@@ -9,7 +9,7 @@ pub(crate) use erased::ErasedClosureOnce;
 
 use std::pin::Pin;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::ThreadAware;
 
 /// A boxed, pinned, `Send` future — the return type of async closure calls.
@@ -37,6 +37,30 @@ pub trait ThreadAwareFn<T>: ThreadAware {
 pub trait ThreadAwareFnMut<T>: ThreadAware {
     /// Calls the closure mutably, returning the result.
     fn call_mut(&mut self) -> T;
+}
+
+/// Async equivalent of [`ThreadAwareFnOnce`] — calls the closure once, returning a [`BoxFuture`].
+///
+/// Use [`async_closure_once`] to construct an implementation.
+pub trait ThreadAwareAsyncFnOnce<T>: ThreadAware {
+    /// Calls the async closure, consuming it.
+    fn call_once(self: Box<Self>) -> BoxFuture<'static, T>;
+}
+
+/// Async equivalent of [`ThreadAwareFn`] — calls the closure by shared reference, returning a [`BoxFuture`].
+///
+/// Use [`async_closure`] to construct an implementation.
+pub trait ThreadAwareAsyncFn<T>: ThreadAware {
+    /// Calls the async closure by shared reference.
+    fn call(&self) -> BoxFuture<'_, T>;
+}
+
+/// Async equivalent of [`ThreadAwareFnMut`] — calls the closure by mutable reference, returning a [`BoxFuture`].
+///
+/// Use [`async_closure_mut`] to construct an implementation.
+pub trait ThreadAwareAsyncFnMut<T>: ThreadAware {
+    /// Calls the async closure by mutable reference.
+    fn call_mut(&mut self) -> BoxFuture<'_, T>;
 }
 
 /// A common implementation of [`ThreadAwareFn`].
@@ -91,8 +115,8 @@ impl<T, D> ThreadAware for Closure<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -130,8 +154,8 @@ impl<T, D> ThreadAware for ClosureOnce<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -178,8 +202,8 @@ impl<T, D> ThreadAware for ClosureMut<T, D>
 where
     D: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -220,7 +244,7 @@ where
 /// struct Transferable;
 /// impl ThreadAware for Transferable {
 ///     // ...
-///     # fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+///     # fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
 /// }
 ///
 /// let closure = closure_once(Transferable, |transferable| {
@@ -280,9 +304,31 @@ impl<T, D: ThreadAware> AsyncClosure<T, D> {
     }
 }
 
+impl<T, D: ThreadAware> ThreadAwareAsyncFn<T> for AsyncClosure<T, D> {
+    fn call(&self) -> BoxFuture<'_, T> {
+        self.call()
+    }
+}
+
+impl<T, D: ThreadAware> ThreadAwareAsyncFnMut<T> for AsyncClosure<T, D> {
+    fn call_mut(&mut self) -> BoxFuture<'_, T> {
+        self.call()
+    }
+}
+
+impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosure<T, D>
+where
+    D: 'static,
+    T: 'static,
+{
+    fn call_once(self: Box<Self>) -> BoxFuture<'static, T> {
+        Box::pin(async move { self.call().await })
+    }
+}
+
 impl<T, D: ThreadAware> ThreadAware for AsyncClosure<T, D> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -320,9 +366,15 @@ impl<T, D: ThreadAware> AsyncClosureOnce<T, D> {
     }
 }
 
+impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosureOnce<T, D> {
+    fn call_once(self: Box<Self>) -> BoxFuture<'static, T> {
+        (self.f)(self.data)
+    }
+}
+
 impl<T, D: ThreadAware> ThreadAware for AsyncClosureOnce<T, D> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -360,9 +412,25 @@ impl<T, D: ThreadAware> AsyncClosureMut<T, D> {
     }
 }
 
+impl<T, D: ThreadAware> ThreadAwareAsyncFnMut<T> for AsyncClosureMut<T, D> {
+    fn call_mut(&mut self) -> BoxFuture<'_, T> {
+        self.call_mut()
+    }
+}
+
+impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosureMut<T, D>
+where
+    D: 'static,
+    T: 'static,
+{
+    fn call_once(mut self: Box<Self>) -> BoxFuture<'static, T> {
+        Box::pin(async move { self.call_mut().await })
+    }
+}
+
 impl<T, D: ThreadAware> ThreadAware for AsyncClosureMut<T, D> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.data.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.data.relocate(source, destination);
     }
 }
 
@@ -530,17 +598,17 @@ mod tests {
 
         // Test with i32
         let mut c = closure(42_i32, |x| x + 1);
-        c.relocated(affinities[0].into(), affinities[1]);
+        c.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(c.call(), 43);
 
         // Test with Vec
         let mut c = closure(vec![10, 20, 30], |v| v.iter().sum::<i32>());
-        c.relocated(affinities[0].into(), affinities[2]);
+        c.relocate(Some(affinities[0]), affinities[2]);
         assert_eq!(c.call(), 60);
 
         // Test with same affinity (String)
         let mut c = closure(String::from("hello"), |s| s.to_uppercase());
-        c.relocated(affinities[0].into(), affinities[0]);
+        c.relocate(Some(affinities[0]), affinities[0]);
         assert_eq!(c.call(), "HELLO");
     }
 
@@ -586,18 +654,18 @@ mod tests {
 
         // Test with String
         let mut closure = closure_once(String::from("world"), |s| format!("Hello, {s}!"));
-        closure.relocated(affinities[0].into(), affinities[1]);
+        closure.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(closure.call_once(), "Hello, world!");
 
         // Test with complex data (tuple of Vecs)
         let data = (vec![1, 2, 3], vec![4, 5, 6]);
         let mut closure = closure_once(data, |(a, b)| a.len() + b.len());
-        closure.relocated(affinities[1].into(), affinities[3]);
+        closure.relocate(Some(affinities[1]), affinities[3]);
         assert_eq!(closure.call_once(), 6);
 
         // Test cross-NUMA transfer
         let mut closure = closure_once(42_i32, |x| x + 100);
-        closure.relocated(affinities[0].into(), affinities[2]);
+        closure.relocate(Some(affinities[0]), affinities[2]);
         assert_eq!(closure.call_once(), 142);
     }
 
@@ -642,7 +710,7 @@ mod tests {
             *x += 1;
             *x
         });
-        closure.relocated(affinities[0].into(), affinities[2]);
+        closure.relocate(Some(affinities[0]), affinities[2]);
         assert_eq!(closure.call_mut(), 1);
         assert_eq!(closure.call_mut(), 2);
 
@@ -652,7 +720,7 @@ mod tests {
             s.len()
         });
 
-        closure.relocated(affinities[0].into(), affinities[2]);
+        closure.relocate(Some(affinities[0]), affinities[2]);
         assert_eq!(closure.call_mut(), 1);
         assert_eq!(closure.call_mut(), 2);
         assert_eq!(closure.call_mut(), 3);
@@ -709,7 +777,7 @@ mod tests {
 
         // Test ThreadAware
         let mut relocated = cloned;
-        relocated.relocated(affinities[0].into(), affinities[1]);
+        relocated.relocate(Some(affinities[0]), affinities[1]);
 
         // Test ThreadAwareFnMut
         assert_eq!(relocated.call_mut(), 3);
@@ -728,7 +796,7 @@ mod tests {
 
         // Test ThreadAware across NUMA nodes
         let mut relocated = cloned;
-        relocated.relocated(affinities[0].into(), affinities[3]);
+        relocated.relocate(Some(affinities[0]), affinities[3]);
 
         // Test ThreadAwareFnMut
         assert_eq!(relocated.call_mut(), 101);
@@ -745,7 +813,7 @@ mod tests {
 
         // Test ThreadAware
         let mut relocated = cloned;
-        relocated.relocated(affinities[0].into(), affinities[1]);
+        relocated.relocate(Some(affinities[0]), affinities[1]);
 
         // Call once
         assert_eq!(relocated.call_once(), 6);

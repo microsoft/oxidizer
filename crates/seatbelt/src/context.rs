@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use thread_aware::ThreadAware;
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 use tick::Clock;
 
 use crate::TelemetryString;
@@ -28,10 +28,10 @@ pub struct ResilienceContext<In, Out> {
 }
 
 impl<In, Out> ThreadAware for ResilienceContext<In, Out> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         // Only clock is thread-aware for now. At some point, we also want
         // telemetry to be tread-aware too.
-        self.clock.relocated(source, destination);
+        self.clock.relocate(source, destination);
     }
 }
 
@@ -195,7 +195,7 @@ mod tests {
         let mut ctx = ResilienceContext::<(), ()>::new(tick::Clock::new_frozen());
         let affinites = pinned_affinities(&[2]);
 
-        ctx.relocated(affinites[0].into(), affinites[1]);
+        ctx.relocate(Some(affinites[0]), affinites[1]);
     }
 
     fn test_meter_provider() -> (

@@ -223,17 +223,41 @@ impl Spawner {
     /// Spawn a task that may run on any core, returning a [`JoinHandle`] for the result.
     ///
     /// Unlike [`spawn`](Self::spawn), this does not guarantee core affinity.
-    pub fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
+    /// The `data` must implement [`ThreadAware`](thread_aware::ThreadAware) so
+    /// the spawner can relocate it before execution. The function pointer `f`
+    /// receives ownership of `data` and returns a future.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # #[cfg(feature = "tokio")]
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// use anyspawn::Spawner;
+    ///
+    /// let spawner = Spawner::new_tokio();
+    /// let result = spawner.spawn_anywhere(42, |x| async move { x + 1 }).await;
+    /// assert_eq!(result, 43);
+    /// # }
+    /// # #[cfg(not(feature = "tokio"))]
+    /// # fn main() {}
+    /// ```
+    pub fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> JoinHandle<T>
+    where
+        T: Send + 'static,
+        D: ThreadAware + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
         match &self.0 {
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
                 let jh = match handle {
-                    Some(h) => h.spawn(work),
-                    None => ::tokio::spawn(work),
+                    Some(h) => h.spawn(f(data)),
+                    None => ::tokio::spawn(f(data)),
                 };
                 JoinHandle(JoinHandleInner::Tokio(jh))
             }
-            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(work))),
+            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
         }
     }
 }

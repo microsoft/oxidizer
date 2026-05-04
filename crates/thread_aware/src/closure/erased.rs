@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::closure::ThreadAwareFnOnce;
 use crate::ThreadAware;
 
@@ -39,7 +39,7 @@ impl<T> ThreadAwareFnOnce<T> for ErasedClosureOnce<T> {
 }
 
 impl<T> ThreadAware for ErasedClosureOnce<T> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.inner.transfer_boxed_mut(source, destination);
     }
 }
@@ -55,7 +55,7 @@ impl<T> Clone for ErasedClosureOnce<T> {
 trait Erased<T>: Sync + Send {
     fn call_boxed_once(self: Box<Self>) -> T;
     fn clone_boxed(&self) -> Box<dyn Erased<T>>;
-    fn transfer_boxed_mut(&mut self, source: MemoryAffinity, destination: PinnedAffinity);
+    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity);
 }
 
 struct Wrapper<C> {
@@ -76,8 +76,8 @@ where
         })
     }
 
-    fn transfer_boxed_mut(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.closure.relocated(source, destination);
+    fn transfer_boxed_mut(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.closure.relocate(source, destination);
     }
 }
 

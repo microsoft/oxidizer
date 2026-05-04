@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 
 use futures_channel::oneshot;
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::{PerCore, ThreadAware};
 
 /// Trait for implementing custom task spawners.
@@ -19,14 +20,65 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
     /// Spawn a task with affinity to the current core.
     fn spawn(&self, task: BoxedFuture);
     /// Spawn a task that may run on any core.
-    fn spawn_anywhere(&self, task: BoxedFuture);
+    ///
+    /// The task is provided as a [`ThreadAwareAsyncFnOnce`] whose captured data
+    /// implements [`ThreadAware`], so the spawner can relocate it before execution
+    /// if needed. Call [`call_once`](ThreadAwareAsyncFnOnce::call_once) to obtain
+    /// the future.
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>);
 }
 
 /// A type-erased, heap-allocated, pinned future that returns `()`.
 ///
-/// This is the future type that [`SpawnCustom`] implementations and
+/// This is the future type that [`SpawnCustom::spawn`] implementations and
 /// layer closures operate on.
-pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub type BoxedFuture = Pin<Box<dyn Future<Output=()> + Send>>;
+
+/// Wraps ThreadAware data + fn pointer + result channel as a [`ThreadAwareAsyncFnOnce`].
+///
+/// Created by [`CustomSpawner::spawn_anywhere`] to bridge the typed public API
+/// (`Spawner::spawn_anywhere(data, f)`) to the type-erased `SpawnCustom` trait.
+struct SpawnAnywhereTask<T, D, F> {
+    data: D,
+    f: fn(D) -> F,
+    tx: oneshot::Sender<T>,
+}
+
+impl<T: Send, D: ThreadAware, F> ThreadAware for SpawnAnywhereTask<T, D, F> {
+    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
+        self.data.relocate(source, destination);
+    }
+}
+
+impl<T, D, F> ThreadAwareAsyncFnOnce<()> for SpawnAnywhereTask<T, D, F>
+where
+    T: Send + 'static,
+    D: ThreadAware + 'static,
+    F: Future<Output = T> + Send + 'static,
+{
+    fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
+        let SpawnAnywhereTask { data, f, tx } = *self;
+        Box::pin(async move {
+            let _ = tx.send(f(data).await);
+        })
+    }
+}
+
+/// Wraps a [`BoxedFuture`] as a [`ThreadAwareAsyncFnOnce`] with no-op relocation.
+///
+/// Used internally by [`builder::Layered`](crate::builder) to re-wrap layer-transformed
+/// futures for the inner spawner.
+pub(crate) struct FutureAsAsyncFnOnce(pub(crate) BoxedFuture);
+
+impl ThreadAware for FutureAsAsyncFnOnce {
+    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {}
+}
+
+impl ThreadAwareAsyncFnOnce<()> for FutureAsAsyncFnOnce {
+    fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
+        self.0
+    }
+}
 
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
@@ -41,7 +93,7 @@ impl CustomSpawner {
         Self { spawn, name }
     }
 
-    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.spawn.spawn(Box::pin(async move {
             let _ = tx.send(work.await);
@@ -49,11 +101,15 @@ impl CustomSpawner {
         rx
     }
 
-    pub(crate) fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub(crate) fn spawn_anywhere<T, D, F>(&self, data: D, f: fn(D) -> F) -> oneshot::Receiver<T>
+    where
+        T: Send + 'static,
+        D: ThreadAware + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
         let (tx, rx) = oneshot::channel();
-        self.spawn.spawn_anywhere(Box::pin(async move {
-            let _ = tx.send(work.await);
-        }));
+        let task = Box::new(SpawnAnywhereTask { data, f, tx });
+        self.spawn.spawn_anywhere(task);
         rx
     }
 }

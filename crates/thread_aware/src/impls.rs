@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::core::ThreadAware;
 
 // To make impl_transfer(...) work
 macro_rules! impl_transfer {
     ($t:ty) => {
         impl ThreadAware for $t {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
     };
 }
@@ -47,11 +47,11 @@ macro_rules! impl_transfer_tuple {
                 $head: ThreadAware,
                 $($tail: ThreadAware),*
                 {
-                    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+                    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
                         #[expect(non_snake_case, reason = "Macro-generated code uses uppercase identifiers for tuple elements")]
                         let ($head, $($tail),*) = self;
-                        $head.relocated(source, destination);
-                        $( $tail.relocated(source, destination); )*
+                        $head.relocate(source, destination);
+                        $( $tail.relocate(source, destination); )*
                     }
                 }
 
@@ -61,7 +61,7 @@ macro_rules! impl_transfer_tuple {
 
     () => {
         impl ThreadAware for () {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
     };
 }
@@ -71,7 +71,7 @@ impl_transfer_tuple!(A, B, C, D, E, F, G, H, I, J, K, L,);
 macro_rules! impl_transfer_fn {
     ($head:ident, $($tail:ident,)*) => {
         impl<R, $head, $($tail),*> ThreadAware for fn($head, $($tail),*) -> R {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
 
         // Recursively call the macro for the rest of the function parameters
@@ -79,7 +79,7 @@ macro_rules! impl_transfer_fn {
     };
     () => {
         impl<R> ThreadAware for fn() -> R {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
     }
 }
@@ -92,9 +92,9 @@ impl<T> ThreadAware for Option<T>
 where
     T: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         if let Some(value) = self {
-            value.relocated(source, destination);
+            value.relocate(source, destination);
         }
     }
 }
@@ -104,10 +104,10 @@ where
     T: ThreadAware,
     E: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         match self {
-            Ok(value) => value.relocated(source, destination),
-            Err(err) => err.relocated(source, destination),
+            Ok(value) => value.relocate(source, destination),
+            Err(err) => err.relocate(source, destination),
         }
     }
 }
@@ -116,9 +116,9 @@ impl<T> ThreadAware for Vec<T>
 where
     T: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         for value in self.iter_mut() {
-            value.relocated(source, destination);
+            value.relocate(source, destination);
         }
     }
 }
@@ -133,11 +133,11 @@ where
     K: ThreadAware + Eq + std::hash::Hash,
     V: ThreadAware,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         let old = std::mem::take(self);
         for (mut key, mut value) in old {
-            key.relocated(source, destination);
-            value.relocated(source, destination);
+            key.relocate(source, destination);
+            value.relocate(source, destination);
             self.insert(key, value);
         }
     }
@@ -156,20 +156,20 @@ mod tests {
         use crate::ThreadAware;
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         let mut value: HashMap<i32, String> = HashMap::new();
         value.insert(1, "one".to_string());
         value.insert(2, "two".to_string());
 
-        value.relocated(source, destination);
+        value.relocate(source, destination);
 
         assert_eq!(value.get(&1), Some(&"one".to_string()));
         assert_eq!(value.get(&2), Some(&"two".to_string()));
 
         let mut empty_value: HashMap<i32, String> = HashMap::new();
-        empty_value.relocated(source, destination);
+        empty_value.relocate(source, destination);
         assert_eq!(empty_value.len(), 0);
     }
 
@@ -178,46 +178,46 @@ mod tests {
     fn test_tuples() {
         use crate::ThreadAware;
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         // Test empty tuple
         let mut empty_tuple = ();
-        empty_tuple.relocated(source, destination);
+        empty_tuple.relocate(source, destination);
 
         // Test single element tuple
         let mut single = (42,);
-        single.relocated(source, destination);
+        single.relocate(source, destination);
         assert_eq!(single, (42,));
 
         // Test two element tuple
         let mut two = (42, "hello".to_string());
-        two.relocated(source, destination);
+        two.relocate(source, destination);
         assert_eq!(two, (42, "hello".to_string()));
 
         // Test three element tuple with different types
         let mut three = (1, "test".to_string(), 1.23);
-        three.relocated(source, destination);
+        three.relocate(source, destination);
         assert_eq!(three, (1, "test".to_string(), 1.23));
 
         // Test larger tuple (6 elements)
         let mut six = (1, 2, 3, 4, 5, 6);
-        six.relocated(source, destination);
+        six.relocate(source, destination);
         assert_eq!(six, (1, 2, 3, 4, 5, 6));
 
         // Test tuple with nested Vec (complex type)
         let mut nested = (vec![1, 2, 3], "data".to_string(), 100u64);
-        nested.relocated(source, destination);
+        nested.relocate(source, destination);
         assert_eq!(nested, (vec![1, 2, 3], "data".to_string(), 100u64));
 
         // Test tuple with Option
         let mut with_option = (Some(42), None::<String>, "value".to_string());
-        with_option.relocated(source, destination);
+        with_option.relocate(source, destination);
         assert_eq!(with_option, (Some(42), None::<String>, "value".to_string()));
 
         // Test large tuple (12 elements - maximum supported)
         let mut twelve = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-        twelve.relocated(source, destination);
+        twelve.relocate(source, destination);
         assert_eq!(twelve, (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12));
     }
 
@@ -257,40 +257,40 @@ mod tests {
         }
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         // Test fn() -> R (line 90)
         let mut fn_ptr_no_args: fn() -> i32 = no_args;
-        fn_ptr_no_args.relocated(source, destination);
+        fn_ptr_no_args.relocate(source, destination);
         assert_eq!(fn_ptr_no_args(), 42);
 
         // Test fn(A) -> R (line 80)
         let mut fn_ptr_one: fn(i32) -> i32 = one_arg;
-        fn_ptr_one.relocated(source, destination);
+        fn_ptr_one.relocate(source, destination);
         assert_eq!(fn_ptr_one(5), 10);
 
         // Test fn(A, B) -> R
         let mut fn_ptr_two: fn(i32, i32) -> i32 = two_args;
-        fn_ptr_two.relocated(source, destination);
+        fn_ptr_two.relocate(source, destination);
         assert_eq!(fn_ptr_two(3, 7), 10);
 
         // Test fn(A, B, C) -> R
         let mut fn_ptr_three: fn(i32, i32, i32) -> i32 = three_args;
-        fn_ptr_three.relocated(source, destination);
+        fn_ptr_three.relocate(source, destination);
         assert_eq!(fn_ptr_three(1, 2, 3), 6);
 
         // Test with many arguments
         let mut fn_ptr_many: fn(i32, i32, i32, i32, i32, i32) -> i32 = many_args;
-        fn_ptr_many.relocated(source, destination);
+        fn_ptr_many.relocate(source, destination);
         assert_eq!(fn_ptr_many(1, 2, 3, 4, 5, 6), 21);
 
         let mut fn_string: fn() -> String = returns_string;
-        fn_string.relocated(source, destination);
+        fn_string.relocate(source, destination);
         assert_eq!(fn_string(), "hello".to_string());
 
         let mut fn_bool: fn(i32) -> bool = returns_bool;
-        fn_bool.relocated(source, destination);
+        fn_bool.relocate(source, destination);
         assert!(fn_bool(5));
         assert!(!fn_bool(-3));
     }
@@ -300,26 +300,26 @@ mod tests {
         use crate::ThreadAware;
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         // Test Ok variant
         let mut ok_value: Result<String, i32> = Ok("success".to_string());
-        ok_value.relocated(source, destination);
+        ok_value.relocate(source, destination);
         assert_eq!(ok_value, Ok("success".to_string()));
 
         // Test Err variant
         let mut err_value: Result<String, i32> = Err(42);
-        err_value.relocated(source, destination);
+        err_value.relocate(source, destination);
         assert_eq!(err_value, Err(42));
 
         // Test with complex types
         let mut ok_vec: Result<Vec<i32>, String> = Ok(vec![1, 2, 3]);
-        ok_vec.relocated(source, destination);
+        ok_vec.relocate(source, destination);
         assert_eq!(ok_vec, Ok(vec![1, 2, 3]));
 
         let mut err_string: Result<Vec<i32>, String> = Err("error".to_string());
-        err_string.relocated(source, destination);
+        err_string.relocate(source, destination);
         assert_eq!(err_string, Err("error".to_string()));
     }
 

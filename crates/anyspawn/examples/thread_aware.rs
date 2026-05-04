@@ -11,8 +11,9 @@
 //! In production the data might hold a core-local work queue, metrics
 //! counter, or connection pool instead of a simple index.
 
-use anyspawn::Spawner;
-use thread_aware::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
+use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use thread_aware::affinity::{pinned_affinities, Affinity};
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
 
 #[tokio::main]
@@ -30,11 +31,11 @@ async fn main() {
     let affinities = pinned_affinities(&[1, 1]);
 
     let mut relocated0 = spawner.clone();
-    relocated0.relocated(MemoryAffinity::Unknown, affinities[0]);
+    relocated0.relocate(None, affinities[0]);
     let _relocated0 = relocated0.spawn(async { 1 + 1 }).await;
 
     let mut relocated1 = spawner.clone();
-    relocated1.relocated(MemoryAffinity::Unknown, affinities[1]);
+    relocated1.relocate(None, affinities[1]);
     let _relocated1 = relocated1.spawn(async { 1 + 1 }).await;
 }
 
@@ -55,7 +56,7 @@ impl Scheduler {
 }
 
 impl ThreadAware for Scheduler {
-    fn relocated(&mut self, _source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, _source: Option<Affinity>, destination: Affinity) {
         self.0 = Some(destination.processor_index());
     }
 }
@@ -66,7 +67,7 @@ impl SpawnCustom for Scheduler {
         tokio::spawn(task);
     }
 
-    fn spawn_anywhere(&self, task: BoxedFuture) {
-        self.spawn(task);
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+        self.spawn(task.call_once());
     }
 }

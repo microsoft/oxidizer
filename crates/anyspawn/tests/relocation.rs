@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{self, pinned_affinities};
 
@@ -29,7 +30,7 @@ fn per_process_relocation_preserves_spawn_function() {
     struct CountingSpawner(Arc<AtomicUsize>);
 
     impl ThreadAware for CountingSpawner {
-        fn relocated(&mut self, _: affinity::MemoryAffinity, _: affinity::PinnedAffinity) {}
+        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
     }
 
     impl SpawnCustom for CountingSpawner {
@@ -38,8 +39,8 @@ fn per_process_relocation_preserves_spawn_function() {
             std::thread::spawn(move || futures::executor::block_on(task));
         }
 
-        fn spawn_anywhere(&self, task: BoxedFuture) {
-            self.spawn(task);
+        fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            self.spawn(task.call_once());
         }
     }
 
@@ -48,7 +49,7 @@ fn per_process_relocation_preserves_spawn_function() {
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut relocated = spawner;
-    relocated.relocated(affinities[0].into(), affinities[1]);
+    relocated.relocate(Some(affinities[0]), affinities[1]);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
     let r2 = futures::executor::block_on(relocated.spawn(async { 2 }));
@@ -72,7 +73,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
     struct CountingSpawner;
 
     impl ThreadAware for CountingSpawner {
-        fn relocated(&mut self, _: affinity::MemoryAffinity, _: affinity::PinnedAffinity) {
+        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
             RELOCATE_CALLS.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -82,8 +83,9 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
             std::thread::spawn(move || futures::executor::block_on(task));
         }
 
-        fn spawn_anywhere(&self, task: BoxedFuture) {
-            std::thread::spawn(move || futures::executor::block_on(task));
+        fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            let fut = task.call_once();
+            std::thread::spawn(move || futures::executor::block_on(fut));
         }
     }
 
@@ -94,7 +96,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut relocated = spawner;
-    relocated.relocated(affinities[0].into(), affinities[1]);
+    relocated.relocate(Some(affinities[0]), affinities[1]);
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
@@ -124,7 +126,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
     }
 
     impl ThreadAware for IdSpawner {
-        fn relocated(&mut self, _: affinity::MemoryAffinity, _: affinity::PinnedAffinity) {
+        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
             self.id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -135,8 +137,8 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
             std::thread::spawn(move || futures::executor::block_on(task));
         }
 
-        fn spawn_anywhere(&self, task: BoxedFuture) {
-            self.spawn(task);
+        fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            self.spawn(task.call_once());
         }
     }
 
@@ -145,7 +147,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
     let mut relocated = spawner;
-    relocated.relocated(affinities[0].into(), affinities[1]);
+    relocated.relocate(Some(affinities[0]), affinities[1]);
 
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(relocated.spawn(async {}));

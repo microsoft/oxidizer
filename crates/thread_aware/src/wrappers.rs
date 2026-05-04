@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use crate::ThreadAware;
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 
 /// Allows transferring a value that doesn't implement [`ThreadAware`].
 ///
@@ -52,7 +52,7 @@ impl<T> DerefMut for Unaware<T> {
 }
 
 impl<T: Send> ThreadAware for Unaware<T> {
-    fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
 }
 
 impl<T> Unaware<T> {
@@ -173,17 +173,17 @@ mod tests {
         use std::collections::HashMap;
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         // Test with simple type
         let mut value = Unaware(42);
-        value.relocated(source, destination);
+        value.relocate(source, destination);
         assert_eq!(value.0, 42);
 
         // Test with String
         let mut value = Unaware("test string".to_string());
-        value.relocated(source, destination);
+        value.relocate(source, destination);
         assert_eq!(value.0, "test string");
 
         // Test with complex type (HashMap)
@@ -191,7 +191,7 @@ mod tests {
         map.insert("key1", 100);
         map.insert("key2", 200);
         let mut value = Unaware(map);
-        value.relocated(source, destination);
+        value.relocate(source, destination);
         assert_eq!(value.0.get("key1"), Some(&100));
         assert_eq!(value.0.get("key2"), Some(&200));
     }
@@ -242,11 +242,11 @@ mod tests {
 
         // Should work, but this is the case the docs warn about
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         let mut relocated = unaware_wrapper;
-        relocated.relocated(source, destination);
+        relocated.relocate(source, destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
@@ -290,11 +290,11 @@ mod tests {
 
         // Test with relocation
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         let mut relocated = unaware_complex;
-        relocated.relocated(source, destination);
+        relocated.relocate(source, destination);
         assert_eq!(relocated.0.id, 1);
         assert_eq!(relocated.0.name, "test");
     }

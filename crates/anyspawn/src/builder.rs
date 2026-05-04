@@ -5,11 +5,11 @@
 
 use std::fmt::Debug;
 
-use thread_aware::ThreadAware;
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
-
+use crate::custom::{BoxedFuture, FutureAsAsyncFnOnce, SpawnCustom};
 use crate::Spawner;
-use crate::custom::{BoxedFuture, SpawnCustom};
+use thread_aware::affinity::Affinity;
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
+use thread_aware::ThreadAware;
 
 /// Internal composition of a layer closure wrapping an inner [`SpawnCustom`].
 ///
@@ -32,8 +32,8 @@ impl<F: Clone, S: Clone> Clone for Layered<F, S> {
 }
 
 impl<F: Send, S: ThreadAware> ThreadAware for Layered<F, S> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.inner.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.inner.relocate(source, destination);
     }
 }
 
@@ -46,8 +46,10 @@ where
         self.inner.spawn((self.layer)(task));
     }
 
-    fn spawn_anywhere(&self, task: BoxedFuture) {
-        self.inner.spawn_anywhere((self.layer)(task));
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+        let future = task.call_once();
+        let transformed = (self.layer)(future);
+        self.inner.spawn_anywhere(Box::new(FutureAsAsyncFnOnce(transformed)));
     }
 }
 
@@ -58,7 +60,7 @@ struct TokioSpawner(Option<::tokio::runtime::Handle>);
 
 #[cfg(feature = "tokio")]
 impl ThreadAware for TokioSpawner {
-    fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
 }
 
 #[cfg(feature = "tokio")]
@@ -74,8 +76,8 @@ impl SpawnCustom for TokioSpawner {
         }
     }
 
-    fn spawn_anywhere(&self, task: BoxedFuture) {
-        self.spawn(task);
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+        self.spawn(task.call_once());
     }
 }
 
@@ -263,7 +265,10 @@ impl<S: SpawnCustom + Clone> CustomSpawnerBuilder<S> {
     }
 }
 
-#[expect(clippy::missing_fields_in_debug, reason = "spawner is opaque and not useful in debug output")]
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "spawner is opaque and not useful in debug output"
+)]
 impl<S> Debug for CustomSpawnerBuilder<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("CustomSpawnerBuilder");

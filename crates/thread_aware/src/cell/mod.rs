@@ -17,7 +17,7 @@ use std::sync::{self, RwLock};
 pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::cell::factory::Factory;
 use crate::closure::{closure_once, ErasedClosureOnce, ThreadAwareFnOnce};
 use crate::ThreadAware;
@@ -32,8 +32,8 @@ impl<F: Clone> Clone for BoxedRelocate<F> {
 }
 
 impl<F: ThreadAware> ThreadAware for BoxedRelocate<F> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.0.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.0.relocate(source, destination);
     }
 }
 
@@ -57,7 +57,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # let affinities = pinned_affinities(&[2]);
-/// # let affinity1 = affinities[0].into();
+/// # let affinity1 = Some(affinities[0]);
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
@@ -81,7 +81,7 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+/// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
 /// #         // Initialize a new value in the destination affinity independent
 /// #         // of the source affinity.
 /// #         self.value = std::sync::Arc::new(AtomicI32::new(0));
@@ -94,13 +94,13 @@ impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> 
 /// arc_affinity1.increment_by(42);
 /// assert_eq!(arc_affinity1.value(), 42);
 ///
-/// arc_affinity1.relocated(affinity1, affinity2);
+/// arc_affinity1.relocate(affinity1, affinity2);
 /// assert_eq!(arc_affinity1.value(), 0);
 /// assert_eq!(arc_affinity1_clone.value(), 42);
 ///
 /// arc_affinity1.increment_by(11);
 /// let mut arc_affinity2_clone = arc_affinity1_clone;
-/// arc_affinity2_clone.relocated(affinity1, affinity2);
+/// arc_affinity2_clone.relocate(affinity1, affinity2);
 /// assert_eq!(arc_affinity2_clone.value(), 11);
 /// ```
 #[derive(Debug)]
@@ -206,7 +206,7 @@ where
     /// #     }
     /// # }
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
     /// #         // Initialize a new value in the destination affinity independent
     /// #         // of the source affinity.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
@@ -233,7 +233,7 @@ where
         }
 
         impl<T> ThreadAware for Ctor<T> {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
 
         impl<T> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
@@ -274,7 +274,7 @@ where
         }
 
         impl<T: ?Sized> ThreadAware for Ctor<T> {
-            fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {}
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
         }
 
         impl<T: ?Sized> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
@@ -349,7 +349,7 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
     /// #         // Initialize a new value in the destination affinity independent
     /// #         // of the source affinity.
     /// #         self.value = sync::Arc::new(AtomicI32::new(0));
@@ -396,7 +396,7 @@ where
             value,
             factory: Factory::Data(|data: &T, source, destination| {
                 let mut data = data.clone();
-                data.relocated(source, destination);
+                data.relocate(source, destination);
                 Box::new(data)
             }),
         }
@@ -476,7 +476,7 @@ where
     /// # #[derive(Clone)]
     /// # struct Foo(u32);
     /// # impl ThreadAware for Foo {
-    /// #     fn relocated(&mut self, _: thread_aware::affinity::MemoryAffinity, _: thread_aware::affinity::PinnedAffinity) {}
+    /// #     fn relocate(&mut self, _: Option<thread_aware::affinity::Affinity>, _: thread_aware::affinity::Affinity) {}
     /// # }
     /// trait MyPlugin: ThreadAware {}
     /// impl MyPlugin for Foo {}
@@ -525,7 +525,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>, current_affinity: PinnedAffinity) -> Self {
+    pub fn from_storage(storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>, current_affinity: Affinity) -> Self {
         let value = storage
             .read()
             .expect("Failed to acquire read lock")
@@ -580,7 +580,7 @@ impl<T, S: Strategy> Arc<T, S> {
 }
 
 impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
         if let Some(value) = guard.get_clone(destination) {
@@ -595,12 +595,12 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                     // In case factory source is stored in factory, use that - it means we already transferred the factory
                     // once, so we know the original source affinity. Otherwise, use source as that means this is the first
                     // time we're transferring the Arc, so source is the source affinity of the factory as well.
-                    let factory_source = factory_source_affinity.unwrap_or(source);
+                    let factory_source = factory_source_affinity.or(source);
 
-                    factory_clone.relocated(factory_source, destination);
+                    factory_clone.relocate(factory_source, destination);
                     (
                         sync::Arc::from(factory_clone.call_once()),
-                        Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
+                        Factory::Closure(sync::Arc::clone(factory), factory_source),
                     )
                 }
 
@@ -628,7 +628,7 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
                 "Data already exists for the destination affinity. This should be unreachable due to the the early write lock."
             );
 
-            if let MemoryAffinity::Pinned(source) = source {
+            if let Some(source) = source {
                 // Only restore the value to the source slot when source and destination differ.
                 // If they are the same slot, the replacement above already stored the new value
                 // there; overwriting it here would corrupt storage with the stale pre-relocation value.

@@ -141,7 +141,7 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 use thread_aware::storage::Strategy;
 use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware};
 
@@ -313,8 +313,8 @@ where
     T: Send + Sync,
     S: Strategy + Send + Sync,
 {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.inner.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.inner.relocate(source, destination);
     }
 }
 
@@ -499,11 +499,11 @@ mod tests {
     #[test]
     fn relocated_delegates_to_inner() {
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         let mut merger: Merger<String, String> = Merger::new();
-        merger.relocated(source, destination);
+        merger.relocate(source, destination);
 
         // Verify the relocated merger still works
         assert!(merger.is_empty());

@@ -35,6 +35,7 @@ tokio = ["dep:tokio"]
 futures-channel = { workspace = true, features = ["alloc"] }
 thread_aware = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
+oxidizer = { path = "../../../ox-sdk/crates/oxidizer" }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -67,6 +68,10 @@ required-features = ["tokio"]
 
 [[example]]
 name = "tokio"
+required-features = ["tokio"]
+
+[[example]]
+name = "oxidizer"
 required-features = ["tokio"]
 
 [[example]]

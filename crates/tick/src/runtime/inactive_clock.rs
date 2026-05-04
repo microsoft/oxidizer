@@ -3,7 +3,7 @@
 
 use std::marker::PhantomData;
 
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 use thread_aware::ThreadAware;
 
 use crate::runtime::clock_driver::ClockDriver;
@@ -91,8 +91,8 @@ impl Default for InactiveClock<Isolated> {
 }
 
 impl ThreadAware for InactiveClock<Isolated> {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.state.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.state.relocate(source, destination);
     }
 }
 

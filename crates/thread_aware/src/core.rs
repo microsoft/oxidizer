@@ -3,12 +3,12 @@
 
 //! This module contains all the core primitives the thread aware system is built upon.
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 
 /// Marks types that correctly handle isolation when transferred between threads.
 ///
 /// For performance reasons mentioned in the [crate documentation](`crate`), the basic
-/// goal of the `ThreadAware` trait is that after calling [`ThreadAware::relocated()`],
+/// goal of the `ThreadAware` trait is that after calling [`ThreadAware::relocate()`],
 /// the value should be as independent as possible from any state on the source
 /// (or any other) thread in the sense that interacting with the object should not result
 /// in contention over synchronization primitives when this interaction happens in parallel
@@ -61,7 +61,7 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// }
 ///
 /// impl ThreadAware for Counter {
-///     fn relocated(&mut self, _source: MemoryAffinity, _destination: PinnedAffinity) {
+///     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
 ///         // Initialize a new value in the destination affinity independent
 ///         // of the source affinity.
 ///         self.value = Arc::new(AtomicI32::new(0));
@@ -83,5 +83,5 @@ pub trait ThreadAware: Send {
     /// When calling this function, you must ensure that self belongs to the source affinity, and try
     /// to avoid calling transfer when source and destination match as that's a useless operation
     /// and transfer implementations may be non-trivial.
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity);
 }

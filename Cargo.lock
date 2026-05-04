@@ -79,6 +79,7 @@ dependencies = [
  "futures",
  "futures-channel",
  "opentelemetry",
+ "oxidizer",
  "smol",
  "static_assertions",
  "thread_aware",
@@ -160,6 +161,16 @@ dependencies = [
  "async-io",
  "blocking",
  "futures-lite",
+]
+
+[[package]]
+name = "async-observable"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf9c07d8c61426dd32cd5a17950462441986a1d632ca824a6a6071feb6d2af13"
+dependencies = [
+ "futures",
+ "uuid",
 ]
 
 [[package]]
@@ -278,7 +289,7 @@ dependencies = [
  "criterion",
  "infinity_pool",
  "libc",
- "mutants",
+ "mutants 0.0.3",
  "new_zealand",
  "nm",
  "num-traits",
@@ -296,7 +307,7 @@ dependencies = [
  "bytesbuf",
  "futures",
  "futures-core",
- "mutants",
+ "mutants 0.0.3",
  "new_zealand",
  "ohno 0.3.2",
  "testing_aids",
@@ -342,7 +353,7 @@ dependencies = [
  "foldhash 0.2.0",
  "futures",
  "moka",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "thread_aware",
  "tick",
@@ -630,7 +641,7 @@ version = "0.11.0"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
- "mutants",
+ "mutants 0.0.3",
  "once_cell",
  "rapidhash",
  "rustc-hash",
@@ -645,7 +656,7 @@ name = "data_privacy_macros"
 version = "0.9.0"
 dependencies = [
  "data_privacy_macros_impl",
- "mutants",
+ "mutants 0.0.3",
 ]
 
 [[package]]
@@ -653,7 +664,7 @@ name = "data_privacy_macros_impl"
 version = "0.9.0"
 dependencies = [
  "insta",
- "mutants",
+ "mutants 0.0.3",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -774,6 +785,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "events_once"
+version = "0.5.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ad6918436cd90acf151277caad91df0d9c8c2894e8c3c054e4904625cda742a"
+dependencies = [
+ "hash_hasher",
+ "infinity_pool",
+]
+
+[[package]]
 name = "fast_time"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -841,7 +862,7 @@ name = "fundle_macros"
 version = "0.3.0"
 dependencies = [
  "fundle_macros_impl",
- "mutants",
+ "mutants 0.0.3",
 ]
 
 [[package]]
@@ -849,7 +870,7 @@ name = "fundle_macros_impl"
 version = "0.3.0"
 dependencies = [
  "insta",
- "mutants",
+ "mutants 0.0.3",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -1028,6 +1049,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash_hasher"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b4b9ebce26001bad2e6366295f64e381c1e9c479109202149b9e15e154973e9"
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1121,7 +1148,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "layered",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "pin-project",
  "recoverable",
@@ -1341,7 +1368,7 @@ dependencies = [
  "criterion",
  "dynosaur",
  "futures",
- "mutants",
+ "mutants 0.0.3",
  "pin-project-lite",
  "static_assertions",
  "tokio",
@@ -1488,6 +1515,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc0287524726960e07b119cebd01678f852f147742ae0d925e6a520dca956126"
 
 [[package]]
+name = "mutants"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add0ac067452ff1aca8c5002111bd6b1c895baee6e45fcbc44e0193aea17be56"
+
+[[package]]
+name = "negative-impl"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "395480ec3f71f1c0c80ea45ec92c0efcd379272ace464adfba89c089c69ed549"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "new_zealand"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1545,6 +1589,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi",
+ "libc",
+]
+
+[[package]]
 name = "num_threads"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1559,7 +1613,7 @@ version = "0.3.2"
 dependencies = [
  "futures",
  "insta",
- "mutants",
+ "mutants 0.0.3",
  "ohno_macros 0.3.0",
  "regex",
  "testing_aids",
@@ -1583,7 +1637,7 @@ name = "ohno_macros"
 version = "0.3.0"
 dependencies = [
  "insta",
- "mutants",
+ "mutants 0.0.3",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -1662,6 +1716,113 @@ checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "oxidizer"
+version = "0.19.0-dev"
+dependencies = [
+ "bytesbuf_io",
+ "oxidizer_futures",
+ "oxidizer_io",
+ "oxidizer_macros",
+ "oxidizer_rt",
+ "oxidizer_sync",
+ "thread_aware",
+ "tick",
+]
+
+[[package]]
+name = "oxidizer_executor"
+version = "0.19.0-dev"
+dependencies = [
+ "events_once",
+ "fast_time",
+ "foldhash 0.2.0",
+ "infinity_pool",
+ "nm",
+ "pin-project",
+]
+
+[[package]]
+name = "oxidizer_futures"
+version = "0.19.0-dev"
+dependencies = [
+ "pin-project",
+]
+
+[[package]]
+name = "oxidizer_io"
+version = "0.19.0-dev"
+dependencies = [
+ "async-observable",
+ "bytesbuf",
+ "derive_more",
+ "events_once",
+ "futures",
+ "infinity_pool",
+ "negative-impl",
+ "new_zealand",
+ "nm",
+ "ohno 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "smallvec",
+ "static_assertions",
+ "thread_aware",
+ "tracing",
+ "windows",
+]
+
+[[package]]
+name = "oxidizer_macros"
+version = "0.19.0-dev"
+dependencies = [
+ "oxidizer_macros_impl",
+ "proc-macro2",
+ "syn",
+ "thread_aware_macros_impl",
+]
+
+[[package]]
+name = "oxidizer_macros_impl"
+version = "0.19.0-dev"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "oxidizer_rt"
+version = "0.19.0-dev"
+dependencies = [
+ "async-channel",
+ "async-lock",
+ "bytesbuf",
+ "derive_more",
+ "events_once",
+ "futures",
+ "many_cpus",
+ "mutants 0.0.4",
+ "nonempty",
+ "oxidizer_executor",
+ "oxidizer_io",
+ "oxidizer_macros",
+ "pin-project",
+ "thiserror",
+ "thread_aware",
+ "threadpool",
+ "tick",
+ "tracing",
+ "vicinal",
+ "windows",
+]
+
+[[package]]
+name = "oxidizer_sync"
+version = "0.19.0-dev"
+dependencies = [
+ "async-lock",
 ]
 
 [[package]]
@@ -1744,18 +1905,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.12"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf0d9e68100b3a7989b4901972f265cd542e560a3a8a724e1e20322f4d06ce9"
+checksum = "f1749c7ed4bcaf4c3d0a3efc28538844fb29bcdd7d2b67b2be7e20ba861ff517"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.12"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a990e22f43e84855daf260dded30524ef4a9021cc7541c26540500a50b624389"
+checksum = "d9b20ed30f105399776b9c883e68e536ef602a16ae6f596d2c473591d6ad64c6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2086,7 +2247,7 @@ dependencies = [
  "insta",
  "jiff",
  "layered",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "opentelemetry",
  "opentelemetry-stdout",
@@ -2315,7 +2476,7 @@ version = "0.1.2"
 dependencies = [
  "data_privacy",
  "http",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "pct-str",
  "serde",
@@ -2331,7 +2492,7 @@ dependencies = [
 name = "templated_uri_macros"
 version = "0.1.1"
 dependencies = [
- "mutants",
+ "mutants 0.0.3",
  "templated_uri_macros_impl",
 ]
 
@@ -2342,7 +2503,7 @@ dependencies = [
  "chumsky",
  "darling",
  "insta",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "prettyplease",
  "proc-macro2",
@@ -2371,7 +2532,7 @@ version = "0.0.0"
 dependencies = [
  "futures",
  "mockall",
- "mutants",
+ "mutants 0.0.3",
  "opentelemetry",
  "opentelemetry_sdk",
  "tracing",
@@ -2404,7 +2565,7 @@ version = "0.7.0"
 dependencies = [
  "futures",
  "many_cpus",
- "mutants",
+ "mutants 0.0.3",
  "static_assertions",
  "thread_aware_macros",
 ]
@@ -2413,7 +2574,7 @@ dependencies = [
 name = "thread_aware_macros"
 version = "0.7.0"
 dependencies = [
- "mutants",
+ "mutants 0.0.3",
  "syn",
  "thread_aware_macros_impl",
 ]
@@ -2439,6 +2600,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "tick"
 version = "0.2.2"
 dependencies = [
@@ -2449,7 +2619,7 @@ dependencies = [
  "futures-core",
  "insta",
  "jiff",
- "mutants",
+ "mutants 0.0.3",
  "ohno 0.3.2",
  "pin-project-lite",
  "serde",
@@ -2629,7 +2799,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2757,7 +2939,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "futures-util",
- "mutants",
+ "mutants 0.0.3",
  "thread_aware",
  "tick",
  "tokio",
@@ -2791,6 +2973,23 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vicinal"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e70e6b61ae86480d14edb87771b633ba2b5fdd9748b65249101055a62b717f9c"
+dependencies = [
+ "event-listener",
+ "events_once",
+ "fast_time",
+ "infinity_pool",
+ "many_cpus",
+ "new_zealand",
+ "nm",
+ "pin-project",
+ "tracing",
+]
 
 [[package]]
 name = "walkdir"

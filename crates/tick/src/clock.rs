@@ -4,7 +4,7 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 use thread_aware::ThreadAware;
 
 use crate::state::ClockState;
@@ -174,7 +174,7 @@ use crate::timers::TimerKey;
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
-    affinity: Option<PinnedAffinity>,
+    affinity: Option<Affinity>,
 }
 
 impl std::fmt::Debug for Clock {
@@ -195,8 +195,8 @@ impl std::fmt::Debug for Clock {
 }
 
 impl ThreadAware for Clock {
-    fn relocated(&mut self, source: MemoryAffinity, destination: PinnedAffinity) {
-        self.state.relocated(source, destination);
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.state.relocate(source, destination);
         self.affinity = Some(destination);
     }
 }
@@ -590,7 +590,7 @@ mod tests {
         let affinities = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();
         let mut clock = clock;
-        clock.relocated(affinities[0].into(), affinities[1]);
+        clock.relocate(Some(affinities[0]), affinities[1]);
         clock.delay(Duration::from_millis(15)).await;
     }
 
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn thread_aware() {
         let affinites = pinned_affinities(&[1, 1]);
-        let source: MemoryAffinity = affinites[0].into();
+        let source = Some(affinites[0]);
         let pinned_1 = affinites[0];
         let pinned_2 = affinites[1];
 
@@ -689,9 +689,9 @@ mod tests {
         let root = InactiveClock::default();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocated(source, pinned_1);
+        inactive_1.relocate(source, pinned_1);
         let mut inactive_2 = root;
-        inactive_2.relocated(source, pinned_2);
+        inactive_2.relocate(source, pinned_2);
 
         let (clock_1, mut driver_1) = inactive_1.activate();
         let (clock_2, mut driver_2) = inactive_2.activate();
@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(driver_2.state.timers_len(), 0);
         {
             let mut relocated_clock = clock_1.clone();
-            relocated_clock.relocated(source, pinned_2);
+            relocated_clock.relocate(source, pinned_2);
             assert_eq!(relocated_clock.state.timers_len(), 0);
         }
 
@@ -738,7 +738,7 @@ mod tests {
     #[test]
     fn thread_aware_clock_control() {
         let affinites = pinned_affinities(&[1, 1]);
-        let source: MemoryAffinity = affinites[0].into();
+        let source = Some(affinites[0]);
         let pinned_1 = affinites[0];
         let pinned_2 = affinites[1];
 
@@ -746,9 +746,9 @@ mod tests {
         let root: InactiveClock = ClockControl::default().into();
 
         let mut inactive_1 = root.clone();
-        inactive_1.relocated(source, pinned_1);
+        inactive_1.relocate(source, pinned_1);
         let mut inactive_2 = root;
-        inactive_2.relocated(source, pinned_2);
+        inactive_2.relocate(source, pinned_2);
 
         let (clock_1, driver_1) = inactive_1.activate();
         let (clock_2, driver_2) = inactive_2.activate();
@@ -786,7 +786,7 @@ mod tests {
     async fn debug_alive_system_clock_relocated() {
         let affinites = pinned_affinities(&[2]);
         let mut clock = Clock::new_system_frozen();
-        clock.relocated(affinites[0].into(), affinites[1]);
+        clock.relocate(Some(affinites[0]), affinites[1]);
 
         insta::assert_debug_snapshot!(clock);
     }

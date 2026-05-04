@@ -4,19 +4,19 @@
 use std::{fmt, sync};
 
 use crate::ThreadAware;
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::closure::ErasedClosureOnce;
 
 /// A function that clones data and optionally relocates the clone.
 ///
 /// For `ThreadAware` types, the function clones and calls `relocated()`.
 /// For non-`ThreadAware` types, it just clones (ignoring source/destination).
-pub type DataFn<T> = fn(&T, MemoryAffinity, PinnedAffinity) -> Box<T>;
+pub type DataFn<T> = fn(&T, Option<Affinity>, Affinity) -> Box<T>;
 
 /// Object-safe trait for cloning a value of erased concrete type `V` into `Box<T>`,
 /// then relocating the clone.
 pub(crate) trait ErasedClone<T: ?Sized>: Send + Sync {
-    fn clone_and_relocate(&self, value: &T, source: MemoryAffinity, destination: PinnedAffinity) -> Box<T>;
+    fn clone_and_relocate(&self, value: &T, source: Option<Affinity>, destination: Affinity) -> Box<T>;
 }
 
 /// Concrete implementation that remembers `V` and the user-provided clone function.
@@ -26,12 +26,12 @@ struct CloneAdapter<V, T: ?Sized> {
 }
 
 impl<V: 'static, T: ThreadAware + ?Sized + 'static> ErasedClone<T> for CloneAdapter<V, T> {
-    fn clone_and_relocate(&self, value: &T, source: MemoryAffinity, destination: PinnedAffinity) -> Box<T> {
+    fn clone_and_relocate(&self, value: &T, source: Option<Affinity>, destination: Affinity) -> Box<T> {
         // SAFETY: we know the concrete type behind `T` is `V` because we stored it
         // at construction time and the value in the Arc was created from a `V`.
         let concrete = unsafe { &*(std::ptr::from_ref(value).cast::<V>()) };
         let mut cloned = (self.clone_fn)(concrete);
-        cloned.relocated(source, destination);
+        cloned.relocate(source, destination);
         cloned
     }
 }
@@ -49,7 +49,7 @@ unsafe impl<V, T: ?Sized> Sync for CloneAdapter<V, T> {}
 
 pub enum Factory<T: ?Sized> {
     /// An external closure was provided to create the data.
-    Closure(sync::Arc<ErasedClosureOnce<Box<T>>>, Option<MemoryAffinity>),
+    Closure(sync::Arc<ErasedClosureOnce<Box<T>>>, Option<Affinity>),
 
     /// The data will be cloned and relocated via `DataFn`.
     Data(DataFn<T>),

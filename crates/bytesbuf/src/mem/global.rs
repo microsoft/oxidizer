@@ -41,8 +41,8 @@ pub struct GlobalPool {
 }
 
 impl thread_aware::ThreadAware for GlobalPool {
-    fn relocated(&mut self, source: thread_aware::affinity::MemoryAffinity, destination: thread_aware::affinity::PinnedAffinity) {
-        self.inner.relocated(source, destination);
+    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
+        self.inner.relocate(source, destination);
     }
 }
 
@@ -710,7 +710,7 @@ mod tests {
         use thread_aware::affinity::pinned_affinities;
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         let memory = GlobalPool::new();
@@ -723,7 +723,7 @@ mod tests {
 
         // Relocate the pool to a different affinity.
         let mut relocated_memory = memory;
-        relocated_memory.relocated(source, destination);
+        relocated_memory.relocate(source, destination);
 
         // The relocated pool should work independently.
         let mut buf2 = relocated_memory.reserve(200);

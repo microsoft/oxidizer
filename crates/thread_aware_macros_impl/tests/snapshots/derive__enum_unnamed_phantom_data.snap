@@ -3,17 +3,17 @@ source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
 impl<T, U> ::thread_aware::ThreadAware for EnumUnnamedPhantom<T, U> {
-    fn relocated(
+    fn relocate(
         &mut self,
-        source: ::thread_aware::affinity::MemoryAffinity,
-        destination: ::thread_aware::affinity::PinnedAffinity,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
     ) {
         match self {
             Self::Variant(_v0, _v1) => {
-                ::thread_aware::ThreadAware::relocated(_v0, source, destination);
+                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
             }
             Self::Other(_v0, _v1) => {
-                ::thread_aware::ThreadAware::relocated(_v0, source, destination);
+                ::thread_aware::ThreadAware::relocate(_v0, source, destination);
             }
         }
     }

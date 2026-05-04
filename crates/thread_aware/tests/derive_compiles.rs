@@ -20,8 +20,8 @@ struct Container<T: thread_aware::ThreadAware> {
 #[test]
 fn derive_thread_aware_compiles_and_calls() {
     let mut addrs = pinned_affinities(&[2]);
-    let a = addrs.remove(0).into();
+    let a = Some(addrs.remove(0));
     let b = addrs.remove(0);
     let mut c = Container { val: Inner(5), raw: 10 };
-    thread_aware::ThreadAware::relocated(&mut c, a, b);
+    thread_aware::ThreadAware::relocate(&mut c, a, b);
 }

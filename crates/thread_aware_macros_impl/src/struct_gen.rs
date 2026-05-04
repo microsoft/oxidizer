@@ -16,7 +16,7 @@ pub fn build_struct_body(_name: &syn::Ident, fields: &Fields, root_path: &syn::P
                 if !is_phantom_data(&f.ty) && !attr_cfg.skip {
                     let mut path = root_path.clone();
                     path.segments.push(syn::parse_quote!(ThreadAware));
-                    stmts.push(quote! { #path::relocated(&mut self.#ident, source, destination); });
+                    stmts.push(quote! { #path::relocate(&mut self.#ident, source, destination); });
                 }
             }
             quote! { #( #stmts )* }
@@ -29,7 +29,7 @@ pub fn build_struct_body(_name: &syn::Ident, fields: &Fields, root_path: &syn::P
                     let index = syn::Index::from(i);
                     let mut path = root_path.clone();
                     path.segments.push(syn::parse_quote!(ThreadAware));
-                    stmts.push(quote! { #path::relocated(&mut self.#index, source, destination); });
+                    stmts.push(quote! { #path::relocate(&mut self.#index, source, destination); });
                 }
             }
             quote! { #( #stmts )* }

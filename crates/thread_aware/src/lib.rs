@@ -168,8 +168,8 @@ pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
-/// `ThreadAware::relocated` method. Fields annotated with `#[thread_aware(skip)]` are
-/// left as-is (moved without invoking `transfer`).
+/// `ThreadAware::relocate` method. Fields annotated with `#[thread_aware(skip)]` are
+/// left as-is (moved without invoking `relocate`).
 ///
 /// # Supported Items
 /// * Structs (named, tuple, or unit)
@@ -187,7 +187,7 @@ pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
 /// # Example
 /// ```rust
 /// use thread_aware::ThreadAware;
-/// use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+/// use thread_aware::affinity::Affinity;
 /// #[derive(ThreadAware)]
 /// struct Payload {
 ///     id: u64,
@@ -198,14 +198,14 @@ pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
 /// struct Wrapper {
 ///     // This field will be recursively transferred.
 ///     inner: Payload,
-///     // This field will be moved without calling `transfer`.
+///     // This field will be moved without calling `relocate`.
 ///     #[thread_aware(skip)]
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(mut a1: MemoryAffinity, mut a2: PinnedAffinity, mut w: Wrapper) {
+/// fn demo(a1: Option<Affinity>, a2: Affinity, mut w: Wrapper) {
 ///     // Move the wrapper from a1 to a2.
-///     w.relocated(a1.clone(), a2.clone().into());
+///     w.relocate(a1, a2);
 /// }
 /// ```
 #[cfg(feature = "derive")]

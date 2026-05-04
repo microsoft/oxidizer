@@ -3,11 +3,11 @@ source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
 impl<T: ::thread_aware::ThreadAware> ::thread_aware::ThreadAware for PreBoundFq<T> {
-    fn relocated(
+    fn relocate(
         &mut self,
-        source: ::thread_aware::affinity::MemoryAffinity,
-        destination: ::thread_aware::affinity::PinnedAffinity,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
     ) {
-        ::thread_aware::ThreadAware::relocated(&mut self.0, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.0, source, destination);
     }
 }

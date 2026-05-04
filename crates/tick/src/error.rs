@@ -167,7 +167,7 @@ mod tests {
         let affinities = pinned_affinities(&[2]);
 
         let mut error = error;
-        error.relocated(affinities[0].into(), affinities[0]);
+        error.relocate(Some(affinities[0]), affinities[0]);
 
         assert!(matches!(error.kind(), ErrorKind::Other(_)));
     }

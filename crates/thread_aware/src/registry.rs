@@ -10,7 +10,7 @@ use std::thread::ThreadId;
 
 use many_cpus::SystemHardware;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 
 const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hold - not safe to continue execution";
 
@@ -47,7 +47,7 @@ impl NumaNode {
 /// A registry for managing pinning threads to specific processors.
 #[derive(Debug)]
 pub struct ThreadRegistry {
-    threads: Mutex<HashMap<ThreadId, PinnedAffinity>>,
+    threads: Mutex<HashMap<ThreadId, Affinity>>,
     processors: Vec<Processor>,
     numa_nodes: Vec<NumaNode>,
 }
@@ -103,11 +103,11 @@ impl ThreadRegistry {
 
     /// Get an iterator over all available memory affinities.
     #[expect(clippy::cast_possible_truncation, reason = "Checked in new()")]
-    pub fn affinities(&self) -> impl Iterator<Item = PinnedAffinity> {
+    pub fn affinities(&self) -> impl Iterator<Item = Affinity> {
         self.processors.iter().enumerate().map(|(core_index, processor)| {
             let dense_numa_index = self.numa_nodes[processor.memory_region_id()];
 
-            PinnedAffinity::new(
+            Affinity::new(
                 core_index as _,
                 dense_numa_index.0 as _,
                 self.processors.len() as _,
@@ -128,13 +128,12 @@ impl ThreadRegistry {
     ///
     /// This will panic if the internal lock is poisoned.
     #[must_use]
-    pub fn current_affinity(&self) -> MemoryAffinity {
+    pub fn current_affinity(&self) -> Option<Affinity> {
         self.threads
             .lock()
             .expect(POISONED_LOCK_MSG)
             .get(&std::thread::current().id())
             .copied()
-            .map_or(MemoryAffinity::Unknown, MemoryAffinity::Pinned)
     }
 
     /// Pins the current thread to the specified memory affinity.
@@ -142,7 +141,7 @@ impl ThreadRegistry {
     /// # Panics
     ///
     /// This will panic if affinity contains incorrect processor index
-    pub fn pin_to(&self, affinity: PinnedAffinity) {
+    pub fn pin_to(&self, affinity: Affinity) {
         let core_index = affinity.processor_index();
         let processor = &self.processors[core_index];
         processor.pin_current_thread_to();
@@ -258,7 +257,7 @@ mod tests {
         // After pinning, affinity should be pinned and match what we set
         let current = registry.current_affinity();
         assert!(!current.is_unknown());
-        assert_eq!(current, crate::affinity::MemoryAffinity::Pinned(first));
+        assert_eq!(current, Some(first));
     }
 
     #[test]
@@ -391,14 +390,14 @@ mod test_fake_hardware {
 
         let first = registry.affinities().next().unwrap();
         registry.pin_to(first);
-        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(first));
+        assert_eq!(registry.current_affinity(), Some(first));
         assert!(hw.is_thread_processor_pinned());
         assert!(hw.is_thread_memory_region_pinned());
 
         // Re-pin to a different affinity.
         let third = registry.affinities().nth(2).unwrap();
         registry.pin_to(third);
-        assert_eq!(registry.current_affinity(), crate::affinity::MemoryAffinity::Pinned(third));
+        assert_eq!(registry.current_affinity(), Some(third));
         assert!(hw.is_thread_processor_pinned());
         assert!(hw.is_thread_memory_region_pinned());
     }

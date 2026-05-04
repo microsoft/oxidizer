@@ -24,7 +24,7 @@ pub fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Pat
                     if !is_phantom_data(&f.ty) && !cfg.skip {
                         let mut path = root_path.clone();
                         path.segments.push(syn::parse_quote!(ThreadAware));
-                        stmts.push(quote! { #path::relocated(#ident, source, destination); });
+                        stmts.push(quote! { #path::relocate(#ident, source, destination); });
                     }
                 }
                 arms.push(quote! { Self::#v_ident( #( #bindings ),* ) => { #( #stmts )* } });
@@ -39,7 +39,7 @@ pub fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Pat
                     if !is_phantom_data(&f.ty) && !cfg.skip {
                         let mut path = root_path.clone();
                         path.segments.push(syn::parse_quote!(ThreadAware));
-                        stmts.push(quote! { #path::relocated(#ident, source, destination); });
+                        stmts.push(quote! { #path::relocate(#ident, source, destination); });
                     }
                 }
                 arms.push(quote! { Self::#v_ident { #( #bindings ),* } => { #( #stmts )* } });

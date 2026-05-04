@@ -7,6 +7,7 @@
 //! Tests for `Spawner` implementations.
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync);
@@ -57,8 +58,8 @@ impl SpawnCustom for ThreadPoolSpawner {
         std::thread::spawn(move || futures::executor::block_on(task));
     }
 
-    fn spawn_anywhere(&self, task: BoxedFuture) {
-        self.spawn(task);
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+        self.spawn(task.call_once());
     }
 }
 

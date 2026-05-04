@@ -31,22 +31,22 @@ enum E {
 #[test]
 fn derive_compiles_and_runs() {
     let affinities = pinned_affinities(&[2]);
-    let d0 = affinities[0].into();
+    let d0 = Some(affinities[0]);
     let d1 = affinities[1];
 
     let mut s = Simple {
         a: 10,
         b: Some("x".to_string()),
     };
-    thread_aware::ThreadAware::relocated(&mut s, d0, d1);
+    thread_aware::ThreadAware::relocate(&mut s, d0, d1);
 
     let mut t = Tuple(5, 6);
-    thread_aware::ThreadAware::relocated(&mut t, d0, d1);
+    thread_aware::ThreadAware::relocate(&mut t, d0, d1);
     assert_eq!(t.0, 5);
     assert_eq!(t.1, 6);
 
     let mut e = E::C { x: 1, y: 2 };
-    thread_aware::ThreadAware::relocated(&mut e, d0, d1);
+    thread_aware::ThreadAware::relocate(&mut e, d0, d1);
 
     // removed adapter test; basic derive coverage above is sufficient
 }
