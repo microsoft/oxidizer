@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Compile-time safety tests for URI template parameter types.
+//! Compile-time validity tests for URI template parameter types.
 
 use trybuild::TestCases;
 

@@ -39,7 +39,7 @@ The crate provides extension traits that add convenience methods to standard HTT
 * [`HttpRequestExt`][__link13] - Request cloning with body support
 * [`HeaderMapExt`][__link14] - Header value extraction and parsing
 * [`HeaderValueExt`][__link15] - Construction of [`HeaderValue`][__link16] from [`Bytes`][__link17]
-* [`ExtensionsExt`][__link18] - Extensions for [`Extensions`][__link19] to extract URL template labels
+* [`ExtensionsExt`][__link18] - Extensions for [`Extensions`][__link19] to extract URI template labels
 
 ## Quick Start
 
@@ -170,7 +170,7 @@ for future requests. This makes the crate particularly efficient for high-throug
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7dZHfOzXCO1G4yXrVZokY8aGy09bmHyxlgGG3QVOINBIZOaYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4ygmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjMuMg
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_yJjrPT_KlPGxYlOegplulrG7XEHHDTnouuGxKhZew-0ZljYWSFgmVieXRlc2YxLjExLjGCaGJ5dGVzYnVmZTAuNC4ygmRodHRwZTEuNC4wgmlodHRwX2JvZHllMS4wLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjMuMg
  [__link0]: https://crates.io/crates/http/1.4.0
  [__link1]: https://docs.rs/http_extensions/0.3.2/http_extensions/type.HttpRequest.html
  [__link10]: https://docs.rs/http_extensions/0.3.2/http_extensions/?search=StatusExt

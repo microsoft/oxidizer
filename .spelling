@@ -339,12 +339,8 @@ unregisters
 unsized
 untrusted
 Uri
-UriParam
 URI
 URIs
-UriSafe
-UriSafeString
-UriUnsafeParam
 URL
 URLs
 UTC
@@ -368,3 +364,5 @@ w.r.t.
 Xamarin
 xxH3
 waker
+infallible
+unescaped
