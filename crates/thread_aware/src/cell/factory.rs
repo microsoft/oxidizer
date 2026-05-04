@@ -3,9 +3,9 @@
 
 use std::{fmt, sync};
 
+use crate::ThreadAware;
 use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::closure::ErasedClosureOnce;
-use crate::ThreadAware;
 
 /// A function that clones data and optionally relocates the clone.
 ///
@@ -44,6 +44,7 @@ impl<V, T: ?Sized> fmt::Debug for CloneAdapter<V, T> {
 
 // SAFETY: CloneAdapter only holds a fn pointer which is Send + Sync.
 unsafe impl<V, T: ?Sized> Send for CloneAdapter<V, T> {}
+// SAFETY: CloneAdapter only holds a fn pointer which is Send + Sync.
 unsafe impl<V, T: ?Sized> Sync for CloneAdapter<V, T> {}
 
 pub enum Factory<T: ?Sized> {

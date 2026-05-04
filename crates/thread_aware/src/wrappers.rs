@@ -4,8 +4,8 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
 use crate::ThreadAware;
+use crate::affinity::{MemoryAffinity, PinnedAffinity};
 
 /// Allows transferring a value that doesn't implement [`ThreadAware`].
 ///

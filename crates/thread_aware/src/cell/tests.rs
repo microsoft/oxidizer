@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{self};
 
-use crate::affinity::{pinned_affinities, MemoryAffinity, PinnedAffinity};
+use crate::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
 use crate::{ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
@@ -509,9 +509,7 @@ fn with_clone_fn_relocates_clone() {
     let destination = affinities[1];
 
     // Counter::relocated resets value to 0, so we can detect if it was called.
-    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| {
-        Box::new(c.clone())
-    });
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
 
     arc.increment_by(42);
     assert_eq!(arc.value(), 42);
