@@ -6,10 +6,12 @@ parameters:
   type: object
   default:
   - linux
+  - windows
 - name: validationProfiles
   type: object
   default:
   - dev
+  - release
 - name: previousVersion
   type: string
   default: 'HEAD^'
