@@ -26,8 +26,7 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
 ///
 /// This is the future type that [`SpawnCustom`] implementations and
 /// layer closures operate on.
-pub type BoxedFuture = Pin<Box<dyn Future<Output=()> + Send>>;
-
+pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
@@ -36,16 +35,13 @@ pub(crate) struct CustomSpawner {
     name: &'static str,
 }
 
-
 impl CustomSpawner {
     pub(crate) fn new<T: SpawnCustom + Clone>(name: &'static str, t: T) -> Self {
-        let spawn = thread_aware::Arc::with_clone_fn(t, |x|
-            Box::new(x.clone()) as Box<dyn SpawnCustom>,
-        );
+        let spawn = thread_aware::Arc::with_clone_fn(t, |x| Box::new(x.clone()) as Box<dyn SpawnCustom>);
         Self { spawn, name }
     }
 
-    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.spawn.spawn(Box::pin(async move {
             let _ = tx.send(work.await);
@@ -53,7 +49,7 @@ impl CustomSpawner {
         rx
     }
 
-    pub(crate) fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub(crate) fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.spawn.spawn_anywhere(Box::pin(async move {
             let _ = tx.send(work.await);

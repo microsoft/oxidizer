@@ -98,14 +98,12 @@ use crate::handle::{JoinHandle, JoinHandleInner};
 #[must_use]
 pub struct Spawner(SpawnerKind);
 
-
 #[derive(Clone, ThreadAware)]
 enum SpawnerKind {
     #[cfg(feature = "tokio")]
     Tokio(#[thread_aware(skip)] Option<::tokio::runtime::Handle>),
     Custom(CustomSpawner),
 }
-
 
 impl Spawner {
     /// Creates a spawner that uses the Tokio runtime.
@@ -208,7 +206,7 @@ impl Spawner {
     /// # #[cfg(not(feature = "tokio"))]
     /// # fn main() {}
     /// ```
-    pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> JoinHandle<T> {
+    pub fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {
@@ -225,7 +223,7 @@ impl Spawner {
     /// Spawn a task that may run on any core, returning a [`JoinHandle`] for the result.
     ///
     /// Unlike [`spawn`](Self::spawn), this does not guarantee core affinity.
-    pub fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> JoinHandle<T> {
+    pub fn spawn_anywhere<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> JoinHandle<T> {
         match &self.0 {
             #[cfg(feature = "tokio")]
             SpawnerKind::Tokio(handle) => {

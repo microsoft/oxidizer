@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
 
@@ -80,9 +80,7 @@ async fn builder_passthrough_layer() {
 
 #[tokio::test]
 async fn builder_custom_name() {
-    let spawner = CustomSpawnerBuilder::tokio()
-        .name("my-runtime")
-        .build();
+    let spawner = CustomSpawnerBuilder::tokio().name("my-runtime").build();
 
     let debug = format!("{spawner:?}");
     assert!(debug.contains("my-runtime"));

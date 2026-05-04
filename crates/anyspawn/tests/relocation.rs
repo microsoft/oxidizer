@@ -131,10 +131,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
     impl SpawnCustom for IdSpawner {
         fn spawn(&self, task: BoxedFuture) {
-            DISPATCH_LOG
-                .lock()
-                .expect("dispatch log should not be poisoned")
-                .push(self.id);
+            DISPATCH_LOG.lock().expect("dispatch log should not be poisoned").push(self.id);
             std::thread::spawn(move || futures::executor::block_on(task));
         }
 
@@ -153,9 +150,7 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
     futures::executor::block_on(original.spawn(async {}));
     futures::executor::block_on(relocated.spawn(async {}));
 
-    let log = DISPATCH_LOG
-        .lock()
-        .expect("dispatch log should not be poisoned");
+    let log = DISPATCH_LOG.lock().expect("dispatch log should not be poisoned");
     assert_eq!(log.len(), 2, "both spawners should have dispatched exactly once");
     assert_ne!(
         log[0], log[1],
