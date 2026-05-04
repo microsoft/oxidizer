@@ -18,8 +18,8 @@ use ohno::AppError;
 use argh::FromArgs;
 
 const JOBS: u32 = 1;
-const BUILD_TIMEOUT_SEC: u32 = 600;
-const TIMEOUT_SEC: u32 = 300;
+const BUILD_TIMEOUT_SEC: u32 = 6000;
+const TIMEOUT_SEC: u32 = 3000;
 const MINIMUM_TEST_TIMEOUT_SEC: u32 = 60;
 
 /// Run mutation testing on the workspace
