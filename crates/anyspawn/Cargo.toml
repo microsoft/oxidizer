@@ -39,11 +39,14 @@ tokio = { workspace = true, features = ["rt"], optional = true }
 [dev-dependencies]
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-insta.workspace = true
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = "2"
 static_assertions.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "builder"
+required-features = ["tokio"]
 
 [[test]]
 name = "spawner"
@@ -51,10 +54,6 @@ required-features = ["tokio"]
 
 [[test]]
 name = "handle"
-required-features = ["tokio"]
-
-[[test]]
-name = "builder"
 required-features = ["tokio"]
 
 [[bench]]

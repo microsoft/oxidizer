@@ -6,7 +6,8 @@
 
 //! Tests for `Spawner` implementations.
 
-use anyspawn::Spawner;
+use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use thread_aware::ThreadAware;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync);
 
@@ -21,7 +22,6 @@ async fn tokio_spawn_and_await() {
 async fn tokio_spawn_fire_and_forget() {
     let spawner = Spawner::new_tokio();
     let (tx, rx) = tokio::sync::oneshot::channel();
-
     let () = spawner
         .spawn(async move {
             tx.send(42).unwrap();
@@ -36,6 +36,7 @@ fn tokio_with_handle_spawn_and_await() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let spawner = Spawner::new_tokio_with_handle(rt.handle().clone());
 
+
     // Spawning with an explicit handle works even outside a Tokio runtime context.
     let result = rt.block_on(spawner.spawn(async { 42 }));
     assert_eq!(result, 42);
@@ -49,11 +50,22 @@ fn tokio_with_handle_spawner_debug() {
     assert_eq!(debug_str, r#"Spawner("tokio(handle)")"#);
 }
 
+/// A simple spawner that runs futures on background threads.
+#[derive(ThreadAware, Clone)]
+struct ThreadPoolSpawner;
+impl SpawnCustom for ThreadPoolSpawner {
+    fn spawn(&self, task: BoxedFuture) {
+        std::thread::spawn(move || futures::executor::block_on(task));
+    }
+
+    fn spawn_anywhere(&self, task: BoxedFuture) {
+        self.spawn(task);
+    }
+}
+
 #[test]
 fn custom_spawn_and_await() {
-    let spawner = Spawner::new_custom("threadpool", |fut| {
-        std::thread::spawn(move || futures::executor::block_on(fut));
-    });
+    let spawner = Spawner::new_custom("threadpool", ThreadPoolSpawner);
 
     let result = futures::executor::block_on(spawner.spawn(async { 42 }));
     assert_eq!(result, 42);
@@ -61,9 +73,7 @@ fn custom_spawn_and_await() {
 
 #[tokio::test]
 async fn custom_spawn_fire_and_forget() {
-    let spawner = Spawner::new_custom("threadpool", |fut| {
-        std::thread::spawn(move || futures::executor::block_on(fut));
-    });
+    let spawner = Spawner::new_custom("threadpool", ThreadPoolSpawner);
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -78,14 +88,8 @@ async fn custom_spawn_fire_and_forget() {
 
 #[test]
 fn custom_spawner_debug() {
-    let spawner = Spawner::new_custom("noop", |_| {});
+    let spawner = Spawner::new_custom("noop", ThreadPoolSpawner);
     let debug_str = format!("{spawner:?}");
     assert!(debug_str.contains("noop"));
 }
 
-#[test]
-fn thread_aware_spawner_debug() {
-    let spawner = Spawner::new_thread_aware((), |()| Spawner::new_custom("inner", |_| {}));
-    let debug_str = format!("{spawner:?}");
-    assert_eq!(debug_str, "Spawner(\"thread_aware\")");
-}

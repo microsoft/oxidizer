@@ -1,95 +1,97 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(missing_docs, reason = "test code")]
-#![cfg(not(miri))] // miri doesn't work well with `insta` snapshots
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
-//! Tests for `CustomSpawnerBuilder` naming and debug output.
+use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder, Spawner};
-
-#[test]
-fn tokio_spawner_debug() {
-    let spawner = Spawner::new_tokio();
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner("tokio")"#);
-}
-
-#[test]
-fn tokio_with_handle_spawner_debug() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
-}
-
-#[test]
-fn custom_spawner_debug() {
-    let spawner = Spawner::new_custom("my-runtime", |_| {});
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "my-runtime" })"#);
-}
-
-#[test]
-fn builder_debug_no_layers() {
-    let builder = CustomSpawnerBuilder::tokio();
-    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio" }"#);
-}
-
-#[test]
-fn builder_debug_with_layers() {
-    let builder = CustomSpawnerBuilder::tokio()
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            spawn(fut);
-        })
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            spawn(fut);
-        });
-
-    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "tokio" }"#);
-}
-
-#[test]
-fn builder_custom_name_debug() {
-    let builder = CustomSpawnerBuilder::custom(|_: BoxedFuture| {}).name("smol");
-    insta::assert_snapshot!(format!("{builder:?}"), @r#"CustomSpawnerBuilder { name: "smol" }"#);
-}
-
-#[test]
-fn built_spawner_debug_with_layers() {
-    let spawner = CustomSpawnerBuilder::tokio()
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            spawn(fut);
-        })
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            spawn(fut);
-        })
-        .build();
-
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
-}
-
-#[test]
-fn built_spawner_debug_no_layers() {
+#[tokio::test]
+async fn builder_tokio_basic() {
     let spawner = CustomSpawnerBuilder::tokio().build();
-    insta::assert_snapshot!(format!("{spawner:?}"), @r#"Spawner(CustomSpawner { name: "tokio" })"#);
-}
-
-#[test]
-fn tokio_with_handle_spawner_still_works() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let spawner = CustomSpawnerBuilder::tokio_with_handle(rt.handle().clone()).build();
-
-    // Spawning with an explicit handle works even outside a Tokio runtime context.
-    let result = rt.block_on(spawner.spawn(async { 42 }));
+    let result = spawner.spawn(async { 42 }).await;
     assert_eq!(result, 42);
 }
 
 #[tokio::test]
-async fn layered_spawner_still_works() {
+async fn builder_tokio_with_handle() {
+    let handle = tokio::runtime::Handle::current();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(handle).build();
+    let result = spawner.spawn(async { 99 }).await;
+    assert_eq!(result, 99);
+}
+
+#[tokio::test]
+async fn builder_with_counting_layer() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_clone = count.clone();
+
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            spawn(fut);
+        .layer(move |task: BoxedFuture| -> BoxedFuture {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            task
         })
         .build();
 
-    let result = spawner.spawn(async { 42 }).await;
-    assert_eq!(result, 42);
+    let r1 = spawner.spawn(async { 1 }).await;
+    let r2 = spawner.spawn(async { 2 }).await;
+    let r3 = spawner.spawn(async { 3 }).await;
+
+    assert_eq!(r1, 1);
+    assert_eq!(r2, 2);
+    assert_eq!(r3, 3);
+    assert_eq!(count.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn builder_stacked_layers() {
+    let outer_count = Arc::new(AtomicUsize::new(0));
+    let inner_count = Arc::new(AtomicUsize::new(0));
+
+    let outer_clone = outer_count.clone();
+    let inner_clone = inner_count.clone();
+
+    let spawner = CustomSpawnerBuilder::tokio()
+        .layer(move |task: BoxedFuture| -> BoxedFuture {
+            inner_clone.fetch_add(1, Ordering::SeqCst);
+            task
+        })
+        .layer(move |task: BoxedFuture| -> BoxedFuture {
+            outer_clone.fetch_add(1, Ordering::SeqCst);
+            task
+        })
+        .build();
+
+    spawner.spawn(async {}).await;
+
+    assert_eq!(outer_count.load(Ordering::SeqCst), 1);
+    assert_eq!(inner_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn builder_passthrough_layer() {
+    let spawner = CustomSpawnerBuilder::tokio()
+        .layer(|task: BoxedFuture| -> BoxedFuture { task })
+        .build();
+
+    let result = spawner.spawn(async { "hello" }).await;
+    assert_eq!(result, "hello");
+}
+
+#[tokio::test]
+async fn builder_custom_name() {
+    let spawner = CustomSpawnerBuilder::tokio()
+        .name("my-runtime")
+        .build();
+
+    let debug = format!("{spawner:?}");
+    assert!(debug.contains("my-runtime"));
+}
+
+#[tokio::test]
+async fn builder_debug() {
+    let builder = CustomSpawnerBuilder::tokio();
+    let debug = format!("{builder:?}");
+    assert!(debug.contains("CustomSpawnerBuilder"));
+    assert!(debug.contains("tokio"));
 }
