@@ -198,7 +198,7 @@ impl Processor {
 mod tests {
     use std::num::NonZero;
 
-    use crate::affinity::{memory_affinities, pinned_affinities};
+    use crate::affinity::pinned_affinities;
     use crate::registry::{NumaNode, ProcessorCount, ThreadRegistry};
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
         }
 
         assert!(registry.num_affinities() > 0);
-        assert!(registry.current_affinity().is_unknown());
+        assert!(registry.current_affinity().is_none());
 
         let first = registry.affinities().next().unwrap();
         registry.pin_to(first);
@@ -248,7 +248,7 @@ mod tests {
         let registry = ThreadRegistry::default();
 
         // Before pinning, affinity should be unknown
-        assert!(registry.current_affinity().is_unknown());
+        assert!(registry.current_affinity().is_none());
 
         // Pin to the first affinity
         let first = registry.affinities().next().unwrap();
@@ -256,7 +256,7 @@ mod tests {
 
         // After pinning, affinity should be pinned and match what we set
         let current = registry.current_affinity();
-        assert!(!current.is_unknown());
+        assert!(current.is_some());
         assert_eq!(current, Some(first));
     }
 
@@ -281,8 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn test_crate_fake_memory_affinities() {
-        let affinities = memory_affinities(&[2, 3]);
+    fn test_crate_fake_pinned_affinities() {
+        let affinities = pinned_affinities(&[2, 3]);
         assert_eq!(affinities.len(), 5);
     }
 }

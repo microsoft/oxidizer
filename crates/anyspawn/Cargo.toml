@@ -36,7 +36,6 @@ futures-channel = { workspace = true, features = ["alloc"] }
 thread_aware = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt"], optional = true }
 
-
 [dev-dependencies]
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }

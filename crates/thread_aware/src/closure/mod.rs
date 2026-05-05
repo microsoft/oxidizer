@@ -12,7 +12,7 @@ use std::pin::Pin;
 use crate::ThreadAware;
 use crate::affinity::Affinity;
 
-/// A boxed, pinned, `Send` future — the return type of async closure calls.
+/// A boxed, pinned, `Send` future - the return type of async closure calls.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
@@ -39,7 +39,7 @@ pub trait ThreadAwareFnMut<T>: ThreadAware {
     fn call_mut(&mut self) -> T;
 }
 
-/// Async equivalent of [`ThreadAwareFnOnce`] — calls the closure once, returning a [`BoxFuture`].
+/// Async equivalent of [`ThreadAwareFnOnce`] - calls the closure once, returning a [`BoxFuture`].
 ///
 /// Use [`async_closure_once`] to construct an implementation.
 pub trait ThreadAwareAsyncFnOnce<T>: ThreadAware {
@@ -47,7 +47,7 @@ pub trait ThreadAwareAsyncFnOnce<T>: ThreadAware {
     fn call_once(self: Box<Self>) -> BoxFuture<'static, T>;
 }
 
-/// Async equivalent of [`ThreadAwareFn`] — calls the closure by shared reference, returning a [`BoxFuture`].
+/// Async equivalent of [`ThreadAwareFn`] - calls the closure by shared reference, returning a [`BoxFuture`].
 ///
 /// Use [`async_closure`] to construct an implementation.
 pub trait ThreadAwareAsyncFn<T>: ThreadAware {
@@ -55,7 +55,7 @@ pub trait ThreadAwareAsyncFn<T>: ThreadAware {
     fn call(&self) -> BoxFuture<'_, T>;
 }
 
-/// Async equivalent of [`ThreadAwareFnMut`] — calls the closure by mutable reference, returning a [`BoxFuture`].
+/// Async equivalent of [`ThreadAwareFnMut`] - calls the closure by mutable reference, returning a [`BoxFuture`].
 ///
 /// Use [`async_closure_mut`] to construct an implementation.
 pub trait ThreadAwareAsyncFnMut<T>: ThreadAware {
@@ -270,7 +270,7 @@ where
 
 // --- Async closure types ---
 
-/// Async equivalent of [`Closure`] — can be called multiple times by shared reference.
+/// Async equivalent of [`Closure`] - can be called multiple times by shared reference.
 ///
 /// The function pointer receives `&D` and must return a [`BoxFuture`].
 /// Construct this using the [`async_closure`] function.
@@ -330,7 +330,7 @@ impl<T, D: ThreadAware> ThreadAware for AsyncClosure<T, D> {
     }
 }
 
-/// Async equivalent of [`ClosureOnce`] — can be called exactly once, consuming `self`.
+/// Async equivalent of [`ClosureOnce`] - can be called exactly once, consuming `self`.
 ///
 /// The function pointer receives owned `D` and must return a [`BoxFuture`].
 /// Construct this using the [`async_closure_once`] function.
@@ -374,7 +374,7 @@ impl<T, D: ThreadAware> ThreadAware for AsyncClosureOnce<T, D> {
     }
 }
 
-/// Async equivalent of [`ClosureMut`] — can be called multiple times by mutable reference.
+/// Async equivalent of [`ClosureMut`] - can be called multiple times by mutable reference.
 ///
 /// The function pointer receives `&mut D` and must return a [`BoxFuture`].
 /// Construct this using the [`async_closure_mut`] function.
@@ -428,7 +428,7 @@ impl<T, D: ThreadAware> ThreadAware for AsyncClosureMut<T, D> {
     }
 }
 
-/// Constructs an [`AsyncClosure`] — the async equivalent of [`closure`].
+/// Constructs an [`AsyncClosure`] - the async equivalent of [`closure`].
 ///
 /// The function pointer receives `&D` and must return a [`BoxFuture`].
 /// Use `Box::pin(async move { ... })` in the function body.
@@ -451,7 +451,7 @@ where
     AsyncClosure { data, f }
 }
 
-/// Constructs an [`AsyncClosureMut`] — the async equivalent of [`closure_mut`].
+/// Constructs an [`AsyncClosureMut`] - the async equivalent of [`closure_mut`].
 ///
 /// The function pointer receives `&mut D` and must return a [`BoxFuture`].
 /// Use `Box::pin(async move { ... })` in the function body.
@@ -462,7 +462,7 @@ where
     AsyncClosureMut { data, f }
 }
 
-/// Constructs an [`AsyncClosureOnce`] — the async equivalent of [`closure_once`].
+/// Constructs an [`AsyncClosureOnce`] - the async equivalent of [`closure_once`].
 ///
 /// The function pointer receives owned `D` and must return a [`BoxFuture`].
 /// Use `Box::pin(async move { ... })` in the function body.
