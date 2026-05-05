@@ -123,6 +123,16 @@ where
     }
 }
 
+impl<T> ThreadAware for Box<T>
+where
+    T: ThreadAware + ?Sized,
+{
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        (**self).relocate(source, destination);
+    }
+}
+
+
 // TODO: We should probably support custom hashers as well.
 #[expect(
     clippy::implicit_hasher,
@@ -145,8 +155,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ThreadAware;
     use crate::affinity::pinned_affinities;
+    use crate::ThreadAware;
 
     #[test]
     #[cfg(feature = "threads")]
