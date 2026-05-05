@@ -22,9 +22,9 @@ resources:
   - repository: ox-sdk
     type: git
     name: ox-sdk
-    # Experimental branch carrying the ESRP integration work. Switch back to
-    # refs/heads/master once the changes have landed in ox-sdk's master.
-    ref: refs/heads/u/makolnek/esrp-publish-2
+    # Override this ref to point at a feature branch in ox-sdk when iterating
+    # on the publishing template from the unofficial pipeline.
+    ref: refs/heads/master
 
 extends:
   template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk
