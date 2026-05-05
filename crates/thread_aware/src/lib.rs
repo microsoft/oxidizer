@@ -40,16 +40,15 @@
 //!
 //! ## Relation to [`Send`]
 //!
-//! Although [`ThreadAware`] has no supertraits, any runtime invoking it will usually require the underlying type to
-//! be [`Send`]. In these cases, type are first sent to another thread, then the [`ThreadAware`] relocation
-//! notification is invoked.
+//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to another thread,
+//! then the [`ThreadAware`] relocation notification is invoked.
 //!
 //!
 //! ## Thread vs. Core Semantics
 //!
 //! As this library is primarily intended for use in thread-per-core runtimes,
 //! we use the terms 'thread' and 'core' interchangeably. The assumption is that items
-//! primarily closure between different threads, where each thread is pinned to a different CPU core.
+//! primarily relocate between different threads, where each thread is pinned to a different CPU core.
 //! Should a runtime utilize more than one thread per core (e.g., for internal I/O) user code should
 //! be able to observe this fact.
 //!

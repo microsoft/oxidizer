@@ -5,7 +5,7 @@
 - ⚠️ Breaking Changes
 
   - `ThreadAware` now requires `Send` as a supertrait.
-  - `ThreadAware::relocated` now takes `&mut self` instead of `self` and no longer returns `Self`.
+  - `ThreadAware::relocated` has been renamed to `ThreadAware::relocate`, now takes `&mut self` instead of `self`, and no longer returns `Self`.
   - `Arc<T, S>` now supports `T: ?Sized` via `new_boxed` constructor accepting `fn() -> Box<T>`.
 
 ## [0.6.2] - 2026-02-13

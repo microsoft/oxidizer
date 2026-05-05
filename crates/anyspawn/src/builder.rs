@@ -6,7 +6,7 @@
 use std::fmt::Debug;
 
 use crate::Spawner;
-use crate::custom::{BoxedFuture, FutureAsAsyncFnOnce, SpawnCustom};
+use crate::custom::{BoxedFuture, SpawnCustom};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
@@ -14,7 +14,7 @@ use thread_aware::closure::ThreadAwareAsyncFnOnce;
 /// Internal composition of a layer closure wrapping an inner [`SpawnCustom`].
 ///
 /// The closure transforms futures before they are forwarded to the inner
-/// spawner. During relocation only the inner spawner is notified — closures
+/// spawner. During relocation only the inner spawner is notified; closures
 /// are expected to be stateless (or capture only `Arc`-based state that
 /// does not need relocation).
 struct Layered<F, S> {
@@ -47,9 +47,38 @@ where
     }
 
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
-        let future = task.call_once();
-        let transformed = (self.layer)(future);
-        self.inner.spawn_anywhere(Box::new(FutureAsAsyncFnOnce(transformed)));
+        // Wrap the original task so the inner spawner can relocate it before
+        // call_once(). The layer is applied lazily inside call_once() so that
+        // the captured ThreadAware data is relocated first.
+        let layered = Box::new(LayeredTask {
+            task,
+            layer: self.layer.clone(),
+        });
+        self.inner.spawn_anywhere(layered);
+    }
+}
+
+/// Wraps a [`ThreadAwareAsyncFnOnce`] with a layer function, deferring
+/// `call_once()` until after relocation so the inner spawner can relocate
+/// the task's captured data first.
+struct LayeredTask<F> {
+    task: Box<dyn ThreadAwareAsyncFnOnce<()>>,
+    layer: F,
+}
+
+impl<F: Send> ThreadAware for LayeredTask<F> {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.task.relocate(source, destination);
+    }
+}
+
+impl<F> ThreadAwareAsyncFnOnce<()> for LayeredTask<F>
+where
+    F: Fn(BoxedFuture) -> BoxedFuture + Send + 'static,
+{
+    fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
+        let future = self.task.call_once();
+        (self.layer)(future)
     }
 }
 

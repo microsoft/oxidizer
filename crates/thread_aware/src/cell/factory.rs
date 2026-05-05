@@ -9,7 +9,7 @@ use crate::closure::ErasedClosureOnce;
 
 /// A function that clones data and optionally relocates the clone.
 ///
-/// For `ThreadAware` types, the function clones and calls `relocated()`.
+/// For `ThreadAware` types, the function clones and calls `relocate()`.
 /// For non-`ThreadAware` types, it just clones (ignoring source/destination).
 pub type DataFn<T> = fn(&T, Option<Affinity>, Affinity) -> Box<T>;
 

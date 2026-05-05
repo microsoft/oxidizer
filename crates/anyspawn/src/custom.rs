@@ -64,22 +64,6 @@ where
     }
 }
 
-/// Wraps a [`BoxedFuture`] as a [`ThreadAwareAsyncFnOnce`] with no-op relocation.
-///
-/// Used internally by [`builder::Layered`](crate::builder) to re-wrap layer-transformed
-/// futures for the inner spawner.
-pub(crate) struct FutureAsAsyncFnOnce(pub(crate) BoxedFuture);
-
-impl ThreadAware for FutureAsAsyncFnOnce {
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {}
-}
-
-impl ThreadAwareAsyncFnOnce<()> for FutureAsAsyncFnOnce {
-    fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
-        self.0
-    }
-}
-
 /// Internal wrapper for custom spawn functions.
 #[derive(Clone, ThreadAware)]
 pub(crate) struct CustomSpawner {
