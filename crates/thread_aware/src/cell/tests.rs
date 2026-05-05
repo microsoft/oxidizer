@@ -520,3 +520,114 @@ fn with_clone_fn_relocates_clone() {
     relocated.relocate(source, destination);
     assert_eq!(relocated.value(), 0, "relocated() must be called on the clone");
 }
+
+#[test]
+fn with_clone_fn_dyn_trait_relocates_correctly() {
+    // Exercises the ErasedCloneFn path with a dyn Trait object, which is the
+    // primary use case. The unsafe &T -> &V cast inside CloneAdapter is
+    // exercised here and validated under Miri.
+    trait Plugin: ThreadAware + Send + Sync {
+        fn name(&self) -> &str;
+    }
+
+    #[derive(Clone)]
+    struct MyPlugin(String);
+
+    impl Plugin for MyPlugin {
+        fn name(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl ThreadAware for MyPlugin {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = format!("{}-relocated", self.0);
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let destination = affinities[1];
+
+    let arc = super::Arc::<dyn Plugin, crate::PerCore>::with_clone_fn(MyPlugin("orig".into()), |p: &MyPlugin| {
+        Box::new(p.clone())
+    });
+
+    assert_eq!(arc.name(), "orig");
+
+    let mut relocated = arc;
+    relocated.relocate(source, destination);
+    assert_eq!(relocated.name(), "orig-relocated");
+}
+
+#[test]
+fn with_clone_fn_clone_and_relocate_independently() {
+    // Cloning an Arc backed by ErasedCloneFn should produce independent
+    // clones that can each be relocated separately.
+    let affinities = pinned_affinities(&[3]);
+    let source = Some(affinities[0]);
+    let dest1 = affinities[1];
+    let dest2 = affinities[2];
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    arc.increment_by(10);
+
+    let mut clone1 = arc.clone();
+    let mut clone2 = arc.clone();
+
+    clone1.relocate(source, dest1);
+    clone2.relocate(source, dest2);
+
+    // Both should have been reset by Counter::relocate
+    assert_eq!(clone1.value(), 0);
+    assert_eq!(clone2.value(), 0);
+}
+
+#[test]
+fn with_clone_fn_repeated_relocations() {
+    // Multiple sequential relocations through the same ErasedCloneFn factory
+    // must all produce correct clones.
+    let affinities = pinned_affinities(&[4]);
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    arc.increment_by(99);
+
+    let mut current = arc;
+    for i in 0..3 {
+        let source = Some(affinities[i]);
+        let dest = affinities[i + 1];
+        current.relocate(source, dest);
+        // Counter resets to 0 on relocate
+        assert_eq!(current.value(), 0, "relocation {i} should reset counter");
+        current.increment_by((i + 1) as i32);
+    }
+    assert_eq!(current.value(), 3);
+}
+
+#[test]
+fn with_clone_fn_debug_format() {
+    // Exercises Debug formatting of the ErasedCloneFn factory path.
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let debug = format!("{arc:?}");
+    assert!(!debug.is_empty());
+}
+
+#[test]
+fn with_clone_fn_deduplication_across_clones() {
+    // Two clones relocated to the same destination should share the same
+    // underlying value via storage deduplication.
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let dest = affinities[1];
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let clone1 = arc.clone();
+    let clone2 = arc.clone();
+
+    let mut r1 = clone1;
+    r1.relocate(source, dest);
+    let mut r2 = clone2;
+    r2.relocate(source, dest);
+
+    assert!(sync::Arc::ptr_eq(&r1.clone().into_arc(), &r2.clone().into_arc()));
+}
