@@ -484,7 +484,7 @@ fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
     assert_eq!(arc.value(), 42);
 
     // Relocate with source == destination.  The ThreadAware impl always creates a *new*
-    // Counter (value resets to 0), so `relocated` must result in 0 and must also leave
+    // Counter (value resets to 0), so `relocate` must result in 0 and must also leave
     // storage holding 0 (not the stale 42).
     let mut relocated = arc;
     relocated.relocate(Some(affinity), affinity);

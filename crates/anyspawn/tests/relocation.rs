@@ -1,14 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(missing_docs, reason = "test code")]
+#![allow(missing_docs, clippy::items_after_statements, reason = "test code")]
 #![cfg(not(miri))] // miri does not support OS threads and CPU affinity helpers
 
 //! Tests for [`Spawner`] relocation behavior with [`ThreadAware`].
 //!
 //! Per-process spawners with a no-op [`ThreadAware`] are unaffected by
 //! relocation. Thread-aware spawners (custom [`SpawnCustom`] impls) create
-//! per-core state through `clone` + `relocated`.
+//! per-core state through `clone` + `relocate`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -63,7 +63,7 @@ fn per_process_relocation_preserves_spawn_function() {
     );
 }
 
-/// Thread-aware spawner: relocation must invoke `relocated` to create fresh
+/// Thread-aware spawner: relocation must invoke `relocate` to create fresh
 /// per-core state.
 #[test]
 fn thread_aware_relocation_invokes_relocated_for_new_core() {
@@ -112,7 +112,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 /// Thread-aware spawner: after relocation, spawning must dispatch through the
 /// spawn function associated with the destination core, not the source.
 ///
-/// Each instance gets a unique ID on construction via `relocated`. When a spawn
+/// Each instance gets a unique ID on construction via `relocate`. When a spawn
 /// function is invoked it records its ID in a shared log. After spawning on both
 /// the original and relocated spawner, the log must contain two *different* IDs.
 #[test]

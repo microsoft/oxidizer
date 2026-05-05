@@ -34,7 +34,7 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
 /// layer closures operate on.
 pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-/// Wraps ThreadAware data + fn pointer + result channel as a [`ThreadAwareAsyncFnOnce`].
+/// Wraps [`ThreadAware`] data, a fn pointer, and a result channel as a [`ThreadAwareAsyncFnOnce`].
 ///
 /// Created by [`CustomSpawner::spawn_anywhere`] to bridge the typed public API
 /// (`Spawner::spawn_anywhere(data, f)`) to the type-erased `SpawnCustom` trait.
@@ -57,7 +57,7 @@ where
     F: Future<Output = T> + Send + 'static,
 {
     fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
-        let SpawnAnywhereTask { data, f, tx } = *self;
+        let Self { data, f, tx } = *self;
         Box::pin(async move {
             let _ = tx.send(f(data).await);
         })

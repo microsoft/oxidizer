@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg(not(miri))]
-#![allow(missing_docs)]
+#![allow(missing_docs, reason = "test module")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,7 +27,7 @@ async fn builder_tokio_with_handle() {
 #[tokio::test]
 async fn builder_with_counting_layer() {
     let count = Arc::new(AtomicUsize::new(0));
-    let count_clone = count.clone();
+    let count_clone = Arc::clone(&count);
 
     let spawner = CustomSpawnerBuilder::tokio()
         .layer(move |task: BoxedFuture| -> BoxedFuture {
@@ -51,8 +51,8 @@ async fn builder_stacked_layers() {
     let outer_count = Arc::new(AtomicUsize::new(0));
     let inner_count = Arc::new(AtomicUsize::new(0));
 
-    let outer_clone = outer_count.clone();
-    let inner_clone = inner_count.clone();
+    let outer_clone = Arc::clone(&outer_count);
+    let inner_clone = Arc::clone(&inner_count);
 
     let spawner = CustomSpawnerBuilder::tokio()
         .layer(move |task: BoxedFuture| -> BoxedFuture {

@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![expect(missing_docs, reason = "This is a test module")]
-#![allow(dead_code, unused_variables, unused_assignments)]
+#![allow(dead_code, unused_variables, unused_assignments, reason = "compile-only derive test")]
 
 use thread_aware::ThreadAware;
 use thread_aware::affinity::pinned_affinities;

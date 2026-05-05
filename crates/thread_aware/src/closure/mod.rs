@@ -314,9 +314,8 @@ impl<T, D: ThreadAware> ThreadAwareAsyncFnMut<T> for AsyncClosure<T, D> {
     }
 }
 
-impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosure<T, D>
+impl<T, D: ThreadAware + 'static> ThreadAwareAsyncFnOnce<T> for AsyncClosure<T, D>
 where
-    D: 'static,
     T: 'static,
 {
     fn call_once(self: Box<Self>) -> BoxFuture<'static, T> {
@@ -412,9 +411,8 @@ impl<T, D: ThreadAware> ThreadAwareAsyncFnMut<T> for AsyncClosureMut<T, D> {
     }
 }
 
-impl<T, D: ThreadAware> ThreadAwareAsyncFnOnce<T> for AsyncClosureMut<T, D>
+impl<T, D: ThreadAware + 'static> ThreadAwareAsyncFnOnce<T> for AsyncClosureMut<T, D>
 where
-    D: 'static,
     T: 'static,
 {
     fn call_once(mut self: Box<Self>) -> BoxFuture<'static, T> {

@@ -7,8 +7,22 @@
     reason = "Benchmarks don't require documentation and should fail fast on errors"
 )]
 
-use anyspawn::Spawner;
+use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
 use criterion::{Criterion, criterion_group, criterion_main};
+use thread_aware::ThreadAware;
+
+#[derive(Clone, ThreadAware)]
+struct SmolSpawner;
+
+impl SpawnCustom for SmolSpawner {
+    fn spawn(&self, task: BoxedFuture) {
+        smol::spawn(task).detach();
+    }
+
+    fn spawn_anywhere(&self, task: Box<dyn thread_aware::closure::ThreadAwareAsyncFnOnce<()>>) {
+        self.spawn(task.call_once());
+    }
+}
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("spawner");
@@ -26,9 +40,7 @@ fn entry(c: &mut Criterion) {
     });
 
     // smol benchmarks
-    let smol_spawner = Spawner::new_custom("smol", |fut| {
-        smol::spawn(fut).detach();
-    });
+    let smol_spawner = Spawner::new_custom("smol", SmolSpawner);
 
     group.bench_function("smol_direct", |b| {
         b.iter(|| smol::block_on(async { smol::spawn(async { 42 }).await }));
