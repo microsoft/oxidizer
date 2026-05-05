@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+mod clone_fn;
 mod factory;
 pub mod storage;
 
@@ -17,10 +18,10 @@ use std::sync::{self, RwLock};
 pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
-use crate::ThreadAware;
 use crate::affinity::Affinity;
 use crate::cell::factory::Factory;
-use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
+use crate::closure::{closure_once, ErasedClosureOnce, ThreadAwareFnOnce};
+use crate::ThreadAware;
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
@@ -484,14 +485,13 @@ where
     /// let arc = Arc::<dyn MyPlugin, PerCore>::with_clone_fn(Foo(42), |v: &Foo| Box::new(v.clone()));
     /// ```
     pub fn with_clone_fn<V: Send + 'static>(value: V, clone_fn: fn(&V) -> Box<T>) -> Self {
-        let initial = clone_fn(&value);
-        drop(value);
-        let value = sync::Arc::from(initial);
+        let erased = clone_fn::ErasedCloneFn::new(value, clone_fn);
+        let value = sync::Arc::clone(erased.arc());
 
         Self {
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
-            factory: Factory::new_erased_clone_fn(clone_fn),
+            factory: Factory::ErasedCloneFn(erased),
         }
     }
 }
@@ -561,7 +561,10 @@ impl<T, S: Strategy> Arc<T, S> {
     /// assert_eq!(Arc::strong_count(&arc2), 2);
     /// ```
     #[must_use]
-    #[expect(clippy::missing_panics_doc, reason = "this code only panics when the lock is poisoned")]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "this code only panics when the lock is poisoned"
+    )]
     pub fn strong_count(this: &Self) -> usize {
         let raw = sync::Arc::strong_count(&this.value);
         let guard = this.storage.read().expect("Failed to acquire read lock");
@@ -606,8 +609,8 @@ impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, 
 
                 // We can clone the data and closure it
                 Factory::ErasedCloneFn(erased) => {
-                    let cloned = erased.clone_and_relocate(&self.value, source, destination);
-                    (sync::Arc::from(cloned), self.factory.clone())
+                    let cloned = erased.clone_and_relocate(source, destination);
+                    (cloned, self.factory.clone())
                 }
 
                 Factory::Manual => {
