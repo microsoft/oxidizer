@@ -32,7 +32,7 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
 ///
 /// This is the future type that [`SpawnCustom::spawn`] implementations and
 /// layer closures operate on.
-pub type BoxedFuture = Pin<Box<dyn Future<Output=()> + Send>>;
+pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Wraps ThreadAware data + fn pointer + result channel as a [`ThreadAwareAsyncFnOnce`].
 ///
@@ -93,7 +93,7 @@ impl CustomSpawner {
         Self { spawn, name }
     }
 
-    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output=T> + Send + 'static) -> oneshot::Receiver<T> {
+    pub(crate) fn spawn<T: Send + 'static>(&self, work: impl Future<Output = T> + Send + 'static) -> oneshot::Receiver<T> {
         let (tx, rx) = oneshot::channel();
         self.spawn.spawn(Box::pin(async move {
             let _ = tx.send(work.await);

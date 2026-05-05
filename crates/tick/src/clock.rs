@@ -4,8 +4,8 @@
 use std::task::Waker;
 use std::time::{Duration, Instant, SystemTime};
 
-use thread_aware::affinity::Affinity;
 use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
 
 use crate::state::ClockState;
 use crate::timers::TimerKey;
@@ -507,8 +507,8 @@ mod tests {
     use thread_aware::affinity::pinned_affinities;
 
     use super::*;
-    use crate::runtime::InactiveClock;
     use crate::ClockControl;
+    use crate::runtime::InactiveClock;
 
     static_assertions::assert_impl_all!(Clock: Debug, Send, Sync, Clone, AsRef<Clock>);
 

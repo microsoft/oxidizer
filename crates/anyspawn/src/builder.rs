@@ -5,11 +5,11 @@
 
 use std::fmt::Debug;
 
-use crate::custom::{BoxedFuture, FutureAsAsyncFnOnce, SpawnCustom};
 use crate::Spawner;
+use crate::custom::{BoxedFuture, FutureAsAsyncFnOnce, SpawnCustom};
+use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
-use thread_aware::ThreadAware;
 
 /// Internal composition of a layer closure wrapping an inner [`SpawnCustom`].
 ///
@@ -265,10 +265,7 @@ impl<S: SpawnCustom + Clone> CustomSpawnerBuilder<S> {
     }
 }
 
-#[expect(
-    clippy::missing_fields_in_debug,
-    reason = "spawner is opaque and not useful in debug output"
-)]
+#[expect(clippy::missing_fields_in_debug, reason = "spawner is opaque and not useful in debug output")]
 impl<S> Debug for CustomSpawnerBuilder<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("CustomSpawnerBuilder");

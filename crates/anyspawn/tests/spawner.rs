@@ -7,8 +7,8 @@
 //! Tests for `Spawner` implementations.
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
 static_assertions::assert_impl_all!(Spawner: Send, Sync);
 

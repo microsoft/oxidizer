@@ -7,9 +7,9 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
 /// A simple spawner that runs futures on background threads.
 #[derive(Clone)]

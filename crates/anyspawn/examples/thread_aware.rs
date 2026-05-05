@@ -12,9 +12,9 @@
 //! counter, or connection pool instead of a simple index.
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::affinity::{pinned_affinities, Affinity};
-use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
+use thread_aware::affinity::{Affinity, pinned_affinities};
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
 #[tokio::main]
 async fn main() {
@@ -26,7 +26,7 @@ async fn main() {
     let _default = spawner.spawn(async { 1 + 1 }).await;
 
     // Simulate a two-node topology (1 core per NUMA node) and relocate the
-    // spawner to each core. After relocation ThreadAware::relocated runs
+    // spawner to each core. After relocation ThreadAware::relocate runs
     // with the destination core's processor index.
     let affinities = pinned_affinities(&[1, 1]);
 

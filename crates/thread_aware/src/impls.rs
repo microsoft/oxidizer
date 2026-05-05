@@ -132,7 +132,6 @@ where
     }
 }
 
-
 // TODO: We should probably support custom hashers as well.
 #[expect(
     clippy::implicit_hasher,
@@ -155,8 +154,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::affinity::pinned_affinities;
     use crate::ThreadAware;
+    use crate::affinity::pinned_affinities;
 
     #[test]
     #[cfg(feature = "threads")]

@@ -137,12 +137,8 @@
 //! }
 //! ```
 
-#![doc(
-    html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png"
-)]
-#![doc(
-    html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico"
-)]
+#![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/logo.png")]
+#![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/thread_aware/favicon.ico")]
 
 mod cell;
 mod core;
@@ -161,7 +157,7 @@ pub mod affinity;
 #[doc(inline)]
 pub use core::ThreadAware;
 
-pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
@@ -210,4 +206,4 @@ pub use cell::{storage, Arc, PerCore, PerNuma, PerProcess};
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
-pub use wrappers::{unaware, Unaware};
+pub use wrappers::{Unaware, unaware};

@@ -3,17 +3,17 @@
 
 use std::marker::PhantomData;
 
-use thread_aware::affinity::Affinity;
 use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
 
+use crate::Clock;
 use crate::runtime::clock_driver::ClockDriver;
 use crate::state::ClockState;
-use crate::Clock;
 
 /// Marker for an [`InactiveClock`] backed by per-core isolated timer storage.
 ///
 /// This is the default mode. Clones can be relocated to different threads via
-/// [`ThreadAware::relocated`], producing independent timer storage per core. Suitable for
+/// [`ThreadAware::relocate`], producing independent timer storage per core. Suitable for
 /// thread-per-core runtimes.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -63,7 +63,7 @@ pub struct Shared;
 /// # Thread-per-core runtimes
 ///
 /// In thread-per-core architectures, clone the `InactiveClock` and
-/// [`relocate`](thread_aware::ThreadAware::relocated) each clone to its target thread before
+/// [`relocate`](thread_aware::ThreadAware::relocate) each clone to its target thread before
 /// activation. Relocation creates per-core timer storage, so each thread gets an independent set
 /// of timers with no cross-thread lock contention.
 #[derive(Debug)]

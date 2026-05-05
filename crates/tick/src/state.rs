@@ -33,7 +33,7 @@ impl ClockState {
 
     /// Creates a `System` clock state backed by a single shared timer set. Used by clocks driven
     /// by a single global driver task (e.g. the Tokio-driven clock created by
-    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocated`] is a no-op for
+    /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocate`] is a no-op for
     /// this variant.
     #[cfg(any(feature = "rt-shared", test))]
     pub fn new_system_shared() -> Self {
@@ -77,13 +77,13 @@ impl ClockState {
 //    that are ready to fire, and taking the lock is not the bottleneck.
 #[derive(Debug, Clone)]
 pub(crate) enum SynchronizedTimers {
-    /// A single shared timer set. [`ThreadAware::relocated`] is a no-op, so all clones observe
+    /// A single shared timer set. [`ThreadAware::relocate`] is a no-op, so all clones observe
     /// the same timers regardless of thread affinity. Used by clocks driven by a single global
     /// driver task (e.g. the Tokio-driven clock created by [`Clock::new_tokio`][crate::Clock::new_tokio]).
     #[cfg(any(feature = "rt-shared", test))]
     Shared(std::sync::Arc<Mutex<Timers>>),
 
-    /// Per-core isolated timer storage. [`ThreadAware::relocated`] creates a fresh timer set on
+    /// Per-core isolated timer storage. [`ThreadAware::relocate`] creates a fresh timer set on
     /// the destination core, enabling thread-per-core runtimes to operate on independent timers
     /// with no cross-thread lock contention.
     Isolated(thread_aware::Arc<Mutex<Timers>, PerCore>),

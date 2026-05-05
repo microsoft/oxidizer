@@ -21,7 +21,7 @@
 //! timer storage. This eliminates cross-thread lock contention and scales linearly.
 //!
 //! The pattern is to clone the [`InactiveClock`], relocate each clone to its target thread
-//! using [`ThreadAware::relocated`], and then activate:
+//! using [`ThreadAware::relocate`], and then activate:
 //!
 //! ```rust
 //! # use thread_aware::ThreadAware;
@@ -63,7 +63,7 @@
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate
-//! [`ThreadAware::relocated`]: thread_aware::ThreadAware::relocated
+//! [`ThreadAware::relocate`]: thread_aware::ThreadAware::relocate
 
 mod clock_driver;
 mod clock_gone;

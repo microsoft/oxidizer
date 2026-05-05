@@ -9,11 +9,11 @@ pub(crate) use erased::ErasedClosureOnce;
 
 use std::pin::Pin;
 
-use crate::affinity::Affinity;
 use crate::ThreadAware;
+use crate::affinity::Affinity;
 
 /// A boxed, pinned, `Send` future — the return type of async closure calls.
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output=T> + Send + 'a>>;
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Marks `FnOnce()`-like closures whose captured values all implement [`ThreadAware`].
 ///
@@ -282,9 +282,7 @@ pub struct AsyncClosure<T, D> {
 
 impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosure<T, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AsyncClosure")
-            .field("data", &self.data)
-            .finish_non_exhaustive()
+        f.debug_struct("AsyncClosure").field("data", &self.data).finish_non_exhaustive()
     }
 }
 
@@ -344,9 +342,7 @@ pub struct AsyncClosureOnce<T, D> {
 
 impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosureOnce<T, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AsyncClosureOnce")
-            .field("data", &self.data)
-            .finish_non_exhaustive()
+        f.debug_struct("AsyncClosureOnce").field("data", &self.data).finish_non_exhaustive()
     }
 }
 
@@ -390,9 +386,7 @@ pub struct AsyncClosureMut<T, D> {
 
 impl<T, D: std::fmt::Debug> std::fmt::Debug for AsyncClosureMut<T, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AsyncClosureMut")
-            .field("data", &self.data)
-            .finish_non_exhaustive()
+        f.debug_struct("AsyncClosureMut").field("data", &self.data).finish_non_exhaustive()
     }
 }
 
@@ -450,10 +444,7 @@ impl<T, D: ThreadAware> ThreadAware for AsyncClosureMut<T, D> {
 ///
 /// let c = async_closure(42, my_async_fn);
 /// ```
-pub fn async_closure<T, D>(
-    data: D,
-    f: for<'a> fn(&'a D) -> BoxFuture<'a, T>,
-) -> AsyncClosure<T, D>
+pub fn async_closure<T, D>(data: D, f: for<'a> fn(&'a D) -> BoxFuture<'a, T>) -> AsyncClosure<T, D>
 where
     D: ThreadAware,
 {
@@ -464,10 +455,7 @@ where
 ///
 /// The function pointer receives `&mut D` and must return a [`BoxFuture`].
 /// Use `Box::pin(async move { ... })` in the function body.
-pub fn async_closure_mut<T, D>(
-    data: D,
-    f: for<'a> fn(&'a mut D) -> BoxFuture<'a, T>,
-) -> AsyncClosureMut<T, D>
+pub fn async_closure_mut<T, D>(data: D, f: for<'a> fn(&'a mut D) -> BoxFuture<'a, T>) -> AsyncClosureMut<T, D>
 where
     D: ThreadAware,
 {
@@ -478,10 +466,7 @@ where
 ///
 /// The function pointer receives owned `D` and must return a [`BoxFuture`].
 /// Use `Box::pin(async move { ... })` in the function body.
-pub fn async_closure_once<T, D>(
-    data: D,
-    f: fn(D) -> BoxFuture<'static, T>,
-) -> AsyncClosureOnce<T, D>
+pub fn async_closure_once<T, D>(data: D, f: fn(D) -> BoxFuture<'static, T>) -> AsyncClosureOnce<T, D>
 where
     D: ThreadAware,
 {
@@ -503,9 +488,7 @@ mod tests {
 
     #[test]
     fn async_closure_compiles() {
-        let c = async_closure(42, |x| Box::pin(async move {
-            *x + 1
-        }));
+        let c = async_closure(42, |x| Box::pin(async move { *x + 1 }));
         let result = futures::executor::block_on(c.call());
         assert_eq!(result, 43);
     }

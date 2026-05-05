@@ -14,9 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
-use thread_aware::closure::ThreadAwareAsyncFnOnce;
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{self, pinned_affinities};
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
 /// Per-process spawner: relocation must not change which spawn function is used.
 ///
