@@ -90,7 +90,7 @@ use crate::handle::{JoinHandle, JoinHandleInner};
 ///
 /// `Spawner` implements [`ThreadAware`] and supports per-core isolation via
 /// custom [`SpawnCustom`](crate::SpawnCustom) implementations. A thread-aware
-/// spawner creates per-core state through `Clone` + `relocate`, enabling
+/// spawner creates per-core state through cloning and calling [`relocate`](ThreadAware::relocate), enabling
 /// contention-free, NUMA-friendly task dispatch. The Tokio variants do not
 /// create per-core state: they ignore relocation and behave identically
 /// regardless of which core they run on.

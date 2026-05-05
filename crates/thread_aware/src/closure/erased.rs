@@ -114,4 +114,31 @@ mod tests {
         assert!(debug_output.contains("ErasedClosure"));
         assert!(debug_output.contains("String"));
     }
+
+    /// A type whose `relocate` visibly mutates state.
+    #[derive(Clone)]
+    struct Tracker(bool);
+
+    impl crate::ThreadAware for Tracker {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = true;
+        }
+    }
+
+    #[test]
+    fn erased_closure_once_relocate_forwards_to_inner() {
+        use crate::affinity::pinned_affinities;
+        use crate::closure::ThreadAwareFnOnce;
+
+        let affinities = pinned_affinities(&[2]);
+        let src = Some(affinities[0]);
+        let dst = affinities[1];
+
+        let c = closure_once(Tracker(false), |t: Tracker| t.0);
+        let mut erased = ErasedClosureOnce::new(c);
+        erased.relocate(src, dst);
+
+        let result = erased.call_once();
+        assert!(result, "ErasedClosureOnce must forward relocate to inner closure");
+    }
 }

@@ -57,6 +57,43 @@ fn new_with_works() {
 }
 
 #[test]
+fn new_with_relocate_forwards_to_data() {
+    // Exercises BoxedRelocate::relocate and the Factory::Closure path.
+    // Uses a data value whose relocate changes observable state, so we can
+    // verify that the closure's data was actually relocated before call_once.
+    #[derive(Clone)]
+    struct Seed(bool);
+
+    impl ThreadAware for Seed {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = true;
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let destination = affinities[1];
+
+    let pmr = PerCore::new_with(Seed(false), |seed| {
+        let c = Counter::new();
+        // The factory output depends on whether the seed was relocated.
+        if seed.0 {
+            c.increment_by(999);
+        }
+        c
+    });
+    assert_eq!(pmr.value(), 0, "initial factory should see un-relocated seed");
+
+    let mut relocated = pmr;
+    relocated.relocate(source, destination);
+    assert_eq!(
+        relocated.value(),
+        999,
+        "factory must see relocated seed (BoxedRelocate must forward relocate)"
+    );
+}
+
+#[test]
 fn test_from_unaware() {
     // Create a PerCore from an unaware value (a simple i32)
     // This covers line 191 (from_unaware method)
@@ -549,9 +586,7 @@ fn with_clone_fn_dyn_trait_relocates_correctly() {
     let source = Some(affinities[0]);
     let destination = affinities[1];
 
-    let arc = super::Arc::<dyn Plugin, crate::PerCore>::with_clone_fn(MyPlugin("orig".into()), |p: &MyPlugin| {
-        Box::new(p.clone())
-    });
+    let arc = super::Arc::<dyn Plugin, crate::PerCore>::with_clone_fn(MyPlugin("orig".into()), |p: &MyPlugin| Box::new(p.clone()));
 
     assert_eq!(arc.name(), "orig");
 

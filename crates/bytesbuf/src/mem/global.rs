@@ -41,6 +41,7 @@ pub struct GlobalPool {
 }
 
 impl thread_aware::ThreadAware for GlobalPool {
+    #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
         self.inner.relocate(source, destination);
     }

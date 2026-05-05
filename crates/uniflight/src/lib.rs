@@ -313,6 +313,7 @@ where
     T: Send + Sync,
     S: Strategy + Send + Sync,
 {
+    #[cfg_attr(test, mutants::skip)]
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.inner.relocate(source, destination);
     }

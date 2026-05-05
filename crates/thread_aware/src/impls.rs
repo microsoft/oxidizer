@@ -155,7 +155,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ThreadAware;
-    use crate::affinity::pinned_affinities;
+    use crate::affinity::{Affinity, pinned_affinities};
 
     #[test]
     #[cfg(feature = "threads")]
@@ -338,4 +338,82 @@ mod tests {
     // to correctly avoid contention rather than things just working out of the box with likely incorrect
     // behavior (shared synchronization primitives etc).
     static_assertions::assert_not_impl_any!(std::sync::Arc<i32>: ThreadAware);
+
+    /// A type whose `relocate` visibly mutates state, so mutation tests catch
+    /// no-op replacements.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct Tracker(bool);
+
+    impl ThreadAware for Tracker {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = true;
+        }
+    }
+
+    fn affinities() -> (Option<Affinity>, Affinity) {
+        let a = pinned_affinities(&[2]);
+        (Some(a[0]), a[1])
+    }
+
+    #[test]
+    fn option_some_forwards_relocate() {
+        let (src, dst) = affinities();
+        let mut val = Some(Tracker(false));
+        val.relocate(src, dst);
+        assert_eq!(val, Some(Tracker(true)));
+    }
+
+    #[test]
+    fn option_none_is_noop() {
+        let (src, dst) = affinities();
+        let mut val: Option<Tracker> = None;
+        val.relocate(src, dst);
+        assert_eq!(val, None);
+    }
+
+    #[test]
+    fn result_ok_forwards_relocate() {
+        let (src, dst) = affinities();
+        let mut val: Result<Tracker, Tracker> = Ok(Tracker(false));
+        val.relocate(src, dst);
+        assert_eq!(val, Ok(Tracker(true)));
+    }
+
+    #[test]
+    fn result_err_forwards_relocate() {
+        let (src, dst) = affinities();
+        let mut val: Result<Tracker, Tracker> = Err(Tracker(false));
+        val.relocate(src, dst);
+        assert_eq!(val, Err(Tracker(true)));
+    }
+
+    #[test]
+    fn vec_forwards_relocate_to_elements() {
+        let (src, dst) = affinities();
+        let mut val = vec![Tracker(false), Tracker(false)];
+        val.relocate(src, dst);
+        assert!(val.iter().all(|t| t.0), "all elements must be relocated");
+    }
+
+    #[test]
+    fn box_forwards_relocate() {
+        let (src, dst) = affinities();
+        let mut val: Box<Tracker> = Box::new(Tracker(false));
+        val.relocate(src, dst);
+        assert!(val.0, "Box must forward relocate to inner value");
+    }
+
+    #[test]
+    #[cfg(feature = "threads")]
+    fn hashmap_forwards_relocate_to_keys_and_values() {
+        use std::collections::HashMap;
+        let (src, dst) = affinities();
+        let mut map = HashMap::new();
+        map.insert(Tracker(false), Tracker(false));
+        map.relocate(src, dst);
+        for (k, v) in &map {
+            assert!(k.0, "key must be relocated");
+            assert!(v.0, "value must be relocated");
+        }
+    }
 }

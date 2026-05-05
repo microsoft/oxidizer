@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg(not(miri))]
 #![allow(missing_docs, reason = "test module")]
+#![cfg(not(miri))]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -95,4 +95,47 @@ async fn builder_debug() {
     let debug = format!("{builder:?}");
     assert!(debug.contains("CustomSpawnerBuilder"));
     assert!(debug.contains("tokio"));
+}
+
+#[tokio::test]
+async fn builder_spawn_anywhere_applies_layer() {
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_clone = Arc::clone(&count);
+
+    let spawner = CustomSpawnerBuilder::tokio()
+        .layer(move |task: BoxedFuture| -> BoxedFuture {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            task
+        })
+        .build();
+
+    // spawn_anywhere exercises TokioSpawner::spawn_anywhere, Layered::spawn_anywhere,
+    // and LayeredTask through the builder pipeline.
+    let result = spawner.spawn_anywhere(42_i32, |x| async move { x + 1 }).await;
+    assert_eq!(result, 43);
+    assert_eq!(count.load(Ordering::SeqCst), 1, "layer must be applied to spawn_anywhere tasks");
+}
+
+#[tokio::test]
+async fn builder_relocate_preserves_layer() {
+    use thread_aware::ThreadAware;
+    use thread_aware::affinity::pinned_affinities;
+
+    let count = Arc::new(AtomicUsize::new(0));
+    let count_clone = Arc::clone(&count);
+
+    let mut spawner = CustomSpawnerBuilder::tokio()
+        .layer(move |task: BoxedFuture| -> BoxedFuture {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            task
+        })
+        .build();
+
+    let affinities = pinned_affinities(&[2]);
+    spawner.relocate(Some(affinities[0]), affinities[1]);
+
+    // After relocation, the layer must still be applied.
+    let result = spawner.spawn(async { 99 }).await;
+    assert_eq!(result, 99);
+    assert_eq!(count.load(Ordering::SeqCst), 1, "layer must still work after relocate");
 }

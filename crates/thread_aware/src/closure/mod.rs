@@ -802,4 +802,76 @@ mod tests {
         // Original can still be used
         assert_eq!(closure.call_once(), 6);
     }
+
+    // ---- Mutation-detecting tests ----
+    // These use a Tracker type that visibly changes on relocate, ensuring
+    // mutation testing catches no-op replacements of relocate bodies.
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct Tracker(bool);
+
+    impl ThreadAware for Tracker {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = true;
+        }
+    }
+
+    fn affinities() -> (Option<Affinity>, Affinity) {
+        let a = pinned_affinities(&[2]);
+        (Some(a[0]), a[1])
+    }
+
+    #[test]
+    fn closure_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = closure(Tracker(false), |t| t.0);
+        c.relocate(src, dst);
+        assert!(c.call(), "Closure must forward relocate to captured data");
+    }
+
+    #[test]
+    fn closure_once_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = closure_once(Tracker(false), |t| t.0);
+        c.relocate(src, dst);
+        assert!(c.call_once(), "ClosureOnce must forward relocate to captured data");
+    }
+
+    #[test]
+    fn closure_mut_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = closure_mut(Tracker(false), |t| t.0);
+        c.relocate(src, dst);
+        assert!(c.call_mut(), "ClosureMut must forward relocate to captured data");
+    }
+
+    #[test]
+    fn async_closure_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = async_closure(Tracker(false), |t| Box::pin(async move { t.0 }));
+        c.relocate(src, dst);
+        let result = futures::executor::block_on(c.call());
+        assert!(result, "AsyncClosure must forward relocate to captured data");
+    }
+
+    #[test]
+    fn async_closure_once_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = async_closure_once(Tracker(false), |t| Box::pin(async move { t.0 }));
+        c.relocate(src, dst);
+        let result = futures::executor::block_on(c.call_once());
+        assert!(result, "AsyncClosureOnce must forward relocate to captured data");
+    }
+
+    #[test]
+    fn async_closure_mut_relocate_forwards_to_data() {
+        let (src, dst) = affinities();
+        let mut c = async_closure_mut(Tracker(false), |t| {
+            let val = t.0;
+            Box::pin(async move { val })
+        });
+        c.relocate(src, dst);
+        let result = futures::executor::block_on(c.call_mut());
+        assert!(result, "AsyncClosureMut must forward relocate to captured data");
+    }
 }

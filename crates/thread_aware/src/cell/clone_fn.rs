@@ -11,8 +11,8 @@
 
 use std::{fmt, sync};
 
-use crate::affinity::Affinity;
 use crate::ThreadAware;
+use crate::affinity::Affinity;
 
 /// A type-erased clonable value that pairs `sync::Arc<T>` with the clone
 /// function for its hidden concrete type `V`.
@@ -46,11 +46,7 @@ impl<T: ThreadAware + ?Sized + 'static> ErasedCloneFn<T> {
 impl<T: ?Sized> ErasedCloneFn<T> {
     /// Clones the inner value, relocates the clone, and returns a new
     /// `sync::Arc<T>` backed by the relocated clone.
-    pub(crate) fn clone_and_relocate(
-        &self,
-        source: Option<Affinity>,
-        destination: Affinity,
-    ) -> sync::Arc<T> {
+    pub(crate) fn clone_and_relocate(&self, source: Option<Affinity>, destination: Affinity) -> sync::Arc<T> {
         let cloned = self.adapter.clone_and_relocate(&self.value, source, destination);
         sync::Arc::from(cloned)
     }

@@ -160,3 +160,56 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
         log[0], log[1]
     );
 }
+
+/// Verify that `spawn_anywhere` relocates the task data before execution.
+///
+/// Uses a custom spawner whose `spawn_anywhere` relocates the task to a
+/// different affinity before calling `call_once`, exercising
+/// `SpawnAnywhereTask::relocate`.
+#[test]
+fn spawn_anywhere_relocates_task_data() {
+    use std::sync::atomic::AtomicBool;
+
+    static DATA_WAS_RELOCATED: AtomicBool = AtomicBool::new(false);
+
+    #[derive(Clone)]
+    struct Tracker(bool);
+
+    impl ThreadAware for Tracker {
+        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {
+            self.0 = true;
+            DATA_WAS_RELOCATED.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A spawner that relocates the task before execution.
+    #[derive(Clone)]
+    struct RelocatingSpawner;
+
+    impl ThreadAware for RelocatingSpawner {
+        fn relocate(&mut self, _: Option<affinity::Affinity>, _: affinity::Affinity) {}
+    }
+
+    impl SpawnCustom for RelocatingSpawner {
+        fn spawn(&self, task: BoxedFuture) {
+            std::thread::spawn(move || futures::executor::block_on(task));
+        }
+
+        fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            let affinities = pinned_affinities(&[2]);
+            task.relocate(Some(affinities[0]), affinities[1]);
+            self.spawn(task.call_once());
+        }
+    }
+
+    let spawner = Spawner::new_custom("relocating", RelocatingSpawner);
+    let handle = spawner.spawn_anywhere(Tracker(false), |t| async move {
+        assert!(t.0, "data must have been relocated before call_once");
+    });
+
+    futures::executor::block_on(handle);
+    assert!(
+        DATA_WAS_RELOCATED.load(Ordering::SeqCst),
+        "SpawnAnywhereTask must forward relocate to captured data"
+    );
+}
