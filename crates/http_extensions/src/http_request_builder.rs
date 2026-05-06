@@ -352,10 +352,10 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        let path_and_query = uri.target_path_and_query().cloned();
-        let mut request = self.builder.uri(uri.into_http_uri()?).body(body)?;
-        if let Some(path_and_query) = path_and_query {
-            request.extensions_mut().insert(path_and_query);
+        let path = uri.to_path_and_query();
+        let mut request = self.builder.uri(http::Uri::try_from(uri)?).body(body)?;
+        if let Some(path) = path {
+            request.extensions_mut().insert(path);
         }
 
         Ok(request)
@@ -1355,7 +1355,7 @@ mod tests {
 
         assert_eq!(request.method(), Method::HEAD);
         assert_eq!(request.uri(), "https://example.com/api");
-        assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/api");
+        assert_eq!(request.path_and_query().unwrap().to_string().declassify_ref(), "/api");
     }
 
     #[test]
@@ -1389,15 +1389,15 @@ mod tests {
 
     #[test]
     fn extension_attaches_to_request() {
-        use crate::UrlTemplateLabel;
+        use crate::UriTemplateLabel;
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")
-            .extension(UrlTemplateLabel::new("/api/users/{id}"))
+            .extension(UriTemplateLabel::new("/api/users/{id}"))
             .build()
             .unwrap();
 
-        let label = request.extensions().get::<UrlTemplateLabel>().expect("extension should be present");
+        let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
         assert_eq!(label.as_str(), "/api/users/{id}");
     }
 

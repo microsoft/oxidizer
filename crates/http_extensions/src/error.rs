@@ -81,7 +81,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
 ///
 /// ## Works with `templated_uri` crate
 ///
-/// - `templated_uri::ValidationError` - Invalid URI template parameters
+/// - `templated_uri::UriError` - Invalid URI template parameters
 ///
 /// ## Custom Errors
 ///
@@ -113,7 +113,7 @@ pub type Result<T> = std::result::Result<T, HttpError>;
     InvalidStatusCode(label: LABEL_STATUS_CODE_INVALID, recovery: RecoveryInfo::never()),
     MaxSizeReached(label: LABEL_BODY_SIZE_LIMIT_REACHED, recovery: RecoveryInfo::never()),
     std::io::Error(label: LABEL_IO, recovery: RecoveryInfo::from(error.kind())),
-    templated_uri::ValidationError(label: error.label().clone(), recovery: RecoveryInfo::never())
+    templated_uri::UriError(label: error.label().clone(), recovery: RecoveryInfo::never())
 )]
 pub struct HttpError {
     label: ErrorLabel,
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn from_uri_template_validation_error() {
-        let validation_error = templated_uri::ValidationError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
+        let validation_error = templated_uri::UriError::from("not a valid uri".parse::<http::Uri>().unwrap_err());
         let error = HttpError::from(validation_error);
         assert_eq!(error.recovery(), RecoveryInfo::never());
         assert_eq!(error.label(), "uri_invalid");
@@ -413,7 +413,7 @@ mod tests {
         static_assertions::assert_impl_all!(HttpError: From<InvalidMethod>);
         static_assertions::assert_impl_all!(HttpError: From<InvalidStatusCode>);
         static_assertions::assert_impl_all!(HttpError: From<MaxSizeReached>);
-        static_assertions::assert_impl_all!(HttpError: From<templated_uri::ValidationError>);
+        static_assertions::assert_impl_all!(HttpError: From<templated_uri::UriError>);
         static_assertions::assert_impl_all!(HttpError: From<std::io::Error>);
     }
 

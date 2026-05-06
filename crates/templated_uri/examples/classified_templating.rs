@@ -3,8 +3,12 @@
 
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
-use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
-use templated_uri::{BaseUri, Uri, UriParam, UriSafeString, templated};
+use data_privacy::{
+    RedactedToString, RedactionEngine, classified,
+    simple_redactor::{SimpleRedactor, SimpleRedactorMode},
+    taxonomy,
+};
+use templated_uri::{BaseUri, Escape, EscapedString, Uri, templated};
 
 // Example taxonomy for demonstration purposes
 #[taxonomy(example_taxonomy)]
@@ -16,11 +20,11 @@ enum ExampleTaxonomy {
 }
 
 #[classified(ExampleTaxonomy::Oii)]
-#[derive(UriParam)]
-struct OrgId(UriSafeString);
+#[derive(Escape)]
+struct OrgId(EscapedString);
 
 #[classified(ExampleTaxonomy::Eupi)]
-#[derive(UriParam)]
+#[derive(Escape)]
 struct UserId(u32);
 
 #[templated(template = "/{org_id}/user/{user_id}/{item}/")]
@@ -28,30 +32,35 @@ struct UserPath {
     org_id: OrgId,
     user_id: UserId,
     #[unredacted]
-    item: UriSafeString,
+    item: EscapedString,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let engine = RedactionEngine::builder()
+        .set_fallback_redactor(SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .build();
+
     let user_path = UserPath {
-        org_id: OrgId(UriSafeString::from_static("Contosso")),
+        org_id: OrgId(EscapedString::from_static("Contosso")),
         user_id: UserId(42),
-        item: UriSafeString::from_static("foo"),
+        item: EscapedString::from_static("foo"),
     };
 
     let target = Uri::default()
-        .base_uri(BaseUri::from_uri_static("https://example.com"))
-        .path_and_query(user_path);
+        .with_base(BaseUri::from_static("https://example.com"))
+        .with_path_and_query(user_path);
 
     // You need to be careful with this as it contains the classified data.
     let _actual_uri: Uri = target.clone();
 
     // Either of these is safe for telemetry:
-    println!("Redacted URI: {target:?}"); // Prints safe generic debug representation
+    println!("URI (debug): {target:?}"); // Prints safe generic debug representation
     println!(
-        "Redacted URI: {}",
-        target.to_redacted_string(&RedactionEngine::default()) // Prints via redactor
+        "URI (redacted): {}",
+        target.to_redacted_string(&engine) // Prints via redactor
     );
+    println!("URI (unredacted): {}", target.to_string().declassify_ref());
 
     Ok(())
 }
