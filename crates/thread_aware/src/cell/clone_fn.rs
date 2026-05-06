@@ -23,7 +23,7 @@ pub(crate) struct ErasedCloneFn<T: ?Sized> {
 impl<T: ThreadAware + ?Sized + 'static> ErasedCloneFn<T> {
     /// Creates a new `ErasedCloneFn` from a concrete value `V` and a clone function.
     ///
-    /// The clone function is called to produce the initial `Arc<T>` for dereferencing.
+    /// The clone function is called to produce the initial `Arc<T>` used for access.
     /// The original `V` is stored inside the adapter for future cloning.
     pub(crate) fn new<V: Send + Sync + 'static>(value: V, clone_fn: fn(&V) -> Box<T>) -> Self {
         // In a canonical case, we might have `V = u32`, `T = dyn Foo`, and `clone_fn = |&u32| -> Box<dyn Foo>`.
@@ -109,9 +109,9 @@ impl<V, T: ?Sized> fmt::Debug for CloneAdapter<V, T> {
 mod tests {
     use crate::{Arc, PerCore, ThreadAware};
 
-    /// Previously this would have been UB (casting &dyn ThreadAware → &u32
-    /// when the concrete type was String). Now safe: clones come from the
-    /// stored u32, not from the Arc<dyn ThreadAware>.
+    // Previously this would have been UB (casting `&dyn ThreadAware` to `&u32`
+    // when the concrete type was `String`). Now safe: clones come from the
+    // stored `u32`, not from the `Arc<dyn ThreadAware>`.
     #[test]
     fn mismatched_clone_fn_return_type_is_safe() {
         let arc = Arc::<dyn ThreadAware, PerCore>::with_clone_fn(1_u32, |_x| Box::new(String::new()));

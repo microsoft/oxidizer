@@ -330,7 +330,7 @@ mod tests {
         }
     }
 
-    /// Minimal async task for covering spawn_anywhere.
+    /// Minimal async task for covering `spawn_anywhere`.
     struct NoopTask;
     impl ThreadAware for NoopTask {
         fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
