@@ -37,7 +37,7 @@
 
 mod codec;
 #[cfg(any(feature = "test-util", test))]
-pub mod testing;
+mod testing;
 mod tier;
 
 pub use codec::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

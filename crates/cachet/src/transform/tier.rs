@@ -108,7 +108,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transform::codec::{TransformCodec, TransformEncoder, infallible_owned};
+    use crate::transform::{
+        codec::{TransformCodec, TransformEncoder, infallible_owned},
+        testing::MockCodec,
+    };
     use cachet_tier::MockCache;
 
     #[test]
@@ -185,7 +188,7 @@ mod tests {
         let adapter = TransformAdapter::from_boxed(
             inner,
             Box::new(TransformEncoder::new(|k: &i32| Ok::<_, std::convert::Infallible>(*k))),
-            Box::new(crate::MockCodec::<i32>::soft_failure("test failure")),
+            Box::new(MockCodec::<i32>::soft_failure("test failure")),
         );
 
         let result = adapter.get(&1).await.unwrap();

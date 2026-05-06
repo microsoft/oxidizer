@@ -104,7 +104,7 @@ impl<A, B> TransformEncoder<A, B> {
         EncodeError: std::error::Error + Send + Sync + 'static,
     {
         Self {
-            encode_fn: Box::new(move |a| encode_fn(a).map_err(|e| Error::from_source(e))),
+            encode_fn: Box::new(move |a| encode_fn(a).map_err(Error::from_source)),
         }
     }
 
