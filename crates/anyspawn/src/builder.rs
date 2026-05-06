@@ -302,3 +302,74 @@ impl<S> Debug for CustomSpawnerBuilder<S> {
         s.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    /// Mock spawner whose relocate sets a flag, so mutation tests catch no-ops.
+    #[derive(Clone)]
+    struct TrackingSpawner {
+        relocated: &'static AtomicBool,
+    }
+
+    impl ThreadAware for TrackingSpawner {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.relocated.store(true, Ordering::SeqCst);
+        }
+    }
+
+    impl SpawnCustom for TrackingSpawner {
+        fn spawn(&self, _task: BoxedFuture) {}
+
+        fn spawn_anywhere(&self, mut task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+            let affinities = thread_aware::affinity::pinned_affinities(&[2]);
+            task.relocate(Some(affinities[0]), affinities[1]);
+        }
+    }
+
+    #[test]
+    fn layered_relocate_forwards_to_inner() {
+        static RELOCATED: AtomicBool = AtomicBool::new(false);
+
+        let affinities = thread_aware::affinity::pinned_affinities(&[2]);
+        let mut layered = Layered {
+            layer: |task: BoxedFuture| -> BoxedFuture { task },
+            inner: TrackingSpawner { relocated: &RELOCATED },
+        };
+
+        layered.relocate(Some(affinities[0]), affinities[1]);
+        assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
+    }
+
+    #[test]
+    fn layered_task_relocate_forwards_to_inner() {
+        static RELOCATED: AtomicBool = AtomicBool::new(false);
+
+        #[derive(Clone)]
+        struct Tracker(&'static AtomicBool);
+
+        impl ThreadAware for Tracker {
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        impl ThreadAwareAsyncFnOnce<()> for Tracker {
+            fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
+                Box::pin(async {})
+            }
+        }
+
+        let affinities = thread_aware::affinity::pinned_affinities(&[2]);
+        let mut task = LayeredTask {
+            task: Box::new(Tracker(&RELOCATED)),
+            layer: |task: BoxedFuture| -> BoxedFuture { task },
+        };
+
+        task.relocate(Some(affinities[0]), affinities[1]);
+        assert!(RELOCATED.load(Ordering::SeqCst), "LayeredTask must forward relocate to inner task");
+    }
+}

@@ -608,6 +608,7 @@ fn with_clone_fn_clone_and_relocate_independently() {
     arc.increment_by(10);
 
     let mut clone1 = arc.clone();
+    #[expect(clippy::redundant_clone, reason = "testing independent clones")]
     let mut clone2 = arc.clone();
 
     clone1.relocate(source, dest1);
@@ -634,7 +635,7 @@ fn with_clone_fn_repeated_relocations() {
         current.relocate(source, dest);
         // Counter resets to 0 on relocate
         assert_eq!(current.value(), 0, "relocation {i} should reset counter");
-        current.increment_by((i + 1) as i32);
+        current.increment_by(i32::try_from(i + 1).expect("loop index fits in i32"));
     }
     assert_eq!(current.value(), 3);
 }
@@ -657,6 +658,7 @@ fn with_clone_fn_deduplication_across_clones() {
 
     let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
     let clone1 = arc.clone();
+    #[expect(clippy::redundant_clone, reason = "testing independent clones")]
     let clone2 = arc.clone();
 
     let mut r1 = clone1;
