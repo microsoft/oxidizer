@@ -238,20 +238,19 @@ mod tests {
 
         // Test the warning case mentioned in docs - Arc with interior mutability
         let inner_arc = Arc::new(Mutex::new(42));
-        let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
+        let mut unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
         let affinities = pinned_affinities(&[2]);
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let mut relocated = unaware_wrapper;
-        relocated.relocate(source, destination);
+        unaware_wrapper.relocate(source, destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
         assert_eq!(Arc::strong_count(&inner_arc), 2);
-        assert_eq!(Arc::strong_count(&relocated.0), 2);
+        assert_eq!(Arc::strong_count(&unaware_wrapper.0), 2);
     }
 
     #[test]
@@ -283,7 +282,7 @@ mod tests {
             values: vec![1, 2, 3],
         };
 
-        let unaware_complex = Unaware(complex);
+        let mut unaware_complex = Unaware(complex);
         assert_eq!(unaware_complex.0.id, 1);
         assert_eq!(unaware_complex.0.name, "test");
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
@@ -293,10 +292,9 @@ mod tests {
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let mut relocated = unaware_complex;
-        relocated.relocate(source, destination);
-        assert_eq!(relocated.0.id, 1);
-        assert_eq!(relocated.0.name, "test");
+        unaware_complex.relocate(source, destination);
+        assert_eq!(unaware_complex.0.id, 1);
+        assert_eq!(unaware_complex.0.name, "test");
     }
 
     #[test]

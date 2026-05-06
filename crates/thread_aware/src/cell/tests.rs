@@ -74,7 +74,7 @@ fn new_with_relocate_forwards_to_data() {
     let source = Some(affinities[0]);
     let destination = affinities[1];
 
-    let pmr = PerCore::new_with(Seed(false), |seed| {
+    let mut pmr = PerCore::new_with(Seed(false), |seed| {
         let c = Counter::new();
         // The factory output depends on whether the seed was relocated.
         if seed.0 {
@@ -84,10 +84,9 @@ fn new_with_relocate_forwards_to_data() {
     });
     assert_eq!(pmr.value(), 0, "initial factory should see un-relocated seed");
 
-    let mut relocated = pmr;
-    relocated.relocate(source, destination);
+    pmr.relocate(source, destination);
     assert_eq!(
-        relocated.value(),
+        pmr.value(),
         999,
         "factory must see relocated seed (BoxedRelocate must forward relocate)"
     );
@@ -97,14 +96,13 @@ fn new_with_relocate_forwards_to_data() {
 fn test_from_unaware() {
     // Create a PerCore from an unaware value (a simple i32)
     // This covers line 191 (from_unaware method)
-    let per_core = PerCore::from_unaware(42);
+    let mut per_core = PerCore::from_unaware(42);
     assert_eq!(*per_core, 42);
 
     // Verify it can be relocated
     let affinities = pinned_affinities(&[2]);
-    let mut relocated = per_core;
-    relocated.relocate(Some(affinities[0]), affinities[1]);
-    assert_eq!(*relocated, 42);
+    per_core.relocate(Some(affinities[0]), affinities[1]);
+    assert_eq!(*per_core, 42);
 }
 
 #[test]
@@ -395,11 +393,10 @@ fn test_relocated_unknown_source() {
     let source = None;
     let destination = affinities[1];
 
-    let trc = PerCore::with_value(42);
+    let mut trc = PerCore::with_value(42);
 
-    let mut relocated_trc = trc;
-    relocated_trc.relocate(source, destination);
-    assert_eq!(*relocated_trc, 42);
+    trc.relocate(source, destination);
+    assert_eq!(*trc, 42);
 }
 
 #[test]
@@ -523,17 +520,17 @@ fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
     // Relocate with source == destination.  The ThreadAware impl always creates a *new*
     // Counter (value resets to 0), so `relocate` must result in 0 and must also leave
     // storage holding 0 (not the stale 42).
-    let mut relocated = arc;
-    relocated.relocate(Some(affinity), affinity);
-    assert_eq!(relocated.value(), 0, "relocated value should come from factory");
+    let mut arc = arc;
+    arc.relocate(Some(affinity), affinity);
+    assert_eq!(arc.value(), 0, "relocated value should come from factory");
 
     // A second relocation from the same slot must find the factory-created value (0) in
     // storage, not the stale pre-relocation value (42).  Before the bug fix, the first
     // relocated() call wrote the stale Arc<Counter(42)> back into the storage slot,
     // so the second call's `get_clone` fast-path would return 42 instead of 0.
-    relocated.relocate(Some(affinity), affinity);
+    arc.relocate(Some(affinity), affinity);
     assert_eq!(
-        relocated.value(),
+        arc.value(),
         0,
         "subsequent relocation must not see stale pre-relocation value from storage"
     );
@@ -553,9 +550,9 @@ fn with_clone_fn_relocates_clone() {
 
     // Relocating should clone the Counter and call relocated() on the clone,
     // which resets the value to 0.
-    let mut relocated = arc;
-    relocated.relocate(source, destination);
-    assert_eq!(relocated.value(), 0, "relocated() must be called on the clone");
+    let mut arc = arc;
+    arc.relocate(source, destination);
+    assert_eq!(arc.value(), 0, "relocated() must be called on the clone");
 }
 
 #[test]
@@ -590,9 +587,9 @@ fn with_clone_fn_dyn_trait_relocates_correctly() {
 
     assert_eq!(arc.name(), "orig");
 
-    let mut relocated = arc;
-    relocated.relocate(source, destination);
-    assert_eq!(relocated.name(), "orig-relocated");
+    let mut arc = arc;
+    arc.relocate(source, destination);
+    assert_eq!(arc.name(), "orig-relocated");
 }
 
 #[test]

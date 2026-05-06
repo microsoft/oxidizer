@@ -754,14 +754,13 @@ mod tests {
         let c = closure(vec![1, 2, 3], std::vec::Vec::len);
 
         // Test Clone
-        let cloned = c;
+        let mut cloned = c;
 
         // Test ThreadAware
-        let mut relocated = cloned;
-        relocated.relocate(Some(affinities[0]), affinities[1]);
+        cloned.relocate(Some(affinities[0]), affinities[1]);
 
         // Test ThreadAwareFnMut
-        assert_eq!(relocated.call_mut(), 3);
+        assert_eq!(cloned.call_mut(), 3);
     }
 
     #[test]
@@ -773,15 +772,14 @@ mod tests {
         });
 
         // Test Clone
-        let cloned = closure;
+        let mut cloned = closure;
 
         // Test ThreadAware across NUMA nodes
-        let mut relocated = cloned;
-        relocated.relocate(Some(affinities[0]), affinities[3]);
+        cloned.relocate(Some(affinities[0]), affinities[3]);
 
         // Test ThreadAwareFnMut
-        assert_eq!(relocated.call_mut(), 101);
-        assert_eq!(relocated.call_mut(), 102);
+        assert_eq!(cloned.call_mut(), 101);
+        assert_eq!(cloned.call_mut(), 102);
     }
 
     #[test]
@@ -790,14 +788,13 @@ mod tests {
         let closure = closure_once((1, 2, 3), |(a, b, c)| a + b + c);
 
         // Test Clone
-        let cloned = closure;
+        let mut cloned = closure;
 
         // Test ThreadAware
-        let mut relocated = cloned;
-        relocated.relocate(Some(affinities[0]), affinities[1]);
+        cloned.relocate(Some(affinities[0]), affinities[1]);
 
         // Call once
-        assert_eq!(relocated.call_once(), 6);
+        assert_eq!(cloned.call_once(), 6);
 
         // Original can still be used
         assert_eq!(closure.call_once(), 6);

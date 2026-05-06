@@ -714,7 +714,7 @@ mod tests {
         let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let memory = GlobalPool::new();
+        let mut memory = GlobalPool::new();
 
         // Allocate from the original pool.
         let mut buf = memory.reserve(100);
@@ -723,11 +723,10 @@ mod tests {
         assert_eq!(view.first_slice()[0], 42);
 
         // Relocate the pool to a different affinity.
-        let mut relocated_memory = memory;
-        relocated_memory.relocate(source, destination);
+        memory.relocate(source, destination);
 
         // The relocated pool should work independently.
-        let mut buf2 = relocated_memory.reserve(200);
+        let mut buf2 = memory.reserve(200);
         buf2.put_byte(99);
         let view2 = buf2.consume_all();
         assert_eq!(view2.first_slice()[0], 99);

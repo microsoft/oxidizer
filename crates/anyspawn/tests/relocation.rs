@@ -48,11 +48,11 @@ fn per_process_relocation_preserves_spawn_function() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let mut relocated = spawner;
-    relocated.relocate(Some(affinities[0]), affinities[1]);
+    let mut spawner = spawner;
+    spawner.relocate(Some(affinities[0]), affinities[1]);
 
     let r1 = futures::executor::block_on(original.spawn(async { 1 }));
-    let r2 = futures::executor::block_on(relocated.spawn(async { 2 }));
+    let r2 = futures::executor::block_on(spawner.spawn(async { 2 }));
 
     assert_eq!(r1, 1);
     assert_eq!(r2, 2);
@@ -95,8 +95,8 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let mut relocated = spawner;
-    relocated.relocate(Some(affinities[0]), affinities[1]);
+    let mut spawner = spawner;
+    spawner.relocate(Some(affinities[0]), affinities[1]);
 
     assert!(
         RELOCATE_CALLS.load(Ordering::SeqCst) > before,
@@ -104,7 +104,7 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
     );
 
     let r1 = futures::executor::block_on(original.spawn(async { 10 }));
-    let r2 = futures::executor::block_on(relocated.spawn(async { 20 }));
+    let r2 = futures::executor::block_on(spawner.spawn(async { 20 }));
     assert_eq!(r1, 10);
     assert_eq!(r2, 20);
 }
@@ -146,11 +146,11 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
     let affinities = pinned_affinities(&[2]);
     let original = spawner.clone();
-    let mut relocated = spawner;
-    relocated.relocate(Some(affinities[0]), affinities[1]);
+    let mut spawner = spawner;
+    spawner.relocate(Some(affinities[0]), affinities[1]);
 
     futures::executor::block_on(original.spawn(async {}));
-    futures::executor::block_on(relocated.spawn(async {}));
+    futures::executor::block_on(spawner.spawn(async {}));
 
     let log = DISPATCH_LOG.lock().expect("dispatch log should not be poisoned");
     assert_eq!(log.len(), 2, "both spawners should have dispatched exactly once");

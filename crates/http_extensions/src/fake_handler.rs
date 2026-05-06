@@ -554,12 +554,11 @@ mod tests {
     #[test]
     fn relocated_preserves_behavior() {
         let affinity = pinned_affinities(&[2])[0];
-        let handler = FakeHandler::from(StatusCode::ACCEPTED);
+        let mut handler = FakeHandler::from(StatusCode::ACCEPTED);
 
-        let mut relocated = handler;
-        relocated.relocate(None, affinity);
+        handler.relocate(None, affinity);
 
-        let status = get_response(&relocated).unwrap().status();
+        let status = get_response(&handler).unwrap().status();
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 
