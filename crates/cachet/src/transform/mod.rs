@@ -36,7 +36,7 @@
 //! they can be used where a fallible closure is expected.
 
 mod codec;
-#[cfg(any(feature = "test-util", test))]
+#[cfg(test)]
 pub(crate) mod testing;
 mod tier;
 
