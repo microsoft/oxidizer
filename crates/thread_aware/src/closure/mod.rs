@@ -883,12 +883,15 @@ mod tests {
 
     #[test]
     fn async_closure_debug_and_clone() {
-        let c = async_closure(42_i32, |x| Box::pin(async move { *x }));
+        let c = async_closure(String::from("hello"), |x| Box::pin(async move { x.len() }));
         let dbg = format!("{c:?}");
         assert!(dbg.contains("AsyncClosure"), "{dbg}");
         let c2 = c.clone();
         let r = futures::executor::block_on(c2.call());
-        assert_eq!(r, 42);
+        assert_eq!(r, 5);
+        // Use original after clone to prove clone is not redundant
+        let r2 = futures::executor::block_on(c.call());
+        assert_eq!(r2, 5);
     }
 
     #[test]
@@ -913,12 +916,15 @@ mod tests {
 
     #[test]
     fn async_closure_once_debug_and_clone() {
-        let c = async_closure_once(42_i32, |x| Box::pin(async move { x }));
+        let c = async_closure_once(String::from("hello"), |x| Box::pin(async move { x }));
         let dbg = format!("{c:?}");
         assert!(dbg.contains("AsyncClosureOnce"), "{dbg}");
         let c2 = c.clone();
         let r = futures::executor::block_on(c2.call_once());
-        assert_eq!(r, 42);
+        assert_eq!(r, "hello");
+        // Use original after clone to prove clone is not redundant
+        let r2 = futures::executor::block_on(c.call_once());
+        assert_eq!(r2, "hello");
     }
 
     #[test]
@@ -932,15 +938,17 @@ mod tests {
 
     #[test]
     fn async_closure_mut_debug_and_clone() {
-        let c = async_closure_mut(42_i32, |x| {
-            let v = *x;
+        let c = async_closure_mut(String::from("hello"), |x| {
+            let v = x.clone();
             Box::pin(async move { v })
         });
         let dbg = format!("{c:?}");
         assert!(dbg.contains("AsyncClosureMut"), "{dbg}");
         let mut c2 = c.clone();
         let r = futures::executor::block_on(c2.call_mut());
-        assert_eq!(r, 42);
+        assert_eq!(r, "hello");
+        // Use original after clone to prove clone is not redundant
+        drop(c);
     }
 
     #[test]
