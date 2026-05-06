@@ -9,14 +9,14 @@
 
 use std::{fmt, sync};
 
-use crate::affinity::Affinity;
 use crate::ThreadAware;
+use crate::affinity::Affinity;
 
 /// A type-erased clonable value that pairs `sync::Arc<T>` with a
 /// [`CloneAdapter`] storing the concrete `V` and its clone function.
 pub(crate) struct ErasedCloneFn<T: ?Sized> {
     // In a canonical case, we might have `T = dyn Foo`
-    value: sync::Arc<T>, // `Arc<dyn Foo>`
+    value: sync::Arc<T>,                    // `Arc<dyn Foo>`
     adapter: sync::Arc<dyn ErasedClone<T>>, // `Arc<dyn ErasedClone<dyn Foo>>` == `Arc<CloneAdapter<u32, dyn Foo>>`
 }
 
@@ -102,5 +102,38 @@ impl<V: Send + Sync + 'static, T: ThreadAware + ?Sized + 'static> ErasedClone<T>
 impl<V, T: ?Sized> fmt::Debug for CloneAdapter<V, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CloneAdapter").finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Arc, PerCore, ThreadAware};
+
+    /// Previously this would have been UB (casting &dyn ThreadAware → &u32
+    /// when the concrete type was String). Now safe: clones come from the
+    /// stored u32, not from the Arc<dyn ThreadAware>.
+    #[test]
+    fn mismatched_clone_fn_return_type_is_safe() {
+        let arc = Arc::<dyn ThreadAware, PerCore>::with_clone_fn(1_u32, |_x| Box::new(String::new()));
+        let _clone = arc.clone();
+    }
+
+    #[test]
+    fn erased_clone_fn_debug() {
+        let erased = super::ErasedCloneFn::<dyn ThreadAware>::new(1_u32, |x| Box::new(*x));
+        let dbg = format!("{erased:?}");
+        assert!(dbg.contains("ErasedCloneFn"), "{dbg}");
+    }
+
+    #[test]
+    fn clone_adapter_debug_and_clone_fn() {
+        let adapter = super::CloneAdapter::<u32, u32> {
+            concrete: 42,
+            clone_fn: |x| Box::new(*x),
+        };
+        let dbg = format!("{adapter:?}");
+        assert!(dbg.contains("CloneAdapter"), "{dbg}");
+        let boxed = (adapter.clone_fn)(&adapter.concrete);
+        assert_eq!(*boxed, 42);
     }
 }

@@ -330,6 +330,17 @@ mod tests {
         }
     }
 
+    /// Minimal async task for covering spawn_anywhere.
+    struct NoopTask;
+    impl ThreadAware for NoopTask {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+    impl ThreadAwareAsyncFnOnce<()> for NoopTask {
+        fn call_once(self: Box<Self>) -> thread_aware::closure::BoxFuture<'static, ()> {
+            Box::pin(async {})
+        }
+    }
+
     #[test]
     fn layered_relocate_forwards_to_inner() {
         static RELOCATED: AtomicBool = AtomicBool::new(false);
@@ -342,6 +353,13 @@ mod tests {
 
         layered.relocate(Some(affinities[0]), affinities[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
+
+        // Exercise spawn + spawn_anywhere + layer closure + NoopTask::call_once
+        layered.inner.spawn(Box::pin(async {}));
+        layered.inner.spawn_anywhere(Box::new(NoopTask));
+        let covered = (layered.layer)(Box::pin(async {}));
+        futures::executor::block_on(covered);
+        futures::executor::block_on(Box::new(NoopTask).call_once());
     }
 
     #[test]
@@ -371,5 +389,13 @@ mod tests {
 
         task.relocate(Some(affinities[0]), affinities[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "LayeredTask must forward relocate to inner task");
+
+        // Exercise layer closure to cover helper code
+        let covered = (task.layer)(Box::pin(async {}));
+        futures::executor::block_on(covered);
+
+        // Exercise call_once (consumes the task)
+        let fut = task.task.call_once();
+        futures::executor::block_on(fut);
     }
 }

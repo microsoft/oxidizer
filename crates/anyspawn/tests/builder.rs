@@ -139,3 +139,57 @@ async fn builder_relocate_preserves_layer() {
     assert_eq!(result, 99);
     assert_eq!(count.load(Ordering::SeqCst), 1, "layer must still work after relocate");
 }
+
+#[tokio::test]
+async fn builder_custom_spawner_new() {
+    // Exercises CustomSpawnerBuilder::new (non-tokio constructor)
+    use anyspawn::SpawnCustom;
+    use thread_aware::ThreadAware;
+    use thread_aware::affinity::Affinity;
+
+    #[derive(Clone)]
+    struct InlineSpawner;
+
+    impl ThreadAware for InlineSpawner {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+    }
+
+    impl SpawnCustom for InlineSpawner {
+        fn spawn(&self, task: BoxedFuture) {
+            futures::executor::block_on(task);
+        }
+
+        fn spawn_anywhere(&self, task: Box<dyn thread_aware::closure::ThreadAwareAsyncFnOnce<()>>) {
+            futures::executor::block_on(task.call_once());
+        }
+    }
+
+    let spawner = CustomSpawnerBuilder::new(InlineSpawner).name("inline").build();
+    let dbg = format!("{spawner:?}");
+    assert!(dbg.contains("inline"), "Debug should contain the custom name: {dbg}");
+}
+
+#[tokio::test]
+async fn spawner_tokio_spawn_anywhere() {
+    // Exercises Spawner::spawn_anywhere via plain tokio (non-layered)
+    let spawner = CustomSpawnerBuilder::tokio().build();
+    let result = spawner.spawn_anywhere(42_i32, |x| async move { x + 1 }).await;
+    assert_eq!(result, 43);
+}
+
+#[tokio::test]
+async fn spawner_tokio_debug_no_handle() {
+    // Exercises Debug for SpawnerKind::Tokio(None) branch
+    let spawner = CustomSpawnerBuilder::tokio().build();
+    let dbg = format!("{spawner:?}");
+    assert!(dbg.contains("tokio"), "Debug should mention tokio: {dbg}");
+}
+
+#[tokio::test]
+async fn spawner_tokio_with_handle_spawn_anywhere() {
+    // Exercises spawn_anywhere via Tokio(Some(handle)) branch
+    let handle = tokio::runtime::Handle::current();
+    let spawner = CustomSpawnerBuilder::tokio_with_handle(handle).build();
+    let result = spawner.spawn_anywhere(10_i32, |x| async move { x * 2 }).await;
+    assert_eq!(result, 20);
+}

@@ -18,10 +18,10 @@ use std::sync::{self, RwLock};
 pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
+use crate::ThreadAware;
 use crate::affinity::Affinity;
 use crate::cell::factory::Factory;
-use crate::closure::{closure_once, ErasedClosureOnce, ThreadAwareFnOnce};
-use crate::ThreadAware;
+use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
 
 /// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
 struct BoxedRelocate<F>(F);
@@ -565,10 +565,7 @@ impl<T, S: Strategy> Arc<T, S> {
     /// assert_eq!(Arc::strong_count(&arc2), 2);
     /// ```
     #[must_use]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "this code only panics when the lock is poisoned"
-    )]
+    #[expect(clippy::missing_panics_doc, reason = "this code only panics when the lock is poisoned")]
     pub fn strong_count(this: &Self) -> usize {
         let raw = sync::Arc::strong_count(&this.value);
         let guard = this.storage.read().expect("Failed to acquire read lock");

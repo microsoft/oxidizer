@@ -665,3 +665,55 @@ fn with_clone_fn_deduplication_across_clones() {
 
     assert!(sync::Arc::ptr_eq(&r1.clone().into_arc(), &r2.clone().into_arc()));
 }
+
+#[test]
+fn with_clone_fn_debug_includes_erased() {
+    // Exercises Debug for ErasedCloneFn (clone_fn.rs) and Factory::ErasedCloneFn (factory.rs)
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let dbg = format!("{arc:?}");
+    assert!(
+        dbg.contains("factory: Clone"),
+        "Debug output should mention factory Clone variant: {dbg}"
+    );
+}
+
+#[test]
+fn factory_data_debug() {
+    // Exercises Factory::Data debug branch
+    let arc = PerCore::from_unaware(42);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Data"), "Debug output should mention Data variant: {dbg}");
+}
+
+#[test]
+fn factory_manual_debug() {
+    // Exercises Factory::Manual debug branch (from_storage)
+    use std::sync::{self, RwLock};
+
+    let affinities = pinned_affinities(&[1]);
+    let storage = sync::Arc::new(RwLock::new(super::storage::Storage::new()));
+    storage
+        .write()
+        .expect("lock should not be poisoned")
+        .replace(affinities[0], sync::Arc::new(42));
+    let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
+}
+
+#[test]
+fn factory_closure_debug() {
+    // Exercises Factory::Closure debug branch (from Arc::new)
+    let arc = PerCore::new(Counter::new);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Closure"), "Debug output should mention Closure variant: {dbg}");
+}
+
+#[test]
+fn new_boxed_relocate() {
+    // Exercises Ctor<T>::relocate (the no-op ThreadAware impl inside new_boxed)
+    let affinities = pinned_affinities(&[2]);
+    let mut arc = super::Arc::<Counter, crate::PerCore>::new_boxed(|| Box::new(Counter::new()));
+    arc.relocate(Some(affinities[0]), affinities[1]);
+    assert_eq!(arc.value(), 0, "new_boxed relocate should create a fresh counter");
+}

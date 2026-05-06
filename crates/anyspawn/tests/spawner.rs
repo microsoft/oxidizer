@@ -92,3 +92,25 @@ fn custom_spawner_debug() {
     let debug_str = format!("{spawner:?}");
     assert!(debug_str.contains("noop"));
 }
+
+#[tokio::test]
+async fn tokio_spawn_anywhere() {
+    let spawner = Spawner::new_tokio();
+    let result = spawner.spawn_anywhere(42_i32, |x| async move { x + 1 }).await;
+    assert_eq!(result, 43);
+}
+
+#[test]
+fn tokio_with_handle_spawn_anywhere() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = Spawner::new_tokio_with_handle(rt.handle().clone());
+    let result = rt.block_on(spawner.spawn_anywhere(10_i32, |x| async move { x * 2 }));
+    assert_eq!(result, 20);
+}
+
+#[tokio::test]
+async fn tokio_spawner_debug() {
+    let spawner = Spawner::new_tokio();
+    let debug_str = format!("{spawner:?}");
+    assert_eq!(debug_str, r#"Spawner("tokio")"#);
+}

@@ -871,4 +871,95 @@ mod tests {
         let result = futures::executor::block_on(c.call_mut());
         assert!(result, "AsyncClosureMut must forward relocate to captured data");
     }
+
+    // ---- Coverage for Debug, Clone, call_once, trait impls on async closure types ----
+
+    #[test]
+    fn closure_call_once_trait() {
+        // Exercises ThreadAwareFnOnce::call_once for Closure (line 109-111)
+        let c = closure(42_i32, |x| *x + 1);
+        assert_eq!(ThreadAwareFnOnce::call_once(c), 43);
+    }
+
+    #[test]
+    fn async_closure_debug_and_clone() {
+        let c = async_closure(42_i32, |x| Box::pin(async move { *x }));
+        let dbg = format!("{c:?}");
+        assert!(dbg.contains("AsyncClosure"), "{dbg}");
+        let c2 = c.clone();
+        let r = futures::executor::block_on(c2.call());
+        assert_eq!(r, 42);
+    }
+
+    #[test]
+    fn async_closure_trait_impls() {
+        // ThreadAwareAsyncFn::call
+        let c = async_closure(10_i32, |x| Box::pin(async move { *x }));
+        let c: Box<dyn ThreadAwareAsyncFn<i32>> = Box::new(c);
+        let r = futures::executor::block_on(c.call());
+        assert_eq!(r, 10);
+
+        // ThreadAwareAsyncFnMut::call_mut
+        let mut c = async_closure(10_i32, |x| Box::pin(async move { *x }));
+        let r = futures::executor::block_on(ThreadAwareAsyncFnMut::call_mut(&mut c));
+        assert_eq!(r, 10);
+
+        // ThreadAwareAsyncFnOnce::call_once (Box<Self>)
+        let c = async_closure(10_i32, |x| Box::pin(async move { *x }));
+        let boxed: Box<dyn ThreadAwareAsyncFnOnce<i32>> = Box::new(c);
+        let r = futures::executor::block_on(boxed.call_once());
+        assert_eq!(r, 10);
+    }
+
+    #[test]
+    fn async_closure_once_debug_and_clone() {
+        let c = async_closure_once(42_i32, |x| Box::pin(async move { x }));
+        let dbg = format!("{c:?}");
+        assert!(dbg.contains("AsyncClosureOnce"), "{dbg}");
+        let c2 = c.clone();
+        let r = futures::executor::block_on(c2.call_once());
+        assert_eq!(r, 42);
+    }
+
+    #[test]
+    fn async_closure_once_trait_call_once() {
+        // ThreadAwareAsyncFnOnce::call_once (Box<Self>)
+        let c = async_closure_once(99_i32, |x| Box::pin(async move { x }));
+        let boxed: Box<dyn ThreadAwareAsyncFnOnce<i32>> = Box::new(c);
+        let r = futures::executor::block_on(boxed.call_once());
+        assert_eq!(r, 99);
+    }
+
+    #[test]
+    fn async_closure_mut_debug_and_clone() {
+        let c = async_closure_mut(42_i32, |x| {
+            let v = *x;
+            Box::pin(async move { v })
+        });
+        let dbg = format!("{c:?}");
+        assert!(dbg.contains("AsyncClosureMut"), "{dbg}");
+        let mut c2 = c.clone();
+        let r = futures::executor::block_on(c2.call_mut());
+        assert_eq!(r, 42);
+    }
+
+    #[test]
+    fn async_closure_mut_trait_impls() {
+        // ThreadAwareAsyncFnMut::call_mut
+        let mut c = async_closure_mut(10_i32, |x| {
+            let v = *x;
+            Box::pin(async move { v })
+        });
+        let r = futures::executor::block_on(ThreadAwareAsyncFnMut::call_mut(&mut c));
+        assert_eq!(r, 10);
+
+        // ThreadAwareAsyncFnOnce::call_once (Box<Self>)
+        let c = async_closure_mut(10_i32, |x| {
+            let v = *x;
+            Box::pin(async move { v })
+        });
+        let boxed: Box<dyn ThreadAwareAsyncFnOnce<i32>> = Box::new(c);
+        let r = futures::executor::block_on(boxed.call_once());
+        assert_eq!(r, 10);
+    }
 }
