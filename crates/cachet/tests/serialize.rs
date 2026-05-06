@@ -6,7 +6,7 @@
 #![cfg(feature = "serialize")]
 
 use bytesbuf::BytesView;
-use cachet::{Cache, CacheOp, CacheTier, FallbackPromotionPolicy, MockCache};
+use cachet::{Cache, CacheOp, CacheTier, MockCache};
 use tick::Clock;
 
 #[cfg_attr(miri, ignore)]
@@ -18,7 +18,6 @@ async fn serialize_encode_decode_returns_correct_output() {
         .storage(mock_cache_before.clone())
         .serialize()
         .fallback(Cache::builder(Clock::new_frozen()).storage(mock_cache_after.clone()))
-        .promotion_policy(FallbackPromotionPolicy::never())
         .build();
     let expected_key = "greeting".to_string();
     let expected_value = "Hello, world!".to_string();
@@ -35,10 +34,12 @@ async fn serialize_encode_decode_returns_correct_output() {
 
     // Verify the pre-transform cache saw the correct operations with original types.
     let before_ops = mock_cache_before.operations();
-    assert_eq!(before_ops.len(), 3);
+    assert_eq!(before_ops.len(), 4);
     assert!(matches!(&before_ops[0], CacheOp::Insert { key, entry } if key == &expected_key && entry.value() == &expected_value));
     assert!(matches!(&before_ops[1], CacheOp::Invalidate(k) if k == &expected_key));
     assert!(matches!(&before_ops[2], CacheOp::Get(k) if k == &expected_key));
+    // [3] is the promotion insert from fallback hit
+    assert!(matches!(&before_ops[3], CacheOp::Insert { key, entry } if key == &expected_key && entry.value() == &expected_value));
 
     // Verify the post-transform cache received serialized operations.
     let after_ops = mock_cache_after.operations();
@@ -91,7 +92,6 @@ async fn concurrent_serialize_from_multiple_tasks() {
             .storage(MockCache::<String, String>::new())
             .serialize()
             .fallback(Cache::builder(Clock::new_frozen()).storage(mock_after.clone()))
-            .promotion_policy(FallbackPromotionPolicy::always())
             .build(),
     );
 
@@ -144,7 +144,6 @@ async fn serialize_on_one_thread_deserialize_on_another() {
             .storage(mock_before.clone())
             .serialize()
             .fallback(Cache::builder(Clock::new_frozen()).storage(MockCache::<BytesView, BytesView>::new()))
-            .promotion_policy(FallbackPromotionPolicy::always())
             .build(),
     );
 

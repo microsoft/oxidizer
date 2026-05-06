@@ -172,7 +172,9 @@ mod tests {
     #[test]
     fn encoder_encode_produces_valid_output() {
         let value = 42u32;
-        let encoded = PostcardEncoder::new(GlobalPool::new()).encode(&value).expect("encode should succeed");
+        let encoded = PostcardEncoder::new(GlobalPool::new())
+            .encode(&value)
+            .expect("encode should succeed");
         let bytes = to_contiguous(&encoded);
         assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
         let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");

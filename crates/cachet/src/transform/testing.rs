@@ -16,8 +16,9 @@ use super::codec::DecodeOutcome;
 ///
 /// # Examples
 ///
-/// ```
-/// use cachet::{MockCodec, DecodeOutcome};
+/// ```ignore
+/// use cachet::transform::testing::MockCodec;
+/// use cachet::DecodeOutcome;
 ///
 /// // A codec that always succeeds
 /// let codec = MockCodec::<i32>::value();

@@ -3,6 +3,8 @@
 
 //! Builder methods for serialization of cache Key and Value.
 
+use std::hash::Hash;
+
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use serde::{Serialize, de::DeserializeOwned};
@@ -15,8 +17,8 @@ use crate::{
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where
-    K: Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
     /// Applies a serialization boundary that converts keys and values to [`BytesView`](bytesbuf::BytesView).
@@ -51,8 +53,8 @@ where
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
 where
-    K: Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
     PB: CacheTierBuilder<K, V>,
     FB: CacheTierBuilder<K, V>,
 {

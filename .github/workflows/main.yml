@@ -124,7 +124,8 @@ jobs:
         if: success() || failure()
         run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Examples
-        run: just examples
+        if: success() || failure()
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev ${{ needs.delta.outputs.exclude_not_affected }}
 
   static-analysis:
     needs: [delta]
@@ -232,14 +233,14 @@ jobs:
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.2
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
         if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.2
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check
           delete: true

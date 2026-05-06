@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- ⚠️ Breaking
+
+  - Rename `UrlTemplateLabel` to `UriTemplateLabel` and `RequestExt::url_template_label()` / `ExtensionsExt::url_template_label()` to `uri_template_label()`.
+
 ## [0.3.2] - 2026-04-22
 
 - 🔧 Maintenance

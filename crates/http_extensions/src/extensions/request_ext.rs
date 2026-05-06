@@ -1,34 +1,34 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::UrlTemplateLabel;
+use crate::UriTemplateLabel;
 use crate::extensions::ExtensionsExt;
 use http::Request;
-use templated_uri::uri::TargetPathAndQuery;
+use templated_uri::PathAndQuery;
 
 /// Extensions for HTTP requests.
 pub trait RequestExt: sealed::Sealed {
-    /// Returns the path and query associated with this request, if any.
-    fn path_and_query(&self) -> Option<&TargetPathAndQuery>;
+    /// Returns the URI path and query associated with this request, if any.
+    fn path_and_query(&self) -> Option<&PathAndQuery>;
 
-    /// Returns the URL template label for this request, if available.
+    /// Returns the URI template label for this request, if available.
     ///
     /// This method checks for a template label in the following order:
-    /// 1. From an explicit [`UrlTemplateLabel`] extension attached to the request
+    /// 1. From an explicit [`UriTemplateLabel`] extension attached to the request
     /// 2. From a templated URIs label (if set via `#[templated(label = "...")]`)
     /// 3. From a templated URIs template string
     ///
     /// Returns `None` if no template information is available.
-    fn url_template_label(&self) -> Option<UrlTemplateLabel>;
+    fn uri_template_label(&self) -> Option<UriTemplateLabel>;
 }
 
 impl<B> RequestExt for Request<B> {
-    fn path_and_query(&self) -> Option<&TargetPathAndQuery> {
+    fn path_and_query(&self) -> Option<&PathAndQuery> {
         self.extensions().get()
     }
 
-    fn url_template_label(&self) -> Option<UrlTemplateLabel> {
-        self.extensions().url_template_label()
+    fn uri_template_label(&self) -> Option<UriTemplateLabel> {
+        self.extensions().uri_template_label()
     }
 }
 
@@ -54,47 +54,47 @@ mod tests {
         let mut request = crate::Request::builder().uri(uri.clone()).body(()).unwrap();
         request
             .extensions_mut()
-            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
+            .insert(PathAndQuery::from(uri.path_and_query().cloned().unwrap()));
 
-        assert_eq!(request.path_and_query().unwrap().to_uri_string(), "/path");
+        assert_eq!(request.path_and_query().unwrap().to_string().declassify_ref(), "/path");
     }
 
     #[test]
-    fn url_template_label_from_url_template_label_extension() {
+    fn uri_template_label_from_uri_template_label_extension() {
         let mut request = http::Request::get("https://example.com/api/users/123")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
-        request.extensions_mut().insert(UrlTemplateLabel::new("/api/users/{id}"));
+        request.extensions_mut().insert(UriTemplateLabel::new("/api/users/{id}"));
 
-        let result = request.url_template_label();
-        assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users/{id}"));
+        let result = request.uri_template_label();
+        assert_eq!(result.as_ref().map(UriTemplateLabel::as_str), Some("/api/users/{id}"));
     }
 
     #[test]
-    fn url_template_label_returns_none_without_template() {
+    fn uri_template_label_returns_none_without_template() {
         let request = http::Request::get("https://example.com/api/users/123")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        let result = request.url_template_label();
+        let result = request.uri_template_label();
         assert!(result.is_none());
     }
 
     #[test]
-    fn url_template_label_falls_back_to_path_and_query_template() {
+    fn uri_template_label_falls_back_to_path_template() {
         let uri = Uri::from_static("https://example.com/api/users");
         let mut request = http::Request::get("https://example.com/api/users")
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        // Attach a TargetPathAndQuery but no UrlTemplateLabel.
+        // Attach a PathAndQuery but no UriTemplateLabel.
         // For a plain PathAndQuery, label() returns None so the fallback
         // to template() is exercised.
         request
             .extensions_mut()
-            .insert(TargetPathAndQuery::from_path_and_query(uri.path_and_query().cloned().unwrap()));
+            .insert(PathAndQuery::from(uri.path_and_query().cloned().unwrap()));
 
-        let result = request.url_template_label();
-        assert_eq!(result.as_ref().map(UrlTemplateLabel::as_str), Some("/api/users"));
+        let result = request.uri_template_label();
+        assert_eq!(result.as_ref().map(UriTemplateLabel::as_str), Some("/api/users"));
     }
 }
