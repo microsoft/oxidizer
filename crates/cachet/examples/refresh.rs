@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyspawn::Spawner;
-use cachet::{Cache, CacheEntry, CacheTier, Error, FallbackPromotionPolicy, TimeToRefresh};
+use cachet::{Cache, CacheEntry, CacheTier, Error, TimeToRefresh};
 use tick::Clock;
 
 #[derive(Clone)]
@@ -51,7 +51,6 @@ async fn main() {
         .ttl(Duration::from_secs(10))
         .fallback(Cache::builder::<String, String>(clock.clone()).storage(db.clone()))
         .time_to_refresh(TimeToRefresh::new(Duration::from_secs(1), Spawner::new_tokio()))
-        .promotion_policy(FallbackPromotionPolicy::always())
         .build();
 
     let key = "config".to_string();
