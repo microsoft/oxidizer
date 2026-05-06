@@ -488,3 +488,23 @@ fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
         "subsequent relocation must not see stale pre-relocation value from storage"
     );
 }
+
+#[test]
+fn factory_runs_once_per_affinity_when_source_eq_destination() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let arc = PerCore::new(|| {
+        CALLS.fetch_add(1, Ordering::Relaxed);
+        0u32
+    });
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+
+    let here = pinned_affinities(&[1])[0];
+    let _ = arc.clone().relocated(here.into(), here);
+    let _ = arc.clone().relocated(here.into(), here);
+
+    // Without the fix this is 3 (factory re-runs each time source slot is empty
+    // at destination-lookup time).
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+}

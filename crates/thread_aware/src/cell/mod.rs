@@ -490,6 +490,12 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
         let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
+        if let MemoryAffinity::Pinned(source) = source {
+        if guard.get_clone(source).is_none() {
+            guard.replace(source, sync::Arc::clone(&self.value));
+        }
+    }
+
         let (value, new_factory) = if let Some(value) = guard.get_clone(destination) {
             (value, self.factory)
         } else {
@@ -530,15 +536,6 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
 
             (value, factory)
         };
-
-        if let MemoryAffinity::Pinned(source) = source {
-            // Only restore the value to the source slot when source and destination differ.
-            // If they are the same slot, the replacement above already stored the new value
-            // there; overwriting it here would corrupt storage with the stale pre-relocation value.
-            if source != destination {
-                guard.replace(source, self.value);
-            }
-        }
 
         drop(guard);
 
