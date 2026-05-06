@@ -26,7 +26,23 @@ const FORMAT_VERSION: u8 = 1;
 ///
 /// For bidirectional serialization/deserialization, use [`PostcardCodec`].
 #[derive(Debug, Clone)]
-pub struct PostcardEncoder;
+pub struct PostcardEncoder {
+    pool: GlobalPool,
+}
+
+impl PostcardEncoder {
+    /// Creates a new encoder with a shared memory pool.
+    #[must_use]
+    pub fn new(pool: GlobalPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
+    fn encode(&self, value: &T) -> Result<BytesView, Error> {
+        encode(value, &self.pool)
+    }
+}
 
 /// A bidirectional codec that serializes and deserializes values using postcard.
 ///
@@ -35,33 +51,22 @@ pub struct PostcardEncoder;
 /// Serialization writes directly into pool-backed memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
 /// producing a [`BytesView`] with no intermediate heap allocation.
 #[derive(Debug, Clone)]
-pub struct PostcardCodec;
+pub struct PostcardCodec {
+    pool: GlobalPool,
+}
 
-impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
-    fn encode(&self, value: &T) -> Result<BytesView, Error> {
-        encode(value)
+impl PostcardCodec {
+    /// Creates a new codec with a shared memory pool.
+    #[must_use]
+    pub fn new(pool: GlobalPool) -> Self {
+        Self { pool }
     }
 }
 
 impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardCodec {
     fn encode(&self, value: &T) -> Result<BytesView, Error> {
-        encode(value)
+        encode(value, &self.pool)
     }
-}
-
-fn encode<T: Serialize + Send + Sync>(value: &T) -> Result<BytesView, Error> {
-    // TODO make Cache thread aware so we can simply store the pool in the encoder
-    // Until then we need this to avoid creating a new pool for every encode call, which would be
-    // very expensive
-    thread_local! {
-        static POOL: GlobalPool = GlobalPool::new();
-    }
-    let pool = POOL.with(GlobalPool::clone);
-
-    let mut writer = BytesBuf::new().into_writer(pool);
-    writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
-    postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
-    Ok(writer.into_inner().peek())
 }
 
 impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for PostcardCodec {
@@ -85,6 +90,13 @@ impl<T: Serialize + DeserializeOwned + Send + Sync> Codec<T, BytesView> for Post
             Err(_) => Ok(DecodeOutcome::SoftFailure("deserialization failed")),
         }
     }
+}
+
+fn encode<T: Serialize + Send + Sync>(value: &T, pool: &GlobalPool) -> Result<BytesView, Error> {
+    let mut writer = BytesBuf::new().into_writer(pool.clone());
+    writer.write_all(&[FORMAT_VERSION]).map_err(Error::from_source)?;
+    postcard::to_io(value, &mut writer).map_err(Error::from_source)?;
+    Ok(writer.into_inner().peek())
 }
 
 /// Returns a contiguous byte slice from a [`BytesView`]. Zero-copy for single-span
@@ -117,13 +129,13 @@ mod tests {
 
     #[test]
     fn encode_serialization_failure_returns_err() {
-        let result = encode(&FailSerialize);
+        let result = encode(&FailSerialize, &GlobalPool::new());
         assert!(result.is_err(), "encode should propagate serialization errors");
     }
 
     #[test]
     fn decode_empty_payload_returns_soft_failure() {
-        let codec = PostcardCodec;
+        let codec = PostcardCodec::new(GlobalPool::new());
         let empty = BytesView::from(Vec::<u8>::new());
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(empty);
         assert!(matches!(result.unwrap(), DecodeOutcome::SoftFailure("empty payload")));
@@ -131,7 +143,7 @@ mod tests {
 
     #[test]
     fn decode_wrong_format_version_returns_soft_failure() {
-        let codec = PostcardCodec;
+        let codec = PostcardCodec::new(GlobalPool::new());
         let mut data = vec![0xFF];
         data.extend_from_slice(&postcard::to_allocvec(&"hello".to_string()).unwrap());
         let view = BytesView::from(data);
@@ -141,7 +153,7 @@ mod tests {
 
     #[test]
     fn decode_corrupt_payload_returns_soft_failure() {
-        let codec = PostcardCodec;
+        let codec = PostcardCodec::new(GlobalPool::new());
         let data = vec![FORMAT_VERSION, 0xFF, 0xFE, 0xFD];
         let view = BytesView::from(data);
         let result: Result<DecodeOutcome<String>, Error> = codec.decode(view);
@@ -150,7 +162,7 @@ mod tests {
 
     #[test]
     fn encode_decode_roundtrip() {
-        let codec = PostcardCodec;
+        let codec = PostcardCodec::new(GlobalPool::new());
         let original = "hello, world!".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
         let outcome: DecodeOutcome<String> = codec.decode(encoded).expect("decode should succeed");
@@ -160,7 +172,7 @@ mod tests {
     #[test]
     fn encoder_encode_produces_valid_output() {
         let value = 42u32;
-        let encoded = PostcardEncoder.encode(&value).expect("encode should succeed");
+        let encoded = PostcardEncoder::new(GlobalPool::new()).encode(&value).expect("encode should succeed");
         let bytes = to_contiguous(&encoded);
         assert_eq!(bytes[0], FORMAT_VERSION, "first byte should be format version");
         let decoded: u32 = postcard::from_bytes(&bytes[1..]).expect("postcard decode should succeed");
@@ -169,7 +181,7 @@ mod tests {
 
     #[test]
     fn decode_multi_span_view() {
-        let codec = PostcardCodec;
+        let codec = PostcardCodec::new(GlobalPool::new());
         let original = "multi-span test".to_string();
         let encoded = codec.encode(&original).expect("encode should succeed");
 

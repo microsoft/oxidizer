@@ -34,9 +34,6 @@ async fn main() {
         .expect("insert failed");
 
     // Get returns a typed value — deserialized from BytesView if fetched from L2.
-    let value = cache.get(&key).await.expect("get failed");
-    match value {
-        Some(e) => println!("get({key}): {}", e.value()),
-        None => println!("get({key}): not found"),
-    }
+    let value = cache.get(&key).await.expect("get failed").unwrap();
+    println!("get({key}): {:?}", value);
 }

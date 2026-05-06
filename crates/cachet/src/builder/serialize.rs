@@ -4,6 +4,7 @@
 //! Builder methods for serialization of cache Key and Value.
 
 use bytesbuf::BytesView;
+use bytesbuf::mem::GlobalPool;
 use serde::{Serialize, de::DeserializeOwned};
 
 use super::transform::TransformBuilder;
@@ -25,7 +26,7 @@ where
     /// # Examples
     ///
     /// ```no_run
-    /// use cachet::{Cache, FallbackPromotionPolicy};
+    /// use cachet::Cache;
     /// use tick::Clock;
     ///
     /// let clock = Clock::new_tokio();
@@ -35,7 +36,6 @@ where
     ///     .memory()
     ///     .serialize()
     ///     .fallback(remote)
-    ///     .promotion_policy(FallbackPromotionPolicy::always())
     ///     .build();
     /// ```
     #[must_use]
@@ -44,7 +44,8 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder, PostcardCodec)
+        let pool = GlobalPool::new();
+        self.transform(PostcardEncoder::new(pool.clone()), PostcardCodec::new(pool))
     }
 }
 
@@ -62,6 +63,7 @@ where
         K: Serialize,
         V: Serialize + DeserializeOwned,
     {
-        self.transform(PostcardEncoder, PostcardCodec)
+        let pool = GlobalPool::new();
+        self.transform(PostcardEncoder::new(pool.clone()), PostcardCodec::new(pool))
     }
 }
