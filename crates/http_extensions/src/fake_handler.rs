@@ -142,7 +142,7 @@ impl FakeHandler {
     /// use http_extensions::{FakeHandler, HttpError, HttpRequest};
     ///
     /// let handler = FakeHandler::from_http_error(|_request: HttpRequest| {
-    ///    HttpError::validation("simulated error")
+    ///     HttpError::validation("simulated error")
     /// });
     /// ```
     pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {

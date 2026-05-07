@@ -200,8 +200,8 @@ impl HttpError {
     /// let mut error = HttpError::unavailable("service is down").with_request(http_request);
     /// // later you can try to extract the request
     /// if let Some(request) = error.take_request() {
-    ///    // execute the retry
-    ///    execute_retry(request);
+    ///     // execute the retry
+    ///     execute_retry(request);
     /// }
     /// # fn execute_retry(http_request: HttpRequest) {}
     /// ```

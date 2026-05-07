@@ -9,11 +9,11 @@
 // Use foldhash::fast for high-performance hashing of cache keys.
 // The `fast` variant prioritizes speed over statistical quality, which is
 // ideal for hash table lookups where we only need good bucket distribution.
-use foldhash::fast::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
 use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
+use foldhash::fast::RandomState;
 use moka::Expiry;
 use moka::future::Cache;
 use thread_aware::{Arc, PerProcess, ThreadAware};

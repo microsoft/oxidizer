@@ -186,10 +186,9 @@ mod tests {
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::Cache;
-    use crate::InsertPolicy;
     use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
+    use crate::{Cache, InsertPolicy};
 
     type TestPrimary = CacheWrapper<String, i32, MockCache<String, i32>>;
     type TestFallbackCache = FallbackCache<String, i32, TestPrimary, MockCache<String, i32>>;

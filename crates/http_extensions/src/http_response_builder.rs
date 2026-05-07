@@ -130,7 +130,9 @@ impl HttpResponseBuilder<'_> {
     /// // Create a BytesView over some bytes
     /// let payload = BytesView::copied_from_slice(b"hello world", &builder);
     ///
-    /// let response_builder = HttpResponseBuilder::new(&builder).status(200).bytes(payload);
+    /// let response_builder = HttpResponseBuilder::new(&builder)
+    ///     .status(200)
+    ///     .bytes(payload);
     ///
     /// # Ok::<(), HttpError>(())
     /// ```

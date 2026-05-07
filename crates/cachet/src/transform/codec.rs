@@ -11,7 +11,7 @@ use crate::Error;
 /// # Examples
 ///
 /// ```
-/// use cachet::{infallible, TransformCodec};
+/// use cachet::{TransformCodec, infallible};
 ///
 /// // Mixed fallibility: encode is fallible, decode is infallible
 /// let codec = TransformCodec::new(

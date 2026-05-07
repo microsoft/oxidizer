@@ -300,11 +300,11 @@ mod source;
 pub mod test_util;
 
 pub use core::OhnoCore;
-pub use error_label::{ErrorLabel, Labeled};
 
 #[cfg(feature = "app-err")]
 pub use app::{AppError, IntoAppError};
 pub use enrichable::{Enrichable, EnrichableExt};
 pub use enrichment_entry::{EnrichmentEntry, Location};
 pub use error_ext::ErrorExt;
+pub use error_label::{ErrorLabel, Labeled};
 pub use ohno_macros::{Error, enrich_err, error};
