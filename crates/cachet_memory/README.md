@@ -73,7 +73,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGx97UkpE8tyEG0w3jevrQF8SG5D28UVlbZVEG3A-UY200y_0YWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbH3tSSkTy3IQbTDeN6-tAXxIbkPbxRWVtlUQbcD5RjbTTL_RhZIKCbWNhY2hldF9tZW1vcnllMC4xLjCCa2NhY2hldF90aWVyZTAuMS4w
  [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link2]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=policy::EvictionPolicy

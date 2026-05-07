@@ -238,7 +238,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8FPUL0qKt72Gy-GD_CgRPCCG9SaPObQ7vYiG4uWqBhKhhTAYWSGgmZjYWNoZXRlMC4xLjGCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjIuMoJpdW5pZmxpZ2h0ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbwU9QvSoq3vYbL4YP8KBE8IIb1Jo85tDu9iIbi5aoGEqGFMBhZIaCZmNhY2hldGUwLjEuMYJtY2FjaGV0X21lbW9yeWUwLjEuMIJuY2FjaGV0X3NlcnZpY2VlMC4xLjCCa2NhY2hldF90aWVyZTAuMS4wgmR0aWNrZTAuMi4ygml1bmlmbGlnaHRlMC4xLjA
  [__link0]: https://docs.rs/cachet/0.1.1/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

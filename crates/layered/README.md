@@ -121,7 +121,7 @@ This ensures compatibility with multi-threaded async runtimes like Tokio.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/layered">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9cd3_rKpXlxG3cPQgH_Ia06Gylje5wjfL8MG8IUl5cvZMADYWSBgmdsYXllcmVkZTAuMy4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1x3f-sqleXEbdw9CAf8hrTobKWN7nCN8vwwbwhSXly9kwANhZIGCZ2xheWVyZWRlMC4zLjA
  [__link0]: https://docs.rs/layered/0.3.0/layered/?search=Service
  [__link1]: https://docs.rs/tower
  [__link10]: https://docs.rs/layered/0.3.0/layered/?search=Intercept

@@ -68,7 +68,7 @@ details and examples.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9pMzxUlg8D9GxZnrkpQT5jmGyYaBtuYnUetGw3uMQ2o2j_5YWSCgmhhbnlzcGF3bmUwLjMuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb2kzPFSWDwP0bFmeuSlBPmOYbJhoG25idR60bDe4xDajaP_lhZIKCaGFueXNwYXduZTAuMy4wgmx0aHJlYWRfYXdhcmVlMC42LjI
  [__link0]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
  [__link2]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_thread_aware
