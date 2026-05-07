@@ -286,10 +286,6 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
 pub use policy::InsertPolicy;
-
-/// Deprecated: Use [`InsertPolicy`] instead.
-#[deprecated(since = "0.2.0", note = "renamed to InsertPolicy")]
-pub type FallbackPromotionPolicy<V> = InsertPolicy<V>;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
