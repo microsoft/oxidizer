@@ -5,15 +5,15 @@
 
 use std::marker::PhantomData;
 
-use crate::affinity::PinnedAffinity;
+use crate::affinity::Affinity;
 
 /// A strategy for storing data in a affinity-aware manner.
 pub trait Strategy {
     /// Returns the slot index for the given affinity.
-    fn index(affinity: PinnedAffinity) -> usize;
+    fn index(affinity: Affinity) -> usize;
 
     /// Returns the total number of slots for the given affinity.
-    fn count(affinity: PinnedAffinity) -> usize;
+    fn count(affinity: Affinity) -> usize;
 }
 
 /// Type used for storing data in a affinity-aware manner.
@@ -38,7 +38,7 @@ impl<T, S: Strategy> Storage<T, S> {
     /// Replaces the data for the given affinity with the provided value.
     ///
     /// Returns the previous value if it existed, otherwise returns `None`.
-    pub fn replace(&mut self, affinity: PinnedAffinity, value: T) -> Option<T> {
+    pub fn replace(&mut self, affinity: Affinity, value: T) -> Option<T> {
         self.resize(S::count(affinity));
 
         self.data[S::index(affinity)].replace(value)
@@ -65,7 +65,7 @@ where
     /// Clone and gets the data for the given affinity if it exists.
     /// Returns `None` if the data does not exist for that affinity.
     #[must_use]
-    pub fn get_clone(&self, affinity: PinnedAffinity) -> Option<T> {
+    pub fn get_clone(&self, affinity: Affinity) -> Option<T> {
         self.data.get(S::index(affinity)).and_then(std::clone::Clone::clone)
     }
 }

@@ -141,7 +141,7 @@ use async_once_cell::OnceCell;
 use dashmap::DashMap;
 use dashmap::Entry::{Occupied, Vacant};
 use futures_util::FutureExt; // catch_unwind, map
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 use thread_aware::storage::Strategy;
 use thread_aware::{Arc as TaArc, PerCore, PerNuma, PerProcess, ThreadAware};
 
@@ -309,12 +309,13 @@ where
 
 impl<K, T, S> ThreadAware for Merger<K, T, S>
 where
-    S: Strategy,
+    K: Send + Sync,
+    T: Send + Sync,
+    S: Strategy + Send + Sync,
 {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-        Self {
-            inner: self.inner.relocated(source, destination),
-        }
+    #[cfg_attr(test, mutants::skip)]
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.inner.relocate(source, destination);
     }
 }
 
@@ -499,14 +500,14 @@ mod tests {
     #[test]
     fn relocated_delegates_to_inner() {
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let merger: Merger<String, String> = Merger::new();
-        let relocated = merger.relocated(source, destination);
+        let mut merger: Merger<String, String> = Merger::new();
+        merger.relocate(source, destination);
 
         // Verify the relocated merger still works
-        assert!(relocated.is_empty());
+        assert!(merger.is_empty());
     }
 
     #[test]

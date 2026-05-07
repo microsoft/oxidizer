@@ -12,7 +12,7 @@ use http::uri::{InvalidUri, InvalidUriParts};
 use ohno::{ErrorLabel, Labeled};
 use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 
 use crate::HttpRequest;
 use crate::error_labels::{
@@ -124,9 +124,8 @@ pub struct HttpError {
 }
 
 impl ThreadAware for HttpError {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        // move as is
-        self
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        // no thread-local state to relocate
     }
 }
 
@@ -479,12 +478,12 @@ mod tests {
     #[test]
     fn relocated_preserves_error() {
         let affinity = pinned_affinities(&[1])[0];
-        let error = HttpError::validation("relocated test");
+        let mut error = HttpError::validation("relocated test");
 
-        let relocated = error.relocated(MemoryAffinity::Unknown, affinity);
+        error.relocate(None, affinity);
 
-        assert_eq!(relocated.message(), "relocated test");
-        assert_eq!(relocated.label(), "validation");
+        assert_eq!(error.message(), "relocated test");
+        assert_eq!(error.label(), "validation");
     }
 
     #[test]
