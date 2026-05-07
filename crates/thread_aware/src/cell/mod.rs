@@ -497,17 +497,36 @@ impl<T, S: Strategy> ThreadAware for Arc<T, S> {
             let (data, factory) = match &self.factory {
                 // We can use the closure to create new data
                 Factory::Closure(factory, factory_source_affinity) => {
-                    let factory_clone = (**factory).clone();
+                    // First-call dedup: `with_closure` eagerly built `self.value` for the
+                    // calling thread's affinity but did not record which one. The first
+                    // `relocated()` observes `source` from the caller, which is by contract
+                    // the affinity of the thread that called `with_closure`. When that source
+                    // equals the destination, the eager `self.value` is already the correct
+                    // per-affinity value — reuse it instead of running the factory again.
+                    //
+                    // Without this shortcut, `Instantiation::All` on the calling thread races
+                    // on the storage write lock: if the source==destination task wins first it
+                    // factory-builds (counter +=1) before any peer task can populate the source
+                    // slot via the end-of-function fallback below, leading to a non-deterministic
+                    // factory call count.
+                    if factory_source_affinity.is_none() && source == MemoryAffinity::Pinned(destination) {
+                        (
+                            sync::Arc::clone(&self.value),
+                            Factory::Closure(sync::Arc::clone(factory), Some(source)),
+                        )
+                    } else {
+                        let factory_clone = (**factory).clone();
 
-                    // In case factory source is stored in factory, use that - it means we already transferred the factory
-                    // once, so we know the original source affinity. Otherwise, use source as that means this is the first
-                    // time we're transferring the Arc, so source is the source affinity of the factory as well.
-                    let factory_source = factory_source_affinity.unwrap_or(source);
+                        // In case factory source is stored in factory, use that - it means we already transferred the factory
+                        // once, so we know the original source affinity. Otherwise, use source as that means this is the first
+                        // time we're transferring the Arc, so source is the source affinity of the factory as well.
+                        let factory_source = factory_source_affinity.unwrap_or(source);
 
-                    (
-                        sync::Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
-                        Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
-                    )
+                        (
+                            sync::Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
+                            Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
+                        )
+                    }
                 }
 
                 // We can clone and transfer the data
