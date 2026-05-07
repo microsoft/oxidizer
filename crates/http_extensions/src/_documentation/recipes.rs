@@ -64,7 +64,7 @@
 //! are reused without copying through `TryFrom`.
 //!
 //! ```
-//! use http::header::{CONTENT_TYPE, ACCEPT, HeaderMap, HeaderValue};
+//! use http::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 //!
 //! let mut headers = HeaderMap::with_capacity(10); // if you know ahead of time
 //! // Standard name constant + static value = 0 allocations
@@ -105,10 +105,7 @@
 //! let value = HeaderValue::from_static("application/json");
 //!
 //! // From bytes::Bytes — zero allocations for static data
-//! let large_value = HeaderValue::from_shared(
-//!     Bytes::from_static(b"my large value"),
-//! )
-//! .unwrap();
+//! let large_value = HeaderValue::from_shared(Bytes::from_static(b"my large value")).unwrap();
 //!
 //! // From a BytesView — zero-copy when backed by a single contiguous slice
 //! # let pool = GlobalPool::new();
@@ -145,9 +142,7 @@
 //!
 //! let uri: Uri = "https://api.example.com/health".try_into()?;
 //! for _ in 0..100 {
-//!     let request = HttpRequestBuilder::new_fake()
-//!         .get(uri.clone())
-//!         .build()?;
+//!     let request = HttpRequestBuilder::new_fake().get(uri.clone()).build()?;
 //! }
 //! # Ok::<(), http_extensions::HttpError>(())
 //! ```
@@ -181,8 +176,8 @@
 //!
 //! ```
 //! use http_extensions::HttpRequestBuilder;
-//! use uuid::Uuid;
 //! use templated_uri::templated;
+//! use uuid::Uuid;
 //!
 //! #[templated(template = "/users/{user_id}/profile", unredacted)]
 //! #[derive(Clone)]
@@ -232,10 +227,7 @@
 //!
 //! // One allocation when the token is acquired.
 //! let token = "eyJhbGciOi...long_token";
-//! let auth = HeaderValue::from_shared(
-//!     Bytes::from(format!("Bearer {token}")),
-//! )
-//! .unwrap();
+//! let auth = HeaderValue::from_shared(Bytes::from(format!("Bearer {token}"))).unwrap();
 //!
 //! // Each .clone() is a ref-count bump — no data copied.
 //! let mut headers = HeaderMap::new();
@@ -243,11 +235,11 @@
 //! ```
 //!
 //! Rebuild the [`HeaderValue`] only when the token is refreshed.
-//!
 
-#[expect(unused_imports, reason = "simplifies the docs")]
-use crate::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
 use ::http::*;
 #[expect(unused_imports, reason = "simplifies the docs")]
 use templated_uri::*;
+
+#[expect(unused_imports, reason = "simplifies the docs")]
+use crate::*;

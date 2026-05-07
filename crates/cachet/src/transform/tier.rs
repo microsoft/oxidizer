@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
-
 use std::fmt::Debug;
+
+use crate::{CacheEntry, CacheTier, Codec, Encoder, Error, SizeError};
 
 type EncodeFn<A, B> = Box<dyn Fn(&A) -> Result<B, Error> + Send + Sync>;
 
@@ -176,8 +176,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use cachet_tier::MockCache;
+
+    use super::*;
 
     #[test]
     fn transform_adapter_debug() {

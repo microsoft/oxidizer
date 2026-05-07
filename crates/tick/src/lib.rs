@@ -119,7 +119,7 @@
 //! timer isolation in thread-per-core runtime architectures.
 //!
 //! When an [`InactiveClock`][runtime::InactiveClock] is
-//! [relocated](thread_aware::ThreadAware::relocated) to a target thread, the underlying timer
+//! [relocated](thread_aware::ThreadAware::relocate) to a target thread, the underlying timer
 //! storage is duplicated per core. After activation, each thread's [`Clock`] and
 //! [`ClockDriver`][runtime::ClockDriver] operate on an independent set of timers with no
 //! cross-thread lock contention.
@@ -271,9 +271,7 @@ macro_rules! thread_aware_move {
     ($($t:ty),+ $(,)?) => {
         $(
             impl thread_aware::ThreadAware for $t {
-                fn relocated(self, _source: thread_aware::affinity::MemoryAffinity, _destination: thread_aware::affinity::PinnedAffinity) -> Self {
-                    self
-                }
+                fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {}
             }
         )+
     };

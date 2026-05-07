@@ -4,8 +4,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{self};
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity, pinned_affinities};
-use crate::closure::relocate;
+use crate::affinity::{Affinity, pinned_affinities};
 use crate::{ThreadAware, Unaware};
 
 // We don't use PerCore here because we want to test the raw Trc itself.
@@ -31,22 +30,21 @@ impl Counter {
 }
 
 impl ThreadAware for Counter {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        Self {
-            value: sync::Arc::new(AtomicI32::new(0)),
-        }
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+        self.value = sync::Arc::new(AtomicI32::new(0));
     }
 }
 
 #[test]
 fn transfer_creates_new_value() {
     let affinities = pinned_affinities(&[2]);
-    let source = affinities[0].into();
+    let source = Some(affinities[0]);
     let destination = affinities[1];
 
     let pmr = PerCore::new(Counter::new);
     pmr.increment_by(10);
-    let pmr2 = pmr.clone().relocated(source, destination);
+    let mut pmr2 = pmr.clone();
+    pmr2.relocate(source, destination);
     assert_eq!(pmr.value(), 10);
     assert_eq!(pmr2.value(), 0);
 }
@@ -59,16 +57,52 @@ fn new_with_works() {
 }
 
 #[test]
+fn new_with_relocate_forwards_to_data() {
+    // Exercises BoxedRelocate::relocate and the Factory::Closure path.
+    // Uses a data value whose relocate changes observable state, so we can
+    // verify that the closure's data was actually relocated before call_once.
+    #[derive(Clone)]
+    struct Seed(bool);
+
+    impl ThreadAware for Seed {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = true;
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let destination = affinities[1];
+
+    let mut pmr = PerCore::new_with(Seed(false), |seed| {
+        let c = Counter::new();
+        // The factory output depends on whether the seed was relocated.
+        if seed.0 {
+            c.increment_by(999);
+        }
+        c
+    });
+    assert_eq!(pmr.value(), 0, "initial factory should see un-relocated seed");
+
+    pmr.relocate(source, destination);
+    assert_eq!(
+        pmr.value(),
+        999,
+        "factory must see relocated seed (BoxedRelocate must forward relocate)"
+    );
+}
+
+#[test]
 fn test_from_unaware() {
     // Create a PerCore from an unaware value (a simple i32)
     // This covers line 191 (from_unaware method)
-    let per_core = PerCore::from_unaware(42);
+    let mut per_core = PerCore::from_unaware(42);
     assert_eq!(*per_core, 42);
 
     // Verify it can be relocated
     let affinities = pinned_affinities(&[2]);
-    let relocated = per_core.relocated(affinities[0].into(), affinities[1]);
-    assert_eq!(*relocated, 42);
+    per_core.relocate(Some(affinities[0]), affinities[1]);
+    assert_eq!(*per_core, 42);
 }
 
 #[test]
@@ -135,7 +169,7 @@ fn test_trc_clone() {
 
 #[test]
 fn test_into_arc() {
-    let trc = PerCore::with_closure(relocate((), |()| 42));
+    let trc = PerCore::new(|| 42);
     let _arc = trc.into_arc();
 
     let trc = PerCore::with_value(42);
@@ -147,7 +181,7 @@ fn test_into_arc() {
 
 #[test]
 fn test_from() {
-    let trc = PerCore::with_closure(relocate((), |()| 42));
+    let trc = PerCore::new(|| 42);
     let _arc = trc.into_arc();
 
     let trc = PerCore::with_value(42);
@@ -160,7 +194,7 @@ fn test_from() {
 #[test]
 fn test_trc_relocated_with_factory_data() {
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create a Trc with a value that implements ThreadAware + Clone
@@ -169,15 +203,16 @@ fn test_trc_relocated_with_factory_data() {
     assert_eq!(*trc_affinity1, 42);
 
     // Relocate to another affinity, which should trigger Factory::Data path
-    // and call data.relocated(source, destination) at line 219
-    let trc_affinity2 = trc_affinity1.relocated(affinity1, affinity2);
+    // and call data.relocate(source, destination) at line 219
+    let mut trc_affinity2 = trc_affinity1;
+    trc_affinity2.relocate(affinity1, affinity2);
     assert_eq!(*trc_affinity2, 42);
 }
 
 #[test]
 fn test_trc_relocated_reuses_existing_value() {
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create a Trc and clone it before relocating
@@ -186,13 +221,15 @@ fn test_trc_relocated_reuses_existing_value() {
 
     // Relocate the first Trc to affinity2
     // This creates a new value in the destination storage
-    let trc1_relocated = trc1.relocated(affinity1, affinity2);
+    let mut trc1_relocated = trc1;
+    trc1_relocated.relocate(affinity1, affinity2);
     assert_eq!(*trc1_relocated, 42);
 
     // Relocate the cloned Trc to the same destination
     // This should hit line 428 where it finds the existing value in storage
     // and reuses it instead of creating a new one
-    let trc2_relocated = trc2.relocated(affinity1, affinity2);
+    let mut trc2_relocated = trc2;
+    trc2_relocated.relocate(affinity1, affinity2);
     assert_eq!(*trc2_relocated, 42);
 
     // Both relocated Trcs should point to the same sync::Arc (deduplication)
@@ -229,7 +266,7 @@ fn test_factory_clone_with_data() {
     // This test covers line 142: Self::Data(data_fn) => Self::Data(*data_fn)
     // We create a Trc with Factory::Data, clone it, and verify the factory is properly cloned
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create a Trc with a value that uses Factory::Data (ThreadAware + Clone)
@@ -243,23 +280,25 @@ fn test_factory_clone_with_data() {
     assert_eq!(*trc2, 42);
 
     // Relocate both to verify the cloned factory works properly
-    let trc1_relocated = trc1.relocated(affinity1, affinity2);
-    let trc2_relocated = trc2.relocated(affinity1, affinity2);
+    let mut trc1_relocated = trc1;
+    trc1_relocated.relocate(affinity1, affinity2);
+    let mut trc2_relocated = trc2;
+    trc2_relocated.relocate(affinity1, affinity2);
 
     assert_eq!(*trc1_relocated, 42);
     assert_eq!(*trc2_relocated, 42);
 }
 
 #[test]
-fn test_factory_clone_with_closure() {
+fn test_factory_clone_with_closure_boxed() {
     // This test covers line 141: Self::Closure(closure, closure_source) => Self::Closure(sync::Arc::clone(closure), *closure_source)
     // We create a Trc with Factory::Closure via with_closure, clone it, and verify the factory is properly cloned
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create a Trc with a closure that uses Factory::Closure
-    let trc1 = PerCore::with_closure(relocate((), |()| 100));
+    let trc1 = PerCore::new(|| 100);
 
     // Clone the Trc - this should exercise line 141 in the Factory::clone method
     let trc2 = trc1.clone();
@@ -269,8 +308,10 @@ fn test_factory_clone_with_closure() {
     assert_eq!(*trc2, 100);
 
     // Relocate both to verify the cloned factory (closure) works properly
-    let trc1_relocated = trc1.relocated(affinity1, affinity2);
-    let trc2_relocated = trc2.relocated(affinity1, affinity2);
+    let mut trc1_relocated = trc1;
+    trc1_relocated.relocate(affinity1, affinity2);
+    let mut trc2_relocated = trc2;
+    trc2_relocated.relocate(affinity1, affinity2);
 
     assert_eq!(*trc1_relocated, 100);
     assert_eq!(*trc2_relocated, 100);
@@ -334,7 +375,8 @@ fn test_factory_manual_relocated() {
     // Relocate to affinity2 where no data exists
     // This should trigger line 453 (Factory::Manual branch)
     // and behave like Arc<T> by just cloning the reference
-    let trc_relocated = trc.relocated(affinity1.into(), affinity2);
+    let mut trc_relocated = trc;
+    trc_relocated.relocate(Some(affinity1), affinity2);
 
     // The value should still be 100
     assert_eq!(*trc_relocated, 100);
@@ -348,13 +390,13 @@ fn test_factory_manual_relocated() {
 fn test_relocated_unknown_source() {
     let affinities = pinned_affinities(&[2]);
 
-    let source = MemoryAffinity::Unknown;
+    let source = None;
     let destination = affinities[1];
 
-    let trc = PerCore::with_value(42);
+    let mut trc = PerCore::with_value(42);
 
-    let relocated_trc = trc.relocated(source, destination);
-    assert_eq!(*relocated_trc, 42);
+    trc.relocate(source, destination);
+    assert_eq!(*trc, 42);
 }
 
 #[test]
@@ -385,7 +427,7 @@ fn test_strong_count() {
 #[test]
 fn test_strong_count_after_relocation() {
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create an Arc with multiple strong references
@@ -394,7 +436,8 @@ fn test_strong_count_after_relocation() {
     assert_eq!(PerCore::strong_count(&arc1), 2);
 
     // Relocate one of them
-    let arc1_relocated = arc1.relocated(affinity1, affinity2);
+    let mut arc1_relocated = arc1;
+    arc1_relocated.relocate(affinity1, affinity2);
 
     // After relocation:
     // - arc1_relocated holds a reference to a new Arc created for affinity2
@@ -412,7 +455,7 @@ fn test_strong_count_after_relocation() {
 #[test]
 fn test_strong_count_with_deduplication() {
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create an Arc and clone it
@@ -421,8 +464,10 @@ fn test_strong_count_with_deduplication() {
 
     // Relocate both to the same destination
     // They should share the same underlying Arc in the destination
-    let arc1_relocated = arc1.relocated(affinity1, affinity2);
-    let arc2_relocated = arc2.relocated(affinity1, affinity2);
+    let mut arc1_relocated = arc1;
+    arc1_relocated.relocate(affinity1, affinity2);
+    let mut arc2_relocated = arc2;
+    arc2_relocated.relocate(affinity1, affinity2);
 
     // Both should point to the same underlying Arc (deduplication)
     // The strong count includes:
@@ -436,7 +481,7 @@ fn test_strong_count_with_deduplication() {
 #[test]
 fn test_strong_count_independent_across_affinities() {
     let affinities = pinned_affinities(&[2]);
-    let affinity1 = affinities[0].into();
+    let affinity1 = Some(affinities[0]);
     let affinity2 = affinities[1];
 
     // Create an Arc on affinity1 with strong_count = 1
@@ -444,7 +489,8 @@ fn test_strong_count_independent_across_affinities() {
     assert_eq!(PerCore::strong_count(&arc_a), 1);
 
     // Relocate to affinity2, creating a separate instance there
-    let arc_b = arc_a.clone().relocated(affinity1, affinity2);
+    let mut arc_b = arc_a.clone();
+    arc_b.relocate(affinity1, affinity2);
     assert_eq!(PerCore::strong_count(&arc_b), 1); // arc_b only; storage ref excluded
 
     // Clone arc_a on affinity1 - this should NOT affect arc_b on affinity2
@@ -472,19 +518,202 @@ fn test_relocated_source_equals_destination_does_not_corrupt_storage() {
     assert_eq!(arc.value(), 42);
 
     // Relocate with source == destination.  The ThreadAware impl always creates a *new*
-    // Counter (value resets to 0), so `relocated` must return 0 and must also leave
+    // Counter (value resets to 0), so `relocate` must result in 0 and must also leave
     // storage holding 0 (not the stale 42).
-    let relocated = arc.relocated(affinity.into(), affinity);
-    assert_eq!(relocated.value(), 0, "relocated value should come from factory");
+    let mut arc = arc;
+    arc.relocate(Some(affinity), affinity);
+    assert_eq!(arc.value(), 0, "relocated value should come from factory");
 
     // A second relocation from the same slot must find the factory-created value (0) in
     // storage, not the stale pre-relocation value (42).  Before the bug fix, the first
     // relocated() call wrote the stale Arc<Counter(42)> back into the storage slot,
     // so the second call's `get_clone` fast-path would return 42 instead of 0.
-    let relocated_again = relocated.relocated(affinity.into(), affinity);
+    arc.relocate(Some(affinity), affinity);
     assert_eq!(
-        relocated_again.value(),
+        arc.value(),
         0,
         "subsequent relocation must not see stale pre-relocation value from storage"
     );
+}
+
+#[test]
+fn with_clone_fn_relocates_clone() {
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let destination = affinities[1];
+
+    // Counter::relocated resets value to 0, so we can detect if it was called.
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+
+    arc.increment_by(42);
+    assert_eq!(arc.value(), 42);
+
+    // Relocating should clone the Counter and call relocated() on the clone,
+    // which resets the value to 0.
+    let mut arc = arc;
+    arc.relocate(source, destination);
+    assert_eq!(arc.value(), 0, "relocated() must be called on the clone");
+}
+
+#[test]
+fn with_clone_fn_dyn_trait_relocates_correctly() {
+    // Exercises the ErasedCloneFn path with a dyn Trait object, which is the
+    // primary use case. The unsafe &T -> &V cast inside CloneAdapter is
+    // exercised here and validated under Miri.
+    trait Plugin: ThreadAware + Send + Sync {
+        fn name(&self) -> &str;
+    }
+
+    #[derive(Clone)]
+    struct MyPlugin(String);
+
+    impl Plugin for MyPlugin {
+        fn name(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl ThreadAware for MyPlugin {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 = format!("{}-relocated", self.0);
+        }
+    }
+
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let destination = affinities[1];
+
+    let arc = super::Arc::<dyn Plugin, crate::PerCore>::with_clone_fn(MyPlugin("orig".into()), |p: &MyPlugin| Box::new(p.clone()));
+
+    assert_eq!(arc.name(), "orig");
+
+    let mut arc = arc;
+    arc.relocate(source, destination);
+    assert_eq!(arc.name(), "orig-relocated");
+}
+
+#[test]
+fn with_clone_fn_clone_and_relocate_independently() {
+    // Cloning an Arc backed by ErasedCloneFn should produce independent
+    // clones that can each be relocated separately.
+    let affinities = pinned_affinities(&[3]);
+    let source = Some(affinities[0]);
+    let dest1 = affinities[1];
+    let dest2 = affinities[2];
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    arc.increment_by(10);
+
+    let mut clone1 = arc.clone();
+    #[expect(clippy::redundant_clone, reason = "testing independent clones")]
+    let mut clone2 = arc.clone();
+
+    clone1.relocate(source, dest1);
+    clone2.relocate(source, dest2);
+
+    // Both should have been reset by Counter::relocate
+    assert_eq!(clone1.value(), 0);
+    assert_eq!(clone2.value(), 0);
+}
+
+#[test]
+fn with_clone_fn_repeated_relocations() {
+    // Multiple sequential relocations through the same ErasedCloneFn factory
+    // must all produce correct clones.
+    let affinities = pinned_affinities(&[4]);
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    arc.increment_by(99);
+
+    let mut current = arc;
+    for i in 0..3 {
+        let source = Some(affinities[i]);
+        let dest = affinities[i + 1];
+        current.relocate(source, dest);
+        // Counter resets to 0 on relocate
+        assert_eq!(current.value(), 0, "relocation {i} should reset counter");
+        current.increment_by(i32::try_from(i + 1).expect("loop index fits in i32"));
+    }
+    assert_eq!(current.value(), 3);
+}
+
+#[test]
+fn with_clone_fn_debug_format() {
+    // Exercises Debug formatting of the ErasedCloneFn factory path.
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let debug = format!("{arc:?}");
+    assert!(!debug.is_empty());
+}
+
+#[test]
+fn with_clone_fn_deduplication_across_clones() {
+    // Two clones relocated to the same destination should share the same
+    // underlying value via storage deduplication.
+    let affinities = pinned_affinities(&[2]);
+    let source = Some(affinities[0]);
+    let dest = affinities[1];
+
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let clone1 = arc.clone();
+    #[expect(clippy::redundant_clone, reason = "testing independent clones")]
+    let clone2 = arc.clone();
+
+    let mut r1 = clone1;
+    r1.relocate(source, dest);
+    let mut r2 = clone2;
+    r2.relocate(source, dest);
+
+    assert!(sync::Arc::ptr_eq(&r1.clone().into_arc(), &r2.clone().into_arc()));
+}
+
+#[test]
+fn with_clone_fn_debug_includes_erased() {
+    // Exercises Debug for ErasedCloneFn (clone_fn.rs) and Factory::ErasedCloneFn (factory.rs)
+    let arc = super::Arc::<Counter, crate::PerCore>::with_clone_fn(Counter::new(), |c: &Counter| Box::new(c.clone()));
+    let dbg = format!("{arc:?}");
+    assert!(
+        dbg.contains("factory: Clone"),
+        "Debug output should mention factory Clone variant: {dbg}"
+    );
+}
+
+#[test]
+fn factory_data_debug() {
+    // Exercises Factory::Data debug branch
+    let arc = PerCore::from_unaware(42);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Data"), "Debug output should mention Data variant: {dbg}");
+}
+
+#[test]
+fn factory_manual_debug() {
+    // Exercises Factory::Manual debug branch (from_storage)
+    use std::sync::{self, RwLock};
+
+    let affinities = pinned_affinities(&[1]);
+    let storage = sync::Arc::new(RwLock::new(super::storage::Storage::new()));
+    storage
+        .write()
+        .expect("lock should not be poisoned")
+        .replace(affinities[0], sync::Arc::new(42));
+    let arc = super::Arc::<i32, crate::PerCore>::from_storage(storage, affinities[0]);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Manual"), "Debug output should mention Manual variant: {dbg}");
+}
+
+#[test]
+fn factory_closure_debug() {
+    // Exercises Factory::Closure debug branch (from Arc::new)
+    let arc = PerCore::new(Counter::new);
+    let dbg = format!("{arc:?}");
+    assert!(dbg.contains("Closure"), "Debug output should mention Closure variant: {dbg}");
+}
+
+#[test]
+fn new_boxed_relocate() {
+    // Exercises Ctor<T>::relocate (the no-op ThreadAware impl inside new_boxed)
+    let affinities = pinned_affinities(&[2]);
+    let mut arc = super::Arc::<Counter, crate::PerCore>::new_boxed(|| Box::new(Counter::new()));
+    arc.relocate(Some(affinities[0]), affinities[1]);
+    assert_eq!(arc.value(), 0, "new_boxed relocate should create a fresh counter");
 }

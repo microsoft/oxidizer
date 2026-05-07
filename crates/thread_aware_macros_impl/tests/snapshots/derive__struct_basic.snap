@@ -3,19 +3,12 @@ source: crates/thread_aware_macros_impl/tests/derive.rs
 expression: expand(input)
 ---
 impl ::thread_aware::ThreadAware for Foo {
-    #[allow(
-        clippy::redundant_clone,
-        reason = "macro generated pattern moves each field once"
-    )]
-    fn relocated(
-        self,
-        source: ::thread_aware::affinity::MemoryAffinity,
-        destination: ::thread_aware::affinity::PinnedAffinity,
-    ) -> Self {
-        let Self { a, b } = self;
-        Self {
-            a: ::thread_aware::ThreadAware::relocated(a, source, destination),
-            b: ::thread_aware::ThreadAware::relocated(b, source, destination),
-        }
+    fn relocate(
+        &mut self,
+        source: Option<::thread_aware::affinity::Affinity>,
+        destination: ::thread_aware::affinity::Affinity,
+    ) {
+        ::thread_aware::ThreadAware::relocate(&mut self.a, source, destination);
+        ::thread_aware::ThreadAware::relocate(&mut self.b, source, destination);
     }
 }

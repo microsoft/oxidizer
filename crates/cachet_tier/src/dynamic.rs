@@ -6,9 +6,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use crate::SizeError;
 use crate::tier::DynCacheTier;
-use crate::{CacheEntry, CacheTier, Error};
+use crate::{CacheEntry, CacheTier, Error, SizeError};
 
 /// A cloneable dynamic cache tier with type erasure.
 ///

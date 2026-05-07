@@ -27,7 +27,7 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, Uri, PathAndQuery};
+//! use templated_uri::{BaseUri, PathAndQuery, Uri};
 //!
 //! // Create the base (scheme + authority, optionally a path prefix)
 //! let base_uri = BaseUri::from_static("https://api.example.com");
@@ -48,7 +48,7 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, PathAndQueryTemplate, Uri, EscapedString, templated};
+//! use templated_uri::{BaseUri, EscapedString, PathAndQueryTemplate, Uri, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
@@ -171,16 +171,14 @@ pub use base_uri::BaseUri;
 pub use error::UriError;
 pub use escape::{Escape, Raw};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-pub use macros::{Escape, Raw, templated};
-pub use origin::Origin;
-pub use path_and_query::PathAndQuery;
-pub use path_and_query_template::PathAndQueryTemplate;
-pub use uri::Uri;
-
-pub use http::uri::{Authority, Scheme};
-
 // Re-export the `http` crate so macro-generated code can refer to
 // `http::uri::PathAndQuery` via `::templated_uri::http` without requiring
 // downstream crates to depend on `http` directly.
 #[doc(hidden)]
 pub use http;
+pub use http::uri::{Authority, Scheme};
+pub use macros::{Escape, Raw, templated};
+pub use origin::Origin;
+pub use path_and_query::PathAndQuery;
+pub use path_and_query_template::PathAndQueryTemplate;
+pub use uri::Uri;
