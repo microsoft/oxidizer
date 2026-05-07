@@ -22,7 +22,7 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-Do not manually edit `CHANGELOG.md` files. Changelogs are automatically updated on release.
+Manually update the relevant `CHANGELOG.md` file(s) when making user-visible changes. Add entries under an `## Unreleased` section, following the existing format. Changelogs are not auto-generated.
 
 ## Pull Requests
 

@@ -22,6 +22,7 @@ trip_wire_patterns = [
      ".cargo/*",
      ".delta.toml",
      ".editorconfig",
+     ".github/*",
      "*.just",
      "Cargo.lock",
      "Cargo.toml",

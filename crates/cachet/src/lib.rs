@@ -63,9 +63,8 @@
 //! - **Dynamic dispatch** - when a fallback tier is configured, the builder
 //!   automatically type-erases both tiers into a [`DynamicCache<K, V>`] so
 //!   the primary and fallback don't need to be the same concrete type.
-//! - **Configurable promotion** - choose whether, and under what conditions, values
-//!   found in a fallback tier are promoted back into the primary tier
-//!   ([`FallbackPromotionPolicy`]).
+//! - **Configurable insert policy** - choose whether, and under what conditions,
+//!   values are inserted into a tier ([`InsertPolicy`]).
 //! - **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
 //!   a [`tick::Clock`], making caches fully controllable in tests without sleeping.
 //!
@@ -94,10 +93,10 @@
 //! | Type | Description |
 //! |---|---|
 //! | [`Cache`] | The user-facing cache. Wraps any `CacheTier` with `get`, `insert`, `invalidate`, `clear`, `get_or_insert`, `try_get_or_insert`, and `optionally_get_or_insert`. |
-//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, promotion policy, stampede protection, and background refresh. |
+//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, insert policy, stampede protection, and background refresh. |
 //! | [`CacheEntry<V>`] | A value together with an optional cached-at timestamp and TTL. Returned by all `get` operations. |
 //! | [`CacheTier`] | The core trait for storage backends. Implement this to add your own storage. |
-//! | [`FallbackPromotionPolicy`] | Decides whether a value found in a fallback tier is promoted to the primary tier. |
+//! | [`InsertPolicy`] | Decides whether a value should be inserted into a tier. |
 //! | [`TimeToRefresh`] | Configures background refresh: how stale an entry must be before a background task refreshes it. |
 //! | [`Error`] | The error type returned by all fallible cache operations. |
 //!
@@ -114,7 +113,7 @@
 //!             .memory()                  // L2: a second in-process store (or a remote service)
 //!             .ttl(Duration::from_secs(300))
 //!     )
-//!     .promotion_policy(FallbackPromotionPolicy::always())  // promote L2 hits into L1
+//!     .insert_policy(InsertPolicy::always())  // control when values are inserted into L1
 //!     .time_to_refresh(TimeToRefresh::new(Duration::from_secs(20), spawner))  // refresh L1 in background
 //!     .build()
 //! ```
@@ -182,7 +181,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
+//! use cachet::Cache;
 //! use tick::Clock;
 //! # async {
 //!
@@ -193,7 +192,6 @@
 //!     .memory()
 //!     .ttl(Duration::from_secs(60))
 //!     .fallback(l2)
-//!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
 //! # };
 //! ```
@@ -216,7 +214,7 @@
 //!
 //! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
 //! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback`, `cache.fallback_promotion`, `cache.error`, `cache.ok`
+//! `cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
 //!
 //! ## Logs (tracing)
 //!
@@ -226,12 +224,13 @@
 //! | Level | Activities |
 //! |-------|-----------|
 //! | ERROR | `cache.error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
 
 mod builder;
 mod cache;
 mod fallback;
+mod policy;
 mod refresh;
 mod telemetry;
 mod transform;
@@ -255,7 +254,11 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
-pub use fallback::FallbackPromotionPolicy;
+pub use policy::InsertPolicy;
+
+/// Deprecated: Use [`InsertPolicy`] instead.
+#[deprecated(since = "0.2.0", note = "renamed to InsertPolicy")]
+pub type FallbackPromotionPolicy<V> = InsertPolicy<V>;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]

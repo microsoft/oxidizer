@@ -25,7 +25,7 @@ use syn::{Attribute, DeriveInput, Field, parse_quote, parse2};
 
 use crate::enum_template::enum_template;
 use crate::struct_template::struct_template;
-use crate::uri_param::{uri_param_impl, uri_unsafe_param_impl};
+use crate::uri_param::{raw_impl, uri_param_impl};
 
 macro_rules! bail {
     ($span:ident, $msg:expr) => {
@@ -184,13 +184,13 @@ pub fn uri_param_derive_impl(input: TokenStream) -> TokenStream {
 }
 
 #[must_use]
-pub fn uri_unsafe_param_derive_impl(input: TokenStream) -> TokenStream {
+pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
     let input: DeriveInput = match parse2(input) {
         Ok(input) => input,
         Err(err) => return err.to_compile_error(),
     };
 
-    uri_unsafe_param_impl(input)
+    raw_impl(input)
 }
 
 #[cfg(not(miri))] // Insta can't work with Miri
@@ -207,8 +207,8 @@ mod tests {
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
-    fn pretty_parse_uri_unsafe_param(input: TokenStream) -> String {
-        let output = uri_unsafe_param_derive_impl(input);
+    fn pretty_parse_raw(input: TokenStream) -> String {
+        let output = raw_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
@@ -223,7 +223,7 @@ mod tests {
         let item = quote! {
             struct Test {
                 param: String,
-                param2: UriSafeString,
+                param2: EscapedString,
                 param3: String,
                 param4: String
             }
@@ -233,35 +233,38 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriSafeString,
+            param2: EscapedString,
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
+            fn render(&self) -> ::std::string::String {
+                let param = ::templated_uri::Escape::escape(&self.param);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
+                let param3 = ::templated_uri::Escape::escape(&self.param3);
+                let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -280,7 +283,7 @@ mod tests {
                 f.write_str("/example.com/")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
                 f.write_str("/")?;
-                <UriSafeString as ::data_privacy::RedactedDisplay>::fmt(
+                <EscapedString as ::data_privacy::RedactedDisplay>::fmt(
                     &self.param2,
                     engine,
                     f,
@@ -292,11 +295,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -309,7 +310,7 @@ mod tests {
             struct Test {
                 // #[templated(classify=Public)]
                 param: String,
-                param2: UriSafeString,
+                param2: EscapedString,
                 // #[templated(classify=Restricted)]
                 param3: String,
                 // #[templated(classify=Public)]
@@ -321,35 +322,38 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriSafeString,
+            param2: EscapedString,
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
+            fn render(&self) -> ::std::string::String {
+                let param = ::templated_uri::Escape::escape(&self.param);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
+                let param3 = ::templated_uri::Escape::escape(&self.param3);
+                let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -376,11 +380,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -393,7 +395,7 @@ mod tests {
             struct Test {
                 param: String,
                 #[templated(unredacted)]
-                param2: UriSafeString,
+                param2: EscapedString,
                 param3: String,
                 param4: String
             }
@@ -403,35 +405,38 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriSafeString,
+            param2: EscapedString,
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
+            fn render(&self) -> ::std::string::String {
+                let param = ::templated_uri::Escape::escape(&self.param);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
+                let param3 = ::templated_uri::Escape::escape(&self.param3);
+                let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -458,11 +463,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -475,7 +478,7 @@ mod tests {
             struct Test {
                 param: String,
                 #[unredacted]
-                param2: UriSafeString,
+                param2: EscapedString,
                 param3: String,
                 param4: String
             }
@@ -485,35 +488,38 @@ mod tests {
         assert_snapshot!(output_pretty, @r#"
         struct Test {
             param: String,
-            param2: UriSafeString,
+            param2: EscapedString,
             param3: String,
             param4: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for Test {
+            fn template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{+param2}{/param3,param4}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/example.com/{param}/{param2}/{param3}/{param4}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                let param = ::templated_uri::UriParam::as_uri_safe(&self.param);
-                let param2 = ::templated_uri::UriUnsafeParam::as_display(&self.param2);
-                let param3 = ::templated_uri::UriParam::as_uri_safe(&self.param3);
-                let param4 = ::templated_uri::UriParam::as_uri_safe(&self.param4);
+            fn render(&self) -> ::std::string::String {
+                let param = ::templated_uri::Escape::escape(&self.param);
+                let param2 = ::templated_uri::Raw::raw(&self.param2);
+                let param3 = ::templated_uri::Escape::escape(&self.param3);
+                let param4 = ::templated_uri::Escape::escape(&self.param4);
                 ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
             }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for Test {
@@ -540,11 +546,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -569,30 +573,33 @@ mod tests {
             page: String,
             limit: String,
         }
-        impl ::templated_uri::TemplatedPathAndQuery for QueryTest {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
+        impl ::templated_uri::PathAndQueryTemplate for QueryTest {
+            fn template(&self) -> &'static core::primitive::str {
                 "/api/{resource}{?page,limit}"
             }
-            fn template(&self) -> &'static core::primitive::str {
+            fn format_template(&self) -> &'static core::primitive::str {
                 "/api/{resource}?page={page}&limit={limit}"
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
                 ::core::option::Option::None
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                let resource = ::templated_uri::UriParam::as_uri_safe(&self.resource);
-                let page = ::templated_uri::UriParam::as_uri_safe(&self.page);
-                let limit = ::templated_uri::UriParam::as_uri_safe(&self.limit);
+            fn render(&self) -> ::std::string::String {
+                let resource = ::templated_uri::Escape::escape(&self.resource);
+                let page = ::templated_uri::Escape::escape(&self.page);
+                let limit = ::templated_uri::Escape::escape(&self.limit);
                 ::std::format!("/api/{resource}?page={page}&limit={limit}")
             }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
-                let uri_string = self.to_uri_string();
-                Ok(::templated_uri::uri::PathAndQuery::try_from(uri_string)?)
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
             }
         }
         impl ::std::fmt::Debug for QueryTest {
@@ -619,11 +626,9 @@ mod tests {
                 ::std::result::Result::Ok(())
             }
         }
-        impl From<QueryTest> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<QueryTest> for ::templated_uri::PathAndQuery {
             fn from(value: QueryTest) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
@@ -635,7 +640,7 @@ mod tests {
         let item = quote! {
             struct ExcessiveTemplate {
                 param: String,
-                param2: UriSafeString,
+                param2: EscapedString,
                 param3: String,
                 param4: String,
                 extra_param: String, // This should cause an error
@@ -781,19 +786,17 @@ mod tests {
             FirstTemplate(First),
             SecondTemplate(Second),
         }
-        impl ::templated_uri::TemplatedPathAndQuery for Test {
-            fn rfc_6570_template(&self) -> &'static core::primitive::str {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.rfc_6570_template(),
-                    Test::SecondTemplate(template_variant) => {
-                        template_variant.rfc_6570_template()
-                    }
-                }
-            }
+        impl ::templated_uri::PathAndQueryTemplate for Test {
             fn template(&self) -> &'static core::primitive::str {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.template(),
                     Test::SecondTemplate(template_variant) => template_variant.template(),
+                }
+            }
+            fn format_template(&self) -> &'static core::primitive::str {
+                match self {
+                    Test::FirstTemplate(template_variant) => template_variant.format_template(),
+                    Test::SecondTemplate(template_variant) => template_variant.format_template(),
                 }
             }
             fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
@@ -802,23 +805,23 @@ mod tests {
                     Test::SecondTemplate(template_variant) => template_variant.label(),
                 }
             }
-            fn to_uri_string(&self) -> ::std::string::String {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.to_uri_string(),
-                    Test::SecondTemplate(template_variant) => template_variant.to_uri_string(),
-                }
-            }
             fn to_path_and_query(
                 &self,
             ) -> ::std::result::Result<
-                ::templated_uri::uri::PathAndQuery,
-                ::templated_uri::ValidationError,
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
             > {
                 match self {
                     Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
                     Test::SecondTemplate(template_variant) => {
                         template_variant.to_path_and_query()
                     }
+                }
+            }
+            fn render(&self) -> ::std::string::String {
+                match self {
+                    Test::FirstTemplate(template_variant) => template_variant.render(),
+                    Test::SecondTemplate(template_variant) => template_variant.render(),
                 }
             }
         }
@@ -841,8 +844,12 @@ mod tests {
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
                 match self {
-                    Test::FirstTemplate(template_variant) => template_variant.fmt(engine, f)?,
-                    Test::SecondTemplate(template_variant) => template_variant.fmt(engine, f)?,
+                    Test::FirstTemplate(template_variant) => {
+                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                    }
+                    Test::SecondTemplate(template_variant) => {
+                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                    }
                 }
                 Ok(())
             }
@@ -857,26 +864,24 @@ mod tests {
                 Self::SecondTemplate(template_variant)
             }
         }
-        impl From<Test> for ::templated_uri::uri::TargetPathAndQuery {
+        impl From<Test> for ::templated_uri::PathAndQuery {
             fn from(value: Test) -> Self {
-                ::templated_uri::uri::TargetPathAndQuery::TemplatedPathAndQuery(
-                    ::std::sync::Arc::new(value),
-                )
+                ::templated_uri::PathAndQuery::from_template(value)
             }
         }
         "#);
     }
 
     #[test]
-    fn test_uri_unsafe_param_impl() {
+    fn test_raw_impl() {
         let input = quote! {
             struct MyFragment(String);
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeParam for MyFragment {
-            fn as_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::Raw for MyFragment {
+            fn raw(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -884,15 +889,15 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_unsafe_param_with_custom_type() {
+    fn test_raw_with_custom_type() {
         let input = quote! {
-            struct CustomFragment(UriSafeString);
+            struct CustomFragment(EscapedString);
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriUnsafeParam for CustomFragment {
-            fn as_display(&self) -> impl ::std::fmt::Display {
+        impl ::templated_uri::Raw for CustomFragment {
+            fn raw(&self) -> impl ::std::fmt::Display {
                 &self.0
             }
         }
@@ -900,63 +905,63 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_unsafe_param_named_fields_error() {
+    fn test_raw_named_fields_error() {
         let input = quote! {
             struct InvalidFragment {
                 value: String
             }
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam can only be derived for tuple structs (newtype pattern)"
+            "Raw can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_unsafe_param_multiple_fields_error() {
+    fn test_raw_multiple_fields_error() {
         let input = quote! {
             struct TooManyFields(String, String);
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam requires exactly one field, found 2"
+            "Raw requires exactly one field, found 2"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_unsafe_param_enum_error() {
+    fn test_raw_enum_error() {
         let input = quote! {
             enum FragmentEnum {
                 Variant(String)
             }
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam cannot be derived for enums"
+            "Raw cannot be derived for enums"
         }
         "#);
     }
 
     #[test]
-    fn test_uri_unsafe_param_union_error() {
+    fn test_raw_union_error() {
         let input = quote! {
             union UnsafeFragmentUnion {
                 value: u32
             }
         };
 
-        let output_pretty = pretty_parse_uri_unsafe_param(input);
+        let output_pretty = pretty_parse_raw(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriUnsafeParam cannot be derived for unions"
+            "Raw cannot be derived for unions"
         }
         "#);
     }
@@ -1004,9 +1009,9 @@ mod tests {
 
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::UriParam for SafeFragment {
-            fn as_uri_safe(&self) -> ::templated_uri::UriSafe<impl ::std::fmt::Display> {
-                self.0.as_uri_safe()
+        impl ::templated_uri::Escape for SafeFragment {
+            fn escape(&self) -> ::templated_uri::Escaped<impl ::std::fmt::Display> {
+                self.0.escape()
             }
         }
         ");
@@ -1023,7 +1028,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriParam can only be derived for tuple structs (newtype pattern)"
+            "Escape can only be derived for tuple structs (newtype pattern)"
         }
         "#);
     }
@@ -1039,7 +1044,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriParam cannot be derived for enums"
+            "Escape cannot be derived for enums"
         }
         "#);
     }
@@ -1055,7 +1060,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriParam cannot be derived for unions"
+            "Escape cannot be derived for unions"
         }
         "#);
     }
@@ -1069,7 +1074,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriParam requires exactly one field, found 2"
+            "Escape requires exactly one field, found 2"
         }
         "#);
     }
@@ -1083,7 +1088,7 @@ mod tests {
         let output_pretty = pretty_parse_uri_param(input);
         assert_snapshot!(output_pretty, @r#"
         ::core::compile_error! {
-            "UriParam requires exactly one field, found 0"
+            "Escape requires exactly one field, found 0"
         }
         "#);
     }
@@ -1145,14 +1150,14 @@ mod tests {
     }
 
     #[test]
-    fn test_uri_unsafe_param_derive_impl_parse_error() {
+    fn test_raw_derive_impl_parse_error() {
         // Test error handling when input cannot be parsed as DeriveInput
         // Pass invalid tokens that cannot be parsed as a struct/enum/union
         let input = quote! {
             fn not_a_struct() {}
         };
 
-        let output = uri_unsafe_param_derive_impl(input);
+        let output = raw_derive_impl(input);
         let output_str = output.to_string();
 
         // Should produce a compile error
@@ -1253,12 +1258,9 @@ mod tests {
             struct Wrapper<T>(T);
         };
 
-        let output = uri_unsafe_param_derive_impl(input);
+        let output = raw_derive_impl(input);
         let output_str = output.to_string();
-        assert!(
-            output_str.contains("compile_error"),
-            "Should reject generic UriUnsafeParam: {output_str}"
-        );
+        assert!(output_str.contains("compile_error"), "Should reject generic Raw: {output_str}");
     }
 
     #[test]
@@ -1269,7 +1271,7 @@ mod tests {
 
         let output = uri_param_derive_impl(input);
         let output_str = output.to_string();
-        assert!(output_str.contains("compile_error"), "Should reject generic UriParam: {output_str}");
+        assert!(output_str.contains("compile_error"), "Should reject generic Escape: {output_str}");
     }
 
     #[test]

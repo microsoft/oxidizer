@@ -72,16 +72,16 @@ impl CacheOperation {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheActivity {
     Hit,
+    Error,
     Expired,
-    Miss,
-    RefreshHit,
-    RefreshMiss,
+    Fallback,
     Inserted,
     Invalidated,
+    Miss,
     Ok,
-    Fallback,
-    FallbackPromotion,
-    Error,
+    RefreshHit,
+    RefreshMiss,
+    Rejected,
 }
 
 #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -89,16 +89,16 @@ impl CacheActivity {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Hit => "cache.hit",
+            Self::Error => "cache.error",
             Self::Expired => "cache.expired",
-            Self::Miss => "cache.miss",
-            Self::RefreshHit => "cache.refresh_hit",
-            Self::RefreshMiss => "cache.refresh_miss",
+            Self::Fallback => "cache.fallback",
             Self::Inserted => "cache.inserted",
             Self::Invalidated => "cache.invalidated",
+            Self::Miss => "cache.miss",
             Self::Ok => "cache.ok",
-            Self::Fallback => "cache.fallback",
-            Self::FallbackPromotion => "cache.fallback_promotion",
-            Self::Error => "cache.error",
+            Self::RefreshHit => "cache.refresh_hit",
+            Self::RefreshMiss => "cache.refresh_miss",
+            Self::Rejected => "cache.rejected",
         }
     }
 }
@@ -177,7 +177,7 @@ impl CacheTelemetry {
             | CacheActivity::Inserted
             | CacheActivity::Invalidated
             | CacheActivity::Fallback
-            | CacheActivity::FallbackPromotion => emit_event!(info),
+            | CacheActivity::Rejected => emit_event!(info),
             CacheActivity::Hit | CacheActivity::Miss | CacheActivity::RefreshHit | CacheActivity::Ok => {
                 emit_event!(debug);
             }
@@ -211,8 +211,8 @@ mod tests {
         assert_eq!(CacheActivity::Invalidated.as_str(), "cache.invalidated");
         assert_eq!(CacheActivity::Ok.as_str(), "cache.ok");
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
-        assert_eq!(CacheActivity::FallbackPromotion.as_str(), "cache.fallback_promotion");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
+        assert_eq!(CacheActivity::Rejected.as_str(), "cache.rejected");
     }
 
     #[cfg_attr(miri, ignore)]

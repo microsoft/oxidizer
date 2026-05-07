@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.5] - 2026-04-22
+
+- 🔧 Maintenance
+
+  - bump `tick` to 0.2.2
+
 ## [0.4.4] - 2026-04-01
 
 - ✨ Features
