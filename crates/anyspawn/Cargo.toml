@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn"
 description = "A generic task spawner compatible with any async runtime."
-version = "0.3.0"
+version = "0.4.0"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]
@@ -20,8 +20,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 allowed_external_types = [
     "tokio::runtime::handle::Handle",
     "thread_aware::core::ThreadAware",
-    "thread_aware::affinity::MemoryAffinity",
-    "thread_aware::affinity::PinnedAffinity",
+    "thread_aware::affinity::Affinity",
+    "thread_aware::closure::ThreadAwareAsyncFnOnce",
 ]
 
 [package.metadata.docs.rs]
@@ -39,11 +39,14 @@ tokio = { workspace = true, features = ["rt"], optional = true }
 [dev-dependencies]
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-insta.workspace = true
 opentelemetry = { workspace = true, features = ["futures"] }
 smol = "2"
 static_assertions.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+
+[[test]]
+name = "builder"
+required-features = ["tokio"]
 
 [[test]]
 name = "spawner"
@@ -51,10 +54,6 @@ required-features = ["tokio"]
 
 [[test]]
 name = "handle"
-required-features = ["tokio"]
-
-[[test]]
-name = "builder"
 required-features = ["tokio"]
 
 [[bench]]

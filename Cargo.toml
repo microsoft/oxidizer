@@ -23,7 +23,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 [workspace.dependencies]
 
 # local dependencies
-anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.3.0" }
+anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.4.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
 cachet = { path = "crates/cachet", default-features = false, version = "0.1.1" }
@@ -46,9 +46,9 @@ templated_uri = { path = "crates/templated_uri", default-features = false, versi
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.1.1" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.1.1" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.6.2" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.6.1" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.6.1" }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.7.0" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.0" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.7.0" }
 tick = { path = "crates/tick", default-features = false, version = "0.2.2" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.1.0" }
 

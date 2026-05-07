@@ -324,8 +324,9 @@ const fn is_valid_label(s: &str) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
     use testing_aids::ALL_ERROR_KINDS;
+
+    use super::*;
 
     #[test]
     fn from_static_const() {

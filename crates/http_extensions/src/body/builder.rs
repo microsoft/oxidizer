@@ -9,13 +9,12 @@ use http_body_util::BodyExt;
 use thread_aware::{ThreadAware, Unaware};
 use tick::Clock;
 
-#[cfg(any(feature = "json", test))]
-use crate::json::JsonError;
-use crate::{HttpError, Result};
-
 use super::options::HttpBodyOptions;
 use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
+#[cfg(any(feature = "json", test))]
+use crate::json::JsonError;
+use crate::{HttpError, Result};
 
 /// Builder for creating optimized HTTP bodies.
 ///
@@ -340,6 +339,8 @@ impl Memory for MemoryWrapper {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::time::Duration;
+
     use bytes::Bytes;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::executor::block_on;
@@ -347,8 +348,6 @@ mod tests {
     use serde::Serialize;
     use static_assertions::assert_impl_all;
     use tick::ClockControl;
-
-    use std::time::Duration;
 
     use super::*;
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};

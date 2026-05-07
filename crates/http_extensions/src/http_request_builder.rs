@@ -465,7 +465,10 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # let bb = HttpBodyBuilder::new_fake();
     /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
     /// # let request_builder = handler.request_builder();
-    /// let response: HttpResponse = request_builder.get("https://example.com").fetch_buffered().await?;
+    /// let response: HttpResponse = request_builder
+    ///     .get("https://example.com")
+    ///     .fetch_buffered()
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
@@ -554,7 +557,10 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # let bb = HttpBodyBuilder::new_fake();
     /// # let handler = FakeHandler::from(HttpResponseBuilder::new(&bb).status(200).build()?);
     /// # let request_builder = handler.request_builder();
-    /// let response: Response<BytesView> = request_builder.get("https://example.com").fetch_bytes().await?;
+    /// let response: Response<BytesView> = request_builder
+    ///     .get("https://example.com")
+    ///     .fetch_bytes()
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```

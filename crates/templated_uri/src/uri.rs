@@ -20,8 +20,7 @@ use crate::{BasePath, BaseUri, Origin, PathAndQuery};
 /// URI generation.
 ///
 /// ```
-/// use templated_uri::PathAndQuery;
-/// use templated_uri::{BaseUri, Uri};
+/// use templated_uri::{BaseUri, PathAndQuery, Uri};
 /// let base_uri = BaseUri::from_static("http://example.com");
 /// let path = PathAndQuery::from_static("/path?query=1");
 /// let uri: Uri = Uri::new().with_base(base_uri).with_path_and_query(path);
@@ -38,7 +37,9 @@ use crate::{BasePath, BaseUri, Origin, PathAndQuery};
 ///
 /// let my_template = MyTemplate { param: 42 };
 /// let base_uri = BaseUri::from_static("http://example.com");
-/// let uri: Uri = Uri::new().with_path_and_query(my_template).with_base(base_uri);
+/// let uri: Uri = Uri::new()
+///     .with_path_and_query(my_template)
+///     .with_base(base_uri);
 /// ```
 #[derive(Clone)]
 pub struct Uri {
@@ -88,7 +89,7 @@ impl Uri {
     /// Creates a new [`Uri`] from a [`BaseUri`] and a [`PathAndQuery`].
     ///
     /// ```
-    /// use templated_uri::{BaseUri, Uri, PathAndQuery};
+    /// use templated_uri::{BaseUri, PathAndQuery, Uri};
     ///
     /// let base = BaseUri::from_static("http://example.com");
     /// let path_and_query = PathAndQuery::from(http::uri::PathAndQuery::from_static("/path?query=1"));
