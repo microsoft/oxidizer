@@ -212,11 +212,12 @@ mod layer;
 mod service;
 mod telemetry;
 
-#[deprecated(note = "import from `seatbelt::Attempt` instead")]
-pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, HedgingDelayArgs, OnExecuteArgs, RecoveryArgs};
 pub use config::HedgingConfig;
 pub use layer::HedgingLayer;
 pub use service::Hedging;
 #[cfg(feature = "tower-service")]
 pub use service::HedgingFuture;
+
+#[deprecated(note = "import from `seatbelt::Attempt` instead")]
+pub use crate::attempt::Attempt;

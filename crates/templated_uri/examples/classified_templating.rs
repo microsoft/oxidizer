@@ -3,11 +3,8 @@
 
 //! Example demonstrating how to use existing classification taxonomy with templated paths in `fetch`,
 
-use data_privacy::{
-    RedactedToString, RedactionEngine, classified,
-    simple_redactor::{SimpleRedactor, SimpleRedactorMode},
-    taxonomy,
-};
+use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
 use templated_uri::{BaseUri, Escape, EscapedString, Uri, templated};
 
 // Example taxonomy for demonstration purposes

@@ -3,13 +3,13 @@
 
 //! This module contains all the core primitives the thread aware system is built upon.
 
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 
 /// Marks types that correctly handle isolation when transferred between threads.
 ///
 /// For performance reasons mentioned in the [crate documentation](`crate`), the basic
-/// goal of the `ThreadAware` trait is that the value returned by
-/// [`ThreadAware::relocated()`] should be as independent as possible from any state on the source
+/// goal of the `ThreadAware` trait is that after calling [`ThreadAware::relocate()`],
+/// the value should be as independent as possible from any state on the source
 /// (or any other) thread in the sense that interacting with the object should not result
 /// in contention over synchronization primitives when this interaction happens in parallel
 /// with interactions with related values (e.g. clones) on other threads.
@@ -17,7 +17,7 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// What this means depends on the type, but there are a couple of common implementation
 /// strategies:
 ///
-/// * Return self - this implies that the value doesn't have any dependency on other values
+/// * No-op - this implies that the value doesn't have any dependency on other values
 ///   that may result in synchronization primitive contention, so it can be transferred as is. This
 ///   approach can be also be achieved by wrapping a value in the
 ///   [`Unaware`](`crate::Unaware`) type.
@@ -61,22 +61,17 @@ use crate::affinity::{MemoryAffinity, PinnedAffinity};
 /// }
 ///
 /// impl ThreadAware for Counter {
-///     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-///         Self {
-///             // Initialize a new value in the destination affinity independent
-///             // of the source affinity.
-///             value: Arc::new(AtomicI32::new(0)),
-///         }
+///     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+///         // Initialize a new value in the destination affinity independent
+///         // of the source affinity.
+///         self.value = Arc::new(AtomicI32::new(0));
 ///     }
 /// }
 /// ```
 ///
-/// Note that this trait is independent of the [`Send`] trait as there can be usages of isolated
-/// affinities with multiple affinities on a single thread. However, that
-/// is a fairly specific use case, so types that implement [`ThreadAware`] should generally also implement
-/// [`Send`].
-pub trait ThreadAware {
-    /// Consume a value and return a value in the destination affinity.
+/// Note that this trait requires [`Send`] because relocation inherently moves data across threads.
+pub trait ThreadAware: Send {
+    /// Relocate this value in place to the destination affinity.
     ///
     /// When implementing this function, you can assume self belongs to the source affinity, but it's
     /// not guaranteed that source and destination will be different. Note that "belonging to an affinity"
@@ -88,6 +83,5 @@ pub trait ThreadAware {
     /// When calling this function, you must ensure that self belongs to the source affinity, and try
     /// to avoid calling transfer when source and destination match as that's a useless operation
     /// and transfer implementations may be non-trivial.
-    #[must_use]
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self;
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity);
 }

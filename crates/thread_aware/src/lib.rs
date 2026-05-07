@@ -40,9 +40,8 @@
 //!
 //! ## Relation to [`Send`]
 //!
-//! Although [`ThreadAware`] has no supertraits, any runtime invoking it will usually require the underlying type to
-//! be [`Send`]. In these cases, type are first sent to another thread, then the [`ThreadAware`] relocation
-//! notification is invoked.
+//! [`ThreadAware`] requires [`Send`] as a supertrait. Types are first sent to another thread,
+//! then the [`ThreadAware`] relocation notification is invoked.
 //!
 //!
 //! ## Thread vs. Core Semantics
@@ -157,14 +156,15 @@ pub mod affinity;
 #[doc(inline)]
 pub use core::ThreadAware;
 
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
 /// Derive macro implementing `ThreadAware` for structs and enums.
 ///
 /// The generated implementation transfers each field by calling its own
-/// `ThreadAware::relocated` method. Fields annotated with `#[thread_aware(skip)]` are
-/// left as-is (moved without invoking `transfer`).
+/// `ThreadAware::relocate` method. Fields annotated with `#[thread_aware(skip)]` are
+/// left as-is (moved without invoking `relocate`).
 ///
 /// # Supported Items
 /// * Structs (named, tuple, or unit)
@@ -182,7 +182,7 @@ pub use core::ThreadAware;
 /// # Example
 /// ```rust
 /// use thread_aware::ThreadAware;
-/// use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+/// use thread_aware::affinity::Affinity;
 /// #[derive(ThreadAware)]
 /// struct Payload {
 ///     id: u64,
@@ -193,18 +193,16 @@ pub use core::ThreadAware;
 /// struct Wrapper {
 ///     // This field will be recursively transferred.
 ///     inner: Payload,
-///     // This field will be moved without calling `transfer`.
+///     // This field will be moved without calling `relocate`.
 ///     #[thread_aware(skip)]
 ///     raw_len: usize,
 /// }
 ///
-/// fn demo(mut a1: MemoryAffinity, mut a2: PinnedAffinity, w: Wrapper) -> Wrapper {
+/// fn demo(a1: Option<Affinity>, a2: Affinity, mut w: Wrapper) {
 ///     // Move the wrapper from a1 to a2.
-///     let moved = w.relocated(a1.clone(), a2.clone().into());
-///     moved
+///     w.relocate(a1, a2);
 /// }
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 pub use wrappers::{Unaware, unaware};

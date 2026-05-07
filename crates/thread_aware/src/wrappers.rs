@@ -5,7 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use crate::ThreadAware;
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 
 /// Allows transferring a value that doesn't implement [`ThreadAware`].
 ///
@@ -51,10 +51,8 @@ impl<T> DerefMut for Unaware<T> {
     }
 }
 
-impl<T> ThreadAware for Unaware<T> {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-        self
-    }
+impl<T: Send> ThreadAware for Unaware<T> {
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
 }
 
 impl<T> Unaware<T> {
@@ -175,27 +173,27 @@ mod tests {
         use std::collections::HashMap;
 
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
         // Test with simple type
-        let value = Unaware(42);
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0, 42);
+        let mut value = Unaware(42);
+        value.relocate(source, destination);
+        assert_eq!(value.0, 42);
 
         // Test with String
-        let value = Unaware("test string".to_string());
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0, "test string");
+        let mut value = Unaware("test string".to_string());
+        value.relocate(source, destination);
+        assert_eq!(value.0, "test string");
 
         // Test with complex type (HashMap)
         let mut map = HashMap::new();
         map.insert("key1", 100);
         map.insert("key2", 200);
-        let value = Unaware(map);
-        let relocated = value.relocated(source, destination);
-        assert_eq!(relocated.0.get("key1"), Some(&100));
-        assert_eq!(relocated.0.get("key2"), Some(&200));
+        let mut value = Unaware(map);
+        value.relocate(source, destination);
+        assert_eq!(value.0.get("key1"), Some(&100));
+        assert_eq!(value.0.get("key2"), Some(&200));
     }
 
     #[test]
@@ -240,19 +238,19 @@ mod tests {
 
         // Test the warning case mentioned in docs - Arc with interior mutability
         let inner_arc = Arc::new(Mutex::new(42));
-        let unaware_wrapper = Unaware(Arc::clone(&inner_arc));
+        let mut unaware_wrapper = Unaware(Arc::clone(&inner_arc));
 
         // Should work, but this is the case the docs warn about
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let relocated = unaware_wrapper.relocated(source, destination);
+        unaware_wrapper.relocate(source, destination);
 
         // Both should still point to the same underlying data
         // Original + clone in wrapper = 2, relocated is a copy (since Unaware<Arc<_>> implements Copy)
         assert_eq!(Arc::strong_count(&inner_arc), 2);
-        assert_eq!(Arc::strong_count(&relocated.0), 2);
+        assert_eq!(Arc::strong_count(&unaware_wrapper.0), 2);
     }
 
     #[test]
@@ -284,19 +282,19 @@ mod tests {
             values: vec![1, 2, 3],
         };
 
-        let unaware_complex = Unaware(complex);
+        let mut unaware_complex = Unaware(complex);
         assert_eq!(unaware_complex.0.id, 1);
         assert_eq!(unaware_complex.0.name, "test");
         assert_eq!(unaware_complex.0.values, vec![1, 2, 3]);
 
         // Test with relocation
         let affinities = pinned_affinities(&[2]);
-        let source = affinities[0].into();
+        let source = Some(affinities[0]);
         let destination = affinities[1];
 
-        let relocated = unaware_complex.relocated(source, destination);
-        assert_eq!(relocated.0.id, 1);
-        assert_eq!(relocated.0.name, "test");
+        unaware_complex.relocate(source, destination);
+        assert_eq!(unaware_complex.0.id, 1);
+        assert_eq!(unaware_complex.0.name, "test");
     }
 
     #[test]

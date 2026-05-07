@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use http::{Response, StatusCode};
 use layered::Service;
 use thread_aware::ThreadAware;
-use thread_aware::affinity::{MemoryAffinity, PinnedAffinity};
+use thread_aware::affinity::Affinity;
 
 use crate::constants::ERR_POISONED_LOCK;
 use crate::{HttpBody, HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
@@ -84,10 +84,9 @@ pub struct FakeHandler {
 }
 
 impl ThreadAware for FakeHandler {
-    fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
         // No thread awareness needed for fake handler, we want the same behavior
         // even after relocation.
-        self
     }
 }
 
@@ -142,7 +141,7 @@ impl FakeHandler {
     /// use http_extensions::{FakeHandler, HttpError, HttpRequest};
     ///
     /// let handler = FakeHandler::from_http_error(|_request: HttpRequest| {
-    ///    HttpError::validation("simulated error")
+    ///     HttpError::validation("simulated error")
     /// });
     /// ```
     pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
@@ -555,11 +554,11 @@ mod tests {
     #[test]
     fn relocated_preserves_behavior() {
         let affinity = pinned_affinities(&[2])[0];
-        let handler = FakeHandler::from(StatusCode::ACCEPTED);
+        let mut handler = FakeHandler::from(StatusCode::ACCEPTED);
 
-        let relocated = handler.relocated(MemoryAffinity::Unknown, affinity);
+        handler.relocate(None, affinity);
 
-        let status = get_response(&relocated).unwrap().status();
+        let status = get_response(&handler).unwrap().status();
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 

@@ -487,6 +487,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     async fn telemetry_reports_recoverable_and_abandoned_not_successful() {
         use std::sync::atomic::AtomicU32;
+
         use tokio::sync::Notify;
 
         let tester = MetricTester::new();

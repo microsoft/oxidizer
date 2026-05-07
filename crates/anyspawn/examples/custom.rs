@@ -3,18 +3,35 @@
 
 //! Spawning tasks with a custom spawner.
 
-use std::thread::{sleep, spawn};
+use std::thread::sleep;
 use std::time::Duration;
 
-use anyspawn::Spawner;
-use futures::executor::block_on;
+use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
+use thread_aware::closure::ThreadAwareAsyncFnOnce;
+
+/// A simple spawner that runs futures on background threads.
+#[derive(Clone)]
+struct ThreadPoolSpawner;
+
+impl ThreadAware for ThreadPoolSpawner {
+    fn relocate(&mut self, _: Option<Affinity>, _: Affinity) {}
+}
+
+impl SpawnCustom for ThreadPoolSpawner {
+    fn spawn(&self, task: BoxedFuture) {
+        std::thread::spawn(move || futures::executor::block_on(task));
+    }
+
+    fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
+        self.spawn(task.call_once());
+    }
+}
 
 #[tokio::main]
 async fn main() {
-    // Create a spawner that runs futures on background threads
-    let spawner = Spawner::new_custom("threadpool", |fut| {
-        spawn(move || block_on(fut));
-    });
+    let spawner = Spawner::new_custom("threadpool", ThreadPoolSpawner);
 
     // Fire-and-forget: spawn a task without waiting for its result
     let () = spawner
