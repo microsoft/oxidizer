@@ -30,7 +30,6 @@ allowed_external_types = [
     "layered::service::Service",
     "tick::clock::Clock",
     # External dependencies
-    "opentelemetry::metrics::meter::Meter",
     "opentelemetry::metrics::meter::MeterProvider",
     "serde_core::de::DeserializeOwned",
     "serde_core::ser::Serialize",
