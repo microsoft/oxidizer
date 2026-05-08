@@ -78,7 +78,7 @@ opentelemetry = { workspace = true, features = [
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 postcard = { workspace = true }
 recoverable = { workspace = true }
-seatbelt = { workspace = true, features = ["retry", "tower-service"] }
+seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }
 serde = { workspace = true, features = ["derive"] }
 testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
