@@ -54,7 +54,7 @@ contention-free, NUMA-friendly task dispatch.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQblHE7Bl8YSN4bb97k0EOW-rkbZQa-GdodS-cbCkeYjGZgZ-BhZIKCaGFueXNwYXduZTAuNC4wgmx0aHJlYWRfYXdhcmVlMC43LjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5RxOwZfGEjeG2_e5NBDlvq5G2UGvhnaHUvnGwpHmIxmYGfgYWSCgmhhbnlzcGF3bmUwLjQuMIJsdGhyZWFkX2F3YXJlZTAuNy4w
  [__link0]: https://docs.rs/anyspawn/0.4.0/anyspawn/?search=Spawner
  [__link1]: https://docs.rs/anyspawn/0.4.0/anyspawn/?search=SpawnCustom
  [__link2]: https://docs.rs/anyspawn/0.4.0/anyspawn/?search=CustomSpawnerBuilder

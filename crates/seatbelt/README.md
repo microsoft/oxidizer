@@ -199,7 +199,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbymnV5hB2nygbp0sWjd0KKl0bxAPd-fo65O0bzaSrVDJ0Po1hZIWCZ2xheWVyZWRlMC4zLjCCa3JlY292ZXJhYmxlZTAuMS4ygmhzZWF0YmVsdGUwLjQuNYJkdGlja2UwLjIuMoJtdG93ZXJfc2VydmljZWUwLjMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8pp1eYQdp8oG6dLFo3dCipdG8QD3fn6OuTtG82kq1QydD6NYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMoJoc2VhdGJlbHRlMC40LjWCZHRpY2tlMC4yLjKCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.4.5/seatbelt/hedging/index.html
