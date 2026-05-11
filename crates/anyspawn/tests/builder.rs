@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test module")]
-#![cfg(not(miri))]
+// #![cfg(not(miri))]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,6 +14,9 @@ async fn builder_tokio_basic() {
     let spawner = CustomSpawnerBuilder::tokio().build();
     let result = spawner.spawn(async { 42 }).await;
     assert_eq!(result, 42);
+
+    let result = spawner.spawn_blocking(|| 42).await;
+    assert_eq!(result, 42);
 }
 
 #[tokio::test]
@@ -21,6 +24,9 @@ async fn builder_tokio_with_handle() {
     let handle = tokio::runtime::Handle::current();
     let spawner = CustomSpawnerBuilder::tokio_with_handle(handle).build();
     let result = spawner.spawn(async { 99 }).await;
+    assert_eq!(result, 99);
+
+    let result = spawner.spawn_blocking(|| 99).await;
     assert_eq!(result, 99);
 }
 

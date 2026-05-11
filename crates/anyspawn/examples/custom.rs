@@ -50,7 +50,7 @@ async fn main() {
     println!("Got result: {value}");
 
     // Spawn a blocking task
-    let handle = spawner.spawn_blocking(Box::new(|| 1 + 1));
+    let handle = spawner.spawn_blocking(|| 1 + 1);
     let value = handle.await;
     println!("Got result (blocking): {value}");
 
