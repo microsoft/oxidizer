@@ -10,6 +10,7 @@
 - ⚠️ Breaking
 
   - `SpawnCustom` now requires a `spawn_blocking` method. Existing implementors must add this method to compile.
+  - `CustomSpawnerBuilder::layer` now takes two closures — one for futures and one for blocking tasks. Pass an identity closure (`|t| t`) for either side to leave that task kind unchanged.
 
 ## [0.3.0] - 2026-03-27
 

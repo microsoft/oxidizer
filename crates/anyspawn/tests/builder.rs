@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder};
 
 #[tokio::test]
 async fn builder_tokio_basic() {
@@ -25,56 +25,95 @@ async fn builder_tokio_with_handle() {
 }
 
 #[tokio::test]
-async fn builder_with_counting_layer() {
-    let count = Arc::new(AtomicUsize::new(0));
-    let count_clone = Arc::clone(&count);
+async fn builder_layer_counts_invocations() {
+    let future_count = Arc::new(AtomicUsize::new(0));
+    let blocking_count = Arc::new(AtomicUsize::new(0));
+    let fc = Arc::clone(&future_count);
+    let bc = Arc::clone(&blocking_count);
 
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(move |task: BoxedFuture| -> BoxedFuture {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-            task
-        })
+        .layer(
+            move |task: BoxedFuture| -> BoxedFuture {
+                fc.fetch_add(1, Ordering::SeqCst);
+                task
+            },
+            move |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                bc.fetch_add(1, Ordering::SeqCst);
+                task
+            },
+        )
         .build();
 
     let r1 = spawner.spawn(async { 1 }).await;
     let r2 = spawner.spawn(async { 2 }).await;
-    let r3 = spawner.spawn(async { 3 }).await;
+    let r3 = spawner.spawn_blocking(|| 3).await;
 
-    assert_eq!(r1, 1);
-    assert_eq!(r2, 2);
-    assert_eq!(r3, 3);
-    assert_eq!(count.load(Ordering::SeqCst), 3);
+    assert_eq!((r1, r2, r3), (1, 2, 3));
+    // Each layer runs only for its own task kind.
+    assert_eq!(future_count.load(Ordering::SeqCst), 2);
+    assert_eq!(blocking_count.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
 async fn builder_stacked_layers() {
-    let outer_count = Arc::new(AtomicUsize::new(0));
-    let inner_count = Arc::new(AtomicUsize::new(0));
-
-    let outer_clone = Arc::clone(&outer_count);
-    let inner_clone = Arc::clone(&inner_count);
+    let future_order = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let blocking_order = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+    let inner_future = Arc::clone(&future_order);
+    let outer_future = Arc::clone(&future_order);
+    let inner_blocking = Arc::clone(&blocking_order);
+    let outer_blocking = Arc::clone(&blocking_order);
 
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(move |task: BoxedFuture| -> BoxedFuture {
-            inner_clone.fetch_add(1, Ordering::SeqCst);
-            task
-        })
-        .layer(move |task: BoxedFuture| -> BoxedFuture {
-            outer_clone.fetch_add(1, Ordering::SeqCst);
-            task
-        })
+        .layer(
+            move |task: BoxedFuture| -> BoxedFuture {
+                let inner = Arc::clone(&inner_future);
+                Box::pin(async move {
+                    inner.lock().unwrap().push("inner");
+                    task.await;
+                })
+            },
+            move |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                let inner = Arc::clone(&inner_blocking);
+                Box::new(move || {
+                    inner.lock().unwrap().push("inner");
+                    task();
+                })
+            },
+        )
+        .layer(
+            move |task: BoxedFuture| -> BoxedFuture {
+                let outer = Arc::clone(&outer_future);
+                Box::pin(async move {
+                    outer.lock().unwrap().push("outer");
+                    task.await;
+                })
+            },
+            move |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                let outer = Arc::clone(&outer_blocking);
+                Box::new(move || {
+                    outer.lock().unwrap().push("outer");
+                    task();
+                })
+            },
+        )
         .build();
 
     spawner.spawn(async {}).await;
+    spawner.spawn_blocking(|| {}).await;
 
-    assert_eq!(outer_count.load(Ordering::SeqCst), 1);
-    assert_eq!(inner_count.load(Ordering::SeqCst), 1);
+    // Layers wrap the task outside-in as added: the first-added (innermost
+    // wrapper) layer's pre-task code runs first when the task executes.
+    assert_eq!(*future_order.lock().unwrap(), vec!["inner", "outer"]);
+    assert_eq!(*blocking_order.lock().unwrap(), vec!["inner", "outer"]);
 }
 
 #[tokio::test]
 async fn builder_passthrough_layer() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(|task: BoxedFuture| -> BoxedFuture { task })
+        .layer(
+            |task: BoxedFuture| -> BoxedFuture { task },
+            |task: BoxedBlockingTask| -> BoxedBlockingTask { task },
+        )
         .build();
 
     let result = spawner.spawn(async { "hello" }).await;
@@ -103,10 +142,13 @@ async fn builder_spawn_anywhere_applies_layer() {
     let count_clone = Arc::clone(&count);
 
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(move |task: BoxedFuture| -> BoxedFuture {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-            task
-        })
+        .layer(
+            move |task: BoxedFuture| -> BoxedFuture {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+                task
+            },
+            |task: BoxedBlockingTask| -> BoxedBlockingTask { task },
+        )
         .build();
 
     // spawn_anywhere exercises TokioSpawner::spawn_anywhere, Layered::spawn_anywhere,
@@ -125,10 +167,13 @@ async fn builder_relocate_preserves_layer() {
     let count_clone = Arc::clone(&count);
 
     let mut spawner = CustomSpawnerBuilder::tokio()
-        .layer(move |task: BoxedFuture| -> BoxedFuture {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-            task
-        })
+        .layer(
+            move |task: BoxedFuture| -> BoxedFuture {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+                task
+            },
+            |task: BoxedBlockingTask| -> BoxedBlockingTask { task },
+        )
         .build();
 
     let affinities = pinned_affinities(&[2]);
