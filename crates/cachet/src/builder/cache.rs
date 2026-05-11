@@ -7,8 +7,6 @@ use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
 
 use super::buildable::Buildable;
@@ -172,16 +170,6 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
         self.telemetry = self.telemetry.with_logs();
-        self
-    }
-
-    /// Configures metrics collection for this cache.
-    ///
-    /// When configured, cache operations will emit metrics via OpenTelemetry.
-    #[cfg(any(feature = "metrics", test))]
-    #[must_use]
-    pub fn enable_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.telemetry = self.telemetry.with_metrics(meter_provider);
         self
     }
 
@@ -366,16 +354,6 @@ mod tests {
             .storage(cachet_tier::MockCache::new())
             .enable_logs();
         assert!(builder.telemetry.logs_enabled);
-    }
-
-    #[test]
-    fn builder_enable_metrics() {
-        let clock = Clock::new_frozen();
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-        let builder = Cache::builder::<String, i32>(clock)
-            .storage(cachet_tier::MockCache::new())
-            .enable_metrics(&provider);
-        assert!(builder.telemetry.meter.is_some());
     }
 
     #[test]

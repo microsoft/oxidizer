@@ -319,7 +319,7 @@ mod tests {
 #[cfg(test)]
 mod fetch_and_promote_tests {
     use cachet_tier::MockCache;
-    use testing_aids::MetricTester;
+    use testing_aids::LogCapture;
     use tick::Clock;
 
     use super::*;
@@ -337,13 +337,15 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, clock, None, telemetry)
     }
 
-    #[cfg_attr(miri, ignore)] // OTel SDK calls SystemTime::now() which miri blocks under isolation
+    #[cfg_attr(miri, ignore)] // tracing subscriber setup is not miri-compatible
     #[test]
-    fn fallback_miss_records_refresh_miss_telemetry() {
+    fn fallback_miss_logs_refresh_miss_telemetry() {
         block_on(async {
-            let tester = MetricTester::new();
+            let capture = LogCapture::new();
+            let _guard = tracing::subscriber::set_default(capture.subscriber());
+
             let clock = Clock::new_frozen();
-            let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
+            let telemetry = TelemetryConfig::new().with_logs().build();
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
             let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
@@ -351,7 +353,8 @@ mod fetch_and_promote_tests {
             // Fallback is empty → handle_fallback_miss Ok(None) branch
             fc.inner.fetch_and_promote("missing".to_string()).await;
 
-            tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, "cache.refresh_miss")]);
+            capture.assert_contains(attributes::CACHE_ACTIVITY_NAME);
+            capture.assert_contains("cache.refresh_miss");
         });
     }
 

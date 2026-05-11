@@ -5,46 +5,33 @@
 
 use std::time::Duration;
 
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::{
-    KeyValue,
-    metrics::{Counter, Gauge, Histogram},
-};
-#[cfg(any(feature = "logs", feature = "metrics", test))]
+#[cfg(any(feature = "logs", test))]
 use thread_aware::{Arc, PerCore};
 
 use crate::cache::CacheName;
-#[cfg(any(feature = "metrics", test))]
-use crate::telemetry::attributes;
 
 /// Internal state for cache telemetry when features are enabled.
-#[cfg(any(feature = "logs", feature = "metrics", test))]
+#[cfg(any(feature = "logs", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
     #[cfg(any(feature = "logs", test))]
     pub(crate) logging_enabled: bool,
-    #[cfg(any(feature = "metrics", test))]
-    pub(crate) event_counter: Option<Counter<u64>>,
-    #[cfg(any(feature = "metrics", test))]
-    pub(crate) operation_duration: Option<Histogram<f64>>,
-    #[cfg(any(feature = "metrics", test))]
-    pub(crate) cache_size: Option<Gauge<u64>>,
 }
 
 /// Internal state for cache telemetry when no features are enabled (no-op).
-#[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+#[cfg(not(any(feature = "logs", test)))]
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CacheTelemetryInner;
 
 /// Cache telemetry provider for OpenTelemetry integration.
 ///
 /// This type is created internally by [`TelemetryConfig::build()`] and handles
-/// recording cache operations as structured logs and metrics.
+/// recording cache operations as structured logs.
 #[derive(Clone, Debug)]
 pub struct CacheTelemetry {
-    #[cfg(any(feature = "logs", feature = "metrics", test))]
+    #[cfg(any(feature = "logs", test))]
     pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
-    #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+    #[cfg(not(any(feature = "logs", test)))]
     #[expect(dead_code, reason = "No-op telemetry when features are disabled")]
     pub(crate) inner: CacheTelemetryInner,
 }
@@ -57,7 +44,7 @@ pub(crate) enum CacheOperation {
     Clear,
 }
 
-#[cfg(any(feature = "logs", feature = "metrics", test))]
+#[cfg(any(feature = "logs", test))]
 impl CacheOperation {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -84,7 +71,7 @@ pub(crate) enum CacheActivity {
     Rejected,
 }
 
-#[cfg(any(feature = "logs", feature = "metrics", test))]
+#[cfg(any(feature = "logs", test))]
 impl CacheActivity {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -106,47 +93,18 @@ impl CacheActivity {
 impl CacheTelemetry {
     /// Records a cache operation with the given name, type, activity, and duration.
     #[cfg_attr(
-        not(any(feature = "logs", feature = "metrics", test)),
-        expect(unused_variables, reason = "No-op when both logs and metrics are disabled")
+        not(any(feature = "logs", test)),
+        expect(unused_variables, reason = "No-op when both logs are disabled")
     )]
     #[cfg_attr(
-        not(any(feature = "logs", feature = "metrics", test)),
+        not(any(feature = "logs", test)),
         expect(clippy::unused_self, reason = "self is used under feature flags")
     )]
     #[inline]
     pub(crate) fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {
-        #[cfg(any(feature = "metrics", test))]
-        {
-            let attrs = [
-                KeyValue::new(attributes::CACHE_NAME, cache_name),
-                KeyValue::new(attributes::CACHE_OPERATION_NAME, operation.as_str()),
-                KeyValue::new(attributes::CACHE_ACTIVITY_NAME, activity.as_str()),
-            ];
-
-            if let Some(c) = &self.inner.event_counter {
-                c.add(1, &attrs);
-            }
-
-            if let Some(h) = &self.inner.operation_duration {
-                h.record(duration.as_secs_f64(), &attrs);
-            }
-        }
-
         #[cfg(any(feature = "logs", test))]
         if self.inner.logging_enabled {
             Self::emit(cache_name, operation, activity, duration);
-        }
-    }
-
-    /// Records the current cache size for the given cache name.
-    #[cfg(any(feature = "metrics", test))]
-    #[cfg_attr(not(test), expect(dead_code, reason = "TODO will be used by future configurable size recording"))]
-    #[inline]
-    pub(crate) fn record_size(&self, cache_name: CacheName, size: u64) {
-        let attrs = [KeyValue::new(attributes::CACHE_NAME, cache_name)];
-
-        if let Some(g) = &self.inner.cache_size {
-            g.record(size, &attrs);
         }
     }
 
@@ -187,10 +145,10 @@ impl CacheTelemetry {
 
 #[cfg(test)]
 mod tests {
-    use testing_aids::{LogCapture, MetricTester};
+    use testing_aids::LogCapture;
 
     use super::*;
-    use crate::telemetry::TelemetryConfig;
+    use crate::telemetry::{TelemetryConfig, attributes};
 
     #[test]
     fn cache_operation_as_str() {
@@ -213,32 +171,6 @@ mod tests {
         assert_eq!(CacheActivity::Fallback.as_str(), "cache.fallback");
         assert_eq!(CacheActivity::Error.as_str(), "cache.error");
         assert_eq!(CacheActivity::Rejected.as_str(), "cache.rejected");
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn metrics_record_emits_correct_attributes() {
-        let tester = MetricTester::new();
-        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
-
-        telemetry.record("my_cache", CacheOperation::Get, CacheActivity::Hit, Duration::from_millis(5));
-
-        tester.assert_attributes_contain(&[
-            opentelemetry::KeyValue::new(attributes::CACHE_NAME, "my_cache"),
-            opentelemetry::KeyValue::new(attributes::CACHE_OPERATION_NAME, CacheOperation::Get.as_str()),
-            opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, CacheActivity::Hit.as_str()),
-        ]);
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn metrics_record_size_emits_cache_name() {
-        let tester = MetricTester::new();
-        let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
-
-        telemetry.record_size("size_test_cache", 42);
-
-        tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_NAME, "size_test_cache")]);
     }
 
     #[cfg_attr(miri, ignore)]
