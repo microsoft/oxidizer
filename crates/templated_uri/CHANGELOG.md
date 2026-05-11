@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0] - 2026-05-11
+
+- ⚠️ Breaking
+
+  - API review and overall cleanup ([#391](https://github.com/microsoft/oxidizer/pull/391))
+
 ## Unreleased
 
 - ⚠️ Breaking
