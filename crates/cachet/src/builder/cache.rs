@@ -360,6 +360,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
         let clock = Clock::new_frozen();
         let builder = Cache::builder::<String, i32>(clock)
