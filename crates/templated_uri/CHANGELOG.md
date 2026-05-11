@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## [0.2.0] - 2026-05-11
 
 - ⚠️ Breaking
 
-  - Broad API cleanup with many breaking changes across the crate. Review call sites against the updated API surface. Highlights:
+    API review and overall cleanup ([#391](https://github.com/microsoft/oxidizer/pull/391)). Many breaking changes across the crate. 
+    Review call sites against the updated API surface. Highlights:
+
     - Dropped the `Uri` prefix from most types (e.g. `UriPath` → `PathAndQuery`, `UriTemplate` → `PathAndQueryTemplate`, `UriSafe*` → `Escaped*`, `UriParam` → `Escape`, `UriUnsafeParam` → `Raw`), and renamed several other types and methods for consistency (e.g. `ValidationError` → `UriError`, `Uri::to_http_path()` → `Uri::to_path_and_query()`).
     - `Origin` (and `BaseUri`) now accept any URI scheme, not just HTTP/HTTPS; `Origin::port()` returns `Option<u16>` and `Origin::try_from_parts` was replaced by the infallible `Origin::from_parts`.
     - `PathAndQuery` now mirrors `Uri` for redaction: it implements `RedactedDisplay`/`RedactedDebug` and `to_string()` returns a `Sensitive<String>`.
