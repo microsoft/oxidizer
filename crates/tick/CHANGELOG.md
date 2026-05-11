@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.0] - 2026-05-11
+
+- ⚠️ Breaking
+
+  - new major version of `thread_aware` ([#403](https://github.com/microsoft/oxidizer/pull/403))
+
 ## [0.2.2] - 2026-04-22
 
 - 🐛 Bug Fixes
