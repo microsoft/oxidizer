@@ -78,7 +78,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-channel",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "smol",
  "static_assertions",
  "thread_aware",
@@ -317,7 +317,7 @@ dependencies = [
  "futures",
  "layered",
  "ohno 0.3.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry_sdk",
  "parking_lot",
  "pin-project-lite",
@@ -1627,13 +1627,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "opentelemetry-stdout"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc8887887e169414f637b18751487cce4e095be787d23fad13c454e2fb1b3811"
 dependencies = [
  "chrono",
- "opentelemetry",
+ "opentelemetry 0.31.0",
  "opentelemetry_sdk",
 ]
 
@@ -1646,7 +1658,7 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.31.0",
  "percent-encoding",
  "rand",
  "thiserror",
@@ -2071,7 +2083,7 @@ dependencies = [
  "layered",
  "mutants",
  "ohno 0.3.2",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "recoverable",
@@ -2355,7 +2367,7 @@ dependencies = [
  "futures",
  "mockall",
  "mutants",
- "opentelemetry",
+ "opentelemetry 0.32.0",
  "opentelemetry_sdk",
  "tracing",
  "tracing-subscriber",
