@@ -234,11 +234,6 @@ function Get-AllTransitiveDependents {
     )
 
     $crates = Get-WorkspaceCrates -repoRoot $repoRoot
-    $byName = @{}
-    foreach ($c in $crates) {
-        $byName[$c.Name.Replace('-', '_')] = $c
-    }
-
     $normalizedTarget = $crateName.Replace('-', '_')
 
     # BFS over the reverse dependency graph.
@@ -265,7 +260,8 @@ function Get-AllTransitiveDependents {
         }
     }
 
-    return , $dependents
+    # Wrap with @(...) at the call site to preserve array semantics for 0/1-element results.
+    return $dependents
 }
 
 # Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules:
@@ -543,7 +539,11 @@ function Write-Changelog {
     }
 
     if ($formattedCommits.Count -eq 0 -and $null -eq $cascadeReason) {
-        Write-Warning "No unreleased commits found to add to the changelog."
+        if ($rawCommits.Count -eq 0) {
+            Write-Warning "No unreleased commits found to add to the changelog."
+        } else {
+            Write-Warning "No relevant commits found to add to the changelog (all $($rawCommits.Count) commit(s) were filtered out)."
+        }
         return
     }
 
@@ -784,7 +784,7 @@ try {
     # Cascade the same bump kind to every transitive non-dev workspace dependent. This keeps
     # workspace-pinned versions consistent and prevents the publish-time failures described in
     # https://github.com/microsoft/oxidizer/blob/main/.github/prompts/bump-crate-version.prompt.md
-    $dependents = Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot
+    $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
         Write-Host "🔗 Cascading $cascadeBump bump to $($dependents.Count) dependent crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
