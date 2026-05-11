@@ -19,7 +19,6 @@ use parking_lot::Mutex;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
 use crate::telemetry::ext::ClockExt;
-use crate::telemetry::{CacheActivity, CacheOperation};
 
 /// Configuration for background cache refresh.
 ///
@@ -155,8 +154,7 @@ where
     }
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {
-        self.telemetry
-            .record(self.name, CacheOperation::Get, CacheActivity::RefreshHit, fetch_duration);
+        self.telemetry.refresh_hit(self.name, fetch_duration);
 
         self.promote_to_primary(key, value).await;
     }
@@ -169,8 +167,7 @@ where
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
-        self.telemetry
-            .record(self.name, CacheOperation::Get, CacheActivity::RefreshMiss, duration);
+        self.telemetry.refresh_miss(self.name, duration);
     }
 }
 

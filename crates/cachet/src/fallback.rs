@@ -17,8 +17,8 @@ use tick::Clock;
 use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
+use crate::telemetry::CacheTelemetry;
 use crate::telemetry::ext::ClockExt;
-use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 
 pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
@@ -103,9 +103,7 @@ where
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
-        self.inner
-            .telemetry
-            .record(self.inner.name, CacheOperation::Get, CacheActivity::Fallback, timed.duration);
+        self.inner.telemetry.cache_fallback(self.inner.name, timed.duration);
 
         // Propagate any error from fallback
         let fallback_value = timed.result?;
@@ -186,10 +184,9 @@ mod tests {
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::Cache;
-    use crate::InsertPolicy;
     use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
+    use crate::{Cache, InsertPolicy};
 
     type TestPrimary = CacheWrapper<String, i32, MockCache<String, i32>>;
     type TestFallbackCache = FallbackCache<String, i32, TestPrimary, MockCache<String, i32>>;

@@ -233,6 +233,18 @@ mod fallback;
 mod policy;
 mod refresh;
 mod telemetry;
+
+/// The tracing target prefix for all cachet telemetry events.
+///
+/// All cachet events use module-path targets (e.g., `cachet::telemetry::cache`)
+/// that start with this prefix. Use with `tracing_subscriber::filter::Targets`
+/// for prefix-based filtering:
+/// ```ignore
+/// use tracing_subscriber::filter;
+/// let filter = filter::Targets::new()
+///     .with_target(cachet::TRACING_TARGET, tracing::Level::DEBUG);
+/// ```
+pub use telemetry::attributes::TARGET as TRACING_TARGET;
 mod transform;
 mod wrapper;
 

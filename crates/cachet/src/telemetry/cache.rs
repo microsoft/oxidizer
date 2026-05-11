@@ -101,11 +101,103 @@ impl CacheTelemetry {
         expect(clippy::unused_self, reason = "self is used under feature flags")
     )]
     #[inline]
-    pub(crate) fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {
+    fn record(&self, cache_name: CacheName, operation: CacheOperation, activity: CacheActivity, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.inner.logging_enabled {
             Self::emit(cache_name, operation, activity, duration);
         }
+    }
+
+    // -- Get operation helpers --
+
+    /// Records a cache hit (key found and not expired).
+    #[inline]
+    pub(crate) fn cache_hit(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::Hit, duration);
+    }
+
+    /// Records a cache miss (key not found).
+    #[inline]
+    pub(crate) fn cache_miss(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::Miss, duration);
+    }
+
+    /// Records a cache entry that was found but expired.
+    #[inline]
+    pub(crate) fn cache_expired(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::Expired, duration);
+    }
+
+    /// Records an error during a get operation.
+    #[inline]
+    pub(crate) fn get_error(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::Error, duration);
+    }
+
+    /// Records a fallback tier lookup.
+    #[inline]
+    pub(crate) fn cache_fallback(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::Fallback, duration);
+    }
+
+    /// Records a successful background refresh from fallback.
+    #[inline]
+    pub(crate) fn refresh_hit(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::RefreshHit, duration);
+    }
+
+    /// Records a background refresh miss (fallback had no data or errored).
+    #[inline]
+    pub(crate) fn refresh_miss(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Get, CacheActivity::RefreshMiss, duration);
+    }
+
+    // -- Insert operation helpers --
+
+    /// Records a successful cache insert.
+    #[inline]
+    pub(crate) fn cache_inserted(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Insert, CacheActivity::Inserted, duration);
+    }
+
+    /// Records a cache insert that was rejected by the insert policy.
+    #[inline]
+    pub(crate) fn insert_rejected(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Insert, CacheActivity::Rejected, duration);
+    }
+
+    /// Records an error during an insert operation.
+    #[inline]
+    pub(crate) fn insert_error(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Insert, CacheActivity::Error, duration);
+    }
+
+    // -- Invalidate operation helpers --
+
+    /// Records a successful cache invalidation.
+    #[inline]
+    pub(crate) fn cache_invalidated(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Invalidate, CacheActivity::Invalidated, duration);
+    }
+
+    /// Records an error during an invalidate operation.
+    #[inline]
+    pub(crate) fn invalidate_error(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Invalidate, CacheActivity::Error, duration);
+    }
+
+    // -- Clear operation helpers --
+
+    /// Records a successful cache clear.
+    #[inline]
+    pub(crate) fn cache_cleared(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Clear, CacheActivity::Ok, duration);
+    }
+
+    /// Records an error during a clear operation.
+    #[inline]
+    pub(crate) fn clear_error(&self, cache_name: CacheName, duration: Duration) {
+        self.record(cache_name, CacheOperation::Clear, CacheActivity::Error, duration);
     }
 
     #[cfg(any(feature = "logs", test))]
@@ -114,8 +206,10 @@ impl CacheTelemetry {
         let ev = event.as_str();
         let duration_ns = duration.as_nanos();
 
-        // Tracing level must be constant, so we use a macro to select the appropriate level.
-        // Field names must match constants in attributes.rs - see logs_emit_contains_all_fields_and_values test.
+        // Tracing level must be a constant, so we match on each level separately.
+        // The default tracing target is the module path (cachet::telemetry::cache),
+        // which consumers can filter with `Targets::new().with_target("cachet", ...)`.
+        // Field names must match constants in attributes.rs — see logs_emit_contains_all_fields_and_values test.
         macro_rules! emit_event {
             ($level:ident) => {
                 tracing::$level!(

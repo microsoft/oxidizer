@@ -14,8 +14,8 @@ use cachet_tier::{CacheTier, SizeError};
 use tick::Clock;
 
 use crate::cache::CacheName;
+use crate::telemetry::CacheTelemetry;
 use crate::telemetry::ext::ClockExt;
-use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 use crate::{CacheEntry, Error, InsertPolicy};
 
 /// Wraps a cache tier with telemetry and TTL expiration.
@@ -112,15 +112,14 @@ where
     fn handle_get_result(&self, value: Option<CacheEntry<V>>, duration: Duration) -> Option<CacheEntry<V>> {
         if let Some(entry) = value {
             if self.is_expired(&entry) {
-                self.telemetry
-                    .record(self.name, CacheOperation::Get, CacheActivity::Expired, duration);
+                self.telemetry.cache_expired(self.name, duration);
                 None
             } else {
-                self.telemetry.record(self.name, CacheOperation::Get, CacheActivity::Hit, duration);
+                self.telemetry.cache_hit(self.name, duration);
                 Some(entry)
             }
         } else {
-            self.telemetry.record(self.name, CacheOperation::Get, CacheActivity::Miss, duration);
+            self.telemetry.cache_miss(self.name, duration);
             None
         }
     }
@@ -137,8 +136,7 @@ where
         match timed.result {
             Ok(value) => Ok(self.handle_get_result(value, timed.duration)),
             Err(e) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Get, CacheActivity::Error, timed.duration);
+                self.telemetry.get_error(self.name, timed.duration);
                 Err(e)
             }
         }
@@ -147,20 +145,17 @@ where
     async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
         entry.ensure_cached_at(self.clock.system_time());
         if !self.policy.should_insert(&entry) {
-            self.telemetry
-                .record(self.name, CacheOperation::Insert, CacheActivity::Rejected, Duration::default());
+            self.telemetry.insert_rejected(self.name, Duration::default());
             return Ok(());
         }
 
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::Inserted, timed.duration);
+                self.telemetry.cache_inserted(self.name, timed.duration);
             }
             Err(_) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::Error, timed.duration);
+                self.telemetry.insert_error(self.name, timed.duration);
             }
         }
         timed.result
@@ -170,12 +165,10 @@ where
         let timed = self.clock.timed_async(self.inner.invalidate(key)).await;
         match &timed.result {
             Ok(()) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Invalidate, CacheActivity::Invalidated, timed.duration);
+                self.telemetry.cache_invalidated(self.name, timed.duration);
             }
             Err(_) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Invalidate, CacheActivity::Error, timed.duration);
+                self.telemetry.invalidate_error(self.name, timed.duration);
             }
         }
         timed.result
@@ -185,12 +178,10 @@ where
         let timed = self.clock.timed_async(self.inner.clear()).await;
         match &timed.result {
             Ok(()) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Clear, CacheActivity::Ok, timed.duration);
+                self.telemetry.cache_cleared(self.name, timed.duration);
             }
             Err(_) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Clear, CacheActivity::Error, timed.duration);
+                self.telemetry.clear_error(self.name, timed.duration);
             }
         }
         timed.result
