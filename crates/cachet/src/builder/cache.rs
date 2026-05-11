@@ -370,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn builder_enable_metrics() {
         let clock = Clock::new_frozen();
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
