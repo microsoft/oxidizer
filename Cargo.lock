@@ -78,7 +78,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-channel",
- "opentelemetry",
+ "opentelemetry 0.31.0",
  "smol",
  "static_assertions",
  "thread_aware",
@@ -317,8 +317,8 @@ dependencies = [
  "futures",
  "layered",
  "ohno 0.3.2",
- "opentelemetry",
- "opentelemetry_sdk",
+ "opentelemetry 0.31.0",
+ "opentelemetry_sdk 0.32.0",
  "parking_lot",
  "pin-project-lite",
  "recoverable",
@@ -1623,6 +1623,18 @@ dependencies = [
  "futures-sink",
  "js-sys",
  "pin-project-lite",
+]
+
+[[package]]
+name = "opentelemetry"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0142c63252a9e054e68a4c61a5778f7b14f576274d593f8ce883d191a099682"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
  "thiserror",
 ]
 
@@ -1633,8 +1645,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc8887887e169414f637b18751487cce4e095be787d23fad13c454e2fb1b3811"
 dependencies = [
  "chrono",
- "opentelemetry",
- "opentelemetry_sdk",
+ "opentelemetry 0.31.0",
+ "opentelemetry_sdk 0.31.0",
 ]
 
 [[package]]
@@ -1646,12 +1658,25 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "futures-util",
- "opentelemetry",
+ "opentelemetry 0.31.0",
+ "thiserror",
+]
+
+[[package]]
+name = "opentelemetry_sdk"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "368afaed344110f40b179bb8fbe54bc52d98f9bd2b281799ef32487c2650c956"
+dependencies = [
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "opentelemetry 0.32.0",
  "percent-encoding",
+ "portable-atomic",
  "rand",
  "thiserror",
  "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -2071,9 +2096,9 @@ dependencies = [
  "layered",
  "mutants",
  "ohno 0.3.2",
- "opentelemetry",
+ "opentelemetry 0.31.0",
  "opentelemetry-stdout",
- "opentelemetry_sdk",
+ "opentelemetry_sdk 0.32.0",
  "recoverable",
  "rstest",
  "serde",
@@ -2355,8 +2380,8 @@ dependencies = [
  "futures",
  "mockall",
  "mutants",
- "opentelemetry",
- "opentelemetry_sdk",
+ "opentelemetry 0.31.0",
+ "opentelemetry_sdk 0.32.0",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2511,17 +2536,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
