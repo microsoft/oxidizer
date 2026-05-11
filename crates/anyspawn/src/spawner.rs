@@ -260,6 +260,56 @@ impl Spawner {
             SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_anywhere(data, f))),
         }
     }
+
+    /// Spawns a blocking (synchronous) task on the runtime.
+    ///
+    /// Use this for CPU-bound work or calls into blocking APIs that would
+    /// otherwise stall the async executor. The closure `f` runs to completion
+    /// on a thread that is allowed to block; for Tokio this is the blocking
+    /// thread pool managed by [`tokio::task::spawn_blocking`].
+    ///
+    /// Returns a [`JoinHandle`] that can be awaited to retrieve the task's
+    /// result, or dropped to run the task in fire-and-forget mode.
+    ///
+    /// # Panics
+    ///
+    /// Awaiting the returned `JoinHandle` will panic if the spawned task panics.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # #[cfg(feature = "tokio")]
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// use anyspawn::Spawner;
+    ///
+    /// let spawner = Spawner::new_tokio();
+    /// let value = spawner.spawn_blocking(|| {
+    ///     // expensive synchronous work goes here
+    ///     1 + 1
+    /// }).await;
+    /// assert_eq!(value, 2);
+    /// # }
+    /// # #[cfg(not(feature = "tokio"))]
+    /// # fn main() {}
+    /// ```
+    pub fn spawn_blocking<T, F>(&self, f: F) -> JoinHandle<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        match &self.0 {
+            #[cfg(feature = "tokio")]
+            SpawnerKind::Tokio(handle) => {
+                let jh = match handle {
+                    Some(h) => h.spawn_blocking(f),
+                    None => ::tokio::task::spawn_blocking(f),
+                };
+                JoinHandle(JoinHandleInner::Tokio(jh))
+            }
+            SpawnerKind::Custom(c) => JoinHandle(JoinHandleInner::Custom(c.spawn_blocking(f))),
+        }
+    }
 }
 
 impl Debug for Spawner {

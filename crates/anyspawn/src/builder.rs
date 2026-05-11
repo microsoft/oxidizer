@@ -6,7 +6,7 @@
 use std::fmt::Debug;
 
 use crate::Spawner;
-use crate::custom::{BoxedFuture, SpawnCustom};
+use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
@@ -55,6 +55,13 @@ where
             layer: self.layer.clone(),
         });
         self.inner.spawn_anywhere(layered);
+    }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        // Layers operate on futures, not synchronous closures, so blocking
+        // tasks bypass the layer and are forwarded directly to the inner
+        // spawner.
+        self.inner.spawn_blocking(task);
     }
 }
 
@@ -107,6 +114,17 @@ impl SpawnCustom for TokioSpawner {
 
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
+    }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        match &self.0 {
+            Some(h) => {
+                h.spawn_blocking(task);
+            }
+            None => {
+                ::tokio::task::spawn_blocking(task);
+            }
+        }
     }
 }
 
@@ -328,6 +346,8 @@ mod tests {
             let affinities = thread_aware::affinity::pinned_affinities(&[2]);
             task.relocate(Some(affinities[0]), affinities[1]);
         }
+
+        fn spawn_blocking(&self, _task: BoxedBlockingTask) {}
     }
 
     /// Minimal async task for covering `spawn_anywhere`.
@@ -354,9 +374,10 @@ mod tests {
         layered.relocate(Some(affinities[0]), affinities[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
 
-        // Exercise spawn + spawn_anywhere + layer closure + NoopTask::call_once
+        // Exercise spawn + spawn_anywhere + spawn_blocking + layer closure + NoopTask::call_once
         layered.inner.spawn(Box::pin(async {}));
         layered.inner.spawn_anywhere(Box::new(NoopTask));
+        layered.spawn_blocking(Box::new(|| {}));
         let covered = (layered.layer)(Box::pin(async {}));
         futures::executor::block_on(covered);
         futures::executor::block_on(Box::new(NoopTask).call_once());

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- ✨ Features
+
+  - add `Spawner::spawn_blocking` for running synchronous, CPU-bound or blocking work on a dedicated thread (Tokio uses [`tokio::task::spawn_blocking`]).
+  - extend the `SpawnCustom` trait with a `spawn_blocking` method, allowing custom runtimes to plug in their own blocking-task execution strategy.
+
+- ⚠️ Breaking
+
+  - `SpawnCustom` now requires a `spawn_blocking` method. Existing implementors must add this method to compile.
+
 ## [0.3.0] - 2026-03-27
 
 - ✨ Features

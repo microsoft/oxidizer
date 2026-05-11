@@ -162,6 +162,10 @@ async fn builder_custom_spawner_new() {
         fn spawn_anywhere(&self, task: Box<dyn thread_aware::closure::ThreadAwareAsyncFnOnce<()>>) {
             futures::executor::block_on(task.call_once());
         }
+
+        fn spawn_blocking(&self, task: anyspawn::BoxedBlockingTask) {
+            task();
+        }
     }
 
     let spawner = CustomSpawnerBuilder::new(InlineSpawner).name("inline").build();
