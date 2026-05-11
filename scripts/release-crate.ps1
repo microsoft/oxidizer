@@ -6,12 +6,22 @@
     Updates the version of a Rust crate and generates a CHANGELOG.md file based on git history.
 
 .DESCRIPTION
-    This script automates two main tasks for releasing a Rust crate in a workspace repository:
-    1. Version Bump: Automatically increment the version (major, minor, or patch) or set a specific version.
-    2. Changelog Generation: It generates a CHANGELOG.md file based on git commit history.
+    This script automates the full release of a Rust crate in a workspace repository:
+    1. Version Bump: Automatically increment the version (major, minor, or patch) or set a specific
+       version. Cargo's 0.x.y SemVer rules are honored — for `0.x.y` crates a `major` bump becomes
+       `0.(x+1).0` and both `minor` and `patch` map to bumping `y`.
+    2. Cascade: Every workspace crate that depends on the target via `[dependencies]` or
+       `[build-dependencies]` (transitively) is bumped with the same bump kind. Dev-only dependents
+       are skipped — they automatically pick up the new workspace version. This mirrors the
+       guidance in `.github/prompts/bump-crate-version.prompt.md` and prevents the publish-time
+       inconsistencies that would otherwise occur when a core crate is bumped in isolation.
+    3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
+       dependent. Cascaded crates that have no other commits since their last release get a single
+       `bump \`<target>\` to <new-version>` entry under `🔧 Maintenance` (or `⚠️ Breaking` for
+       major bumps).
 
-    By default, if neither --version nor --bump is specified, the script will bump the minor version
-    and reset the patch version to 0 (e.g., 1.2.3 -> 1.3.0).
+    By default, if neither --version nor --bump is specified, the script will perform a minor bump
+    of the target crate (e.g., 1.2.3 -> 1.3.0, or 0.3.3 -> 0.3.4 for `0.x.y` crates).
 
 .PARAMETER CrateName
     The name of the crate to release. This should match the folder name inside the 'crates' directory.
@@ -157,13 +167,142 @@ function Compare-SemanticVersions {
     return 0  # versions are equal
 }
 
-# Determines whether a version bump is semver-incompatible, following Cargo's
-# semver compatibility rules:
-#   - For stable versions (>= 1.0.0): incompatible if the major version changes.
-#   - For pre-release versions (0.x.y, x >= 1): incompatible if the minor version changes.
-#   - For initial development versions (0.0.x): every change is incompatible.
-# Returns $true if the bump is incompatible, $false otherwise.
-function Test-SemverIncompatibleBump {
+# Loads workspace package metadata once and caches it.
+$script:CachedWorkspaceMetadata = $null
+function Get-WorkspaceMetadata {
+    param([string]$repoRoot)
+
+    if ($null -ne $script:CachedWorkspaceMetadata) {
+        return $script:CachedWorkspaceMetadata
+    }
+
+    $rootManifest = Join-Path $repoRoot "Cargo.toml"
+    $metadataJson = cargo metadata --format-version=1 --no-deps --manifest-path $rootManifest
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to run 'cargo metadata'." -ErrorAction Stop
+    }
+
+    $script:CachedWorkspaceMetadata = $metadataJson | ConvertFrom-Json
+    return $script:CachedWorkspaceMetadata
+}
+
+# Returns information about all workspace crates as an array of objects with:
+#   Name      - cargo package name
+#   Folder    - folder name under crates/ (used as the script's CrateName argument)
+#   Published - $true if the crate is published to crates.io
+#   Deps      - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+function Get-WorkspaceCrates {
+    param([string]$repoRoot)
+
+    $metadata = Get-WorkspaceMetadata -repoRoot $repoRoot
+    $cratesDir = (Join-Path $repoRoot "crates").Replace('/', '\')
+
+    $crates = @()
+    foreach ($package in $metadata.packages) {
+        $manifestDir = (Split-Path $package.manifest_path -Parent).Replace('/', '\')
+        if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        $deps = @()
+        foreach ($dep in $package.dependencies) {
+            # Cascade follows normal and build deps; dev-deps automatically pick up the workspace
+            # version on `cargo publish` and never need their own version bumped.
+            if ($dep.kind -ne 'dev') {
+                $deps += $dep.name.Replace('-', '_')
+            }
+        }
+
+        $crates += [pscustomobject]@{
+            Name      = $package.name
+            Folder    = Split-Path $manifestDir -Leaf
+            Published = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
+            Deps      = $deps
+        }
+    }
+
+    return $crates
+}
+
+# Computes the transitive set of published workspace crates that depend on the given target via
+# [dependencies] or [build-dependencies]. Returns folder names suitable for indexing into crates/.
+# The target itself is not included.
+function Get-AllTransitiveDependents {
+    param(
+        [string]$crateName,
+        [string]$repoRoot
+    )
+
+    $crates = Get-WorkspaceCrates -repoRoot $repoRoot
+    $byName = @{}
+    foreach ($c in $crates) {
+        $byName[$c.Name.Replace('-', '_')] = $c
+    }
+
+    $normalizedTarget = $crateName.Replace('-', '_')
+
+    # BFS over the reverse dependency graph.
+    $toVisit = [System.Collections.Generic.Queue[string]]::new()
+    $toVisit.Enqueue($normalizedTarget)
+    $visited = [System.Collections.Generic.HashSet[string]]::new()
+    [void]$visited.Add($normalizedTarget)
+
+    $dependents = @()
+    while ($toVisit.Count -gt 0) {
+        $current = $toVisit.Dequeue()
+        foreach ($candidate in $crates) {
+            $candidateNorm = $candidate.Name.Replace('-', '_')
+            if ($visited.Contains($candidateNorm)) {
+                continue
+            }
+            if ($candidate.Deps -contains $current) {
+                [void]$visited.Add($candidateNorm)
+                $toVisit.Enqueue($candidateNorm)
+                if ($candidate.Published) {
+                    $dependents += $candidate.Folder
+                }
+            }
+        }
+    }
+
+    return , $dependents
+}
+
+# Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules:
+#   - For x.y.z (x >= 1): major -> (x+1).0.0, minor -> x.(y+1).0, patch -> x.y.(z+1)
+#   - For 0.x.y (x >= 1): major -> 0.(x+1).0, minor and patch -> 0.x.(y+1)
+#   - For 0.0.x:           every bump -> 0.0.(x+1) (every change is breaking)
+function Get-NextVersion {
+    param(
+        [string]$currentVersion,
+        [ValidateSet('major', 'minor', 'patch')]
+        [string]$bump
+    )
+
+    $parts = $currentVersion.Split('.') | ForEach-Object { [int]$_ }
+    while ($parts.Count -lt 3) { $parts += 0 }
+
+    if ($parts[0] -ge 1) {
+        switch ($bump) {
+            'major' { return "$($parts[0] + 1).0.0" }
+            'minor' { return "$($parts[0]).$($parts[1] + 1).0" }
+            'patch' { return "$($parts[0]).$($parts[1]).$($parts[2] + 1)" }
+        }
+    }
+    elseif ($parts[1] -ge 1) {
+        switch ($bump) {
+            'major' { return "0.$($parts[1] + 1).0" }
+            default { return "0.$($parts[1]).$($parts[2] + 1)" }
+        }
+    }
+    else {
+        return "0.0.$($parts[2] + 1)"
+    }
+}
+
+# Infers a bump kind from the difference between two versions. Used when the caller passed an
+# explicit --version so the cascade can apply a matching kind to dependents.
+function Get-BumpKindFromVersions {
     param(
         [string]$oldVersion,
         [string]$newVersion
@@ -171,83 +310,19 @@ function Test-SemverIncompatibleBump {
 
     $oldParts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
     $newParts = $newVersion.Split('.') | ForEach-Object { [int]$_ }
-
     while ($oldParts.Count -lt 3) { $oldParts += 0 }
     while ($newParts.Count -lt 3) { $newParts += 0 }
 
-    # For versions >= 1.0.0, incompatible if major version changed
     if ($oldParts[0] -ge 1) {
-        return $newParts[0] -ne $oldParts[0]
+        if ($newParts[0] -ne $oldParts[0]) { return 'major' }
+        if ($newParts[1] -ne $oldParts[1]) { return 'minor' }
+        return 'patch'
     }
-
-    # For versions 0.x.y where x >= 1, incompatible if minor version changed
     if ($oldParts[1] -ge 1) {
-        return $newParts[1] -ne $oldParts[1]
+        if ($newParts[1] -ne $oldParts[1]) { return 'major' }
+        return 'patch'
     }
-
-    # For versions 0.0.x, every change is incompatible
-    return $newParts[2] -ne $oldParts[2]
-}
-
-# Finds published workspace crates that have a direct (non-dev, non-build) dependency
-# on the given crate. Uses 'cargo metadata' for reliable JSON-based dependency resolution
-# rather than TOML parsing. Returns an array of crate folder names (suitable for passing
-# to release-crate.ps1). Unpublished crates (publish = false) are excluded since they
-# do not need follow-up releases.
-function Get-DirectDependents {
-    param(
-        [string]$crateName,
-        [string]$repoRoot
-    )
-
-    $rootManifest = Join-Path $repoRoot "Cargo.toml"
-    $metadataJson = cargo metadata --format-version=1 --no-deps --manifest-path $rootManifest
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to run 'cargo metadata'. Skipping dependent crate check."
-        return @()
-    }
-
-    $metadata = $metadataJson | ConvertFrom-Json
-
-    # Normalize crate name for comparison (hyphens and underscores are equivalent in Cargo)
-    $normalizedTargetName = $crateName.Replace('-', '_')
-
-    $dependents = @()
-    $cratesDir = (Join-Path $repoRoot "crates").Replace('/', '\')
-
-    foreach ($package in $metadata.packages) {
-        # Normalize path separators for reliable comparison
-        $manifestDir = (Split-Path $package.manifest_path -Parent).Replace('/', '\')
-
-        # Only consider packages within the workspace crates directory
-        if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-            continue
-        }
-
-        # Skip the crate itself
-        $normalizedPackageName = $package.name.Replace('-', '_')
-        if ($normalizedPackageName -eq $normalizedTargetName) {
-            continue
-        }
-
-        # Skip crates that are not published (publish = [] in cargo metadata means publish = false)
-        if ($null -ne $package.publish -and $package.publish.Count -eq 0) {
-            continue
-        }
-
-        # Check if this package has a direct (non-dev, non-build) dependency on the target crate
-        foreach ($dep in $package.dependencies) {
-            $normalizedDepName = $dep.name.Replace('-', '_')
-            if ($normalizedDepName -eq $normalizedTargetName -and [string]::IsNullOrEmpty($dep.kind)) {
-                # Extract folder name from manifest path for use as release-crate.ps1 input
-                $folderName = Split-Path $manifestDir -Leaf
-                $dependents += $folderName
-                break
-            }
-        }
-    }
-
-    return $dependents
+    return 'major'
 }
 
 function Get-CurrentVersion {
@@ -397,31 +472,8 @@ function Update-CrateVersion {
 
     $newVersion = ""
     if ([string]::IsNullOrEmpty($version)) {
-        $versionParts = $currentVersion.Split('.')
-        # Ensure versionParts has 3 elements (major, minor, patch)
-        while ($versionParts.Count -lt 3) {
-            $versionParts += '0'
-        }
-
-        # Determine which version component to bump
         $bumpType = if ([string]::IsNullOrEmpty($bump)) { 'minor' } else { $bump }
-
-        switch ($bumpType) {
-            'major' {
-                $versionParts[0] = [int]$versionParts[0] + 1
-                $versionParts[1] = '0'
-                $versionParts[2] = '0'
-            }
-            'minor' {
-                $versionParts[1] = [int]$versionParts[1] + 1
-                $versionParts[2] = '0'
-            }
-            'patch' {
-                $versionParts[2] = [int]$versionParts[2] + 1
-            }
-        }
-
-        $newVersion = $versionParts -join '.'
+        $newVersion = Get-NextVersion -currentVersion $currentVersion -bump $bumpType
         Write-Host "✅ Incrementing $bumpType version from $currentVersion to $newVersion."
     }
     else {
@@ -444,11 +496,6 @@ function Update-CrateVersion {
     $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content $rootCargoToml -Raw) -replace $regex, $newVersion | Set-Content $rootCargoToml -NoNewline
 
-    cargo check -p $crateName --quiet | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Cargo check failed after version update. Please verify the changes." -ErrorAction Stop
-    }
-
     return $newVersion
 }
 
@@ -458,7 +505,11 @@ function Write-Changelog {
         [string]$newVersion,
         [string]$crateFolder,
         [string]$changelogFile,
-        [string]$prBaseUrl
+        [string]$prBaseUrl,
+        # Optional: when this crate is being bumped purely as a cascade from another crate,
+        # describe the cascade so a maintenance entry can be written even if the crate has
+        # no commits since its last release. Shape: @{ Target = '<name>'; Version = '<x.y.z>'; Breaking = $false }
+        [hashtable]$cascadeReason = $null
     )
 
     $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
@@ -486,15 +537,33 @@ function Write-Changelog {
         $rawCommits = @($rawCommits)
     }
 
-    if (-not $rawCommits) {
+    $formattedCommits = @()
+    if ($rawCommits.Count -gt 0) {
+        $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
+    }
+
+    if ($formattedCommits.Count -eq 0 -and $null -eq $cascadeReason) {
         Write-Warning "No unreleased commits found to add to the changelog."
         return
     }
 
-    $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
-    if (-not $formattedCommits) {
-        Write-Warning "No relevant commits found to add to the changelog (all commits may be filtered out)."
-        return
+    # Prepend a cascade entry when this crate is being bumped purely because one of its
+    # dependencies was bumped. Format follows existing convention in the repo
+    # (e.g. crates/cachet/CHANGELOG.md):
+    #   - 🔧 Maintenance
+    #     - bump `<target>` to <version>
+    if ($null -ne $cascadeReason) {
+        $sectionHeader = if ($cascadeReason.Breaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
+        $cascadeLines = @(
+            $sectionHeader,
+            "",
+            "  - bump ``$($cascadeReason.Target)`` to $($cascadeReason.Version)"
+        )
+        if ($formattedCommits.Count -gt 0) {
+            $formattedCommits = $cascadeLines + @("") + $formattedCommits
+        } else {
+            $formattedCommits = $cascadeLines
+        }
     }
 
     # Build the new version section
@@ -561,35 +630,43 @@ function Update-Readme {
     }
 }
 
-# Displays a warning when a semver-incompatible release has been prepared and other
-# published workspace crates depend on the released crate. These dependents will need
-# their own releases to reference the new version. The user must decide for each
-# dependent whether the change is breaking in that crate's context and run
-# release-crate.ps1 accordingly.
-function Show-DependentCratesWarning {
+# Bumps a single crate's version, regenerates its changelog and README.
+# Returns the new version string.
+function Invoke-CrateRelease {
     param(
         [string]$crateName,
-        [string]$oldVersion,
-        [string]$newVersion,
-        [string[]]$dependentCrates
+        [string]$crateFolder,
+        [string]$crateCargoToml,
+        [string]$rootCargoToml,
+        [string]$changelogFile,
+        [string]$prBaseUrl,
+        [string]$version,
+        [string]$bump,
+        [hashtable]$cascadeReason = $null
+    )
+
+    $newVersion = Update-CrateVersion -crateName $crateName -version $version -bump $bump `
+        -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
+    if ($null -eq $newVersion) {
+        Write-Error "Failed to update version for crate '$crateName'." -ErrorAction Stop
+    }
+
+    Write-Changelog -crateName $crateName -newVersion $newVersion -crateFolder $crateFolder `
+        -changelogFile $changelogFile -prBaseUrl $prBaseUrl -cascadeReason $cascadeReason
+    Update-Readme -crateName $crateName -crateFolder $crateFolder
+
+    return $newVersion
+}
+
+function Show-ReleaseSummary {
+    param(
+        [array]$releases
     )
 
     Write-Host ""
-    Write-Host "⚠️  SEMVER-INCOMPATIBLE RELEASE DETECTED" -ForegroundColor Yellow
-    Write-Host "The version bump from $oldVersion to $newVersion is semver-incompatible." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "The following workspace crates have a direct dependency on '$crateName'" -ForegroundColor Yellow
-    Write-Host "and will also need to be released to reference the new version:" -ForegroundColor Yellow
-    Write-Host ""
-    foreach ($dependent in $dependentCrates) {
-        Write-Host "  - $dependent" -ForegroundColor Yellow
-    }
-    Write-Host ""
-    Write-Host "For each dependent crate, decide whether this is a breaking or non-breaking" -ForegroundColor Yellow
-    Write-Host "change in that crate's context, then run:" -ForegroundColor Yellow
-    Write-Host ""
-    foreach ($dependent in $dependentCrates) {
-        Write-Host "  .\scripts\release-crate.ps1 $dependent --bump <major|minor|patch>" -ForegroundColor DarkGray
+    Write-Host "📦 Released crates:" -ForegroundColor Green
+    foreach ($r in $releases) {
+        Write-Host "  - $($r.Crate): $($r.OldVersion) -> $($r.NewVersion)" -ForegroundColor Green
     }
     Write-Host ""
 }
@@ -686,22 +763,66 @@ if (-not [string]::IsNullOrEmpty($Version)) {
 try {
     $oldVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
 
-    $newVersion = Update-CrateVersion -crateName $CrateName -version $Version -bump $Bump -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
-    if ($null -eq $newVersion) {
-        Write-Error "Failed to update crate version. Aborting."
-        Exit 1
+    $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
+        -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml -changelogFile $changelogFile `
+        -prBaseUrl $prBaseUrl -version $Version -bump $Bump
+
+    # Determine the bump kind that was applied so we can cascade the same kind to dependents.
+    # When the caller passed --version we infer it from old -> new.
+    $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
+        $Bump
+    } elseif (-not [string]::IsNullOrEmpty($Version)) {
+        Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
+    } else {
+        'minor'
     }
 
-    Write-Changelog -crateName $CrateName -newVersion $newVersion -crateFolder $crateFolder -changelogFile $changelogFile -prBaseUrl $prBaseUrl
-    Update-Readme -crateName $CrateName -crateFolder $crateFolder
+    $releases = @(
+        [pscustomobject]@{ Crate = $CrateName; OldVersion = $oldVersion; NewVersion = $newVersion }
+    )
 
-    if (Test-SemverIncompatibleBump -oldVersion $oldVersion -newVersion $newVersion) {
-        $dependentCrates = Get-DirectDependents -crateName $CrateName -repoRoot $repoRoot
-        if ($dependentCrates.Count -gt 0) {
-            Show-DependentCratesWarning -crateName $CrateName -oldVersion $oldVersion -newVersion $newVersion -dependentCrates $dependentCrates
+    # Cascade the same bump kind to every transitive non-dev workspace dependent. This keeps
+    # workspace-pinned versions consistent and prevents the publish-time failures described in
+    # https://github.com/microsoft/oxidizer/blob/main/.github/prompts/bump-crate-version.prompt.md
+    $dependents = Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot
+    if ($dependents.Count -gt 0) {
+        Write-Host ""
+        Write-Host "🔗 Cascading $cascadeBump bump to $($dependents.Count) dependent crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
+
+        $cascadeReason = @{
+            Target   = $CrateName
+            Version  = $newVersion
+            Breaking = ($cascadeBump -eq 'major')
+        }
+
+        foreach ($dependent in $dependents) {
+            $depFolder = Join-Path $repoRoot "crates/$dependent"
+            $depCargo  = Join-Path $depFolder "Cargo.toml"
+            $depChange = Join-Path $depFolder "CHANGELOG.md"
+
+            if (-not (Test-Path $depCargo)) {
+                Write-Warning "Skipping cascade for '$dependent': Cargo.toml not found at '$depCargo'."
+                continue
+            }
+
+            $depOld = Get-CurrentVersion -cargoTomlPath $depCargo
+            $depNew = Invoke-CrateRelease -crateName $dependent -crateFolder $depFolder `
+                -crateCargoToml $depCargo -rootCargoToml $rootCargoToml -changelogFile $depChange `
+                -prBaseUrl $prBaseUrl -version "" -bump $cascadeBump -cascadeReason $cascadeReason
+
+            $releases += [pscustomobject]@{ Crate = $dependent; OldVersion = $depOld; NewVersion = $depNew }
         }
     }
 
+    # One workspace-wide cargo check after every version edit to confirm the workspace still resolves.
+    Write-Host ""
+    Write-Host "🔍 Running workspace cargo check..." -ForegroundColor Cyan
+    cargo check --workspace --quiet | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Workspace 'cargo check' failed after version updates. Please verify the changes." -ErrorAction Stop
+    }
+
+    Show-ReleaseSummary -releases $releases
     Show-FinalMessage -crateName $CrateName -newVersion $newVersion
 }
 catch {
