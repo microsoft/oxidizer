@@ -199,7 +199,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8pp1eYQdp8oG6dLFo3dCipdG8QD3fn6OuTtG82kq1QydD6NYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMoJoc2VhdGJlbHRlMC40LjWCZHRpY2tlMC4yLjKCbXRvd2VyX3NlcnZpY2VlMC4zLjM
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8pp1eYQdp8oG6dLFo3dCipdG8QD3fn6OuTtG82kq1QydD6NYWSFgmdsYXllcmVkZTAuMy4wgmtyZWNvdmVyYWJsZWUwLjEuMoJoc2VhdGJlbHRlMC40LjWCZHRpY2tlMC4zLjCCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.0
  [__link1]: https://docs.rs/layered/0.3.0/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.4.5/seatbelt/hedging/index.html
@@ -212,7 +212,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
  [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
  [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
- [__link2]: https://docs.rs/tick/0.2.2/tick/?search=Clock
+ [__link2]: https://docs.rs/tick/0.3.0/tick/?search=Clock
  [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
  [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
  [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs
@@ -223,7 +223,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
  [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs
  [__link29]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs
- [__link3]: https://crates.io/crates/tick/0.2.2
+ [__link3]: https://crates.io/crates/tick/0.3.0
  [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs
  [__link31]: https://docs.rs/seatbelt/0.4.5/seatbelt/timeout/index.html
  [__link32]: https://docs.rs/seatbelt/0.4.5/seatbelt/retry/index.html
