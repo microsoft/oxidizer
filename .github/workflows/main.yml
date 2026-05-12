@@ -144,15 +144,18 @@ jobs:
         with:
           enable-sccache: true
           rust-toolchain: RUST_LATEST
-          rust-components: clippy, rustfmt
+          rust-components: clippy
           cargo-tools: CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
 
       # execute
       - name: Clippy
         run: cargo clippy --workspace ${{ needs.delta.outputs.exclude_not_modified }} --all-targets --all-features -- -D warnings
-      - name: Source Format
+      - name: Install Nightly Rustfmt
         if: success() || failure()
-        run: cargo fmt -- --check
+        run: rustup toolchain install ${{ env.RUST_NIGHTLY }} --profile minimal --component rustfmt
+      - name: Source Format (nightly)
+        if: success() || failure()
+        run: cargo +${{ env.RUST_NIGHTLY }} fmt --all -- --config-path ./unstable-rustfmt.toml --check
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
