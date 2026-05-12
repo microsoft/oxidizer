@@ -15,7 +15,10 @@ use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{Attribute, DataStruct, Field};
 
-use crate::template_parser::{TemplatePart, UriTemplate};
+use crate::template_parser::{ParamGroup, TemplatePart, UriTemplate};
+
+type FieldMap<'a> = std::collections::HashMap<String, &'a Field>;
+type FieldOptsMap<'a> = std::collections::HashMap<String, &'a FieldOpts>;
 
 #[derive(Debug, FromAttributes)]
 #[darling(attributes(templated))]
@@ -128,24 +131,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         .map(|p| p.name.to_owned())
         .collect();
 
-    let is_restricted = |p: &Ident| !unrestricted_params.contains(&p.to_string());
-
-    let collect_params: Vec<_> = struct_fields
-        .iter()
-        .map(|f| {
-            let ident = f.ident.as_ref().expect("struct fields must be named");
-            let is_restricted = is_restricted(ident);
-            let ty_span = f.ty.span();
-
-            // Restricted fields use .escape(), unrestricted use .raw()
-            if is_restricted {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::Escape::escape(&self.#ident); }
-            } else {
-                quote_spanned! { ty_span => let #ident = ::templated_uri::Raw::raw(&self.#ident); }
-            }
-        })
-        .collect();
-
+    let render_body = construct_render(&template, &struct_fields, &unrestricted_params);
     let redacted_display = construct_redacted_display(&template, &struct_fields, &fields, unredacted);
 
     let label_impl = label.as_ref().map_or_else(
@@ -168,9 +154,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
 
             fn render(&self) -> ::std::string::String {
-                #(#collect_params)*
-
-                ::std::format!(#format_template)
+                #render_body
             }
 
             fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
@@ -200,15 +184,262 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
     }
 }
 
-fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], fields: &Fields, unredacted: bool) -> TokenStream {
-    // Build a map from field name to field for lookup
-    let field_map: std::collections::HashMap<String, &Field> = struct_fields
+/// Checks whether `ty` is syntactically `Option<T>` (or `std::option::Option<T>`, etc.)
+/// and returns the inner type `T`.
+///
+/// This is the standard approach used by serde, clap, and other derive macros.
+/// It won't detect type aliases for `Option`, which is a known and accepted limitation.
+fn extract_option_inner(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last_segment.arguments else {
+        return None;
+    };
+    if args.args.len() != 1 {
+        return None;
+    }
+    let syn::GenericArgument::Type(inner_ty) = &args.args[0] else {
+        return None;
+    };
+    Some(inner_ty)
+}
+
+/// Generates the body of the `render()` method.
+///
+/// Walks the parsed template parts and emits `Write::write_fmt` calls (via UFCS,
+/// to avoid bringing `fmt::Write` into the caller's scope), handling RFC 6570
+/// undefined-value semantics for `Option<T>` fields.
+fn construct_render(template: &UriTemplate, struct_fields: &[&Field], unrestricted_params: &HashSet<String>) -> TokenStream {
+    let field_map: FieldMap<'_> = struct_fields
         .iter()
         .filter_map(|f| f.ident.as_ref().map(|ident| (ident.to_string(), *f)))
         .collect();
 
-    // Build a map from field name to field options for checking unredacted attribute
-    let field_opts_map: std::collections::HashMap<String, &FieldOpts> = fields
+    // Pre-allocate the rendered-URI buffer using a static heuristic computed from the
+    // template parts. See `render_capacity_hint` for the precise semantics; it may
+    // slightly over-allocate when a group's parameters are all `None` at runtime, which
+    // is far cheaper than the realloc chain a fresh `String::new()` would incur.
+    let initial_capacity = render_capacity_hint(template);
+
+    let statements: Vec<TokenStream> = template
+        .template_parts()
+        .iter()
+        .flat_map(|part| match part {
+            TemplatePart::Content(content) => {
+                vec![quote! { __out.push_str(#content); }]
+            }
+            TemplatePart::ParamGroup(group) => construct_render_group(group, &field_map, unrestricted_params),
+        })
+        .collect();
+
+    quote! {
+        let mut __out = ::std::string::String::with_capacity(#initial_capacity);
+        #(#statements)*
+        __out
+    }
+}
+
+/// Compile-time capacity heuristic for the `String` buffer that holds a rendered URI.
+///
+/// The returned size counts every byte the macro can statically *name*:
+///
+/// - Static `Content` segments are always present.
+/// - Each parameter group's fixed literals (prefix, separators between values, and the
+///   `key=` literal for key/value expansions like `{?a}` and `{;a}`).
+///
+/// Parameter values themselves are not counted because their runtime size is unknown.
+/// The heuristic does **not** discount per-parameter literals attached to `Option<T>`
+/// fields, so when a group's optional values are all `None` at runtime, the buffer
+/// over-allocates by a few bytes (typically one prefix byte plus the key length plus
+/// `=`). That small over-attribution is harmless: a strict lower bound would require
+/// threading field metadata into this function, and the worst-case waste is bounded
+/// by a few bytes per group, well below a single allocator slab.
+fn render_capacity_hint(template: &UriTemplate) -> usize {
+    template
+        .template_parts()
+        .iter()
+        .map(|part| match part {
+            TemplatePart::Content(content) => content.len(),
+            TemplatePart::ParamGroup(group) => {
+                let prefix_len = group.prefix().map_or(0, str::len);
+                let param_names = group.param_names();
+                // Every RFC 6570 separator emitted by `ParamKind::separator()` (`,`, `;`,
+                // `&`, `.`, `/`) is exactly 1 byte, so the separator-byte count equals the
+                // number of separators. If the vocabulary ever grows a multi-byte member,
+                // multiply by `group.separator().len()` and add a unit test for it.
+                let separators_len = param_names.len().saturating_sub(1);
+                let kv_len = if group.is_kv() {
+                    // Each value gets `key=` prepended.
+                    param_names.iter().map(|n| n.len() + 1).sum::<usize>()
+                } else {
+                    0
+                };
+                prefix_len + separators_len + kv_len
+            }
+        })
+        .sum()
+}
+
+/// Returns true if any parameter in `param_names` is backed by an `Option<T>` field.
+fn group_has_any_optional(param_names: &[&str], field_map: &FieldMap<'_>) -> bool {
+    param_names
+        .iter()
+        .any(|name| field_map.get(*name).is_some_and(|f| extract_option_inner(&f.ty).is_some()))
+}
+
+/// Returns the `(emit_delim, emit_kv)` token-stream pair used inside the optional-aware
+/// `__first`-tracked code paths in both `render_group_with_optional` and
+/// `redacted_display_group_with_optional`.
+///
+/// `write_lit` is a closure that emits the writer-specific statement for writing a
+/// single string literal: `__out.push_str(s)` for render, `f.write_str(s)?` for the
+/// `RedactedDisplay` impl. Factoring this here keeps both code paths in lockstep so
+/// future operator tweaks can't drift between `render()` and `RedactedDisplay::fmt`.
+fn emit_optional_delim_and_kv(
+    prefix: &str,
+    separator: &str,
+    key: Option<&str>,
+    write_lit: impl Fn(&str) -> TokenStream,
+) -> (TokenStream, TokenStream) {
+    let emit_delim = if prefix.is_empty() {
+        let sep = write_lit(separator);
+        quote! { if !__first { #sep } }
+    } else {
+        let pfx = write_lit(prefix);
+        let sep = write_lit(separator);
+        quote! { if __first { #pfx } else { #sep } }
+    };
+    let emit_kv = key.map_or_else(TokenStream::new, |k| {
+        let key_tok = write_lit(k);
+        let eq_tok = write_lit("=");
+        quote! { #key_tok #eq_tok }
+    });
+    (emit_delim, emit_kv)
+}
+
+/// Generates render code for a single parameter group (e.g. `{?x,y}`, `{/a,b}`, `{x}`).
+///
+/// Dispatches to the all-required fast path or the optional-aware path depending on
+/// whether the group contains any `Option<T>` field.
+fn construct_render_group(group: &ParamGroup, field_map: &FieldMap<'_>, unrestricted_params: &HashSet<String>) -> Vec<TokenStream> {
+    if group_has_any_optional(group.param_names(), field_map) {
+        render_group_with_optional(group, field_map, unrestricted_params)
+    } else {
+        render_group_all_required(group, field_map, unrestricted_params)
+    }
+}
+
+/// Render path for groups whose parameters are all required.
+///
+/// Emits a flat sequence of `push_str` and `write!` statements. No `__first`
+/// tracking is needed because every parameter contributes a value.
+fn render_group_all_required(group: &ParamGroup, field_map: &FieldMap<'_>, unrestricted_params: &HashSet<String>) -> Vec<TokenStream> {
+    let prefix = group.prefix().unwrap_or_default();
+    let separator = group.separator();
+    let is_kv = group.is_kv();
+    let param_names = group.param_names();
+
+    let mut stmts = Vec::new();
+    for (i, param_name) in param_names.iter().enumerate() {
+        let delim = if i == 0 { prefix } else { separator };
+        if !delim.is_empty() {
+            stmts.push(quote! { __out.push_str(#delim); });
+        }
+        if is_kv {
+            let key = *param_name;
+            stmts.push(quote! { __out.push_str(#key); __out.push_str("="); });
+        }
+        let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
+        let field_ident = field.ident.as_ref().expect("struct fields must be named");
+        let ty_span = field.ty.span();
+        if unrestricted_params.contains(*param_name) {
+            stmts.push(quote_spanned! { ty_span => ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", ::templated_uri::Raw::raw(&self.#field_ident))).expect("Display impls for templated URI parameter values are expected to be infallible"); });
+        } else {
+            stmts.push(
+                quote_spanned! { ty_span => ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", ::templated_uri::Escape::escape(&self.#field_ident))).expect("Display impls for templated URI parameter values are expected to be infallible"); },
+            );
+        }
+    }
+    stmts
+}
+
+/// Render path for groups containing at least one `Option<T>` parameter.
+///
+/// Emits a `__first`-tracked block per RFC 6570 section 3.2: when a variable is
+/// undefined (`None`), its prefix or separator is also omitted so that the
+/// first *defined* variable receives the prefix and subsequent defined
+/// variables receive the separator.
+fn render_group_with_optional(group: &ParamGroup, field_map: &FieldMap<'_>, unrestricted_params: &HashSet<String>) -> Vec<TokenStream> {
+    let prefix = group.prefix().unwrap_or_default();
+    let separator = group.separator();
+    let is_kv = group.is_kv();
+    let param_names = group.param_names();
+
+    let mut inner_stmts = Vec::new();
+    inner_stmts.push(quote! { let mut __first = true; });
+
+    for param_name in param_names {
+        let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
+        let field_ident = field.ident.as_ref().expect("struct fields must be named");
+        let optional_inner = extract_option_inner(&field.ty);
+        let ty_span = optional_inner.map_or_else(|| field.ty.span(), syn::spanned::Spanned::span);
+
+        // For `Option<&T>` the `Some(ref __val)` binding produces `__val: &&T`. Pass `*__val`
+        // (which is `&T`) to the trait method so resolution sees the intended receiver type.
+        let inner_is_reference = optional_inner.is_some_and(|ty| matches!(ty, syn::Type::Reference(_)));
+        let val_arg = if inner_is_reference {
+            quote! { *__val }
+        } else {
+            quote! { __val }
+        };
+
+        let escape_expr = if unrestricted_params.contains(*param_name) {
+            quote_spanned! { ty_span => ::templated_uri::Raw::raw(#val_arg) }
+        } else {
+            quote_spanned! { ty_span => ::templated_uri::Escape::escape(#val_arg) }
+        };
+
+        let key_for_kv = is_kv.then_some(*param_name);
+        let (emit_delim, emit_kv) = emit_optional_delim_and_kv(prefix, separator, key_for_kv, |s| quote! { __out.push_str(#s); });
+
+        let body = quote! {
+            #emit_delim
+            #emit_kv
+            ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", #escape_expr)).expect("Display impls for templated URI parameter values are expected to be infallible");
+            __first = false;
+        };
+
+        if optional_inner.is_some() {
+            inner_stmts.push(quote! {
+                if let ::core::option::Option::Some(ref __val) = self.#field_ident {
+                    #body
+                }
+            });
+        } else {
+            inner_stmts.push(quote! {
+                {
+                    let __val = &self.#field_ident;
+                    #body
+                }
+            });
+        }
+    }
+
+    vec![quote! { { #(#inner_stmts)* } }]
+}
+
+fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], fields: &Fields, unredacted: bool) -> TokenStream {
+    let field_map: FieldMap<'_> = struct_fields
+        .iter()
+        .filter_map(|f| f.ident.as_ref().map(|ident| (ident.to_string(), *f)))
+        .collect();
+
+    let field_opts_map: FieldOptsMap<'_> = fields
         .fields
         .iter()
         .filter_map(|f| f.ident.as_ref().map(|ident| (ident.to_string(), f)))
@@ -219,53 +450,200 @@ fn construct_redacted_display(template: &UriTemplate, struct_fields: &[&Field], 
         .iter()
         .flat_map(|part| match part {
             TemplatePart::Content(content) => {
-                // For static content, just write it to the formatter
                 vec![quote! { f.write_str(#content)?; }]
             }
-            TemplatePart::ParamGroup(group) => {
-                let prefix = group.prefix().unwrap_or_default();
-                let separator = group.separator();
-                let is_kv = group.is_kv();
-                let param_names = group.param_names();
-
-                let mut stmts = Vec::new();
-                for (i, param_name) in param_names.iter().enumerate() {
-                    // Emit prefix (first param) or separator (subsequent params)
-                    let delim = if i == 0 { prefix } else { separator };
-                    if !delim.is_empty() {
-                        stmts.push(quote! { f.write_str(#delim)?; });
-                    }
-
-                    // Emit key= for KV expansions (e.g. ?key=value, ;key=value)
-                    if is_kv {
-                        let key = *param_name;
-                        stmts.push(quote! { f.write_str(#key)?; f.write_str("=")?; });
-                    }
-
-                    let field = field_map.get(*param_name).expect("Field should exist (validated earlier)");
-                    let field_ident = field.ident.as_ref().expect("struct fields must be named");
-                    let field_type = &field.ty;
-
-                    // Check if this specific field is marked as unredacted
-                    let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
-
-                    if unredacted || field_unredacted {
-                        stmts.push(quote! {
-                            ::std::write!(f, "{}", self.#field_ident)?;
-                        });
-                    } else {
-                        stmts.push(quote! {
-                            <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, engine, f)?;
-                        });
-                    }
-                }
-                stmts
-            }
+            TemplatePart::ParamGroup(group) => construct_redacted_display_group(group, &field_map, &field_opts_map, unredacted),
         })
         .collect();
 
     quote! {
         #(#statements)*
         ::std::result::Result::Ok(())
+    }
+}
+
+/// Generates redacted-display code for a single parameter group.
+///
+/// Dispatches to the all-required fast path or the optional-aware path depending on
+/// whether the group contains any `Option<T>` field.
+fn construct_redacted_display_group(
+    group: &ParamGroup,
+    field_map: &FieldMap<'_>,
+    field_opts_map: &FieldOptsMap<'_>,
+    unredacted: bool,
+) -> Vec<TokenStream> {
+    if group_has_any_optional(group.param_names(), field_map) {
+        redacted_display_group_with_optional(group, field_map, field_opts_map, unredacted)
+    } else {
+        redacted_display_group_all_required(group, field_map, field_opts_map, unredacted)
+    }
+}
+
+/// Redacted-display path for groups whose parameters are all required.
+fn redacted_display_group_all_required(
+    group: &ParamGroup,
+    field_map: &FieldMap<'_>,
+    field_opts_map: &FieldOptsMap<'_>,
+    unredacted: bool,
+) -> Vec<TokenStream> {
+    let prefix = group.prefix().unwrap_or_default();
+    let separator = group.separator();
+    let is_kv = group.is_kv();
+    let param_names = group.param_names();
+
+    let mut stmts = Vec::new();
+    for (i, param_name) in param_names.iter().enumerate() {
+        let delim = if i == 0 { prefix } else { separator };
+        if !delim.is_empty() {
+            stmts.push(quote! { f.write_str(#delim)?; });
+        }
+        if is_kv {
+            let key = *param_name;
+            stmts.push(quote! { f.write_str(#key)?; f.write_str("=")?; });
+        }
+        let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
+        let field_ident = field.ident.as_ref().expect("struct fields must be named");
+        let field_type = &field.ty;
+        let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
+
+        if unredacted || field_unredacted {
+            stmts.push(quote! { ::std::write!(f, "{}", self.#field_ident)?; });
+        } else {
+            stmts.push(quote! { <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, engine, f)?; });
+        }
+    }
+    stmts
+}
+
+/// Redacted-display path for groups containing at least one `Option<T>` parameter.
+///
+/// Mirrors `render_group_with_optional`: undefined values are skipped along with
+/// their prefix/separator using `__first` tracking.
+fn redacted_display_group_with_optional(
+    group: &ParamGroup,
+    field_map: &FieldMap<'_>,
+    field_opts_map: &FieldOptsMap<'_>,
+    unredacted: bool,
+) -> Vec<TokenStream> {
+    let prefix = group.prefix().unwrap_or_default();
+    let separator = group.separator();
+    let is_kv = group.is_kv();
+    let param_names = group.param_names();
+
+    let mut inner_stmts = Vec::new();
+    inner_stmts.push(quote! { let mut __first = true; });
+
+    for param_name in param_names {
+        let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
+        let field_ident = field.ident.as_ref().expect("struct fields must be named");
+        let optional_inner = extract_option_inner(&field.ty);
+        let field_unredacted = field_opts_map.get(*param_name).is_some_and(|opts| opts.unredacted);
+
+        let key_for_kv = is_kv.then_some(*param_name);
+        let (emit_delim, emit_kv) = emit_optional_delim_and_kv(prefix, separator, key_for_kv, |s| quote! { f.write_str(#s)?; });
+
+        if let Some(inner_type) = optional_inner {
+            // For `Option<&T>` the `Some(ref __val)` binding produces `__val: &&T`. Peel
+            // the AST `Type::Reference` and dereference once so the generated trait call
+            // resolves against `T: RedactedDisplay`, not the less useful `&T: RedactedDisplay`.
+            let (self_ty, val_arg) = match inner_type {
+                syn::Type::Reference(reference) => {
+                    let elem = &*reference.elem;
+                    (quote! { #elem }, quote! { *__val })
+                }
+                _ => (quote! { #inner_type }, quote! { __val }),
+            };
+            let display_value = if unredacted || field_unredacted {
+                quote! { ::std::write!(f, "{}", #val_arg)?; }
+            } else {
+                quote! { <#self_ty as ::data_privacy::RedactedDisplay>::fmt(#val_arg, engine, f)?; }
+            };
+
+            inner_stmts.push(quote! {
+                if let ::core::option::Option::Some(ref __val) = self.#field_ident {
+                    #emit_delim
+                    #emit_kv
+                    #display_value
+                    __first = false;
+                }
+            });
+        } else {
+            let display_value = if unredacted || field_unredacted {
+                quote! { ::std::write!(f, "{}", self.#field_ident)?; }
+            } else {
+                let field_type = &field.ty;
+                quote! { <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, engine, f)?; }
+            };
+
+            inner_stmts.push(quote! {
+                {
+                    #emit_delim
+                    #emit_kv
+                    #display_value
+                    __first = false;
+                }
+            });
+        }
+    }
+
+    vec![quote! { { #(#inner_stmts)* } }]
+}
+
+#[cfg(test)]
+mod tests {
+    use syn::parse_quote;
+
+    use super::extract_option_inner;
+
+    #[test]
+    fn extract_option_inner_some_for_simple_option() {
+        let ty: syn::Type = parse_quote! { Option<u32> };
+        let inner = extract_option_inner(&ty).expect("Option<u32> should match");
+        let inner_str = quote::quote! { #inner }.to_string();
+        assert_eq!(inner_str, "u32");
+    }
+
+    #[test]
+    fn extract_option_inner_some_for_qualified_option() {
+        // Both `std::option::Option<T>` and `core::option::Option<T>` are accepted by
+        // matching only on the last path segment.
+        let ty: syn::Type = parse_quote! { std::option::Option<String> };
+        let inner = extract_option_inner(&ty).expect("qualified Option should match");
+        let inner_str = quote::quote! { #inner }.to_string();
+        assert_eq!(inner_str, "String");
+    }
+
+    #[test]
+    fn extract_option_inner_none_for_non_path_type() {
+        // `&Option<u32>` is `Type::Reference`, not `Type::Path` — must short-circuit.
+        let ty: syn::Type = parse_quote! { &Option<u32> };
+        assert!(extract_option_inner(&ty).is_none());
+    }
+
+    #[test]
+    fn extract_option_inner_none_for_non_option_path() {
+        let ty: syn::Type = parse_quote! { Vec<u32> };
+        assert!(extract_option_inner(&ty).is_none());
+    }
+
+    #[test]
+    fn extract_option_inner_none_for_bare_option_without_generics() {
+        // Bare `Option` parses with `PathArguments::None`, not `AngleBracketed`.
+        let ty: syn::Type = parse_quote! { Option };
+        assert!(extract_option_inner(&ty).is_none());
+    }
+
+    #[test]
+    fn extract_option_inner_none_for_option_with_two_type_args() {
+        // Malformed `Option<T, U>` — the length check rejects it.
+        let ty: syn::Type = parse_quote! { Option<u32, String> };
+        assert!(extract_option_inner(&ty).is_none());
+    }
+
+    #[test]
+    fn extract_option_inner_none_for_option_with_lifetime_arg() {
+        // `Option<'a>` parses but the generic arg is a `Lifetime`, not a `Type`.
+        let ty: syn::Type = parse_quote! { Option<'a> };
+        assert!(extract_option_inner(&ty).is_none());
     }
 }

@@ -218,6 +218,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
     fn test_templated_uri_impl() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
@@ -248,11 +252,44 @@ mod tests {
                 ::core::option::Option::None
             }
             fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
+                let mut __out = ::std::string::String::with_capacity(16usize);
+                __out.push_str("/example.com/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param3)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param4)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out
             }
             fn to_path_and_query(
                 &self,
@@ -304,6 +341,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
     fn test_templated_unredacted_uri_impl() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}", unredacted };
         let item = quote! {
@@ -337,11 +378,44 @@ mod tests {
                 ::core::option::Option::None
             }
             fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
+                let mut __out = ::std::string::String::with_capacity(16usize);
+                __out.push_str("/example.com/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param3)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param4)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out
             }
             fn to_path_and_query(
                 &self,
@@ -389,6 +463,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
     fn test_field_level_unredacted() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
@@ -420,11 +498,44 @@ mod tests {
                 ::core::option::Option::None
             }
             fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
+                let mut __out = ::std::string::String::with_capacity(16usize);
+                __out.push_str("/example.com/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param3)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param4)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out
             }
             fn to_path_and_query(
                 &self,
@@ -472,6 +583,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
     fn test_standalone_unredacted() {
         let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
         let item = quote! {
@@ -503,11 +618,44 @@ mod tests {
                 ::core::option::Option::None
             }
             fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
+                let mut __out = ::std::string::String::with_capacity(16usize);
+                __out.push_str("/example.com/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param3)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.param4)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out
             }
             fn to_path_and_query(
                 &self,
@@ -555,6 +703,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
     fn test_query_param_is_kv_expansion() {
         let attr = quote! { template="/api/{resource}{?page,limit}" };
         let item = quote! {
@@ -584,10 +736,38 @@ mod tests {
                 ::core::option::Option::None
             }
             fn render(&self) -> ::std::string::String {
-                let resource = ::templated_uri::Escape::escape(&self.resource);
-                let page = ::templated_uri::Escape::escape(&self.page);
-                let limit = ::templated_uri::Escape::escape(&self.limit);
-                ::std::format!("/api/{resource}?page={page}&limit={limit}")
+                let mut __out = ::std::string::String::with_capacity(18usize);
+                __out.push_str("/api/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(& self.resource)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("?");
+                __out.push_str("page");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.page)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out.push_str("&");
+                __out.push_str("limit");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.limit)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __out
             }
             fn to_path_and_query(
                 &self,
@@ -628,6 +808,417 @@ mod tests {
         }
         impl From<QueryTest> for ::templated_uri::PathAndQuery {
             fn from(value: QueryTest) -> Self {
+                ::templated_uri::PathAndQuery::from_template(value)
+            }
+        }
+        "#);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
+    fn test_optional_field_codegen() {
+        // Mixes a required-only group `{id}` with a query group `{?filter,limit}` that
+        // contains an `Option<u32>`. Locks in:
+        //   * the all-required render path (flat `push_str` / `write!` for `{id}`),
+        //   * the optional-aware render path with `__first` tracking for `{?filter,limit}`,
+        //   * the matching `RedactedDisplay` paths,
+        //   * `if let Some(ref __val) = self.limit` extraction of the inner `u32`.
+        let attr = quote! { template="/items/{id}{?filter,limit}" };
+        let item = quote! {
+            struct OptionalTest {
+                id: u32,
+                filter: String,
+                limit: Option<u32>
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert_snapshot!(output_pretty, @r#"
+        struct OptionalTest {
+            id: u32,
+            filter: String,
+            limit: Option<u32>,
+        }
+        impl ::templated_uri::PathAndQueryTemplate for OptionalTest {
+            fn template(&self) -> &'static core::primitive::str {
+                "/items/{id}{?filter,limit}"
+            }
+            fn format_template(&self) -> &'static core::primitive::str {
+                "/items/{id}?filter={filter}&limit={limit}"
+            }
+            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+                ::core::option::Option::None
+            }
+            fn render(&self) -> ::std::string::String {
+                let mut __out = ::std::string::String::with_capacity(22usize);
+                __out.push_str("/items/");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.id)),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                {
+                    let mut __first = true;
+                    {
+                        let __val = &self.filter;
+                        if __first {
+                            __out.push_str("?");
+                        } else {
+                            __out.push_str("&");
+                        }
+                        __out.push_str("filter");
+                        __out.push_str("=");
+                        ::std::fmt::Write::write_fmt(
+                                &mut __out,
+                                ::core::format_args!(
+                                    "{}", ::templated_uri::Escape::escape(__val)
+                                ),
+                            )
+                            .expect(
+                                "Display impls for templated URI parameter values are expected to be infallible",
+                            );
+                        __first = false;
+                    }
+                    if let ::core::option::Option::Some(ref __val) = self.limit {
+                        if __first {
+                            __out.push_str("?");
+                        } else {
+                            __out.push_str("&");
+                        }
+                        __out.push_str("limit");
+                        __out.push_str("=");
+                        ::std::fmt::Write::write_fmt(
+                                &mut __out,
+                                ::core::format_args!(
+                                    "{}", ::templated_uri::Escape::escape(__val)
+                                ),
+                            )
+                            .expect(
+                                "Display impls for templated URI parameter values are expected to be infallible",
+                            );
+                        __first = false;
+                    }
+                }
+                __out
+            }
+            fn to_path_and_query(
+                &self,
+            ) -> ::std::result::Result<
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
+            > {
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
+            }
+        }
+        impl ::std::fmt::Debug for OptionalTest {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.debug_tuple("OptionalTest").field(&"/items/{id}{?filter,limit}").finish()
+            }
+        }
+        impl ::data_privacy::RedactedDisplay for OptionalTest {
+            fn fmt(
+                &self,
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                f.write_str("/items/")?;
+                <u32 as ::data_privacy::RedactedDisplay>::fmt(&self.id, engine, f)?;
+                {
+                    let mut __first = true;
+                    {
+                        if __first {
+                            f.write_str("?")?;
+                        } else {
+                            f.write_str("&")?;
+                        }
+                        f.write_str("filter")?;
+                        f.write_str("=")?;
+                        <String as ::data_privacy::RedactedDisplay>::fmt(
+                            &self.filter,
+                            engine,
+                            f,
+                        )?;
+                        __first = false;
+                    }
+                    if let ::core::option::Option::Some(ref __val) = self.limit {
+                        if __first {
+                            f.write_str("?")?;
+                        } else {
+                            f.write_str("&")?;
+                        }
+                        f.write_str("limit")?;
+                        f.write_str("=")?;
+                        <u32 as ::data_privacy::RedactedDisplay>::fmt(__val, engine, f)?;
+                        __first = false;
+                    }
+                }
+                ::std::result::Result::Ok(())
+            }
+        }
+        impl From<OptionalTest> for ::templated_uri::PathAndQuery {
+            fn from(value: OptionalTest) -> Self {
+                ::templated_uri::PathAndQuery::from_template(value)
+            }
+        }
+        "#);
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Inline snapshot of generated codegen exceeds the threshold by design"
+    )]
+    fn test_optional_field_with_unredacted_codegen() {
+        // Pins down the `unredacted || field_unredacted` semantics inside the
+        // optional-aware redacted-display path. With a `#[unredacted]` field, the
+        // generated code MUST call `::std::write!(f, "{}", self.field)` (Display),
+        // not the `RedactedDisplay::fmt` trait path. Flipping the `||` to `&&` in
+        // `redacted_display_group_with_optional` produces a different TokenStream
+        // and this snapshot diff will catch it.
+        let attr = quote! { template = "/items{?filter,limit}" };
+        let item = quote! {
+            struct OptionalUnredactedTest {
+                #[unredacted]
+                filter: String,
+                #[unredacted]
+                limit: Option<u32>,
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert_snapshot!(output_pretty, @r#"
+        struct OptionalUnredactedTest {
+            filter: String,
+            limit: Option<u32>,
+        }
+        impl ::templated_uri::PathAndQueryTemplate for OptionalUnredactedTest {
+            fn template(&self) -> &'static core::primitive::str {
+                "/items{?filter,limit}"
+            }
+            fn format_template(&self) -> &'static core::primitive::str {
+                "/items?filter={filter}&limit={limit}"
+            }
+            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+                ::core::option::Option::None
+            }
+            fn render(&self) -> ::std::string::String {
+                let mut __out = ::std::string::String::with_capacity(21usize);
+                __out.push_str("/items");
+                {
+                    let mut __first = true;
+                    {
+                        let __val = &self.filter;
+                        if __first {
+                            __out.push_str("?");
+                        } else {
+                            __out.push_str("&");
+                        }
+                        __out.push_str("filter");
+                        __out.push_str("=");
+                        ::std::fmt::Write::write_fmt(
+                                &mut __out,
+                                ::core::format_args!(
+                                    "{}", ::templated_uri::Escape::escape(__val)
+                                ),
+                            )
+                            .expect(
+                                "Display impls for templated URI parameter values are expected to be infallible",
+                            );
+                        __first = false;
+                    }
+                    if let ::core::option::Option::Some(ref __val) = self.limit {
+                        if __first {
+                            __out.push_str("?");
+                        } else {
+                            __out.push_str("&");
+                        }
+                        __out.push_str("limit");
+                        __out.push_str("=");
+                        ::std::fmt::Write::write_fmt(
+                                &mut __out,
+                                ::core::format_args!(
+                                    "{}", ::templated_uri::Escape::escape(__val)
+                                ),
+                            )
+                            .expect(
+                                "Display impls for templated URI parameter values are expected to be infallible",
+                            );
+                        __first = false;
+                    }
+                }
+                __out
+            }
+            fn to_path_and_query(
+                &self,
+            ) -> ::std::result::Result<
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
+            > {
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
+            }
+        }
+        impl ::std::fmt::Debug for OptionalUnredactedTest {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.debug_tuple("OptionalUnredactedTest").field(&"/items{?filter,limit}").finish()
+            }
+        }
+        impl ::data_privacy::RedactedDisplay for OptionalUnredactedTest {
+            fn fmt(
+                &self,
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                f.write_str("/items")?;
+                {
+                    let mut __first = true;
+                    {
+                        if __first {
+                            f.write_str("?")?;
+                        } else {
+                            f.write_str("&")?;
+                        }
+                        f.write_str("filter")?;
+                        f.write_str("=")?;
+                        ::std::write!(f, "{}", self.filter)?;
+                        __first = false;
+                    }
+                    if let ::core::option::Option::Some(ref __val) = self.limit {
+                        if __first {
+                            f.write_str("?")?;
+                        } else {
+                            f.write_str("&")?;
+                        }
+                        f.write_str("limit")?;
+                        f.write_str("=")?;
+                        ::std::write!(f, "{}", __val)?;
+                        __first = false;
+                    }
+                }
+                ::std::result::Result::Ok(())
+            }
+        }
+        impl From<OptionalUnredactedTest> for ::templated_uri::PathAndQuery {
+            fn from(value: OptionalUnredactedTest) -> Self {
+                ::templated_uri::PathAndQuery::from_template(value)
+            }
+        }
+        "#);
+    }
+
+    #[test]
+    fn test_optional_reference_field_codegen() {
+        // For `Option<&T>`, `Some(ref __val)` binds `__val: &&T`. The macro must peel one
+        // reference so the generated trait calls resolve against `T: Escape`/`T: RedactedDisplay`
+        // rather than the much rarer `&T` impls. This snapshot pins down:
+        //   * the render path emits `Escape::escape(*__val)` (not `__val`),
+        //   * the redacted-display path emits `<str as RedactedDisplay>::fmt(*__val, ...)`
+        //     with the inner reference peeled from the UFCS receiver type.
+        let attr = quote! { template = "/items{?name}" };
+        let item = quote! {
+            struct ReferenceOptional {
+                name: Option<&'static str>,
+            }
+        };
+
+        let output_pretty = pretty_parse(attr, item);
+        assert_snapshot!(output_pretty, @r#"
+        struct ReferenceOptional {
+            name: Option<&'static str>,
+        }
+        impl ::templated_uri::PathAndQueryTemplate for ReferenceOptional {
+            fn template(&self) -> &'static core::primitive::str {
+                "/items{?name}"
+            }
+            fn format_template(&self) -> &'static core::primitive::str {
+                "/items?name={name}"
+            }
+            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+                ::core::option::Option::None
+            }
+            fn render(&self) -> ::std::string::String {
+                let mut __out = ::std::string::String::with_capacity(12usize);
+                __out.push_str("/items");
+                {
+                    let mut __first = true;
+                    if let ::core::option::Option::Some(ref __val) = self.name {
+                        if __first {
+                            __out.push_str("?");
+                        } else {
+                            __out.push_str("&");
+                        }
+                        __out.push_str("name");
+                        __out.push_str("=");
+                        ::std::fmt::Write::write_fmt(
+                                &mut __out,
+                                ::core::format_args!(
+                                    "{}", ::templated_uri::Escape::escape(* __val)
+                                ),
+                            )
+                            .expect(
+                                "Display impls for templated URI parameter values are expected to be infallible",
+                            );
+                        __first = false;
+                    }
+                }
+                __out
+            }
+            fn to_path_and_query(
+                &self,
+            ) -> ::std::result::Result<
+                ::templated_uri::http::uri::PathAndQuery,
+                ::templated_uri::UriError,
+            > {
+                Ok(
+                    ::templated_uri::http::uri::PathAndQuery::try_from(
+                        ::templated_uri::PathAndQueryTemplate::render(self),
+                    )?,
+                )
+            }
+        }
+        impl ::std::fmt::Debug for ReferenceOptional {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.debug_tuple("ReferenceOptional").field(&"/items{?name}").finish()
+            }
+        }
+        impl ::data_privacy::RedactedDisplay for ReferenceOptional {
+            fn fmt(
+                &self,
+                engine: &::data_privacy::RedactionEngine,
+                f: &mut ::std::fmt::Formatter,
+            ) -> ::std::fmt::Result {
+                f.write_str("/items")?;
+                {
+                    let mut __first = true;
+                    if let ::core::option::Option::Some(ref __val) = self.name {
+                        if __first {
+                            f.write_str("?")?;
+                        } else {
+                            f.write_str("&")?;
+                        }
+                        f.write_str("name")?;
+                        f.write_str("=")?;
+                        <str as ::data_privacy::RedactedDisplay>::fmt(*__val, engine, f)?;
+                        __first = false;
+                    }
+                }
+                ::std::result::Result::Ok(())
+            }
+        }
+        impl From<ReferenceOptional> for ::templated_uri::PathAndQuery {
+            fn from(value: ReferenceOptional) -> Self {
                 ::templated_uri::PathAndQuery::from_template(value)
             }
         }
