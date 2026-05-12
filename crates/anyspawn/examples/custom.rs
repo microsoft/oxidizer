@@ -6,7 +6,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
@@ -27,6 +27,10 @@ impl SpawnCustom for ThreadPoolSpawner {
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
     }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        std::thread::spawn(task);
+    }
 }
 
 #[tokio::main]
@@ -44,6 +48,11 @@ async fn main() {
     let handle = spawner.spawn(async { 1 + 1 });
     let value = handle.await;
     println!("Got result: {value}");
+
+    // Spawn a blocking task
+    let handle = spawner.spawn_blocking(|| 1 + 1);
+    let value = handle.await;
+    println!("Got result (blocking): {value}");
 
     // Wait for background task
     sleep(Duration::from_millis(50));

@@ -146,6 +146,37 @@
 //! Template variables must implement [`Escape`] (except for reserved expansions,
 //! which use [`Raw`]) to ensure the resulting URI is valid.
 //!
+//! ## Undefined Values (`Option<T>`)
+//!
+//! Per [RFC 6570 section 2.3](https://datatracker.ietf.org/doc/html/rfc6570#section-2.3), template
+//! variables may be *undefined*. Use `Option<T>` to model this: a `None` value is treated
+//! as undefined and the variable (along with its prefix or separator) is omitted from the
+//! rendered URI.
+//!
+//! ```rust
+//! use templated_uri::{EscapedString, PathAndQueryTemplate, templated};
+//!
+//! #[templated(template = "/items{?query,limit}", unredacted)]
+//! struct ItemSearch {
+//!     query: EscapedString,
+//!     limit: Option<u32>,
+//! }
+//!
+//! // With limit defined:
+//! let path = ItemSearch {
+//!     query: EscapedString::from_static("rust"),
+//!     limit: Some(10),
+//! };
+//! assert_eq!(path.render(), "/items?query=rust&limit=10");
+//!
+//! // With limit undefined:
+//! let path = ItemSearch {
+//!     query: EscapedString::from_static("rust"),
+//!     limit: None,
+//! };
+//! assert_eq!(path.render(), "/items?query=rust");
+//! ```
+//!
 //! # Integration with HTTP Ecosystem
 //!
 //! This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting

@@ -348,6 +348,9 @@ mod tests {
     }
 
     #[test]
+    // OpenTelemetry SDK initialization resolves the current executable, which requires `readlink`
+    // and is blocked by Miri isolation.
+    #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
         let clock = Clock::new_frozen();
         let builder = Cache::builder::<String, i32>(clock)

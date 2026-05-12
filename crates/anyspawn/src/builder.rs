@@ -5,45 +5,52 @@
 
 use std::fmt::Debug;
 
-use crate::Spawner;
-use crate::custom::{BoxedFuture, SpawnCustom};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
-/// Internal composition of a layer closure wrapping an inner [`SpawnCustom`].
+use crate::Spawner;
+use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
+
+/// Internal composition of two layer closures wrapping an inner [`SpawnCustom`].
 ///
-/// The closure transforms futures before they are forwarded to the inner
-/// spawner. During relocation only the inner spawner is notified; closures
-/// are expected to be stateless (or capture only `Arc`-based state that
-/// does not need relocation).
-struct Layered<F, S> {
-    layer: F,
+/// `future_layer` transforms futures forwarded to [`SpawnCustom::spawn`] and
+/// [`SpawnCustom::spawn_anywhere`]; `blocking_layer` transforms tasks
+/// forwarded to [`SpawnCustom::spawn_blocking`]. The builder supplies an
+/// identity closure for whichever layer kind is not being added. During
+/// relocation only the inner spawner is notified; closures are expected to
+/// be stateless (or capture only `Arc`-based state that does not need
+/// relocation).
+struct Layered<FL, BL, S> {
+    future_layer: FL,
+    blocking_layer: BL,
     inner: S,
 }
 
-impl<F: Clone, S: Clone> Clone for Layered<F, S> {
+impl<FL: Clone, BL: Clone, S: Clone> Clone for Layered<FL, BL, S> {
     fn clone(&self) -> Self {
         Self {
-            layer: self.layer.clone(),
+            future_layer: self.future_layer.clone(),
+            blocking_layer: self.blocking_layer.clone(),
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<F: Send, S: ThreadAware> ThreadAware for Layered<F, S> {
+impl<FL: Send, BL: Send, S: ThreadAware> ThreadAware for Layered<FL, BL, S> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.inner.relocate(source, destination);
     }
 }
 
-impl<F, S> SpawnCustom for Layered<F, S>
+impl<FL, BL, S> SpawnCustom for Layered<FL, BL, S>
 where
-    F: Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
+    FL: Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
+    BL: Fn(BoxedBlockingTask) -> BoxedBlockingTask + Clone + Send + Sync + 'static,
     S: SpawnCustom + Clone,
 {
     fn spawn(&self, task: BoxedFuture) {
-        self.inner.spawn((self.layer)(task));
+        self.inner.spawn((self.future_layer)(task));
     }
 
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
@@ -52,9 +59,13 @@ where
         // the captured ThreadAware data is relocated first.
         let layered = Box::new(LayeredTask {
             task,
-            layer: self.layer.clone(),
+            layer: self.future_layer.clone(),
         });
         self.inner.spawn_anywhere(layered);
+    }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        self.inner.spawn_blocking((self.blocking_layer)(task));
     }
 }
 
@@ -108,28 +119,43 @@ impl SpawnCustom for TokioSpawner {
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
     }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        match &self.0 {
+            Some(h) => {
+                h.spawn_blocking(task);
+            }
+            None => {
+                ::tokio::task::spawn_blocking(task);
+            }
+        }
+    }
 }
 
-/// A builder for constructing a [`Spawner`] with layered middleware.
+/// Builds a [`Spawner`] from a base spawner plus zero or more layers.
 ///
-/// Each layer is a closure `Fn(BoxedFuture) -> BoxedFuture` that transforms
-/// the spawned future before it reaches the inner spawner. Layers compose
-/// from outside in: the last added layer runs first when
-/// [`Spawner::spawn`] is called.
+/// 1. Pick a base with [`tokio()`](Self::tokio),
+///    [`tokio_with_handle()`](Self::tokio_with_handle), or
+///    [`new()`](Self::new).
+/// 2. Wrap it with any number of [`layer()`](Self::layer) calls.
+/// 3. Call [`build()`](Self::build).
 ///
-/// # Design
+/// A layer is a pair of closures that wrap each spawned task before it
+/// reaches the base spawner: one wraps futures (used by
+/// [`Spawner::spawn`] and [`Spawner::spawn_anywhere`]) and one wraps
+/// blocking tasks (used by [`Spawner::spawn_blocking`]). Pass `|t| t` for
+/// either side to leave that task kind unchanged.
 ///
-/// Use [`new`](Self::new) with any [`SpawnCustom`] base, or the convenience
-/// [`tokio()`](Self::tokio) constructor. Stack middleware with
-/// [`layer()`](Self::layer) and finalize with [`build()`](Self::build).
+/// Layers run in the order they are added: when a task executes, the
+/// first layer added runs first, then the second, and so on, until the
+/// task itself runs.
 ///
 /// # Note
 ///
-/// [`Spawner::new_tokio`] uses a more efficient code path with native Tokio
-/// `JoinHandle`s. The builder's [`tokio()`](Self::tokio) constructor goes
-/// through the custom spawner path (using a oneshot channel for join handles),
-/// which is necessary to support layers but slightly less efficient for
-/// unlayered use.
+/// For a plain Tokio spawner with no layers, prefer [`Spawner::new_tokio`]:
+/// it uses native Tokio `JoinHandle`s directly. The builder's
+/// [`tokio()`](Self::tokio) path uses a oneshot channel for join handles
+/// so that layers can be applied, which is slightly less efficient.
 ///
 /// # Examples
 ///
@@ -137,13 +163,19 @@ impl SpawnCustom for TokioSpawner {
 /// # #[cfg(feature = "tokio")]
 /// # #[tokio::main]
 /// # async fn main() {
-/// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+/// use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder};
 ///
 /// let spawner = CustomSpawnerBuilder::tokio()
-///     .layer(|task: BoxedFuture| -> BoxedFuture {
-///         println!("spawning task");
-///         task
-///     })
+///     .layer(
+///         |task: BoxedFuture| -> BoxedFuture {
+///             println!("spawning async task");
+///             task
+///         },
+///         |task: BoxedBlockingTask| -> BoxedBlockingTask {
+///             println!("spawning blocking task");
+///             task
+///         },
+///     )
 ///     .build();
 ///
 /// let result = spawner.spawn(async { 42 }).await;
@@ -250,38 +282,27 @@ impl<S: SpawnCustom + Clone> CustomSpawnerBuilder<S> {
         self
     }
 
-    /// Adds a layer that transforms futures before they reach the inner
-    /// spawner.
+    /// Wraps each spawned task with a pair of layer closures before it
+    /// reaches the base spawner.
     ///
-    /// The closure receives a [`BoxedFuture`] and must return a
-    /// [`BoxedFuture`]. It is invoked for both [`Spawner::spawn`] and
-    /// [`Spawner::spawn_anywhere`].
+    /// - `future_layer` wraps the future used by [`Spawner::spawn`] and
+    ///   [`Spawner::spawn_anywhere`].
+    /// - `blocking_layer` wraps the closure used by
+    ///   [`Spawner::spawn_blocking`].
     ///
-    /// Layers compose from outside in: the last added layer runs first.
+    /// Pass `|t| t` for either side to leave that task kind unchanged.
     ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # #[cfg(feature = "tokio")]
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
-    ///
-    /// let spawner = CustomSpawnerBuilder::tokio()
-    ///     .layer(|task: BoxedFuture| -> BoxedFuture { task })
-    ///     .build();
-    /// # let _ = spawner;
-    /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
-    /// ```
-    pub fn layer<F>(self, layer: F) -> CustomSpawnerBuilder<impl SpawnCustom + Clone>
+    /// When multiple layers are added, they run in the order they were
+    /// added: the first layer added runs first when the task executes.
+    pub fn layer<FL, BL>(self, future_layer: FL, blocking_layer: BL) -> CustomSpawnerBuilder<impl SpawnCustom + Clone>
     where
-        F: Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
+        FL: Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
+        BL: Fn(BoxedBlockingTask) -> BoxedBlockingTask + Clone + Send + Sync + 'static,
     {
         CustomSpawnerBuilder {
             spawner: Layered {
-                layer,
+                future_layer,
+                blocking_layer,
                 inner: self.spawner,
             },
             name: self.name,
@@ -328,6 +349,8 @@ mod tests {
             let affinities = thread_aware::affinity::pinned_affinities(&[2]);
             task.relocate(Some(affinities[0]), affinities[1]);
         }
+
+        fn spawn_blocking(&self, _task: BoxedBlockingTask) {}
     }
 
     /// Minimal async task for covering `spawn_anywhere`.
@@ -344,20 +367,31 @@ mod tests {
     #[test]
     fn layered_relocate_forwards_to_inner() {
         static RELOCATED: AtomicBool = AtomicBool::new(false);
+        static BLOCKING_LAYER_RAN: AtomicBool = AtomicBool::new(false);
 
         let affinities = thread_aware::affinity::pinned_affinities(&[2]);
         let mut layered = Layered {
-            layer: |task: BoxedFuture| -> BoxedFuture { task },
+            future_layer: |task: BoxedFuture| -> BoxedFuture { task },
+            blocking_layer: |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                BLOCKING_LAYER_RAN.store(true, Ordering::SeqCst);
+                task
+            },
             inner: TrackingSpawner { relocated: &RELOCATED },
         };
 
         layered.relocate(Some(affinities[0]), affinities[1]);
         assert!(RELOCATED.load(Ordering::SeqCst), "Layered must forward relocate to inner");
 
-        // Exercise spawn + spawn_anywhere + layer closure + NoopTask::call_once
-        layered.inner.spawn(Box::pin(async {}));
-        layered.inner.spawn_anywhere(Box::new(NoopTask));
-        let covered = (layered.layer)(Box::pin(async {}));
+        // Exercise spawn + spawn_anywhere + spawn_blocking + layer closures + NoopTask::call_once
+        layered.spawn(Box::pin(async {}));
+        layered.spawn_anywhere(Box::new(NoopTask));
+        layered.spawn_blocking(Box::new(|| {}));
+        assert!(
+            BLOCKING_LAYER_RAN.load(Ordering::SeqCst),
+            "blocking_layer must run on spawn_blocking"
+        );
+
+        let covered = (layered.future_layer)(Box::pin(async {}));
         futures::executor::block_on(covered);
         futures::executor::block_on(Box::new(NoopTask).call_once());
     }

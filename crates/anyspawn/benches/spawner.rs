@@ -7,7 +7,7 @@
     reason = "Benchmarks don't require documentation and should fail fast on errors"
 )]
 
-use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use criterion::{Criterion, criterion_group, criterion_main};
 use thread_aware::ThreadAware;
 
@@ -21,6 +21,10 @@ impl SpawnCustom for SmolSpawner {
 
     fn spawn_anywhere(&self, task: Box<dyn thread_aware::closure::ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
+    }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        std::thread::spawn(task);
     }
 }
 

@@ -8,17 +8,27 @@
 //! the caller's current context and reattach it inside the spawned future,
 //! so spans, baggage, and other context values propagate automatically.
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder};
 use opentelemetry::Context;
 use opentelemetry::context::FutureExt as OtelFutureExt;
 
 #[tokio::main]
 async fn main() {
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(|task: BoxedFuture| -> BoxedFuture {
-            let cx = Context::current();
-            Box::pin(task.with_context(cx))
-        })
+        .layer(
+            |task: BoxedFuture| -> BoxedFuture {
+                let cx = Context::current();
+                Box::pin(task.with_context(cx))
+            },
+            |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                let cx = Context::current();
+
+                Box::new(move || {
+                    let _guard = cx.attach();
+                    task();
+                })
+            },
+        )
         .name("tokio_with_otel")
         .build();
 
@@ -38,8 +48,20 @@ async fn main() {
             id == "abc-123"
         })
         .await;
-
     assert!(result, "context should have propagated into the spawned task");
+
+    let result = spawner
+        .spawn_blocking(|| {
+            // Inside the spawned task the context is available thanks to
+            // the layer closure above.
+            let cx = Context::current();
+            let id = cx.get::<RequestId>().map_or("<missing>", |r| r.0.as_str());
+            println!("spawned task sees RequestId = {id}");
+            id == "abc-123"
+        })
+        .await;
+    assert!(result, "context should have propagated into the spawned blocking task");
+
     println!("context propagation works!");
 }
 

@@ -55,7 +55,7 @@ mod handle;
 mod spawner;
 
 pub use builder::CustomSpawnerBuilder;
-pub use custom::{BoxedFuture, SpawnCustom};
+pub use custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
 pub use handle::JoinHandle;
 pub use spawner::Spawner;
 pub use thread_aware::closure::ThreadAwareAsyncFnOnce;
