@@ -90,9 +90,9 @@ new_zealand = { version = "1.0.1", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
-opentelemetry = { version = "0.31.0", default-features = false }
-opentelemetry-stdout = { version = "0.31.0", default-features = false }
-opentelemetry_sdk = { version = "0.31.0", default-features = false }
+opentelemetry = { version = "0.32.0", default-features = false }
+opentelemetry-stdout = { version = "0.32.0", default-features = false }
+opentelemetry_sdk = { version = "0.32.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
 pin-project = { version = "1.1.8", default-features = false }
