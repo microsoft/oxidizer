@@ -5,10 +5,8 @@
 
 use std::fmt::Display;
 
-#[cfg(feature = "uuid")]
-use data_privacy::Sensitive;
 use data_privacy::simple_redactor::SimpleRedactor;
-use data_privacy::{RedactedToString, RedactionEngine, classified, taxonomy};
+use data_privacy::{RedactedToString, RedactionEngine, Sensitive, classified, taxonomy};
 use templated_uri::{BaseUri, Escape, EscapedString, PathAndQueryTemplate, Raw, Uri, templated};
 
 // Local taxonomy for testing purposes, mimicking microsoft_enterprise_data_taxonomy
@@ -434,4 +432,508 @@ fn test_uri_path_from_template() {
     // Verify it can be used in a Uri
     let uri = Uri::from(target_paq);
     assert_eq!(uri.to_string().declassify_ref(), "/api/123/posts");
+}
+
+// ======== RFC 6570 undefined values (Option<T>) tests ========
+
+#[templated(template = "/foo{?topic_id}", unredacted)]
+#[derive(Clone)]
+struct ListTopics {
+    topic_id: Option<u32>,
+}
+
+#[test]
+fn optional_query_param_some() {
+    let path = ListTopics { topic_id: Some(42) };
+    assert_eq!(path.render(), "/foo?topic_id=42");
+}
+
+#[test]
+fn optional_query_param_none() {
+    let path = ListTopics { topic_id: None };
+    assert_eq!(path.render(), "/foo");
+}
+
+#[templated(template = "/search{?query,limit,offset}", unredacted)]
+#[derive(Clone)]
+struct SearchQuery {
+    query: EscapedString,
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+#[test]
+fn optional_query_mixed_all_some() {
+    let path = SearchQuery {
+        query: EscapedString::from_static("rust"),
+        limit: Some(10),
+        offset: Some(20),
+    };
+    assert_eq!(path.render(), "/search?query=rust&limit=10&offset=20");
+}
+
+#[test]
+fn optional_query_mixed_some_none() {
+    let path = SearchQuery {
+        query: EscapedString::from_static("rust"),
+        limit: Some(10),
+        offset: None,
+    };
+    assert_eq!(path.render(), "/search?query=rust&limit=10");
+}
+
+#[test]
+fn optional_query_mixed_all_none() {
+    let path = SearchQuery {
+        query: EscapedString::from_static("rust"),
+        limit: None,
+        offset: None,
+    };
+    assert_eq!(path.render(), "/search?query=rust");
+}
+
+// Optional-first ordering: `{?opt,req}` with `opt=None` must still attach the `?` prefix
+// to the required value (i.e., not lose the group prefix when the first member is undefined).
+// This exercises the `__first` tracking in the order required-after-optional rather than
+// the more common optional-after-required.
+#[templated(template = "/items{?opt,req}", unredacted)]
+#[derive(Clone)]
+struct OptionalFirstThenRequired {
+    opt: Option<u32>,
+    req: u32,
+}
+
+#[test]
+fn optional_first_then_required_some() {
+    let path = OptionalFirstThenRequired { opt: Some(1), req: 2 };
+    assert_eq!(path.render(), "/items?opt=1&req=2");
+}
+
+#[test]
+fn optional_first_then_required_none_attaches_prefix_to_required() {
+    let path = OptionalFirstThenRequired { opt: None, req: 2 };
+    // `opt` is undefined, so the `?` prefix must hop to `req`. The naive bug would
+    // drop the prefix entirely and produce `/itemsreq=2` or `/items&req=2`.
+    assert_eq!(path.render(), "/items?req=2");
+}
+
+#[templated(template = "/items{?x,y}", unredacted)]
+#[derive(Clone)]
+struct AllOptionalQuery {
+    x: Option<u32>,
+    y: Option<u32>,
+}
+
+#[test]
+fn optional_query_all_optional_both_some() {
+    let path = AllOptionalQuery {
+        x: Some(1024),
+        y: Some(768),
+    };
+    assert_eq!(path.render(), "/items?x=1024&y=768");
+}
+
+#[test]
+fn optional_query_all_optional_first_none() {
+    // RFC 6570: {?undef,y} → ?y=768
+    let path = AllOptionalQuery { x: None, y: Some(768) };
+    assert_eq!(path.render(), "/items?y=768");
+}
+
+#[test]
+fn optional_query_all_optional_second_none() {
+    // RFC 6570: {?x,undef} → ?x=1024
+    let path = AllOptionalQuery { x: Some(1024), y: None };
+    assert_eq!(path.render(), "/items?x=1024");
+}
+
+#[test]
+fn optional_query_all_optional_both_none() {
+    let path = AllOptionalQuery { x: None, y: None };
+    assert_eq!(path.render(), "/items");
+}
+
+#[templated(template = "/{x}", unredacted)]
+#[derive(Clone)]
+struct SimpleOptional {
+    x: Option<EscapedString>,
+}
+
+#[test]
+fn optional_simple_expansion_some() {
+    let path = SimpleOptional {
+        x: Some(EscapedString::from_static("hello")),
+    };
+    assert_eq!(path.render(), "/hello");
+}
+
+#[test]
+fn optional_simple_expansion_none() {
+    // RFC 6570: O{undef}X → OX — the variable disappears
+    let path = SimpleOptional { x: None };
+    assert_eq!(path.render(), "/");
+}
+
+#[templated(template = "/prefix{/a,b}", unredacted)]
+#[derive(Clone)]
+struct PathExpansionOptional {
+    a: EscapedString,
+    b: Option<EscapedString>,
+}
+
+#[test]
+fn optional_path_expansion_some() {
+    let path = PathExpansionOptional {
+        a: EscapedString::from_static("x"),
+        b: Some(EscapedString::from_static("y")),
+    };
+    assert_eq!(path.render(), "/prefix/x/y");
+}
+
+#[test]
+fn optional_path_expansion_none() {
+    let path = PathExpansionOptional {
+        a: EscapedString::from_static("x"),
+        b: None,
+    };
+    assert_eq!(path.render(), "/prefix/x");
+}
+
+#[templated(template = "/data{?required}{&opt}", unredacted)]
+#[derive(Clone)]
+struct QueryContinuationOptional {
+    required: u32,
+    opt: Option<u32>,
+}
+
+#[test]
+fn optional_query_continuation_some() {
+    let path = QueryContinuationOptional { required: 1, opt: Some(2) };
+    assert_eq!(path.render(), "/data?required=1&opt=2");
+}
+
+#[test]
+fn optional_query_continuation_none() {
+    let path = QueryContinuationOptional { required: 1, opt: None };
+    assert_eq!(path.render(), "/data?required=1");
+}
+
+#[templated(template = "/{x,y}", unredacted)]
+#[derive(Clone)]
+struct SimpleMultiOptional {
+    x: Option<EscapedString>,
+    y: Option<EscapedString>,
+}
+
+#[test]
+fn optional_simple_multi_both_some() {
+    let path = SimpleMultiOptional {
+        x: Some(EscapedString::from_static("a")),
+        y: Some(EscapedString::from_static("b")),
+    };
+    assert_eq!(path.render(), "/a,b");
+}
+
+#[test]
+fn optional_simple_multi_first_none() {
+    let path = SimpleMultiOptional {
+        x: None,
+        y: Some(EscapedString::from_static("b")),
+    };
+    assert_eq!(path.render(), "/b");
+}
+
+#[test]
+fn optional_simple_multi_second_none() {
+    let path = SimpleMultiOptional {
+        x: Some(EscapedString::from_static("a")),
+        y: None,
+    };
+    assert_eq!(path.render(), "/a");
+}
+
+#[test]
+fn optional_simple_multi_both_none() {
+    let path = SimpleMultiOptional { x: None, y: None };
+    assert_eq!(path.render(), "/");
+}
+
+// Test that Some("") (empty string) is NOT treated as undefined — it's a defined empty value.
+// RFC 6570 section 3.2.2: ?{x,empty} → ?1024,  vs  ?{x,undef} → ?1024
+#[templated(template = "/?{x,y}", unredacted)]
+#[derive(Clone)]
+struct SimpleMultiEmptyVsUndef {
+    x: EscapedString,
+    y: Option<EscapedString>,
+}
+
+#[test]
+fn optional_some_empty_vs_none_simple() {
+    // Defined empty value: separator is kept, value is empty → trailing comma
+    let some_empty = SimpleMultiEmptyVsUndef {
+        x: EscapedString::from_static("1024"),
+        y: Some(EscapedString::from_static("")),
+    };
+    assert_eq!(some_empty.render(), "/?1024,");
+
+    // Undefined: variable AND separator are omitted
+    let none = SimpleMultiEmptyVsUndef {
+        x: EscapedString::from_static("1024"),
+        y: None,
+    };
+    assert_eq!(none.render(), "/?1024");
+}
+
+#[test]
+fn optional_some_empty_vs_none() {
+    let some_empty = ListTopics { topic_id: Some(0) };
+    assert_eq!(some_empty.render(), "/foo?topic_id=0");
+
+    let none = ListTopics { topic_id: None };
+    assert_eq!(none.render(), "/foo");
+}
+
+// Test Option with reserved expansion {+var}
+#[templated(template = "/{+path}", unredacted)]
+#[derive(Clone)]
+struct OptionalReserved {
+    path: Option<String>,
+}
+
+#[test]
+fn optional_reserved_expansion_some() {
+    let path = OptionalReserved {
+        path: Some("a/b/c".to_string()),
+    };
+    assert_eq!(path.render(), "/a/b/c");
+}
+
+#[test]
+fn optional_reserved_expansion_none() {
+    let path = OptionalReserved { path: None };
+    assert_eq!(path.render(), "/");
+}
+
+// Test Option with classified/redacted fields
+#[templated(template = "/{org_id}/items{?filter}")]
+#[derive(Clone)]
+struct RedactedOptionalPath {
+    org_id: OrgId,
+    #[unredacted]
+    filter: Option<EscapedString>,
+}
+
+#[test]
+fn optional_redacted_display_some() {
+    let path = RedactedOptionalPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        filter: Some(EscapedString::from_static("active")),
+    };
+
+    assert_eq!(path.render(), "/Acme/items?filter=active");
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(
+        path.to_redacted_string(&redaction_engine),
+        "/****/items?filter=active",
+        "org_id should be redacted, filter should not"
+    );
+}
+
+#[test]
+fn optional_redacted_display_none() {
+    let path = RedactedOptionalPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        filter: None,
+    };
+
+    assert_eq!(path.render(), "/Acme/items");
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(
+        path.to_redacted_string(&redaction_engine),
+        "/****/items",
+        "undefined filter should be omitted from redacted display too"
+    );
+}
+
+// Test Option<Sensitive<T>>
+#[templated(template = "/users{?user_id}")]
+#[derive(Clone)]
+struct OptionalSensitiveField {
+    user_id: Option<Sensitive<EscapedString>>,
+}
+
+#[test]
+fn optional_sensitive_some() {
+    let path = OptionalSensitiveField {
+        user_id: Some(Sensitive::new(EscapedString::from_static("secret_user"), Uri::DATA_CLASS)),
+    };
+    assert_eq!(path.render(), "/users?user_id=secret_user");
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(
+        path.to_redacted_string(&redaction_engine),
+        "/users?user_id=***********",
+        "Sensitive value should be redacted"
+    );
+}
+
+#[test]
+fn optional_sensitive_none() {
+    let path = OptionalSensitiveField { user_id: None };
+    assert_eq!(path.render(), "/users");
+
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(
+        path.to_redacted_string(&redaction_engine),
+        "/users",
+        "None value should be omitted from redacted display"
+    );
+}
+
+// Verifies that `#[unredacted]` actually relaxes the `RedactedDisplay` trait bound to
+// just `Display`. `DisplayOnly` deliberately does not implement `RedactedDisplay`, so
+// the `redacted_display_group_with_optional` codegen MUST take the `Display`-only branch
+// for the marked fields. Flipping `unredacted || field_unredacted` to `&&` in the macro
+// would route through `<DisplayOnly as RedactedDisplay>::fmt(...)`, which doesn't exist —
+// causing this file to fail compilation. That's the precise semantic invariant the test
+// pins down: `#[unredacted]` allows `Display`-only types in templates.
+#[derive(Clone)]
+struct DisplayOnly(&'static str);
+
+impl Display for DisplayOnly {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl templated_uri::Escape for DisplayOnly {
+    fn escape(&self) -> templated_uri::Escaped<impl Display> {
+        templated_uri::Escaped::from_static(self.0)
+    }
+}
+
+#[templated(template = "/items{?required_id,opt_id}")]
+#[derive(Clone)]
+struct UnredactedDisplayOnlyOptional {
+    #[unredacted]
+    required_id: DisplayOnly,
+    #[unredacted]
+    opt_id: Option<DisplayOnly>,
+}
+
+#[test]
+fn optional_field_unredacted_required_uses_display_only_trait_bound() {
+    // `opt_id = None` so the optional-aware path is taken with only `required_id`.
+    let path = UnredactedDisplayOnlyOptional {
+        required_id: DisplayOnly("req"),
+        opt_id: None,
+    };
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(path.to_redacted_string(&redaction_engine), "/items?required_id=req");
+}
+
+#[test]
+fn optional_field_unredacted_optional_uses_display_only_trait_bound() {
+    // `opt_id = Some(...)` covers the optional-field branch.
+    let path = UnredactedDisplayOnlyOptional {
+        required_id: DisplayOnly("req"),
+        opt_id: Some(DisplayOnly("opt")),
+    };
+    let redaction_engine = RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build();
+    assert_eq!(path.to_redacted_string(&redaction_engine), "/items?required_id=req&opt_id=opt");
+}
+
+// Test that template() and format_template() are unchanged by Option usage
+#[test]
+fn optional_template_metadata_unchanged() {
+    let path = AllOptionalQuery { x: None, y: None };
+    assert_eq!(path.template(), "/items{?x,y}");
+    assert_eq!(path.format_template(), "/items?x={x}&y={y}");
+    assert_eq!(format!("{path:?}"), r#"AllOptionalQuery("/items{?x,y}")"#);
+}
+
+// ======== Matrix params `{;a,b}` (RFC 6570 section 3.2.7) ========
+#[templated(template = "/items{;a,b}", unredacted)]
+#[derive(Clone)]
+struct MatrixOptional {
+    a: Option<EscapedString>,
+    b: Option<EscapedString>,
+}
+
+#[test]
+fn optional_matrix_both_some() {
+    let path = MatrixOptional {
+        a: Some(EscapedString::from_static("x")),
+        b: Some(EscapedString::from_static("y")),
+    };
+    assert_eq!(path.render(), "/items;a=x;b=y");
+}
+
+#[test]
+fn optional_matrix_first_none() {
+    // RFC 6570: undefined first variable → prefix attaches to second
+    let path = MatrixOptional {
+        a: None,
+        b: Some(EscapedString::from_static("y")),
+    };
+    assert_eq!(path.render(), "/items;b=y");
+}
+
+#[test]
+fn optional_matrix_second_none() {
+    let path = MatrixOptional {
+        a: Some(EscapedString::from_static("x")),
+        b: None,
+    };
+    assert_eq!(path.render(), "/items;a=x");
+}
+
+#[test]
+fn optional_matrix_both_none() {
+    let path = MatrixOptional { a: None, b: None };
+    assert_eq!(path.render(), "/items");
+}
+
+// ======== Label-style `{.a,b}` (RFC 6570 section 3.2.5) ========
+#[templated(template = "/file{.ext1,ext2}", unredacted)]
+#[derive(Clone)]
+struct LabelOptional {
+    ext1: Option<EscapedString>,
+    ext2: Option<EscapedString>,
+}
+
+#[test]
+fn optional_label_both_some() {
+    let path = LabelOptional {
+        ext1: Some(EscapedString::from_static("tar")),
+        ext2: Some(EscapedString::from_static("gz")),
+    };
+    assert_eq!(path.render(), "/file.tar.gz");
+}
+
+#[test]
+fn optional_label_first_none() {
+    // RFC 6570: undefined first variable → label dot attaches to second
+    let path = LabelOptional {
+        ext1: None,
+        ext2: Some(EscapedString::from_static("gz")),
+    };
+    assert_eq!(path.render(), "/file.gz");
+}
+
+#[test]
+fn optional_label_second_none() {
+    let path = LabelOptional {
+        ext1: Some(EscapedString::from_static("tar")),
+        ext2: None,
+    };
+    assert_eq!(path.render(), "/file.tar");
+}
+
+#[test]
+fn optional_label_both_none() {
+    let path = LabelOptional { ext1: None, ext2: None };
+    assert_eq!(path.render(), "/file");
 }
