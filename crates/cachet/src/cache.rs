@@ -262,7 +262,7 @@ where
     ///
     /// cache.insert("key".to_string(), CacheEntry::new(42)).await?;
     /// cache.insert("key".to_string(), 42).await?; // also works
-    ///     
+    ///
     /// # Ok::<(), cachet::Error>(())
     /// # };
     /// ```
