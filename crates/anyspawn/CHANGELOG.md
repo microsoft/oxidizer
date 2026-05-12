@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## [0.4.0] - 2026-05-12
+## [0.5.0] - 2026-05-12
 
 - ✨ Features
 
@@ -13,6 +13,20 @@
 
   - `SpawnCustom` now requires a `spawn_blocking` method. Existing implementors must add this method to compile.
   - `CustomSpawnerBuilder::layer` now takes two closures — one for futures and one for blocking tasks. Pass an identity closure (`|t| t`) for either side to leave that task kind unchanged.
+
+## [0.4.0] - 2026-05-07
+
+- ✨ Features
+
+  - add `Spawner::spawn_anywhere` for spawning futures built from [`ThreadAware`](thread_aware::ThreadAware) data, with the data relocated before the future is constructed ([#403](https://github.com/microsoft/oxidizer/pull/403)).
+  - publicly export the `SpawnCustom` trait so custom runtimes can be implemented as named types instead of closures ([#403](https://github.com/microsoft/oxidizer/pull/403)).
+  - re-export `thread_aware::closure::ThreadAwareAsyncFnOnce` for ergonomic use alongside `Spawner` ([#403](https://github.com/microsoft/oxidizer/pull/403)).
+
+- ⚠️ Breaking
+
+  - `Spawner::new_custom` now takes a `T: SpawnCustom + Clone` implementation instead of a `Fn(BoxedFuture)` closure. Wrap existing closures in a small struct that implements `SpawnCustom` ([#403](https://github.com/microsoft/oxidizer/pull/403)).
+  - remove `Spawner::new_thread_aware`. Per-core isolation is now expressed by implementing `SpawnCustom` on a `ThreadAware` type and using `Spawner::new_custom`, or via `CustomSpawnerBuilder` ([#403](https://github.com/microsoft/oxidizer/pull/403)).
+  - the set of `allowed_external_types` changed: `thread_aware::affinity::{MemoryAffinity, PinnedAffinity}` are no longer part of the public surface; `thread_aware::affinity::Affinity` and `thread_aware::closure::ThreadAwareAsyncFnOnce` are now exposed instead ([#403](https://github.com/microsoft/oxidizer/pull/403)).
 
 ## [0.3.0] - 2026-03-27
 
