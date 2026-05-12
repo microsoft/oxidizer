@@ -284,10 +284,12 @@ impl Spawner {
     /// use anyspawn::Spawner;
     ///
     /// let spawner = Spawner::new_tokio();
-    /// let value = spawner.spawn_blocking(|| {
-    ///     // expensive synchronous work goes here
-    ///     1 + 1
-    /// }).await;
+    /// let value = spawner
+    ///     .spawn_blocking(|| {
+    ///         // expensive synchronous work goes here
+    ///         1 + 1
+    ///     })
+    ///     .await;
     /// assert_eq!(value, 2);
     /// # }
     /// # #[cfg(not(feature = "tokio"))]

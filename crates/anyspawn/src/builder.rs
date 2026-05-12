@@ -5,11 +5,12 @@
 
 use std::fmt::Debug;
 
-use crate::Spawner;
-use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
+
+use crate::Spawner;
+use crate::custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
 
 /// Internal composition of two layer closures wrapping an inner [`SpawnCustom`].
 ///
