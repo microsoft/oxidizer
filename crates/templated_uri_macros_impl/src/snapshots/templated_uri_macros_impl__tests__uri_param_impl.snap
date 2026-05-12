@@ -1,0 +1,9 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+impl ::templated_uri::Escape for SafeFragment {
+    fn escape(&self) -> ::templated_uri::Escaped<impl ::std::fmt::Display> {
+        self.0.escape()
+    }
+}

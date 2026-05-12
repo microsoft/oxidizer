@@ -372,3 +372,7 @@ unescaped
 spawners
 unlayered
 UFCS
+byte-identical
+codegen
+namespaced
+substring

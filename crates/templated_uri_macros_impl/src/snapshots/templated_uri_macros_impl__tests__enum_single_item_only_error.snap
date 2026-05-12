@@ -1,0 +1,10 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+enum TestEnum {
+    Variant1(String, String),
+}
+::core::compile_error! {
+    "TemplatedUri enum variants must have exactly one field containing a TemplatedUri struct"
+}
