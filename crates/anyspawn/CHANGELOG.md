@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.4.0] - 2026-05-12
+
 - ✨ Features
 
   - add `Spawner::spawn_blocking` for running synchronous, CPU-bound or blocking work on a dedicated thread (Tokio uses [`tokio::task::spawn_blocking`]).
