@@ -3,10 +3,9 @@
 
 use std::{fmt, sync};
 
+use super::clone_fn::ErasedCloneFn;
 use crate::affinity::Affinity;
 use crate::closure::ErasedClosureOnce;
-
-use super::clone_fn::ErasedCloneFn;
 
 /// A function that clones data and optionally relocates the clone.
 ///
