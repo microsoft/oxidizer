@@ -74,28 +74,20 @@ fn run(args: &Args) -> Result<(), AppError> {
 
     let excluded_packages: Vec<&str> = args.exclude.iter().map(String::as_str).collect();
 
-    // Resolve scope: which packages to iterate locally + cargo args for the
-    // workspace pre-build.
-    let (packages_to_process, cargo_scope_args): (Vec<&automation::PackageMetadata>, Vec<String>) =
-        if args.package.is_none() {
-            let to_process: Vec<_> = packages
-                .iter()
-                .filter(|p| !excluded_packages.contains(&p.name.as_str()))
-                .collect();
-            let mut scope = vec!["--workspace".to_string()];
-            for ex in &excluded_packages {
-                scope.push("--exclude".to_string());
-                scope.push((*ex).to_string());
-            }
-            (to_process, scope)
-        } else {
-            let package = args.package.as_deref().unwrap();
-            let pkg = packages
-                .iter()
-                .find(|p| p.name == package)
-                .into_app_err_with(|| format!("package '{package}' not found in workspace"))?;
-            (vec![pkg], vec!["--package".to_string(), package.to_string()])
-        };
+    // Resolve which packages to iterate over.
+    let packages_to_process: Vec<&automation::PackageMetadata> = if args.package.is_none() {
+        packages
+            .iter()
+            .filter(|p| !excluded_packages.contains(&p.name.as_str()))
+            .collect()
+    } else {
+        let package = args.package.as_deref().unwrap();
+        let pkg = packages
+            .iter()
+            .find(|p| p.name == package)
+            .into_app_err_with(|| format!("package '{package}' not found in workspace"))?;
+        vec![pkg]
+    };
 
     println!(
         "Running examples for packages: {}",
@@ -112,26 +104,6 @@ fn run(args: &Args) -> Result<(), AppError> {
         println!("No packages to process after applying excludes; nothing to do.");
         return Ok(());
     }
-
-    // Pre-build all examples for the selected packages so the per-example
-    // timeout below only covers execution (and a fingerprint check), not
-    // compile + link cost. On Windows debug builds the link step alone for
-    // the first example in a package can blow past the 30-second timeout.
-    println!("Pre-building examples for selected packages...");
-    let mut prebuild = Command::new("cargo");
-    prebuild
-        .arg("build")
-        .arg("--examples")
-        .arg("--profile")
-        .arg(&args.cargo_profile)
-        .arg("--all-features")
-        .arg("--locked")
-        .args(&cargo_scope_args);
-    let status = prebuild.status().into_app_err("failed to spawn `cargo build --examples`")?;
-    if !status.success() {
-        bail!("Pre-build of examples failed with exit code {:?}", status.code());
-    }
-    println!();
 
     let mut total = 0usize;
     let mut successes = 0usize;
@@ -157,19 +129,31 @@ fn run(args: &Args) -> Result<(), AppError> {
             }
 
             total += 1;
-            println!("Running example '{example_name}' in package '{}'...", pkg.name);
 
-            let mut cmd = Command::new("cargo");
-            cmd.arg("run")
-                .arg("--package")
-                .arg(&pkg.name)
-                .arg("--example")
-                .arg(example_name)
-                .arg("--profile")
-                .arg(&args.cargo_profile)
-                .arg("--all-features")
-                .arg("--locked")
-                .env("IS_TESTING", "1");
+            // Build the example first (outside the timeout) so that the
+            // timeout only covers execution.
+            println!("Building example '{example_name}' in package '{}'...", pkg.name);
+            let mut build = cargo_example_command("build", &pkg.name, example_name, &args.cargo_profile);
+            let status = build.status().into_app_err_with(|| {
+                format!(
+                    "failed to spawn `cargo build --example {example_name} --package {}`",
+                    pkg.name
+                )
+            })?;
+            if !status.success() {
+                let code_str =
+                    status.code().map_or_else(|| "<signal>".to_string(), |c| c.to_string());
+                println!(
+                    "✗ Build of example '{example_name}' in package '{}' failed with exit code {code_str}",
+                    pkg.name
+                );
+                failures.push(format!("{}::{example_name} (build exit code {code_str})", pkg.name));
+                continue;
+            }
+
+            println!("Running example '{example_name}' in package '{}'...", pkg.name);
+            let mut cmd = cargo_example_command("run", &pkg.name, example_name, &args.cargo_profile);
+            cmd.env("IS_TESTING", "1");
 
             let result = run_with_timeout(cmd, TIMEOUT)?;
             match result.outcome {
@@ -215,6 +199,27 @@ fn run(args: &Args) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+/// Builds a `cargo <subcommand> --package <package> --example <example> ...`
+/// command with the flags shared by the build and run steps.
+fn cargo_example_command(
+    subcommand: &str,
+    package: &str,
+    example: &str,
+    profile: &str,
+) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg(subcommand)
+        .arg("--package")
+        .arg(package)
+        .arg("--example")
+        .arg(example)
+        .arg("--profile")
+        .arg(profile)
+        .arg("--all-features")
+        .arg("--locked");
+    cmd
 }
 
 fn print_captured_output(stdout: &[u8], stderr: &[u8]) {
