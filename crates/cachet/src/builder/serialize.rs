@@ -7,13 +7,12 @@ use std::hash::Hash;
 
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::transform::TransformBuilder;
-use crate::{
-    CacheBuilder, CacheTier, CacheTierBuilder, FallbackBuilder,
-    serialize::codec::{PostcardCodec, PostcardEncoder},
-};
+use crate::serialize::codec::{PostcardCodec, PostcardEncoder};
+use crate::{CacheBuilder, CacheTier, CacheTierBuilder, FallbackBuilder};
 
 impl<K, V, CT> CacheBuilder<K, V, CT>
 where

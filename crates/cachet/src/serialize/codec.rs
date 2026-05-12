@@ -12,11 +12,11 @@ use std::io::Write;
 
 use bytesbuf::mem::GlobalPool;
 use bytesbuf::{BytesBuf, BytesView};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::transform::DecodeOutcome;
 use crate::{Codec, Encoder, Error};
-
-use serde::{Serialize, de::DeserializeOwned};
 
 const FORMAT_VERSION: u8 = 1;
 

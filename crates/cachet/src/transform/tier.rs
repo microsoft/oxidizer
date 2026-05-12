@@ -107,12 +107,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::transform::{
-        codec::{TransformCodec, TransformEncoder, infallible_owned},
-        testing::MockCodec,
-    };
     use cachet_tier::MockCache;
+
+    use super::*;
+    use crate::transform::codec::{TransformCodec, TransformEncoder, infallible_owned};
+    use crate::transform::testing::MockCodec;
 
     #[test]
     fn transform_adapter_debug() {

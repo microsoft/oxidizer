@@ -6,9 +6,8 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use crate::{Codec, Encoder, Error};
-
 use super::codec::DecodeOutcome;
+use crate::{Codec, Encoder, Error};
 
 /// A mock codec for testing that uses identity encoding and a configurable decode outcome.
 ///

@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::Error;
 use std::fmt::Debug;
+
+use crate::Error;
 
 /// Wraps an infallible closure taking a reference so it can be used where a fallible one is expected.
 ///
@@ -11,7 +12,7 @@ use std::fmt::Debug;
 /// # Examples
 ///
 /// ```
-/// use cachet::{infallible, TransformEncoder};
+/// use cachet::{TransformEncoder, infallible};
 ///
 /// let encoder = TransformEncoder::new(infallible(|v: &i32| v.to_string()));
 /// ```
@@ -29,7 +30,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use cachet::{infallible_owned, TransformCodec, infallible};
+/// use cachet::{TransformCodec, infallible, infallible_owned};
 ///
 /// let codec = TransformCodec::new(
 ///     |v: &String| v.parse::<i32>(),
