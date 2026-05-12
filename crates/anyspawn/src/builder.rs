@@ -131,28 +131,30 @@ impl SpawnCustom for TokioSpawner {
     }
 }
 
-/// A builder for constructing a [`Spawner`] with layered middleware.
+/// Builds a [`Spawner`] from a base spawner plus zero or more layers.
 ///
-/// Each layer is a pair of closures - one for futures
-/// (`Fn(BoxedFuture) -> BoxedFuture`) and one for blocking tasks
-/// (`Fn(BoxedBlockingTask) -> BoxedBlockingTask`) - that transform spawned
-/// work before it reaches the inner spawner. Layers compose from outside
-/// in: the last added layer runs first when [`Spawner::spawn`] or
-/// [`Spawner::spawn_blocking`] is called.
+/// 1. Pick a base with [`tokio()`](Self::tokio),
+///    [`tokio_with_handle()`](Self::tokio_with_handle), or
+///    [`new()`](Self::new).
+/// 2. Wrap it with any number of [`layer()`](Self::layer) calls.
+/// 3. Call [`build()`](Self::build).
 ///
-/// # Design
+/// A layer is a pair of closures that wrap each spawned task before it
+/// reaches the base spawner: one wraps futures (used by
+/// [`Spawner::spawn`] and [`Spawner::spawn_anywhere`]) and one wraps
+/// blocking tasks (used by [`Spawner::spawn_blocking`]). Pass `|t| t` for
+/// either side to leave that task kind unchanged.
 ///
-/// Use [`new`](Self::new) with any [`SpawnCustom`] base, or the convenience
-/// [`tokio()`](Self::tokio) constructor. Stack middleware with
-/// [`layer()`](Self::layer) and finalize with [`build()`](Self::build).
+/// Layers run in the order they are added: when a task executes, the
+/// first layer added runs first, then the second, and so on, until the
+/// task itself runs.
 ///
 /// # Note
 ///
-/// [`Spawner::new_tokio`] uses a more efficient code path with native Tokio
-/// `JoinHandle`s. The builder's [`tokio()`](Self::tokio) constructor goes
-/// through the custom spawner path (using a oneshot channel for join handles),
-/// which is necessary to support layers but slightly less efficient for
-/// unlayered use.
+/// For a plain Tokio spawner with no layers, prefer [`Spawner::new_tokio`]:
+/// it uses native Tokio `JoinHandle`s directly. The builder's
+/// [`tokio()`](Self::tokio) path uses a oneshot channel for join handles
+/// so that layers can be applied, which is slightly less efficient.
 ///
 /// # Examples
 ///
@@ -276,17 +278,18 @@ impl<S: SpawnCustom + Clone> CustomSpawnerBuilder<S> {
         self
     }
 
-    /// Adds a layer that transforms tasks before they reach the inner
-    /// spawner.
+    /// Wraps each spawned task with a pair of layer closures before it
+    /// reaches the base spawner.
     ///
-    /// `future_layer` receives a [`BoxedFuture`] and returns a
-    /// [`BoxedFuture`]; it is invoked for both [`Spawner::spawn`] and
-    /// [`Spawner::spawn_anywhere`]. `blocking_layer` receives a
-    /// [`BoxedBlockingTask`] and returns a [`BoxedBlockingTask`]; it is
-    /// invoked for [`Spawner::spawn_blocking`]. Pass an identity closure
-    /// (`|t| t`) for either side to leave that task kind unchanged.
+    /// - `future_layer` wraps the future used by [`Spawner::spawn`] and
+    ///   [`Spawner::spawn_anywhere`].
+    /// - `blocking_layer` wraps the closure used by
+    ///   [`Spawner::spawn_blocking`].
     ///
-    /// Layers compose from outside in: the last added layer runs first.
+    /// Pass `|t| t` for either side to leave that task kind unchanged.
+    ///
+    /// When multiple layers are added, they run in the order they were
+    /// added: the first layer added runs first when the task executes.
     ///
     /// # Examples
     ///

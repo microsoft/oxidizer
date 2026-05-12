@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 #![allow(missing_docs, reason = "test module")]
-// #![cfg(not(miri))]
+#![cfg(not(miri))]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -60,57 +60,99 @@ async fn builder_layer_counts_invocations() {
     assert_eq!(blocking_count.load(Ordering::SeqCst), 1);
 }
 
+type SharedOrder = Arc<std::sync::Mutex<Vec<&'static str>>>;
+
+/// Builds a layer pair that records `tag` before delegating to the wrapped
+/// task: the future side records to `future_order` and the blocking side to
+/// `blocking_order`. Used to verify that layers execute in the documented
+/// order.
+fn recording_layer(
+    future_order: SharedOrder,
+    blocking_order: SharedOrder,
+    tag: &'static str,
+) -> (
+    impl Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
+    impl Fn(BoxedBlockingTask) -> BoxedBlockingTask + Clone + Send + Sync + 'static,
+) {
+    let future_layer = move |task: BoxedFuture| -> BoxedFuture {
+        let order = Arc::clone(&future_order);
+        Box::pin(async move {
+            order.lock().expect("lock poisoned").push(tag);
+            task.await;
+        })
+    };
+    let blocking_layer = move |task: BoxedBlockingTask| -> BoxedBlockingTask {
+        let order = Arc::clone(&blocking_order);
+        Box::new(move || {
+            order.lock().expect("lock poisoned").push(tag);
+            task();
+        })
+    };
+    (future_layer, blocking_layer)
+}
+
 #[tokio::test]
 async fn builder_stacked_layers() {
-    let future_order = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let blocking_order = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
-    let inner_future = Arc::clone(&future_order);
-    let outer_future = Arc::clone(&future_order);
-    let inner_blocking = Arc::clone(&blocking_order);
-    let outer_blocking = Arc::clone(&blocking_order);
+    // Three layers so the ordering is unambiguous: the documented order
+    // must reproduce the exact add-order, not just any consistent order.
+    let future_order: SharedOrder = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let blocking_order: SharedOrder = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let (first_f, first_b) = recording_layer(Arc::clone(&future_order), Arc::clone(&blocking_order), "first");
+    let (second_f, second_b) = recording_layer(Arc::clone(&future_order), Arc::clone(&blocking_order), "second");
+    let (third_f, third_b) = recording_layer(Arc::clone(&future_order), Arc::clone(&blocking_order), "third");
 
     let spawner = CustomSpawnerBuilder::tokio()
-        .layer(
-            move |task: BoxedFuture| -> BoxedFuture {
-                let inner = Arc::clone(&inner_future);
-                Box::pin(async move {
-                    inner.lock().unwrap().push("inner");
-                    task.await;
-                })
-            },
-            move |task: BoxedBlockingTask| -> BoxedBlockingTask {
-                let inner = Arc::clone(&inner_blocking);
-                Box::new(move || {
-                    inner.lock().unwrap().push("inner");
-                    task();
-                })
-            },
-        )
-        .layer(
-            move |task: BoxedFuture| -> BoxedFuture {
-                let outer = Arc::clone(&outer_future);
-                Box::pin(async move {
-                    outer.lock().unwrap().push("outer");
-                    task.await;
-                })
-            },
-            move |task: BoxedBlockingTask| -> BoxedBlockingTask {
-                let outer = Arc::clone(&outer_blocking);
-                Box::new(move || {
-                    outer.lock().unwrap().push("outer");
-                    task();
-                })
-            },
-        )
+        .layer(first_f, first_b)
+        .layer(second_f, second_b)
+        .layer(third_f, third_b)
         .build();
 
-    spawner.spawn(async {}).await;
-    spawner.spawn_blocking(|| {}).await;
+    let body_future_order = Arc::clone(&future_order);
+    let body_blocking_order = Arc::clone(&blocking_order);
 
-    // Layers wrap the task outside-in as added: the first-added (innermost
-    // wrapper) layer's pre-task code runs first when the task executes.
-    assert_eq!(*future_order.lock().unwrap(), vec!["inner", "outer"]);
-    assert_eq!(*blocking_order.lock().unwrap(), vec!["inner", "outer"]);
+    spawner
+        .spawn(async move {
+            body_future_order.lock().expect("lock poisoned").push("task");
+        })
+        .await;
+    spawner
+        .spawn_blocking(move || {
+            body_blocking_order.lock().expect("lock poisoned").push("task");
+        })
+        .await;
+
+    // Documented behavior: layers run in the order they were added, then
+    // the task body runs last.
+    assert_eq!(*future_order.lock().unwrap(), vec!["first", "second", "third", "task"]);
+    assert_eq!(*blocking_order.lock().unwrap(), vec!["first", "second", "third", "task"]);
+}
+
+#[tokio::test]
+async fn builder_stacked_layers_spawn_anywhere() {
+    // spawn_anywhere goes through the future layer, so it must observe the
+    // same add-order semantics as spawn().
+    let order: SharedOrder = Arc::new(std::sync::Mutex::new(Vec::new()));
+    // The blocking sink is irrelevant here because spawn_anywhere only
+    // exercises the future layer; pass the same Vec to satisfy the helper.
+    let (first_f, first_b) = recording_layer(Arc::clone(&order), Arc::clone(&order), "first");
+    let (second_f, second_b) = recording_layer(Arc::clone(&order), Arc::clone(&order), "second");
+    let (third_f, third_b) = recording_layer(Arc::clone(&order), Arc::clone(&order), "third");
+
+    let spawner = CustomSpawnerBuilder::tokio()
+        .layer(first_f, first_b)
+        .layer(second_f, second_b)
+        .layer(third_f, third_b)
+        .build();
+
+    // spawn_anywhere takes a fn pointer, so the task body cannot capture
+    // the order Vec. We only assert the layer order here; the existing
+    // `builder_spawn_anywhere_applies_layer` test already covers that
+    // the task body runs after the layer.
+    let result = spawner.spawn_anywhere(0_i32, |x| async move { x + 1 }).await;
+
+    assert_eq!(result, 1);
+    assert_eq!(*order.lock().unwrap(), vec!["first", "second", "third"]);
 }
 
 #[tokio::test]
