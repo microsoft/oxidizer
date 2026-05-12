@@ -376,7 +376,9 @@ mod tests {
             BaseUri::from_static("https://primary.example.com"),
             BaseUri::from_static("https://fallback.example.com"),
         );
-        let ctx = RoutingContext::new().with_previous_recovery(recoverable::RecoveryInfo::unavailable());
+        let ctx = RoutingContext::new()
+            .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
+            .with_attempt(1, false);
         let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
