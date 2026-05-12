@@ -10,4 +10,5 @@ use trybuild::TestCases;
 fn compile_fail_tests() {
     let t = TestCases::new();
     t.compile_fail("tests/ui/string_in_restricted_position.rs");
+    t.compile_fail("tests/ui/option_string_in_restricted_position.rs");
 }

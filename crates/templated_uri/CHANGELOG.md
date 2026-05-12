@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- ✨ Features
+
+  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics. When a field is `None`, it is omitted from the rendered URI, including any associated prefix or separator.
+
 ## [0.2.0] - 2026-05-11
 
 - ✨ Features

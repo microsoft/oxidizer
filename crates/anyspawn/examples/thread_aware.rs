@@ -11,7 +11,7 @@
 //! In production the data might hold a core-local work queue, metrics
 //! counter, or connection pool instead of a simple index.
 
-use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
@@ -69,5 +69,10 @@ impl SpawnCustom for Scheduler {
 
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
+    }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        println!("{}: executing blocking", self.caption());
+        tokio::task::spawn_blocking(task);
     }
 }

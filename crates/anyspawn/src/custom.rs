@@ -26,6 +26,16 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
     /// if needed. Call [`call_once`](ThreadAwareAsyncFnOnce::call_once) to obtain
     /// the future.
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>);
+    /// Spawn a blocking (synchronous) task.
+    ///
+    /// Implementations should execute `task` on a thread that is allowed to
+    /// block (e.g., Tokio's blocking thread pool via
+    /// [`tokio::task::spawn_blocking`]) so the async runtime is not stalled.
+    ///
+    /// The task is a type-erased [`FnOnce`] returning `()`; the public
+    /// [`Spawner::spawn_blocking`](crate::Spawner::spawn_blocking) API handles
+    /// the typed result via an internal channel.
+    fn spawn_blocking(&self, task: BoxedBlockingTask);
 }
 
 /// A type-erased, heap-allocated, pinned future that returns `()`.
@@ -33,6 +43,12 @@ pub trait SpawnCustom: ThreadAware + Sync + 'static {
 /// This is the future type that [`SpawnCustom::spawn`] implementations and
 /// layer closures operate on.
 pub type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// A type-erased, heap-allocated synchronous closure that returns `()`.
+///
+/// This is the task type that [`SpawnCustom::spawn_blocking`] implementations
+/// operate on.
+pub type BoxedBlockingTask = Box<dyn FnOnce() + Send + 'static>;
 
 /// Wraps [`ThreadAware`] data, a fn pointer, and a result channel as a [`ThreadAwareAsyncFnOnce`].
 ///
@@ -94,6 +110,18 @@ impl CustomSpawner {
         let (tx, rx) = oneshot::channel();
         let task = Box::new(SpawnAnywhereTask { data, f, tx });
         self.spawn.spawn_anywhere(task);
+        rx
+    }
+
+    pub(crate) fn spawn_blocking<T, F>(&self, f: F) -> oneshot::Receiver<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        self.spawn.spawn_blocking(Box::new(move || {
+            let _ = tx.send(f());
+        }));
         rx
     }
 }

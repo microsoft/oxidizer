@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- ✨ Features
+
+  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics.
+
 ## [0.2.0] - 2026-05-11
 
 - ⚠️ Breaking
