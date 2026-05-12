@@ -156,7 +156,6 @@ pub mod affinity;
 #[doc(inline)]
 pub use core::ThreadAware;
 
-pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 // Re-export the derive macro (behind the `derive` feature) so users can
 // simply `use thread_aware::ThreadAware;`. Disable the feature to avoid the
 // proc-macro dependency in minimal builds.
@@ -205,4 +204,5 @@ pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 /// ```
 #[cfg(feature = "derive")]
 pub use ::thread_aware_macros::ThreadAware;
+pub use cell::{Arc, PerCore, PerNuma, PerProcess, storage};
 pub use wrappers::{Unaware, unaware};
