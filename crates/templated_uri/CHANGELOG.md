@@ -8,7 +8,7 @@
 
 ## [0.2.0] - 2026-05-11
 
-- ✨ Features
+- ⚠️ Breaking
 
     API review and overall cleanup ([#391](https://github.com/microsoft/oxidizer/pull/391)). Many breaking changes across the crate. 
     Review call sites against the updated API surface. Highlights:
