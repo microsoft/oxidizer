@@ -13,7 +13,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{self, pinned_affinities};
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
@@ -41,6 +41,10 @@ fn per_process_relocation_preserves_spawn_function() {
 
         fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
             self.spawn(task.call_once());
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            std::thread::spawn(task);
         }
     }
 
@@ -86,6 +90,10 @@ fn thread_aware_relocation_invokes_relocated_for_new_core() {
         fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
             let fut = task.call_once();
             std::thread::spawn(move || futures::executor::block_on(fut));
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            std::thread::spawn(task);
         }
     }
 
@@ -139,6 +147,10 @@ fn thread_aware_relocated_spawner_dispatches_through_destination() {
 
         fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
             self.spawn(task.call_once());
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            std::thread::spawn(task);
         }
     }
 
@@ -199,6 +211,10 @@ fn spawn_anywhere_relocates_task_data() {
             let affinities = pinned_affinities(&[2]);
             task.relocate(Some(affinities[0]), affinities[1]);
             self.spawn(task.call_once());
+        }
+
+        fn spawn_blocking(&self, task: BoxedBlockingTask) {
+            std::thread::spawn(task);
         }
     }
 

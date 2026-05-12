@@ -6,7 +6,7 @@
 
 //! Tests for `Spawner` implementations.
 
-use anyspawn::{BoxedFuture, SpawnCustom, Spawner};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, SpawnCustom, Spawner};
 use thread_aware::ThreadAware;
 use thread_aware::closure::ThreadAwareAsyncFnOnce;
 
@@ -61,6 +61,10 @@ impl SpawnCustom for ThreadPoolSpawner {
     fn spawn_anywhere(&self, task: Box<dyn ThreadAwareAsyncFnOnce<()>>) {
         self.spawn(task.call_once());
     }
+
+    fn spawn_blocking(&self, task: BoxedBlockingTask) {
+        std::thread::spawn(task);
+    }
 }
 
 #[test]
@@ -113,4 +117,26 @@ async fn tokio_spawner_debug() {
     let spawner = Spawner::new_tokio();
     let debug_str = format!("{spawner:?}");
     assert_eq!(debug_str, r#"Spawner("tokio")"#);
+}
+
+#[tokio::test]
+async fn tokio_spawn_blocking() {
+    let spawner = Spawner::new_tokio();
+    let result = spawner.spawn_blocking(|| 21 * 2).await;
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn tokio_with_handle_spawn_blocking() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let spawner = Spawner::new_tokio_with_handle(rt.handle().clone());
+    let result = rt.block_on(spawner.spawn_blocking(|| 7 * 6));
+    assert_eq!(result, 42);
+}
+
+#[test]
+fn custom_spawn_blocking() {
+    let spawner = Spawner::new_custom("threadpool", ThreadPoolSpawner);
+    let result = futures::executor::block_on(spawner.spawn_blocking(|| 100 + 23));
+    assert_eq!(result, 123);
 }
