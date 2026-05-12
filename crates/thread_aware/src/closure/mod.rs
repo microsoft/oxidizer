@@ -5,9 +5,9 @@
 
 mod erased;
 
-pub(crate) use erased::ErasedClosureOnce;
-
 use std::pin::Pin;
+
+pub(crate) use erased::ErasedClosureOnce;
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;

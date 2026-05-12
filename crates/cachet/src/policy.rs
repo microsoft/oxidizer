@@ -92,9 +92,9 @@ impl<V> InsertPolicy<V> {
     /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
-    ///     .insert_policy(InsertPolicy::when(
-    ///         move |entry: &CacheEntry<String>| entry.value().len() >= min_len,
-    ///     ))
+    ///     .insert_policy(InsertPolicy::when(move |entry: &CacheEntry<String>| {
+    ///         entry.value().len() >= min_len
+    ///     }))
     ///     .fallback(l2)
     ///     .build();
     /// ```

@@ -41,7 +41,10 @@
 //! }
 //!
 //! fn database_operation() -> Result<(), DatabaseError> {
-//!     Err(DatabaseError::caused_by(RecoveryInfo::retry(), "connection timed out"))
+//!     Err(DatabaseError::caused_by(
+//!         RecoveryInfo::retry(),
+//!         "connection timed out",
+//!     ))
 //! }
 //!
 //! fn service_operation() -> Result<(), ServiceError> {
@@ -83,7 +86,10 @@
 //!     }
 //! }
 //!
-//! let err = ConfigError::caused_by(RecoveryInfo::never(), "missing required field: database_url");
+//! let err = ConfigError::caused_by(
+//!     RecoveryInfo::never(),
+//!     "missing required field: database_url",
+//! );
 //! assert_eq!(err.recovery().kind(), RecoveryKind::Never);
 //! ```
 //!

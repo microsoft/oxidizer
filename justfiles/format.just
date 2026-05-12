@@ -16,4 +16,4 @@ format-check:
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    cargo +$env:RUST_NIGHTLY fmt {{ format_package }} --check
+    cargo +$env:RUST_NIGHTLY fmt {{ format_package }} -- --config-path ./unstable-rustfmt.toml --check
