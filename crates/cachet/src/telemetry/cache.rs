@@ -45,7 +45,11 @@ impl CacheTelemetry {
     fn debug(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.inner.logging_enabled {
-            tracing::debug!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration.as_nanos());
+            tracing::debug!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
     }
 
@@ -54,7 +58,11 @@ impl CacheTelemetry {
     fn info(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.inner.logging_enabled {
-            tracing::info!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration.as_nanos());
+            tracing::info!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
     }
 
@@ -63,7 +71,11 @@ impl CacheTelemetry {
     fn error(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.inner.logging_enabled {
-            tracing::error!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration.as_nanos());
+            tracing::error!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
     }
 
