@@ -167,10 +167,13 @@ impl SpawnCustom for TokioSpawner {
 /// let spawner = CustomSpawnerBuilder::tokio()
 ///     .layer(
 ///         |task: BoxedFuture| -> BoxedFuture {
-///             println!("spawning task");
+///             println!("spawning async task");
 ///             task
 ///         },
-///         |task: BoxedBlockingTask| -> BoxedBlockingTask { task },
+///         |task: BoxedBlockingTask| -> BoxedBlockingTask {
+///             println!("spawning blocking task");
+///             task
+///         },
 ///     )
 ///     .build();
 ///
@@ -290,33 +293,6 @@ impl<S: SpawnCustom + Clone> CustomSpawnerBuilder<S> {
     ///
     /// When multiple layers are added, they run in the order they were
     /// added: the first layer added runs first when the task executes.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # #[cfg(feature = "tokio")]
-    /// # #[tokio::main]
-    /// # async fn main() {
-    /// use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder};
-    ///
-    /// let spawner = CustomSpawnerBuilder::tokio()
-    ///     .layer(
-    ///         |task: BoxedFuture| -> BoxedFuture { task },
-    ///         |task: BoxedBlockingTask| -> BoxedBlockingTask {
-    ///             Box::new(move || {
-    ///                 println!("running blocking task");
-    ///                 task();
-    ///             })
-    ///         },
-    ///     )
-    ///     .build();
-    ///
-    /// let result = spawner.spawn_blocking(|| 42).await;
-    /// assert_eq!(result, 42);
-    /// # }
-    /// # #[cfg(not(feature = "tokio"))]
-    /// # fn main() {}
-    /// ```
     pub fn layer<FL, BL>(self, future_layer: FL, blocking_layer: BL) -> CustomSpawnerBuilder<impl SpawnCustom + Clone>
     where
         FL: Fn(BoxedFuture) -> BoxedFuture + Clone + Send + Sync + 'static,
