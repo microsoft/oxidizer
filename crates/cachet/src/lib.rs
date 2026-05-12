@@ -232,7 +232,7 @@ mod cache;
 mod fallback;
 mod policy;
 mod refresh;
-mod telemetry;
+pub mod telemetry;
 
 /// The tracing target prefix for all cachet telemetry events.
 ///

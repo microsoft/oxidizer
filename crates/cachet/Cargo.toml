@@ -143,5 +143,9 @@ required-features = ["memory", "service"]
 name = "type_mapping"
 required-features = ["memory", "test-util"]
 
+[[example]]
+name = "telemetry_subscriber"
+required-features = ["memory", "logs"]
+
 [lints]
 workspace = true

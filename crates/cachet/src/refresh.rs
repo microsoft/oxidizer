@@ -350,8 +350,8 @@ mod fetch_and_promote_tests {
             // Fallback is empty → handle_fallback_miss Ok(None) branch
             fc.inner.fetch_and_promote("missing".to_string()).await;
 
-            capture.assert_contains(attributes::CACHE_ACTIVITY_NAME);
-            capture.assert_contains("cache.refresh_miss");
+            capture.assert_contains(attributes::FIELD_EVENT);
+            capture.assert_contains(attributes::EVENT_REFRESH_MISS);
         });
     }
 
