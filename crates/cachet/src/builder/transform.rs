@@ -14,7 +14,6 @@ use super::buildable::{Buildable, type_name};
 use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::fallback::FallbackPromotionPolicy;
 use crate::telemetry::{CacheTelemetry, TelemetryConfig};
 use crate::transform::TransformAdapter;
 use crate::{CacheTier, Codec, Encoder};
@@ -171,7 +170,6 @@ where
             name: None,
             primary_builder: self.post,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
             clock: clock.clone(),
             refresh: None,
             telemetry: telemetry.clone(),
@@ -267,15 +265,7 @@ where
         let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
 
         // Combine: pre is primary, adapted is fallback
-        let fallback = crate::fallback::FallbackCache::new(
-            type_name::<Self::TierOutput>(None),
-            pre_tier,
-            adapted,
-            FallbackPromotionPolicy::always(),
-            clock,
-            None,
-            telemetry,
-        );
+        let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);
 
         DynamicCache::new(fallback)
     }

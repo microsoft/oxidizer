@@ -123,9 +123,7 @@
 //! let stack = (
 //!     Fallback::layer("my_fallback", &context)
 //!         .should_fallback(|output: &String| output == "error")
-//!         .fallback_async(|_output: String, _args| async {
-//!             "fetched_from_cache".to_string()
-//!         }),
+//!         .fallback_async(|_output: String, _args| async { "fetched_from_cache".to_string() }),
 //!     Execute::new(execute_unreliable_operation),
 //! );
 //!

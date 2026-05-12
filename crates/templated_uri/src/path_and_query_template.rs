@@ -30,7 +30,7 @@ use crate::UriError;
 /// # Examples
 ///
 /// ```
-/// use templated_uri::{PathAndQueryTemplate, EscapedString, templated};
+/// use templated_uri::{EscapedString, PathAndQueryTemplate, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/", unredacted)]
 /// #[derive(Clone)]
@@ -54,11 +54,11 @@ use crate::UriError;
 /// ```
 /// #![allow(non_upper_case_globals)]
 /// # const Pii: DataClass = DataClass::new("templated_uri", "pii");
+/// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 /// use data_privacy::{
 ///     Classified, DataClass, RedactedToString, RedactionEngine, RedactionEngineBuilder, Sensitive,
 /// };
-/// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use templated_uri::{PathAndQueryTemplate, EscapedString, templated};
+/// use templated_uri::{EscapedString, PathAndQueryTemplate, templated};
 ///
 /// #[templated(template = "/{org_id}/user/{user_id}/")]
 /// #[derive(Clone)]

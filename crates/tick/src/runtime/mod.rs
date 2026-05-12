@@ -21,7 +21,7 @@
 //! timer storage. This eliminates cross-thread lock contention and scales linearly.
 //!
 //! The pattern is to clone the [`InactiveClock`], relocate each clone to its target thread
-//! using [`ThreadAware::relocated`], and then activate:
+//! using [`ThreadAware::relocate`], and then activate:
 //!
 //! ```rust
 //! # use thread_aware::ThreadAware;
@@ -31,8 +31,10 @@
 //! let root = InactiveClock::default();
 //!
 //! // Clone and relocate to each thread's affinity
-//! let inactive_1 = root.clone().relocated(affinities[0].into(), affinities[0]);
-//! let inactive_2 = root.relocated(affinities[1].into(), affinities[1]);
+//! let mut inactive_1 = root.clone();
+//! inactive_1.relocate(Some(affinities[0]), affinities[0]);
+//! let mut inactive_2 = root;
+//! inactive_2.relocate(Some(affinities[1]), affinities[1]);
 //!
 //! // On thread 1: activate and drive timers independently
 //! let (clock_1, driver_1) = inactive_1.activate();
@@ -61,7 +63,7 @@
 //!
 //! [`Clock`]: crate::Clock
 //! [`InactiveClock::activate`]: InactiveClock::activate
-//! [`ThreadAware::relocated`]: thread_aware::ThreadAware::relocated
+//! [`ThreadAware::relocate`]: thread_aware::ThreadAware::relocate
 
 mod clock_driver;
 mod clock_gone;

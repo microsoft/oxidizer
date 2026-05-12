@@ -14,9 +14,8 @@ use layered::{Execute, Service, Stack};
 use ohno::AppError;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_stdout::MetricExporter;
-use seatbelt::Attempt;
 use seatbelt::retry::Retry;
-use seatbelt::{RecoveryInfo, ResilienceContext};
+use seatbelt::{Attempt, RecoveryInfo, ResilienceContext};
 use tick::Clock;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -37,9 +36,9 @@ async fn main() -> Result<(), AppError> {
                 cloned.extensions_mut().insert(args.attempt());
                 Some(cloned)
             })
-            .max_retry_attempts(10)
+            .max_retry_attempts(5)
             .use_jitter(true)
-            .base_delay(Duration::from_millis(100))
+            .base_delay(Duration::from_millis(50))
             .recovery_with(|output, _args| match output {
                 Ok(_) => RecoveryInfo::never(),
                 Err(_) => RecoveryInfo::retry(),

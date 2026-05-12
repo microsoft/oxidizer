@@ -67,12 +67,30 @@ docs:
     cargo +$env:RUST_NIGHTLY doc {{ target_package }} --no-deps --all-features --locked --open
 
 # Run all stand-alone example binaries to ensure they complete with exit code 0.
+# Implemented in Rust (via cargo-script) so that exit codes propagate cleanly
+# through `just` and CI on every platform — see AB#7306508.
 [script]
-examples PROFILE='dev':
+examples PROFILE='dev' EXCLUDE='':
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    . ./scripts/run-examples.ps1 -Package "{{ package }}" -CargoProfile "{{ PROFILE }}"
+    $args = @(
+        "+$env:RUST_NIGHTLY",
+        "-Zscript",
+        "./scripts/run-examples.rs",
+        "--cargo-profile",
+        "{{ PROFILE }}"
+    )
+
+    if ("{{ package }}" -ne "") {
+        $args += @("--package", "{{ package }}")
+    }
+
+    if ("{{ EXCLUDE }}" -ne "") {
+        $args += "{{ EXCLUDE }}".Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)
+    }
+
+    cargo @args
 
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked

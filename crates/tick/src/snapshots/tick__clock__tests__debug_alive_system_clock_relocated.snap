@@ -7,7 +7,7 @@ Clock {
     timers: 0,
     alive: false,
     affinity: Some(
-        PinnedAffinity {
+        Affinity {
             processor_index: 1,
             memory_region_index: 0,
             processor_count: 2,

@@ -19,8 +19,7 @@ use thread_aware::ThreadAware;
 ///
 /// use http_extensions::HttpBodyOptions;
 ///
-/// let options = HttpBodyOptions::default()
-///     .timeout(Duration::from_secs(60));
+/// let options = HttpBodyOptions::default().timeout(Duration::from_secs(60));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ThreadAware)]
 pub struct HttpBodyOptions {
