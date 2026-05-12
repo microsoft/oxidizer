@@ -82,13 +82,13 @@ impl Routing {
     /// based on the previous attempt's [`RecoveryInfo`] and the current attempt's
     /// position in the retry sequence.
     ///
-    /// The fallback [`BaseUri`] is used when either:
+    /// The first attempt always uses the primary [`BaseUri`]. On subsequent
+    /// attempts, the fallback [`BaseUri`] is used when either:
     ///
     /// - the previous attempt's [`RecoveryInfo`] reports
     ///   [`RecoveryKind::Unavailable`] (e.g., a circuit breaker is open), or
-    /// - the current attempt is not the first attempt and is the last attempt
-    ///   that will be performed (a final best-effort try against the fallback
-    ///   endpoint).
+    /// - the current attempt is the last attempt that will be performed
+    ///   (a final best-effort try against the fallback endpoint).
     ///
     /// Otherwise, the primary [`BaseUri`] is used. This is intended for
     /// scenarios where the primary endpoint becomes unavailable but requests

@@ -13,7 +13,8 @@
 //! - [`Routing::default`] - returns no [`BaseUri`] (the target [`Uri`] is used as-is).
 //! - [`Routing::base_uri`] - always returns the same [`BaseUri`].
 //! - [`Routing::fallback`] - selects between a primary and a fallback [`BaseUri`]
-//!   based on the previous attempt's recovery information.
+//!   based on the previous attempt's recovery information and the current
+//!   attempt's position in the retry sequence.
 //! - [`Routing::custom`] - delegates the decision to a user supplied closure that
 //!   receives a [`RoutingContext`].
 //!
