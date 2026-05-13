@@ -5,7 +5,7 @@
 //!
 //! Use these constants to filter or match cachet events in a custom
 //! `tracing_subscriber::Layer`. All cachet events are emitted with
-//! [`FIELD_NAME`], [`FIELD_EVENT`], and [`FIELD_DURATION_NS`] fields.
+//! `FIELD_NAME`, `FIELD_EVENT`, and `FIELD_DURATION_NS` fields.
 //!
 //! # Example
 //!
