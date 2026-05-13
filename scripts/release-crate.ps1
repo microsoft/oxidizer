@@ -11,10 +11,17 @@
        version. Cargo's 0.x.y SemVer rules are honored — for `0.x.y` crates a `major` bump becomes
        `0.(x+1).0` and both `minor` and `patch` map to bumping `y`.
     2. Cascade: Every workspace crate that depends on the target via `[dependencies]` or
-       `[build-dependencies]` (transitively) is bumped with the same bump kind. Dev-only dependents
-       are skipped — they automatically pick up the new workspace version. This mirrors the
-       guidance in `.github/prompts/bump-crate-version.prompt.md` and prevents the publish-time
-       inconsistencies that would otherwise occur when a core crate is bumped in isolation.
+       `[build-dependencies]` (transitively) is also bumped. The bump kind applied to each
+       dependent is informed by `[package.metadata.cargo_check_external_types]`:
+         * If the dependent exposes any type rooted at the bumped crate in its public API
+           (or does not declare allowed_external_types at all), the same bump kind is applied —
+           a breaking change in the bumped crate's public API transitively becomes a breaking
+           change in the dependent's public API.
+         * Otherwise, the dependent only uses the bumped crate internally, and a `patch` bump
+           is applied: enough to refresh the workspace-pinned version, but without overstating
+           the change to downstream consumers.
+       Dev-only dependents are skipped — they automatically pick up the new workspace version.
+       This mirrors the guidance in `.github/prompts/bump-crate-version.prompt.md`.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded crates that have no other commits since their last release get a single
        `bump \`<target>\` to <new-version>` entry under `🔧 Maintenance` (or `⚠️ Breaking` for
@@ -187,10 +194,14 @@ function Get-WorkspaceMetadata {
 }
 
 # Returns information about all workspace crates as an array of objects with:
-#   Name      - cargo package name
-#   Folder    - folder name under crates/ (used as the script's CrateName argument)
-#   Published - $true if the crate is published to crates.io
-#   Deps      - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   Name                  - cargo package name
+#   Folder                - folder name under crates/ (used as the script's CrateName argument)
+#   Published             - $true if the crate is published to crates.io
+#   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
+#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
+#                           or $null if the crate does not declare them. Each entry is a path or
+#                           glob like "tick::clock::Clock" or "cachet_memory::*". Used to detect
+#                           whether a dependent exposes types from a bumped crate in its public API.
 function Get-WorkspaceCrates {
     param([string]$repoRoot)
 
@@ -213,15 +224,61 @@ function Get-WorkspaceCrates {
             }
         }
 
+        # Extract [package.metadata.cargo_check_external_types].allowed_external_types if present.
+        # PSCustomObject access via PSObject.Properties avoids errors for missing branches.
+        $allowedTypes = $null
+        $pkgMeta = $package.PSObject.Properties['metadata']
+        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
+            $cet = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
+            if ($cet -and $null -ne $cet.Value) {
+                $aet = $cet.Value.PSObject.Properties['allowed_external_types']
+                if ($aet -and $null -ne $aet.Value) {
+                    $allowedTypes = @($aet.Value)
+                }
+            }
+        }
+
         $crates += [pscustomobject]@{
-            Name      = $package.name
-            Folder    = Split-Path $manifestDir -Leaf
-            Published = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
-            Deps      = $deps
+            Name                 = $package.name
+            Folder               = Split-Path $manifestDir -Leaf
+            Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
+            Deps                 = $deps
+            AllowedExternalTypes = $allowedTypes
         }
     }
 
     return $crates
+}
+
+# Returns $true if the dependent crate exposes any type rooted at the target crate in its public
+# API, as declared by [package.metadata.cargo_check_external_types].allowed_external_types.
+#
+# Returns $true (conservative) if the dependent does not declare allowed_external_types at all,
+# since we then have no information about its public API surface and assume the worst.
+#
+# Returns $false only when the metadata is present and contains no entry rooted at the target.
+function Test-CrateExposesTarget {
+    param(
+        [pscustomobject]$dependent,
+        [string]$targetPackageName
+    )
+
+    if ($null -eq $dependent.AllowedExternalTypes) {
+        # No metadata declared. Be conservative: assume the dependent might expose target's types.
+        return $true
+    }
+
+    $normalizedTarget = $targetPackageName.Replace('-', '_')
+    foreach ($entry in $dependent.AllowedExternalTypes) {
+        # Each entry is a Rust path like "tick::clock::Clock" or "cachet_memory::*". The first
+        # `::`-separated segment is always the crate name (in normalized snake_case form).
+        $root = ($entry -split '::', 2)[0]
+        if ($root -eq $normalizedTarget) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 # Computes the transitive set of published workspace crates that depend on the given target via
@@ -814,19 +871,23 @@ try {
         [pscustomobject]@{ Crate = $CrateName; OldVersion = $oldVersion; NewVersion = $newVersion }
     )
 
-    # Cascade the same bump kind to every transitive non-dev workspace dependent. This keeps
-    # workspace-pinned versions consistent and prevents the publish-time failures described in
-    # https://github.com/microsoft/oxidizer/blob/main/.github/prompts/bump-crate-version.prompt.md
+    # Cascade to every transitive non-dev workspace dependent. The bump kind applied to each
+    # dependent is informed by [package.metadata.cargo_check_external_types]:
+    #   - If the dependent exposes any type rooted at the bumped crate in its public API, the
+    #     same bump kind is applied (a breaking change in the bumped crate's public API
+    #     transitively becomes a breaking change in the dependent's public API).
+    #   - Otherwise, the dependent only uses the bumped crate internally, so a `patch` bump is
+    #     enough to refresh the workspace-pinned version without overstating the change.
+    # If a dependent does not declare allowed_external_types, we conservatively cascade the same
+    # kind (worst-case assumption).
     $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
-        Write-Host "🔗 Cascading $cascadeBump bump to $($dependents.Count) dependent crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
+        Write-Host "🔗 Cascading $cascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
 
-        $cascadeReason = @{
-            Target   = $CrateName
-            Version  = $newVersion
-            Breaking = ($cascadeBump -eq 'major')
-        }
+        $allCrates = Get-WorkspaceCrates -repoRoot $repoRoot
+        $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
+        $targetPackageName = if ($null -ne $targetCrate) { $targetCrate.Name } else { $CrateName }
 
         foreach ($dependent in $dependents) {
             $depFolder = Join-Path $repoRoot 'crates' $dependent
@@ -838,10 +899,27 @@ try {
                 continue
             }
 
+            $depCrate = $allCrates | Where-Object { $_.Folder -eq $dependent } | Select-Object -First 1
+            $exposes = if ($null -ne $depCrate) {
+                Test-CrateExposesTarget -dependent $depCrate -targetPackageName $targetPackageName
+            } else {
+                $true
+            }
+
+            $depBump = if ($exposes) { $cascadeBump } else { 'patch' }
+            $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
+            Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
+
+            $depCascadeReason = @{
+                Target   = $CrateName
+                Version  = $newVersion
+                Breaking = ($depBump -eq 'major')
+            }
+
             $depOld = Get-CurrentVersion -cargoTomlPath $depCargo
             $depNew = Invoke-CrateRelease -crateName $dependent -crateFolder $depFolder `
                 -crateCargoToml $depCargo -rootCargoToml $rootCargoToml -changelogFile $depChange `
-                -prBaseUrl $prBaseUrl -version "" -bump $cascadeBump -cascadeReason $cascadeReason
+                -prBaseUrl $prBaseUrl -version "" -bump $depBump -cascadeReason $depCascadeReason
 
             $releases += [pscustomobject]@{ Crate = $dependent; OldVersion = $depOld; NewVersion = $depNew }
         }
