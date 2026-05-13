@@ -184,7 +184,6 @@ mod tests {
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
     use crate::{Cache, InsertPolicy};
 
@@ -193,7 +192,7 @@ mod tests {
 
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
     }
 
@@ -201,7 +200,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         FallbackCache::new("fallback", primary, fallback_mock, clock, None, telemetry)
     }
 
@@ -437,7 +436,7 @@ mod tests {
         primary_mock.insert("key".to_string(), entry).await.unwrap();
 
         let fallback_mock = MockCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
 
         let primary = CacheWrapper::new(

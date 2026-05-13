@@ -15,36 +15,14 @@ use crate::telemetry::attributes;
 #[cfg(any(feature = "logs", test))]
 #[derive(Clone, Debug)]
 pub(crate) struct CacheTelemetryInner {
-    #[cfg(any(feature = "logs", test))]
     pub(crate) logging_enabled: bool,
 }
 
-/// Internal state for cache telemetry when no features are enabled (no-op).
-#[cfg(not(any(feature = "logs", test)))]
-#[derive(Clone, Debug, Default)]
-pub(crate) struct CacheTelemetryInner;
-
-/// Cache telemetry provider for OpenTelemetry integration.
-///
-/// This type is created internally by [`TelemetryConfig::build()`] and handles
-/// recording cache operations as structured logs.
-#[derive(Clone, Debug)]
-pub struct CacheTelemetry {
-    #[cfg(any(feature = "logs", test))]
-    pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
-    #[cfg(not(any(feature = "logs", test)))]
-    #[expect(dead_code, reason = "No-op telemetry when features are disabled")]
-    pub(crate) inner: CacheTelemetryInner,
-}
-
-impl CacheTelemetry {
-    // -- Emit helpers (encapsulate the enabled check + cfg gate) --
-
-    #[allow(unused_variables)]
+#[cfg(any(feature = "logs", test))]
+impl CacheTelemetryInner {
     #[inline]
     fn debug(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        #[cfg(any(feature = "logs", test))]
-        if self.inner.logging_enabled {
+        if self.logging_enabled {
             tracing::debug!(
                 cache.name = cache_name,
                 cache.event = event,
@@ -53,11 +31,9 @@ impl CacheTelemetry {
         }
     }
 
-    #[allow(unused_variables)]
     #[inline]
     fn info(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        #[cfg(any(feature = "logs", test))]
-        if self.inner.logging_enabled {
+        if self.logging_enabled {
             tracing::info!(
                 cache.name = cache_name,
                 cache.event = event,
@@ -66,11 +42,9 @@ impl CacheTelemetry {
         }
     }
 
-    #[allow(unused_variables)]
     #[inline]
     fn error(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        #[cfg(any(feature = "logs", test))]
-        if self.inner.logging_enabled {
+        if self.logging_enabled {
             tracing::error!(
                 cache.name = cache_name,
                 cache.event = event,
@@ -78,37 +52,94 @@ impl CacheTelemetry {
             );
         }
     }
+}
+
+/// Internal state for cache telemetry when no features are enabled (no-op).
+#[cfg(not(any(feature = "logs", test)))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CacheTelemetryInner;
+
+#[cfg(not(any(feature = "logs", test)))]
+#[expect(clippy::unused_self, reason = "Methods must match the logs-enabled impl signature")]
+impl CacheTelemetryInner {
+    #[inline]
+    fn debug(&self, _: CacheName, _: &'static str, _: Duration) {}
+
+    #[inline]
+    fn info(&self, _: CacheName, _: &'static str, _: Duration) {}
+
+    #[inline]
+    fn error(&self, _: CacheName, _: &'static str, _: Duration) {}
+}
+
+/// Cache telemetry provider.
+///
+/// This type is created internally by the cache builder and handles
+/// recording cache operations as structured tracing events.
+#[derive(Clone, Debug)]
+pub struct CacheTelemetry {
+    #[cfg(any(feature = "logs", test))]
+    pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
+    #[cfg(not(any(feature = "logs", test)))]
+    pub(crate) inner: CacheTelemetryInner,
+}
+
+impl CacheTelemetry {
+    /// Creates a new `CacheTelemetry` with logging disabled.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self::with_options(false)
+    }
+
+    /// Creates a new `CacheTelemetry` with logging enabled.
+    #[cfg(any(feature = "logs", test))]
+    #[must_use]
+    pub(crate) fn with_logging() -> Self {
+        Self::with_options(true)
+    }
+
+    #[cfg(any(feature = "logs", test))]
+    fn with_options(logging_enabled: bool) -> Self {
+        Self {
+            inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled }),
+        }
+    }
+
+    #[cfg(not(any(feature = "logs", test)))]
+    fn with_options(_logging_enabled: bool) -> Self {
+        Self { inner: CacheTelemetryInner }
+    }
 
     // -- Get --
 
     /// Records a cache hit (key found and not expired).
     #[inline]
     pub(crate) fn cache_hit(&self, cache_name: CacheName, duration: Duration) {
-        self.debug(cache_name, attributes::EVENT_HIT, duration);
+        self.inner.debug(cache_name, attributes::EVENT_HIT, duration);
     }
 
     /// Records a cache miss (key not found).
     #[inline]
     pub(crate) fn cache_miss(&self, cache_name: CacheName, duration: Duration) {
-        self.debug(cache_name, attributes::EVENT_MISS, duration);
+        self.inner.debug(cache_name, attributes::EVENT_MISS, duration);
     }
 
     /// Records a cache entry that was found but expired.
     #[inline]
     pub(crate) fn cache_expired(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_EXPIRED, duration);
+        self.inner.info(cache_name, attributes::EVENT_EXPIRED, duration);
     }
 
     /// Records an error during a get operation.
     #[inline]
     pub(crate) fn get_error(&self, cache_name: CacheName, duration: Duration) {
-        self.error(cache_name, attributes::EVENT_GET_ERROR, duration);
+        self.inner.error(cache_name, attributes::EVENT_GET_ERROR, duration);
     }
 
     /// Records a fallback tier lookup.
     #[inline]
     pub(crate) fn cache_fallback(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_FALLBACK, duration);
+        self.inner.info(cache_name, attributes::EVENT_FALLBACK, duration);
     }
 
     // -- Refresh --
@@ -116,13 +147,13 @@ impl CacheTelemetry {
     /// Records a successful background refresh from fallback.
     #[inline]
     pub(crate) fn refresh_hit(&self, cache_name: CacheName, duration: Duration) {
-        self.debug(cache_name, attributes::EVENT_REFRESH_HIT, duration);
+        self.inner.debug(cache_name, attributes::EVENT_REFRESH_HIT, duration);
     }
 
-    /// Records a background refresh miss (fallback had no data or errored).
+    /// Records a background refresh miss (fallback had no data or returned error).
     #[inline]
     pub(crate) fn refresh_miss(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_REFRESH_MISS, duration);
+        self.inner.info(cache_name, attributes::EVENT_REFRESH_MISS, duration);
     }
 
     // -- Insert --
@@ -130,19 +161,19 @@ impl CacheTelemetry {
     /// Records a successful cache insert.
     #[inline]
     pub(crate) fn cache_inserted(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_INSERTED, duration);
+        self.inner.info(cache_name, attributes::EVENT_INSERTED, duration);
     }
 
     /// Records a cache insert that was rejected by the insert policy.
     #[inline]
     pub(crate) fn insert_rejected(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_INSERT_REJECTED, duration);
+        self.inner.info(cache_name, attributes::EVENT_INSERT_REJECTED, duration);
     }
 
     /// Records an error during an insert operation.
     #[inline]
     pub(crate) fn insert_error(&self, cache_name: CacheName, duration: Duration) {
-        self.error(cache_name, attributes::EVENT_INSERT_ERROR, duration);
+        self.inner.error(cache_name, attributes::EVENT_INSERT_ERROR, duration);
     }
 
     // -- Invalidate --
@@ -150,13 +181,13 @@ impl CacheTelemetry {
     /// Records a successful cache invalidation.
     #[inline]
     pub(crate) fn cache_invalidated(&self, cache_name: CacheName, duration: Duration) {
-        self.info(cache_name, attributes::EVENT_INVALIDATED, duration);
+        self.inner.info(cache_name, attributes::EVENT_INVALIDATED, duration);
     }
 
     /// Records an error during an invalidate operation.
     #[inline]
     pub(crate) fn invalidate_error(&self, cache_name: CacheName, duration: Duration) {
-        self.error(cache_name, attributes::EVENT_INVALIDATE_ERROR, duration);
+        self.inner.error(cache_name, attributes::EVENT_INVALIDATE_ERROR, duration);
     }
 
     // -- Clear --
@@ -164,13 +195,13 @@ impl CacheTelemetry {
     /// Records a successful cache clear.
     #[inline]
     pub(crate) fn cache_cleared(&self, cache_name: CacheName, duration: Duration) {
-        self.debug(cache_name, attributes::EVENT_CLEARED, duration);
+        self.inner.debug(cache_name, attributes::EVENT_CLEARED, duration);
     }
 
     /// Records an error during a clear operation.
     #[inline]
     pub(crate) fn clear_error(&self, cache_name: CacheName, duration: Duration) {
-        self.error(cache_name, attributes::EVENT_CLEAR_ERROR, duration);
+        self.inner.error(cache_name, attributes::EVENT_CLEAR_ERROR, duration);
     }
 }
 
@@ -179,7 +210,6 @@ mod tests {
     use testing_aids::LogCapture;
 
     use super::*;
-    use crate::telemetry::TelemetryConfig;
 
     #[cfg_attr(miri, ignore)]
     #[test]
@@ -187,7 +217,7 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let telemetry = TelemetryConfig::new().with_logs().build();
+        let telemetry = CacheTelemetry::with_logging();
         telemetry.invalidate_error("my_test_cache", Duration::from_nanos(12345));
 
         // Verify field names match public constants
@@ -204,7 +234,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn logs_emit_at_correct_severity_levels() {
-        let telemetry = TelemetryConfig::new().with_logs().build();
+        let telemetry = CacheTelemetry::with_logging();
 
         // Error level
         let capture = LogCapture::new();
@@ -228,7 +258,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn telemetry_disabled_emits_nothing() {
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
 
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
