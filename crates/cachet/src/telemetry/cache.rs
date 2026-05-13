@@ -107,7 +107,9 @@ impl CacheTelemetry {
 
     #[cfg(not(any(feature = "logs", test)))]
     fn with_options(_logging_enabled: bool) -> Self {
-        Self { inner: CacheTelemetryInner }
+        Self {
+            inner: CacheTelemetryInner,
+        }
     }
 
     // -- Get --
