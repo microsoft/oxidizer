@@ -23,11 +23,16 @@ all-features = true
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "bytesbuf::view::BytesView",
     "cachet_memory::*",
     "cachet_service::*",
     "cachet_tier::*",
     "layered::service::Service",
     "tick::clock::Clock",
+    # External dependencies
+    "opentelemetry::metrics::meter::MeterProvider",
+    "serde_core::de::DeserializeOwned",
+    "serde_core::ser::Serialize",
 ]
 
 [features]
@@ -36,9 +41,12 @@ logs = ["dep:opentelemetry", "opentelemetry/logs", "dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
+serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
+telemetry = []
 
 [dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
+bytesbuf = { workspace = true, optional = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
@@ -48,6 +56,8 @@ ohno = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
+postcard = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
 thread_aware = { workspace = true }
 tick = { workspace = true, features = [] }
 tracing = { workspace = true, optional = true }
@@ -55,6 +65,8 @@ uniflight = { workspace = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+bytesbuf = { workspace = true }
+cachet_memory = { workspace = true }
 cachet_tier = { workspace = true, features = ["test-util"] }
 criterion = { workspace = true }
 dynosaur = { workspace = true }
@@ -63,8 +75,10 @@ opentelemetry = { workspace = true, features = [
     "logs",
 ] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
+postcard = { workspace = true }
 recoverable = { workspace = true }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }
+serde = { workspace = true, features = ["derive"] }
 testing_aids = { path = "../testing_aids" }
 tick = { workspace = true, features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -142,6 +156,10 @@ required-features = ["memory", "test-util"]
 [[example]]
 name = "telemetry_subscriber"
 required-features = ["memory", "logs"]
+
+[[example]]
+name = "serialization"
+required-features = ["memory", "serialize"]
 
 [lints]
 workspace = true

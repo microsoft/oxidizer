@@ -154,6 +154,7 @@
 //! | `memory` | ✅ | Enables `InMemoryCache` and the `.memory()` builder method via `cachet_memory`. |
 //! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
+//! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -195,6 +196,34 @@
 //! # };
 //! ```
 //!
+//! ## Serialization Boundary
+//!
+//! When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
+//! to add a postcard serialization boundary. Keys and values are automatically serialized
+//! to [`BytesView`](bytesbuf::BytesView) before reaching the fallback tier, and
+//! deserialized on the way back.
+//!
+//! ```ignore
+//! use cachet::{Cache, FallbackPromotionPolicy};
+//! use tick::Clock;
+//! # async {
+//!
+//! let clock = Clock::new_tokio();
+//! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+//!
+//! let cache = Cache::builder::<String, String>(clock)
+//!     .memory()
+//!     .serialize()
+//!     .fallback(remote)
+//!     .promotion_policy(FallbackPromotionPolicy::always())
+//!     .build();
+//!
+//! // Keys and values are String on the outside, BytesView in the fallback tier.
+//! cache.insert("key".to_string(), "value".to_string()).await?;
+//! # Ok::<(), cachet::Error>(())
+//! # };
+//! ```
+//!
 //! # Telemetry
 //!
 //! Enable with the `logs` feature. Configure via `.enable_logs()` on the cache builder.
@@ -219,19 +248,9 @@ mod cache;
 mod fallback;
 mod policy;
 mod refresh;
+#[cfg(any(feature = "serialize", test))]
+mod serialize;
 pub mod telemetry;
-
-/// The tracing target prefix for all cachet telemetry events.
-///
-/// All cachet events use module-path targets (e.g., `cachet::telemetry::cache`)
-/// that start with this prefix. Use with `tracing_subscriber::filter::Targets`
-/// for prefix-based filtering:
-/// ```ignore
-/// use tracing_subscriber::filter;
-/// let filter = filter::Targets::new()
-///     .with_target(cachet::TRACING_TARGET, tracing::Level::DEBUG);
-/// ```
-pub use telemetry::attributes::TARGET as TRACING_TARGET;
 mod transform;
 mod wrapper;
 
@@ -239,7 +258,7 @@ mod wrapper;
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
-#[cfg(feature = "memory")]
+#[cfg(any(feature = "memory", test))]
 #[doc(inline)]
 pub use cachet_memory::InMemoryCache;
 #[cfg(feature = "service")]
@@ -256,5 +275,16 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+/// The tracing target prefix for all cachet telemetry events.
+///
+/// All cachet events use module-path targets (e.g., `cachet::telemetry::cache`)
+/// that start with this prefix. Use with `tracing_subscriber::filter::Targets`
+/// for prefix-based filtering:
+/// ```ignore
+/// use tracing_subscriber::filter;
+/// let filter = filter::Targets::new()
+///     .with_target(cachet::TRACING_TARGET, tracing::Level::DEBUG);
+/// ```
+pub use telemetry::attributes::TARGET as TRACING_TARGET;
 #[doc(inline)]
-pub use transform::{Codec, Encoder, TransformCodec, TransformEncoder, infallible};
+pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

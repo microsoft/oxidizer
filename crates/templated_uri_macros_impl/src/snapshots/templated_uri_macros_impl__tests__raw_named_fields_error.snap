@@ -1,0 +1,7 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+::core::compile_error! {
+    "Raw can only be derived for tuple structs (newtype pattern)"
+}
