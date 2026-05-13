@@ -10,6 +10,8 @@ mod buildable;
 mod cache;
 mod fallback;
 mod sealed;
+#[cfg(any(feature = "serialize", test))]
+mod serialize;
 mod transform;
 
 pub use cache::CacheBuilder;
