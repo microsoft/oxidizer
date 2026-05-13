@@ -88,27 +88,26 @@ impl CacheTelemetry {
     /// Creates a new `CacheTelemetry` with logging disabled.
     #[must_use]
     pub(crate) fn new() -> Self {
-        Self::with_options(false)
+        #[cfg(any(feature = "logs", test))]
+        {
+            Self {
+                inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled: false }),
+            }
+        }
+        #[cfg(not(any(feature = "logs", test)))]
+        {
+            Self {
+                inner: CacheTelemetryInner,
+            }
+        }
     }
 
     /// Creates a new `CacheTelemetry` with logging enabled.
     #[cfg(any(feature = "logs", test))]
     #[must_use]
     pub(crate) fn with_logging() -> Self {
-        Self::with_options(true)
-    }
-
-    #[cfg(any(feature = "logs", test))]
-    fn with_options(logging_enabled: bool) -> Self {
         Self {
-            inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled }),
-        }
-    }
-
-    #[cfg(not(any(feature = "logs", test)))]
-    fn with_options(_logging_enabled: bool) -> Self {
-        Self {
-            inner: CacheTelemetryInner,
+            inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled: true }),
         }
     }
 
@@ -268,5 +267,34 @@ mod tests {
         telemetry.cache_hit("cache", Duration::from_secs(1));
 
         assert!(capture.output().is_empty());
+    }
+
+    /// Asserts that a telemetry helper emits the expected event string.
+    #[cfg_attr(miri, ignore)]
+    fn assert_emits(f: impl FnOnce(&CacheTelemetry), expected: &str) {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        let telemetry = CacheTelemetry::with_logging();
+        f(&telemetry);
+        capture.assert_contains(expected);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn every_helper_emits_its_event() {
+        assert_emits(|t| t.cache_hit("c", Duration::ZERO), attributes::EVENT_HIT);
+        assert_emits(|t| t.cache_miss("c", Duration::ZERO), attributes::EVENT_MISS);
+        assert_emits(|t| t.cache_expired("c", Duration::ZERO), attributes::EVENT_EXPIRED);
+        assert_emits(|t| t.get_error("c", Duration::ZERO), attributes::EVENT_GET_ERROR);
+        assert_emits(|t| t.cache_fallback("c", Duration::ZERO), attributes::EVENT_FALLBACK);
+        assert_emits(|t| t.refresh_hit("c", Duration::ZERO), attributes::EVENT_REFRESH_HIT);
+        assert_emits(|t| t.refresh_miss("c", Duration::ZERO), attributes::EVENT_REFRESH_MISS);
+        assert_emits(|t| t.cache_inserted("c", Duration::ZERO), attributes::EVENT_INSERTED);
+        assert_emits(|t| t.insert_rejected("c", Duration::ZERO), attributes::EVENT_INSERT_REJECTED);
+        assert_emits(|t| t.insert_error("c", Duration::ZERO), attributes::EVENT_INSERT_ERROR);
+        assert_emits(|t| t.cache_invalidated("c", Duration::ZERO), attributes::EVENT_INVALIDATED);
+        assert_emits(|t| t.invalidate_error("c", Duration::ZERO), attributes::EVENT_INVALIDATE_ERROR);
+        assert_emits(|t| t.cache_cleared("c", Duration::ZERO), attributes::EVENT_CLEARED);
+        assert_emits(|t| t.clear_error("c", Duration::ZERO), attributes::EVENT_CLEAR_ERROR);
     }
 }
