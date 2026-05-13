@@ -28,9 +28,6 @@ allowed_external_types = [
     "cachet_tier::*",
     "layered::service::Service",
     "tick::clock::Clock",
-    # External dependencies
-    "opentelemetry::metrics::meter::Meter",
-    "opentelemetry::metrics::meter::MeterProvider",
 ]
 
 [features]
@@ -38,7 +35,6 @@ default = ["memory"]
 logs = ["dep:opentelemetry", "opentelemetry/logs", "dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
-metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
 
 [dependencies]
@@ -79,7 +75,7 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 [[bench]]
 name = "operations"
 harness = false
-required-features = ["logs", "metrics", "test-util"]
+required-features = ["logs", "test-util"]
 
 [[bench]]
 name = "dynamic"
@@ -97,15 +93,15 @@ required-features = ["memory"]
 
 [[example]]
 name = "wrapped"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "two_tier"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "multi_tier"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "get_or_insert"

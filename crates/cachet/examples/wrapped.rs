@@ -6,15 +6,11 @@
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use tick::Clock;
 
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_tokio();
-
-    // Set up telemetry
-    let meter_provider = SdkMeterProvider::builder().build();
 
     let cache = Cache::builder::<String, String>(clock)
         .memory()

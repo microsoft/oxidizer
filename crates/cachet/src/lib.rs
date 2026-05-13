@@ -80,7 +80,7 @@
 //! | Stampede protection | ❌ | ✅ |
 //! | Background refresh | ❌ | ✅ |
 //! | Service middleware integration | ❌ | ✅ |
-//! | OpenTelemetry metrics + logs | ❌ | ✅ |
+//! | OpenTelemetry metrics + logs | ❌ | ✅ (structured tracing events) |
 //! | Pluggable storage backends | ❌ | ✅ |
 //! | Clock injection for testing | ❌ | ✅ |
 //!
@@ -152,8 +152,7 @@
 //! | Feature | Default | Description |
 //! |---|---|---|
 //! | `memory` | ✅ | Enables `InMemoryCache` and the `.memory()` builder method via `cachet_memory`. |
-//! | `metrics` | ❌ | Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`). |
-//! | `logs` | ❌ | Enables structured `tracing` log events for every cache activity. |
+//! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
@@ -198,34 +197,22 @@
 //!
 //! # Telemetry
 //!
-//! Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` and `.enable_logs()`.
+//! Enable with the `logs` feature. Configure via `.enable_logs()` on the cache builder.
 //!
-//! ## Metrics (OpenTelemetry)
+//! Each cache operation emits a structured `tracing` event with fields
+//! `cache.name`, `cache.event`, and `cache.duration_ns`. Subscribe to events
+//! using a custom [`tracing_subscriber::Layer`] and the constants in
+//! [`telemetry::attributes`].
 //!
-//! | Metric | Type | Unit | Description |
-//! |--------|------|------|-------------|
-//! | `cache.event.count` | Counter | event | Cache operation events |
-//! | `cache.operation.duration` | Histogram | s | Operation latency |
-//! | `cache.size` | Gauge | entry | Current entry count |
+//! See the `telemetry_subscriber` example for a complete demonstration.
 //!
-//! **Attributes:** `cache.name`, `cache.operation`, `cache.activity`
+//! ## Event types
 //!
-//! **Operations:** `cache.get`, `cache.insert`, `cache.invalidate`, `cache.clear`
-//!
-//! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
-//! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
-//!
-//! ## Logs (tracing)
-//!
-//! Event name: `cache.event` with fields `cache.name`, `cache.operation`,
-//! `cache.activity`, `cache.duration_ns`.
-//!
-//! | Level | Activities |
-//! |-------|-----------|
-//! | ERROR | `cache.error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected` |
-//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
+//! | Level | Events |
+//! |-------|--------|
+//! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback` |
+//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
 mod cache;

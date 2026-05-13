@@ -43,17 +43,16 @@ impl TelemetryConfig {
     /// Builds the telemetry collector from this configuration.
     #[must_use]
     pub(crate) fn build(self) -> CacheTelemetry {
-        #[cfg(any(feature = "logs", feature = "metrics", test))]
+        #[cfg(any(feature = "logs", test))]
         {
             CacheTelemetry {
                 inner: Arc::from_unaware(CacheTelemetryInner {
-                    #[cfg(any(feature = "logs", test))]
                     logging_enabled: self.logs_enabled,
                 }),
             }
         }
 
-        #[cfg(not(any(feature = "logs", feature = "metrics", test)))]
+        #[cfg(not(any(feature = "logs", test)))]
         {
             _ = self;
             #[expect(clippy::default_trait_access, reason = "CacheTelemetryInner is not in scope without feature flags")]

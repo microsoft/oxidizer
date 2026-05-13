@@ -1,11 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Cache telemetry integration with OpenTelemetry.
+//! Cache telemetry integration.
 //!
-//! This module provides telemetry recording for cache operations using
-//! OpenTelemetry metrics and logs. Use [`TelemetryConfig`] to configure
-//! logging and metrics for your cache.
+//! This module provides telemetry recording for cache operations via the
+//! `tracing` crate. Enable structured logging through the cache builder's
+//! [`enable_logs()`](crate::CacheBuilder::enable_logs) method.
+//!
+//! Consumers can subscribe to cache events using a custom
+//! [`tracing_subscriber::Layer`] and the public constants in [`attributes`].
+//! See the `telemetry_subscriber` example for a complete demonstration.
 
 pub mod attributes;
 pub(crate) mod cache;
