@@ -1,0 +1,95 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+struct QueryTest {
+    resource: String,
+    page: String,
+    limit: String,
+}
+impl ::templated_uri::PathAndQueryTemplate for QueryTest {
+    fn template(&self) -> &'static core::primitive::str {
+        "/api/{resource}{?page,limit}"
+    }
+    fn format_template(&self) -> &'static core::primitive::str {
+        "/api/{resource}?page={page}&limit={limit}"
+    }
+    fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+        ::core::option::Option::None
+    }
+    fn render(&self) -> ::std::string::String {
+        let mut __out = ::std::string::String::with_capacity(18usize);
+        __out.push_str("/api/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!(
+                    "{}", ::templated_uri::Escape::escape(& self.resource)
+                ),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out.push_str("?");
+        __out.push_str("page");
+        __out.push_str("=");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.page)),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out.push_str("&");
+        __out.push_str("limit");
+        __out.push_str("=");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.limit)),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out
+    }
+    fn to_path_and_query(
+        &self,
+    ) -> ::std::result::Result<
+        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::UriError,
+    > {
+        Ok(
+            ::templated_uri::http::uri::PathAndQuery::try_from(
+                ::templated_uri::PathAndQueryTemplate::render(self),
+            )?,
+        )
+    }
+}
+impl ::std::fmt::Debug for QueryTest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.debug_tuple("QueryTest").field(&"/api/{resource}{?page,limit}").finish()
+    }
+}
+impl ::data_privacy::RedactedDisplay for QueryTest {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        f.write_str("/api/")?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, engine, f)?;
+        f.write_str("?")?;
+        f.write_str("page")?;
+        f.write_str("=")?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, engine, f)?;
+        f.write_str("&")?;
+        f.write_str("limit")?;
+        f.write_str("=")?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, engine, f)?;
+        ::std::result::Result::Ok(())
+    }
+}
+impl From<QueryTest> for ::templated_uri::PathAndQuery {
+    fn from(value: QueryTest) -> Self {
+        ::templated_uri::PathAndQuery::from_template(value)
+    }
+}

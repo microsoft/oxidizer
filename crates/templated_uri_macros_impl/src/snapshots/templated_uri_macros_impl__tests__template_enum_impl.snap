@@ -1,0 +1,91 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+enum Test {
+    FirstTemplate(First),
+    SecondTemplate(Second),
+}
+impl ::templated_uri::PathAndQueryTemplate for Test {
+    fn template(&self) -> &'static core::primitive::str {
+        match self {
+            Test::FirstTemplate(template_variant) => template_variant.template(),
+            Test::SecondTemplate(template_variant) => template_variant.template(),
+        }
+    }
+    fn format_template(&self) -> &'static core::primitive::str {
+        match self {
+            Test::FirstTemplate(template_variant) => template_variant.format_template(),
+            Test::SecondTemplate(template_variant) => template_variant.format_template(),
+        }
+    }
+    fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+        match self {
+            Test::FirstTemplate(template_variant) => template_variant.label(),
+            Test::SecondTemplate(template_variant) => template_variant.label(),
+        }
+    }
+    fn to_path_and_query(
+        &self,
+    ) -> ::std::result::Result<
+        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::UriError,
+    > {
+        match self {
+            Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
+            Test::SecondTemplate(template_variant) => {
+                template_variant.to_path_and_query()
+            }
+        }
+    }
+    fn render(&self) -> ::std::string::String {
+        match self {
+            Test::FirstTemplate(template_variant) => template_variant.render(),
+            Test::SecondTemplate(template_variant) => template_variant.render(),
+        }
+    }
+}
+impl ::std::fmt::Debug for Test {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Test::FirstTemplate(template_variant) => {
+                f.debug_tuple("Test").field(&template_variant).finish()
+            }
+            Test::SecondTemplate(template_variant) => {
+                f.debug_tuple("Test").field(&template_variant).finish()
+            }
+        }
+    }
+}
+impl ::data_privacy::RedactedDisplay for Test {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        match self {
+            Test::FirstTemplate(template_variant) => {
+                ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+            }
+            Test::SecondTemplate(template_variant) => {
+                ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+            }
+        }
+        Ok(())
+    }
+}
+impl ::std::convert::From<First> for Test {
+    fn from(template_variant: First) -> Self {
+        Self::FirstTemplate(template_variant)
+    }
+}
+impl ::std::convert::From<Second> for Test {
+    fn from(template_variant: Second) -> Self {
+        Self::SecondTemplate(template_variant)
+    }
+}
+impl From<Test> for ::templated_uri::PathAndQuery {
+    fn from(value: Test) -> Self {
+        ::templated_uri::PathAndQuery::from_template(value)
+    }
+}

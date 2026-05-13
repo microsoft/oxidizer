@@ -1,0 +1,123 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+struct OptionalUnredactedTest {
+    filter: String,
+    limit: Option<u32>,
+}
+impl ::templated_uri::PathAndQueryTemplate for OptionalUnredactedTest {
+    fn template(&self) -> &'static core::primitive::str {
+        "/items{?filter,limit}"
+    }
+    fn format_template(&self) -> &'static core::primitive::str {
+        "/items?filter={filter}&limit={limit}"
+    }
+    fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+        ::core::option::Option::None
+    }
+    fn render(&self) -> ::std::string::String {
+        let mut __out = ::std::string::String::with_capacity(21usize);
+        __out.push_str("/items");
+        {
+            let mut __first = true;
+            {
+                let __val = &self.filter;
+                if __first {
+                    __out.push_str("?");
+                } else {
+                    __out.push_str("&");
+                }
+                __out.push_str("filter");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(__val)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __first = false;
+            }
+            if let ::core::option::Option::Some(ref __val) = self.limit {
+                if __first {
+                    __out.push_str("?");
+                } else {
+                    __out.push_str("&");
+                }
+                __out.push_str("limit");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(__val)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __first = false;
+            }
+        }
+        __out
+    }
+    fn to_path_and_query(
+        &self,
+    ) -> ::std::result::Result<
+        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::UriError,
+    > {
+        Ok(
+            ::templated_uri::http::uri::PathAndQuery::try_from(
+                ::templated_uri::PathAndQueryTemplate::render(self),
+            )?,
+        )
+    }
+}
+impl ::std::fmt::Debug for OptionalUnredactedTest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.debug_tuple("OptionalUnredactedTest").field(&"/items{?filter,limit}").finish()
+    }
+}
+impl ::data_privacy::RedactedDisplay for OptionalUnredactedTest {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        f.write_str("/items")?;
+        {
+            let mut __first = true;
+            {
+                if __first {
+                    f.write_str("?")?;
+                } else {
+                    f.write_str("&")?;
+                }
+                f.write_str("filter")?;
+                f.write_str("=")?;
+                ::std::write!(f, "{}", self.filter)?;
+                __first = false;
+            }
+            if let ::core::option::Option::Some(ref __val) = self.limit {
+                if __first {
+                    f.write_str("?")?;
+                } else {
+                    f.write_str("&")?;
+                }
+                f.write_str("limit")?;
+                f.write_str("=")?;
+                ::std::write!(f, "{}", __val)?;
+                __first = false;
+            }
+        }
+        ::std::result::Result::Ok(())
+    }
+}
+impl From<OptionalUnredactedTest> for ::templated_uri::PathAndQuery {
+    fn from(value: OptionalUnredactedTest) -> Self {
+        ::templated_uri::PathAndQuery::from_template(value)
+    }
+}
