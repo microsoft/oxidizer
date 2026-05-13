@@ -80,7 +80,7 @@
 //! | Stampede protection | ❌ | ✅ |
 //! | Background refresh | ❌ | ✅ |
 //! | Service middleware integration | ❌ | ✅ |
-//! | OpenTelemetry metrics + logs | ❌ | ✅ (structured tracing events) |
+//! | Structured telemetry (tracing) | ❌ | ✅ |
 //! | Pluggable storage backends | ❌ | ✅ |
 //! | Clock injection for testing | ❌ | ✅ |
 //!
@@ -226,12 +226,26 @@
 //!
 //! # Telemetry
 //!
-//! Enable with the `logs` feature. Configure via `.enable_logs()` on the cache builder.
+//! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 //!
-//! Each cache operation emits a structured `tracing` event with fields
-//! `cache.name`, `cache.event`, and `cache.duration_ns`. Subscribe to events
-//! using a custom [`tracing_subscriber::Layer`] and the constants in
-//! [`telemetry::attributes`].
+//! Each cache operation emits a structured [`tracing`] event with fields
+//! `cache.name`, `cache.event`, and `cache.duration_ns`.
+//!
+//! ## Subscribing to events
+//!
+//! Use [`telemetry::attributes`] constants to filter and match events in a
+//! custom `tracing_subscriber::Layer`:
+//!
+//! ```ignore
+//! use cachet::telemetry::attributes;
+//!
+//! // Filter by tracing target prefix
+//! let filter = tracing_subscriber::filter::Targets::new()
+//!     .with_target(attributes::TARGET, tracing::Level::DEBUG);
+//!
+//! // Match specific events in a Visit impl
+//! if event_value == attributes::EVENT_HIT { /* cache hit */ }
+//! ```
 //!
 //! See the `telemetry_subscriber` example for a complete demonstration.
 //!
@@ -275,16 +289,5 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
-/// The tracing target prefix for all cachet telemetry events.
-///
-/// All cachet events use module-path targets (e.g., `cachet::telemetry::cache`)
-/// that start with this prefix. Use with `tracing_subscriber::filter::Targets`
-/// for prefix-based filtering:
-/// ```ignore
-/// use tracing_subscriber::filter;
-/// let filter = filter::Targets::new()
-///     .with_target(cachet::TRACING_TARGET, tracing::Level::DEBUG);
-/// ```
-pub use telemetry::attributes::TARGET as TRACING_TARGET;
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
