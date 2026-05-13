@@ -7,7 +7,7 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use cachet_tier::{CacheEntry, CacheTier, SizeError};
+use cachet_tier::{CacheEntry, CacheTier, DynamicCache, SizeError};
 use tick::Clock;
 use uniflight::Merger;
 
@@ -105,16 +105,16 @@ impl<K, V> Debug for Mergers<K, V> {
 /// # };
 /// ```
 #[derive(Debug)]
-pub struct Cache<K, V, CT = ()> {
+pub struct Cache<K, V> {
     pub(crate) name: CacheName,
-    pub(crate) storage: CT,
+    pub(crate) storage: DynamicCache<K, V>,
     pub(crate) clock: Clock,
     /// Mergers for stampede protection on all operations.
     /// Only present when `stampede_protection` is enabled.
     mergers: Option<Mergers<K, V>>,
 }
 
-impl Cache<(), (), ()> {
+impl Cache<(), ()> {
     /// Creates a new cache builder.
     ///
     /// The builder pattern allows configuring storage, TTL, telemetry,
@@ -140,13 +140,12 @@ impl Cache<(), (), ()> {
     }
 }
 
-impl<K, V, CT> Cache<K, V, CT>
+impl<K, V> Cache<K, V>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    CT: CacheTier<K, V> + Send + Sync,
 {
-    pub(crate) fn new(name: CacheName, storage: CT, clock: Clock, stampede_protection: bool) -> Self {
+    pub(crate) fn new(name: CacheName, storage: DynamicCache<K, V>, clock: Clock, stampede_protection: bool) -> Self {
         Self {
             name,
             storage,
@@ -154,18 +153,9 @@ where
             mergers: stampede_protection.then(Mergers::new),
         }
     }
-
-    /// Returns a reference to the inner storage tier.
-    ///
-    /// This allows accessing tier-specific functionality not exposed by
-    /// the main `Cache` API.
-    #[must_use]
-    pub fn inner(&self) -> &CT {
-        &self.storage
-    }
 }
 
-impl<K, V, CT> Cache<K, V, CT>
+impl<K, V> Cache<K, V>
 where
     K: Clone + Eq + Hash + Send + Sync,
     V: Clone + Send + Sync,
@@ -185,11 +175,10 @@ where
     }
 }
 
-impl<K, V, CT> Cache<K, V, CT>
+impl<K, V> Cache<K, V>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    CT: CacheTier<K, V> + Send + Sync,
 {
     /// Retrieves a value from the cache.
     ///
@@ -600,11 +589,10 @@ where
 }
 
 #[cfg(feature = "service")]
-impl<K, V, CT> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K, V, CT>
+impl<K, V> layered::Service<cachet_service::CacheOperation<K, V>> for Cache<K, V>
 where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
-    CT: CacheTier<K, V> + Send + Sync,
 {
     type Out = Result<cachet_service::CacheResponse<V>, Error>;
 
@@ -640,12 +628,12 @@ mod tests {
         futures::executor::block_on(f)
     }
 
-    fn build_cache() -> Cache<String, i32, crate::wrapper::CacheWrapper<String, i32, MockCache<String, i32>>> {
+    fn build_cache() -> Cache<String, i32> {
         let clock = Clock::new_frozen();
         Cache::builder::<String, i32>(clock).storage(MockCache::new()).build()
     }
 
-    fn build_cache_with_stampede() -> Cache<String, i32, crate::wrapper::CacheWrapper<String, i32, MockCache<String, i32>>> {
+    fn build_cache_with_stampede() -> Cache<String, i32> {
         let clock = Clock::new_frozen();
         Cache::builder::<String, i32>(clock)
             .storage(MockCache::new())
@@ -671,7 +659,6 @@ mod tests {
         let cache = build_cache();
         assert!(!cache.name().is_empty());
         let _ = cache.clock();
-        let _ = cache.inner();
     }
 
     #[test]

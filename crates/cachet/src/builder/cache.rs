@@ -16,7 +16,6 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::policy::InsertPolicy;
 use crate::telemetry::TelemetryConfig;
-use crate::wrapper::CacheWrapper;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -316,7 +315,7 @@ where
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
-    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -350,13 +349,11 @@ mod tests {
     #[test]
     fn cache_builder_with_ttl() {
         let clock = Clock::new_frozen();
-        let cache = Cache::builder::<String, i32>(clock)
+        let builder = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .ttl(Duration::from_secs(300))
-            .build();
+            .ttl(Duration::from_secs(300));
 
-        assert!(cache.inner().ttl.is_some());
-        assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
+        assert_eq!(builder.ttl, Some(Duration::from_secs(300)));
     }
 
     #[test]

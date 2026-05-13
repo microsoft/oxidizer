@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 💥 Breaking Changes
+
+  - Simplified `Cache<K, V, CT>` to `Cache<K, V>`. All builders now return the same type, making it easy to store caches without naming internal tier types.
+  - Removed `Cache::inner()`. The underlying storage tier is no longer directly accessible.
+
 ## [0.2.0] - 2026-05-06
 
 - ✔️ Tasks

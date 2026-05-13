@@ -168,7 +168,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let cache = Cache::builder::<String, i32>(clock).memory().build();
+//! let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 //!
 //! cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;
