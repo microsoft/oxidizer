@@ -195,11 +195,11 @@ function Get-WorkspaceCrates {
     param([string]$repoRoot)
 
     $metadata = Get-WorkspaceMetadata -repoRoot $repoRoot
-    $cratesDir = (Join-Path $repoRoot "crates").Replace('/', '\')
+    $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
 
     $crates = @()
     foreach ($package in $metadata.packages) {
-        $manifestDir = (Split-Path $package.manifest_path -Parent).Replace('/', '\')
+        $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
@@ -234,7 +234,16 @@ function Get-AllTransitiveDependents {
     )
 
     $crates = Get-WorkspaceCrates -repoRoot $repoRoot
-    $normalizedTarget = $crateName.Replace('-', '_')
+
+    # Resolve the user-facing crate identifier (folder name or package name) to the canonical
+    # package name. This makes the cascade robust even if a crate's folder under crates/ ever
+    # diverges from its [package].name in Cargo.toml.
+    $targetCrate = $crates | Where-Object { $_.Folder -eq $crateName -or $_.Name -eq $crateName } | Select-Object -First 1
+    if ($null -eq $targetCrate) {
+        Write-Warning "Crate '$crateName' not found in workspace metadata; cannot compute dependents."
+        return @()
+    }
+    $normalizedTarget = $targetCrate.Name.Replace('-', '_')
 
     # BFS over the reverse dependency graph.
     $toVisit = [System.Collections.Generic.Queue[string]]::new()
@@ -552,17 +561,41 @@ function Write-Changelog {
     # (e.g. crates/cachet/CHANGELOG.md):
     #   - 🔧 Maintenance
     #     - bump `<target>` to <version>
+    # If the same section header was already produced by Format-ConventionalCommits for this
+    # release, the cascade bullet is merged into that existing section instead of creating a
+    # duplicate header.
     if ($null -ne $cascadeReason) {
         $sectionHeader = if ($cascadeReason.Breaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
-        $cascadeLines = @(
-            $sectionHeader,
-            "",
-            "  - bump ``$($cascadeReason.Target)`` to $($cascadeReason.Version)"
-        )
-        if ($formattedCommits.Count -gt 0) {
-            $formattedCommits = $cascadeLines + @("") + $formattedCommits
+        $cascadeBullet = "  - bump ``$($cascadeReason.Target)`` to $($cascadeReason.Version)"
+
+        $existingHeaderIdx = -1
+        for ($i = 0; $i -lt $formattedCommits.Count; $i++) {
+            if ($formattedCommits[$i] -eq $sectionHeader) {
+                $existingHeaderIdx = $i
+                break
+            }
+        }
+
+        if ($existingHeaderIdx -ge 0) {
+            # Find the end of this section (next top-level "- " header or end of list).
+            $insertIdx = $formattedCommits.Count
+            for ($i = $existingHeaderIdx + 1; $i -lt $formattedCommits.Count; $i++) {
+                if ($formattedCommits[$i] -match '^- \S') { $insertIdx = $i; break }
+            }
+            # Trim trailing blank lines belonging to the section.
+            while ($insertIdx -gt $existingHeaderIdx + 1 -and [string]::IsNullOrWhiteSpace($formattedCommits[$insertIdx - 1])) {
+                $insertIdx--
+            }
+            $before = if ($insertIdx -gt 0) { @($formattedCommits[0..($insertIdx - 1)]) } else { @() }
+            $after  = if ($insertIdx -lt $formattedCommits.Count) { @($formattedCommits[$insertIdx..($formattedCommits.Count - 1)]) } else { @() }
+            $formattedCommits = $before + @($cascadeBullet) + $after
         } else {
-            $formattedCommits = $cascadeLines
+            $cascadeLines = @($sectionHeader, "", $cascadeBullet)
+            if ($formattedCommits.Count -gt 0) {
+                $formattedCommits = $cascadeLines + @("") + $formattedCommits
+            } else {
+                $formattedCommits = $cascadeLines
+            }
         }
     }
 
@@ -718,7 +751,7 @@ if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
     Exit 1
 }
 
-$crateFolder = Join-Path $repoRoot "crates/$CrateName"
+$crateFolder = Join-Path $repoRoot 'crates' $CrateName
 if (-not (Test-Path $crateFolder)) {
     Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
     Exit 1
@@ -796,9 +829,9 @@ try {
         }
 
         foreach ($dependent in $dependents) {
-            $depFolder = Join-Path $repoRoot "crates/$dependent"
-            $depCargo  = Join-Path $depFolder "Cargo.toml"
-            $depChange = Join-Path $depFolder "CHANGELOG.md"
+            $depFolder = Join-Path $repoRoot 'crates' $dependent
+            $depCargo  = Join-Path $depFolder 'Cargo.toml'
+            $depChange = Join-Path $depFolder 'CHANGELOG.md'
 
             if (-not (Test-Path $depCargo)) {
                 Write-Warning "Skipping cascade for '$dependent': Cargo.toml not found at '$depCargo'."
