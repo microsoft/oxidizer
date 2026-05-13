@@ -165,6 +165,7 @@ most commonly used types from all of them.
 |`metrics`|❌|Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`).|
 |`logs`|❌|Enables structured `tracing` log events for every cache activity.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
+|`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -199,6 +200,31 @@ let cache = Cache::builder::<String, String>(clock)
     .ttl(Duration::from_secs(60))
     .fallback(l2)
     .build();
+```
+
+### Serialization Boundary
+
+When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
+to add a postcard serialization boundary. Keys and values are automatically serialized
+to [`BytesView`][__link18] before reaching the fallback tier, and
+deserialized on the way back.
+
+```rust
+use cachet::{Cache, FallbackPromotionPolicy};
+use tick::Clock;
+
+let clock = Clock::new_tokio();
+let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+
+let cache = Cache::builder::<String, String>(clock)
+    .memory()
+    .serialize()
+    .fallback(remote)
+    .promotion_policy(FallbackPromotionPolicy::always())
+    .build();
+
+// Keys and values are String on the outside, BytesView in the fallback tier.
+cache.insert("key".to_string(), "value".to_string()).await?;
 ```
 
 ## Telemetry
@@ -238,7 +264,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8FPUL0qKt72Gy-GD_CgRPCCG9SaPObQ7vYiG4uWqBhKhhTAYWSGgmZjYWNoZXRlMC4yLjCCbWNhY2hldF9tZW1vcnllMC4xLjCCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjMuMIJpdW5pZmxpZ2h0ZTAuMS4w
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1DRY_ouWcOzG58PK1HRUDW5G5JDU0oAlprIG37b8vyW3Z6AYWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMi4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/cachet/0.2.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
@@ -249,6 +275,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link15]: https://crates.io/crates/cachet_memory/0.1.0
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
+ [__link18]: https://docs.rs/bytesbuf/0.4.2/bytesbuf/?search=BytesView
  [__link2]: https://docs.rs/cachet/0.2.0/cachet/?search=CacheBuilder::stampede_protection
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
