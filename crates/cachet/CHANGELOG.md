@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-05-14
+
+- 🐛 Bug Fixes
+
+  - Fix tick dependency requirement from `^0.2.2` to `^0.2.1` (tick 0.2.2 was never published)
+
 ## [0.2.0] - 2026-05-06
 
 - ✔️ Tasks

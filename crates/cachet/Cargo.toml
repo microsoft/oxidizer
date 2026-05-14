@@ -4,7 +4,7 @@
 [package]
 name = "cachet"
 description = "A composable, customizable multi-tier caching library with rich feature support."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -60,7 +60,7 @@ pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thread_aware = { workspace = true }
-tick = { workspace = true, features = [] }
+tick = { path = "../tick", default-features = false, version = ">=0.2.1, <0.4.0", features = [] }
 tracing = { workspace = true, optional = true }
 uniflight = { workspace = true }
 
