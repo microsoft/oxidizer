@@ -4,7 +4,7 @@
 
 - ⚠️ Breaking
 
-  - release a 0.3.0 version ([#410](https://github.com/microsoft/oxidizer/pull/410))
+  - update the `metrics` and `logs` feature APIs to use OpenTelemetry 0.32 types ([#417](https://github.com/microsoft/oxidizer/pull/417))
 
 - ✨ Features
 
