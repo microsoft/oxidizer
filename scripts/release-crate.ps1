@@ -387,6 +387,30 @@ function Get-BumpKindFromVersions {
     return 'major'
 }
 
+# Returns $true when bumping `oldVersion` by the given kind produces a SemVer-incompatible version
+# under Cargo's resolution rules. Mirrors Get-NextVersion's logic:
+#   - old major >= 1            : breaking iff bump == 'major'
+#   - old major == 0, minor >= 1 : breaking iff bump == 'major' (0.x -> 0.(x+1) is breaking)
+#   - old major == 0, minor == 0 : every bump is breaking (0.0.x -> 0.0.(x+1) is breaking)
+function Test-IsBreakingChange {
+    param(
+        [string]$oldVersion,
+        [ValidateSet('major', 'minor', 'patch')]
+        [string]$bump
+    )
+
+    $parts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
+    while ($parts.Count -lt 3) { $parts += 0 }
+
+    if ($parts[0] -ge 1) {
+        return $bump -eq 'major'
+    }
+    if ($parts[1] -ge 1) {
+        return $bump -eq 'major'
+    }
+    return $true
+}
+
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
 
@@ -910,13 +934,14 @@ try {
             $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
             Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
 
+            $depOld = Get-CurrentVersion -cargoTomlPath $depCargo
+
             $depCascadeReason = @{
                 Target   = $CrateName
                 Version  = $newVersion
-                Breaking = ($depBump -eq 'major')
+                Breaking = (Test-IsBreakingChange -oldVersion $depOld -bump $depBump)
             }
 
-            $depOld = Get-CurrentVersion -cargoTomlPath $depCargo
             $depNew = Invoke-CrateRelease -crateName $dependent -crateFolder $depFolder `
                 -crateCargoToml $depCargo -rootCargoToml $rootCargoToml -changelogFile $depChange `
                 -prBaseUrl $prBaseUrl -version "" -bump $depBump -cascadeReason $depCascadeReason
