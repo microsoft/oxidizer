@@ -60,7 +60,7 @@ impl<S: tracing::Subscriber> Layer<S> for CacheEventPrinter {
 
         // React to specific events using the public constants
         match event_type {
-            attributes::EVENT_HIT => println!("HIT  on {cache_name} ({duration_us}µs)"),
+            attributes::EVENT_HIT => println!("HIT on {cache_name} ({duration_us}µs)"),
             attributes::EVENT_MISS => println!("MISS on {cache_name} ({duration_us}µs)"),
             attributes::EVENT_INSERTED => println!("INSERT on {cache_name} ({duration_us}µs)"),
             attributes::EVENT_EXPIRED => println!("EXPIRED on {cache_name} ({duration_us}µs)"),
