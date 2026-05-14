@@ -74,7 +74,7 @@ impl<K, V, CT> CacheWrapper<K, V, CT> {
         }
     }
 
-    /// Returns the name of this cache tier for telemetry identification.
+    /// Returns the name of this cache tier for telemetry identification (test-only).
     #[cfg(test)]
     #[must_use]
     pub(crate) fn name(&self) -> CacheName {

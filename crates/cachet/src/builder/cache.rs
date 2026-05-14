@@ -348,12 +348,20 @@ mod tests {
 
     #[test]
     fn cache_builder_with_ttl() {
-        let clock = Clock::new_frozen();
-        let builder = Cache::builder::<String, i32>(clock)
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .ttl(Duration::from_secs(300));
+            .ttl(Duration::from_secs(300))
+            .build();
 
-        assert_eq!(builder.ttl, Some(Duration::from_secs(300)));
+        futures::executor::block_on(async {
+            cache.insert("key".to_string(), cachet_tier::CacheEntry::new(42)).await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_some(), "entry should exist before TTL");
+
+            control.advance(Duration::from_secs(301));
+            assert!(cache.get("key").await.unwrap().is_none(), "entry should expire after TTL");
+        });
     }
 
     #[test]
