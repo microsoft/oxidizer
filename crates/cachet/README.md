@@ -177,7 +177,7 @@ use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 let clock = Clock::new_tokio();
-let cache = Cache::builder::<String, i32>(clock).memory().build();
+let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 
 cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 let value = cache.get("key").await?;
@@ -264,7 +264,7 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1DRY_ouWcOzG58PK1HRUDW5G5JDU0oAlprIG37b8vyW3Z6AYWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMi4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2SRAp6ZagCjG-WGQSEjBc1XGyO2tWXss_xSG4ePkfYHWSbxYWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMi4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjEuMA
  [__link0]: https://docs.rs/cachet/0.2.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
