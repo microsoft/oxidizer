@@ -12,11 +12,13 @@
        `0.(x+1).0` and both `minor` and `patch` map to bumping `y`.
     2. Cascade: Every workspace crate that depends on the target via `[dependencies]` or
        `[build-dependencies]` (transitively) is also bumped. The bump kind applied to each
-       dependent is informed by `[package.metadata.cargo_check_external_types]`:
+       dependent is informed by `[package.metadata.cargo_check_external_types]` AND by whether
+       the target's bump is SemVer-incompatible under Cargo's rules:
          * If the dependent exposes any type rooted at the bumped crate in its public API
-           (or does not declare allowed_external_types at all), the same bump kind is applied —
-           a breaking change in the bumped crate's public API transitively becomes a breaking
-           change in the dependent's public API.
+           (or does not declare allowed_external_types at all), the dependent gets a `major`
+           bump when the target's bump is breaking (e.g. `0.0.x → 0.0.(x+1)`, `0.x.y → 0.(x+1).0`,
+           `1.x → 2.0`); otherwise the same kind as the target. This ensures the dependent's
+           own version increment reflects the breaking change in its public API surface.
          * Otherwise, the dependent only uses the bumped crate internally, and a `patch` bump
            is applied: enough to refresh the workspace-pinned version, but without overstating
            the change to downstream consumers.
@@ -896,18 +898,24 @@ try {
     )
 
     # Cascade to every transitive non-dev workspace dependent. The bump kind applied to each
-    # dependent is informed by [package.metadata.cargo_check_external_types]:
-    #   - If the dependent exposes any type rooted at the bumped crate in its public API, the
-    #     same bump kind is applied (a breaking change in the bumped crate's public API
-    #     transitively becomes a breaking change in the dependent's public API).
+    # dependent is informed by [package.metadata.cargo_check_external_types] AND by whether the
+    # target's bump is SemVer-incompatible under Cargo's rules:
+    #   - If the dependent exposes any type rooted at the bumped crate in its public API:
+    #       * If the target's bump is breaking (e.g. 0.0.5 -> 0.0.6, 0.3.0 -> 0.4.0, 1.x -> 2.0)
+    #         cascade as 'major' so the dependent's own version increment reflects the breaking
+    #         change in its public API surface.
+    #       * Otherwise cascade with the same kind as the target.
     #   - Otherwise, the dependent only uses the bumped crate internally, so a `patch` bump is
     #     enough to refresh the workspace-pinned version without overstating the change.
-    # If a dependent does not declare allowed_external_types, we conservatively cascade the same
-    # kind (worst-case assumption).
+    # If a dependent does not declare allowed_external_types, it is treated as exposing the target
+    # (worst-case assumption).
+    $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -bump $cascadeBump
+    $exposingCascadeBump = if ($targetIsBreaking) { 'major' } else { $cascadeBump }
+
     $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
-        Write-Host "🔗 Cascading $cascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
+        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
 
         $allCrates = Get-WorkspaceCrates -repoRoot $repoRoot
         $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
@@ -930,7 +938,7 @@ try {
                 $true
             }
 
-            $depBump = if ($exposes) { $cascadeBump } else { 'patch' }
+            $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
             $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
             Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
 
