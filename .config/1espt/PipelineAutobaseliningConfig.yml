@@ -5,13 +5,13 @@ pipelines:
     retail:
       source:
         eslint:
-          lastModifiedDate: 2025-10-03
+          lastModifiedDate: 2026-05-15
         bandit:
-          lastModifiedDate: 2025-10-03
+          lastModifiedDate: 2026-05-15
         psscriptanalyzer:
-          lastModifiedDate: 2025-10-03
+          lastModifiedDate: 2026-05-15
         armory:
-          lastModifiedDate: 2025-10-03
+          lastModifiedDate: 2026-05-15
   52130:
     retail:
       source:
