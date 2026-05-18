@@ -82,8 +82,7 @@ impl Router {
     }
 
     /// Creates a [`Router`] that selects between a primary and a fallback [`BaseUri`]
-    /// based on the previous attempt's [`RecoveryInfo`] and the current attempt's
-    /// position in the retry sequence.
+    /// based on the per-attempt information in the [`RouterContext`].
     ///
     /// The first attempt always uses the primary [`BaseUri`]. On subsequent
     /// attempts, the fallback [`BaseUri`] is used when either:
@@ -97,12 +96,19 @@ impl Router {
     /// scenarios where the primary endpoint becomes unavailable but requests
     /// can still be served by a fallback endpoint.
     ///
+    /// The per-attempt information consulted here (attempt index, last-attempt
+    /// flag, and previous-attempt [`RecoveryInfo`]) is populated by the caller
+    /// driving the retry loop. See the [module-level "Retry context"
+    /// section][retry-context] for how this information enters the routing
+    /// workflow and who is responsible for providing it.
+    ///
     /// Uses [`BaseUriConflict::UseRouted`] so in-place retries via
     /// [`Router::resolve_request_uri`] can actually swap endpoints instead of
     /// being pinned to the primary [`BaseUri`] attached on the first attempt.
     ///
     /// [`RecoveryInfo`]: recoverable::RecoveryInfo
     /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
+    /// [retry-context]: super#retry-context
     #[must_use]
     pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
         Self::custom(move |context| Some(if use_fallback(context) { fallback.clone() } else { primary.clone() }))

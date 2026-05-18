@@ -5,14 +5,20 @@ use recoverable::RecoveryInfo;
 
 use crate::HttpRequest;
 
-/// Context passed to the closure of [`Router::custom`] when resolving a [`BaseUri`].
+/// Context passed to the closure of [`Router::custom`](super::Router::custom) when resolving a [`BaseUri`](templated_uri::BaseUri).
 ///
 /// This type is intentionally opaque so that fields can be added in the future without
 /// breaking the closure signature. Use the getters to inspect the available
 /// information about the current request attempt.
 ///
-/// [`Router::custom`]: super::Router::custom
-/// [`BaseUri`]: templated_uri::BaseUri
+/// A [`RouterContext`] is built and populated by the caller driving the
+/// request (typically a resilience layer wrapping the HTTP client) and passed
+/// to [`Router::resolve_request_uri`](super::Router::resolve_request_uri) /
+/// [`Router::resolve_uri`](super::Router::resolve_uri) on every attempt. See
+/// the [module-level "Retry context" section](super#retry-context) for the
+/// bigger picture: where this information comes from, who is responsible for
+/// providing it, and how resolvers like [`Router::fallback`](super::Router::fallback)
+/// consume it.
 #[derive(Debug, Clone)]
 pub struct RouterContext<'a> {
     attempt: u32,
@@ -54,6 +60,10 @@ impl<'a> RouterContext<'a> {
     /// last one that will be performed.
     ///
     /// The first attempt has index `0`, the second `1`, and so on.
+    ///
+    /// This is typically called by the resilience layer driving the retry
+    /// loop. See the [module-level "Retry context" section](super#retry-context)
+    /// for context.
     #[must_use]
     pub fn with_attempt(mut self, attempt: u32, is_last_attempt: bool) -> Self {
         self.attempt = attempt;
@@ -62,6 +72,11 @@ impl<'a> RouterContext<'a> {
     }
 
     /// Sets the [`RecoveryInfo`] produced by the previous attempt.
+    ///
+    /// This is typically called by the resilience layer driving the retry
+    /// loop, using the [`Recovery`](recoverable::Recovery) information
+    /// attached to the error returned by the prior attempt. See the
+    /// [module-level "Retry context" section](super#retry-context) for context.
     #[must_use]
     pub fn with_previous_recovery(mut self, previous_recovery: RecoveryInfo) -> Self {
         self.previous_recovery = Some(previous_recovery);
