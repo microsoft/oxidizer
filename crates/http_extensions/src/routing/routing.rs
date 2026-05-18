@@ -197,12 +197,15 @@ impl Routing {
         Ok(Uri::from_parts(chosen, path))
     }
 
-    /// Updates the [`HttpRequest`]'s URI in place by routing the current URI through
+    /// Updates the [`HttpRequest`]'s URI in place by routing it through
     /// [`Routing::create_uri`].
     ///
-    /// The request's existing [`http::Uri`] is converted to a [`Uri`], passed through
-    /// [`Routing::create_uri`] together with `ctx`, and the result is written back to the
-    /// request.
+    /// When `HttpRequestBuilder::build` attached the original templated [`Uri`]
+    /// as a request extension, that unrouted target is used as the input on
+    /// every call. This keeps repeated re-routings idempotent—e.g. fallback
+    /// retries with [`BaseUriConflict::Override`] swap the [`BaseUri`] cleanly
+    /// instead of stacking base path prefixes. Otherwise, the request's
+    /// current [`http::Uri`] is used as the input.
     ///
     /// # Errors
     ///
@@ -212,9 +215,14 @@ impl Routing {
     /// - [`Routing::create_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
     /// - the resolved [`Uri`] cannot be converted back to an [`http::Uri`].
     pub fn update_request_uri(&self, ctx: RoutingContext, request: &mut HttpRequest) -> Result<(), HttpError> {
-        // Clone the URI rather than taking it: if any step below fails we leave the
-        // request's URI untouched.
-        let uri: Uri = request.uri().clone().try_into()?;
+        // Prefer the original `Uri` extension so retries re-route from the
+        // caller-supplied target; fall back to the request's current URI for
+        // hand-built requests. Clone rather than take, so a failure below
+        // leaves the request's URI untouched.
+        let uri: Uri = match request.extensions().get::<Uri>() {
+            Some(original) => original.clone(),
+            None => request.uri().clone().try_into()?,
+        };
         let resolved = self.create_uri(ctx.with_request(request), uri)?;
         *request.uri_mut() = resolved.try_into()?;
         Ok(())
@@ -434,6 +442,35 @@ mod tests {
             .with_attempt(1, false);
         routing.update_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://fallback.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_does_not_duplicate_base_path_across_in_place_update_request_uri_calls() {
+        // Regression test: when both endpoints carry a non-trivial base path,
+        // re-routing in place must operate on the caller's original target.
+        // Otherwise a fallback override would stack `/api/` on top of the
+        // previously-routed `/api/v1/items`, yielding `/api/api/v1/items`.
+        let routing = Routing::fallback(
+            BaseUri::from_static("https://primary.example.com/api/v1/"),
+            BaseUri::from_static("https://fallback.example.com/api/"),
+        );
+        let mut request = crate::HttpRequestBuilder::new_fake().get("/items").build().unwrap();
+
+        // First attempt: primary endpoint.
+        routing.update_request_uri(RoutingContext::new(), &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://primary.example.com/api/v1/items");
+
+        // Second attempt: fallback endpoint, not stacked on the previously-routed path.
+        let ctx = RoutingContext::new()
+            .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
+            .with_attempt(1, false);
+        routing.update_request_uri(ctx, &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://fallback.example.com/api/items");
+
+        // Third attempt: back to primary, still clean.
+        let ctx = RoutingContext::new().with_attempt(2, false);
+        routing.update_request_uri(ctx, &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://primary.example.com/api/v1/items");
     }
 
     #[test]

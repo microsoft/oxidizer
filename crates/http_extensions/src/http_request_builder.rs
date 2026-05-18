@@ -352,8 +352,15 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
+        // Attach both the templated `Uri` and its `PathAndQuery`:
+        //   - `Uri` preserves the caller's unrouted target so
+        //     `Routing::update_request_uri` can re-route from it on every retry.
+        //   - `PathAndQuery` backs `RequestExt::path_and_query` and
+        //     `ExtensionsExt::uri_template_label`.
         let path = uri.to_path_and_query();
-        let mut request = self.builder.uri(http::Uri::try_from(uri)?).body(body)?;
+        let http_uri = http::Uri::try_from(uri.clone())?;
+        let mut request = self.builder.uri(http_uri).body(body)?;
+        request.extensions_mut().insert(uri);
         if let Some(path) = path {
             request.extensions_mut().insert(path);
         }
@@ -1405,6 +1412,19 @@ mod tests {
 
         let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
         assert_eq!(label.as_str(), "/api/users/{id}");
+    }
+
+    #[test]
+    fn build_attaches_original_uri_extension() {
+        // The templated `Uri` is stashed on the request so `Routing` can
+        // re-route from the original target on retries.
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api/users/123")
+            .build()
+            .unwrap();
+
+        let uri = request.extensions().get::<Uri>().expect("Uri extension should be present");
+        assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/users/123");
     }
 
     #[test]
