@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.0] - 2026-05-18
+
+- ⚠️ Breaking
+
+  - update cache thread-awareness dependencies to `thread_aware` 0.7-compatible crate versions
+
 ## [0.3.0] - 2026-05-14
 
 - ⚠️ Breaking
