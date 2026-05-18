@@ -14,7 +14,7 @@ use super::buildable::{Buildable, type_name};
 use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::telemetry::{CacheTelemetry, TelemetryConfig};
+use crate::telemetry::CacheTelemetry;
 use crate::transform::TransformAdapter;
 use crate::{CacheTier, Codec, Encoder};
 
@@ -31,7 +31,7 @@ pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
     key_encoder: Box<dyn Encoder<K, KT>>,
     value_codec: Box<dyn Codec<V, VT>>,
     clock: Clock,
-    telemetry: TelemetryConfig,
+    telemetry: CacheTelemetry,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V, KT, VT)>,
 }
@@ -243,7 +243,7 @@ where
 
     fn build(self) -> crate::Cache<K, V> {
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
         let tier = self.build_tier(clock.clone(), telemetry);
 

@@ -7,15 +7,13 @@ use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::policy::InsertPolicy;
-use crate::telemetry::TelemetryConfig;
+use crate::telemetry::CacheTelemetry;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -44,7 +42,7 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) ttl: Option<Duration>,
     pub(crate) policy: InsertPolicy<V>,
     pub(crate) clock: Clock,
-    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
@@ -57,7 +55,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             ttl: None,
             policy: InsertPolicy::default(),
             clock,
-            telemetry: TelemetryConfig::new(),
+            telemetry: CacheTelemetry::new(),
             stampede_protection: false,
             _phantom: PhantomData,
         }
@@ -170,17 +168,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[cfg(any(feature = "logs", test))]
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
-        self.telemetry = self.telemetry.with_logs();
-        self
-    }
-
-    /// Configures metrics collection for this cache.
-    ///
-    /// When configured, cache operations will emit metrics via OpenTelemetry.
-    #[cfg(any(feature = "metrics", test))]
-    #[must_use]
-    pub fn enable_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.telemetry = self.telemetry.with_metrics(meter_provider);
+        self.telemetry = CacheTelemetry::with_logging();
         self
     }
 
@@ -365,28 +353,25 @@ mod tests {
     }
 
     #[test]
-    // OpenTelemetry SDK initialization resolves the current executable, which requires `readlink`
-    // and is blocked by Miri isolation.
     #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
-        let clock = Clock::new_frozen();
-        let builder = Cache::builder::<String, i32>(clock)
-            .storage(cachet_tier::MockCache::new())
-            .enable_logs();
-        assert!(builder.telemetry.logs_enabled);
-    }
+        use testing_aids::LogCapture;
 
-    #[test]
-    // OpenTelemetry SDK initialization resolves the current executable, which requires `readlink`
-    // and is blocked by Miri isolation.
-    #[cfg_attr(miri, ignore)]
-    fn builder_enable_metrics() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-        let builder = Cache::builder::<String, i32>(clock)
+        let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .enable_metrics(&provider);
-        assert!(builder.telemetry.meter.is_some());
+            .enable_logs()
+            .build();
+
+        futures::executor::block_on(async {
+            let _ = cache.get(&"key".to_string()).await;
+        });
+
+        // Logs should contain a cache event when logging is enabled
+        capture.assert_contains(crate::telemetry::attributes::EVENT_MISS);
     }
 
     #[test]
