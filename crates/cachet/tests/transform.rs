@@ -12,11 +12,7 @@ use tick::Clock;
 
 /// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
 /// separated by a String-to-i32 transform boundary.
-fn build_transform_cache(
-    clock: Clock,
-    l1: MockCache<String, String>,
-    l2: MockCache<i32, i32>,
-) -> Cache<String, String, impl cachet::CacheTier<String, String>> {
+fn build_transform_cache(clock: Clock, l1: MockCache<String, String>, l2: MockCache<i32, i32>) -> Cache<String, String> {
     Cache::builder::<String, String>(clock.clone())
         .storage(l1)
         .transform(

@@ -4,7 +4,6 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use cachet_tier::DynamicCache;
 use tick::Clock;
 
 use super::buildable::Buildable;
@@ -127,7 +126,7 @@ where
     ///     .fallback(l2)
     ///     .build();
     /// ```
-    pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }

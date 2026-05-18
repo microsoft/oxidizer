@@ -2,17 +2,20 @@
 
 ## Unreleased
 
-- 💥 Breaking Changes
+- ⚠️ Breaking Changes
 
   - Removed `metrics` feature and `enable_metrics()` builder method. Metrics will be reintroduced via a `tracing_subscriber::Layer` in a future release.
   - Removed `CacheOperation` and `CacheActivity` enums. Telemetry events are now identified by a single `cache.event` field instead of separate `cache.operation` and `cache.activity` fields.
-  - The `opentelemetry` dependency is no longer pulled in by the `logs` feature.
+ - The `opentelemetry` dependency is no longer pulled in by the `logs` feature.
+ - Simplified `Cache<K, V, CT>` to `Cache<K, V>`. All builders now return the same type, making it easy to store caches without naming internal tier types.
+ - Removed `Cache::inner()`. The underlying storage tier is no longer directly accessible.
 
 - ✨ New Features
 
   - Added public `telemetry::attributes` module with constants for event names (`EVENT_HIT`, `EVENT_MISS`, etc.), field names (`FIELD_NAME`, `FIELD_EVENT`, `FIELD_DURATION_NS`), and the tracing target prefix (`TARGET`). Consumers can use these to build custom `tracing_subscriber::Layer` implementations.
   - Added `telemetry_subscriber` example demonstrating how to subscribe to cache events.
   - Each telemetry event now has a unique, self-descriptive name (e.g., `cache.get_error`, `cache.insert_rejected`) instead of reusing generic values like `cache.error` across operations.
+>>>>>>> 7c8b6df240be400c109964c28e9b78fbbbcf0c71
 
 ## [0.3.0] - 2026-05-14
 

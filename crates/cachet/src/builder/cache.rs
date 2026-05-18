@@ -14,7 +14,6 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::policy::InsertPolicy;
 use crate::telemetry::CacheTelemetry;
-use crate::wrapper::CacheWrapper;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -304,7 +303,7 @@ where
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
-    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -337,14 +336,20 @@ mod tests {
 
     #[test]
     fn cache_builder_with_ttl() {
-        let clock = Clock::new_frozen();
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .ttl(Duration::from_secs(300))
             .build();
 
-        assert!(cache.inner().ttl.is_some());
-        assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
+        futures::executor::block_on(async {
+            cache.insert("key".to_string(), cachet_tier::CacheEntry::new(42)).await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_some(), "entry should exist before TTL");
+
+            control.advance(Duration::from_secs(301));
+            assert!(cache.get("key").await.unwrap().is_none(), "entry should expire after TTL");
+        });
     }
 
     #[test]

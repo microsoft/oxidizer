@@ -60,9 +60,9 @@
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** - when a fallback tier is configured, the builder
-//!   automatically type-erases both tiers into a [`DynamicCache<K, V>`] so
-//!   the primary and fallback don't need to be the same concrete type.
+//! - **Dynamic dispatch** - the builder type-erases the storage tier into a
+//!   [`DynamicCache<K, V>`], so all builders produce the same `Cache<K, V>`
+//!   output type regardless of the underlying storage or tier composition.
 //! - **Configurable insert policy** - choose whether, and under what conditions,
 //!   values are inserted into a tier ([`InsertPolicy`]).
 //! - **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
@@ -167,7 +167,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let cache = Cache::builder::<String, i32>(clock).memory().build();
+//! let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 //!
 //! cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;

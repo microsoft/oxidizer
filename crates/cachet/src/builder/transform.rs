@@ -223,7 +223,7 @@ where
     Post: Buildable<KT, VT>,
 {
     /// Builds the full cache hierarchy with the transform boundary.
-    pub fn build(self) -> crate::Cache<K, V, DynamicCache<K, V>> {
+    pub fn build(self) -> crate::Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -239,21 +239,15 @@ where
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,
 {
-    type Output = DynamicCache<K, V>;
     type TierOutput = DynamicCache<K, V>;
 
-    fn build(self) -> crate::Cache<K, V, Self::Output> {
+    fn build(self) -> crate::Cache<K, V> {
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
         let tier = self.build_tier(clock.clone(), telemetry);
 
-        crate::Cache::new(
-            type_name::<crate::Cache<K, V, Self::Output>>(None),
-            tier,
-            clock,
-            stampede_protection,
-        )
+        crate::Cache::new(type_name::<Self::TierOutput>(None), tier, clock, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {

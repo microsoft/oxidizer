@@ -74,16 +74,11 @@ impl<K, V, CT> CacheWrapper<K, V, CT> {
         }
     }
 
-    /// Returns the name of this cache tier for telemetry identification.
+    /// Returns the name of this cache tier for telemetry identification (test-only).
+    #[cfg(test)]
     #[must_use]
-    pub fn name(&self) -> CacheName {
+    pub(crate) fn name(&self) -> CacheName {
         self.name
-    }
-
-    /// Returns a reference to the wrapped storage tier.
-    #[must_use]
-    pub fn inner(&self) -> &CT {
-        &self.inner
     }
 }
 
@@ -323,7 +318,6 @@ mod tests {
         let telemetry = CacheTelemetry::new();
         let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("mock_test", inner, clock, None, telemetry, InsertPolicy::default());
         assert_eq!(wrapper.name(), "mock_test");
-        let _ = wrapper.inner();
     }
 
     #[test]

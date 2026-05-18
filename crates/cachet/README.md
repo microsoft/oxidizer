@@ -69,9 +69,9 @@ around:
   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
   timeout, and circuit-breaker middleware around your storage using standard Tower
   or `layered` patterns.
-* **Dynamic dispatch** - when a fallback tier is configured, the builder
-  automatically type-erases both tiers into a [`DynamicCache<K, V>`][__link4] so
-  the primary and fallback don’t need to be the same concrete type.
+* **Dynamic dispatch** - the builder type-erases the storage tier into a
+  [`DynamicCache<K, V>`][__link4], so all builders produce the same `Cache<K, V>`
+  output type regardless of the underlying storage or tier composition.
 * **Configurable insert policy** - choose whether, and under what conditions,
   values are inserted into a tier ([`InsertPolicy`][__link5]).
 * **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
@@ -176,7 +176,7 @@ use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 let clock = Clock::new_tokio();
-let cache = Cache::builder::<String, i32>(clock).memory().build();
+let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 
 cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 let value = cache.get("key").await?;
@@ -265,7 +265,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG7agN_eKArGIG90Y5tevTLmXG9LAGsix_fQuG2j-L8OvSsIEYWSIgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMy4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-n6c1asXb8uG6CeIkUqNVu-GxjETKbvQrZwG4I5xAXRHmeEYWSIgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMy4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4xLjA
  [__link0]: https://docs.rs/cachet/0.3.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
