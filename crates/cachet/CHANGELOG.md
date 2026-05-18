@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-05-14
+
+- ⚠️ Breaking
+
+  - update the `metrics` and `logs` feature APIs to use OpenTelemetry 0.32 types ([#417](https://github.com/microsoft/oxidizer/pull/417))
+
+- ✨ Features
+
+  - add serialization support with PostcardEncoder/PostcardCodec ([#377](https://github.com/microsoft/oxidizer/pull/377))
+
+- ✔️ Tasks
+
+  - enforce nightly formatting ([#407](https://github.com/microsoft/oxidizer/pull/407))
+  - upgrade opentelemetry crates to 0.32.0 ([#417](https://github.com/microsoft/oxidizer/pull/417))
+
 ## [0.2.0] - 2026-05-06
 
 - ✔️ Tasks

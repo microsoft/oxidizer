@@ -1,0 +1,7 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+::core::compile_error! {
+    "Escape requires exactly one field, found 0"
+}

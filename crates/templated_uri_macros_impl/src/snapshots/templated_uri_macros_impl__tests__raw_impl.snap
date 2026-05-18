@@ -1,0 +1,9 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+impl ::templated_uri::Raw for MyFragment {
+    fn raw(&self) -> impl ::std::fmt::Display {
+        &self.0
+    }
+}

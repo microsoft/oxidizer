@@ -1,0 +1,102 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+struct Test {
+    param: String,
+    param2: EscapedString,
+    param3: String,
+    param4: String,
+}
+impl ::templated_uri::PathAndQueryTemplate for Test {
+    fn template(&self) -> &'static core::primitive::str {
+        "/example.com/{param}/{+param2}{/param3,param4}"
+    }
+    fn format_template(&self) -> &'static core::primitive::str {
+        "/example.com/{param}/{param2}/{param3}/{param4}"
+    }
+    fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+        ::core::option::Option::None
+    }
+    fn render(&self) -> ::std::string::String {
+        let mut __out = ::std::string::String::with_capacity(16usize);
+        __out.push_str("/example.com/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out.push_str("/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out.push_str("/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!(
+                    "{}", ::templated_uri::Escape::escape(& self.param3)
+                ),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out.push_str("/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!(
+                    "{}", ::templated_uri::Escape::escape(& self.param4)
+                ),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        __out
+    }
+    fn to_path_and_query(
+        &self,
+    ) -> ::std::result::Result<
+        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::UriError,
+    > {
+        Ok(
+            ::templated_uri::http::uri::PathAndQuery::try_from(
+                ::templated_uri::PathAndQueryTemplate::render(self),
+            )?,
+        )
+    }
+}
+impl ::std::fmt::Debug for Test {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.debug_tuple("Test")
+            .field(&"/example.com/{param}/{+param2}{/param3,param4}")
+            .finish()
+    }
+}
+impl ::data_privacy::RedactedDisplay for Test {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        f.write_str("/example.com/")?;
+        ::std::write!(f, "{}", self.param)?;
+        f.write_str("/")?;
+        ::std::write!(f, "{}", self.param2)?;
+        f.write_str("/")?;
+        ::std::write!(f, "{}", self.param3)?;
+        f.write_str("/")?;
+        ::std::write!(f, "{}", self.param4)?;
+        ::std::result::Result::Ok(())
+    }
+}
+impl From<Test> for ::templated_uri::PathAndQuery {
+    fn from(value: Test) -> Self {
+        ::templated_uri::PathAndQuery::from_template(value)
+    }
+}

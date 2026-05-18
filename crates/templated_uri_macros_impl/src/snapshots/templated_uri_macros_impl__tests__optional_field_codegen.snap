@@ -1,0 +1,136 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+struct OptionalTest {
+    id: u32,
+    filter: String,
+    limit: Option<u32>,
+}
+impl ::templated_uri::PathAndQueryTemplate for OptionalTest {
+    fn template(&self) -> &'static core::primitive::str {
+        "/items/{id}{?filter,limit}"
+    }
+    fn format_template(&self) -> &'static core::primitive::str {
+        "/items/{id}?filter={filter}&limit={limit}"
+    }
+    fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
+        ::core::option::Option::None
+    }
+    fn render(&self) -> ::std::string::String {
+        let mut __out = ::std::string::String::with_capacity(22usize);
+        __out.push_str("/items/");
+        ::std::fmt::Write::write_fmt(
+                &mut __out,
+                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.id)),
+            )
+            .expect(
+                "Display impls for templated URI parameter values are expected to be infallible",
+            );
+        {
+            let mut __first = true;
+            {
+                let __val = &self.filter;
+                if __first {
+                    __out.push_str("?");
+                } else {
+                    __out.push_str("&");
+                }
+                __out.push_str("filter");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(__val)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __first = false;
+            }
+            if let ::core::option::Option::Some(ref __val) = self.limit {
+                if __first {
+                    __out.push_str("?");
+                } else {
+                    __out.push_str("&");
+                }
+                __out.push_str("limit");
+                __out.push_str("=");
+                ::std::fmt::Write::write_fmt(
+                        &mut __out,
+                        ::core::format_args!(
+                            "{}", ::templated_uri::Escape::escape(__val)
+                        ),
+                    )
+                    .expect(
+                        "Display impls for templated URI parameter values are expected to be infallible",
+                    );
+                __first = false;
+            }
+        }
+        __out
+    }
+    fn to_path_and_query(
+        &self,
+    ) -> ::std::result::Result<
+        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::UriError,
+    > {
+        Ok(
+            ::templated_uri::http::uri::PathAndQuery::try_from(
+                ::templated_uri::PathAndQueryTemplate::render(self),
+            )?,
+        )
+    }
+}
+impl ::std::fmt::Debug for OptionalTest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        f.debug_tuple("OptionalTest").field(&"/items/{id}{?filter,limit}").finish()
+    }
+}
+impl ::data_privacy::RedactedDisplay for OptionalTest {
+    fn fmt(
+        &self,
+        engine: &::data_privacy::RedactionEngine,
+        f: &mut ::std::fmt::Formatter,
+    ) -> ::std::fmt::Result {
+        f.write_str("/items/")?;
+        <u32 as ::data_privacy::RedactedDisplay>::fmt(&self.id, engine, f)?;
+        {
+            let mut __first = true;
+            {
+                if __first {
+                    f.write_str("?")?;
+                } else {
+                    f.write_str("&")?;
+                }
+                f.write_str("filter")?;
+                f.write_str("=")?;
+                <String as ::data_privacy::RedactedDisplay>::fmt(
+                    &self.filter,
+                    engine,
+                    f,
+                )?;
+                __first = false;
+            }
+            if let ::core::option::Option::Some(ref __val) = self.limit {
+                if __first {
+                    f.write_str("?")?;
+                } else {
+                    f.write_str("&")?;
+                }
+                f.write_str("limit")?;
+                f.write_str("=")?;
+                <u32 as ::data_privacy::RedactedDisplay>::fmt(__val, engine, f)?;
+                __first = false;
+            }
+        }
+        ::std::result::Result::Ok(())
+    }
+}
+impl From<OptionalTest> for ::templated_uri::PathAndQuery {
+    fn from(value: OptionalTest) -> Self {
+        ::templated_uri::PathAndQuery::from_template(value)
+    }
+}

@@ -26,7 +26,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.5.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.4.2" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.4.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.2.0" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.3.0" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.1.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.1.0" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.1.0" }
@@ -41,7 +41,7 @@ layered = { path = "crates/layered", default-features = false, version = "0.3.0"
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.4.5" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.0" }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.2.0" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.0" }
@@ -97,6 +97,7 @@ parking_lot = { version = "0.12.5", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
+postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
