@@ -517,6 +517,24 @@ mod tests {
     }
 
     #[test]
+    fn update_request_uri_falls_back_to_request_uri_without_uri_extension() {
+        // Hand-built requests (constructed directly via `http::Request::new`)
+        // do not carry the templated `Uri` extension that
+        // `HttpRequestBuilder::build` attaches. In that case
+        // `update_request_uri` must fall back to converting the request's
+        // current `http::Uri` and route from that.
+        let routing = Routing::base_uri(BaseUri::from_static("https://api.example.com"));
+        let body = crate::HttpBodyBuilder::new_fake().empty();
+        let mut request = http::Request::new(body);
+        *request.uri_mut() = http::Uri::from_static("/v1/items");
+        assert!(request.extensions().get::<Uri>().is_none(), "precondition: no Uri extension");
+
+        routing.update_request_uri(RoutingContext::new(), &mut request).unwrap();
+
+        assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+    }
+
+    #[test]
     fn update_request_uri_attaches_base_uri() {
         let routing = Routing::base_uri(BaseUri::from_static("https://api.example.com"));
         let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
