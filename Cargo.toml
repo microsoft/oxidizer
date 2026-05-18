@@ -63,7 +63,7 @@ chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 darling = { version = "0.23.0", default-features = false }
-dashmap = { version = "6.1", default-features = false }
+dashmap = { version = "6.2", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
