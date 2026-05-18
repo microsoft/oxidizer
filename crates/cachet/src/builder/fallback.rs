@@ -11,7 +11,7 @@ use super::buildable::Buildable;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::Cache;
 use crate::refresh::TimeToRefresh;
-use crate::telemetry::TelemetryConfig;
+use crate::telemetry::CacheTelemetry;
 
 /// Builder for a cache with fallback tiers.
 ///
@@ -25,7 +25,7 @@ pub struct FallbackBuilder<K, V, PB, FB> {
     pub(crate) fallback_builder: FB,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
-    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
