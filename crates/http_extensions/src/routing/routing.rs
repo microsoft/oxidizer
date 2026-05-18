@@ -165,7 +165,7 @@ impl Routing {
 
         if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
             return Err(HttpError::validation_with_label(
-                "the target uri cannot be empty; provide a base uri or a path such as `/...`",
+                "the target URI cannot be empty; provide a base URI or a path such as `/...`",
                 LABEL_URI_MISSING,
             ));
         }
