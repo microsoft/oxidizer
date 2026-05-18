@@ -11,7 +11,6 @@
 //! `tracing_subscriber::Layer` and the public constants in [`attributes`].
 //! See the `telemetry_subscriber` example for a complete demonstration.
 
-/// Cache telemetry field and target constants.
 pub mod attributes;
 pub(crate) mod cache;
 pub(crate) mod ext;
