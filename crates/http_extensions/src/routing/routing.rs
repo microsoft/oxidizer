@@ -201,8 +201,8 @@ impl Routing {
     /// [`Routing::create_uri`].
     ///
     /// When `HttpRequestBuilder::build` attached the original templated [`Uri`]
-    /// as a request extension, that unrouted target is used as the input on
-    /// every call. This keeps repeated re-routings idempotent—e.g. fallback
+    /// as a request extension, that non-routed target is used as the input on
+    /// every call. This keeps repeated re-routings idempotent, e.g. fallback
     /// retries with [`BaseUriConflict::Override`] swap the [`BaseUri`] cleanly
     /// instead of stacking base path prefixes. Otherwise, the request's
     /// current [`http::Uri`] is used as the input.
