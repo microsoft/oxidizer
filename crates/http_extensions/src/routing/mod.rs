@@ -52,9 +52,9 @@
 //! signals that the endpoint just used is not serving traffic (e.g., an open
 //! circuit breaker or a `503 Service Unavailable`). [`Router::fallback`]
 //! keys off of this signal to swap endpoints on the next attempt.
-
-#[expect(unused_imports, reason = "simplifies the docs")]
-use templated_uri::{BaseUri, Uri};
+//!
+//! [`BaseUri`]: [template_uri::BaseUri]
+//! [`Uri`]: [template_uri::Uri]
 
 mod router;
 pub use router::{BaseUriConflict, Router};
