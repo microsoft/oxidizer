@@ -336,6 +336,12 @@ impl Memory for MemoryWrapper {
     }
 }
 
+impl AsRef<Clock> for HttpBodyBuilder {
+    fn as_ref(&self) -> &Clock {
+        &self.clock
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -354,7 +360,7 @@ mod tests {
 
     #[test]
     fn assert_send_and_sync() {
-        assert_impl_all!(HttpBodyBuilder: Send, Sync, std::fmt::Debug);
+        assert_impl_all!(HttpBodyBuilder: Send, Sync, AsRef<Clock>, std::fmt::Debug);
     }
 
     #[test]
@@ -364,6 +370,9 @@ mod tests {
         let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
+
+        // access the clock
+        let _clock: &Clock = builder.as_ref();
     }
 
     #[test]

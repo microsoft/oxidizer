@@ -69,7 +69,7 @@ around:
   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
   timeout, and circuit-breaker middleware around your storage using standard Tower
   or `layered` patterns.
-* **Dynamic dispatch** — the builder type-erases the storage tier into a
+* **Dynamic dispatch** - the builder type-erases the storage tier into a
   [`DynamicCache<K, V>`][__link4], so all builders produce the same `Cache<K, V>`
   output type regardless of the underlying storage or tier composition.
 * **Configurable insert policy** - choose whether, and under what conditions,
@@ -264,23 +264,23 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4pqHqBF-00XG9oSjIQFfONJGyhhe72y56qxG4oAjxKtTpsWYWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMi4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjEuMA
- [__link0]: https://docs.rs/cachet/0.2.0/cachet/?search=TimeToRefresh
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6bfnqWz1zdXG3fQnYim7etlG0Uq9bY-ejheGxRZ4OiAV9c5YWSHgmhieXRlc2J1ZmUwLjQuMoJmY2FjaGV0ZTAuMy4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjEuMA
+ [__link0]: https://docs.rs/cachet/0.3.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.1.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
- [__link11]: https://docs.rs/cachet/0.2.0/cachet/?search=InsertPolicy
- [__link12]: https://docs.rs/cachet/0.2.0/cachet/?search=TimeToRefresh
+ [__link11]: https://docs.rs/cachet/0.3.0/cachet/?search=InsertPolicy
+ [__link12]: https://docs.rs/cachet/0.3.0/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.1.0
  [__link15]: https://crates.io/crates/cachet_memory/0.1.0
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
  [__link18]: https://docs.rs/bytesbuf/0.4.2/bytesbuf/?search=BytesView
- [__link2]: https://docs.rs/cachet/0.2.0/cachet/?search=CacheBuilder::stampede_protection
+ [__link2]: https://docs.rs/cachet/0.3.0/cachet/?search=CacheBuilder::stampede_protection
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
- [__link5]: https://docs.rs/cachet/0.2.0/cachet/?search=InsertPolicy
+ [__link5]: https://docs.rs/cachet/0.3.0/cachet/?search=InsertPolicy
  [__link6]: https://docs.rs/tick/0.3.0/tick/?search=Clock
- [__link7]: https://docs.rs/cachet/0.2.0/cachet/?search=Cache
- [__link8]: https://docs.rs/cachet/0.2.0/cachet/?search=CacheBuilder
+ [__link7]: https://docs.rs/cachet/0.3.0/cachet/?search=Cache
+ [__link8]: https://docs.rs/cachet/0.3.0/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
