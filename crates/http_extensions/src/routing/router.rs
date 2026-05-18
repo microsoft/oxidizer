@@ -56,7 +56,10 @@ pub enum BaseUriConflict {
 /// use http_extensions::routing::{Router, RouterContext};
 /// use templated_uri::{BaseUri, Uri};
 ///
-/// let router = Router::custom(|context| Some(BaseUri::from_static("https://api.example.com")), false);
+/// let router = Router::custom(
+///     |context| Some(BaseUri::from_static("https://api.example.com")),
+///     false,
+/// );
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
 /// let resolved = router.resolve_uri(RouterContext::new(), target).unwrap();
