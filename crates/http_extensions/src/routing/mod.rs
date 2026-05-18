@@ -53,8 +53,8 @@
 //! circuit breaker or a `503 Service Unavailable`). [`Router::fallback`]
 //! keys off of this signal to swap endpoints on the next attempt.
 //!
-//! [`BaseUri`]: [template_uri::BaseUri]
-//! [`Uri`]: [template_uri::Uri]
+//! [`BaseUri`]: templated_uri::BaseUri
+//! [`Uri`]: templated_uri::Uri
 
 mod router;
 pub use router::{BaseUriConflict, Router};
