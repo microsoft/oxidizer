@@ -41,6 +41,7 @@ allowed_external_types = [
     "templated_uri::error::UriError",
     "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
+    "templated_uri::base_uri::BaseUri",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
     "thread_aware::core::ThreadAware",
