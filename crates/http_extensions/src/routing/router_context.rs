@@ -5,24 +5,24 @@ use recoverable::RecoveryInfo;
 
 use crate::HttpRequest;
 
-/// Context passed to the closure of [`Routing::custom`] when resolving a [`BaseUri`].
+/// Context passed to the closure of [`Router::custom`] when resolving a [`BaseUri`].
 ///
 /// This type is intentionally opaque so that fields can be added in the future without
 /// breaking the closure signature. Use the getters to inspect the available
 /// information about the current request attempt.
 ///
-/// [`Routing::custom`]: super::Routing::custom
+/// [`Router::custom`]: super::Router::custom
 /// [`BaseUri`]: templated_uri::BaseUri
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct RoutingContext<'a> {
+pub struct RouterContext<'a> {
     attempt: u32,
     is_last_attempt: bool,
     previous_recovery: Option<RecoveryInfo>,
     request: Option<&'a HttpRequest>,
 }
 
-impl Default for RoutingContext<'_> {
+impl Default for RouterContext<'_> {
     fn default() -> Self {
         Self {
             attempt: 0,
@@ -33,11 +33,11 @@ impl Default for RoutingContext<'_> {
     }
 }
 
-impl<'a> RoutingContext<'a> {
-    /// Creates a new [`RoutingContext`] for the first (and only) attempt.
+impl<'a> RouterContext<'a> {
+    /// Creates a new [`RouterContext`] for the first (and only) attempt.
     ///
     /// The returned context reports attempt index `0` and `is_last_attempt = true`.
-    /// Use [`RoutingContext::with_attempt`] to override these values when the
+    /// Use [`RouterContext::with_attempt`] to override these values when the
     /// request is part of a multi-attempt flow.
     #[must_use]
     pub fn new() -> Self {
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn defaults() {
-        let ctx = RoutingContext::new();
+        let ctx = RouterContext::new();
         assert_eq!(ctx.attempt(), 0);
         assert!(ctx.is_last_attempt());
         assert!(ctx.previous_recovery().is_none());
@@ -119,7 +119,7 @@ mod tests {
             .expect("valid request");
         let recovery = RecoveryInfo::retry();
 
-        let ctx = RoutingContext::new()
+        let ctx = RouterContext::new()
             .with_request(&request)
             .with_attempt(2, true)
             .with_previous_recovery(recovery);
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn with_attempt_can_set_is_last_attempt_to_false() {
-        let ctx = RoutingContext::new().with_attempt(1, false);
+        let ctx = RouterContext::new().with_attempt(1, false);
         assert_eq!(ctx.attempt(), 1);
         assert!(!ctx.is_last_attempt());
     }

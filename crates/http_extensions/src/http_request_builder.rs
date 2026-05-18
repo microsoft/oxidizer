@@ -354,7 +354,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
         // Attach both the templated `Uri` and its `PathAndQuery`:
         //   - `Uri` preserves the caller's unrouted target so
-        //     `Routing::update_request_uri` can re-route from it on every retry.
+        //     `Router::update_request_uri` can re-route from it on every retry.
         //   - `PathAndQuery` backs `RequestExt::path_and_query` and
         //     `ExtensionsExt::uri_template_label`.
         let path = uri.to_path_and_query();
@@ -1416,7 +1416,7 @@ mod tests {
 
     #[test]
     fn build_attaches_original_uri_extension() {
-        // The templated `Uri` is stashed on the request so `Routing` can
+        // The templated `Uri` is stashed on the request so `Router` can
         // re-route from the original target on retries.
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")

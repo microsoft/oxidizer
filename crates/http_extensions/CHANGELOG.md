@@ -4,8 +4,8 @@
 
 - ✨ Features
 
-  - add `routing` module with `Routing`, `RoutingContext`, and `BaseUriConflict` for resolving the target `BaseUri` of outgoing requests
-  - `HttpRequestBuilder::build` now attaches the original templated `templated_uri::Uri` as a request extension, which `Routing::update_request_uri` uses so repeated in-place re-routings (e.g. fallback retries with `BaseUriConflict::Override`) don't duplicate the base path prefix.
+  - add `routing` module with `Router`, `RouterContext`, and `BaseUriConflict` for resolving the target `BaseUri` of outgoing requests
+  - `HttpRequestBuilder::build` now attaches the original templated `templated_uri::Uri` as a request extension, which `Router::update_request_uri` uses so repeated in-place re-routings (e.g. fallback retries with `BaseUriConflict::UseRouted`) don't duplicate the base path prefix.
 
 - ⚠️ Breaking
 

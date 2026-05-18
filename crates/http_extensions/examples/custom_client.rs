@@ -4,11 +4,11 @@
 //! An example of a custom HTTP client using `http_extensions`.
 //!
 //! This example demonstrates how to create a simple HTTP client that just echoes back the
-//! data it receives. The client uses the [`Routing`] feature to set a base URI, so that
+//! data it receives. The client uses the [`Router`] feature to set a base URI, so that
 //! request builders can use relative paths.
 
 use bytesbuf::mem::GlobalPool;
-use http_extensions::routing::{BaseUriConflict, Routing, RoutingContext};
+use http_extensions::routing::{BaseUriConflict, Router, RouterContext};
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpRequestBuilderExt, HttpResponse, HttpResponseBuilder, StatusExt};
 use layered::Service;
 use templated_uri::BaseUri;
@@ -17,11 +17,11 @@ use tick::Clock;
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     // Create a custom client that implements the Service trait, configured with a base URI.
-    // The client uses the `Routing` feature internally to attach the base URI to requests.
+    // The client uses the `Router` feature internally to attach the base URI to requests.
     let client = CustomClient::new(BaseUri::from_static("http://localhost:8080"));
 
     // Use the client to send a request, providing only the relative path: the base URI is
-    // attached by the client's routing.
+    // attached by the client's router.
     let response = client
         .request_builder()
         .get("/hello-world")
@@ -38,7 +38,7 @@ async fn main() -> Result<(), ohno::AppError> {
 #[derive(Debug)]
 struct CustomClient {
     builder: HttpBodyBuilder,
-    routing: Routing,
+    router: Router,
 }
 
 /// The implementation of `AsRef<HttpBodyBuilder>` allows us to use the
@@ -53,7 +53,7 @@ impl CustomClient {
     fn new(base_uri: BaseUri) -> Self {
         Self {
             builder: HttpBodyBuilder::new(GlobalPool::new(), &Clock::new_tokio()),
-            routing: Routing::base_uri(base_uri).conflict_policy(BaseUriConflict::Fail),
+            router: Router::fixed(base_uri).conflict_policy(BaseUriConflict::Fail),
         }
     }
 }
@@ -62,9 +62,9 @@ impl Service<HttpRequest> for CustomClient {
     type Out = http_extensions::Result<HttpResponse>;
 
     async fn execute(&self, mut input: HttpRequest) -> Self::Out {
-        // Resolve the request's URI through the configured routing, attaching the base URI
+        // Resolve the request's URI through the configured router, attaching the base URI
         // to the relative path provided by the caller.
-        self.routing.update_request_uri(RoutingContext::new(), &mut input)?;
+        self.router.update_request_uri(RouterContext::new(), &mut input)?;
 
         println!("request uri: {}", input.uri());
 
