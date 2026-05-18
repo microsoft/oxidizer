@@ -60,7 +60,7 @@
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** — the builder type-erases the storage tier into a
+//! - **Dynamic dispatch** - the builder type-erases the storage tier into a
 //!   [`DynamicCache<K, V>`], so all builders produce the same `Cache<K, V>`
 //!   output type regardless of the underlying storage or tier composition.
 //! - **Configurable insert policy** - choose whether, and under what conditions,
