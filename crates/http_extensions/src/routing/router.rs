@@ -56,7 +56,7 @@ pub enum BaseUriConflict {
 /// use http_extensions::routing::{Router, RouterContext};
 /// use templated_uri::{BaseUri, Uri};
 ///
-/// let router = Router::custom(|context| Some(BaseUri::from_static("https://api.example.com")));
+/// let router = Router::custom(|context| Some(BaseUri::from_static("https://api.example.com")), false);
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
 /// let resolved = router.resolve_uri(RouterContext::new(), target).unwrap();
@@ -84,48 +84,46 @@ impl Router {
     /// Creates a [`Router`] that selects between a primary and a fallback [`BaseUri`]
     /// based on the per-attempt information in the [`RouterContext`].
     ///
-    /// The first attempt always uses the primary [`BaseUri`]. On subsequent
-    /// attempts, the fallback [`BaseUri`] is used when either:
+    /// The first attempt uses the primary [`BaseUri`]. Subsequent attempts use
+    /// the fallback when either the previous attempt reported
+    /// [`RecoveryKind::Unavailable`] (e.g., a circuit breaker is open), or the
+    /// current attempt is the last one (a final best-effort try).
     ///
-    /// - the previous attempt's [`RecoveryInfo`] reports
-    ///   [`RecoveryKind::Unavailable`] (e.g., a circuit breaker is open), or
-    /// - the current attempt is the last attempt that will be performed
-    ///   (a final best-effort try against the fallback endpoint).
-    ///
-    /// Otherwise, the primary [`BaseUri`] is used. This is intended for
-    /// scenarios where the primary endpoint becomes unavailable but requests
-    /// can still be served by a fallback endpoint.
-    ///
-    /// The per-attempt information consulted here (attempt index, last-attempt
-    /// flag, and previous-attempt [`RecoveryInfo`]) is populated by the caller
-    /// driving the retry loop. See the [module-level "Retry context"
-    /// section][retry-context] for how this information enters the routing
-    /// workflow and who is responsible for providing it.
+    /// Attempt index, last-attempt flag, and previous-attempt [`RecoveryInfo`][recoverable::RecoveryInfo]
+    /// are populated by the caller driving the retry loop; see the
+    /// [module-level "Retry context" section][super#retry-context].
     ///
     /// Uses [`BaseUriConflict::UseRouted`] so in-place retries via
-    /// [`Router::resolve_request_uri`] can actually swap endpoints instead of
-    /// being pinned to the primary [`BaseUri`] attached on the first attempt.
-    ///
-    /// [`RecoveryInfo`]: recoverable::RecoveryInfo
-    /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
-    /// [retry-context]: super#retry-context
+    /// [`Router::resolve_request_uri`] can swap endpoints instead of being
+    /// pinned to the primary [`BaseUri`] attached on the first attempt.
     #[must_use]
     pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
-        Self::custom(move |context| Some(if use_fallback(context) { fallback.clone() } else { primary.clone() }))
-            .conflict_policy(BaseUriConflict::UseRouted)
+        Self::custom(
+            move |context| Some(if use_fallback(context) { fallback.clone() } else { primary.clone() }),
+            true,
+        )
+        .conflict_policy(BaseUriConflict::UseRouted)
     }
 
     /// Creates a [`Router`] that delegates resolution to the given closure.
     ///
     /// The closure receives a [`RouterContext`] and returns `Some(BaseUri)` to attach a
     /// [`BaseUri`] to the target, or `None` to leave the target's [`BaseUri`] as-is.
+    ///
+    /// `has_alternatives` declares whether the closure may select among
+    /// multiple endpoints across attempts; it is reported by
+    /// [`Router::has_alternatives`] and used by resilience layers to decide
+    /// whether retrying an `Unavailable` outcome is worthwhile.
     #[must_use]
-    pub fn custom<F>(resolver: F) -> Self
+    pub fn custom<F>(resolver: F, has_alternatives: bool) -> Self
     where
         F: Fn(&RouterContext) -> Option<BaseUri> + Send + Sync + 'static,
     {
         Self {
-            resolver: Arc::new(Resolver::Custom(Arc::new(resolver))),
+            resolver: Arc::new(Resolver::Custom {
+                resolver: Arc::new(resolver),
+                has_alternatives,
+            }),
             conflict_policy: BaseUriConflict::default(),
         }
     }
@@ -145,14 +143,12 @@ impl Router {
     /// previously failed with an unavailable endpoint is worthwhile: if
     /// alternatives exist, a subsequent attempt may be routed to a different
     /// endpoint and succeed.
-    ///
-    /// Returns `true` for [`Router::fallback`] and [`Router::custom`] (which
-    /// may dynamically select among multiple endpoints), and `false` for
-    /// [`Router::fixed`] and [`Router::default`] (which always resolve to
-    /// the same [`BaseUri`], or none at all).
     #[must_use]
     pub fn has_alternatives(&self) -> bool {
-        matches!(self.resolver.as_ref(), Resolver::Custom(_))
+        match self.resolver.as_ref() {
+            Resolver::Empty | Resolver::Fixed(_) => false,
+            Resolver::Custom { has_alternatives, .. } => *has_alternatives,
+        }
     }
 
     /// Resolves the final [`Uri`] for an outgoing request, combining the target [`Uri`] with
@@ -242,7 +238,7 @@ impl Router {
         match self.resolver.as_ref() {
             Resolver::Empty => None,
             Resolver::Fixed(base_uri) => Some(base_uri.clone()),
-            Resolver::Custom(f) => f(context),
+            Resolver::Custom { resolver, .. } => resolver(context),
         }
     }
 }
@@ -254,7 +250,10 @@ enum Resolver {
     #[default]
     Empty,
     Fixed(BaseUri),
-    Custom(Arc<RouterFn>),
+    Custom {
+        resolver: Arc<RouterFn>,
+        has_alternatives: bool,
+    },
 }
 
 impl std::fmt::Debug for Resolver {
@@ -262,7 +261,10 @@ impl std::fmt::Debug for Resolver {
         match self {
             Self::Empty => f.write_str("Empty"),
             Self::Fixed(base_uri) => f.debug_tuple("Fixed").field(base_uri).finish(),
-            Self::Custom(_) => f.write_str("Custom"),
+            Self::Custom { has_alternatives, .. } => f
+                .debug_struct("Custom")
+                .field("has_alternatives", has_alternatives)
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -320,14 +322,14 @@ mod tests {
 
     #[test]
     fn custom_resolver_returning_none_passes_through() {
-        let router = Router::custom(|_| None);
+        let router = Router::custom(|_| None, false);
         let resolved = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://existing.example.com/items");
     }
 
     #[test]
     fn custom_resolver_returning_some_is_used() {
-        let router = Router::custom(|_| Some(BaseUri::from_static("https://api.example.com")));
+        let router = Router::custom(|_| Some(BaseUri::from_static("https://api.example.com")), false);
         let resolved = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
@@ -520,8 +522,14 @@ mod tests {
 
     #[test]
     fn custom_has_alternatives() {
-        let router = Router::custom(|_| None);
+        let router = Router::custom(|_| None, true);
         assert!(router.has_alternatives());
+    }
+
+    #[test]
+    fn custom_without_alternatives_reports_false() {
+        let router = Router::custom(|_| None, false);
+        assert!(!router.has_alternatives());
     }
 
     #[test]
@@ -598,7 +606,12 @@ mod tests {
         let fixed = Resolver::Fixed(BaseUri::from_static("https://api.example.com"));
         assert!(format!("{fixed:?}").starts_with("Fixed("));
 
-        let custom = Resolver::Custom(Arc::new(|_| None));
-        assert_eq!(format!("{custom:?}"), "Custom");
+        let custom = Resolver::Custom {
+            resolver: Arc::new(|_| None),
+            has_alternatives: true,
+        };
+        let custom_debug = format!("{custom:?}");
+        assert!(custom_debug.starts_with("Custom"));
+        assert!(custom_debug.contains("has_alternatives: true"));
     }
 }
