@@ -94,11 +94,16 @@ impl Routing {
     /// scenarios where the primary endpoint becomes unavailable but requests
     /// can still be served by a fallback endpoint.
     ///
+    /// Uses [`BaseUriConflict::Override`] so in-place retries via
+    /// [`Routing::update_request_uri`] can actually swap endpoints instead of
+    /// being pinned to the primary [`BaseUri`] attached on the first attempt.
+    ///
     /// [`RecoveryInfo`]: recoverable::RecoveryInfo
     /// [`RecoveryKind::Unavailable`]: recoverable::RecoveryKind::Unavailable
     #[must_use]
     pub fn fallback(primary: BaseUri, fallback: BaseUri) -> Self {
         Self::custom(move |ctx| Some(if use_fallback(ctx) { fallback.clone() } else { primary.clone() }))
+            .conflict_policy(BaseUriConflict::Override)
     }
 
     /// Creates a [`Routing`] that delegates resolution to the given closure.
@@ -404,6 +409,31 @@ mod tests {
         let ctx = RoutingContext::new().with_attempt(0, true);
         let resolved = routing.create_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
+    }
+
+    #[test]
+    fn fallback_switches_endpoint_across_in_place_update_request_uri_calls() {
+        // Regression test: ensure fallback retries can actually swap base URIs
+        // when the request is re-routed in place across attempts. With the
+        // default KeepExisting policy this would pin the request to the primary
+        // forever after the first attempt.
+        let routing = Routing::fallback(
+            BaseUri::from_static("https://primary.example.com"),
+            BaseUri::from_static("https://fallback.example.com"),
+        );
+        let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
+
+        // First attempt: primary endpoint.
+        routing.update_request_uri(RoutingContext::new(), &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://primary.example.com/v1/items");
+
+        // Second attempt: previous recovery reports unavailable, fallback wins
+        // and must replace the previously-attached primary base URI.
+        let ctx = RoutingContext::new()
+            .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
+            .with_attempt(1, false);
+        routing.update_request_uri(ctx, &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://fallback.example.com/v1/items");
     }
 
     #[test]
