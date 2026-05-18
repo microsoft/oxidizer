@@ -15,9 +15,9 @@ use crate::HttpRequest;
 /// request (typically a resilience layer wrapping the HTTP client) and passed
 /// to [`Router::resolve_request_uri`](super::Router::resolve_request_uri) /
 /// [`Router::resolve_uri`](super::Router::resolve_uri) on every attempt. See
-/// the [module-level "Retry context" section](super#retry-context) for the
+/// the [module-level "Recovery Context" section](super#recovery-context) for the
 /// bigger picture: where this information comes from, who is responsible for
-/// providing it, and how resolvers like [`Router::fallback`](super::Router::fallback)
+/// providing it, and how resolver like [`Router::fallback`](super::Router::fallback)
 /// consume it.
 #[derive(Debug, Clone)]
 pub struct RouterContext<'a> {
@@ -61,8 +61,8 @@ impl<'a> RouterContext<'a> {
     ///
     /// The first attempt has index `0`, the second `1`, and so on.
     ///
-    /// This is typically called by the resilience layer driving the retry
-    /// loop. See the [module-level "Retry context" section](super#retry-context)
+    /// This is typically called by the resilience layer driving the recovery
+    /// loop. See the [module-level "Recovery Context" section](super#recovery-context)
     /// for context.
     #[must_use]
     pub fn with_attempt(mut self, attempt: u32, is_last_attempt: bool) -> Self {
@@ -73,10 +73,10 @@ impl<'a> RouterContext<'a> {
 
     /// Sets the [`RecoveryInfo`] produced by the previous attempt.
     ///
-    /// This is typically called by the resilience layer driving the retry
+    /// This is typically called by the resilience layer driving the recovery
     /// loop, using the [`Recovery`](recoverable::Recovery) information
     /// attached to the error returned by the prior attempt. See the
-    /// [module-level "Retry context" section](super#retry-context) for context.
+    /// [module-level "Recovery Context" section](super#recovery-context) for context.
     #[must_use]
     pub fn with_previous_recovery(mut self, previous_recovery: RecoveryInfo) -> Self {
         self.previous_recovery = Some(previous_recovery);

@@ -3,7 +3,7 @@
 
 //! Router primitives for resolving the [`BaseUri`] of an outgoing request.
 //!
-//! A [`Router`] decides which [`BaseUri`] (scheme + authority, e.g.
+//! A [`Router`] decides which [`BaseUri`] (scheme and authority, e.g.
 //! `https://api.example.com`) should be attached to a target [`Uri`] before it
 //! is sent. This is useful when a library or middleware needs to centralize
 //! the resolution of the destination of HTTP requests while still allowing callers to
@@ -12,7 +12,7 @@
 //! Typical scenario for a router can be a service that is deployed to two regions,
 //! `https://api-westus.example.com` and `https://api-eastus.example.com`.
 //! Requests normally target the primary region, but when it becomes unavailable the [`Router`]
-//! swaps in the secondary region on the next retry so the call can still succeed. See
+//! swaps in the secondary region on the next attempt so the call can still succeed. See
 //! [`Router::fallback`].
 //!
 //! # Construction
@@ -21,7 +21,7 @@
 //! - [`Router::fixed`] - creates a [`Router`] that always resolves to the same [`BaseUri`].
 //! - [`Router::fallback`] - creates a [`Router`] that selects between a primary and a fallback [`BaseUri`]
 //!   based on the previous attempt's recovery information and the current
-//!   attempt's position in the retry sequence.
+//!   attempt's position in the recovery sequence.
 //! - [`Router::custom`] - creates a [`Router`] that delegates the decision to a user supplied closure that
 //!   receives a [`RouterContext`].
 //!
@@ -32,18 +32,18 @@
 //! [`BaseUriConflict`] policy to decide what to do. The policy can be set with
 //! [`Router::conflict_policy`] and defaults to [`BaseUriConflict::UseOriginal`].
 //!
-//! # Retry context
+//! # Recovery Context
 //!
-//! A [`Router`] does not retry on its own; it only resolves a [`BaseUri`] for
-//! a single attempt. When the routing decision should depend on previous
+//! A [`Router`] does not recover on its own; it only resolves a [`BaseUri`]
+//! for a single attempt. When the routing decision should depend on previous
 //! attempts, the caller passes that state in through a [`RouterContext`]
 //! (attempt index, last-attempt flag, and the previous attempt's
 //! [`RecoveryInfo`](recoverable::RecoveryInfo)).
 //!
 //! Populating the [`RouterContext`] is the caller's responsibility, typically
-//! a resilience layer (e.g. a retry policy) wrapping the HTTP client: before
-//! each attempt it builds a fresh context and calls
-//! [`Router::resolve_request_uri`]. When no retry layer is involved,
+//! a resilience layer (e.g. a recovery policy) wrapping the HTTP client:
+//! before each attempt it builds a fresh context and calls
+//! [`Router::resolve_request_uri`]. When no recovery layer is involved,
 //! [`RouterContext::new`] is sufficient.
 //!
 //! [`RecoveryInfo`](recoverable::RecoveryInfo) is the recoverable-error

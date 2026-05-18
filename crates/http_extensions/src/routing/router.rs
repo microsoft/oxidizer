@@ -90,10 +90,10 @@ impl Router {
     /// current attempt is the last one (a final best-effort try).
     ///
     /// Attempt index, last-attempt flag, and previous-attempt [`RecoveryInfo`][recoverable::RecoveryInfo]
-    /// are populated by the caller driving the retry loop; see the
-    /// [module-level "Retry context" section][super#retry-context].
+    /// are populated by the caller driving the recovery loop; see the
+    /// [module-level "Recovery Context" section][super#recovery-context].
     ///
-    /// Uses [`BaseUriConflict::UseRouted`] so in-place retries via
+    /// Uses [`BaseUriConflict::UseRouted`] so in-place recovery attempts via
     /// [`Router::resolve_request_uri`] can swap endpoints instead of being
     /// pinned to the primary [`BaseUri`] attached on the first attempt.
     #[must_use]
@@ -113,7 +113,7 @@ impl Router {
     /// `has_alternatives` declares whether the closure may select among
     /// multiple endpoints across attempts; it is reported by
     /// [`Router::has_alternatives`] and used by resilience layers to decide
-    /// whether retrying an `Unavailable` outcome is worthwhile.
+    /// whether recovering from an `Unavailable` outcome is worthwhile.
     #[must_use]
     pub fn custom<F>(resolver: F, has_alternatives: bool) -> Self
     where
@@ -139,7 +139,7 @@ impl Router {
     /// Returns `true` when this [`Router`] may resolve to more than one
     /// [`BaseUri`] across attempts.
     ///
-    /// Resilience layers can use this to decide whether retrying a request that
+    /// Resilience layers can use this to decide whether recovering a request that
     /// previously failed with an unavailable endpoint is worthwhile: if
     /// alternatives exist, a subsequent attempt may be routed to a different
     /// endpoint and succeed.
@@ -208,7 +208,7 @@ impl Router {
     /// When `HttpRequestBuilder::build` attached the original templated [`Uri`]
     /// as a request extension, that non-routed target is used as the input on
     /// every call. This keeps repeated re-routings idempotent, e.g. fallback
-    /// retries with [`BaseUriConflict::UseRouted`] swap the [`BaseUri`] cleanly
+    /// recovery attempts with [`BaseUriConflict::UseRouted`] swap the [`BaseUri`] cleanly
     /// instead of stacking base path prefixes. Otherwise, the request's
     /// current [`http::Uri`] is used as the input.
     ///
@@ -220,7 +220,7 @@ impl Router {
     /// - [`Router::resolve_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
     /// - the resolved [`Uri`] cannot be converted back to an [`http::Uri`].
     pub fn resolve_request_uri(&self, context: RouterContext, request: &mut HttpRequest) -> Result<(), HttpError> {
-        // Prefer the original `Uri` extension so retries re-route from the
+        // Prefer the original `Uri` extension so recovery attempts re-route from the
         // caller-supplied target; fall back to the request's current URI for
         // hand-built requests. Clone rather than take, so a failure below
         // leaves the request's URI untouched.
