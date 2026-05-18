@@ -18,7 +18,8 @@ pub enum BaseUriConflict {
     #[default]
     KeepExisting,
 
-    /// Return an error when the target [`Uri`] already has a [`BaseUri`].
+    /// Return an error when the target [`Uri`] already has a [`BaseUri`] and the
+    /// routing also produces a conflicting [`BaseUri`].
     Fail,
 
     /// Replace the target's [`BaseUri`] with the one produced by the routing.
