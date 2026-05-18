@@ -2,14 +2,18 @@
 
 ## [0.4.0] - 2026-05-18
 
-- ✨ Features
+- 🔧 Maintenance
 
-  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
+  - bump `cachet_memory` to 0.1.1
 
-- ♻️ Code Refactoring
+- ⚠️ Breaking
 
   - Simplify cachet builder return type ([#422](https://github.com/microsoft/oxidizer/pull/422))
   - Make cachet telemetry more user-friendly ([#420](https://github.com/microsoft/oxidizer/pull/420))
+
+- ✨ Features
+
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
 
 ## [0.3.0] - 2026-05-14
 
