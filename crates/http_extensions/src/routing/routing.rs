@@ -156,7 +156,6 @@ impl Routing {
         reason = "while not consuming the context, we might do it at some point"
     )]
     pub fn create_uri(&self, ctx: RoutingContext, uri: Uri) -> Result<Uri, HttpError> {
-        let routed = self.resolve(&ctx);
         let (existing, path) = uri.into_parts();
 
         if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
@@ -165,6 +164,8 @@ impl Routing {
                 LABEL_URI_MISSING,
             ));
         }
+
+        let routed = self.resolve(&ctx);
 
         // if new base uri is not available, return existing uri
         let Some(routed) = routed else {
