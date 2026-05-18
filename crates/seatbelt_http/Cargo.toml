@@ -1,0 +1,55 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "seatbelt_http"
+description = "HTTP-specific extensions for the seatbelt crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "resilience", "seatbelt", "http", "recovery"]
+categories = ["data-structures", "network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "http_extensions::*",
+    "seatbelt::*",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+    "recoverable::RecoveryKind",
+    "tick::clock::Clock",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+timeout = ["seatbelt/timeout"]
+retry = ["seatbelt/retry"]
+hedging = ["seatbelt/hedging"]
+breaker = ["seatbelt/breaker"]
+
+[dependencies]
+http = { workspace = true }
+http_extensions = { workspace = true }
+seatbelt = { workspace = true }
+templated_uri = { workspace = true }
+tick = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["executor"] }
+http_extensions = { workspace = true, features = ["test-util"] }
+layered = { workspace = true }
+mutants = { workspace = true }
+ohno = { workspace = true }
+tick = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true
