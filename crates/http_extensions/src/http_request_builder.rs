@@ -354,7 +354,7 @@ impl<R> HttpRequestBuilder<'_, R> {
 
         // Attach both the templated `Uri` and its `PathAndQuery`:
         //   - `Uri` preserves the caller's unrouted target so
-        //     `Router::update_request_uri` can re-route from it on every retry.
+        //     `Router::resolve_request_uri` can re-route from it on every retry.
         //   - `PathAndQuery` backs `RequestExt::path_and_query` and
         //     `ExtensionsExt::uri_template_label`.
         let path = uri.to_path_and_query();

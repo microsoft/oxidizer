@@ -10,7 +10,7 @@ use super::RouterContext;
 use crate::error_labels::{LABEL_URI_CONFLICT, LABEL_URI_MISSING};
 use crate::{HttpError, HttpRequest};
 
-/// Strategy used by [`Router::create_uri`] when both the target [`Uri`] and the
+/// Strategy used by [`Router::resolve_uri`] when both the target [`Uri`] and the
 /// routing produce a [`BaseUri`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum BaseUriConflict {
@@ -43,7 +43,7 @@ pub enum BaseUriConflict {
 /// let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
-/// let resolved = router.create_uri(RouterContext::new(), target).unwrap();
+/// let resolved = router.resolve_uri(RouterContext::new(), target).unwrap();
 /// assert_eq!(
 ///     resolved.to_string().declassify_into(),
 ///     "https://api.example.com/v1/items"
@@ -59,7 +59,7 @@ pub enum BaseUriConflict {
 /// let router = Router::custom(|context| Some(BaseUri::from_static("https://api.example.com")));
 /// let target: Uri = "/v1/items".parse().unwrap();
 ///
-/// let resolved = router.create_uri(RouterContext::new(), target).unwrap();
+/// let resolved = router.resolve_uri(RouterContext::new(), target).unwrap();
 /// assert_eq!(
 ///     resolved.to_string().declassify_into(),
 ///     "https://api.example.com/v1/items"
@@ -98,7 +98,7 @@ impl Router {
     /// can still be served by a fallback endpoint.
     ///
     /// Uses [`BaseUriConflict::UseRouted`] so in-place retries via
-    /// [`Router::update_request_uri`] can actually swap endpoints instead of
+    /// [`Router::resolve_request_uri`] can actually swap endpoints instead of
     /// being pinned to the primary [`BaseUri`] attached on the first attempt.
     ///
     /// [`RecoveryInfo`]: recoverable::RecoveryInfo
@@ -124,7 +124,7 @@ impl Router {
         }
     }
 
-    /// Sets the [`BaseUriConflict`] policy used by [`Router::create_uri`] when both the
+    /// Sets the [`BaseUriConflict`] policy used by [`Router::resolve_uri`] when both the
     /// target [`Uri`] and the routing produce a [`BaseUri`].
     #[must_use]
     pub fn conflict_policy(mut self, policy: BaseUriConflict) -> Self {
@@ -149,7 +149,7 @@ impl Router {
         matches!(self.resolver.as_ref(), Resolver::Custom(_))
     }
 
-    /// Builds the final [`Uri`] for an outgoing request, combining the target [`Uri`] with
+    /// Resolves the final [`Uri`] for an outgoing request, combining the target [`Uri`] with
     /// the [`BaseUri`] produced by this routing according to the configured
     /// [`BaseUriConflict`] policy.
     ///
@@ -163,7 +163,7 @@ impl Router {
         clippy::needless_pass_by_value,
         reason = "while not consuming the context, we might do it at some point"
     )]
-    pub fn create_uri(&self, context: RouterContext, uri: Uri) -> Result<Uri, HttpError> {
+    pub fn resolve_uri(&self, context: RouterContext, uri: Uri) -> Result<Uri, HttpError> {
         let (existing, path) = uri.into_parts();
 
         if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
@@ -173,7 +173,7 @@ impl Router {
             ));
         }
 
-        let routed = self.resolve(&context);
+        let routed = self.resolve_base_uri(&context);
 
         // if new base uri is not available, return existing uri
         let Some(routed) = routed else {
@@ -200,8 +200,8 @@ impl Router {
         Ok(Uri::from_parts(chosen, path))
     }
 
-    /// Updates the [`HttpRequest`]'s URI in place by routing it through
-    /// [`Router::create_uri`].
+    /// Resolves the [`HttpRequest`]'s URI in place by routing it through
+    /// [`Router::resolve_uri`].
     ///
     /// When `HttpRequestBuilder::build` attached the original templated [`Uri`]
     /// as a request extension, that non-routed target is used as the input on
@@ -215,9 +215,9 @@ impl Router {
     /// Returns [`HttpError::validation`] when:
     ///
     /// - the request's existing URI cannot be converted to a [`Uri`],
-    /// - [`Router::create_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
+    /// - [`Router::resolve_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
     /// - the resolved [`Uri`] cannot be converted back to an [`http::Uri`].
-    pub fn update_request_uri(&self, context: RouterContext, request: &mut HttpRequest) -> Result<(), HttpError> {
+    pub fn resolve_request_uri(&self, context: RouterContext, request: &mut HttpRequest) -> Result<(), HttpError> {
         // Prefer the original `Uri` extension so retries re-route from the
         // caller-supplied target; fall back to the request's current URI for
         // hand-built requests. Clone rather than take, so a failure below
@@ -226,13 +226,13 @@ impl Router {
             Some(original) => original.clone(),
             None => request.uri().clone().try_into()?,
         };
-        let resolved = self.create_uri(context.with_request(request), uri)?;
+        let resolved = self.resolve_uri(context.with_request(request), uri)?;
         *request.uri_mut() = resolved.try_into()?;
         Ok(())
     }
 
     /// Resolves the [`BaseUri`] for the current request, if any.
-    fn resolve(&self, context: &RouterContext) -> Option<BaseUri> {
+    fn resolve_base_uri(&self, context: &RouterContext) -> Option<BaseUri> {
         match self.resolver.as_ref() {
             Resolver::Empty => None,
             Resolver::Fixed(base_uri) => Some(base_uri.clone()),
@@ -240,8 +240,6 @@ impl Router {
         }
     }
 }
-
-// --- Private items below ---
 
 type RouterFn = dyn Fn(&RouterContext) -> Option<BaseUri> + Send + Sync + 'static;
 
@@ -300,31 +298,31 @@ mod tests {
     fn default_passes_target_through() {
         let router = Router::default();
 
-        let with_base = router.create_uri(RouterContext::new(), target_with_base()).unwrap();
+        let with_base = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(with_base.to_string().declassify_into(), "https://existing.example.com/items");
 
-        let without_base = router.create_uri(RouterContext::new(), target_without_base()).unwrap();
+        let without_base = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(without_base.to_string().declassify_into(), "/v1/items");
     }
 
     #[test]
     fn fixed_attaches_when_target_has_none() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
-        let resolved = router.create_uri(RouterContext::new(), target_without_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
     #[test]
     fn custom_resolver_returning_none_passes_through() {
         let router = Router::custom(|_| None);
-        let resolved = router.create_uri(RouterContext::new(), target_with_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://existing.example.com/items");
     }
 
     #[test]
     fn custom_resolver_returning_some_is_used() {
         let router = Router::custom(|_| Some(BaseUri::from_static("https://api.example.com")));
-        let resolved = router.create_uri(RouterContext::new(), target_without_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
@@ -332,7 +330,7 @@ mod tests {
     fn keep_existing_is_default_on_conflict() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
 
-        let resolved = router.create_uri(RouterContext::new(), target_with_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://existing.example.com/items");
     }
 
@@ -340,7 +338,7 @@ mod tests {
     fn use_routed_replaces_original_base_uri() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::UseRouted);
 
-        let resolved = router.create_uri(RouterContext::new(), target_with_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/items");
     }
 
@@ -348,7 +346,7 @@ mod tests {
     fn fail_returns_error_on_conflict() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
 
-        let err = router.create_uri(RouterContext::new(), target_with_base()).unwrap_err();
+        let err = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap_err();
         assert_eq!(err.label(), "uri_conflict");
     }
 
@@ -356,7 +354,7 @@ mod tests {
     fn fail_returns_error_when_target_has_no_base_and_no_path() {
         let router = Router::default().conflict_policy(BaseUriConflict::Fail);
 
-        let err = router.create_uri(RouterContext::new(), Uri::default()).unwrap_err();
+        let err = router.resolve_uri(RouterContext::new(), Uri::default()).unwrap_err();
         assert_eq!(err.label(), "uri_missing");
     }
 
@@ -364,7 +362,7 @@ mod tests {
     fn fail_does_not_trigger_without_conflict() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
 
-        let resolved = router.create_uri(RouterContext::new(), target_without_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
@@ -374,7 +372,7 @@ mod tests {
             BaseUri::from_static("https://primary.example.com"),
             BaseUri::from_static("https://fallback.example.com"),
         );
-        let resolved = router.create_uri(RouterContext::new(), target_without_base()).unwrap();
+        let resolved = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
 
@@ -385,7 +383,7 @@ mod tests {
             BaseUri::from_static("https://fallback.example.com"),
         );
         let ctx = RouterContext::new().with_previous_recovery(recoverable::RecoveryInfo::retry());
-        let resolved = router.create_uri(ctx, target_without_base()).unwrap();
+        let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
 
@@ -398,7 +396,7 @@ mod tests {
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
             .with_attempt(1, false);
-        let resolved = router.create_uri(ctx, target_without_base()).unwrap();
+        let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
 
@@ -409,7 +407,7 @@ mod tests {
             BaseUri::from_static("https://fallback.example.com"),
         );
         let ctx = RouterContext::new().with_attempt(2, true);
-        let resolved = router.create_uri(ctx, target_without_base()).unwrap();
+        let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
 
@@ -420,12 +418,12 @@ mod tests {
             BaseUri::from_static("https://fallback.example.com"),
         );
         let ctx = RouterContext::new().with_attempt(0, true);
-        let resolved = router.create_uri(ctx, target_without_base()).unwrap();
+        let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
 
     #[test]
-    fn fallback_switches_endpoint_across_in_place_update_request_uri_calls() {
+    fn fallback_switches_endpoint_across_in_place_resolve_request_uri_calls() {
         // Regression test: ensure fallback retries can actually swap base URIs
         // when the request is re-routed in place across attempts. With the
         // default UseOriginal policy this would pin the request to the primary
@@ -437,7 +435,7 @@ mod tests {
         let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
 
         // First attempt: primary endpoint.
-        router.update_request_uri(RouterContext::new(), &mut request).unwrap();
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://primary.example.com/v1/items");
 
         // Second attempt: previous recovery reports unavailable, fallback wins
@@ -445,12 +443,12 @@ mod tests {
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
             .with_attempt(1, false);
-        router.update_request_uri(ctx, &mut request).unwrap();
+        router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://fallback.example.com/v1/items");
     }
 
     #[test]
-    fn fallback_does_not_duplicate_base_path_across_in_place_update_request_uri_calls() {
+    fn fallback_does_not_duplicate_base_path_across_in_place_resolve_request_uri_calls() {
         // Regression test: when both endpoints carry a non-trivial base path,
         // re-routing in place must operate on the caller's original target.
         // Otherwise a fallback re-route would stack `/api/` on top of the
@@ -462,19 +460,19 @@ mod tests {
         let mut request = crate::HttpRequestBuilder::new_fake().get("/items").build().unwrap();
 
         // First attempt: primary endpoint.
-        router.update_request_uri(RouterContext::new(), &mut request).unwrap();
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://primary.example.com/api/v1/items");
 
         // Second attempt: fallback endpoint, not stacked on the previously-routed path.
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
             .with_attempt(1, false);
-        router.update_request_uri(ctx, &mut request).unwrap();
+        router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://fallback.example.com/api/items");
 
         // Third attempt: back to primary, still clean.
         let ctx = RouterContext::new().with_attempt(2, false);
-        router.update_request_uri(ctx, &mut request).unwrap();
+        router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://primary.example.com/api/v1/items");
     }
 
@@ -485,7 +483,7 @@ mod tests {
             BaseUri::from_static("https://fallback.example.com"),
         );
         let ctx = RouterContext::new().with_attempt(1, false);
-        let resolved = router.create_uri(ctx, target_without_base()).unwrap();
+        let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
 
@@ -521,11 +519,11 @@ mod tests {
     }
 
     #[test]
-    fn update_request_uri_falls_back_to_request_uri_without_uri_extension() {
+    fn resolve_request_uri_falls_back_to_request_uri_without_uri_extension() {
         // Hand-built requests (constructed directly via `http::Request::new`)
         // do not carry the templated `Uri` extension that
         // `HttpRequestBuilder::build` attaches. In that case
-        // `update_request_uri` must fall back to converting the request's
+        // `resolve_request_uri` must fall back to converting the request's
         // current `http::Uri` and route from that.
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let body = crate::HttpBodyBuilder::new_fake().empty();
@@ -533,48 +531,48 @@ mod tests {
         *request.uri_mut() = http::Uri::from_static("/v1/items");
         assert!(request.extensions().get::<Uri>().is_none(), "precondition: no Uri extension");
 
-        router.update_request_uri(RouterContext::new(), &mut request).unwrap();
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
     }
 
     #[test]
-    fn update_request_uri_attaches_base_uri() {
+    fn resolve_request_uri_attaches_base_uri() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
 
-        router.update_request_uri(RouterContext::new(), &mut request).unwrap();
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
     }
 
     #[test]
-    fn update_request_uri_keeps_existing_base_uri_by_default() {
+    fn resolve_request_uri_keeps_existing_base_uri_by_default() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let mut request = crate::HttpRequestBuilder::new_fake()
             .get("https://existing.example.com/items")
             .build()
             .unwrap();
 
-        router.update_request_uri(RouterContext::new(), &mut request).unwrap();
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://existing.example.com/items");
     }
 
     #[test]
-    fn update_request_uri_returns_error_on_conflict_when_policy_is_fail() {
+    fn resolve_request_uri_returns_error_on_conflict_when_policy_is_fail() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
         let mut request = crate::HttpRequestBuilder::new_fake()
             .get("https://existing.example.com/items")
             .build()
             .unwrap();
 
-        let err = router.update_request_uri(RouterContext::new(), &mut request).unwrap_err();
+        let err = router.resolve_request_uri(RouterContext::new(), &mut request).unwrap_err();
         assert_eq!(err.label(), "uri_conflict");
     }
 
     #[test]
-    fn update_request_uri_preserves_original_uri_on_failure() {
+    fn resolve_request_uri_preserves_original_uri_on_failure() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail);
         let mut request = crate::HttpRequestBuilder::new_fake()
             .get("https://existing.example.com/items")
@@ -582,7 +580,7 @@ mod tests {
             .unwrap();
 
         let original_uri = request.uri().clone();
-        let _ = router.update_request_uri(RouterContext::new(), &mut request).unwrap_err();
+        let _ = router.resolve_request_uri(RouterContext::new(), &mut request).unwrap_err();
 
         assert_eq!(request.uri(), &original_uri);
     }

@@ -20,7 +20,7 @@
 //!
 //! # Conflict resolution
 //!
-//! When the target [`Uri`] passed to [`Router::create_uri`] already carries a
+//! When the target [`Uri`] passed to [`Router::resolve_uri`] already carries a
 //! [`BaseUri`] and the routing also produces one, [`Router`] uses the configured
 //! [`BaseUriConflict`] policy to decide what to do. The policy can be set with
 //! [`Router::conflict_policy`] and defaults to [`BaseUriConflict::UseOriginal`].

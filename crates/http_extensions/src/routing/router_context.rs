@@ -14,7 +14,6 @@ use crate::HttpRequest;
 /// [`Router::custom`]: super::Router::custom
 /// [`BaseUri`]: templated_uri::BaseUri
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct RouterContext<'a> {
     attempt: u32,
     is_last_attempt: bool,
