@@ -170,29 +170,29 @@ impl Router {
         reason = "while not consuming the context, we might do it at some point"
     )]
     pub fn resolve_uri(&self, context: RouterContext, uri: Uri) -> Result<Uri, HttpError> {
-        let (existing, path) = uri.into_parts();
+        let (original, path) = uri.into_parts();
         let routed = self.resolve_base_uri(&context);
 
         // if new base uri is not available, return existing uri
         let Some(routed) = routed else {
-            let Some(existing) = existing else {
+            let Some(original) = original else {
                 return Err(HttpError::validation_with_label(
                     "the target URI has no base URI and the routing did not produce one; \
                      provide a base URI on the target or configure the router to resolve one",
                     LABEL_URI_MISSING,
                 ));
             };
-            return Ok(Uri::from_parts(Some(existing), path));
+            return Ok(Uri::from_parts(Some(original), path));
         };
 
         // if existing base uri is not available, return new base uri
-        let Some(existing) = existing else {
+        let Some(original) = original else {
             return Ok(Uri::from_parts(routed, path));
         };
 
         // choose base uri based on conflict policy
         let chosen = match self.conflict_policy {
-            BaseUriConflict::UseOriginal => existing,
+            BaseUriConflict::UseOriginal => original,
             BaseUriConflict::UseRouted => routed,
             BaseUriConflict::Fail => {
                 return Err(HttpError::validation_with_label(
