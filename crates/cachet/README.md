@@ -69,9 +69,9 @@ around:
   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
   timeout, and circuit-breaker middleware around your storage using standard Tower
   or `layered` patterns.
-* **Dynamic dispatch** - when a fallback tier is configured, the builder
-  automatically type-erases both tiers into a [`DynamicCache<K, V>`][__link4] so
-  the primary and fallback don’t need to be the same concrete type.
+* **Dynamic dispatch** - the builder type-erases the storage tier into a
+  [`DynamicCache<K, V>`][__link4], so all builders produce the same `Cache<K, V>`
+  output type regardless of the underlying storage or tier composition.
 * **Configurable insert policy** - choose whether, and under what conditions,
   values are inserted into a tier ([`InsertPolicy`][__link5]).
 * **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
@@ -89,7 +89,7 @@ builds on top of them and adds:
 |Stampede protection|❌|✅|
 |Background refresh|❌|✅|
 |Service middleware integration|❌|✅|
-|OpenTelemetry metrics + logs|❌|✅|
+|Structured telemetry (tracing)|❌|✅|
 |Pluggable storage backends|❌|✅|
 |Clock injection for testing|❌|✅|
 
@@ -162,8 +162,7 @@ most commonly used types from all of them.
 |Feature|Default|Description|
 |-------|-------|-----------|
 |`memory`|✅|Enables `InMemoryCache` and the `.memory()` builder method via `cachet_memory`.|
-|`metrics`|❌|Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`).|
-|`logs`|❌|Enables structured `tracing` log events for every cache activity.|
+|`logs`|❌|Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`][__link18] constants.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
 |`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
@@ -177,7 +176,7 @@ use cachet::{Cache, CacheEntry};
 use tick::Clock;
 
 let clock = Clock::new_tokio();
-let cache = Cache::builder::<String, i32>(clock).memory().build();
+let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 
 cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 let value = cache.get("key").await?;
@@ -206,7 +205,7 @@ let cache = Cache::builder::<String, String>(clock)
 
 When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
 to add a postcard serialization boundary. Keys and values are automatically serialized
-to [`BytesView`][__link18] before reaching the fallback tier, and
+to [`BytesView`][__link19] before reaching the fallback tier, and
 deserialized on the way back.
 
 ```rust
@@ -229,34 +228,36 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 ## Telemetry
 
-Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` and `.enable_logs()`.
+Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 
-### Metrics (OpenTelemetry)
+Each cache operation emits a structured [`tracing`][__link20] event with fields
+`cache.name`, `cache.event`, and `cache.duration_ns`.
 
-|Metric|Type|Unit|Description|
-|------|----|----|-----------|
-|`cache.event.count`|Counter|event|Cache operation events|
-|`cache.operation.duration`|Histogram|s|Operation latency|
-|`cache.size`|Gauge|entry|Current entry count|
+### Subscribing to events
 
-**Attributes:** `cache.name`, `cache.operation`, `cache.activity`
+Use [`telemetry::attributes`][__link21] constants to filter and match events in a
+custom `tracing_subscriber::Layer`:
 
-**Operations:** `cache.get`, `cache.insert`, `cache.invalidate`, `cache.clear`
+```rust
+use cachet::telemetry::attributes;
 
-**Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
-`cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-`cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
+// Filter by tracing target prefix
+let filter = tracing_subscriber::filter::Targets::new()
+    .with_target(attributes::TARGET, tracing::Level::DEBUG);
 
-### Logs (tracing)
+// Match specific events in a Visit impl
+if event_value == attributes::EVENT_HIT { /* cache hit */ }
+```
 
-Event name: `cache.event` with fields `cache.name`, `cache.operation`,
-`cache.activity`, `cache.duration_ns`.
+See the `telemetry_subscriber` example for a complete demonstration.
 
-|Level|Activities|
-|-----|----------|
-|ERROR|`cache.error`|
-|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected`|
-|DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok`|
+### Event types
+
+|Level|Events|
+|-----|------|
+|ERROR|`cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`|
+|DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared`|
 
 
 <hr/>
@@ -264,23 +265,26 @@ Event name: `cache.event` with fields `cache.name`, `cache.operation`,
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1DRY_ouWcOzG58PK1HRUDW5G5JDU0oAlprIG37b8vyW3Z6AYWSHgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNC4wgm1jYWNoZXRfbWVtb3J5ZTAuMi4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCaXVuaWZsaWdodGUwLjIuMA
- [__link0]: https://docs.rs/cachet/0.4.0/cachet/?search=TimeToRefresh
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-n6c1asXb8uG6CeIkUqNVu-GxjETKbvQrZwG4I5xAXRHmeEYWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4wgm1jYWNoZXRfbWVtb3J5ZTAuMS4xgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
+ [__link0]: https://docs.rs/cachet/0.5.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
- [__link11]: https://docs.rs/cachet/0.4.0/cachet/?search=InsertPolicy
- [__link12]: https://docs.rs/cachet/0.4.0/cachet/?search=TimeToRefresh
+ [__link11]: https://docs.rs/cachet/0.5.0/cachet/?search=InsertPolicy
+ [__link12]: https://docs.rs/cachet/0.5.0/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.1.0
- [__link15]: https://crates.io/crates/cachet_memory/0.2.0
+ [__link15]: https://crates.io/crates/cachet_memory/0.1.1
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
- [__link18]: https://docs.rs/bytesbuf/0.5.0/bytesbuf/?search=BytesView
- [__link2]: https://docs.rs/cachet/0.4.0/cachet/?search=CacheBuilder::stampede_protection
+ [__link18]: https://docs.rs/cachet/0.5.0/cachet/?search=telemetry::attributes
+ [__link19]: https://docs.rs/bytesbuf/0.5.0/bytesbuf/?search=BytesView
+ [__link2]: https://docs.rs/cachet/0.5.0/cachet/?search=CacheBuilder::stampede_protection
+ [__link20]: https://crates.io/crates/tracing/0.1.44
+ [__link21]: https://docs.rs/cachet/0.5.0/cachet/?search=telemetry::attributes
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
- [__link5]: https://docs.rs/cachet/0.4.0/cachet/?search=InsertPolicy
+ [__link5]: https://docs.rs/cachet/0.5.0/cachet/?search=InsertPolicy
  [__link6]: https://docs.rs/tick/0.3.0/tick/?search=Clock
- [__link7]: https://docs.rs/cachet/0.4.0/cachet/?search=Cache
- [__link8]: https://docs.rs/cachet/0.4.0/cachet/?search=CacheBuilder
+ [__link7]: https://docs.rs/cachet/0.5.0/cachet/?search=Cache
+ [__link8]: https://docs.rs/cachet/0.5.0/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry
