@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-05-18
+
+- ⚠️ Breaking
+
+  - update asynchronous I/O byte buffer types to `bytesbuf` 0.5
+
 ## [0.3.0] - 2026-02-16
 
 - ✔️ Tasks
@@ -29,4 +35,3 @@
 - 🧩 Miscellaneous
 
   - Reduce keyword count in bytesbuf_io to 5 so crates.io will accept it ([#185](https://github.com/microsoft/oxidizer/pull/185))
-
