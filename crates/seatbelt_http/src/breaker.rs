@@ -152,10 +152,13 @@ pub(crate) mod sealed {
 /// If the origin cannot be extracted (e.g. a relative URI), a fallback ID of
 /// `"default"` is returned.
 fn create_breaker_id(uri: &Uri) -> BreakerId {
-    uri.to_string()
-        .parse::<Origin>()
-        .ok()
-        .map_or_else(|| BreakerId::from("default"), |v| BreakerId::from(v.to_string()))
+    match (uri.scheme(), uri.authority()) {
+        (Some(scheme), Some(authority)) => {
+            let origin = Origin::new(scheme.clone(), authority.clone());
+            BreakerId::from(origin.to_string())
+        }
+        _ => BreakerId::from("default"),
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
