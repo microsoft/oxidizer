@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::convert::Infallible;
 use std::num::NonZero;
 
@@ -248,7 +247,7 @@ impl FakeReadBuilder {
     /// Panics if the contents of the stream have not been set.
     #[must_use]
     pub fn build(self) -> FakeRead {
-        assert!(self.contents.is_some(), "{} requires a sequence to be set", type_name::<Self>());
+        assert!(self.contents.is_some(), "FakeReadBuilder requires a sequence to be set");
 
         FakeRead {
             contents: self.contents.expect("guarded by assertion above"),
