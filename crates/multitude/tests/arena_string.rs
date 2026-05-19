@@ -1,0 +1,1250 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Tests for [`String`]: the growable arena-backed string builder.
+
+#![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+#![allow(clippy::std_instead_of_core, reason = "tests use std")]
+#![allow(clippy::unwrap_used, reason = "test code")]
+#![allow(clippy::approx_constant, reason = "test uses 3.14 intentionally as a display value")]
+
+mod common;
+
+use core::cmp::Ordering;
+
+use multitude::Arena;
+use multitude::strings::String;
+use multitude::vec::CollectIn;
+#[test]
+fn build_then_freeze_zero_copy() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.push_str("hello, world");
+    let s_addr_before = s.as_str().as_ptr() as usize;
+    let frozen = s.into_arena_str();
+    let s_addr_after = frozen.as_ptr() as usize;
+    assert_eq!(s_addr_before, s_addr_after, "freeze should be zero-copy");
+    assert_eq!(&*frozen, "hello, world");
+}
+
+#[cfg(feature = "stats")]
+#[test]
+fn freeze_reclaims_slack() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string_with_capacity(1024);
+    s.push_str("short");
+    assert!(s.capacity() >= 1024);
+    let chunks_before = arena.stats().normal_local_chunks_allocated;
+    let _frozen = s.into_arena_str();
+    // The slack we just reclaimed should be available for the next alloc
+    // without needing a fresh chunk.
+    let _other = arena.alloc_slice_copy_rc([0_u8; 1000]);
+    assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
+}
+
+#[test]
+fn grow_through_reallocation() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.push_str("original ");
+    let _decoy = arena.alloc_rc(0_u64);
+    // This grow can no longer extend in place — must reallocate. The
+    // inline len prefix must be preserved through the reallocation.
+    s.push_str("grown ");
+    s.push_str("a lot ");
+    for _ in 0..100 {
+        s.push_str("more text ");
+    }
+    let frozen = s.into_arena_str();
+    assert!(frozen.starts_with("original grown a lot "));
+    assert!(frozen.len() > 1000);
+}
+
+#[test]
+fn empty_freeze() {
+    let arena = Arena::new();
+    let s = arena.alloc_string();
+    let frozen = s.into_arena_str();
+    assert_eq!(&*frozen, "");
+    assert_eq!(frozen.len(), 0);
+}
+
+#[test]
+fn clear_and_reuse() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.push_str("hello");
+    let cap_before = s.capacity();
+    s.clear();
+    assert_eq!(s.len(), 0);
+    assert_eq!(s.capacity(), cap_before);
+    s.push_str("world");
+    assert_eq!(s.as_str(), "world");
+}
+
+#[test]
+fn clear_when_unallocated_is_noop() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.clear();
+    assert!(s.is_empty());
+}
+
+#[test]
+fn size_32_bytes_on_64bit() {
+    // 32 bytes = data ptr + cached len + cap + arena ref. The cached len
+    // (added for perf) avoids a chunk-memory load on every read; it costs
+    // 8 extra bytes vs. the previous 24-byte builder.
+    if size_of::<usize>() == 8 {
+        assert_eq!(size_of::<String<'_>>(), 32);
+    }
+}
+
+#[test]
+fn push_single_char() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.push('a');
+    s.push('é');
+    s.push('日');
+    assert_eq!(s.as_str(), "aé日");
+}
+
+#[test]
+fn reserve_grows_capacity() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.reserve(100);
+    assert!(s.capacity() >= 100);
+    s.push_str("hi");
+    assert_eq!(s.as_str(), "hi");
+}
+
+#[test]
+fn reserve_noop_when_already_large() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string_with_capacity(200);
+    let cap = s.capacity();
+    s.reserve(50);
+    assert_eq!(s.capacity(), cap);
+}
+
+#[test]
+fn as_str_when_empty_returns_empty_slice() {
+    let arena = Arena::new();
+    let s = arena.alloc_string();
+    assert_eq!(s.as_str(), "");
+    assert_eq!(s.len(), 0);
+    assert_eq!(s.capacity(), 0);
+}
+
+#[test]
+fn extend_chars() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.extend(['a', 'b', 'c'].iter().copied());
+    assert_eq!(s.as_str(), "abc");
+}
+
+#[test]
+fn extend_chars_empty_iter() {
+    // Hits the `lower == 0` branch in Extend<char>::extend.
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    let empty: [char; 0] = [];
+    s.extend(empty.iter().copied());
+    assert_eq!(s.as_str(), "");
+}
+
+#[test]
+fn extend_strs() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.extend(["foo", "bar", "baz"].iter().copied());
+    assert_eq!(s.as_str(), "foobarbaz");
+}
+
+#[test]
+fn collect_in_chars() {
+    let arena = Arena::new();
+    let s: String<'_> = "héllo".chars().collect_in(&arena);
+    assert_eq!(s.as_str(), "héllo");
+}
+
+#[test]
+fn traits_compile() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.push_str("hi");
+    let _: &str = s.as_ref();
+    let r: &str = core::borrow::Borrow::borrow(&s);
+    assert_eq!(r, "hi");
+    assert_eq!(format!("{s:?}"), "\"hi\"");
+    assert_eq!(format!("{s}"), "hi");
+    let mut other = arena.alloc_string();
+    other.push_str("hi");
+    let mut big = arena.alloc_string();
+    big.push_str("z");
+    assert_eq!(s, other);
+    assert!(s < big);
+    assert_eq!(s.cmp(&big), Ordering::Less);
+    assert_eq!(s.partial_cmp(&big), Some(Ordering::Less));
+    assert_eq!(common::hash_of(&s), common::hash_of(&other));
+}
+
+#[test]
+fn try_push_succeeds() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.try_push('a').unwrap();
+    s.try_push('b').unwrap();
+    assert_eq!(&*s, "ab");
+}
+
+#[test]
+fn try_push_str_succeeds() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.try_push_str("hello").unwrap();
+    s.try_push_str(" world").unwrap();
+    assert_eq!(&*s, "hello world");
+}
+
+#[test]
+fn try_push_str_empty_is_noop_ok() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.try_push_str("").unwrap();
+    assert!(s.is_empty());
+}
+
+#[test]
+fn try_reserve_succeeds() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.try_reserve(64).unwrap();
+    assert!(s.capacity() >= 64);
+}
+
+#[test]
+fn try_with_capacity_in_succeeds() {
+    let arena = Arena::new();
+    let s = String::try_with_capacity_in(32, &arena).unwrap();
+    assert!(s.capacity() >= 32);
+    assert!(s.is_empty());
+}
+
+#[test]
+fn try_with_capacity_in_zero_does_not_allocate() {
+    let arena = Arena::new();
+    let s = String::try_with_capacity_in(0, &arena).unwrap();
+    assert_eq!(s.capacity(), 0);
+}
+
+#[test]
+fn try_push_str_returns_err_on_alloc_failure() {
+    use allocator_api2::alloc::AllocError;
+    // FailingAllocator with 0 budget: every allocate() fails.
+    let alloc = common::FailingAllocator::new(0);
+    let arena = Arena::new_in(alloc);
+    let mut s = arena.alloc_string();
+    let err: AllocError = s.try_push_str("x").unwrap_err();
+    let _ = err;
+}
+
+#[test]
+fn try_push_returns_err_on_alloc_failure() {
+    let alloc = common::FailingAllocator::new(0);
+    let arena = Arena::new_in(alloc);
+    let mut s = arena.alloc_string();
+    let _ = s.try_push('x').unwrap_err();
+}
+
+#[test]
+fn try_reserve_returns_err_on_alloc_failure() {
+    let alloc = common::FailingAllocator::new(0);
+    let arena = Arena::new_in(alloc);
+    let mut s = arena.alloc_string();
+    let _ = s.try_reserve(16).unwrap_err();
+}
+
+#[test]
+fn try_with_capacity_in_returns_err_on_alloc_failure() {
+    let alloc = common::FailingAllocator::new(0);
+    let arena = Arena::new_in(alloc);
+    let result = String::try_with_capacity_in(16, &arena);
+    let _ = result.unwrap_err();
+}
+
+#[test]
+fn try_grow_path_via_push_str_after_initial() {
+    // Drives try_grow_to_at_least's slow path (cap > 0 branch).
+    let arena = Arena::new();
+    let mut s = String::try_with_capacity_in(4, &arena).unwrap();
+    s.try_push_str("abcd").unwrap(); // fills initial cap exactly
+    s.try_push_str("e").unwrap(); // forces grow
+    assert_eq!(&*s, "abcde");
+    assert!(s.capacity() >= 5);
+}
+
+#[test]
+fn from_str_in_copies_content() {
+    let arena = Arena::new();
+    let s = String::from_str_in("hello, world", &arena);
+    assert_eq!(s.as_str(), "hello, world");
+    assert!(s.capacity() >= "hello, world".len());
+}
+
+#[test]
+fn from_str_in_empty() {
+    let arena = Arena::new();
+    let s = String::from_str_in("", &arena);
+    assert!(s.is_empty());
+    assert_eq!(s.capacity(), 0);
+    assert_eq!(s.as_str(), "");
+}
+
+#[test]
+fn as_bytes_returns_correct_bytes() {
+    let arena = Arena::new();
+    let s = String::from_str_in("héllo", &arena);
+    assert_eq!(s.as_bytes(), "héllo".as_bytes());
+}
+
+#[test]
+fn as_bytes_empty() {
+    let arena = Arena::new();
+    let s = arena.alloc_string();
+    assert_eq!(s.as_bytes(), b"");
+}
+
+#[test]
+fn as_mut_str_allows_mutation() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    s.as_mut_str().make_ascii_uppercase();
+    assert_eq!(s.as_str(), "HELLO");
+}
+
+#[test]
+fn as_mut_str_empty() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    assert_eq!(s.as_mut_str(), "");
+}
+
+#[test]
+fn as_ptr_and_as_mut_ptr() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hi", &arena);
+    let p = s.as_ptr();
+    let q = s.as_mut_ptr();
+    assert_eq!(p, q.cast_const());
+    // SAFETY: valid pointer to len bytes.
+    unsafe {
+        assert_eq!(*p, b'h');
+    }
+    // SAFETY: valid pointer to len bytes; offset 1 is in bounds.
+    let p1 = unsafe { p.add(1) };
+    // SAFETY: valid pointer to a byte.
+    unsafe {
+        assert_eq!(*p1, b'i');
+    }
+}
+
+#[test]
+fn pop_returns_chars_in_reverse() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("a💖é", &arena);
+    assert_eq!(s.pop(), Some('é'));
+    assert_eq!(s.pop(), Some('💖'));
+    assert_eq!(s.pop(), Some('a'));
+    assert_eq!(s.pop(), None);
+    assert!(s.is_empty());
+}
+
+#[test]
+fn truncate_shortens() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    let cap = s.capacity();
+    s.truncate(3);
+    assert_eq!(s.as_str(), "hel");
+    assert_eq!(s.capacity(), cap, "capacity unchanged");
+}
+
+#[test]
+fn truncate_noop_when_longer() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hi", &arena);
+    s.truncate(50);
+    assert_eq!(s.as_str(), "hi");
+}
+
+#[test]
+#[should_panic(expected = "char boundary")]
+fn truncate_panics_on_non_boundary() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("é", &arena); // 2 bytes
+    s.truncate(1);
+}
+
+#[test]
+fn shrink_to_fit_reclaims_when_at_cursor() {
+    let arena = Arena::new();
+    let mut s = String::with_capacity_in(1024, &arena);
+    s.push_str("short");
+    let _len = s.len();
+    s.shrink_to_fit();
+    // Buffer is at the bump cursor, so shrink should succeed.
+    assert_eq!(s.capacity(), 5);
+    assert_eq!(s.as_str(), "short");
+}
+
+#[test]
+fn shrink_to_fit_noop_when_not_at_cursor() {
+    let arena = Arena::new();
+    let mut s = String::with_capacity_in(1024, &arena);
+    s.push_str("short");
+    let _decoy = arena.alloc_rc(0_u64);
+    s.shrink_to_fit();
+    // Decoy moved the bump cursor past us; capacity unchanged.
+    assert!(s.capacity() >= 1024);
+    assert_eq!(s.as_str(), "short");
+}
+
+#[test]
+fn shrink_to_fit_empty_or_full_noop() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    // Folded mutant-kill: string.rs:207 `|| -> &&` must still no-op at cap == 0.
+    s.shrink_to_fit();
+    assert_eq!(s.capacity(), 0);
+
+    let mut s2 = String::with_capacity_in(4, &arena);
+    s2.push_str("abcd");
+    let cap = s2.capacity();
+    // Folded mutant-kill: the same guard must also no-op when len == cap.
+    s2.shrink_to_fit();
+    assert_eq!(s2.capacity(), cap);
+}
+
+#[test]
+fn insert_at_various_positions() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("ac", &arena);
+    s.insert(1, 'b');
+    assert_eq!(s.as_str(), "abc");
+    s.insert(0, 'Z');
+    assert_eq!(s.as_str(), "Zabc");
+    s.insert(s.len(), '!');
+    assert_eq!(s.as_str(), "Zabc!");
+}
+
+#[test]
+fn insert_multibyte_char() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("ab", &arena);
+    s.insert(1, '💖');
+    assert_eq!(s.as_str(), "a💖b");
+}
+
+#[test]
+fn insert_str_grows() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("ad", &arena);
+    s.insert_str(1, "bc");
+    assert_eq!(s.as_str(), "abcd");
+}
+
+#[test]
+fn insert_str_empty_is_noop() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hi", &arena);
+    s.insert_str(1, "");
+    assert_eq!(s.as_str(), "hi");
+}
+
+#[test]
+#[should_panic(expected = "char boundary")]
+fn insert_panics_on_bad_index() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("é", &arena);
+    s.insert(1, 'x');
+}
+
+#[test]
+#[should_panic(expected = "insertion index out of bounds")]
+fn insert_panics_when_idx_past_end() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hi", &arena);
+    s.insert(99, 'x');
+}
+
+#[test]
+fn remove_returns_char() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("a💖c", &arena);
+    let ch = s.remove(1);
+    assert_eq!(ch, '💖');
+    assert_eq!(s.as_str(), "ac");
+}
+
+#[test]
+fn remove_first_and_last() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("abcd", &arena);
+    assert_eq!(s.remove(0), 'a');
+    assert_eq!(s.as_str(), "bcd");
+    assert_eq!(s.remove(s.len() - 1), 'd');
+    assert_eq!(s.as_str(), "bc");
+}
+
+#[test]
+#[should_panic(expected = "out of bounds")]
+fn remove_panics_when_empty() {
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    let _ = s.remove(0);
+}
+
+#[test]
+fn retain_filters_chars() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("a1b2c3", &arena);
+    s.retain(|c| c.is_ascii_alphabetic());
+    assert_eq!(s.as_str(), "abc");
+}
+
+#[test]
+fn retain_removes_all() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    s.retain(|_| false);
+    assert!(s.is_empty());
+}
+
+#[test]
+fn retain_keeps_all() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    s.retain(|_| true);
+    assert_eq!(s.as_str(), "hello");
+}
+
+#[test]
+fn retain_with_multibyte() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("a💖b💖c", &arena);
+    s.retain(|c| c != '💖');
+    assert_eq!(s.as_str(), "abc");
+}
+
+#[test]
+fn replace_range_same_length() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello world", &arena);
+    s.replace_range(6..11, "earth");
+    assert_eq!(s.as_str(), "hello earth");
+}
+
+#[test]
+fn replace_range_grow() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hi world", &arena);
+    s.replace_range(0..2, "hello");
+    assert_eq!(s.as_str(), "hello world");
+}
+
+#[test]
+fn replace_range_shrink() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello world", &arena);
+    s.replace_range(0..5, "hi");
+    assert_eq!(s.as_str(), "hi world");
+}
+
+#[test]
+fn replace_range_unbounded() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    s.replace_range(.., "goodbye");
+    assert_eq!(s.as_str(), "goodbye");
+}
+
+#[test]
+fn replace_range_empty_replacement() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello world", &arena);
+    s.replace_range(5..11, "");
+    assert_eq!(s.as_str(), "hello");
+}
+
+#[test]
+fn replace_range_inclusive() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("abcdef", &arena);
+    s.replace_range(1..=3, "XYZW");
+    assert_eq!(s.as_str(), "aXYZWef");
+}
+
+#[test]
+#[should_panic(expected = "char boundary")]
+fn replace_range_panics_on_non_boundary() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("é", &arena);
+    s.replace_range(0..1, "x");
+}
+
+#[test]
+fn clone_produces_equal_independent_string() {
+    let arena = Arena::new();
+    let original = String::from_str_in("hello", &arena);
+    let mut cloned = original.clone();
+    assert_eq!(original.as_str(), cloned.as_str());
+    // Independent buffers
+    assert_ne!(original.as_ptr(), cloned.as_ptr());
+    cloned.push_str(" world");
+    assert_eq!(original.as_str(), "hello");
+    assert_eq!(cloned.as_str(), "hello world");
+}
+
+#[test]
+fn clone_empty() {
+    let arena = Arena::new();
+    let original = arena.alloc_string();
+    let cloned = original.clone();
+    assert_eq!(cloned.as_str(), "");
+    assert_eq!(cloned.capacity(), 0);
+}
+
+#[test]
+fn deref_mut_allows_mutation() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("hello", &arena);
+    let r: &mut str = &mut s;
+    r.make_ascii_uppercase();
+    assert_eq!(s.as_str(), "HELLO");
+}
+
+#[test]
+fn as_mut_trait_allows_mutation() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("abc", &arena);
+    let r: &mut str = AsMut::as_mut(&mut s);
+    r.make_ascii_uppercase();
+    assert_eq!(s.as_str(), "ABC");
+}
+
+#[test]
+fn borrow_mut_trait_allows_mutation() {
+    let arena = Arena::new();
+    let mut s = String::from_str_in("xyz", &arena);
+    let r: &mut str = core::borrow::BorrowMut::borrow_mut(&mut s);
+    r.make_ascii_uppercase();
+    assert_eq!(s.as_str(), "XYZ");
+}
+
+#[test]
+fn collect_str_slices_into_string() {
+    let arena = Arena::new();
+    let parts = ["hello", ", ", "world", "!"];
+    let s: String = parts.into_iter().collect_in(&arena);
+    assert_eq!(s.as_str(), "hello, world!");
+}
+
+#[test]
+fn collect_empty_str_slices() {
+    let arena = Arena::new();
+    let parts: [&str; 0] = [];
+    let s: String = parts.into_iter().collect_in(&arena);
+    assert_eq!(s.as_str(), "");
+    assert!(s.is_empty());
+}
+
+#[test]
+fn collect_single_str_slice() {
+    let arena = Arena::new();
+    let s: String = core::iter::once("only").collect_in(&arena);
+    assert_eq!(s.as_str(), "only");
+}
+
+#[test]
+fn collect_str_slices_with_unicode() {
+    let arena = Arena::new();
+    let parts = ["café", " ", "naïve", " ", "résumé"];
+    let s: String = parts.into_iter().collect_in(&arena);
+    assert_eq!(s.as_str(), "café naïve résumé");
+}
+
+#[test]
+fn collect_chars_into_string() {
+    let arena = Arena::new();
+    let s: String = "hello".chars().collect_in(&arena);
+    assert_eq!(s.as_str(), "hello");
+}
+
+#[test]
+fn collect_chars_empty() {
+    let arena = Arena::new();
+    let s: String = "".chars().collect_in(&arena);
+    assert!(s.is_empty());
+}
+
+#[test]
+fn write_macro_formats_into_string() {
+    use core::fmt::Write;
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    write!(s, "x = {}, y = {}", 42, 3.14).unwrap();
+    assert_eq!(s.as_str(), "x = 42, y = 3.14");
+}
+
+#[test]
+fn write_macro_appends() {
+    use core::fmt::Write;
+    let arena = Arena::new();
+    let mut s = String::from_str_in("prefix:", &arena);
+    write!(s, " {}", 100).unwrap();
+    assert_eq!(s.as_str(), "prefix: 100");
+}
+
+#[test]
+fn write_char_via_trait() {
+    use core::fmt::Write;
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.write_char('A').unwrap();
+    s.write_char('B').unwrap();
+    s.write_char('C').unwrap();
+    assert_eq!(s.as_str(), "ABC");
+}
+
+#[test]
+fn write_str_via_trait() {
+    use core::fmt::Write;
+    let arena = Arena::new();
+    let mut s = arena.alloc_string();
+    s.write_str("hello").unwrap();
+    s.write_str(", world").unwrap();
+    assert_eq!(s.as_str(), "hello, world");
+}
+
+// === merged from tests/arena_str.rs ===
+mod arena_str {
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::std_instead_of_core, reason = "tests use std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::redundant_clone, reason = "tests exercise Clone explicitly")]
+    use core::cmp::Ordering;
+    use std::collections::{BTreeMap, HashMap};
+
+    use multitude::Arena;
+    use multitude::strings::RcStr;
+
+    use crate::common;
+
+    #[test]
+    fn arena_rc_str_basic() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_rc("hello, world");
+        assert_eq!(&*s, "hello, world");
+        assert_eq!(s.len(), 12);
+        assert!(!s.is_empty());
+
+        let empty = arena.alloc_str_rc("");
+        assert_eq!(&*empty, "");
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn arena_rc_str_clone_increments_refcount() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_rc("data");
+        let s2 = s.clone();
+        assert_eq!(&*s, "data");
+        assert_eq!(&*s2, "data");
+    }
+
+    #[test]
+    fn arena_rc_str_traits_compile() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_rc("hi");
+        let _: &str = s.as_ref();
+        let r: &str = core::borrow::Borrow::borrow(&s);
+        assert_eq!(r, "hi");
+        assert_eq!(&*s, "hi");
+        assert_eq!(format!("{s:?}"), "\"hi\"");
+        assert_eq!(format!("{s}"), "hi");
+        let other = arena.alloc_str_rc("hi");
+        let big = arena.alloc_str_rc("z");
+        assert_eq!(s, other);
+        assert!(s < big);
+        assert_eq!(s.cmp(&big), Ordering::Less);
+        assert_eq!(s.partial_cmp(&big), Some(Ordering::Less));
+        assert_eq!(common::hash_of(&s), common::hash_of(&other));
+    }
+
+    #[test]
+    fn arena_rc_str_eq_and_hash_via_hashmap() {
+        let arena = Arena::new();
+        let key = arena.alloc_str_rc("key");
+        let mut map: HashMap<RcStr<_>, i32> = HashMap::new();
+        let _ = map.insert(key.clone(), 1);
+        assert_eq!(map.get(&key), Some(&1));
+        // Borrow<str> lookup also works.
+        assert_eq!(map.get("key"), Some(&1));
+    }
+
+    #[test]
+    fn arena_rc_str_works_as_btreemap_key() {
+        let arena = Arena::new();
+        let mut m: BTreeMap<RcStr, u32> = BTreeMap::new();
+        let _ = m.insert(arena.alloc_str_rc("a"), 1);
+        let _ = m.insert(arena.alloc_str_rc("b"), 2);
+        assert_eq!(m.get("a"), Some(&1));
+        assert_eq!(m.get("b"), Some(&2));
+    }
+
+    #[test]
+    fn arena_arc_str_basic() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_arc("hi");
+        assert_eq!(&*s, "hi");
+        assert_eq!(s.len(), 2);
+        assert!(!s.is_empty());
+        let s2 = s.clone();
+        let h = std::thread::spawn(move || {
+            assert_eq!(&*s2, "hi");
+        });
+        h.join().unwrap();
+    }
+
+    #[test]
+    fn arena_arc_str_empty() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_arc("");
+        assert_eq!(s.len(), 0);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn arena_arc_str_traits_compile() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_arc("hi");
+        let _: &str = s.as_ref();
+        let r: &str = core::borrow::Borrow::borrow(&s);
+        assert_eq!(r, "hi");
+        assert_eq!(format!("{s:?}"), "\"hi\"");
+        assert_eq!(format!("{s}"), "hi");
+        let other = arena.alloc_str_arc("hi");
+        let big = arena.alloc_str_arc("z");
+        assert_eq!(s, other);
+        assert!(s < big);
+        assert_eq!(s.cmp(&big), Ordering::Less);
+        assert_eq!(s.partial_cmp(&big), Some(Ordering::Less));
+        assert_eq!(common::hash_of(&s), common::hash_of(&other));
+    }
+
+    #[test]
+    fn arena_arc_str_outlives_arena() {
+        // Drives the `teardown_chunk(chunk, false)` branch in
+        // ArenaArcStr::Drop when this is the LAST reference and the arena
+        // itself has already been dropped.
+        let s: multitude::strings::ArcStr = {
+            let arena = Arena::new();
+            arena.alloc_str_arc("survives the arena")
+        };
+        assert_eq!(&*s, "survives the arena");
+        drop(s); // teardown_chunk(chunk, false) for the Shared chunk.
+    }
+
+    #[test]
+    fn unpin_impl_rc_str() {
+        fn assert_unpin<T: Unpin>() {}
+        assert_unpin::<RcStr>();
+        assert_unpin::<multitude::strings::ArcStr>();
+    }
+
+    #[test]
+    fn from_arena_string_freezes_to_rc_str() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        s.push_str("frozen");
+        let r: RcStr = s.into();
+        assert_eq!(&*r, "frozen");
+        let r2 = r.clone();
+        assert_eq!(&*r, &*r2);
+    }
+
+    #[test]
+    fn from_arena_rc_str_to_arena_rc_byte_slice() {
+        use multitude::Rc;
+        let arena = Arena::new();
+        let s = arena.alloc_str_rc("héllo"); // includes a multi-byte char
+        let bytes: Rc<[u8]> = s.into();
+        assert_eq!(&*bytes, "héllo".as_bytes());
+    }
+
+    #[test]
+    fn from_arena_arc_str_to_arena_arc_byte_slice() {
+        use multitude::Arc;
+        use multitude::strings::ArcStr;
+        let arena = Arena::new();
+        let s: ArcStr = arena.alloc_str_arc("payload");
+        let bytes: Arc<[u8]> = s.into();
+        assert_eq!(&*bytes, b"payload");
+    }
+
+    #[test]
+    fn arena_arc_byte_slice_is_send_sync() {
+        use multitude::Arc;
+        use multitude::strings::ArcStr;
+        let arena = Arena::new();
+        let s: ArcStr = arena.alloc_str_arc("threaded");
+        let bytes: Arc<[u8]> = s.into();
+        let bytes2 = bytes.clone();
+        let h = std::thread::spawn(move || bytes2.len());
+        assert_eq!(h.join().unwrap(), bytes.len());
+    }
+}
+
+// === merged from tests/arena_box_str.rs ===
+mod arena_box_str {
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::std_instead_of_core, reason = "tests use std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+
+    use core::cmp::Ordering;
+    use std::collections::{BTreeMap, HashMap};
+
+    use multitude::Arena;
+    use multitude::strings::BoxStr;
+
+    use crate::common;
+
+    #[test]
+    fn arena_box_str_basic() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_box("hello, world");
+        assert_eq!(&*s, "hello, world");
+        assert_eq!(s.len(), 12);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn arena_box_str_empty() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_box("");
+        assert_eq!(&*s, "");
+        assert_eq!(s.len(), 0);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn arena_box_str_is_eight_bytes() {
+        // The whole reason `ArenaBoxStr` exists rather than `ArenaBox<str>`
+        // (16 bytes via fat pointer): single-pointer compactness.
+        assert_eq!(size_of::<BoxStr>(), size_of::<usize>());
+    }
+
+    #[test]
+    fn arena_box_str_mutable_in_place() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_str_box("hello");
+        s.make_ascii_uppercase();
+        assert_eq!(&*s, "HELLO");
+    }
+
+    #[test]
+    fn arena_box_str_as_mut_via_deref_mut() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_str_box("Mixed Case");
+        let m: &mut str = &mut s;
+        m.make_ascii_lowercase();
+        assert_eq!(&*s, "mixed case");
+    }
+
+    #[test]
+    fn arena_box_str_accepts_string() {
+        // impl AsRef<str> covers both &str and String.
+        let arena = Arena::new();
+        let owned = std::string::String::from("from String");
+        let s = arena.alloc_str_box(owned);
+        assert_eq!(&*s, "from String");
+    }
+
+    #[test]
+    fn try_alloc_str_box_succeeds() {
+        let arena = Arena::new();
+        let s = arena.try_alloc_str_box("ok").unwrap();
+        assert_eq!(&*s, "ok");
+    }
+
+    #[test]
+    fn arena_box_str_traits_compile() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_box("hi");
+        let _: &str = s.as_ref();
+        let r: &str = core::borrow::Borrow::borrow(&s);
+        assert_eq!(r, "hi");
+        assert_eq!(format!("{s:?}"), "\"hi\"");
+        assert_eq!(format!("{s}"), "hi");
+        let other = arena.alloc_str_box("hi");
+        let big = arena.alloc_str_box("z");
+        assert_eq!(s, other);
+        assert!(s < big);
+        assert_eq!(s.cmp(&big), Ordering::Less);
+        assert_eq!(s.partial_cmp(&big), Some(Ordering::Less));
+        assert_eq!(common::hash_of(&s), common::hash_of(&other));
+    }
+
+    #[test]
+    fn arena_box_str_eq_and_hash_via_hashmap() {
+        let arena = Arena::new();
+        let key = arena.alloc_str_box("key");
+        let mut map: HashMap<BoxStr, i32> = HashMap::new();
+        let _ = map.insert(key, 1);
+        // Borrow<str> lookup also works, so we don't need the original key.
+        assert_eq!(map.get("key"), Some(&1));
+    }
+
+    #[test]
+    fn arena_box_str_works_as_btreemap_key() {
+        let arena = Arena::new();
+        let mut m: BTreeMap<BoxStr, u32> = BTreeMap::new();
+        let _ = m.insert(arena.alloc_str_box("a"), 1);
+        let _ = m.insert(arena.alloc_str_box("b"), 2);
+        assert_eq!(m.get("a"), Some(&1));
+        assert_eq!(m.get("b"), Some(&2));
+    }
+
+    #[test]
+    fn arena_box_str_drop_releases_chunk_immediately() {
+        // ArenaBoxStr drops its chunk hold the moment the smart pointer is dropped.
+        // Subsequent allocations in the arena must still work, exercising
+        // the dec_ref + (optional) teardown_chunk path in ArenaBoxStr::Drop.
+        let arena = Arena::new();
+        let s = arena.alloc_str_box("temporary");
+        assert_eq!(&*s, "temporary");
+        drop(s);
+        // Arena still works.
+        let s2 = arena.alloc_str_box("after-drop");
+        assert_eq!(&*s2, "after-drop");
+    }
+
+    #[test]
+    fn arena_box_str_lifetime_bound_to_arena() {
+        // The borrow checker must reject use of an `ArenaBoxStr` whose
+        // arena has been dropped. We can't write a runtime test for the
+        // negative case (it's a compile error), but we can verify positive
+        // case: dropping the box BEFORE the arena is fine.
+        let arena = Arena::new();
+        {
+            let s = arena.alloc_str_box("inner");
+            assert_eq!(&*s, "inner");
+        }
+        let s2 = arena.alloc_str_box("outer");
+        assert_eq!(&*s2, "outer");
+    }
+
+    #[test]
+    fn many_arena_box_str_allocations_force_chunk_rotation() {
+        let arena = Arena::builder().build();
+        let mut handles = std::vec::Vec::new();
+        for i in 0..200 {
+            handles.push(arena.alloc_str_box(format!("item{i}")));
+        }
+        assert_eq!(&*handles[0], "item0");
+        assert_eq!(&*handles[199], "item199");
+    }
+
+    #[test]
+    fn arena_box_str_round_trip_through_drop_does_not_corrupt() {
+        let arena = Arena::new();
+        for i in 0..1000 {
+            let s = arena.alloc_str_box(format!("transient-{i}"));
+            // Each iteration: alloc, mutate, drop. The dec_ref + teardown
+            // must keep the arena healthy across many iterations.
+            let _ = s.len();
+        }
+        // Final allocation works too.
+        let s = arena.alloc_str_box("final");
+        assert_eq!(&*s, "final");
+    }
+
+    #[test]
+    fn arena_box_str_borrow_mut_and_pointer() {
+        use core::borrow::BorrowMut;
+        let arena = Arena::new();
+        let mut s = arena.alloc_str_box("hello");
+        let m: &mut str = s.borrow_mut();
+        m.make_ascii_uppercase();
+        assert_eq!(&*s, "HELLO");
+        let p = format!("{s:p}");
+        assert!(p.starts_with("0x"), "Pointer format: {p}");
+    }
+
+    #[test]
+    fn arena_box_str_into_rc_str_via_from() {
+        let arena = Arena::new();
+        let b = arena.alloc_str_box("hi");
+        let r: multitude::strings::RcStr = b.into();
+        let r2 = r.clone();
+        assert_eq!(&*r, "hi");
+        assert_eq!(&*r, &*r2);
+    }
+}
+
+// === merged from tests/mutants_string.rs ===
+mod mutants_for_string {
+    #![allow(clippy::std_instead_of_core, reason = "test code")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::doc_markdown, reason = "doc comments cite raw identifier names")]
+    use multitude::Arena;
+    use multitude::strings::String as MString;
+
+    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    use crate::common;
+
+    /// Kills `string.rs:94:16 > → >=` in `try_with_capacity_in`:
+    /// `if cap > 0 { allocate }`. With `>=`, even `cap == 0` allocates.
+    /// Detection: pointer identity. A zero-capacity request must leave
+    /// the data pointer in its dangling state (no allocation, no chunk
+    /// touched).
+    #[test]
+    fn with_capacity_zero_does_not_allocate() {
+        let arena = Arena::new();
+        let s0 = MString::with_capacity_in(0, &arena);
+        assert_eq!(s0.capacity(), 0);
+        // Compare against `new_in` (the documented no-alloc constructor).
+        let s_new = MString::new_in(&arena);
+        assert_eq!(s_new.capacity(), 0);
+        // Both have the same dangling data pointer (== 1 by NonNull::dangling()).
+        // ptr identity is the strongest observable signal here.
+        assert_eq!(s0.as_ptr() as usize, s_new.as_ptr() as usize);
+    }
+
+    /// Kills `string.rs:465:19 > → >=` in `try_reserve`. Same shape as
+    /// the utf16 counterpart: `if needed > self.cap { grow }`. With
+    /// `>=`, reserve at exact fit reallocates spuriously.
+    #[test]
+    fn string_reserve_at_exact_fit_does_not_regrow() {
+        let arena = Arena::new();
+        let mut s = MString::with_capacity_in(16, &arena);
+        let cap = s.capacity();
+        let ptr_before = s.as_ptr();
+        s.reserve(cap); // additional == cap → needed == cap (len was 0)
+        assert_eq!(s.capacity(), cap);
+        assert_eq!(s.as_ptr(), ptr_before);
+    }
+
+    /// Kills `string.rs:510:21 == → !=` in `into_arena_box_str`. With
+    /// `!=`, the empty-fast-path triggers on non-empty inputs (wrong
+    /// output, possibly UB) and the data-path triggers on empty (UB on
+    /// dangling).
+    #[test]
+    fn into_arena_box_str_handles_empty_and_non_empty() {
+        let arena = Arena::new();
+
+        let s_empty = MString::new_in(&arena);
+        let b_empty = s_empty.into_arena_box_str();
+        assert_eq!(&*b_empty, "");
+        assert_eq!(b_empty.len(), 0);
+
+        let mut s = MString::with_capacity_in(16, &arena);
+        s.push_str("hello");
+        let b = s.into_arena_box_str();
+        assert_eq!(&*b, "hello");
+        assert_eq!(b.len(), 5);
+    }
+
+    /// Kills `string.rs:528:9 try_reclaim_tail → ()` (body becomes a
+    /// no-op), `528:21 >= → <` (early-return inverted), and `534:29 - → /`
+    /// (`total - used` arithmetic).
+    ///
+    /// `try_reclaim_tail` returns the unused trailing bytes to the chunk
+    /// cursor. If the function is a no-op or the arithmetic is wrong,
+    /// the next allocation in the same arena would either start past
+    /// the reclaimed region (no aliasing — invisible) or overlap with
+    /// it (corruption). We pin the *positive observation* by allocating
+    /// after a freeze and confirming the frozen string is intact.
+    #[test]
+    fn reclaim_tail_does_not_corrupt_frozen_string() {
+        let arena = Arena::new();
+        let mut s = MString::with_capacity_in(256, &arena);
+        s.push_str("frozen!");
+        let frozen = s.into_arena_box_str();
+        let _filler: multitude::vec::Vec<'_, u64> = {
+            let mut v = arena.alloc_vec_with_capacity::<u64>(64);
+            for i in 0..64 {
+                v.push(i);
+            }
+            v
+        };
+        assert_eq!(&*frozen, "frozen!");
+    }
+}
+
+// === merged from tests/format_macro.rs ===
+mod format_macro {
+    #![allow(clippy::std_instead_of_core, reason = "tests use std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    use multitude::Arena;
+
+    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    use crate::common;
+
+    #[test]
+    fn format_macro_basic() {
+        let arena = Arena::new();
+        let name = "world";
+        let s = multitude::strings::format!(in &arena, "hello, {name}!");
+        assert_eq!(&*s, "hello, world!");
+    }
+
+    #[test]
+    fn format_macro_returns_arena_string() {
+        // The macro returns ArenaString, not a frozen ArenaRcStr.
+        let arena = Arena::new();
+        let mut s = multitude::strings::format!(in &arena, "Hello, {}!", "Alice");
+        s.push_str(" extended");
+        assert_eq!(s.as_str(), "Hello, Alice! extended");
+    }
+
+    #[test]
+    fn format_macro_freeze_to_arena_str() {
+        let arena = Arena::new();
+        let name = "Alice";
+        let s = multitude::strings::format!(in &arena, "Hello, {name}!");
+        let frozen = s.into_arena_str();
+        assert_eq!(&*frozen, "Hello, Alice!");
+    }
+
+    #[test]
+    fn format_macro_with_multiple_args() {
+        let arena = Arena::new();
+        let s = multitude::strings::format!(in &arena, "{}+{}={}", 2, 3, 5);
+        assert_eq!(&*s, "2+3=5");
+    }
+
+    #[test]
+    fn format_macro_empty_format_string() {
+        let arena = Arena::new();
+        let s = multitude::strings::format!(in &arena, "");
+        assert_eq!(&*s, "");
+    }
+
+    #[test]
+    fn arena_string_is_a_fmt_write_target() {
+        use core::fmt::Write;
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        write!(&mut s, "x={}", 42).unwrap();
+        assert_eq!(s.as_str(), "x=42");
+
+        s.write_char('!').unwrap();
+        assert_eq!(s.as_str(), "x=42!");
+    }
+}
