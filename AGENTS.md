@@ -22,7 +22,8 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-Manually update the relevant `CHANGELOG.md` file(s) when making user-visible changes. Add entries under an `## Unreleased` section, following the existing format. Changelogs are not auto-generated.
+The changelogs are updated by `scripts/release-crate.ps1` at release time, based on Git history. It is not necessary to make manual edits
+to the changelogs, though you are permitted to do so if explicitly instructed.
 
 ## Pull Requests
 
