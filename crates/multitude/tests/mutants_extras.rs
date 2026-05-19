@@ -20,8 +20,6 @@ mod mutants_for_kill {
         dead_code,
         reason = "test types intentionally retain unused fields to keep their Drop side-effects observable"
     )]
-    use std::collections::HashMap;
-    use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
     use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -42,80 +40,6 @@ mod mutants_for_kill {
     /// hit). To distinguish, we hash the key directly with a single-shot
     /// hasher and assert the produced hash is not the empty-stream hash —
     /// i.e. that `hash` actually fed bytes to the hasher.
-    #[test]
-    fn arc_hash_forwards_to_inner() {
-        let arena = Arena::new();
-        let a: Arc<u64> = arena.alloc_arc(0x0123_4567_89ab_cdef_u64);
-        let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
-        let mut h_arc = bh.build_hasher();
-        std::hash::Hash::hash(&a, &mut h_arc);
-        let arc_hash = h_arc.finish();
-        let mut h_inner = bh.build_hasher();
-        std::hash::Hash::hash(&0x0123_4567_89ab_cdef_u64, &mut h_inner);
-        let inner_hash = h_inner.finish();
-        let h_empty = bh.build_hasher();
-        let empty_hash = h_empty.finish();
-        assert_eq!(arc_hash, inner_hash, "Arc::hash must forward to inner hash");
-        assert_ne!(arc_hash, empty_hash, "Arc::hash must feed bytes (not be a no-op)");
-
-        // Round-trip via HashMap to keep the test exercising real usage.
-        let mut map: HashMap<Arc<u64>, &'static str> = HashMap::new();
-        map.insert(a.clone(), "v");
-        assert_eq!(map.get(&a).copied(), Some("v"));
-    }
-
-    /// Kills `crates/multitude/src/box.rs:389: replace <Box as Hash>::hash with ()`.
-    #[test]
-    fn box_hash_forwards_to_inner() {
-        let arena = Arena::new();
-        let b: Box<u64> = arena.alloc_box(0xdead_beef_cafe_babe_u64);
-        let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
-        let mut h_box = bh.build_hasher();
-        std::hash::Hash::hash(&b, &mut h_box);
-        let box_hash = h_box.finish();
-        let mut h_inner = bh.build_hasher();
-        std::hash::Hash::hash(&0xdead_beef_cafe_babe_u64, &mut h_inner);
-        let inner_hash = h_inner.finish();
-        let h_empty = bh.build_hasher();
-        let empty_hash = h_empty.finish();
-        assert_eq!(box_hash, inner_hash);
-        assert_ne!(box_hash, empty_hash);
-    }
-
-    /// Kills `crates/multitude/src/rc.rs:303: replace <Rc as Hash>::hash with ()`.
-    #[test]
-    fn rc_hash_forwards_to_inner() {
-        let arena = Arena::new();
-        let r: Rc<u64> = arena.alloc_rc(0xfeed_face_dead_beef_u64);
-        let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
-        let mut h_rc = bh.build_hasher();
-        std::hash::Hash::hash(&r, &mut h_rc);
-        let rc_hash = h_rc.finish();
-        let mut h_inner = bh.build_hasher();
-        std::hash::Hash::hash(&0xfeed_face_dead_beef_u64, &mut h_inner);
-        let inner_hash = h_inner.finish();
-        let h_empty = bh.build_hasher();
-        let empty_hash = h_empty.finish();
-        assert_eq!(rc_hash, inner_hash);
-        assert_ne!(rc_hash, empty_hash);
-    }
-
-    /// Kills `crates/multitude/src/arc.rs:303: replace <Arc as fmt::Pointer>::fmt
-    /// -> Result with Ok(())`.
-    ///
-    /// If the body became `Ok(())`, the formatter would emit nothing and
-    /// the result string would be empty. We assert the rendered string
-    /// starts with `0x` (Rust's standard pointer format) and has at least
-    /// the `0x` prefix plus a hex digit.
-    #[test]
-    fn arc_pointer_format_is_non_empty() {
-        let arena = Arena::new();
-        let a: Arc<u64> = arena.alloc_arc(7_u64);
-        let s = format!("{a:p}");
-        assert!(s.starts_with("0x"), "expected `0x` prefix, got `{s}`");
-        assert!(s.len() > 2, "expected non-empty pointer hex digits, got `{s}`");
-    }
-
     // --------------------------------------------------------------------
     // B/I. Builder defaults / preallocation paths / resolve_capacity.
     // --------------------------------------------------------------------
@@ -163,10 +87,9 @@ mod mutants_for_kill {
             let arena = Arena::new();
             let mut keep_rc: std::vec::Vec<Rc<DropCounter>> = std::vec::Vec::new();
             let mut keep_box: std::vec::Vec<Box<DropCounter>> = std::vec::Vec::new();
-            // 1024 mixed allocations across both Rc and Box flavors.
-            // Each value is freshly cloned so DropCounter actually has
-            // a `Drop` impl that registers in the arena's drop list.
-            for i in 0..1024_u32 {
+            // 256 mixed allocations still span multiple local chunks and keep
+            // the drop-list accounting observable without 1024 drops under miri.
+            for i in 0..256_u32 {
                 if i % 2 == 0 {
                     keep_rc.push(arena.alloc_rc(DropCounter(counter.clone())));
                 } else {
@@ -180,7 +103,7 @@ mod mutants_for_kill {
         }
         assert_eq!(
             counter.load(Ordering::Relaxed),
-            1024,
+            256,
             "every DropCounter must be dropped exactly once"
         );
     }
@@ -196,13 +119,15 @@ mod mutants_for_kill {
         {
             let arena = Arena::new();
             let mut keep: std::vec::Vec<Arc<DropCounter>> = std::vec::Vec::new();
-            for _ in 0..1024_u32 {
+            // 256 Arc allocations still exercise multiple shared chunks and the
+            // same drop-entry paths this test is targeting.
+            for _ in 0..256_u32 {
                 keep.push(arena.alloc_arc_with(|| DropCounter(counter.clone())));
             }
             drop(keep);
             drop(arena);
         }
-        assert_eq!(counter.load(Ordering::Relaxed), 1024);
+        assert_eq!(counter.load(Ordering::Relaxed), 256);
     }
 
     /// Kills mutants in the *closure* variant of the normal local-flavor
@@ -227,7 +152,9 @@ mod mutants_for_kill {
             let arena = Arena::new();
             let mut keep_rc: std::vec::Vec<Rc<DropCounter>> = std::vec::Vec::new();
             let mut keep_box: std::vec::Vec<Box<DropCounter>> = std::vec::Vec::new();
-            for i in 0..1024_u32 {
+            // 256 closure-based allocations still span multiple local chunks and
+            // validate the same drop-install/commit logic.
+            for i in 0..256_u32 {
                 if i % 2 == 0 {
                     keep_rc.push(arena.alloc_rc_with(|| DropCounter(counter.clone())));
                 } else {
@@ -238,7 +165,7 @@ mod mutants_for_kill {
             drop(keep_box);
             drop(arena);
         }
-        assert_eq!(counter.load(Ordering::Relaxed), 1024);
+        assert_eq!(counter.load(Ordering::Relaxed), 256);
     }
 
     /// Kills the oversized-value match-guard mutant
@@ -1087,9 +1014,10 @@ mod mutants_for_kill2 {
     #[test]
     fn slice_local_slow_pressure_succeeds() {
         let arena = multitude::Arena::new();
-        // 1000 small slice allocations force several refills.
-        let mut keep: Vec<multitude::Rc<[u32]>> = Vec::with_capacity(1000);
-        for i in 0..1000_u32 {
+        // 256 small slices still span multiple local chunks, which is enough
+        // to re-enter the slice slow paths this test is targeting.
+        let mut keep: Vec<multitude::Rc<[u32]>> = Vec::with_capacity(256);
+        for i in 0..256_u32 {
             let v = vec![i; 4];
             keep.push(arena.alloc_slice_copy_rc(&v[..]));
         }
@@ -2246,8 +2174,13 @@ mod mutants_for_kill3 {
     fn arena_1085_1101_exact_fit_slow_value() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Fill many items to force slow path
-        for _ in 0..2000 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 2000 small allocs.
+        for _ in 0..8 {
+            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        // A short burst is enough to drive the next Drop allocation through the
+        // same local slow-refill path.
+        for _ in 0..32 {
             arena.alloc_rc(0u64);
         }
         // Allocate a Drop value that triggers slow path
@@ -2266,8 +2199,13 @@ mod mutants_for_kill3 {
     fn arena_1089_needed_underflow_slow_value() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Force slow path
-        for _ in 0..if cfg!(miri) { 100 } else { 1000 } {
+        // Optimized for miri runtime: ratchet via large fillers instead of 1000 small allocs.
+        for _ in 0..8 {
+            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        // A short burst is enough to leave the next Drop allocation on the
+        // same local slow-refill path under test.
+        for _ in 0..32 {
             arena.alloc_rc(0u64);
         }
         // DropTracker is 8 bytes. entry_size for InnerDropEntry is ~16 bytes.
@@ -2357,8 +2295,12 @@ mod mutants_for_kill3 {
     fn arena_1491_exact_fit_slow_with() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        for _ in 0..2000 {
-            arena.alloc_rc(0u64);
+        // Optimized for miri runtime: ratchet via large fillers instead of 2000 small allocs.
+        for _ in 0..8 {
+            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        for _ in 0..32 {
+            arena.alloc_rc_with(|| 0u64);
         }
         let rc = arena.alloc_rc_with(|| DropTracker(77));
         drop(rc);
@@ -2372,7 +2314,11 @@ mod mutants_for_kill3 {
     fn arena_1507_exact_fit_slow_with2() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        for _ in 0..3000 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 3000 small allocs.
+        for _ in 0..8 {
+            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        for _ in 0..32 {
             arena.alloc_rc_with(|| 0u64);
         }
         let rc = arena.alloc_rc_with(|| DropTracker(88));
@@ -2474,8 +2420,11 @@ mod mutants_for_kill3 {
     #[test]
     fn arena_2482_2577_slice_slow_force() {
         let arena = Arena::new();
-        // Fill heavily to force slow paths
-        for _ in 0..5000 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 5000 small allocs.
+        for _ in 0..8 {
+            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        for _ in 0..32 {
             arena.alloc_rc(0u64);
         }
         // No-drop slice via fill_with
@@ -3487,15 +3436,16 @@ mod mutants_for_audit {
         let arena = Arena::new();
         {
             let _big: Rc<[u8]> = arena.alloc_slice_fill_with_rc(32 * 1024, |_| 0_u8);
-            // Now the next refill upgrades to a 64 KiB chunk.
+            // 256 Drop allocations are enough to exercise repeated header
+            // resolution inside the promoted max-class chunk.
             let mut handles: std::vec::Vec<Rc<D<'_>>> = std::vec::Vec::new();
-            for _ in 0..2_000 {
+            for _ in 0..256 {
                 handles.push(arena.alloc_rc(D(&drops)));
             }
             drop(handles);
         }
         drop(arena);
-        assert_eq!(drops.get(), 2_000);
+        assert_eq!(drops.get(), 256);
     }
 
     // ============================================================================

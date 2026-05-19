@@ -21,6 +21,29 @@ fn reserve_and_consume_basic() {
     assert_eq!(view, b"hello");
 }
 
+/// Fast-fail micro-test for the `BlockRef::drop` last-drop cleanup
+/// gate (`bytesbuf.rs::ArenaBlockState::drop`'s `if prev == 1`).
+/// Under the `==` → `!=` mutation the cleanup runs on every drop
+/// *except* the last, so the chunk hold is never released and the
+/// arena chunk leaks to the tracking allocator. The targeted shape
+/// (single reserve, immediate drop, then arena drop) makes this
+/// observation roughly 1ms instead of ~78s through the stress suite.
+#[test]
+fn reserve_drop_releases_arena_chunk_hold() {
+    let alloc = common::SendTrackingAllocator::new();
+    {
+        let arena = Arena::builder_in(alloc.clone()).build();
+        let buf = arena.reserve(64);
+        drop(buf);
+    }
+    assert_eq!(
+        alloc.live_chunks(),
+        0,
+        "BlockRef::drop last-drop branch must release the chunk hold"
+    );
+    assert_eq!(alloc.live_bytes(), 0);
+}
+
 #[test]
 fn reserve_exact_size() {
     let arena = Arena::new();

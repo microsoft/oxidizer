@@ -168,6 +168,7 @@ mod utf16_string_builder {
         s.push_str(utf16str!("hello"));
         s.truncate(3);
         assert_eq!(s.as_utf16_str(), utf16str!("hel"));
+        assert_eq!(s.len(), 3);
         s.clear();
         assert!(s.is_empty());
     }
@@ -361,6 +362,149 @@ mod utf16_string_builder {
         out.try_push_from_str(&owned).unwrap();
         out.try_push_from_str("!").unwrap();
         assert_eq!(out.as_utf16_str(), utf16str!("hello, 💖!"));
+    }
+
+    // === Fast, direct tests targeting Utf16String::len and ===
+    // === Utf16String::try_with_capacity_in mutants.          ===
+    //
+    // These mutants survive when the only coverage runs through heavy
+    // integration paths. Keep these tests minimal so cargo-mutants can
+    // kill them quickly (a `len -> 0` replacement should fail in
+    // milliseconds, not minutes).
+
+    #[test]
+    fn len_is_zero_for_fresh_string() {
+        let arena = Arena::new();
+        let s = arena.alloc_utf16_string();
+        assert_eq!(s.len(), 0);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn len_tracks_number_of_u16_code_units_after_push_str() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("abc"));
+        assert_eq!(s.len(), 3);
+        s.push_str(utf16str!("de"));
+        assert_eq!(s.len(), 5);
+    }
+
+    #[test]
+    fn len_handles_non_bmp_chars_as_two_code_units() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push('🦀'); // U+1F980, one scalar => two UTF-16 code units
+        assert_eq!(s.len(), 2);
+        s.push('a');
+        assert_eq!(s.len(), 3);
+    }
+
+    #[test]
+    fn len_returns_zero_after_clear() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("nonempty"));
+        assert!(!s.is_empty());
+        s.clear();
+        assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn try_with_capacity_in_zero_does_not_allocate_but_is_usable() {
+        let arena = Arena::new();
+        let s = multitude::strings::Utf16String::try_with_capacity_in(0, &arena).unwrap();
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.capacity(), 0);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn try_with_capacity_in_respects_requested_capacity() {
+        let arena = Arena::new();
+        let s = multitude::strings::Utf16String::try_with_capacity_in(8, &arena).unwrap();
+        assert!(s.capacity() >= 8);
+        assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn try_with_capacity_in_one_allocates_at_least_one_unit() {
+        let arena = Arena::new();
+        let s = multitude::strings::Utf16String::try_with_capacity_in(1, &arena).unwrap();
+        assert!(s.capacity() >= 1);
+        assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn reserve_grows_capacity_and_preserves_contents() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("abc"));
+        let cap_before = s.capacity();
+        s.reserve(cap_before + 32);
+        assert!(s.capacity() >= s.len() + cap_before + 32);
+        assert_eq!(s.as_utf16_str(), utf16str!("abc"));
+        assert_eq!(s.len(), 3);
+    }
+
+    #[test]
+    fn reserve_grows_from_zero_capacity() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        assert_eq!(s.capacity(), 0);
+        s.reserve(64);
+        assert!(s.capacity() >= 64);
+        assert_eq!(s.len(), 0);
+    }
+
+    #[test]
+    fn try_reserve_zero_additional_is_noop() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("xy"));
+        let cap_before = s.capacity();
+        s.try_reserve(0).unwrap();
+        assert_eq!(s.capacity(), cap_before);
+        assert_eq!(s.as_utf16_str(), utf16str!("xy"));
+    }
+
+    #[test]
+    fn extend_chars_appends_in_order() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.extend(['a', 'b', 'c'].iter().copied());
+        assert_eq!(s.as_utf16_str(), utf16str!("abc"));
+        assert_eq!(s.len(), 3);
+        s.extend(std::iter::once(&'d').copied());
+        assert_eq!(s.as_utf16_str(), utf16str!("abcd"));
+        assert_eq!(s.len(), 4);
+    }
+
+    #[test]
+    fn extend_chars_handles_surrogate_pairs() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.extend(['a', '🦀', 'b'].iter().copied());
+        assert_eq!(s.as_utf16_str(), utf16str!("a🦀b"));
+        assert_eq!(s.len(), 4); // 1 + 2 + 1
+    }
+
+    #[test]
+    fn extend_str_slices_appends_in_order() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.extend(["ab", "cd"].iter().copied());
+        assert_eq!(s.as_utf16_str(), utf16str!("abcd"));
+        assert_eq!(s.len(), 4);
+    }
+
+    #[test]
+    fn extend_utf16_str_slices_appends_in_order() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.extend([utf16str!("ab"), utf16str!("cd")].iter().copied());
+        assert_eq!(s.as_utf16_str(), utf16str!("abcd"));
+        assert_eq!(s.len(), 4);
     }
 
     extern crate alloc;
@@ -690,8 +834,10 @@ mod utf16_coverage {
         s.push_str(utf16str!("abc"));
         s.truncate(10);
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
+        // Folded from_mutants_extras_utf16_scattered::utf16_truncate_to_current_length_is_noop.
         s.truncate(3);
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
+        assert_eq!(s.len(), 3);
     }
 
     #[test]
@@ -701,6 +847,13 @@ mod utf16_coverage {
         // cap==0 path
         s.shrink_to_fit();
         assert_eq!(s.capacity(), 0);
+
+        // Folded from_mutants_extras_utf16_scattered::utf16_shrink_to_fit_already_tight_is_noop.
+        let mut tight = arena.alloc_utf16_string_with_capacity(3);
+        tight.push_from_str("abc");
+        tight.shrink_to_fit();
+        assert_eq!(tight.len(), 3);
+
         // cap == len path
         s.push_str(utf16str!("hi"));
         let cap = s.capacity();
@@ -1198,6 +1351,11 @@ mod utf16_coverage {
         assert_eq!(format!("{a}"), "hi💖");
         let b = arena.alloc_utf16_str_box(utf16str!("hi💖"));
         assert_eq!(format!("{b}"), "hi💖");
+
+        // Folded from_coverage_extras_utf16::utf16_string_display_renders_content.
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("hello"));
+        assert_eq!(std::format!("{s}"), "hello");
     }
 
     #[test]
@@ -1524,6 +1682,12 @@ mod mutants_for_utf16_strings {
         s.insert_utf16_str(s.len(), utf16str!("!"));
         assert_eq!(s.as_utf16_str(), utf16str!("hXXello!"));
 
+        // Folded from_coverage_extras_utf16::utf16_string_insert_str_at_end_of_string.
+        let mut appended = arena.alloc_utf16_string();
+        appended.push_str(utf16str!("hi"));
+        appended.insert_utf16_str(appended.len(), utf16str!("!"));
+        assert_eq!(appended.as_utf16_str(), utf16str!("hi!"));
+
         // Insert at idx == 0 (head).
         s.insert_utf16_str(0, utf16str!(">"));
         assert_eq!(s.as_utf16_str(), utf16str!(">hXXello!"));
@@ -1568,6 +1732,16 @@ mod mutants_for_utf16_strings {
         let removed = s.remove(0);
         assert_eq!(removed, 'h');
         assert_eq!(s.as_utf16_str(), utf16str!("ll"));
+
+        // Folded from_mutants_extras_utf16_scattered::utf16_remove_shifts_correct_byte_count.
+        let mut s = Utf16String::new_in(&arena);
+        s.push_from_str("abcdefghij");
+        assert_eq!(s.remove(4), 'e');
+        assert_eq!(s.as_slice().to_vec(), widestring::Utf16String::from_str("abcdfghij").into_vec());
+        assert_eq!(s.remove(0), 'a');
+        assert_eq!(s.as_slice().to_vec(), widestring::Utf16String::from_str("bcdfghij").into_vec());
+        assert_eq!(s.remove(s.len() - 1), 'j');
+        assert_eq!(s.as_slice().to_vec(), widestring::Utf16String::from_str("bcdfghi").into_vec());
     }
 
     /// Kills `utf16_string.rs:396:22 && → ||`, `396:18 > → >=`,
@@ -1586,6 +1760,18 @@ mod mutants_for_utf16_strings {
         let mut s = Utf16String::from_utf16_str_in(utf16str!("hello"), &arena);
         s.replace_range(.., utf16str!("WORLD"));
         assert_eq!(s.as_utf16_str(), utf16str!("WORLD"));
+
+        // Folded from_coverage_extras_utf16::utf16_string_replace_range_full_with_longer.
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("abc"));
+        s.replace_range(0..3, utf16str!("xyzw"));
+        assert_eq!(s.as_utf16_str(), utf16str!("xyzw"));
+
+        // Folded from_coverage_extras_utf16::utf16_string_replace_range_full_with_shorter.
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("abcdef"));
+        s.replace_range(0..6, utf16str!("xy"));
+        assert_eq!(s.as_utf16_str(), utf16str!("xy"));
 
         // Middle replace, different lengths (longer).
         let mut s = Utf16String::from_utf16_str_in(utf16str!("hello"), &arena);
@@ -1611,6 +1797,13 @@ mod mutants_for_utf16_strings {
         let mut s = Utf16String::from_utf16_str_in(utf16str!("hello"), &arena);
         s.replace_range(2..2, utf16str!("--"));
         assert_eq!(s.as_utf16_str(), utf16str!("he--llo"));
+
+        // Folded from_coverage_extras_utf16::utf16_string_replace_range_empty_at_end.
+        let mut s = arena.alloc_utf16_string();
+        s.push_str(utf16str!("abc"));
+        let n = s.len();
+        s.replace_range(n..n, utf16str!("xyz"));
+        assert_eq!(s.as_utf16_str(), utf16str!("abcxyz"));
 
         // Replace into an empty string.
         let mut s = Utf16String::new_in(&arena);
@@ -1901,6 +2094,17 @@ mod mutation_coverage {
 
         assert_eq!(s.capacity(), s.len());
         assert_eq!(s.as_utf16_str(), utf16str!("hello"));
+
+        #[cfg(all(feature = "stats", feature = "utf16"))]
+        {
+            // Folded from_mutants_extras_utf16_scattered::utf16_shrink_to_fit_reclaims_tail.
+            let mut s = arena.alloc_utf16_string_with_capacity(128);
+            s.push_from_str("hi");
+            let before_chunks = arena.stats().normal_local_chunks_allocated;
+            s.shrink_to_fit();
+            let _r: multitude::Rc<u8> = arena.alloc_rc(0);
+            assert_eq!(arena.stats().normal_local_chunks_allocated, before_chunks);
+        }
     }
 
     #[test]
@@ -1964,6 +2168,16 @@ mod mutation_coverage {
         let _follow_on = arena.alloc_utf16_str_rc(utf16str!("zzzz"));
 
         assert_eq!(&*frozen, utf16str!("hello"));
+
+        // Folded from_coverage_extras_utf16::utf16_into_arena_str_reclaims_tail.
+        let mut s = arena.alloc_utf16_string_with_capacity(64);
+        s.push_str(utf16str!("abcd"));
+        let frozen = s.into_arena_utf16_str();
+        let frozen_end_addr = frozen.as_ptr() as usize + frozen.len() * core::mem::size_of::<u16>();
+        let next: multitude::Rc<u32> = arena.alloc_rc(0_u32);
+        let next_addr = multitude::Rc::as_ptr(&next) as usize;
+        let gap = next_addr.saturating_sub(frozen_end_addr);
+        assert!(gap < 120, "gap was {gap} bytes");
     }
 
     #[test]
@@ -3464,31 +3678,6 @@ mod from_coverage_extras_utf16 {
     use crate::common::{self, FailingAllocator};
 
     #[test]
-    fn utf16_string_display_renders_content() {
-        use widestring::utf16str;
-        let arena: Arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("hello"));
-        assert_eq!(std::format!("{s}"), "hello");
-    }
-
-    #[test]
-    fn utf16_into_arena_str_reclaims_tail() {
-        use widestring::utf16str;
-        let arena: Arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(64);
-        s.push_str(utf16str!("abcd"));
-        let frozen = s.into_arena_utf16_str();
-        let frozen_end_addr = frozen.as_ptr() as usize + frozen.len() * core::mem::size_of::<u16>();
-
-        let next: multitude::Rc<u32> = arena.alloc_rc(0_u32);
-        let next_addr = multitude::Rc::as_ptr(&next) as usize;
-
-        let gap = next_addr.saturating_sub(frozen_end_addr);
-        assert!(gap < 120, "gap was {gap} bytes");
-    }
-
-    #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn utf16_string_push_panics_on_allocator_error() {
         let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
@@ -3538,43 +3727,6 @@ mod from_coverage_extras_utf16 {
         s.push_str(utf16str!("serde 🦀"));
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(json, r#""serde 🦀""#);
-    }
-
-    #[test]
-    fn utf16_string_insert_str_at_end_of_string() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("hi"));
-        s.insert_utf16_str(s.len(), utf16str!("!"));
-        assert_eq!(s.as_utf16_str(), utf16str!("hi!"));
-    }
-
-    #[test]
-    fn utf16_string_replace_range_full_with_longer() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("abc"));
-        s.replace_range(0..3, utf16str!("xyzw"));
-        assert_eq!(s.as_utf16_str(), utf16str!("xyzw"));
-    }
-
-    #[test]
-    fn utf16_string_replace_range_full_with_shorter() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("abcdef"));
-        s.replace_range(0..6, utf16str!("xy"));
-        assert_eq!(s.as_utf16_str(), utf16str!("xy"));
-    }
-
-    #[test]
-    fn utf16_string_replace_range_empty_at_end() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("abc"));
-        let n = s.len();
-        s.replace_range(n..n, utf16str!("xyz"));
-        assert_eq!(s.as_utf16_str(), utf16str!("abcxyz"));
     }
 
     #[test]
@@ -3738,37 +3890,6 @@ mod from_mutants_extras_utf16_scattered {
     ///   into the tail, leaving the wrong content.
     ///
     /// We assert exact post-remove content over many calls.
-    #[test]
-    fn utf16_remove_shifts_correct_byte_count() {
-        use multitude::strings::Utf16String;
-        let arena = Arena::new();
-        let mut s: Utf16String<'_> = Utf16String::new_in(&arena);
-        s.push_from_str("abcdefghij");
-        assert_eq!(s.len(), 10);
-        // Remove the middle character.
-        let ch = s.remove(4);
-        assert_eq!(ch, 'e');
-        let expected = "abcdfghij";
-        let got: alloc::string::String = char::decode_utf16(s.as_slice().iter().copied())
-            .map(|r: Result<char, _>| r.expect("valid"))
-            .collect();
-        assert_eq!(got, expected, "remove must shift tail by exactly n units");
-        // Remove from the front.
-        let ch2 = s.remove(0);
-        assert_eq!(ch2, 'a');
-        let got2: alloc::string::String = char::decode_utf16(s.as_slice().iter().copied())
-            .map(|r: Result<char, _>| r.expect("valid"))
-            .collect();
-        assert_eq!(got2, "bcdfghij");
-        // Remove from near the end.
-        let ch3 = s.remove(s.len() - 1);
-        assert_eq!(ch3, 'j');
-        let got3: alloc::string::String = char::decode_utf16(s.as_slice().iter().copied())
-            .map(|r: Result<char, _>| r.expect("valid"))
-            .collect();
-        assert_eq!(got3, "bcdfghi");
-    }
-
     /// Kills `utf16_string.rs:260:19`, `277:19`, `298:19`, `318:16`, `396:18`,
     /// `418:20` — all `> → >=` boundary mutations on
     /// `if needed > self.cap { grow }`.
@@ -3796,56 +3917,6 @@ mod from_mutants_extras_utf16_scattered {
         }
         assert_eq!(s.len(), cap);
         assert!(s.capacity() >= cap);
-    }
-
-    #[test]
-    fn utf16_truncate_to_current_length_is_noop() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_from_str("abcde");
-        let len = s.len();
-        s.truncate(len);
-        assert_eq!(s.len(), len);
-    }
-
-    #[test]
-    fn utf16_truncate_below_length_actually_truncates() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_from_str("abcde");
-        s.truncate(2);
-        assert_eq!(s.len(), 2);
-    }
-
-    #[test]
-    fn utf16_shrink_to_fit_empty_is_noop() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.shrink_to_fit();
-        assert_eq!(s.len(), 0);
-    }
-
-    #[test]
-    fn utf16_shrink_to_fit_already_tight_is_noop() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(3);
-        s.push_from_str("abc");
-        s.shrink_to_fit();
-        assert_eq!(s.len(), 3);
-    }
-
-    #[cfg(all(feature = "stats", feature = "utf16"))]
-    #[test]
-    fn utf16_shrink_to_fit_reclaims_tail() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(128);
-        s.push_from_str("hi");
-        let before_chunks = arena.stats().normal_local_chunks_allocated;
-        s.shrink_to_fit();
-        // After reclaim, the tail is back on the cursor so a small alloc
-        // fits in the same chunk.
-        let _r: Rc<u8> = arena.alloc_rc(0);
-        assert_eq!(arena.stats().normal_local_chunks_allocated, before_chunks);
     }
 
     #[test]

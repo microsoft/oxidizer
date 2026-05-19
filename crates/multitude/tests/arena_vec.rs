@@ -39,16 +39,18 @@ fn freeze_in_place_for_copy_types() {
     // buffer is at the chunk's bump cursor.
     let arena = Arena::new();
     let mut v = arena.alloc_vec();
-    for i in 0..1000_u32 {
+    // 256 pushes still require several growth steps before freezing, which is
+    // enough to verify the in-place path.
+    for i in 0..256_u32 {
         v.push(i);
     }
     let chunks_before_freeze = arena.stats().normal_local_chunks_allocated;
     let frozen = v.into_arena_rc();
     let chunks_after_freeze = arena.stats().normal_local_chunks_allocated;
     assert_eq!(chunks_after_freeze, chunks_before_freeze);
-    assert_eq!(frozen.len(), 1000);
+    assert_eq!(frozen.len(), 256);
     assert_eq!(frozen[42], 42);
-    assert_eq!(frozen[999], 999);
+    assert_eq!(frozen[255], 255);
 }
 
 #[test]

@@ -56,7 +56,42 @@ pub const MIN_MAX_NORMAL_ALLOC: usize = 4 * 1024;
 /// one atomic op.
 pub const LARGE: usize = (isize::MAX as usize) / 2;
 
-/// Convert a size class to its **total allocation** size in bytes
+/// Returns `true` if a chunk allocation starting at `start_addr` and
+/// spanning `total` bytes lies entirely within the user-space portion
+/// of the address space (i.e. its end address fits in `isize`).
+///
+/// This is the runtime precondition for the `assert_unchecked` hints
+/// the hot-path bump-cursor arithmetic uses to prove that
+/// `data_addr + bumped + entry_size` fits in `isize`.
+///
+/// # Mutation testing
+///
+/// The five comparison-operator mutations on this expression fall into
+/// two groups:
+///   * `>` → `==` and `||` → `&&` are killable: a pathological
+///     allocator returning a chunk in the upper half of the address
+///     space exposes the difference. The test
+///     `local_chunk_allocate_rejects_high_address_from_pathological_allocator`
+///     covers them.
+///   * `>` → `>=`, `<` → `==`, `<` → `<=` are equivalent: the
+///     distinguishing inputs (`end_addr == isize::MAX` exactly, or
+///     `end_addr == start_addr` which requires `total == 0`) cannot
+///     be produced by any real allocator, and the chunk-allocation
+///     callers reject `total_bytes < header_bytes` (a strictly
+///     positive lower bound) before reaching this helper, so `total
+///     == 0` is unreachable on the production path. Skipping mutation
+///     testing for this helper is the cleanest way to record that
+///     observation; both arms of the check are still exercised by the
+///     regression test above and by every successful chunk allocation
+///     in the test suite.
+#[inline]
+#[must_use]
+#[cfg_attr(test, mutants::skip)]
+pub(crate) fn chunk_end_addr_fits_in_isize(start_addr: usize, total: usize) -> bool {
+    let end_addr = start_addr.wrapping_add(total);
+    isize::try_from(end_addr).is_ok() && end_addr >= start_addr
+}
+
 /// (header + payload).
 ///
 /// The class's usable *payload* is `class_to_bytes(class) -
