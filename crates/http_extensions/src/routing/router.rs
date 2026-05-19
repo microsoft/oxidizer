@@ -276,13 +276,10 @@ impl Router {
         // Commit: update the request's URI and record the resolved URI.
         // Only `routed` is mutated; `original` is preserved across attempts.
         *request.uri_mut() = http_uri;
-        if let Some(uris) = request.extensions_mut().get_mut::<RequestUris>() {
-            uris.set_routed(resolved);
-        } else {
-            let mut uris = RequestUris::new(original);
-            uris.set_routed(resolved);
-            request.extensions_mut().insert(uris);
-        }
+        request
+            .extensions_mut()
+            .get_or_insert_with(|| RequestUris::new(original))
+            .set_routed(resolved);
 
         Ok(())
     }
