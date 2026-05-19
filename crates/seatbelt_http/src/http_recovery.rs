@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -23,8 +22,17 @@ use crate::HttpResponse;
 /// Customize via [`custom`][HttpRecovery::custom] or, for clock-aware
 /// `Retry-After` parsing, [`custom_with_clock`][HttpRecovery::custom_with_clock].
 /// Transient failures should return [`RecoveryInfo::retry`].
-#[derive(Debug)]
 pub struct HttpRecovery(Inner);
+
+impl Debug for HttpRecovery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let variant = match &self.0 {
+            Inner::Default => "Default",
+            Inner::Custom(_) => "Custom",
+        };
+        f.debug_tuple("HttpRecovery").field(&variant).finish()
+    }
+}
 
 impl Default for HttpRecovery {
     fn default() -> Self {
@@ -85,12 +93,6 @@ type CustomDelegate = Arc<dyn Fn(&HttpResponse, &Clock) -> RecoveryInfo + Send +
 enum Inner {
     Default,
     Custom(CustomDelegate),
-}
-
-impl Debug for Inner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct(type_name::<Self>()).finish()
-    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -164,6 +166,19 @@ mod tests {
 
         // Default would classify 400 as `Never`; our custom closure classifies it as `Retry`.
         assert_eq!(http_recovery.recovery(&response, &clock).kind(), RecoveryKind::Retry);
+    }
+
+    #[test]
+    fn debug_distinguishes_default_and_custom() {
+        assert_eq!(format!("{:?}", HttpRecovery::default()), "HttpRecovery(\"Default\")");
+        assert_eq!(
+            format!("{:?}", HttpRecovery::custom(|_| RecoveryInfo::never())),
+            "HttpRecovery(\"Custom\")"
+        );
+        assert_eq!(
+            format!("{:?}", HttpRecovery::custom_with_clock(|_, _| RecoveryInfo::never())),
+            "HttpRecovery(\"Custom\")"
+        );
     }
 
     #[test]
