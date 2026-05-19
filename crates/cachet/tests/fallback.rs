@@ -473,26 +473,6 @@ async fn do_refresh_deduplicates_in_flight() {
 }
 
 #[cfg_attr(miri, ignore)]
-#[cfg(feature = "metrics")]
-#[tokio::test]
-async fn fallback_builder_enable_metrics() {
-    let tester = testing_aids::MetricTester::new();
-    let clock = Clock::new_frozen();
-    let fallback = Cache::builder::<String, i32>(clock.clone()).memory();
-
-    let cache = Cache::builder::<String, i32>(clock)
-        .memory()
-        .enable_metrics(tester.meter_provider())
-        .fallback(fallback)
-        .build();
-
-    let key = "key".to_string();
-    cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
-    let entry = cache.get(&key).await.unwrap().expect("entry should exist");
-    assert_eq!(*entry.value(), 42);
-}
-
-#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn fallback_get_error_from_fallback_tier() {
     let clock = Clock::new_frozen();

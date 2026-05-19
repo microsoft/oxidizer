@@ -2,9 +2,18 @@
 
 ## [0.4.0] - 2026-05-18
 
+- 🔧 Maintenance
+
+  - bump `cachet_memory` to 0.1.1
+
 - ⚠️ Breaking
 
-  - update cache thread-awareness dependencies to `thread_aware` 0.7-compatible crate versions
+  - Simplify cachet builder return type ([#422](https://github.com/microsoft/oxidizer/pull/422))
+  - Make cachet telemetry more user-friendly ([#420](https://github.com/microsoft/oxidizer/pull/420))
+
+- ✨ Features
+
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
 
 ## [0.3.0] - 2026-05-14
 

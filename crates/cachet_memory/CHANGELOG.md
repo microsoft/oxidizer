@@ -1,10 +1,11 @@
 # Changelog
 
-## [0.2.0] - 2026-05-18
+## [0.1.1] - 2026-05-18
 
-- ⚠️ Breaking
+- ✨ Features
 
-  - update cache tier thread-awareness support to `thread_aware` 0.7
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - Add LRU eviction policy for in memory cache ([#369](https://github.com/microsoft/oxidizer/pull/369))
 
 ## [0.1.0]
 

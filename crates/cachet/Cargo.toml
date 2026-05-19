@@ -30,17 +30,15 @@ allowed_external_types = [
     "layered::service::Service",
     "tick::clock::Clock",
     # External dependencies
-    "opentelemetry::metrics::meter::MeterProvider",
     "serde_core::de::DeserializeOwned",
     "serde_core::ser::Serialize",
 ]
 
 [features]
 default = ["memory"]
-logs = ["dep:opentelemetry", "opentelemetry/logs", "dep:tracing"]
+logs = ["dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
-metrics = ["dep:opentelemetry", "opentelemetry/metrics"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
 telemetry = []
@@ -54,7 +52,6 @@ cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
-opentelemetry = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
@@ -90,7 +87,7 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 [[bench]]
 name = "operations"
 harness = false
-required-features = ["logs", "metrics", "test-util"]
+required-features = ["logs", "test-util"]
 
 [[bench]]
 name = "dynamic"
@@ -108,15 +105,15 @@ required-features = ["memory"]
 
 [[example]]
 name = "wrapped"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "two_tier"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "multi_tier"
-required-features = ["memory", "logs", "metrics"]
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "get_or_insert"
@@ -153,6 +150,10 @@ required-features = ["memory", "service"]
 [[example]]
 name = "type_mapping"
 required-features = ["memory", "test-util"]
+
+[[example]]
+name = "telemetry_subscriber"
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "serialization"
