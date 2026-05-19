@@ -241,6 +241,16 @@ mod tests {
     }
 
     #[test]
+    fn extract_http_request_returns_none_for_non_unavailable_error() {
+        let request = HttpRequestBuilder::new_fake().uri("https://example.com").build().unwrap();
+        let mut error = HttpError::other("transient failure", seatbelt::RecoveryInfo::retry(), "test").with_request(request);
+
+        assert!(extract_http_request(&mut error).is_none());
+        // The request must still be attached — it was not taken.
+        assert!(error.take_request().is_some());
+    }
+
+    #[test]
     fn retry_routes_attempts_with_custom_router() {
         // Verify that the request URI seen by the handler on each retry attempt
         // reflects the routing decision produced by a custom `Router`. The

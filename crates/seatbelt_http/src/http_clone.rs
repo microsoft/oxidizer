@@ -111,6 +111,8 @@ fn attach_attempt(request: &mut HttpRequest, attempt: Attempt) {
 #[cfg(test)]
 mod tests {
     use http_extensions::HttpRequestBuilder;
+    use http_extensions::routing::BaseUriConflict;
+    use templated_uri::BaseUri;
 
     use super::*;
 
@@ -217,6 +219,30 @@ mod tests {
             .expect("attempt should be attached to the cloned request");
         assert_eq!(attached.index(), 3);
         assert!(!attached.is_last());
+    }
+
+    #[test]
+    fn try_clone_returns_none_when_routing_fails() {
+        // Router has alternatives and a `Fail` conflict policy. Combined with a
+        // request whose target URI already carries a base URI, resolving on any
+        // non-first attempt must fail, causing `try_clone` to drop the clone.
+        let router =
+            Router::custom(|_| Some(BaseUri::from_static("https://routed.example.com")), true).conflict_policy(BaseUriConflict::Fail);
+
+        let mut request = HttpRequestBuilder::new_fake()
+            .method(Method::GET)
+            .uri("https://existing.example.com/items")
+            .extension(router)
+            .build()
+            .unwrap();
+
+        let clone = HttpClone::all();
+        // Non-first attempt triggers re-routing inside `try_clone`.
+        let attempt = Attempt::new(1, false);
+
+        let result = clone.try_clone(&mut request, attempt, None);
+
+        assert!(result.is_none(), "failed routing should drop the clone");
     }
 
     #[test]
