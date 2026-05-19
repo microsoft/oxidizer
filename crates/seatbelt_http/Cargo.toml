@@ -31,17 +31,17 @@ allowed_external_types = [
 all-features = true
 
 [features]
-timeout = ["seatbelt/timeout"]
-retry = ["seatbelt/retry"]
-hedging = ["seatbelt/hedging"]
-breaker = ["seatbelt/breaker"]
+timeout = ["seatbelt/timeout", "dep:tick"]
+retry = ["seatbelt/retry", "dep:tick"]
+hedging = ["seatbelt/hedging", "dep:tick"]
+breaker = ["seatbelt/breaker", "dep:templated_uri", "dep:tick"]
 
 [dependencies]
 http = { workspace = true }
 http_extensions = { workspace = true }
 seatbelt = { workspace = true }
-templated_uri = { workspace = true }
-tick = { workspace = true }
+templated_uri = { workspace = true, optional = true }
+tick = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
