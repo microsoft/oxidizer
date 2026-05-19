@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.4.0] - 2026-05-18
 
 - ✨ Features
 
@@ -10,6 +10,7 @@
 - ⚠️ Breaking
 
   - Rename `UrlTemplateLabel` to `UriTemplateLabel` and `RequestExt::url_template_label()` / `ExtensionsExt::url_template_label()` to `uri_template_label()`.
+  - update HTTP body and extension APIs to `bytesbuf` 0.5, `thread_aware` 0.7, `tick` 0.3, and `templated_uri` 0.2
 
 ## [0.3.2] - 2026-04-22
 
