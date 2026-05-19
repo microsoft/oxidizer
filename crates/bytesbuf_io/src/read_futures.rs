@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::fmt::{self, Debug};
 use std::marker::PhantomPinned;
 use std::pin::Pin;
@@ -126,7 +125,7 @@ where
     #[cfg_attr(coverage_nightly, coverage(off))] // No API contract to test.
     #[cfg_attr(test, mutants::skip)] // We have no contract to test.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
+        f.debug_struct("ReadAsFuturesStream")
             .field("inner", &self.inner)
             .field("active_read.is_some()", &self.active_read.is_some())
             .finish_non_exhaustive()

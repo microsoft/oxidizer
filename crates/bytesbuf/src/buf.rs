@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
 
@@ -1069,7 +1068,7 @@ impl std::fmt::Debug for BytesBuf {
             .collect::<Vec<_>>()
             .join(", ");
 
-        f.debug_struct(type_name::<Self>())
+        f.debug_struct("BytesBuf")
             .field("len", &self.len)
             .field("frozen", &self.frozen)
             .field("available", &self.available)

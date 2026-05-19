@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
 use std::fmt;
 use std::sync::Arc;
 
@@ -111,7 +110,7 @@ where
 {
     #[cfg_attr(test, mutants::skip)] // We have no API contract for this.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
+        f.debug_struct("CallbackMemory")
             .field("reserve_fn", &"Fn(usize) -> BytesBuf")
             .finish()
     }
