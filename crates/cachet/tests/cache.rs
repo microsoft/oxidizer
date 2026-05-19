@@ -13,7 +13,7 @@ use tick::Clock;
 #[test]
 fn builder_creates_cache() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, String>(clock).memory().build();
+    let cache: Cache<String, String> = Cache::builder(clock).memory().build();
 
     assert!(!cache.name().is_empty());
 }
@@ -327,7 +327,7 @@ async fn optionally_get_or_insert_hit_returns_cached() {
 #[test]
 fn cache_with_memory_is_send() {
     fn assert_send<T: Send>() {}
-    assert_send::<Cache<String, i32, cachet_memory::InMemoryCache<String, i32>>>();
+    assert_send::<Cache<String, i32>>();
 }
 
 /// Verifies that Cache with `InMemoryCache` storage is Sync.
@@ -335,7 +335,7 @@ fn cache_with_memory_is_send() {
 #[test]
 fn cache_with_memory_is_sync() {
     fn assert_sync<T: Sync>() {}
-    assert_sync::<Cache<String, i32, cachet_memory::InMemoryCache<String, i32>>>();
+    assert_sync::<Cache<String, i32>>();
 }
 
 /// Verifies that `CacheEntry` is Send.
