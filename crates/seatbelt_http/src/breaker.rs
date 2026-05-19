@@ -153,10 +153,7 @@ pub(crate) mod sealed {
 /// `"default"` is returned.
 fn create_breaker_id(uri: &Uri) -> BreakerId {
     match (uri.scheme(), uri.authority()) {
-        (Some(scheme), Some(authority)) => {
-            let origin = Origin::new(scheme.clone(), authority.clone());
-            BreakerId::from(origin.to_string())
-        }
+        (Some(scheme), Some(authority)) => Origin::from_parts(scheme.clone(), authority.clone()).to_string().into(),
         _ => BreakerId::from("default"),
     }
 }
