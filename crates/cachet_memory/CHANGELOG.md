@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0] - 2026-05-19
+
+- ✔️ Tasks
+
+  - release HTTP and bytesbuf dependents
+  - release thread-aware-dependent crates
+
 ## [0.1.1] - 2026-05-18
 
 - ✨ Features

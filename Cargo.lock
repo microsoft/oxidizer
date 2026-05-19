@@ -271,7 +271,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "bytesbuf"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bytesbuf",
  "futures",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -338,7 +338,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -1131,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -2758,7 +2758,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "async-once-cell",
