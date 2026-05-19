@@ -160,29 +160,29 @@ impl Router {
     ///
     /// # Errors
     ///
-    /// Returns [`HttpError::validation`] when the policy is [`BaseUriConflict::Fail`] and
-    /// either:
-    /// - the target [`Uri`] already has a [`BaseUri`] and the routing also produces one; or
-    /// - the target [`Uri`] has neither a [`BaseUri`] nor a path.
+    /// Returns [`HttpError::validation`] when:
+    /// - the target [`Uri`] has no [`BaseUri`] and the routing does not produce one
+    ///   (regardless of the configured [`BaseUriConflict`] policy); or
+    /// - the policy is [`BaseUriConflict::Fail`] and the target [`Uri`] already has a
+    ///   [`BaseUri`] while the routing also produces one.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "while not consuming the context, we might do it at some point"
     )]
     pub fn resolve_uri(&self, context: RouterContext, uri: Uri) -> Result<Uri, HttpError> {
         let (existing, path) = uri.into_parts();
-
-        if existing.is_none() && path.is_none() && self.conflict_policy == BaseUriConflict::Fail {
-            return Err(HttpError::validation_with_label(
-                "the target URI cannot be empty; provide a base URI or a path such as `/...`",
-                LABEL_URI_MISSING,
-            ));
-        }
-
         let routed = self.resolve_base_uri(&context);
 
         // if new base uri is not available, return existing uri
         let Some(routed) = routed else {
-            return Ok(Uri::from_parts(existing, path));
+            let Some(existing) = existing else {
+                return Err(HttpError::validation_with_label(
+                    "the target URI has no base URI and the routing did not produce one; \
+                     provide a base URI on the target or configure the router to resolve one",
+                    LABEL_URI_MISSING,
+                ));
+            };
+            return Ok(Uri::from_parts(Some(existing), path));
         };
 
         // if existing base uri is not available, return new base uri
@@ -232,7 +232,13 @@ impl Router {
             None => request.uri().clone().try_into()?,
         };
         let resolved = self.resolve_uri(context.with_request(request), uri)?;
-        *request.uri_mut() = resolved.try_into()?;
+        let http_uri = resolved.clone().try_into()?;
+
+        // Update the request's URI and also attach the resolved `Uri` extension.
+        *request.uri_mut() = http_uri;
+        request.extensions_mut().remove::<Uri>();
+        request.extensions_mut().insert(resolved);
+
         Ok(())
     }
 
@@ -306,14 +312,19 @@ mod tests {
     }
 
     #[test]
-    fn default_passes_target_through() {
+    fn default_passes_target_through_when_target_has_base() {
         let router = Router::default();
 
         let with_base = router.resolve_uri(RouterContext::new(), target_with_base()).unwrap();
         assert_eq!(with_base.to_string().declassify_into(), "https://existing.example.com/items");
+    }
 
-        let without_base = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap();
-        assert_eq!(without_base.to_string().declassify_into(), "/v1/items");
+    #[test]
+    fn default_errors_when_target_has_no_base() {
+        let router = Router::default();
+
+        let err = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap_err();
+        assert_eq!(err.label(), "uri_missing");
     }
 
     #[test]
@@ -362,11 +373,18 @@ mod tests {
     }
 
     #[test]
-    fn fail_returns_error_when_target_has_no_base_and_no_path() {
-        let router = Router::default().conflict_policy(BaseUriConflict::Fail);
+    fn missing_base_uri_errors_regardless_of_policy() {
+        // No base URI on the target and no routing means there is no base URI to use,
+        // which is always invalid regardless of the conflict policy.
+        for policy in [BaseUriConflict::UseOriginal, BaseUriConflict::UseRouted, BaseUriConflict::Fail] {
+            let router = Router::default().conflict_policy(policy);
 
-        let err = router.resolve_uri(RouterContext::new(), Uri::default()).unwrap_err();
-        assert_eq!(err.label(), "uri_missing");
+            let err = router.resolve_uri(RouterContext::new(), Uri::default()).unwrap_err();
+            assert_eq!(err.label(), "uri_missing", "empty Uri with policy {policy:?}");
+
+            let err = router.resolve_uri(RouterContext::new(), target_without_base()).unwrap_err();
+            assert_eq!(err.label(), "uri_missing", "path-only Uri with policy {policy:?}");
+        }
     }
 
     #[test]
@@ -561,6 +579,24 @@ mod tests {
         router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+    }
+
+    #[test]
+    fn resolve_request_uri_attaches_resolved_uri_extension() {
+        // After `resolve_request_uri`, the request's extensions should carry the
+        // newly resolved `Uri` (with the routed `BaseUri` applied), so subsequent
+        // re-routings (e.g., recovery attempts) start from the routed target
+        // rather than the original untouched template.
+        let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
+        let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
+
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
+
+        let attached = request
+            .extensions()
+            .get::<Uri>()
+            .expect("resolve_request_uri must attach the resolved Uri as an extension");
+        assert_eq!(attached.to_string().declassify_into(), "https://api.example.com/v1/items");
     }
 
     #[test]
