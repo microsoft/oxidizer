@@ -74,14 +74,14 @@ jobs:
           exclude_not_affected=$(impact -f cargo-excludes --affected)
           exclude_not_required=$(impact -f cargo-excludes --required)
 
-          # `required` is the superset (required ⊇ affected ⊇ modified). If it
-          # has no impacted crates, nothing is impacted and downstream
-          # source-scoped jobs can be skipped entirely.
-          if [[ -z "$(impact -f names --required)" ]]; then
-            skip=true
-          else
-            skip=false
-          fi
+          # Workaround: branch protection requires matrix-expanded status check
+          # contexts (e.g. `testing (ubuntu-latest)`), but GitHub Actions does
+          # not expand the matrix for a job whose top-level `if:` evaluates to
+          # false — only a single skipped check is posted under the bare job
+          # name. Until the required-checks fan-in lands and the ruleset is
+          # migrated, force `skip=false` so every matrix job actually runs and
+          # posts the per-OS contexts the ruleset is waiting for.
+          skip=false
 
           {
             echo "exclude_not_modified=$exclude_not_modified"
