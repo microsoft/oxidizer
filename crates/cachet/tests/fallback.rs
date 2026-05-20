@@ -310,8 +310,8 @@ async fn fallback_builder_stampede_protection() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
-        .fallback(fallback)
         .stampede_protection()
+        .fallback(fallback)
         .build();
 
     let key = "key".to_string();
