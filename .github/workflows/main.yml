@@ -465,3 +465,50 @@ jobs:
       # execute
       - name: Check External Type Exposure
         run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
+
+  # Single aggregating ("fan-in") status check. Branch protection should
+  # require ONLY this context for the workflow jobs below: it succeeds when
+  # every dependency either succeeded or was skipped, and fails if any
+  # dependency failed or was cancelled. This avoids the GitHub Actions
+  # quirk where a matrix job gated by a job-level `if:` posts only a single
+  # skipped check under the bare job name, leaving matrix-expanded required
+  # contexts (`testing (ubuntu-latest)` etc.) stuck on
+  # `Expected — Waiting for status to be reported`.
+  required-checks:
+    name: required-checks
+    if: always()
+    needs:
+      - delta
+      - testing
+      - static-analysis
+      - spell-check
+      - semver
+      - extended-analysis
+      - model-checking
+      - fuzz-testing
+      - mutation-testing
+      - coverage
+      - pr-title
+      - license-headers
+      - external-type-exposure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Dependency Results
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          # Pass when every dependency is success or skipped; fail otherwise
+          # (failure, cancelled, or any unexpected state).
+          bad=$(echo "$NEEDS_JSON" | jq -r '
+            to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | .[] | "\(.key): \(.value.result)"
+          ')
+          if [[ -n "$bad" ]]; then
+            printf '::error::One or more required jobs did not succeed or skip:\n%s\n' "$bad"
+            exit 1
+          fi
+          echo "All required jobs succeeded or were skipped."
