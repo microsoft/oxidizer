@@ -450,8 +450,8 @@ mod tests {
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .stampede_protection()
             .fallback(fb)
+            .stampede_protection()
             .build();
         assert!(!cache.name().is_empty());
     }
