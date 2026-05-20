@@ -336,6 +336,7 @@ io
 iterator's
 jemalloc
 jitter
+killable
 len
 lexicographically
 libc

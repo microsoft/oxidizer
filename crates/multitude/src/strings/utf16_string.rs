@@ -533,7 +533,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         // SAFETY: caller guarantees an allocation; data is just past the prefix slot.
         let prefix_ptr = unsafe { self.data.as_ptr().cast::<u8>().sub(prefix_size).cast::<usize>() };
         // SAFETY: this string exclusively owns the prefix slot and still owns
-        // the allocation's chunk ref.
+        // the allocation's chunk ref. The slot may already hold a stale
+        // `usize` from an earlier flush, but `usize: Copy + !Drop`, so
+        // overwriting it without running drop is always sound and still
+        // satisfies `UninitSlot::from_raw`'s contract.
         let slot = unsafe { crate::internal::slot::UninitSlot::<usize>::from_raw(prefix_ptr) };
         slot.write_unaligned(self.len);
     }

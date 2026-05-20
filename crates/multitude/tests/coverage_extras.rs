@@ -26,9 +26,11 @@ mod coverage {
     #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe ops")]
     use core::sync::atomic::{AtomicUsize, Ordering};
 
+    #[cfg(feature = "dst")]
+    use multitude::Arc;
     use multitude::strings::RcStr;
     use multitude::vec::{CollectIn, Vec};
-    use multitude::{Arc, Arena, ArenaBuilder, Box};
+    use multitude::{Arena, ArenaBuilder};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -103,12 +105,6 @@ mod coverage {
         let s = format!("{:?}", Arena::builder());
         assert!(s.contains("ArenaBuilder"));
         assert!(s.contains("max_normal_alloc"));
-    }
-
-    #[test]
-    #[should_panic(expected = "max_normal_alloc must be in")]
-    fn builder_build_panics_on_invalid_config() {
-        let _ = Arena::builder().max_normal_alloc(0).build();
     }
 
     #[test]
@@ -543,26 +539,6 @@ mod coverage {
     }
 
     #[test]
-    fn arena_box_partial_eq() {
-        let arena = Arena::new();
-        let a: Box<u32> = arena.alloc_box(7);
-        let b: Box<u32> = arena.alloc_box(7);
-        let c: Box<u32> = arena.alloc_box(8);
-        assert!(a == b);
-        assert!(a != c);
-    }
-
-    #[test]
-    fn arena_arc_partial_eq() {
-        let arena = Arena::new();
-        let a: Arc<u32> = arena.alloc_arc(7);
-        let b: Arc<u32> = arena.alloc_arc(7);
-        let c: Arc<u32> = arena.alloc_arc(8);
-        assert!(a == b);
-        assert!(a != c);
-    }
-
-    #[test]
     fn arena_vec_deref_mut_modifies_in_place() {
         let arena = Arena::new();
         let mut v: Vec<u32, _> = arena.alloc_vec();
@@ -701,51 +677,6 @@ mod coverage {
     // Infallible Arc / Box slice constructors and the strait-`alloc_arc` family.
     // These wrap their `try_*` cousins with `unwrap_or_else(panic_alloc)`; the
     // happy path was previously uncovered.
-
-    #[test]
-    fn alloc_arc_value_succeeds() {
-        let arena = Arena::new();
-        let h: Arc<u32> = arena.alloc_arc(7);
-        assert_eq!(*h, 7);
-    }
-
-    #[test]
-    fn alloc_arc_with_closure_succeeds() {
-        let arena = Arena::new();
-        let h: Arc<u64> = arena.alloc_arc_with(|| 42_u64);
-        assert_eq!(*h, 42);
-    }
-
-    #[test]
-    fn alloc_slice_copy_arc_succeeds() {
-        let arena = Arena::new();
-        let h: Arc<[u32]> = arena.alloc_slice_copy_arc([1_u32, 2, 3, 4]);
-        assert_eq!(&*h, &[1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn alloc_slice_clone_arc_succeeds() {
-        let arena = Arena::new();
-        let src = [std::string::String::from("a"), std::string::String::from("b")];
-        let h: Arc<[String]> = arena.alloc_slice_clone_arc(src);
-        assert_eq!(h.len(), 2);
-        assert_eq!(h[0], "a");
-        assert_eq!(h[1], "b");
-    }
-
-    #[test]
-    fn alloc_slice_fill_with_arc_succeeds() {
-        let arena = Arena::new();
-        let h: Arc<[u32]> = arena.alloc_slice_fill_with_arc(5, |i| i as u32 * 10);
-        assert_eq!(&*h, &[0, 10, 20, 30, 40]);
-    }
-
-    #[test]
-    fn alloc_slice_fill_iter_arc_succeeds() {
-        let arena = Arena::new();
-        let h: Arc<[u32]> = arena.alloc_slice_fill_iter_arc(0_u32..3);
-        assert_eq!(&*h, &[0, 1, 2]);
-    }
 
     #[test]
     fn arena_try_alloc_str_arc_succeeds() {

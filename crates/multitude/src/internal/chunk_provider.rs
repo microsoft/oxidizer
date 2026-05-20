@@ -186,7 +186,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         debug_assert!(target_class < NUM_CHUNK_CLASSES);
         let target_total = class_to_bytes(target_class);
 
-        // Pop the first cached chunk whose payload fits.
+        // Walk the cached list, freeing too-small chunks and popping the
+        // first chunk whose payload fits.
         // SAFETY: single-thread-local invariant.
         let popped = unsafe {
             self.local_cache.with_mut(|head| -> Option<NonNull<LocalChunk<A>>> {
@@ -194,7 +195,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 // Re-interpret `&mut Option` as `&Cell<Option>` so the
                 // walk can rewrite the predecessor's `next` link
                 // without juggling overlapping borrows.
-                let mut prev_link: *const Cell<Option<NonNull<LocalChunk<A>>>> = {
+                let prev_link: *const Cell<Option<NonNull<LocalChunk<A>>>> = {
                     let head_cell: &Cell<Option<NonNull<LocalChunk<A>>>> = Cell::from_mut(head);
                     core::ptr::from_ref(head_cell)
                 };
@@ -204,12 +205,15 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                     let c = chunk.as_ref();
                     let cap = c.capacity;
                     let next = c.next.get();
+                    (*prev_link).set(next);
+                    c.next.set(None);
                     if cap >= min_payload {
-                        (*prev_link).set(next);
-                        c.next.set(None);
                         return Some(chunk);
                     }
-                    prev_link = &raw const c.next;
+                    self.release_budget(local_header_size::<A>() + cap);
+                    // SAFETY: refcount-zero with drops already replayed
+                    // at cache-push time; we own the chunk.
+                    LocalChunk::free_backing(chunk);
                     cur = next;
                 }
                 None

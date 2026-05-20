@@ -136,7 +136,9 @@ fn builder_small_chunk_size_works() {
 fn small_chunk_size_round_trip_many_allocs() {
     let arena = Arena::builder().build();
     let mut handles = std::vec::Vec::new();
-    for i in 0..1000_u32 {
+    // 512 Rc<u32> values still span multiple normal chunks, which is
+    // enough to validate round-tripping after chunk retirement.
+    for i in 0..512_u32 {
         handles.push(arena.alloc_rc(i));
     }
     drop(handles);
@@ -175,7 +177,9 @@ fn byte_budget_caps_total_chunk_bytes() {
 fn cache_reuse() {
     let arena = Arena::builder().build();
     let mut handles = std::vec::Vec::new();
-    for i in 0..30_000_u64 {
+    // 1024 Rc<u64> allocations still force multiple chunks, which is
+    // enough to prove a retired chunk gets cached and then reused.
+    for i in 0..1024_u64 {
         handles.push(arena.alloc_rc(i));
     }
     let stats = arena.stats();
@@ -266,7 +270,9 @@ fn stats_vec_relocation_counted() {
     let mut v = arena.alloc_vec::<u32>();
     v.push(1);
     let _other = arena.alloc_rc(0_u8); // breaks cursor adjacency
-    for i in 0..1000_u32 {
+    // A short post-decoy push burst is enough to force at least one grow
+    // through the allocator's relocation path.
+    for i in 0..128_u32 {
         v.push(i);
     }
     let stats = arena.stats();
@@ -374,6 +380,39 @@ fn oversized_bump_alloc_does_not_leak_on_drop() {
     assert_eq!(alloc.live_bytes(), 0);
 }
 
+// Fast-fail micro-test for the oversized-Rc/Box drop-entry placement
+// (`inner_value.rs::try_alloc_inner_oversized_with`'s
+// `new_drop_back = cap - entry_size`). Under the `-` → `+` mutation
+// the drop entry is written past the chunk's payload region, so
+// `replay_drops` reads a garbage `drop_fn` pointer at chunk free
+// time and either crashes or fails to run our `Drop`. The targeted
+// shape (one Drop-bearing oversized Rc with a counter) makes the
+// observation immediate instead of waiting ~57s for a stress test to
+// notice the missing drop.
+#[test]
+fn oversized_rc_drop_runs_exactly_once() {
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct BigDroppy {
+        _data: [u8; 32 * 1024],
+        counter: StdArc<AtomicUsize>,
+    }
+    impl Drop for BigDroppy {
+        fn drop(&mut self) {
+            self.counter.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let counter = StdArc::new(AtomicUsize::new(0));
+    {
+        let arena = Arena::new();
+        let _r = arena.alloc_rc(BigDroppy {
+            _data: [0; 32 * 1024],
+            counter: counter.clone(),
+        });
+    }
+    assert_eq!(counter.load(Ordering::Relaxed), 1, "oversized Rc Drop must run exactly once");
+}
+
 #[test]
 fn oversized_bump_alloc_does_not_leak_on_reset() {
     let alloc = common::TrackingAllocator::new();
@@ -456,6 +495,93 @@ fn panic_in_oversized_alloc_with_does_not_leak() {
     }
     assert_eq!(alloc.live_chunks(), 0);
     assert_eq!(alloc.live_bytes(), 0);
+}
+
+// Kills mutants on `ProtectiveHold::drop`'s
+// `smart_pointers_issued.set(cur - 1)` (internals.rs:267). A panic in
+// `alloc_rc_with` on a NORMAL-sized payload must restore the
+// pre-closure `smart_pointers_issued` bump exactly. Under mutation
+// (`cur + 1` or `cur / 1 == cur`), the chunk would swap out with a
+// phantom refcount, leaving it permanently live and detected as a
+// leak by the tracking allocator.
+#[test]
+fn panic_in_normal_alloc_rc_with_does_not_leak() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let alloc = common::TrackingAllocator::new();
+    {
+        let arena = Arena::builder_in(alloc.clone()).build();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _r: multitude::Rc<u64, _> = arena.alloc_rc_with(|| panic!("synthetic panic"));
+        }));
+        assert!(result.is_err());
+    }
+    assert_eq!(alloc.live_chunks(), 0);
+    assert_eq!(alloc.live_bytes(), 0);
+}
+
+// Mirror of `panic_in_normal_alloc_rc_with_does_not_leak` for the
+// `Box` flavor of `ProtectiveHold` (same `AllocFlavor::Box` branch in
+// `ProtectiveHold::drop`).
+#[test]
+fn panic_in_normal_alloc_box_with_does_not_leak() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let alloc = common::TrackingAllocator::new();
+    {
+        let arena = Arena::builder_in(alloc.clone()).build();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _b: multitude::Box<u64, _> = arena.alloc_box_with(|| panic!("synthetic panic"));
+        }));
+        assert!(result.is_err());
+    }
+    assert_eq!(alloc.live_chunks(), 0);
+    assert_eq!(alloc.live_bytes(), 0);
+}
+
+// Kills mutants on `SharedArcsIssuedHold::drop`'s
+// `smart_pointers_issued.set(cur - 1)` (internals.rs:292). Mirrors the
+// `ProtectiveHold` test above but on the shared-chunk `Arc` path
+// (`current_shared.smart_pointers_issued`).
+#[test]
+fn panic_in_normal_alloc_arc_with_does_not_leak() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let alloc = common::SendTrackingAllocator::new();
+    {
+        let arena = Arena::builder_in(alloc.clone()).build();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _a: multitude::Arc<u64, _> = arena.alloc_arc_with(|| panic!("synthetic panic"));
+        }));
+        assert!(result.is_err());
+    }
+    assert_eq!(alloc.live_chunks(), 0);
+    assert_eq!(alloc.live_bytes(), 0);
+}
+
+// Kills mutants on `chunk_end_addr_fits_in_isize` (and the call-site
+// negation) in `LocalChunk::allocate`. A pathological allocator that
+// returns a pointer in the upper half of the address space must be
+// rejected by the bounds check: the user-facing observable is a clean
+// `AllocError` from `try_alloc_with` rather than a write through a
+// kernel-space pointer.
+#[test]
+fn local_chunk_allocate_rejects_high_address_from_pathological_allocator() {
+    use allocator_api2::alloc::AllocError;
+    let arena = Arena::builder_in(common::BadAddressAllocator).build();
+    let result: Result<&mut u64, AllocError> = arena.try_alloc_with(|| 0_u64);
+    assert!(result.is_err(), "high-address allocator must produce AllocError");
+}
+
+// Mirror for the shared-chunk allocate path (`Arc` flavor). Same
+// pathological allocator; the regression covers the symmetric bounds
+// check in `SharedChunk::allocate`.
+#[test]
+fn shared_chunk_allocate_rejects_high_address_from_pathological_allocator() {
+    use allocator_api2::alloc::AllocError;
+    let arena = Arena::builder_in(common::BadAddressAllocator).build();
+    let result: Result<multitude::Arc<u64, _>, AllocError> = arena.try_alloc_arc_with(|| 0_u64);
+    assert!(result.is_err(), "high-address allocator must produce AllocError");
 }
 
 #[test]
@@ -1038,9 +1164,10 @@ mod large_alloc {
         let arena = Arena::new();
         let mut v = multitude::vec::vec![in &arena; 0u32; 16];
         assert_eq!(v.len(), 16);
-        while v.len() < (OVER_CHUNK / 4) {
-            let next = v.len() as u32;
-            v.push(next);
+        // Fixed iteration count rather than `while v.len() < ...` so
+        // that a `Vec::len -> 0` mutation can't drive an infinite loop.
+        for next in 16..(OVER_CHUNK / 4) {
+            v.push(next as u32);
         }
         assert_eq!(v.len(), OVER_CHUNK / 4);
         assert_eq!(v[0], 0);
@@ -1073,10 +1200,14 @@ mod large_alloc {
         let mut s = arena.alloc_string();
         assert_eq!(s.len(), 0);
         s.push_str("hello");
-        while s.len() < OVER_CHUNK {
+        // Fixed iteration count rather than `while s.len() < ...` so
+        // that a `String::len -> 0` or `push -> ()` mutation can't drive
+        // an infinite loop. The final `assert_eq!(s.len(), ...)` then
+        // fast-kills either mutation.
+        for _ in 0..OVER_CHUNK {
             s.push('x');
         }
-        assert!(s.len() >= OVER_CHUNK);
+        assert_eq!(s.len(), 5 + OVER_CHUNK);
         assert!(s.as_str().starts_with("hello"));
         assert_eq!(s.as_bytes()[OVER_CHUNK - 1], b'x');
     }
@@ -1121,10 +1252,12 @@ mod large_alloc {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string();
         s.push_from_str("hello");
-        while s.len() < OVER_CHUNK {
+        // Fixed iteration count — see sibling test above for the
+        // mutation-testing rationale.
+        for _ in 0..OVER_CHUNK {
             s.push('y');
         }
-        assert!(s.len() >= OVER_CHUNK);
+        assert_eq!(s.len(), 5 + OVER_CHUNK);
         let v = s.as_slice();
         assert_eq!(v[0], u16::from(b'h'));
         assert_eq!(v[OVER_CHUNK - 1], u16::from(b'y'));
@@ -1841,8 +1974,9 @@ mod fast_path_correctness {
         // First string: allocated via fast path in the unpinned chunk.
         // The fast path's `if !chunk_ref.pinned() { set_pinned(); }` must fire here.
         let first = arena.alloc_str("hello_world_pinning_test");
-        // Fill the chunk with more strings to force a rotation.
-        for i in 0..1000_u32 {
+        // 512 short strings still force at least one rotation, which is all
+        // this lifetime/pinning check needs.
+        for i in 0..512_u32 {
             let _ = arena.alloc_str(format!("fill_{i:04}"));
         }
         // If the first chunk wasn't pinned by the str fast path, it would
@@ -1866,8 +2000,11 @@ mod fast_path_correctness {
         let _s = arena.alloc_str("pin");
         // Fill the rest of the chunk with alloc_rc (pin_for_bump=false).
         // Drop each handle so only the slot's +1 keeps the chunk alive.
+        let mut count = 0_u32;
         while arena.stats().normal_local_chunks_allocated == 1 {
             drop(arena.alloc_rc(0_u64));
+            count += 1;
+            assert!(count < 20_000, "should have triggered chunk rotation by now");
         }
         // Rotation happened. With correct pinning the old chunk is alive
         // in the pinned list; without it, the evicted guard freed the chunk.
@@ -1974,7 +2111,8 @@ mod allocator_impl {
         let mut v = arena.alloc_vec::<u32>();
         v.push(1);
         let _decoy = arena.alloc_rc(0_u8); // breaks cursor adjacency
-        for i in 0..1000_u32 {
+        // One relocation is enough to cover this path.
+        for i in 0..128_u32 {
             v.push(i);
         }
         assert!(arena.stats().relocations >= 1);
@@ -3371,7 +3509,9 @@ mod coverage_arena_gaps {
             // reserved slot ends up in a chunk that gets evicted before
             // the closure returns. The outer must then take the
             // `commit_alloc_after_eviction` branch.
-            for _ in 0..200_000_u32 {
+            // 2048 u64 allocs still force multiple refills with this 4 KiB
+            // normal-allocation cap, so the reserved chunk is evicted.
+            for _ in 0..2048_u32 {
                 let _ = arena.alloc::<u64>(0);
             }
             D(&drops)
@@ -3445,7 +3585,9 @@ mod coverage_arena_gaps {
         // hosting the vec's buffer is no longer `current_local`. The
         // subsequent `into_arena_rc` freeze fast-path will observe the
         // mismatch and take the copy-fallback branch.
-        for _ in 0..200_000_u32 {
+        // 2048 u64 allocs still span multiple local chunks here, so the
+        // vec buffer's chunk is no longer current by the time we freeze.
+        for _ in 0..2048_u32 {
             let _ = arena.alloc::<u64>(0);
         }
         let rc: Rc<[D<'_>]> = v.into_arena_rc();
@@ -4152,7 +4294,13 @@ mod from_mutants_extras_stats {
         // Mutations in `try_alloc_inner_slow_value`/`_with` that make
         // `needed` enormous would route every refill through oversized.
         let arena = Arena::new();
-        for i in 0_u32..16384 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 16384 small allocs.
+        for _ in 0..8 {
+            let _filler: Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
+        }
+        // A short burst still exercises the small-allocation slow refill path
+        // at the peak local chunk class.
+        for i in 0_u32..32 {
             let _r: Rc<u32> = arena.alloc_rc(i);
         }
         assert_eq!(arena.stats().oversized_local_chunks_allocated, 0);
@@ -4161,7 +4309,13 @@ mod from_mutants_extras_stats {
     #[test]
     fn slow_path_arc_allocs_do_not_use_oversized_chunks() {
         let arena = Arena::new();
-        for i in 0_u32..16384 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 16384 small allocs.
+        for _ in 0..8 {
+            let _filler: Arc<[u8]> = arena.alloc_slice_fill_with_arc(8 * 1024, |_| 0_u8);
+        }
+        // A short burst still exercises the small-allocation slow refill path
+        // at the peak shared chunk class.
+        for i in 0_u32..32 {
             let _a: Arc<u32> = arena.alloc_arc(i);
         }
         assert_eq!(arena.stats().oversized_shared_chunks_allocated, 0);
@@ -4181,7 +4335,13 @@ mod from_mutants_extras_stats {
         unsafe impl Sync for D<'_> {}
         let c = Cell::new(0);
         let arena = Arena::new();
-        for _ in 0..16384 {
+        // Optimized for miri runtime: ratchet via large fillers instead of 16384 small allocs.
+        for _ in 0..8 {
+            let _filler: Arc<[u8]> = arena.alloc_slice_fill_with_arc(8 * 1024, |_| 0_u8);
+        }
+        // A short burst still reaches the peak-class slow refill path; a
+        // mutated `needed` computation would route the first one oversized.
+        for _ in 0..32 {
             let _a: Arc<D<'_>> = arena.alloc_arc(D(&c));
         }
         assert_eq!(arena.stats().oversized_shared_chunks_allocated, 0);

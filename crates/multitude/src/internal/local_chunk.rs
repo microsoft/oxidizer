@@ -182,6 +182,19 @@ impl<A: Allocator + Clone> LocalChunk<A> {
         let raw = allocator.allocate(layout)?;
         let raw_ptr = raw.cast::<u8>();
 
+        // Ensure the chunk end fits in isize so internal bump-cursor
+        // arithmetic (which asserts isize-fit via `assert_unchecked` on
+        // the hot path) is always justified for allocations inside this
+        // chunk. This guards against pathological backing allocators
+        // returning addresses in the upper half of the address space.
+        let start_addr = raw_ptr.as_ptr() as usize;
+        if !super::constants::chunk_end_addr_fits_in_isize(start_addr, total) {
+            // SAFETY: `raw_ptr`/`layout` came from this allocator's
+            // successful `allocate` call.
+            unsafe { allocator.deallocate(raw_ptr, layout) };
+            return Err(allocator_api2::alloc::AllocError);
+        }
+
         let fat: *mut Self = core::ptr::slice_from_raw_parts_mut(raw_ptr.as_ptr(), payload) as *mut Self;
 
         // SAFETY: `raw` points at `total` freshly allocated bytes; each
@@ -499,5 +512,26 @@ impl<A: Allocator + Clone> LocalChunk<A> {
 fn check_local_refcount(prev: usize) {
     if prev >= LARGE.saturating_add(LARGE) {
         refcount_overflow_abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use allocator_api2::alloc::Global;
+
+    use super::*;
+
+    /// Targeted fast-fail for `header_size` mutations. The expected
+    /// value is recomputed directly from the struct layout (mirroring
+    /// the function's body but with no shared expression that a mutant
+    /// could change in lockstep), so any divergence the mutation
+    /// engine produces — replace-with-0, replace-with-1, `+` → `-`,
+    /// etc. — is caught immediately rather than waiting for a stress
+    /// test to observe an indirect chunk-boundary mismatch.
+    #[test]
+    fn header_size_matches_struct_layout() {
+        let expected = core::mem::offset_of!(LocalChunk<Global>, drop_count) + core::mem::size_of::<Cell<u16>>();
+        assert_eq!(header_size::<Global>(), expected);
+        assert!(header_size::<Global>() > 0);
     }
 }

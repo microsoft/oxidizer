@@ -83,6 +83,8 @@ fn debug_and_display() {
 
 #[test]
 fn compare_and_hash() {
+    use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
+
     let arena = Arena::new();
     let a = arena.alloc_rc(1_u32);
     let b = arena.alloc_rc(2_u32);
@@ -92,6 +94,19 @@ fn compare_and_hash() {
     assert_eq!(a.cmp(&b), Ordering::Less);
     assert_eq!(a.partial_cmp(&b), Some(Ordering::Less));
     assert_eq!(common::hash_of(&a), common::hash_of(&a2));
+
+    // Folded mutants_extras::rc_hash_forwards_to_inner.
+    let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
+    let mut h_rc = bh.build_hasher();
+    std::hash::Hash::hash(&a, &mut h_rc);
+    let rc_hash = h_rc.finish();
+    let mut h_inner = bh.build_hasher();
+    std::hash::Hash::hash(&1_u32, &mut h_inner);
+    let inner_hash = h_inner.finish();
+    let h_empty = bh.build_hasher();
+    let empty_hash = h_empty.finish();
+    assert_eq!(rc_hash, inner_hash);
+    assert_ne!(rc_hash, empty_hash);
 }
 
 #[test]

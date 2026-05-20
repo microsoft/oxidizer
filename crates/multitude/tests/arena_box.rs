@@ -156,8 +156,24 @@ fn arena_box_eq_and_ord() {
 #[test]
 fn arena_box_hash_via_hashmap() {
     use std::collections::HashMap;
+    use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
+
     let arena = Arena::new();
     let k = arena.alloc_box(7_u32);
+
+    // Folded mutants_extras::box_hash_forwards_to_inner.
+    let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
+    let mut h_box = bh.build_hasher();
+    std::hash::Hash::hash(&k, &mut h_box);
+    let box_hash = h_box.finish();
+    let mut h_inner = bh.build_hasher();
+    std::hash::Hash::hash(&7_u32, &mut h_inner);
+    let inner_hash = h_inner.finish();
+    let h_empty = bh.build_hasher();
+    let empty_hash = h_empty.finish();
+    assert_eq!(box_hash, inner_hash);
+    assert_ne!(box_hash, empty_hash);
+
     let mut m: HashMap<Box<u32>, &'static str> = HashMap::new();
     let _ = m.insert(k, "seven");
     let probe = arena.alloc_box(7_u32);
