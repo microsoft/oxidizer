@@ -467,8 +467,13 @@ impl<A: Allocator + Clone> Arena<A> {
                 let mirror_dc = unsafe { self.current_local.drop_count(chunk) };
                 // SAFETY: refcount-positive.
                 let chunk_dc = unsafe { (*chunk.as_ptr()).drop_count.get() };
+                // `mirror_dc` is the source of truth; the on-chunk
+                // counter must agree (see `refill_local` for why we
+                // take `mirror_dc` rather than `.max(chunk_dc)`).
+                debug_assert_eq!(mirror_dc, chunk_dc, "drop_count mirror diverged from on-chunk counter");
+                let _ = chunk_dc;
                 // SAFETY: refcount-positive.
-                unsafe { (*chunk.as_ptr()).drop_count.set(mirror_dc.max(chunk_dc)) };
+                unsafe { (*chunk.as_ptr()).drop_count.set(mirror_dc) };
                 let rcs_issued = self.current_local.smart_pointers_issued.replace(0);
                 // `reset` takes `&mut self`, statically excluding any
                 // outstanding simple references; we therefore release

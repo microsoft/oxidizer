@@ -93,9 +93,19 @@ impl<A: Allocator + Clone> Arena<A> {
                         // SAFETY: refcount-positive — chunk held at LARGE
                         // inflation while installed as `current_shared`.
                         let payload_base_addr = unsafe { SharedChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-                        let value_offset = u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).expect(
-                            "bump fit-gate above bounds the allocation inside the current chunk's first 64 KiB tile, and shared chunks use a CHUNK_ALIGN-aligned payload base, so value_offset is < MAX_CHUNK_BYTES <= u16::MAX",
+                        let raw_value_offset = (aligned_ptr.as_ptr() as usize) - payload_base_addr;
+                        // Same bound chain as `impl_alloc_inner_value` (see
+                        // there for the full derivation): bump-fit success
+                        // implies `raw_value_offset < shared_max_bump_extent::<A>()
+                        // = CHUNK_ALIGN − shared_header_size::<A>() ≤ u16::MAX`.
+                        debug_assert!(
+                            u16::try_from(raw_value_offset).is_ok(),
+                            "value_offset must fit in u16; reachable only if oversized chunk leaks into `current_shared`"
                         );
+                        // SAFETY: bounded by current-chunk bump extent.
+                        unsafe { core::hint::assert_unchecked(u16::try_from(raw_value_offset).is_ok()) };
+                        // SAFETY: precondition asserted above.
+                        let value_offset = unsafe { u16::try_from(raw_value_offset).unwrap_unchecked() };
                         self.current_shared.drop_back.set(new_drop_back_ptr);
                         let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
                         let noop_entry = InnerDropEntry::new(noop_drop_shim, value_offset, 1);
@@ -410,15 +420,25 @@ impl<A: Allocator + Clone> Arena<A> {
             // SAFETY: refcount-positive — chunk held at LARGE inflation.
             let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
             let raw_value_offset = (aligned_ptr.as_ptr() as usize) - payload_base_addr;
-            // SAFETY: caller's `assert_unchecked(bumped <= MAX_CHUNK_BYTES)`
-            // bounds the offset to `u16` range; the `debug_assert!`
-            // catches future regressions.
+            // Bound chain:
+            //   raw_value_offset < bump_extent
+            //                    = capacity.min(local_max_bump_extent::<A>())
+            //                    ≤ local_max_bump_extent::<A>()
+            //                    = CHUNK_ALIGN − local_header_size::<A>()    (header ≥ 1)
+            //                    ≤ 65536 − 1 = 65535 = u16::MAX
+            // i.e. successful bump-fit places the allocation strictly
+            // inside the first 64 KiB tile of the chunk's payload, so
+            // the offset fits in `u16`. (Note: `MAX_CHUNK_BYTES = 65536`
+            // is *not* itself ≤ `u16::MAX` — the real bound is
+            // `local_max_bump_extent::<A>()`, which is strictly less.)
             debug_assert!(
                 u16::try_from(raw_value_offset).is_ok(),
                 "value_offset must fit in u16; reachable only if oversized chunk leaks into `current_local`"
             );
-            let value_offset = u16::try_from(raw_value_offset)
-                .expect("bump fit-gate bounds raw_value_offset < MAX_CHUNK_BYTES <= u16::MAX for normal chunks");
+            // SAFETY: bounded by the chain above.
+            unsafe { core::hint::assert_unchecked(u16::try_from(raw_value_offset).is_ok()) };
+            // SAFETY: precondition asserted above; this conversion has no panic surface.
+            let value_offset = unsafe { u16::try_from(raw_value_offset).unwrap_unchecked() };
             self.current_local.drop_back.set(new_drop_back_ptr);
             let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
             // `Box` installs a noop shim (retargeted at `Box::into_rc` time);
@@ -751,10 +771,18 @@ impl<A: Allocator + Clone> Arena<A> {
             // SAFETY: refcount-positive — chunk held at LARGE inflation
             // while installed as `current_local`.
             let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-            let value_offset =
-                u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).expect(
-                    "bump fit-gate above bounds the allocation inside the current chunk's first 64 KiB tile, so value_offset < MAX_CHUNK_BYTES <= u16::MAX",
-                );
+            let raw_value_offset = (aligned_ptr.as_ptr() as usize) - payload_base_addr;
+            // Same bound chain as `impl_alloc_inner_value` — successful
+            // bump-fit places the offset within `local_max_bump_extent::<A>()
+            // = CHUNK_ALIGN − local_header_size::<A>() ≤ u16::MAX`.
+            debug_assert!(
+                u16::try_from(raw_value_offset).is_ok(),
+                "value_offset must fit in u16; reachable only if oversized chunk leaks into `current_local`"
+            );
+            // SAFETY: bounded by current-chunk bump extent.
+            unsafe { core::hint::assert_unchecked(u16::try_from(raw_value_offset).is_ok()) };
+            // SAFETY: precondition asserted above.
+            let value_offset = unsafe { u16::try_from(raw_value_offset).unwrap_unchecked() };
             self.current_local.drop_back.set(new_drop_back_ptr);
             let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
             let noop_entry = InnerDropEntry::new(noop_drop_shim, value_offset, 1);
