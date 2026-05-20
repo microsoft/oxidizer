@@ -17,6 +17,11 @@ file_exclude_patterns = [
 
 # Trip wire patterns - if any changed file matches these patterns,
 # all crates in the workspace are going to be considered impacted.
+#
+# NOTE: The `release-deps` GitHub Actions job (see .github/workflows/main.yml) gates
+# itself on `delta.skip != 'true'` as a compute optimization. That gate is only safe
+# while `Cargo.toml` and `scripts/*` remain trip wires here — they are the signals
+# that a version bump or release-tooling change is in play. Keep them listed.
 trip_wire_patterns = [
      ".ado/*",
      ".cargo/*",

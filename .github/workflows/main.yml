@@ -248,6 +248,58 @@ jobs:
           header: semver-check
           delete: true
 
+  release-deps:
+    # Informational check: flags workspace crates that were modified vs the PR base
+    # but are not part of the version-bump set, when at least one of their downstream
+    # dependents is being released. See scripts/check-unreleased-dependencies.ps1.
+    #
+    # The `needs.delta.outputs.skip != 'true'` gate is a compute optimization: when
+    # .delta.toml signals that no crate is affected, the release set is empty and the
+    # analysis is guaranteed to be a no-op. This relies on `Cargo.toml` (and the
+    # `scripts/` / workflow paths) remaining in .delta.toml's trip_wire_patterns —
+    # see the comment in .delta.toml.
+    needs: [delta]
+    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          rust-toolchain: RUST_LATEST
+
+      - name: Fetch base ref
+        shell: bash
+        run: |
+          git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Analyze unreleased upstream dependencies
+        id: analyze
+        shell: pwsh
+        run: |
+          ./scripts/check-unreleased-dependencies.ps1 `
+            -BaseRef "origin/${{ github.base_ref }}" `
+            -OutputFile release-deps-comment.md
+
+      - name: Post Unreleased-Dependency Comment
+        if: steps.analyze.outputs.has_findings == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
+        with:
+          header: release-deps-check
+          path: release-deps-comment.md
+
+      - name: Remove Unreleased-Dependency Comment
+        if: steps.analyze.outputs.has_findings != 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
+        with:
+          header: release-deps-check
+          delete: true
+
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'

@@ -26,8 +26,8 @@
        This mirrors the guidance in `.github/prompts/bump-crate-version.prompt.md`.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded crates that have no other commits since their last release get a single
-       `bump \`<target>\` to <new-version>` entry under `🔧 Maintenance` (or `⚠️ Breaking` for
-       major bumps).
+       `Now requires <new-version> of \`<target>\`` entry under `🔧 Maintenance` (or `⚠️ Breaking`
+       for major bumps).
 
     By default, if neither --version nor --bump is specified, the script will perform a minor bump
     of the target crate (e.g., 1.2.3 -> 1.3.0, or 0.3.3 -> 0.3.4 for `0.x.y` crates).
@@ -74,7 +74,19 @@ param(
     [Parameter(Mandatory = $false)]
     [Alias('b')]
     [ValidateSet('major', 'minor', 'patch')]
-    [string]$Bump
+    [string]$Bump,
+
+    # Base ref used to compute changes for the post-release upstream-dependency scan.
+    # Default is 'origin/main' (best-effort fetched before use). Pass an empty string
+    # to skip the scan entirely.
+    [Parameter(Mandatory = $false)]
+    [string]$BaseRef = 'origin/main',
+
+    # Suppress all interactive prompts (decline-by-default for the upstream-dependency
+    # scan). Auto-enabled in CI / when stdin is redirected; this switch is the explicit
+    # override for scripted callers.
+    [Parameter(Mandatory = $false)]
+    [switch]$NonInteractive
 )
 
 # --- CONFIGURATION ---
@@ -107,345 +119,29 @@ $script:TypeOrder = @('breaking', 'feat', 'fix', 'perf', 'docs', 'task', 'refact
 # Defines commit types that should be excluded from the changelog.
 $script:IgnoredTypes = @('test')
 
-# --- COMPILED REGEX PATTERNS ---
-
-# Pattern for conventional commit format: type(scope)!: description (! indicates breaking change)
-$script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
-
-# Pattern for PR references: (#123)
-$script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
-
-# Pattern for semantic version format: major.minor.patch
-$script:SemanticVersionRegex = [regex]'^\d+\.\d+\.\d+$'
-
-# Pattern for extracting version from Cargo.toml: version = "x.y.z"
-$script:CargoVersionRegex = [regex]'(?<=version\s*=\s*")[^"]+'
-
-# Pattern for GitHub repository URL matching
-$script:GitHubRepoRegex = [regex]'github\.com[/:]([\w.-]+/[\w.-]+)'
-
-# Pattern for regex metacharacters that need escaping
-$script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
+# --- DOT-SOURCE SHARED LIBRARY ---
+#
+# scripts/lib/releasing.ps1 owns the reusable building blocks used by both this
+# script and scripts/check-unreleased-dependencies.ps1:
+#   - Compiled regex patterns ($script:ConventionalCommitRegex, $script:PrReferenceRegex,
+#     $script:SemanticVersionRegex, $script:CargoVersionRegex, $script:GitHubRepoRegex,
+#     $script:RegexEscapeRegex).
+#   - Safe git invocation (Invoke-Git), ref validation (Test-GitRef), legacy
+#     Invoke-GitCommand wrapper used by the existing call sites in this script.
+#   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-BumpKindFromVersions,
+#     Test-IsBreakingChange) and crate-version readers (Get-CurrentVersion,
+#     Get-CrateVersionFromRef).
+#   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspaceCrates,
+#     Invalidate-WorkspaceMetadataCache, Test-CrateExposesTarget, Get-AllTransitiveDependents).
+#   - Modified-but-unreleased dependency analysis (Get-CratesWithFileChanges,
+#     Get-CratesWithVersionBumps, Get-UnreleasedModifiedDependencies).
+. "$PSScriptRoot/lib/releasing.ps1"
 
 # --- HELPER FUNCTIONS ---
 
 function Test-CommandExists {
     param([string]$Command)
     return $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
-}
-
-function Test-ValidCrateName {
-    param([string]$crateName)
-    # Validate crate name: must contain only letters, numbers, hyphens, and underscores
-    # Must not start or end with hyphen, and must not be empty
-    return $crateName -match '^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$' -and $crateName.Length -le 64
-}
-
-function Test-ValidVersion {
-    param([string]$version)
-    if ([string]::IsNullOrEmpty($version)) {
-        return $true  # Empty version is valid (will be auto-incremented)
-    }
-    return $script:SemanticVersionRegex.IsMatch($version)
-}
-
-function Compare-SemanticVersions {
-    param(
-        [string]$version1,
-        [string]$version2
-    )
-
-    # Parse version strings into arrays of integers
-    $v1Parts = $version1.Split('.') | ForEach-Object { [int]$_ }
-    $v2Parts = $version2.Split('.') | ForEach-Object { [int]$_ }
-
-    # Ensure both arrays have 3 elements (major, minor, patch)
-    while ($v1Parts.Count -lt 3) { $v1Parts += 0 }
-    while ($v2Parts.Count -lt 3) { $v2Parts += 0 }
-
-    # Compare major, minor, patch in order
-    for ($i = 0; $i -lt 3; $i++) {
-        if ($v1Parts[$i] -gt $v2Parts[$i]) {
-            return 1  # version1 > version2
-        }
-        elseif ($v1Parts[$i] -lt $v2Parts[$i]) {
-            return -1  # version1 < version2
-        }
-    }
-
-    return 0  # versions are equal
-}
-
-# Loads workspace package metadata once and caches it.
-$script:CachedWorkspaceMetadata = $null
-function Get-WorkspaceMetadata {
-    param([string]$repoRoot)
-
-    if ($null -ne $script:CachedWorkspaceMetadata) {
-        return $script:CachedWorkspaceMetadata
-    }
-
-    $rootManifest = Join-Path $repoRoot "Cargo.toml"
-    $metadataJson = cargo metadata --format-version=1 --no-deps --manifest-path $rootManifest
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to run 'cargo metadata'." -ErrorAction Stop
-    }
-
-    $script:CachedWorkspaceMetadata = $metadataJson | ConvertFrom-Json
-    return $script:CachedWorkspaceMetadata
-}
-
-# Returns information about all workspace crates as an array of objects with:
-#   Name                  - cargo package name
-#   Folder                - folder name under crates/ (used as the script's CrateName argument)
-#   Published             - $true if the crate is published to crates.io
-#   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
-#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
-#                           or $null if the crate does not declare them. Each entry is a path or
-#                           glob like "tick::clock::Clock" or "cachet_memory::*". Used to detect
-#                           whether a dependent exposes types from a bumped crate in its public API.
-function Get-WorkspaceCrates {
-    param([string]$repoRoot)
-
-    $metadata = Get-WorkspaceMetadata -repoRoot $repoRoot
-    $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
-
-    $crates = @()
-    foreach ($package in $metadata.packages) {
-        $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
-        if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-            continue
-        }
-
-        $deps = @()
-        foreach ($dep in $package.dependencies) {
-            # Cascade follows normal and build deps; dev-deps automatically pick up the workspace
-            # version on `cargo publish` and never need their own version bumped.
-            if ($dep.kind -ne 'dev') {
-                $deps += $dep.name.Replace('-', '_')
-            }
-        }
-
-        # Extract [package.metadata.cargo_check_external_types].allowed_external_types if present.
-        # PSCustomObject access via PSObject.Properties avoids errors for missing branches.
-        $allowedTypes = $null
-        $pkgMeta = $package.PSObject.Properties['metadata']
-        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
-            $cet = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
-            if ($cet -and $null -ne $cet.Value) {
-                $aet = $cet.Value.PSObject.Properties['allowed_external_types']
-                if ($aet -and $null -ne $aet.Value) {
-                    $allowedTypes = @($aet.Value)
-                }
-            }
-        }
-
-        $crates += [pscustomobject]@{
-            Name                 = $package.name
-            Folder               = Split-Path $manifestDir -Leaf
-            Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
-            Deps                 = $deps
-            AllowedExternalTypes = $allowedTypes
-        }
-    }
-
-    return $crates
-}
-
-# Returns $true if the dependent crate exposes any type rooted at the target crate in its public
-# API, as declared by [package.metadata.cargo_check_external_types].allowed_external_types.
-#
-# Returns $true (conservative) if the dependent does not declare allowed_external_types at all,
-# since we then have no information about its public API surface and assume the worst.
-#
-# Returns $false only when the metadata is present and contains no entry rooted at the target.
-function Test-CrateExposesTarget {
-    param(
-        [pscustomobject]$dependent,
-        [string]$targetPackageName
-    )
-
-    if ($null -eq $dependent.AllowedExternalTypes) {
-        # No metadata declared. Be conservative: assume the dependent might expose target's types.
-        return $true
-    }
-
-    $normalizedTarget = $targetPackageName.Replace('-', '_')
-    foreach ($entry in $dependent.AllowedExternalTypes) {
-        # Each entry is a Rust path like "tick::clock::Clock" or "cachet_memory::*". The first
-        # `::`-separated segment is always the crate name (in normalized snake_case form).
-        $root = ($entry -split '::', 2)[0]
-        if ($root -eq $normalizedTarget) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
-# Computes the transitive set of published workspace crates that depend on the given target via
-# [dependencies] or [build-dependencies]. Returns folder names suitable for indexing into crates/.
-# The target itself is not included.
-function Get-AllTransitiveDependents {
-    param(
-        [string]$crateName,
-        [string]$repoRoot
-    )
-
-    $crates = Get-WorkspaceCrates -repoRoot $repoRoot
-
-    # Resolve the user-facing crate identifier (folder name or package name) to the canonical
-    # package name. This makes the cascade robust even if a crate's folder under crates/ ever
-    # diverges from its [package].name in Cargo.toml.
-    $targetCrate = $crates | Where-Object { $_.Folder -eq $crateName -or $_.Name -eq $crateName } | Select-Object -First 1
-    if ($null -eq $targetCrate) {
-        Write-Warning "Crate '$crateName' not found in workspace metadata; cannot compute dependents."
-        return @()
-    }
-    $normalizedTarget = $targetCrate.Name.Replace('-', '_')
-
-    # BFS over the reverse dependency graph.
-    $toVisit = [System.Collections.Generic.Queue[string]]::new()
-    $toVisit.Enqueue($normalizedTarget)
-    $visited = [System.Collections.Generic.HashSet[string]]::new()
-    [void]$visited.Add($normalizedTarget)
-
-    $dependents = @()
-    while ($toVisit.Count -gt 0) {
-        $current = $toVisit.Dequeue()
-        foreach ($candidate in $crates) {
-            $candidateNorm = $candidate.Name.Replace('-', '_')
-            if ($visited.Contains($candidateNorm)) {
-                continue
-            }
-            if ($candidate.Deps -contains $current) {
-                [void]$visited.Add($candidateNorm)
-                $toVisit.Enqueue($candidateNorm)
-                if ($candidate.Published) {
-                    $dependents += $candidate.Folder
-                }
-            }
-        }
-    }
-
-    # Wrap with @(...) at the call site to preserve array semantics for 0/1-element results.
-    return $dependents
-}
-
-# Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules:
-#   - For x.y.z (x >= 1): major -> (x+1).0.0, minor -> x.(y+1).0, patch -> x.y.(z+1)
-#   - For 0.x.y (x >= 1): major -> 0.(x+1).0, minor and patch -> 0.x.(y+1)
-#   - For 0.0.x:           every bump -> 0.0.(x+1) (every change is breaking)
-function Get-NextVersion {
-    param(
-        [string]$currentVersion,
-        [ValidateSet('major', 'minor', 'patch')]
-        [string]$bump
-    )
-
-    $parts = $currentVersion.Split('.') | ForEach-Object { [int]$_ }
-    while ($parts.Count -lt 3) { $parts += 0 }
-
-    if ($parts[0] -ge 1) {
-        switch ($bump) {
-            'major' { return "$($parts[0] + 1).0.0" }
-            'minor' { return "$($parts[0]).$($parts[1] + 1).0" }
-            'patch' { return "$($parts[0]).$($parts[1]).$($parts[2] + 1)" }
-        }
-    }
-    elseif ($parts[1] -ge 1) {
-        switch ($bump) {
-            'major' { return "0.$($parts[1] + 1).0" }
-            default { return "0.$($parts[1]).$($parts[2] + 1)" }
-        }
-    }
-    else {
-        return "0.0.$($parts[2] + 1)"
-    }
-}
-
-# Infers a bump kind from the difference between two versions. Used when the caller passed an
-# explicit --version so the cascade can apply a matching kind to dependents.
-function Get-BumpKindFromVersions {
-    param(
-        [string]$oldVersion,
-        [string]$newVersion
-    )
-
-    $oldParts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
-    $newParts = $newVersion.Split('.') | ForEach-Object { [int]$_ }
-    while ($oldParts.Count -lt 3) { $oldParts += 0 }
-    while ($newParts.Count -lt 3) { $newParts += 0 }
-
-    if ($oldParts[0] -ge 1) {
-        if ($newParts[0] -ne $oldParts[0]) { return 'major' }
-        if ($newParts[1] -ne $oldParts[1]) { return 'minor' }
-        return 'patch'
-    }
-    if ($oldParts[1] -ge 1) {
-        if ($newParts[1] -ne $oldParts[1]) { return 'major' }
-        return 'patch'
-    }
-    return 'major'
-}
-
-# Returns $true when bumping `oldVersion` by the given kind produces a SemVer-incompatible version
-# under Cargo's resolution rules. Mirrors Get-NextVersion's logic:
-#   - old major >= 1            : breaking iff bump == 'major'
-#   - old major == 0, minor >= 1 : breaking iff bump == 'major' (0.x -> 0.(x+1) is breaking)
-#   - old major == 0, minor == 0 : every bump is breaking (0.0.x -> 0.0.(x+1) is breaking)
-function Test-IsBreakingChange {
-    param(
-        [string]$oldVersion,
-        [ValidateSet('major', 'minor', 'patch')]
-        [string]$bump
-    )
-
-    $parts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
-    while ($parts.Count -lt 3) { $parts += 0 }
-
-    if ($parts[0] -ge 1) {
-        return $bump -eq 'major'
-    }
-    if ($parts[1] -ge 1) {
-        return $bump -eq 'major'
-    }
-    return $true
-}
-
-function Get-CurrentVersion {
-    param([string]$cargoTomlPath)
-
-    if (-not (Test-Path $cargoTomlPath)) {
-        Write-Error "Could not find Cargo.toml file at '$cargoTomlPath'." -ErrorAction Stop
-    }
-
-    $cargoContent = Get-Content $cargoTomlPath -Raw
-    $currentVersionMatch = $script:CargoVersionRegex.Match($cargoContent)
-    if (-not $currentVersionMatch.Success) {
-        Write-Error "Could not determine current version from '$cargoTomlPath'." -ErrorAction Stop
-    }
-
-    return $currentVersionMatch.Value
-}
-
-function Invoke-GitCommand {
-    param(
-        [string]$command,
-        [string]$errorMessage = "Git command failed"
-    )
-
-    $result = Invoke-Expression "git $command" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "$errorMessage. Git command: git $command. Error: $result" -ErrorAction Stop
-    }
-
-    # Return empty array instead of null for commands with no output
-    if ($null -eq $result -or $result.Count -eq 0) {
-        return @()
-    }
-
-    return $result
 }
 
 function Sort-KeysByPreferredOrder {
@@ -643,13 +339,13 @@ function Write-Changelog {
     # dependencies was bumped. Format follows existing convention in the repo
     # (e.g. crates/cachet/CHANGELOG.md):
     #   - 🔧 Maintenance
-    #     - bump `<target>` to <version>
+    #     - Now requires <version> of `<target>`
     # If the same section header was already produced by Format-ConventionalCommits for this
     # release, the cascade bullet is merged into that existing section instead of creating a
     # duplicate header.
     if ($null -ne $cascadeReason) {
         $sectionHeader = if ($cascadeReason.Breaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
-        $cascadeBullet = "  - bump ``$($cascadeReason.Target)`` to $($cascadeReason.Version)"
+        $cascadeBullet = "  - Now requires ``$($cascadeReason.Version)`` of ``$($cascadeReason.Target)``"
 
         $existingHeaderIdx = -1
         for ($i = 0; $i -lt $formattedCommits.Count; $i++) {
@@ -804,6 +500,331 @@ function Show-FinalMessage {
     Write-Host "---" -ForegroundColor Green
 }
 
+# --- POST-RELEASE SCAN HELPERS ---
+
+# Idempotently inserts a "Now requires <version> of <target>" bullet into an
+# existing `## [<Version>]` section in a changelog. Used when a dependent has
+# already been version-bumped (sufficiently) in an earlier cascade pass within the
+# same PR — we don't want to re-bump, but we still want to record that this new
+# release also pulled through. Operates by reading the file, locating the target
+# section, finding (or creating) the appropriate `- 🔧 Maintenance` or `- ⚠️ Breaking`
+# sub-header, and inserting the bullet unless an exact match already exists.
+function Add-CascadeBulletToVersionSection {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChangelogFile,
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][hashtable]$CascadeReason
+    )
+
+    if (-not (Test-Path $ChangelogFile)) {
+        Write-Warning "Add-CascadeBulletToVersionSection: changelog '$ChangelogFile' does not exist; skipping."
+        return
+    }
+
+    $targetName    = $CascadeReason.Target
+    $targetVersion = $CascadeReason.Version
+    $isBreaking    = [bool]$CascadeReason.Breaking
+    $subHeader     = if ($isBreaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
+    $bullet        = "  - Now requires ``$targetVersion`` of ``$targetName``"
+
+    $lines = @(Get-Content -LiteralPath $ChangelogFile)
+    $escapedVersion = $script:RegexEscapeRegex.Replace($Version, '\$1')
+    $sectionStart = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^## \[$escapedVersion\]") { $sectionStart = $i; break }
+    }
+    if ($sectionStart -lt 0) {
+        Write-Warning "Add-CascadeBulletToVersionSection: no `## [$Version]` section in '$ChangelogFile'; skipping."
+        return
+    }
+
+    $sectionEnd = $lines.Count
+    for ($i = $sectionStart + 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^## \[') { $sectionEnd = $i; break }
+    }
+
+    $subStart = -1
+    for ($i = $sectionStart + 1; $i -lt $sectionEnd; $i++) {
+        if ($lines[$i] -eq $subHeader) { $subStart = $i; break }
+    }
+
+    if ($subStart -ge 0) {
+        $subEnd = $sectionEnd
+        for ($i = $subStart + 1; $i -lt $sectionEnd; $i++) {
+            if ($lines[$i] -match '^- ') { $subEnd = $i; break }
+        }
+        for ($i = $subStart + 1; $i -lt $subEnd; $i++) {
+            if ($lines[$i] -eq $bullet) { return } # already present
+        }
+        $insertAt = $subEnd
+        # Walk backwards past trailing blank lines so the bullet stays adjacent to the sub-section.
+        while ($insertAt -gt $subStart + 1 -and [string]::IsNullOrWhiteSpace($lines[$insertAt - 1])) {
+            $insertAt--
+        }
+        $new = @($lines[0..($insertAt - 1)]) + @($bullet) + @($lines[$insertAt..($lines.Count - 1)])
+    }
+    else {
+        $insertAt = $sectionEnd
+        while ($insertAt -gt $sectionStart + 1 -and [string]::IsNullOrWhiteSpace($lines[$insertAt - 1])) {
+            $insertAt--
+        }
+        $block = @('', $subHeader, $bullet)
+        if ($insertAt -eq $lines.Count) {
+            $new = @($lines[0..($insertAt - 1)]) + $block
+        } else {
+            $new = @($lines[0..($insertAt - 1)]) + $block + @($lines[$insertAt..($lines.Count - 1)])
+        }
+    }
+
+    Set-Content -LiteralPath $ChangelogFile -Value $new -Encoding utf8
+    Write-Host "📝 Recorded cascade in '$ChangelogFile' under [$Version]." -ForegroundColor DarkCyan
+}
+
+# Cascades a single dependent. Re-bump-safe: if the dependent has already been bumped
+# during this PR (its on-disk version differs from $BaseRef) we either skip the bump
+# (when the existing bump is sufficient) or upgrade to the required version.
+function Invoke-CascadeStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Dependent,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$RootCargoToml,
+        [Parameter(Mandatory = $true)][string]$PrBaseUrl,
+        [Parameter(Mandatory = $true)][string]$TargetCrateName,
+        [Parameter(Mandatory = $true)][string]$TargetNewVersion,
+        [Parameter(Mandatory = $true)][string]$DepBump,
+        [Parameter(Mandatory = $true)][string]$BaseRef
+    )
+
+    $depFolder = Join-Path $RepoRoot 'crates' $Dependent
+    $depCargo  = Join-Path $depFolder 'Cargo.toml'
+    $depChange = Join-Path $depFolder 'CHANGELOG.md'
+
+    if (-not (Test-Path $depCargo)) {
+        Write-Warning "Skipping cascade for '$Dependent': Cargo.toml not found at '$depCargo'."
+        return $null
+    }
+
+    $depCurrent = Get-CurrentVersion -cargoTomlPath $depCargo
+    $depBase = if (-not [string]::IsNullOrEmpty($BaseRef)) {
+        Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $Dependent
+    } else { $null }
+
+    $depCascadeReason = @{
+        Target   = $TargetCrateName
+        Version  = $TargetNewVersion
+        Breaking = (Test-IsBreakingChange -oldVersion $depCurrent -bump $DepBump)
+    }
+
+    # New crate (no base-ref Cargo.toml) or no usable base ref: behave as the legacy
+    # cascade did — let Invoke-CrateRelease bump from $depCurrent.
+    if ([string]::IsNullOrEmpty($depBase) -or $depCurrent -eq $depBase) {
+        $depNew = Invoke-CrateRelease -crateName $Dependent -crateFolder $depFolder `
+            -crateCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
+            -prBaseUrl $PrBaseUrl -version "" -bump $DepBump -cascadeReason $depCascadeReason
+        Invalidate-WorkspaceMetadataCache
+        return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
+    }
+
+    # Already bumped in this PR. Compute the version that THIS cascade would have
+    # produced starting from the base-ref version, and compare.
+    $required = Get-NextVersion -currentVersion $depBase -bump $DepBump
+    $cmp = Compare-SemanticVersions -version1 $depCurrent -version2 $required
+
+    if ($cmp -ge 0) {
+        Write-Host "  • $Dependent already at $depCurrent (>= required $required); recording cascade only." -ForegroundColor DarkGray
+        Add-CascadeBulletToVersionSection -ChangelogFile $depChange -Version $depCurrent -CascadeReason $depCascadeReason
+        return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depCurrent }
+    }
+
+    Write-Host "  • $Dependent currently $depCurrent < required $required; upgrading." -ForegroundColor DarkYellow
+    $depNew = Invoke-CrateRelease -crateName $Dependent -crateFolder $depFolder `
+        -crateCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
+        -prBaseUrl $PrBaseUrl -version $required -bump "" -cascadeReason $depCascadeReason
+    Invalidate-WorkspaceMetadataCache
+    return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
+}
+
+# Runs the bump + downstream cascade for a single target crate. Returns the augmented
+# $releases array. Equivalent to the legacy inline body, but factored so the post-release
+# scan can invoke it recursively for upstream dependencies the user agrees to release.
+function Invoke-ReleaseFlow {
+    param(
+        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $false)][string]$Version = '',
+        [Parameter(Mandatory = $false)][string]$Bump = '',
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$RootCargoToml,
+        [Parameter(Mandatory = $false)][string]$PrBaseUrl,
+        [Parameter(Mandatory = $true)][string]$BaseRef
+    )
+
+    $crateFolder    = Join-Path $RepoRoot 'crates' $CrateName
+    $crateCargoToml = Join-Path $crateFolder 'Cargo.toml'
+    $changelogFile  = Join-Path $crateFolder 'CHANGELOG.md'
+
+    $oldVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+
+    $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
+        -crateCargoToml $crateCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
+        -prBaseUrl $PrBaseUrl -version $Version -bump $Bump
+    Invalidate-WorkspaceMetadataCache
+
+    $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
+        $Bump
+    } elseif (-not [string]::IsNullOrEmpty($Version)) {
+        Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
+    } else {
+        'minor'
+    }
+
+    $releases = @(
+        [pscustomobject]@{ Crate = $CrateName; OldVersion = $oldVersion; NewVersion = $newVersion }
+    )
+
+    $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -bump $cascadeBump
+    $exposingCascadeBump = if ($targetIsBreaking) { 'major' } else { $cascadeBump }
+
+    $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $RepoRoot)
+    if ($dependents.Count -gt 0) {
+        Write-Host ""
+        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
+
+        $allCrates = Get-WorkspaceCrates -repoRoot $RepoRoot
+        $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
+        $targetPackageName = if ($null -ne $targetCrate) { $targetCrate.Name } else { $CrateName }
+
+        foreach ($dependent in $dependents) {
+            $depCrate = $allCrates | Where-Object { $_.Folder -eq $dependent } | Select-Object -First 1
+            $exposes = if ($null -ne $depCrate) {
+                Test-CrateExposesTarget -dependent $depCrate -targetPackageName $targetPackageName
+            } else { $true }
+
+            $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
+            $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
+            Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
+
+            $record = Invoke-CascadeStep -Dependent $dependent -RepoRoot $RepoRoot `
+                -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl `
+                -TargetCrateName $CrateName -TargetNewVersion $newVersion `
+                -DepBump $depBump -BaseRef $BaseRef
+            if ($null -ne $record) {
+                $releases += $record
+            }
+        }
+    }
+
+    return $releases
+}
+
+function Test-InteractiveSession {
+    if ($env:CI) { return $false }
+    if ($env:GITHUB_ACTIONS) { return $false }
+    try { if ([Console]::IsInputRedirected) { return $false } } catch { }
+    return $true
+}
+
+# Scans for workspace crates that were modified vs $BaseRef but are not part of the
+# release set, prompting the user (when interactive) to optionally release them too.
+# Newly-released crates are appended to the release records via [ref].
+function Invoke-PostReleaseDepScan {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$BaseRef,
+        [Parameter(Mandatory = $true)][ref]$ReleasesRef,
+        [Parameter(Mandatory = $true)][string]$RootCargoToml,
+        [Parameter(Mandatory = $false)][string]$PrBaseUrl,
+        [Parameter(Mandatory = $false)][switch]$NonInteractive
+    )
+
+    if ([string]::IsNullOrEmpty($BaseRef)) {
+        Write-Host "ℹ️  Post-release upstream-dependency scan skipped (no base ref)." -ForegroundColor DarkGray
+        return
+    }
+
+    $isInteractive = (-not $NonInteractive) -and (Test-InteractiveSession)
+
+    $declined  = [System.Collections.Generic.HashSet[string]]::new()
+    $prompted  = [System.Collections.Generic.HashSet[string]]::new()
+
+    # Termination bound: number of published workspace crates. The dep graph is a DAG,
+    # so each iteration either grows ($prompted ∪ release-set) monotonically or terminates.
+    $maxIterations = @(Get-WorkspaceCrates -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
+    if ($maxIterations -lt 1) { $maxIterations = 1 }
+
+    for ($iter = 0; $iter -lt $maxIterations; $iter++) {
+        Invalidate-WorkspaceMetadataCache
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef)
+
+        $new = @($findings | Where-Object { -not $prompted.Contains($_.Folder) -and -not $declined.Contains($_.Folder) })
+        if ($new.Count -eq 0) {
+            if ($iter -eq 0) {
+                Write-Host ""
+                Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
+            }
+            return
+        }
+
+        Write-Host ""
+        Write-Host "⚠️  The following workspace crates have changes vs $BaseRef but are NOT part of this release:" -ForegroundColor Yellow
+        foreach ($finding in $new) {
+            Write-Host "  • $($finding.Folder) — $($finding.ChangedFileCount) file(s) changed" -ForegroundColor Yellow
+            foreach ($chain in $finding.DependencyChains) {
+                Write-Host "      pulled in by: $($chain -join ' -> ')" -ForegroundColor DarkGray
+            }
+        }
+
+        if (-not $isInteractive) {
+            Write-Warning "Non-interactive session: leaving the above crate(s) unreleased. Reviewer should confirm the changes are immaterial."
+            foreach ($finding in $new) {
+                [void]$prompted.Add($finding.Folder)
+                [void]$declined.Add($finding.Folder)
+            }
+            return
+        }
+
+        foreach ($finding in $new) {
+            $folder = $finding.Folder
+            [void]$prompted.Add($folder)
+
+            $answer = (Read-Host "Release '$folder' too? [y/N]").Trim().ToLowerInvariant()
+            if ($answer -ne 'y' -and $answer -ne 'yes') {
+                Write-Host "  Leaving '$folder' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
+                [void]$declined.Add($folder)
+                continue
+            }
+
+            $bumpRaw = (Read-Host "Bump kind for '$folder'? [P]atch / [M]inor / (MA)jor (default: minor)").Trim().ToLowerInvariant()
+            $bumpKind = switch ($bumpRaw) {
+                ''        { 'minor' }
+                'p'       { 'patch' }
+                'patch'   { 'patch' }
+                'm'       { 'minor' }
+                'minor'   { 'minor' }
+                'ma'      { 'major' }
+                'major'   { 'major' }
+                default   {
+                    Write-Warning "Unrecognized bump '$bumpRaw'; defaulting to 'minor'."
+                    'minor'
+                }
+            }
+
+            Write-Host ""
+            Write-Host "🚀 Releasing '$folder' as $bumpKind..." -ForegroundColor Cyan
+            $nestedReleases = @(Invoke-ReleaseFlow -CrateName $folder -Bump $bumpKind `
+                -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
+
+            $existingNames = @($ReleasesRef.Value | ForEach-Object { $_.Crate })
+            foreach ($r in $nestedReleases) {
+                if ($existingNames -notcontains $r.Crate) {
+                    $ReleasesRef.Value += $r
+                }
+            }
+        }
+    }
+
+    Write-Warning "Post-release dependency scan reached its iteration cap ($maxIterations); aborting further prompts."
+}
+
 # --- SCRIPT EXECUTION ---
 
 # 1. INPUT VALIDATION
@@ -875,90 +896,34 @@ if (-not [string]::IsNullOrEmpty($Version)) {
     }
 }
 
-# 6. EXECUTE WORKFLOW
-try {
-    $oldVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
-
-    $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
-        -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml -changelogFile $changelogFile `
-        -prBaseUrl $prBaseUrl -version $Version -bump $Bump
-
-    # Determine the bump kind that was applied so we can cascade the same kind to dependents.
-    # When the caller passed --version we infer it from old -> new.
-    $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
-        $Bump
-    } elseif (-not [string]::IsNullOrEmpty($Version)) {
-        Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
-    } else {
-        'minor'
-    }
-
-    $releases = @(
-        [pscustomobject]@{ Crate = $CrateName; OldVersion = $oldVersion; NewVersion = $newVersion }
-    )
-
-    # Cascade to every transitive non-dev workspace dependent. The bump kind applied to each
-    # dependent is informed by [package.metadata.cargo_check_external_types] AND by whether the
-    # target's bump is SemVer-incompatible under Cargo's rules:
-    #   - If the dependent exposes any type rooted at the bumped crate in its public API:
-    #       * If the target's bump is breaking (e.g. 0.0.5 -> 0.0.6, 0.3.0 -> 0.4.0, 1.x -> 2.0)
-    #         cascade as 'major' so the dependent's own version increment reflects the breaking
-    #         change in its public API surface.
-    #       * Otherwise cascade with the same kind as the target.
-    #   - Otherwise, the dependent only uses the bumped crate internally, so a `patch` bump is
-    #     enough to refresh the workspace-pinned version without overstating the change.
-    # If a dependent does not declare allowed_external_types, it is treated as exposing the target
-    # (worst-case assumption).
-    $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -bump $cascadeBump
-    $exposingCascadeBump = if ($targetIsBreaking) { 'major' } else { $cascadeBump }
-
-    $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $repoRoot)
-    if ($dependents.Count -gt 0) {
-        Write-Host ""
-        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
-
-        $allCrates = Get-WorkspaceCrates -repoRoot $repoRoot
-        $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
-        $targetPackageName = if ($null -ne $targetCrate) { $targetCrate.Name } else { $CrateName }
-
-        foreach ($dependent in $dependents) {
-            $depFolder = Join-Path $repoRoot 'crates' $dependent
-            $depCargo  = Join-Path $depFolder 'Cargo.toml'
-            $depChange = Join-Path $depFolder 'CHANGELOG.md'
-
-            if (-not (Test-Path $depCargo)) {
-                Write-Warning "Skipping cascade for '$dependent': Cargo.toml not found at '$depCargo'."
-                continue
-            }
-
-            $depCrate = $allCrates | Where-Object { $_.Folder -eq $dependent } | Select-Object -First 1
-            $exposes = if ($null -ne $depCrate) {
-                Test-CrateExposesTarget -dependent $depCrate -targetPackageName $targetPackageName
-            } else {
-                $true
-            }
-
-            $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
-            $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
-            Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
-
-            $depOld = Get-CurrentVersion -cargoTomlPath $depCargo
-
-            $depCascadeReason = @{
-                Target   = $CrateName
-                Version  = $newVersion
-                Breaking = (Test-IsBreakingChange -oldVersion $depOld -bump $depBump)
-            }
-
-            $depNew = Invoke-CrateRelease -crateName $dependent -crateFolder $depFolder `
-                -crateCargoToml $depCargo -rootCargoToml $rootCargoToml -changelogFile $depChange `
-                -prBaseUrl $prBaseUrl -version "" -bump $depBump -cascadeReason $depCascadeReason
-
-            $releases += [pscustomobject]@{ Crate = $dependent; OldVersion = $depOld; NewVersion = $depNew }
+# 6. RESOLVE BASE REF (best-effort fetch + validate)
+$resolvedBaseRef = $BaseRef
+if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
+    if ($resolvedBaseRef -match '^origin/(.+)$') {
+        $branch = $matches[1]
+        try {
+            Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path -AllowFailure | Out-Null
+        } catch {
+            Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
         }
     }
+    if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
+        Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release upstream-dependency scan will be skipped."
+        $resolvedBaseRef = ''
+    }
+}
 
-    # One workspace-wide cargo check after every version edit to confirm the workspace still resolves.
+# 7. EXECUTE WORKFLOW
+try {
+    $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $Bump `
+        -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
+
+    # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released
+    # crates are appended to $releases via the [ref].
+    Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
+        -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
+        -NonInteractive:$NonInteractive
+
     Write-Host ""
     Write-Host "🔍 Running workspace cargo check..." -ForegroundColor Cyan
     cargo check --workspace --quiet | Write-Host
@@ -966,8 +931,11 @@ try {
         Write-Error "Workspace 'cargo check' failed after version updates. Please verify the changes." -ErrorAction Stop
     }
 
+    $primary = $releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
+    $primaryNewVersion = if ($null -ne $primary) { $primary.NewVersion } else { '' }
+
     Show-ReleaseSummary -releases $releases
-    Show-FinalMessage -crateName $CrateName -newVersion $newVersion
+    Show-FinalMessage -crateName $CrateName -newVersion $primaryNewVersion
 }
 catch {
     Write-Error "Script failed: $_"
