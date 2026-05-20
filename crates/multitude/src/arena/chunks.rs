@@ -154,6 +154,11 @@ impl<C: ChunkKind + ?Sized> CurrentChunk<C> {
     pub(super) fn bump_smart_pointers_issued(&self) {
         let n = self.smart_pointers_issued.get();
         check_smart_pointers_issued_overflow(n);
+        // SAFETY: `check_smart_pointers_issued_overflow` above would
+        // have aborted if `n >= LARGE - 1`. Asserting the postcondition
+        // lets LLVM elide downstream overflow guards and produce tighter
+        // code for the `n + 1` store and subsequent consumers.
+        unsafe { core::hint::assert_unchecked(n < LARGE - 1) };
         self.smart_pointers_issued.set(n + 1);
     }
 }

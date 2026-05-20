@@ -15,9 +15,13 @@
 
 use allocator_api2::alloc::Global;
 
-use super::{AllocFlavor, align_offset, align_up, check_isize_overflow};
+#[cfg(feature = "dst")]
+use super::align_up;
+use super::{AllocFlavor, align_offset, check_isize_overflow};
 #[allow(unused_imports, reason = "kept for documentation in test comments")]
 use crate::internal::constants::MAX_CHUNK_BYTES;
+#[cfg(feature = "stats")]
+use crate::internal::constants::MIN_MAX_NORMAL_ALLOC;
 use crate::internal::drop_list::noop_drop_shim;
 #[cfg(feature = "std")]
 use crate::internal::drop_list::{drop_shim_one, drop_shim_slice};
@@ -381,13 +385,17 @@ fn alloc_slice_shared_with_or_panic_at_u16_max_succeeds() {
 #[cfg(feature = "stats")]
 #[test]
 fn alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path() {
+    // Use the minimum permitted `max_normal_alloc` (4 KiB) and a `u64`
+    // element type so the per-element `init` closure runs only 512 times
+    // instead of 8192 — the routing decision is purely a `layout.size()`
+    // comparison, so the exercised branch is identical.
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_local(64 * 1024)
         .build();
     let _ = arena.alloc::<u8>(0);
     let before = arena.stats().normal_local_chunks_allocated;
-    let _ = arena.alloc_slice_local_with_or_panic::<u8, _>(8 * 1024, AllocFlavor::SimpleRef, None, |_, slot| {
+    let _ = arena.alloc_slice_local_with_or_panic::<u64, _>(MIN_MAX_NORMAL_ALLOC / 8, AllocFlavor::SimpleRef, None, |_, slot| {
         slot.write(0);
     });
     let after = arena.stats().normal_local_chunks_allocated;
@@ -399,17 +407,17 @@ fn alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path() {
 #[test]
 fn alloc_slice_shared_with_or_panic_at_max_normal_uses_fast_path() {
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_shared(64 * 1024)
         .build();
     let _ = arena.alloc_arc::<u8>(0);
     let before = arena.stats().normal_shared_chunks_allocated;
-    let raw = arena.alloc_slice_shared_with_or_panic::<u8, _>(8 * 1024, None, |_, slot| {
+    let raw = arena.alloc_slice_shared_with_or_panic::<u64, _>(MIN_MAX_NORMAL_ALLOC / 8, None, |_, slot| {
         slot.write(0);
     });
     let after = arena.stats().normal_shared_chunks_allocated;
     // SAFETY: shared slice allocator bumped the chunk's smart-pointer refcount.
-    let _arc: crate::Arc<[u8], Global> = unsafe { crate::Arc::from_value_ptr(raw) };
+    let _arc: crate::Arc<[u64], Global> = unsafe { crate::Arc::from_value_ptr(raw) };
     assert_eq!(before, after, "exact max_normal_alloc must not need a new chunk");
 }
 
@@ -562,13 +570,18 @@ fn alloc_with_drop_runs_destructor_on_arena_drop() {
 #[cfg(feature = "stats")]
 #[test]
 fn try_alloc_uninit_slice_at_max_normal_uses_fast_path() {
+    // Minimum permitted `max_normal_alloc` + `u64` element type: the
+    // routing branch is identical (it tests `layout.size() <= max_normal_alloc`)
+    // but the per-element init runs 512 times instead of 8192.
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_local(64 * 1024)
         .build();
     let _ = arena.alloc::<u8>(0);
     let before = arena.stats().normal_local_chunks_allocated;
-    let _ = arena.try_alloc_slice_fill_with::<u8, _>(8 * 1024, |_| 0).expect("must fit");
+    let _ = arena
+        .try_alloc_slice_fill_with::<u64, _>(MIN_MAX_NORMAL_ALLOC / 8, |_| 0)
+        .expect("must fit");
     let after = arena.stats().normal_local_chunks_allocated;
     assert_eq!(before, after, "exact max_normal_alloc must not need a new chunk");
 }
@@ -579,11 +592,14 @@ fn try_alloc_uninit_slice_at_max_normal_uses_fast_path() {
 #[test]
 fn try_alloc_slice_copy_at_max_normal_uses_fast_path() {
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_local(64 * 1024)
         .build();
     let _ = arena.alloc::<u8>(0);
-    let src: alloc::vec::Vec<u8> = alloc::vec![0_u8; 8 * 1024];
+    // `u64` src instead of `u8`: identical fast-path branch, 8× less
+    // per-byte tracking on the source Vec build *and* the
+    // `copy_nonoverlapping` inside the allocator under Miri.
+    let src: alloc::vec::Vec<u64> = alloc::vec![0_u64; MIN_MAX_NORMAL_ALLOC / 8];
     let before = arena.stats().normal_local_chunks_allocated;
     let _ = arena.try_alloc_slice_copy(&*src).expect("must fit");
     let after = arena.stats().normal_local_chunks_allocated;
@@ -596,11 +612,11 @@ fn try_alloc_slice_copy_at_max_normal_uses_fast_path() {
 #[test]
 fn alloc_slice_copy_at_max_normal_uses_fast_path() {
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_local(64 * 1024)
         .build();
     let _ = arena.alloc::<u8>(0);
-    let src: alloc::vec::Vec<u8> = alloc::vec![0_u8; 8 * 1024];
+    let src: alloc::vec::Vec<u64> = alloc::vec![0_u64; MIN_MAX_NORMAL_ALLOC / 8];
     let before = arena.stats().normal_local_chunks_allocated;
     let _ = arena.alloc_slice_copy(&*src);
     let after = arena.stats().normal_local_chunks_allocated;
@@ -613,11 +629,11 @@ fn alloc_slice_copy_at_max_normal_uses_fast_path() {
 #[test]
 fn try_alloc_slice_copy_arc_at_max_normal_uses_fast_path() {
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_shared(64 * 1024)
         .build();
     let _ = arena.alloc_arc::<u8>(0);
-    let src: alloc::vec::Vec<u8> = alloc::vec![0_u8; 8 * 1024];
+    let src: alloc::vec::Vec<u64> = alloc::vec![0_u64; MIN_MAX_NORMAL_ALLOC / 8];
     let before = arena.stats().normal_shared_chunks_allocated;
     let _ = arena.try_alloc_slice_copy_arc(&*src).expect("must fit");
     let after = arena.stats().normal_shared_chunks_allocated;
@@ -630,14 +646,196 @@ fn try_alloc_slice_copy_arc_at_max_normal_uses_fast_path() {
 #[test]
 fn try_alloc_uninit_slice_arc_at_max_normal_uses_fast_path() {
     let arena = Arena::<Global>::builder()
-        .max_normal_alloc(8 * 1024)
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
         .with_capacity_shared(64 * 1024)
         .build();
     let _ = arena.alloc_arc::<u8>(0);
     let before = arena.stats().normal_shared_chunks_allocated;
-    let _ = arena.try_alloc_slice_fill_with_arc::<u8, _>(8 * 1024, |_| 0).expect("must fit");
+    let _ = arena
+        .try_alloc_slice_fill_with_arc::<u64, _>(MIN_MAX_NORMAL_ALLOC / 8, |_| 0)
+        .expect("must fit");
     let after = arena.stats().normal_shared_chunks_allocated;
     assert_eq!(before, after, "exact max_normal_alloc must not need a new chunk");
+}
+
+/// Kills `inner_slice.rs:621:26 > -> >=` in
+/// [`Arena::try_alloc_slice_local_no_drop_with_slow`]. The slow path
+/// is reached when the bump fast path misses; at exactly
+/// `layout.size() == max_normal_alloc` the original (`>`) falls
+/// through to `refill_local`, which charges the retired chunk's
+/// tail to `wasted_tail_bytes`. The mutant (`>=`) routes to
+/// [`Arena::try_alloc_slice_local_oversized_with`], which keeps
+/// `current_local` loaded and therefore leaves `wasted_tail_bytes`
+/// unchanged. Sizing `with_capacity_local` exactly at
+/// `MIN_MAX_NORMAL_ALLOC` makes the preallocated chunk's payload
+/// strictly smaller than `max_normal_alloc`, so the boundary-sized
+/// slice cannot fit and the slow path must run.
+#[cfg(feature = "stats")]
+#[test]
+fn try_alloc_uninit_slice_slow_at_max_normal_refills() {
+    let arena = Arena::<Global>::builder()
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
+        .with_capacity_local(MIN_MAX_NORMAL_ALLOC)
+        .build();
+    let _ = arena.alloc::<u8>(0);
+    let before = arena.stats().wasted_tail_bytes;
+    let _ = arena
+        .try_alloc_slice_fill_with::<u64, _>(MIN_MAX_NORMAL_ALLOC / 8, |_| 0)
+        .expect("slow-path refill must succeed");
+    let after = arena.stats().wasted_tail_bytes;
+    assert!(
+        after > before,
+        "slow path at exactly max_normal_alloc must refill_local (charges wasted tail); the `>=` mutant would route to the oversized helper instead",
+    );
+}
+
+/// Kills `inner_slice.rs:750:26 > -> >=` in
+/// [`Arena::alloc_slice_local_copy_slow`]. Same observation as
+/// `try_alloc_uninit_slice_slow_at_max_normal_refills`, but exercised
+/// through the `T: Copy` fast path.
+#[cfg(feature = "stats")]
+#[test]
+fn try_alloc_slice_copy_slow_at_max_normal_refills() {
+    let arena = Arena::<Global>::builder()
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
+        .with_capacity_local(MIN_MAX_NORMAL_ALLOC)
+        .build();
+    let _ = arena.alloc::<u8>(0);
+    let src: alloc::vec::Vec<u64> = alloc::vec![0_u64; MIN_MAX_NORMAL_ALLOC / 8];
+    let before = arena.stats().wasted_tail_bytes;
+    let _ = arena.try_alloc_slice_copy(&*src).expect("slow-path refill must succeed");
+    let after = arena.stats().wasted_tail_bytes;
+    assert!(
+        after > before,
+        "slow path at exactly max_normal_alloc must refill_local (charges wasted tail); the `>=` mutant would route to the oversized helper instead",
+    );
+}
+
+/// Kills `inner_slice.rs:891:26 > -> >=` in
+/// [`Arena::alloc_slice_shared_copy_slow`]. Shared-flavor sibling
+/// of `try_alloc_slice_copy_slow_at_max_normal_refills`.
+#[cfg(feature = "stats")]
+#[test]
+fn try_alloc_slice_copy_arc_slow_at_max_normal_refills() {
+    let arena = Arena::<Global>::builder()
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
+        .with_capacity_shared(MIN_MAX_NORMAL_ALLOC)
+        .build();
+    let _ = arena.alloc_arc::<u8>(0);
+    let src: alloc::vec::Vec<u64> = alloc::vec![0_u64; MIN_MAX_NORMAL_ALLOC / 8];
+    let before = arena.stats().wasted_tail_bytes;
+    let _ = arena.try_alloc_slice_copy_arc(&*src).expect("slow-path refill must succeed");
+    let after = arena.stats().wasted_tail_bytes;
+    assert!(
+        after > before,
+        "slow path at exactly max_normal_alloc must refill_shared (charges wasted tail); the `>=` mutant would route to the oversized helper instead",
+    );
+}
+
+/// Kills `primitives.rs:123:26 > -> >=` in
+/// [`Arena::allocate_layout_slow`]. The `&Arena: Allocator` slow path
+/// is reached when the bump-fit probe in [`Arena::allocate_layout`]
+/// misses; at exactly `layout.size() == max_normal_alloc` the
+/// original (`>`) calls `refill_local` and then retries the fast
+/// path, charging the retired chunk's tail to `wasted_tail_bytes`.
+/// The mutant (`>=`) routes to `allocate_oversized_layout`, which
+/// keeps `current_local` loaded and never charges wasted tail.
+#[cfg(feature = "stats")]
+#[test]
+fn allocate_layout_slow_at_max_normal_refills() {
+    use core::alloc::Layout;
+
+    use allocator_api2::alloc::Allocator;
+
+    let arena = Arena::<Global>::builder()
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
+        .with_capacity_local(MIN_MAX_NORMAL_ALLOC)
+        .build();
+    let _ = arena.alloc::<u8>(0);
+    let before = arena.stats().wasted_tail_bytes;
+    let layout = Layout::from_size_align(MIN_MAX_NORMAL_ALLOC, 8).expect("valid layout");
+    let ptr = (&arena).allocate(layout).expect("slow-path refill must succeed");
+    let after = arena.stats().wasted_tail_bytes;
+    // `&Arena: Allocator::allocate` bumps the backing chunk's refcount;
+    // the matching `deallocate` is required for the chunk to ever be
+    // freed (otherwise the arena's own drop sees refcount > 0 and
+    // leaves the chunk allocated — observable under Miri's leak checker).
+    // SAFETY: `ptr.cast::<u8>()` is the pointer just returned by `allocate`
+    // above; `layout` is the layout it was allocated with.
+    unsafe { (&arena).deallocate(ptr.cast::<u8>(), layout) };
+    assert!(
+        after > before,
+        "slow path at exactly max_normal_alloc must refill_local (charges wasted tail); the `>=` mutant would route to allocate_oversized_layout instead",
+    );
+}
+
+/// Kills `primitives.rs:127:36 + -> -` in [`Arena::allocate_layout_slow`].
+/// Line 127 computes
+/// `let needed = layout.size() + layout.align().saturating_sub(align_of::<usize>())`.
+/// For `align > align_of::<usize>()` the saturating slack is positive;
+/// the mutant flips `+` to `-`, so for a small `size` (here `1`) and
+/// `align == 16` the request becomes `1usize - 8`, which panics with
+/// "subtract with overflow" in debug profile (and would wrap to a
+/// huge value otherwise, which `refill_local`'s
+/// `min_payload > local_max_bump_extent` defense rejects). The
+/// original computes `needed = 9` and the allocation succeeds.
+#[test]
+fn allocate_layout_slow_high_align_does_not_underflow_needed() {
+    use core::alloc::Layout;
+
+    use allocator_api2::alloc::Allocator;
+
+    let arena = Arena::<Global>::new();
+    // align > size_of::<usize>() (which is 8 on 64-bit and 4 on 32-bit
+    // targets): pick the larger value so the slack is always > 0.
+    let align = (core::mem::align_of::<usize>() * 2).max(16);
+    let layout = Layout::from_size_align(1, align).expect("valid layout");
+    let ptr = (&arena)
+        .allocate(layout)
+        .expect("small high-align allocation must succeed; the `+ -> -` mutant underflows `needed` and rejects the refill");
+    assert!(!ptr.is_empty(), "allocator must return a non-empty slot");
+    // SAFETY: `ptr.cast::<u8>()` is the pointer just returned by `allocate`
+    // above; `layout` is the layout it was allocated with. Required so
+    // the chunk's refcount returns to 0 and the arena can free it on drop.
+    unsafe { (&arena).deallocate(ptr.cast::<u8>(), layout) };
+}
+
+/// Kills `primitives.rs:200:26 > -> >=` in
+/// [`Arena::allocate_shared_layout_slow`]. Mirror of
+/// `allocate_layout_slow_at_max_normal_refills` for the shared-flavor
+/// `bytesbuf`/`dst` integration path.
+#[cfg(all(feature = "stats", any(feature = "dst", feature = "bytesbuf")))]
+#[test]
+fn allocate_shared_layout_slow_at_max_normal_refills() {
+    use core::alloc::Layout;
+
+    use crate::internal::in_chunk::InSharedChunk;
+    use crate::internal::shared_chunk::SharedChunk;
+
+    let arena = Arena::<Global>::builder()
+        .max_normal_alloc(MIN_MAX_NORMAL_ALLOC)
+        .with_capacity_shared(MIN_MAX_NORMAL_ALLOC)
+        .build();
+    let _ = arena.alloc_arc::<u8>(0);
+    let before = arena.stats().wasted_tail_bytes;
+    let layout = Layout::from_size_align(MIN_MAX_NORMAL_ALLOC, 8).expect("valid layout");
+    let raw = arena.allocate_shared_layout(layout).expect("slow-path refill must succeed");
+    let after = arena.stats().wasted_tail_bytes;
+    // `allocate_shared_layout` left a `+1` on the backing chunk's
+    // smart-pointer refcount; production callers (DST / `bytesbuf`)
+    // hand that hold to an `Arc` whose drop calls `dec_ref`. Since
+    // this test never wraps the raw pointer, decrement explicitly so
+    // the chunk can be reclaimed when the arena drops (otherwise Miri
+    // reports a leak).
+    // SAFETY: `raw` was returned from this arena's shared allocator
+    // and points inside a live chunk; the `+1` hold belongs to us.
+    let chunk = unsafe { InSharedChunk::<u8, Global>::new(raw) }.chunk_ptr();
+    // SAFETY: refcount is positive because of the hold we just took.
+    unsafe { SharedChunk::dec_ref(chunk) };
+    assert!(
+        after > before,
+        "slow path at exactly max_normal_alloc must refill_shared (charges wasted tail); the `>=` mutant would route to allocate_shared_oversized_layout instead",
+    );
 }
 
 /// Kills `entry_size > 0 -> entry_size >= 0` mutant at the post-init
@@ -991,7 +1189,7 @@ fn alloc_slice_shared_with_or_panic_refill_failure_panics() {
 fn try_alloc_slice_copy_layout_overflow_returns_err() {
     let arena = Arena::<Global>::new();
     // Build a fake-huge slice by directly invoking the no-drop helper.
-    let res = arena.try_alloc_slice_local_no_drop_with::<u64, _>(HUGE_LEN, AllocFlavor::SimpleRef, |_, slot| {
+    let res = arena.try_alloc_slice_local_no_drop_with::<u64, _, false>(HUGE_LEN, AllocFlavor::SimpleRef, |_, slot| {
         slot.write(0);
     });
     assert!(res.is_err());
@@ -1000,7 +1198,7 @@ fn try_alloc_slice_copy_layout_overflow_returns_err() {
 #[test]
 fn try_alloc_slice_local_no_drop_with_over_aligned_returns_err_box_flavor() {
     let arena = Arena::<Global>::new();
-    let res = arena.try_alloc_slice_local_no_drop_with::<HugeAlign32K, _>(1, AllocFlavor::Box, |_, slot| {
+    let res = arena.try_alloc_slice_local_no_drop_with::<HugeAlign32K, _, false>(1, AllocFlavor::Box, |_, slot| {
         slot.write(HugeAlign32K(0));
     });
     assert!(res.is_err());
@@ -1010,7 +1208,7 @@ fn try_alloc_slice_local_no_drop_with_over_aligned_returns_err_box_flavor() {
 fn try_alloc_slice_local_no_drop_with_over_aligned_returns_err_simpleref_flavor() {
     let arena = Arena::<Global>::new();
     // SimpleRef path uses CHUNK_ALIGN cap (64 KiB), so 64 KiB-aligned T is rejected.
-    let res = arena.try_alloc_slice_local_no_drop_with::<HugeAlign64K, _>(1, AllocFlavor::SimpleRef, |_, slot| {
+    let res = arena.try_alloc_slice_local_no_drop_with::<HugeAlign64K, _, false>(1, AllocFlavor::SimpleRef, |_, slot| {
         slot.write(HugeAlign64K(0));
     });
     assert!(res.is_err());
@@ -1019,7 +1217,7 @@ fn try_alloc_slice_local_no_drop_with_over_aligned_returns_err_simpleref_flavor(
 #[test]
 fn try_alloc_slice_shared_no_drop_with_layout_overflow_returns_err() {
     let arena = Arena::<Global>::new();
-    let res = arena.try_alloc_slice_shared_no_drop_with::<u64, _>(HUGE_LEN, |_, slot| {
+    let res = arena.try_alloc_slice_shared_no_drop_with::<u64, _, false>(HUGE_LEN, |_, slot| {
         slot.write(0);
     });
     assert!(res.is_err());
@@ -1028,7 +1226,7 @@ fn try_alloc_slice_shared_no_drop_with_layout_overflow_returns_err() {
 #[test]
 fn try_alloc_slice_shared_no_drop_with_over_aligned_returns_err() {
     let arena = Arena::<Global>::new();
-    let res = arena.try_alloc_slice_shared_no_drop_with::<HugeAlign32K, _>(1, |_, slot| {
+    let res = arena.try_alloc_slice_shared_no_drop_with::<HugeAlign32K, _, false>(1, |_, slot| {
         slot.write(HugeAlign32K(0));
     });
     assert!(res.is_err());
@@ -1041,6 +1239,100 @@ fn try_alloc_slice_shared_copy_layout_overflow_returns_err() {
     // Sanity-check normal path; layout-overflow is covered by the no_drop variant above.
     let res = arena.try_alloc_slice_copy_arc::<u64>(&[1, 2, 3]);
     assert!(res.is_ok(), "sanity check for normal path");
+}
+
+// ===== PANIC=true panic-on-error arms in `try_alloc_slice_local_no_drop_with` =====
+// These exercise the `if PANIC { panic_alloc(); }` branches that the
+// PANIC=false `try_*` siblings above cannot reach. Routed through the
+// public panicking `alloc_slice_fill_with*` entrypoints which propagate
+// `PANIC = true` into the no-drop inner helper for `T: !needs_drop`.
+
+#[test]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_fill_with_box_layout_overflow_panics() {
+    // `u64: !needs_drop` ⇒ Box flavor's `alloc_slice_fill_with_box` routes
+    // through `try_alloc_slice_local_fill_with_inner::<_, _, true>` → for
+    // `!needs_drop` → `try_alloc_slice_local_no_drop_with::<_, _, true>`,
+    // where `Layout::array::<u64>(HUGE_LEN)` overflows and the panicking
+    // arm fires. (The SimpleRef sibling `alloc_slice_fill_with` cannot
+    // reach this arm because it goes through the fallible inner with
+    // `PANIC = false` and wraps the result with `expect_alloc`.)
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_slice_fill_with_box::<u64, _>(HUGE_LEN, |i| i as u64);
+}
+
+#[test]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_fill_with_layout_overflow_panics() {
+    // SimpleRef flavor: panics through the `expect_alloc` wrapper rather
+    // than `panic_alloc` directly. Kept here as the symmetric sanity test
+    // for the public panicking entrypoint.
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_slice_fill_with::<u64, _>(HUGE_LEN, |i| i as u64);
+}
+
+#[test]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_fill_with_box_over_aligned_panics() {
+    // `HugeAlign32K: !needs_drop` + Box flavor ⇒ no-drop inner with
+    // `MAX_SMART_PTR_ALIGN` cap (= 32 KiB); align == cap rejects and the
+    // panicking arm fires.
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_slice_fill_with_box::<HugeAlign32K, _>(1, |_| HugeAlign32K(0));
+}
+
+// ===== PANIC=true panic-on-error arms in `try_alloc_slice_shared_no_drop_with` =====
+// Reached through `alloc_slice_fill_with_arc` for `T: !needs_drop + Send + Sync`.
+
+// SAFETY: `HugeAlign32K` is a single-byte payload with no thread-state.
+unsafe impl Send for HugeAlign32K {}
+// SAFETY: `HugeAlign32K` is a single-byte payload with no thread-state.
+unsafe impl Sync for HugeAlign32K {}
+
+#[test]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_fill_with_arc_layout_overflow_panics() {
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_slice_fill_with_arc::<u64, _>(HUGE_LEN, |i| i as u64);
+}
+
+#[test]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_fill_with_arc_over_aligned_panics() {
+    // `HugeAlign32K: !needs_drop` ⇒ no-drop shared inner with
+    // `MAX_SMART_PTR_ALIGN` cap; align == cap → panic.
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_slice_fill_with_arc::<HugeAlign32K, _>(1, |_| HugeAlign32K(0));
+}
+
+// ===== PANIC=true panic-on-error arm in `try_alloc_slice_shared_copy` =====
+// Reached through `alloc_slice_copy_arc` for `T: Copy + Send + Sync`.
+// Gated off Windows for the same reason as the bytemuck slice
+// `*_over_aligned` siblings: under coverage instrumentation, materializing
+// any `HugeAlign64KCopy`-typed slot in the test's stack frame exceeds
+// Windows' default 1 MiB stack.
+
+#[cfg(not(target_os = "windows"))]
+#[repr(align(65536))]
+#[derive(Clone, Copy)]
+struct HugeAlign64KCopy(#[expect(dead_code, reason = "alignment marker")] u8);
+
+// SAFETY: `HugeAlign64KCopy` is a single-byte payload with no thread-state.
+#[cfg(not(target_os = "windows"))]
+unsafe impl Send for HugeAlign64KCopy {}
+// SAFETY: `HugeAlign64KCopy` is a single-byte payload with no thread-state.
+#[cfg(not(target_os = "windows"))]
+unsafe impl Sync for HugeAlign64KCopy {}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+#[should_panic(expected = "multitude: allocator returned AllocError")]
+fn alloc_slice_copy_arc_over_aligned_panics() {
+    let arena = Arena::<Global>::new();
+    // Use a heap-allocated empty `Vec` so the `&[T]` is just a (ptr, len) pair
+    // and no `HugeAlign64KCopy` value materializes in this stack frame.
+    let v: alloc::vec::Vec<HugeAlign64KCopy> = alloc::vec::Vec::new();
+    let _ = arena.alloc_slice_copy_arc::<HugeAlign64KCopy>(&*v);
 }
 
 // ===== DST: alloc_unsized.rs error arms =====
@@ -1328,6 +1620,7 @@ fn try_alloc_dst_rc_oversized_refill_failure_returns_err() {
     assert!(res.is_err());
 }
 
+#[cfg(feature = "dst")]
 #[test]
 fn align_up_identity_when_already_aligned() {
     // Kills the `align - 1` mutants in `align_up`: zero must stay zero.
@@ -1337,6 +1630,7 @@ fn align_up_identity_when_already_aligned() {
     assert_eq!(align_up(8, 8), 8);
 }
 
+#[cfg(feature = "dst")]
 #[test]
 fn align_up_rounds_up_to_alignment() {
     assert_eq!(align_up(1, 4), 4);
@@ -1345,6 +1639,7 @@ fn align_up_rounds_up_to_alignment() {
     assert_eq!(align_up(9, 8), 16);
 }
 
+#[cfg(feature = "dst")]
 #[test]
 fn align_up_align_one_is_identity() {
     assert_eq!(align_up(0, 1), 0);

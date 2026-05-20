@@ -13,109 +13,109 @@ Bench names are aligned between criterion and gungraun via the `GROUPS` table in
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `multitude` | 47 ns | — | — | — |
+| `multitude` | 48 ns | — | — | — |
 | `bumpalo` | 1 ns | — | — | — |
 
 ## `alloc_u64`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `alloc` | 2.92 µs | 17,145 | 10 | 27,218 |
-| `alloc_with` | 4.08 µs | 17,024 | 6 | 27,038 |
-| `alloc_box` | 5.12 µs | 20,427 | 31 | 32,593 |
-| `alloc_box_with` | 5.14 µs | 20,305 | 28 | 32,412 |
-| `alloc_uninit_box` | 3.49 µs | 22,406 | 31 | 33,562 |
-| `alloc_zeroed_box` | 4.81 µs | 24,404 | 35 | 36,558 |
-| `alloc_rc` | 4.73 µs | 20,427 | 31 | 32,593 |
-| `alloc_rc_with` | 4.70 µs | 20,305 | 28 | 32,412 |
-| `alloc_uninit_rc` | 3.41 µs | 22,406 | 31 | 33,562 |
-| `alloc_zeroed_rc` | 4.64 µs | 24,404 | 35 | 36,558 |
-| `alloc_arc` | 4.96 µs | 22,412 | 35 | 34,571 |
-| `alloc_arc_with` | 4.79 µs | 22,412 | 33 | 34,571 |
-| `alloc_uninit_arc` | 3.54 µs | 22,410 | 34 | 33,567 |
-| `alloc_zeroed_arc` | 4.87 µs | 23,408 | 34 | 35,563 |
-| `bumpalo` | 5.41 µs | 21,022 | 5 | 31,037 |
-| `bumpalo_with` | 5.26 µs | 21,020 | 5 | 31,034 |
+| `alloc` | 3.70 µs | 17,157 | 13 | 27,235 |
+| `alloc_with` | 4.75 µs | 17,024 | 6 | 27,038 |
+| `alloc_box` | 6.69 µs | 25,439 | 33 | 38,610 |
+| `alloc_box_with` | 6.34 µs | 25,300 | 29 | 38,406 |
+| `alloc_uninit_box` | 6.78 µs | 22,437 | 35 | 33,607 |
+| `alloc_zeroed_box` | 6.37 µs | 22,437 | 35 | 33,607 |
+| `alloc_rc` | 6.41 µs | 25,439 | 33 | 38,610 |
+| `alloc_rc_with` | 6.81 µs | 25,300 | 29 | 38,406 |
+| `alloc_uninit_rc` | 6.29 µs | 22,437 | 35 | 33,607 |
+| `alloc_zeroed_rc` | 6.57 µs | 22,437 | 35 | 33,607 |
+| `alloc_arc` | 6.48 µs | 27,421 | 33 | 40,580 |
+| `alloc_arc_with` | 6.84 µs | 27,421 | 33 | 40,580 |
+| `alloc_uninit_arc` | 4.16 µs | 24,422 | 36 | 34,581 |
+| `alloc_zeroed_arc` | 6.04 µs | 24,422 | 35 | 35,581 |
+| `bumpalo` | 6.57 µs | 21,022 | 5 | 31,037 |
+| `bumpalo_with` | 6.87 µs | 21,020 | 3 | 31,034 |
 
 ## `alloc_str`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `alloc_str` | 4.86 µs | 163,533 | 47 | 233,808 |
-| `alloc_str_box` | 9.24 µs | 172,359 | 45 | 246,561 |
-| `alloc_str_rc` | 9.52 µs | 172,359 | 45 | 246,561 |
-| `alloc_str_arc` | 8.86 µs | 172,361 | 46 | 245,563 |
-| `bumpalo` | 6.14 µs | 168,404 | 47 | 245,618 |
+| `alloc_str` | 6.14 µs | 163,545 | 51 | 233,826 |
+| `alloc_str_box` | 12.22 µs | 186,373 | 46 | 268,576 |
+| `alloc_str_rc` | 11.00 µs | 186,373 | 46 | 268,576 |
+| `alloc_str_arc` | 10.31 µs | 177,370 | 46 | 251,572 |
+| `bumpalo` | 7.71 µs | 168,404 | 47 | 245,618 |
 
 ## `alloc_slice`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `alloc_slice_copy` | 20.99 µs | 23,496 | 28 | 37,727 |
-| `alloc_slice_clone` | 21.97 µs | 46,523 | 35 | 66,761 |
-| `alloc_slice_fill_with` | 23.80 µs | 41,003 | 8 | 72,995 |
-| `alloc_slice_fill_iter` | 23.80 µs | 43,007 | 7 | 77,001 |
-| `alloc_slice_copy_box` | 23.31 µs | 38,747 | 39 | 60,074 |
-| `alloc_slice_clone_box` | 23.48 µs | 59,770 | 43 | 88,100 |
-| `alloc_slice_fill_with_box` | 25.44 µs | 52,250 | 22 | 90,336 |
-| `alloc_slice_fill_iter_box` | 25.64 µs | 54,251 | 22 | 94,337 |
-| `alloc_uninit_slice_box` | 4.99 µs | 28,375 | 25 | 42,531 |
-| `alloc_zeroed_slice_box` | 21.69 µs | 31,376 | 24 | 47,532 |
-| `alloc_slice_copy_rc` | 21.70 µs | 38,747 | 37 | 60,074 |
-| `alloc_slice_clone_rc` | 21.91 µs | 59,770 | 42 | 88,100 |
-| `alloc_slice_fill_with_rc` | 25.85 µs | 52,250 | 22 | 90,336 |
-| `alloc_slice_fill_iter_rc` | 25.63 µs | 54,251 | 22 | 94,337 |
-| `alloc_uninit_slice_rc` | 5.06 µs | 28,375 | 25 | 42,531 |
-| `alloc_zeroed_slice_rc` | 21.91 µs | 31,376 | 24 | 47,532 |
-| `alloc_slice_copy_arc` | 21.87 µs | 36,747 | 43 | 59,075 |
-| `alloc_slice_clone_arc` | 22.39 µs | 66,733 | 43 | 101,054 |
-| `alloc_slice_fill_with_arc` | 25.36 µs | 51,379 | 27 | 89,536 |
-| `alloc_slice_fill_iter_arc` | 25.43 µs | 54,379 | 26 | 94,536 |
-| `alloc_uninit_slice_arc` | 4.83 µs | 27,379 | 28 | 41,536 |
-| `alloc_zeroed_slice_arc` | 21.00 µs | 30,380 | 28 | 46,537 |
-| `bumpalo_copy` | 17.80 µs | 43,374 | 26 | 65,556 |
-| `bumpalo_clone` | 18.38 µs | 61,376 | 27 | 78,557 |
-| `bumpalo_fill_with` | 19.50 µs | 42,020 | 5 | 74,033 |
-| `bumpalo_fill_iter` | 20.05 µs | 42,020 | 5 | 74,033 |
+| `alloc_slice_copy` | 27.99 µs | 20,513 | 32 | 32,751 |
+| `alloc_slice_clone` | 31.81 µs | 43,532 | 33 | 61,774 |
+| `alloc_slice_fill_with` | 32.05 µs | 38,002 | 9 | 67,994 |
+| `alloc_slice_fill_iter` | 31.13 µs | 40,006 | 9 | 72,000 |
+| `alloc_slice_copy_box` | 29.55 µs | 37,766 | 44 | 60,101 |
+| `alloc_slice_clone_box` | 30.33 µs | 60,780 | 43 | 88,115 |
+| `alloc_slice_fill_with_box` | 33.31 µs | 53,249 | 27 | 91,335 |
+| `alloc_slice_fill_iter_box` | 32.78 µs | 54,247 | 21 | 93,332 |
+| `alloc_uninit_slice_box` | 5.88 µs | 32,389 | 28 | 45,552 |
+| `alloc_zeroed_slice_box` | 27.08 µs | 35,390 | 28 | 50,553 |
+| `alloc_slice_copy_rc` | 28.19 µs | 37,766 | 44 | 60,101 |
+| `alloc_slice_clone_rc` | 28.95 µs | 60,780 | 43 | 88,115 |
+| `alloc_slice_fill_with_rc` | 32.18 µs | 53,249 | 27 | 91,335 |
+| `alloc_slice_fill_iter_rc` | 34.27 µs | 54,247 | 22 | 93,332 |
+| `alloc_uninit_slice_rc` | 6.12 µs | 32,389 | 28 | 45,552 |
+| `alloc_zeroed_slice_rc` | 27.16 µs | 35,390 | 28 | 50,553 |
+| `alloc_slice_copy_arc` | 29.95 µs | 39,760 | 39 | 62,090 |
+| `alloc_slice_clone_arc` | 28.59 µs | 63,749 | 39 | 94,075 |
+| `alloc_slice_fill_with_arc` | 34.98 µs | 56,390 | 24 | 93,549 |
+| `alloc_slice_fill_iter_arc` | 40.88 µs | 60,392 | 25 | 100,552 |
+| `alloc_uninit_slice_arc` | 6.45 µs | 30,390 | 29 | 43,549 |
+| `alloc_zeroed_slice_arc` | 28.31 µs | 34,391 | 26 | 49,550 |
+| `bumpalo_copy` | 27.55 µs | 43,374 | 26 | 65,556 |
+| `bumpalo_clone` | 27.30 µs | 61,376 | 27 | 78,557 |
+| `bumpalo_fill_with` | 28.51 µs | 42,020 | 5 | 74,033 |
+| `bumpalo_fill_iter` | 27.69 µs | 42,020 | 5 | 74,033 |
 
 ## `string_builder`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `alloc_string` | 4.54 µs | 149,846 | 52 | 210,254 |
-| `alloc_string_with_capacity` | 4.46 µs | 150,348 | 43 | 210,556 |
-| `bumpalo_grow` | 7.16 µs | 150,866 | 99 | 211,948 |
-| `bumpalo_with_cap` | 6.91 µs | 149,733 | 50 | 210,243 |
+| `alloc_string` | 5.42 µs | 149,857 | 50 | 210,237 |
+| `alloc_string_with_capacity` | 5.48 µs | 151,372 | 42 | 212,588 |
+| `bumpalo_grow` | 9.54 µs | 150,866 | 103 | 211,948 |
+| `bumpalo_with_cap` | 8.99 µs | 149,733 | 50 | 210,243 |
 
 ## `vec_builder`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `alloc_vec` | 1.52 µs | 12,062 | 42 | 18,518 |
-| `alloc_vec_with_capacity` | 1.46 µs | 12,464 | 28 | 19,680 |
-| `bumpalo_grow` | 2.67 µs | 12,429 | 70 | 19,101 |
-| `bumpalo_with_cap` | 2.61 µs | 11,219 | 15 | 17,332 |
+| `alloc_vec` | 1.69 µs | 12,111 | 46 | 18,568 |
+| `alloc_vec_with_capacity` | 1.42 µs | 12,495 | 28 | 19,728 |
+| `bumpalo_grow` | 3.56 µs | 12,429 | 71 | 19,101 |
+| `bumpalo_with_cap` | 3.05 µs | 11,219 | 16 | 17,332 |
 
 ## `drop`
 
 | Variant | Time (criterion) | Instructions | Branch misses | Mem accesses |
 |---|---:|---:|---:|---:|
-| `box_u64` | 3.62 µs | — | — | — |
-| `rc_u64` | 3.59 µs | — | — | — |
-| `arc_u64` | 10.75 µs | — | — | — |
-| `box_droppy` | 17.22 µs | 177,497 | 95 | 246,500 |
-| `rc_droppy` | 18.25 µs | 213,875 | 77 | 304,904 |
-| `arc_droppy` | 23.98 µs | 215,037 | 180 | 307,094 |
-| `str_box` | 3.16 µs | 10,771 | 45 | 14,164 |
-| `str_rc` | 3.25 µs | 10,771 | 45 | 14,164 |
-| `str_arc` | 10.15 µs | 11,350 | 91 | 15,507 |
-| `slice_box_u64` | 5.59 µs | — | — | — |
-| `slice_rc_u64` | 5.61 µs | — | — | — |
-| `slice_arc_u64` | 14.08 µs | — | — | — |
-| `slice_box_droppy` | 101.98 µs | 1,184,336 | 1,122 | 1,604,745 |
-| `slice_rc_droppy` | 129.42 µs | 1,520,784 | 3,122 | 2,147,736 |
-| `slice_arc_droppy` | 134.02 µs | 1,522,860 | 3,246 | 2,150,872 |
-| `alloc` | 1.03 µs | 535 | 25 | 812 |
+| `box_u64` | 4.66 µs | — | — | — |
+| `rc_u64` | 4.48 µs | — | — | — |
+| `arc_u64` | 12.70 µs | — | — | — |
+| `box_droppy` | 21.98 µs | 177,489 | 97 | 246,485 |
+| `rc_droppy` | 21.77 µs | 213,867 | 77 | 304,889 |
+| `arc_droppy` | 27.92 µs | 214,438 | 169 | 306,189 |
+| `str_box` | 4.46 µs | 10,769 | 46 | 14,156 |
+| `str_rc` | 4.37 µs | 10,769 | 46 | 14,156 |
+| `str_arc` | 11.94 µs | 11,009 | 85 | 14,971 |
+| `slice_box_u64` | 8.59 µs | — | — | — |
+| `slice_rc_u64` | 7.99 µs | — | — | — |
+| `slice_arc_u64` | 19.54 µs | — | — | — |
+| `slice_box_droppy` | 108.48 µs | 1,184,318 | 1,125 | 1,604,712 |
+| `slice_rc_droppy` | 140.69 µs | 1,520,766 | 3,123 | 2,147,703 |
+| `slice_arc_droppy` | 162.21 µs | 1,522,288 | 3,233 | 2,149,983 |
+| `alloc` | 1.75 µs | 533 | 25 | 804 |
 
 ## Multitude vs Bumpalo Head-to-Head
 
@@ -123,14 +123,14 @@ Direct comparisons of multitude versus bumpalo on identical workloads (the multi
 
 | Workload | Multitude time | Bumpalo time | Δ time | Multitude instr | Bumpalo instr | Δ instr |
 |---|---:|---:|---:|---:|---:|---:|
-| `alloc_u64/alloc` vs `bumpalo` | 2.92 µs | 5.41 µs | -45.9% | 17,145 | 21,022 | -18.4% |
-| `alloc_str/alloc_str` vs `bumpalo` | 4.86 µs | 6.14 µs | -20.9% | 163,533 | 168,404 | -2.9% |
-| `alloc_slice/alloc_slice_copy` vs `bumpalo_copy` | 20.99 µs | 17.80 µs | +17.9% | 23,496 | 43,374 | -45.8% |
-| `alloc_slice/alloc_slice_clone` vs `bumpalo_clone` | 21.97 µs | 18.38 µs | +19.5% | 46,523 | 61,376 | -24.2% |
-| `alloc_slice/alloc_slice_fill_with` vs `bumpalo_fill_with` | 23.80 µs | 19.50 µs | +22.1% | 41,003 | 42,020 | -2.4% |
-| `alloc_slice/alloc_slice_fill_iter` vs `bumpalo_fill_iter` | 23.80 µs | 20.05 µs | +18.7% | 43,007 | 42,020 | +2.3% |
-| `string_builder/alloc_string` vs `bumpalo_grow` | 4.54 µs | 7.16 µs | -36.6% | 149,846 | 150,866 | -0.7% |
-| `string_builder/alloc_string_with_capacity` vs `bumpalo_with_cap` | 4.46 µs | 6.91 µs | -35.5% | 150,348 | 149,733 | +0.4% |
-| `vec_builder/alloc_vec` vs `bumpalo_grow` | 1.52 µs | 2.67 µs | -42.9% | 12,062 | 12,429 | -3.0% |
-| `vec_builder/alloc_vec_with_capacity` vs `bumpalo_with_cap` | 1.46 µs | 2.61 µs | -44.1% | 12,464 | 11,219 | +11.1% |
+| `alloc_u64/alloc` vs `bumpalo` | 3.70 µs | 6.57 µs | -43.7% | 17,157 | 21,022 | -18.4% |
+| `alloc_str/alloc_str` vs `bumpalo` | 6.14 µs | 7.71 µs | -20.4% | 163,545 | 168,404 | -2.9% |
+| `alloc_slice/alloc_slice_copy` vs `bumpalo_copy` | 27.99 µs | 27.55 µs | +1.6% | 20,513 | 43,374 | -52.7% |
+| `alloc_slice/alloc_slice_clone` vs `bumpalo_clone` | 31.81 µs | 27.30 µs | +16.5% | 43,532 | 61,376 | -29.1% |
+| `alloc_slice/alloc_slice_fill_with` vs `bumpalo_fill_with` | 32.05 µs | 28.51 µs | +12.4% | 38,002 | 42,020 | -9.6% |
+| `alloc_slice/alloc_slice_fill_iter` vs `bumpalo_fill_iter` | 31.13 µs | 27.69 µs | +12.4% | 40,006 | 42,020 | -4.8% |
+| `string_builder/alloc_string` vs `bumpalo_grow` | 5.42 µs | 9.54 µs | -43.2% | 149,857 | 150,866 | -0.7% |
+| `string_builder/alloc_string_with_capacity` vs `bumpalo_with_cap` | 5.48 µs | 8.99 µs | -39.1% | 151,372 | 149,733 | +1.1% |
+| `vec_builder/alloc_vec` vs `bumpalo_grow` | 1.69 µs | 3.56 µs | -52.5% | 12,111 | 12,429 | -2.6% |
+| `vec_builder/alloc_vec_with_capacity` vs `bumpalo_with_cap` | 1.42 µs | 3.05 µs | -53.5% | 12,495 | 11,219 | +11.4% |
 

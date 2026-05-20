@@ -220,7 +220,9 @@ mod utf16_string_builder {
     fn capacity_growth() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string();
-        let n = if cfg!(miri) { 256 } else { 1000 };
+        // Amortized doubling: a few hundred pushes is more than enough to
+        // exercise the capacity-growth path repeatedly.
+        let n = 256;
         for _ in 0..n {
             s.push('a');
         }
