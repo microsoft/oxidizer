@@ -57,7 +57,7 @@
 //! [`Uri`]: templated_uri::Uri
 
 mod router;
-pub use router::{BaseUriConflict, Router};
+pub use router::{BaseUriConflict, RequestUris, Router};
 
 mod router_context;
 pub use router_context::RouterContext;
