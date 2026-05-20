@@ -9,7 +9,8 @@
         ],
         "exclude": [
             "target",
-            "scripts/**/*.rs"
+            "scripts/**/*.rs",
+            "crates/multitude/scripts/**/*.rs"
         ],
         "license": "./.github/license-check/slash-slash.txt"
     },
@@ -23,10 +24,31 @@
 
     {
         "include": [
-            "scripts/**/*.rs"
+            "scripts/**/*.rs",
+            "crates/multitude/scripts/*.rs"
         ],
         "exclude": [
             "scripts/crate-template/**/*.rs"
+        ],
+        "license": "./.github/license-check/hash.txt"
+    },
+
+    {
+        "include": [
+            "**/*.sh"
+        ],
+        "exclude": [
+            "target"
+        ],
+        "license": "./.github/license-check/hash.txt"
+    },
+
+    {
+        "include": [
+            "**/*.py"
+        ],
+        "exclude": [
+            "target"
         ],
         "license": "./.github/license-check/hash.txt"
     },

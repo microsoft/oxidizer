@@ -38,6 +38,7 @@ fundle_macros = { path = "crates/fundle_macros", default-features = false, versi
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.4.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
+multitude = { path = "crates/multitude", default-features = false, version = "0.1.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
@@ -55,8 +56,12 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 # external dependencies
 ahash = { version = "0.8", default-features = false }
 alloc_tracker = { version = "0.5.9", default-features = false }
+allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 async-once-cell = { version = "0.5", default-features = false }
+bolero = { version = "0.13.4", default-features = false }
+bumpalo = { version = "3.20.2", default-features = false }
+bytemuck = { version = "1.25", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
@@ -73,6 +78,8 @@ futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
+gungraun = { version = "0.18.2", default-features = false }
+hashbrown = { version = "0.17.0", default-features = false }
 http = { version = "1.2.0", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
 http-body-util = { version = "0.1.3", default-features = false }
@@ -82,6 +89,7 @@ infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
 libc = { version = "0.2.178", default-features = false }
+loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
@@ -101,6 +109,7 @@ postcard = { version = "1.1.3", default-features = false, features = ["use-std"]
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
+ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
 regex = { version = "1.12.2", default-features = false }
@@ -125,8 +134,10 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
+widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
+zerocopy = { version = "0.8", default-features = false }
 
 [workspace.lints.rust]
 ambiguous_negative_literals = "warn"
@@ -141,6 +152,7 @@ unused_lifetimes = "warn"
 # Allow our special-purpose nonstandard cfg attributes.
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
+    'cfg(loom)',
 ] }
 
 [workspace.lints.clippy]
@@ -222,3 +234,12 @@ debug = "full"
 [profile.mutants]
 inherits = "test"
 debug = "none"
+
+# Profile used by `cargo bolero` (it passes `--profile fuzz` by default).
+# Optimized build with single codegen unit, as recommended by cargo-bolero
+# to avoid known compilation bugs in the libfuzzer instrumentation.
+[profile.fuzz]
+inherits = "dev"
+opt-level = 3
+incremental = false
+codegen-units = 1
