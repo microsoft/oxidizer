@@ -38,10 +38,8 @@ $script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
 # Runs `git` with the given positional argument array. Returns captured stdout as
 # a string array (one element per line), or @() when there is no output. Throws on
 # non-zero exit codes, with the command line and stderr included in the message.
-#
-# Unlike the legacy Invoke-GitCommand wrapper in release-crate.ps1 this does NOT use
-# Invoke-Expression, so ref-derived inputs (e.g. -BaseRef from CLI) cannot be
-# shell-interpolated.
+# Uses explicit array arguments (no shell interpolation) so untrusted inputs
+# (e.g. a -BaseRef value from CLI) cannot be shell-injected.
 function Invoke-Git {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
@@ -79,29 +77,6 @@ function Test-GitRef {
 
     $null = Invoke-Git -Arguments @('rev-parse', '--verify', '-q', "$Ref^{commit}") -RepoRoot $RepoRoot -AllowFailure
     return ($LASTEXITCODE -eq 0)
-}
-
-# --- LEGACY GIT WRAPPER (for release-crate.ps1's existing callsites) ---
-#
-# Existing call sites pass an already-formed command string. We keep the wrapper here
-# (shared scope) so release-crate.ps1 can keep using it without changes, but new code
-# in this library and in new scripts must use Invoke-Git instead.
-function Invoke-GitCommand {
-    param(
-        [string]$command,
-        [string]$errorMessage = "Git command failed"
-    )
-
-    $result = Invoke-Expression "git $command" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "$errorMessage. Git command: git $command. Error: $result" -ErrorAction Stop
-    }
-
-    if ($null -eq $result -or $result.Count -eq 0) {
-        return @()
-    }
-
-    return $result
 }
 
 # --- VERSION HELPERS ---

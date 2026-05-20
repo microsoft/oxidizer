@@ -126,8 +126,7 @@ $script:IgnoredTypes = @('test')
 #   - Compiled regex patterns ($script:ConventionalCommitRegex, $script:PrReferenceRegex,
 #     $script:SemanticVersionRegex, $script:CargoVersionRegex, $script:GitHubRepoRegex,
 #     $script:RegexEscapeRegex).
-#   - Safe git invocation (Invoke-Git), ref validation (Test-GitRef), legacy
-#     Invoke-GitCommand wrapper used by the existing call sites in this script.
+#   - Safe git invocation (Invoke-Git) and ref validation (Test-GitRef).
 #   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-BumpKindFromVersions,
 #     Test-IsBreakingChange) and crate-version readers (Get-CurrentVersion,
 #     Get-CrateVersionFromRef).
@@ -296,7 +295,7 @@ function Write-Changelog {
         [hashtable]$cascadeReason = $null
     )
 
-    $tags = Invoke-GitCommand -Command "tag --list `"$crateName-v*`"" -ErrorMessage "Failed to retrieve git tags"
+    $tags = Invoke-Git -Arguments @('tag', '--list', "$crateName-v*")
     $latestTag = $null
     if ($null -eq $tags -or $tags.Count -eq 0) {
         Write-Warning "No tags found for crate '$crateName'. Generating changelog from all history."
@@ -314,7 +313,7 @@ function Write-Changelog {
 
     # Get commits since the latest tag (unreleased commits)
     $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
-    $rawCommits = Invoke-GitCommand -Command "log $range --pretty=format:`"%s`" -- `"$crateFolder`"" -ErrorMessage "Failed to retrieve git log for unreleased commits"
+    $rawCommits = Invoke-Git -Arguments @('log', $range, '--pretty=format:%s', '--', $crateFolder)
     if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
         $rawCommits = @()
     } else {
@@ -863,7 +862,7 @@ if (-not (Test-Path $crateFolder)) {
 
 # 3. DETERMINE GITHUB REPO URL
 $prBaseUrl = $null
-$remoteUrl = Invoke-GitCommand -command "remote get-url origin" -errorMessage "Failed to get remote URL"
+$remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path
 if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
     $repoIdentifier = $matches[1] -replace '\.git$', ''
     $prBaseUrl = "https://github.com/$repoIdentifier/pull"
