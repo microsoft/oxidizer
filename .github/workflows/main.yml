@@ -40,34 +40,6 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-
-          # Temporary workaround (see PR #434): the entire delta job is
-          # treated as a no-op. We still run `cargo delta snapshot/impact`
-          # below on PRs so we notice if the tool itself breaks, but we
-          # discard its opinion and emit constant `skip=false` plus empty
-          # excludes. This is needed because:
-          #
-          #   1. Branch protection on `main` requires matrix-expanded
-          #      contexts like `testing (ubuntu-latest)`. When a matrix
-          #      job's top-level `if:` evaluates to false, GitHub Actions
-          #      does not expand the matrix and only posts a single skipped
-          #      check under the bare job name, so those required contexts
-          #      stay in "Expected — Waiting for status to be reported"
-          #      forever.
-          #
-          #   2. `cargo-excludes` emits the workspace *complement* of the
-          #      selected tier. When `--required` is empty (e.g. doc-only
-          #      PRs that `.delta.toml` excludes), every tier's complement
-          #      excludes the entire workspace, which would make downstream
-          #      `cargo --workspace --exclude ...` invocations select zero
-          #      packages and fail. Forcing empty excludes makes downstream
-          #      jobs run the full workspace, which is correct (if not
-          #      minimal) for every PR.
-          #
-          # The proper fix is the `required-checks` fan-in (PR #435) and a
-          # ruleset migration; once that lands this whole block can return
-          # to honoring `cargo delta`'s computed outputs.
-
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
             # push to main (or any non-PR trigger) -> full backstop: no excludes.
             {
@@ -98,18 +70,24 @@ jobs:
             cargo delta -c .delta.toml impact --baseline "$baseline" --current "$current" "$@"
           }
 
-          # Run impact for its side effect of exercising the tool; outputs are
-          # intentionally discarded while the workaround is in effect.
-          impact -f cargo-excludes --modified  >/dev/null
-          impact -f cargo-excludes --affected  >/dev/null
-          impact -f cargo-excludes --required  >/dev/null
-          impact -f names          --required  >/dev/null
+          exclude_not_modified=$(impact -f cargo-excludes --modified)
+          exclude_not_affected=$(impact -f cargo-excludes --affected)
+          exclude_not_required=$(impact -f cargo-excludes --required)
+
+          # `required` is the superset (required ⊇ affected ⊇ modified). If it
+          # has no impacted crates, nothing is impacted and downstream
+          # source-scoped jobs can be skipped entirely.
+          if [[ -z "$(impact -f names --required)" ]]; then
+            skip=true
+          else
+            skip=false
+          fi
 
           {
-            echo "exclude_not_modified="
-            echo "exclude_not_affected="
-            echo "exclude_not_required="
-            echo "skip=false"
+            echo "exclude_not_modified=$exclude_not_modified"
+            echo "exclude_not_affected=$exclude_not_affected"
+            echo "exclude_not_required=$exclude_not_required"
+            echo "skip=$skip"
           } | tee -a "$GITHUB_OUTPUT"
 
   testing:
