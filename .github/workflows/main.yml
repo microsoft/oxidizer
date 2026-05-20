@@ -376,7 +376,14 @@ jobs:
 
   coverage:
     needs: [delta]
-    if: needs.delta.outputs.skip != 'true'
+    # Coverage always runs (no `delta.skip` gate) so the externally-posted
+    # `codecov/project` status check is always reported. Codecov posts that
+    # status in reaction to a coverage upload from this job; if `coverage`
+    # is skipped, `codecov/project` stays in
+    # `Expected — Waiting for status to be reported` and blocks merge. The
+    # `required-checks` fan-in only solves stuck contexts for jobs we own,
+    # so we eat the cost of running coverage on doc-only PRs here to keep
+    # the externally-posted check unblocked.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
