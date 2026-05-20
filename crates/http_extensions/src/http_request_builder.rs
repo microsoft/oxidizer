@@ -352,15 +352,16 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        // Attach both the templated `Uri` and its `PathAndQuery`:
-        //   - `Uri` preserves the caller's unrouted target so
+        // Attach both a `RequestUris` carrying the caller's templated target
+        // and its `PathAndQuery`:
+        //   - `RequestUris::original` preserves the unrouted target so
         //     `Router::resolve_request_uri` can re-route from it on every retry.
         //   - `PathAndQuery` backs `RequestExt::path_and_query` and
         //     `ExtensionsExt::uri_template_label`.
         let path = uri.to_path_and_query();
         let http_uri = http::Uri::try_from(uri.clone())?;
         let mut request = self.builder.uri(http_uri).body(body)?;
-        request.extensions_mut().insert(uri);
+        request.extensions_mut().insert(crate::routing::RequestUris::new(uri));
         if let Some(path) = path {
             request.extensions_mut().insert(path);
         }
@@ -1415,16 +1416,22 @@ mod tests {
     }
 
     #[test]
-    fn build_attaches_original_uri_extension() {
-        // The templated `Uri` is stashed on the request so `Router` can
-        // re-route from the original target on retries.
+    fn build_attaches_request_uris_extension() {
+        // The templated `Uri` is stashed on the request inside a `RequestUris`
+        // extension so `Router` can re-route from the original target on retries.
+        use crate::routing::RequestUris;
+
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")
             .build()
             .unwrap();
 
-        let uri = request.extensions().get::<Uri>().expect("Uri extension should be present");
-        assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/users/123");
+        let uris = request
+            .extensions()
+            .get::<RequestUris>()
+            .expect("RequestUris extension should be present");
+        assert_eq!(uris.original().to_string().declassify_ref(), "https://example.com/api/users/123");
+        assert!(uris.routed().is_none(), "routed should be None before any router runs");
     }
 
     #[test]
