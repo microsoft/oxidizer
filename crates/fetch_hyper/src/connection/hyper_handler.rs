@@ -21,7 +21,7 @@ use hyper_util::client::legacy::{self, Client};
 use layered::Service;
 use opentelemetry::metrics::Meter;
 
-use crate::builder::{HyperTransportBuilder, SpawnerExecutor};
+use crate::builder::HyperTransportBuilder;
 use crate::connection::client_connector::ClientConnector;
 use crate::connection::connect::Connect;
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
@@ -30,7 +30,6 @@ use crate::connection::tracked_stream::TrackedStream;
 use crate::error_labels::LABEL_REQUEST_HYPER;
 use crate::recoverability::detect_recoverability;
 use crate::telemetry::ConnectionInfo;
-use crate::timer::ClockTimer;
 use crate::tls::TlsConnector;
 
 /// The fully-wrapped connector chain handed to `hyper`'s [`Client`].
@@ -99,7 +98,6 @@ where
 {
     let HyperTransportBuilder {
         connector,
-        spawner,
         clock,
         tls,
         body_builder,
@@ -108,21 +106,12 @@ where
         connection_lifetime,
         connect_timeout,
         pool_index,
-        configure_hyper,
+        mut hyper_builder,
         ..
     } = builder;
 
-    let timer = ClockTimer::new(clock.clone());
-    let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
-
-    hyper_builder.timer(timer.clone()).pool_timer(timer);
-
     if supported_http_versions.len() == 1 && supported_http_versions[0] == Version::HTTP_2 {
         hyper_builder.http2_only(true);
-    }
-
-    if let Some(configure) = configure_hyper {
-        configure(&mut hyper_builder);
     }
 
     let tls_connector = TlsConnector::new(tls, connector, &request_filter, &supported_http_versions);

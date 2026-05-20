@@ -45,10 +45,6 @@ impl Service<HttpRequest> for HyperTransport {
 /// Default connect timeout applied by [`HyperTransportBuilder`].
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Hook used by [`HyperTransportBuilder::configure_hyper`] to further tune
-/// `hyper`'s underlying [`legacy::Builder`].
-pub(crate) type HyperConfigureFn = Box<dyn FnOnce(&mut legacy::Builder) + Send + 'static>;
-
 /// Adapter exposing an [`anyspawn::Spawner`] as a [`hyper::rt::Executor`].
 #[derive(Clone)]
 pub(crate) struct SpawnerExecutor(pub(crate) Spawner);
@@ -110,7 +106,6 @@ where
     S: HyperIo,
 {
     pub(crate) connector: C,
-    pub(crate) spawner: Spawner,
     pub(crate) clock: Clock,
     pub(crate) tls: TlsBackend,
     pub(crate) body_builder: HttpBodyBuilder,
@@ -120,7 +115,7 @@ where
     pub(crate) connect_timeout: Duration,
     pub(crate) pool_index: usize,
     pub(crate) meter: Option<Meter>,
-    pub(crate) configure_hyper: Option<HyperConfigureFn>,
+    pub(crate) hyper_builder: legacy::Builder,
     pub(crate) _marker: PhantomData<fn() -> S>,
 }
 
@@ -156,9 +151,12 @@ where
     #[must_use]
     #[allow(unused_variables)]
     pub fn new(connector: C, spawner: Spawner, clock: Clock, tls: impl Into<TlsBackend>, body_builder: HttpBodyBuilder) -> Self {
+        let timer = crate::timer::ClockTimer::new(clock.clone());
+        let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
+        hyper_builder.timer(timer.clone()).pool_timer(timer);
+
         Self {
             connector,
-            spawner,
             clock,
             tls: tls.into(),
             body_builder,
@@ -168,7 +166,7 @@ where
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             pool_index: 0,
             meter: None,
-            configure_hyper: None,
+            hyper_builder,
             _marker: PhantomData,
         }
     }
@@ -216,17 +214,22 @@ where
         self
     }
 
-    /// Registers a callback that further tunes `hyper`'s [`legacy::Builder`].
+    /// Invokes a callback that further tunes `hyper`'s [`legacy::Builder`].
     ///
-    /// The callback runs *after* this crate's own defaults are applied, so it
-    /// can override any of them (e.g. timer, pool sizing, keep-alive, HTTP/2
-    /// initial windows, …).
+    /// The callback runs *immediately*, after this crate's own defaults
+    /// (timer, pool timer) have been applied, so it can override any of them
+    /// (e.g. pool sizing, keep-alive, HTTP/2 initial windows, …).
+    ///
+    /// Note: the `http2_only` flag implied by
+    /// [`supported_http_versions`](Self::supported_http_versions) is applied
+    /// at [`build`](Self::build) time and therefore takes precedence over any
+    /// value set here.
     #[must_use]
     pub fn configure_hyper<F>(mut self, configure: F) -> Self
     where
-        F: FnOnce(&mut legacy::Builder) + Send + 'static,
+        F: FnOnce(&mut legacy::Builder),
     {
-        self.configure_hyper = Some(Box::new(configure));
+        configure(&mut self.hyper_builder);
         self
     }
 
@@ -238,8 +241,7 @@ where
     #[must_use]
     pub fn build(self) -> HyperTransport {
         let meter = self.meter.clone().unwrap_or_else(|| opentelemetry::global::meter("fetch_hyper"));
-        let handler = build_hyper_handler(self, &meter);
 
-        HyperTransport::new(handler.into_dynamic())
+        HyperTransport::new(build_hyper_handler(self, &meter).into_dynamic())
     }
 }
