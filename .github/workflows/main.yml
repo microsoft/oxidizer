@@ -434,9 +434,7 @@ jobs:
 
   external-type-exposure:
     needs: [delta]
-    # TEMP(#435): force-skip this job so the `required-checks` fan-in is
-    # exercised against a real `skipped` dependency. Revert before merge.
-    if: false
+    if: needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-slim
     steps:
       # prep
