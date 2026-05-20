@@ -39,19 +39,6 @@ impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
         self.refresh = Some(refresh);
         self
     }
-
-    /// Enables stampede protection for cache reads.
-    ///
-    /// When enabled, concurrent requests for the same key will be merged
-    /// so that only one request performs the lookup. Others wait and share the result.
-    ///
-    /// This prevents the "thundering herd" problem where many concurrent cache
-    /// misses for the same key overwhelm the backend.
-    #[must_use]
-    pub fn stampede_protection(mut self) -> Self {
-        self.stampede_protection = true;
-        self
-    }
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB>
