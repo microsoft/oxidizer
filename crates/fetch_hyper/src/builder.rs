@@ -247,7 +247,6 @@ where
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(feature = "native-tls")]
 mod tests {
     use bytes::Bytes;
     use opentelemetry::metrics::MeterProvider;

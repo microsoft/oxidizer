@@ -41,12 +41,12 @@ fn resolve_io_error_label(error: &std::io::Error) -> ErrorLabel {
         return resolve_io_error_label(inner_io);
     }
 
-    #[cfg(feature = "rustls")]
+    #[cfg(any(feature = "rustls", test))]
     if inner.downcast_ref::<rustls::Error>().is_some() {
         return LABEL_TLS;
     }
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(any(feature = "native-tls", test))]
     if inner.downcast_ref::<native_tls::Error>().is_some() {
         return LABEL_TLS;
     }
@@ -93,7 +93,6 @@ mod tests {
         assert_eq!(label.as_str(), kind_label.as_str());
     }
 
-    #[cfg(feature = "native-tls")]
     #[test]
     fn native_tls_error_in_io_chain_resolves_to_tls_label() {
         // Force a native_tls::Error by attempting to build an identity from invalid PKCS#12 data.
@@ -105,7 +104,6 @@ mod tests {
         assert_eq!(label.as_str(), LABEL_TLS.as_str());
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn rustls_error_in_io_chain_resolves_to_tls_label() {
         let rustls_err = rustls::Error::General("synthetic".to_string());

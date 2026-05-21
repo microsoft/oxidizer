@@ -80,6 +80,8 @@ bytes = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { workspace = true, features = ["test-util"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+hyper-rustls = { workspace = true, features = ["http1", "http2"] }
+hyper-tls = { workspace = true, features = ["alpn"] }
 insta = { workspace = true }
 mutants.workspace = true
 native-tls = { workspace = true }
@@ -89,6 +91,7 @@ rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"] }
 testing_aids = { workspace = true }
 tick = { workspace = true, features = ["tokio", "test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"] }
+tokio-native-tls = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
 wiremock = { workspace = true }
 

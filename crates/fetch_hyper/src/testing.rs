@@ -349,7 +349,6 @@ impl Write for FailingStream {
 }
 
 #[cfg(test)]
-#[cfg(feature = "native-tls")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Duration;

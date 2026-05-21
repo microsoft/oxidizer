@@ -4,15 +4,15 @@
 //! An enum that wraps the `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls", test))]
 use std::sync::Arc;
 
 use http::Version;
 use templated_uri::BaseUri;
-#[cfg(any(feature = "rustls", feature = "native-tls"))]
+#[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use tower::Service as _;
 
-#[cfg(any(feature = "rustls", feature = "native-tls"))]
+#[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
 use crate::options::RequestFilter;
 use crate::tls::TlsBackend;
@@ -24,13 +24,13 @@ where
     C: Connect<S>,
     S: HyperIo,
 {
-    #[cfg(feature = "rustls")]
+    #[cfg(any(feature = "rustls", test))]
     Rustls(hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>, PhantomData<fn() -> S>),
 
-    #[cfg(feature = "native-tls")]
+    #[cfg(any(feature = "native-tls", test))]
     NativeTls(hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>, PhantomData<fn() -> S>),
 
-    #[cfg(not(any(feature = "rustls", feature = "native-tls")))]
+    #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
     None(PhantomData<fn(C, S)>),
 }
 
@@ -41,11 +41,11 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            #[cfg(feature = "rustls")]
+            #[cfg(any(feature = "rustls", test))]
             Self::Rustls(c, _) => Self::Rustls(c.clone(), PhantomData),
-            #[cfg(feature = "native-tls")]
+            #[cfg(any(feature = "native-tls", test))]
             Self::NativeTls(c, _) => Self::NativeTls(c.clone(), PhantomData),
-            #[cfg(not(any(feature = "rustls", feature = "native-tls")))]
+            #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
             Self::None(_) => Self::None(PhantomData),
         }
     }
@@ -64,12 +64,12 @@ where
     )]
     pub(crate) fn new(backend: TlsBackend, connector: C, request_filter: RequestFilter, supported_versions: &[Version]) -> Self {
         match backend {
-            #[cfg(feature = "rustls")]
+            #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
                 build_rustls_connector(config, connector, request_filter, supported_versions),
                 PhantomData,
             ),
-            #[cfg(feature = "native-tls")]
+            #[cfg(any(feature = "native-tls", test))]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
         }
     }
@@ -79,7 +79,7 @@ where
 // a real HTTPS server, which is out of scope for these tests; the surviving
 // boolean mutations on `http1`/`http2` produce observably identical results
 // when the connector is exercised over plain HTTP.
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls", test))]
 #[cfg_attr(test, mutants::skip)]
 fn build_rustls_connector<C, S>(
     config: Arc<rustls::ClientConfig>,
@@ -113,7 +113,7 @@ where
     }
 }
 
-#[cfg(feature = "native-tls")]
+#[cfg(any(feature = "native-tls", test))]
 fn build_native_tls_connector<C, S>(
     native: native_tls::TlsConnector,
     connector: C,
@@ -141,7 +141,7 @@ where
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
         match self {
-            #[cfg(feature = "rustls")]
+            #[cfg(any(feature = "rustls", test))]
             Self::Rustls(c, _) => {
                 let mut c = c.clone();
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
@@ -150,7 +150,7 @@ where
                     .map(|s| Box::new(s) as Box<dyn HyperIo>)
                     .map_err(handle_tls_error)
             }
-            #[cfg(feature = "native-tls")]
+            #[cfg(any(feature = "native-tls", test))]
             Self::NativeTls(c, _) => {
                 let mut c = c.clone();
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
@@ -159,7 +159,7 @@ where
                     .map(|s| Box::new(s) as Box<dyn HyperIo>)
                     .map_err(handle_tls_error)
             }
-            #[cfg(not(any(feature = "rustls", feature = "native-tls")))]
+            #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
             Self::None(_) => {
                 let _ = input;
                 unreachable!(
@@ -170,7 +170,7 @@ where
     }
 }
 
-#[cfg(any(feature = "rustls", feature = "native-tls"))]
+#[cfg(any(feature = "rustls", feature = "native-tls", test))]
 fn handle_tls_error(e: Box<dyn std::error::Error + Send + Sync>) -> http_extensions::HttpError {
     let recovery = crate::recoverability::detect_recoverability(e.as_ref());
     http_extensions::HttpError::other(e, recovery, crate::error_labels::LABEL_CONNECT)
@@ -178,7 +178,6 @@ fn handle_tls_error(e: Box<dyn std::error::Error + Send + Sync>) -> http_extensi
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(any(feature = "rustls", feature = "native-tls"))]
 mod tests {
     use bytes::Bytes;
     use layered::Service as _;
@@ -187,12 +186,10 @@ mod tests {
     use super::*;
     use crate::testing::{FakeConnector, FakeStream, TestError};
 
-    #[cfg(feature = "native-tls")]
     fn native_tls_backend() -> TlsBackend {
         TlsBackend::NativeTls(native_tls::TlsConnector::new().expect("default native-tls connector"))
     }
 
-    #[cfg(feature = "rustls")]
     fn rustls_backend() -> TlsBackend {
         let provider = rustls::crypto::CryptoProvider::get_default()
             .cloned()
@@ -209,7 +206,6 @@ mod tests {
         FakeConnector::new_success(Bytes::new(), Clock::new_frozen())
     }
 
-    #[cfg(feature = "native-tls")]
     #[test]
     fn new_with_native_tls_backend_creates_native_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
@@ -217,7 +213,6 @@ mod tests {
         assert!(matches!(c, TlsConnector::NativeTls(_, _)));
     }
 
-    #[cfg(feature = "native-tls")]
     #[test]
     fn new_with_native_tls_http_and_https_filter() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
@@ -229,7 +224,6 @@ mod tests {
         assert!(matches!(c, TlsConnector::NativeTls(_, _)));
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn new_with_rustls_https_only_filter_and_both_versions() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
@@ -241,7 +235,6 @@ mod tests {
         assert!(matches!(c, TlsConnector::Rustls(_, _)));
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn new_with_rustls_http_and_https_filter_h2_only() {
         let c: TlsConnector<FakeConnector, FakeStream> =
@@ -249,7 +242,6 @@ mod tests {
         assert!(matches!(c, TlsConnector::Rustls(_, _)));
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn new_with_rustls_http1_only_with_http10_alias() {
         let c: TlsConnector<FakeConnector, FakeStream> =
@@ -257,7 +249,6 @@ mod tests {
         assert!(matches!(c, TlsConnector::Rustls(_, _)));
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn clone_rustls_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
@@ -270,7 +261,6 @@ mod tests {
         assert!(matches!(c2, TlsConnector::Rustls(_, _)));
     }
 
-    #[cfg(feature = "native-tls")]
     #[test]
     fn clone_native_tls_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
@@ -279,7 +269,6 @@ mod tests {
         assert!(matches!(c2, TlsConnector::NativeTls(_, _)));
     }
 
-    #[cfg(feature = "native-tls")]
     #[tokio::test]
     async fn execute_native_tls_with_plain_http_returns_stream() {
         // For plain http://, native-tls passes through without performing a handshake.
@@ -293,7 +282,6 @@ mod tests {
         result.unwrap();
     }
 
-    #[cfg(feature = "rustls")]
     #[tokio::test]
     async fn execute_rustls_with_plain_http_returns_stream() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
@@ -306,7 +294,6 @@ mod tests {
         result.unwrap();
     }
 
-    #[cfg(feature = "native-tls")]
     #[tokio::test]
     async fn execute_native_tls_propagates_connector_error() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
@@ -320,7 +307,6 @@ mod tests {
         assert!(err.to_string().contains("fail"), "got: {err}");
     }
 
-    #[cfg(feature = "rustls")]
     #[tokio::test]
     async fn execute_rustls_propagates_connector_error() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();

@@ -186,7 +186,6 @@ fn handle_poisoning(capture: &CaptureConnection, extensions: &Extensions) {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg(feature = "native-tls")]
 mod tests {
     use std::time::Duration;
 

@@ -32,29 +32,29 @@ pub(crate) use connector::TlsConnector;
 #[non_exhaustive]
 pub enum TlsBackend {
     /// Use the `rustls` backend with the given pre-built configuration.
-    #[cfg(feature = "rustls")]
+    #[cfg(any(feature = "rustls", test))]
     Rustls(std::sync::Arc<rustls::ClientConfig>),
 
     /// Use the platform `native-tls` backend with the given connector.
-    #[cfg(feature = "native-tls")]
+    #[cfg(any(feature = "native-tls", test))]
     NativeTls(native_tls::TlsConnector),
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls", test))]
 impl From<rustls::ClientConfig> for TlsBackend {
     fn from(config: rustls::ClientConfig) -> Self {
         Self::Rustls(std::sync::Arc::new(config))
     }
 }
 
-#[cfg(feature = "rustls")]
+#[cfg(any(feature = "rustls", test))]
 impl From<std::sync::Arc<rustls::ClientConfig>> for TlsBackend {
     fn from(config: std::sync::Arc<rustls::ClientConfig>) -> Self {
         Self::Rustls(config)
     }
 }
 
-#[cfg(feature = "native-tls")]
+#[cfg(any(feature = "native-tls", test))]
 impl From<native_tls::TlsConnector> for TlsBackend {
     fn from(connector: native_tls::TlsConnector) -> Self {
         Self::NativeTls(connector)
@@ -66,7 +66,6 @@ impl From<native_tls::TlsConnector> for TlsBackend {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn from_client_config_makes_rustls_variant() {
         let provider = rustls::crypto::CryptoProvider::get_default()
@@ -81,7 +80,6 @@ mod tests {
         assert!(matches!(backend, TlsBackend::Rustls(_)));
     }
 
-    #[cfg(feature = "rustls")]
     #[test]
     fn from_arc_client_config_makes_rustls_variant() {
         let provider = rustls::crypto::CryptoProvider::get_default()
@@ -98,7 +96,6 @@ mod tests {
         assert!(matches!(backend, TlsBackend::Rustls(_)));
     }
 
-    #[cfg(feature = "native-tls")]
     #[test]
     fn from_native_tls_connector_makes_native_variant() {
         let nc = native_tls::TlsConnector::new().expect("default native-tls connector should build");
@@ -106,14 +103,10 @@ mod tests {
         assert!(matches!(backend, TlsBackend::NativeTls(_)));
     }
 
-    #[cfg(any(feature = "rustls", feature = "native-tls"))]
     #[test]
     fn clone_preserves_variant() {
-        #[cfg(feature = "native-tls")]
-        {
-            let nc = native_tls::TlsConnector::new().unwrap();
-            let backend = TlsBackend::NativeTls(nc);
-            assert!(matches!(backend, TlsBackend::NativeTls(_)));
-        }
+        let nc = native_tls::TlsConnector::new().unwrap();
+        let backend = TlsBackend::NativeTls(nc);
+        assert!(matches!(backend, TlsBackend::NativeTls(_)));
     }
 }
