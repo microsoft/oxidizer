@@ -459,6 +459,25 @@ jobs:
   # skipped check under the bare job name, leaving matrix-expanded required
   # contexts (`testing (ubuntu-latest)` etc.) stuck on
   # `Expected — Waiting for status to be reported`.
+  #
+  # Maintenance — when to add a job to `needs:` below:
+  #
+  #   * MUST add if the job has BOTH a `strategy.matrix` AND a job-level
+  #     `if:` that can evaluate to false (e.g. gated on
+  #     `needs.delta.outputs.skip`, `github.event_name`, etc.). Such jobs
+  #     trigger the stuck-context bug above and can only be made required
+  #     safely via this fan-in.
+  #
+  #   * SHOULD add any other job that must pass before merge. Funnelling
+  #     every required job through this single context keeps branch
+  #     protection simple: one workflow context to require here, plus
+  #     externally-posted statuses (`license/cla`, `codecov/project`).
+  #
+  #   * Do NOT add jobs that are intentionally optional / advisory.
+  #
+  # When a new job is added below, also remove any direct entry for it
+  # from the branch protection ruleset (only `required-checks` should be
+  # listed for jobs defined in this workflow).
   required-checks:
     name: required-checks
     if: always()
