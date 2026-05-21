@@ -560,7 +560,13 @@ function Add-CascadeBulletToVersionSection {
         while ($insertAt -gt $subStart + 1 -and [string]::IsNullOrWhiteSpace($lines[$insertAt - 1])) {
             $insertAt--
         }
-        $new = @($lines[0..($insertAt - 1)]) + @($bullet) + @($lines[$insertAt..($lines.Count - 1)])
+        if ($insertAt -eq $lines.Count) {
+            # Inserting at EOF: avoid the reverse-range slice `$lines[$lines.Count..($lines.Count - 1)]`,
+            # which silently aliases to the last element and duplicates it.
+            $new = @($lines[0..($insertAt - 1)]) + @($bullet)
+        } else {
+            $new = @($lines[0..($insertAt - 1)]) + @($bullet) + @($lines[$insertAt..($lines.Count - 1)])
+        }
     }
     else {
         $insertAt = $sectionEnd

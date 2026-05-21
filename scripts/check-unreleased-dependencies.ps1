@@ -97,7 +97,12 @@ try {
         exit 0
     }
 
-    $releaseSet = @(Get-CratesWithVersionBumps -RepoRoot $repoRoot -BaseRef $BaseRef) | Sort-Object
+    # Get-CratesWithVersionBumps returns a HashSet via Write-Output -NoEnumerate so
+    # callers can use .Contains() on it. That same wrapping defeats `Sort-Object`:
+    # piping a NoEnumerate'd HashSet sends it as a single object, and the sort
+    # becomes a no-op. Unwrap explicitly via ForEach-Object before sorting.
+    $releaseSetHash = Get-CratesWithVersionBumps -RepoRoot $repoRoot -BaseRef $BaseRef
+    $releaseSet = @($releaseSetHash | ForEach-Object { $_ }) | Sort-Object
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('## 📦 Unreleased Upstream Dependency Changes') | Out-Null
