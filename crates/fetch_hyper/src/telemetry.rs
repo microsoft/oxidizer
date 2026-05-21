@@ -115,8 +115,8 @@ pub(crate) fn create_connection_failure_attributes(uri: &templated_uri::BaseUri,
     ]
 }
 
-/// Returns the server port as an i64 attribute value, using `-1` as a sentinel
-/// when no port is known for the URI's scheme. Keeping the attribute present
+/// Returns the server port as an `i64` attribute value, using `-1` as a sentinel
+/// when no port is known for the URI scheme. Keeping the attribute present
 /// (rather than omitting it) preserves a stable attribute set across all
 /// telemetry emissions, which downstream aggregations rely on.
 fn server_port_attribute(uri: &templated_uri::BaseUri) -> i64 {
