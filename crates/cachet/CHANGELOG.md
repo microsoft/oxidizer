@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.0] - 2026-05-21
+
+- ✨ Features
+
+  - Add `get_or_insert_with` and `try_get_or_insert_with` methods that accept closures returning `CacheEntry<V>`, enabling per-entry TTL control on cache-miss computations.
+
 ## [0.5.0] - 2026-05-19
 
 - ✔️ Tasks

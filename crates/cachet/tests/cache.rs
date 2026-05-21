@@ -338,6 +338,176 @@ fn cache_with_memory_is_sync() {
     assert_sync::<Cache<String, i32>>();
 }
 
+// =============================================================================
+// get_or_insert_with tests
+// =============================================================================
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn get_or_insert_with_computes_and_caches() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let key = "key".to_string();
+
+    let entry = cache
+        .get_or_insert_with(&key, || async {
+            CacheEntry::expires_after(42, std::time::Duration::from_secs(300))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+    assert_eq!(entry.ttl(), Some(std::time::Duration::from_secs(300)));
+
+    // Second call returns cached value, not the new closure result
+    let entry = cache
+        .get_or_insert_with(&key, || async { CacheEntry::new(100) })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn get_or_insert_with_preserves_per_entry_ttl() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let key = "key".to_string();
+    let ttl = std::time::Duration::from_secs(60);
+
+    let entry = cache
+        .get_or_insert_with(&key, || async { CacheEntry::expires_after(7, ttl) })
+        .await
+        .unwrap();
+
+    assert_eq!(*entry.value(), 7);
+    assert_eq!(entry.ttl(), Some(ttl));
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn stampede_protection_get_or_insert_with() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+    let key = "key".to_string();
+
+    let entry = cache
+        .get_or_insert_with(&key, || async {
+            CacheEntry::expires_after(42, std::time::Duration::from_secs(120))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+
+    // Second call returns cached value
+    let entry = cache
+        .get_or_insert_with(&key, || async { CacheEntry::new(100) })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+}
+
+// =============================================================================
+// try_get_or_insert_with tests
+// =============================================================================
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn try_get_or_insert_with_success() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let key = "key".to_string();
+    let ttl = std::time::Duration::from_secs(600);
+
+    let entry = cache
+        .try_get_or_insert_with(&key, || async {
+            Ok::<_, Error>(CacheEntry::expires_after(42, ttl))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+    assert_eq!(entry.ttl(), Some(ttl));
+
+    // Cached on second call
+    let entry = cache
+        .try_get_or_insert_with(&key, || async {
+            Ok::<_, Error>(CacheEntry::new(100))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn try_get_or_insert_with_error_not_cached() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let key = "key".to_string();
+
+    let result: Result<CacheEntry<i32>, Error> = cache
+        .try_get_or_insert_with(&key, || async {
+            Err(Error::from_message("computation failed"))
+        })
+        .await;
+    result.expect_err("error should propagate");
+
+    // Not cached — second call with success should work
+    let entry = cache
+        .try_get_or_insert_with(&key, || async {
+            Ok::<_, Error>(CacheEntry::new(99))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 99);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn stampede_protection_try_get_or_insert_with_success() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+    let key = "key".to_string();
+
+    let entry = cache
+        .try_get_or_insert_with(&key, || async {
+            Ok::<_, Error>(CacheEntry::expires_after(42, std::time::Duration::from_secs(60)))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+
+    // Cached on second call
+    let entry = cache
+        .try_get_or_insert_with(&key, || async {
+            Ok::<_, Error>(CacheEntry::new(100))
+        })
+        .await
+        .unwrap();
+    assert_eq!(*entry.value(), 42);
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn stampede_protection_try_get_or_insert_with_error() {
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
+
+    let key = "key".to_string();
+
+    let result: Result<CacheEntry<i32>, Error> = cache
+        .try_get_or_insert_with(&key, || async {
+            Err(Error::from_message("test error"))
+        })
+        .await;
+    result.expect_err("error should propagate through stampede protection");
+}
+
 /// Verifies that `CacheEntry` is Send.
 #[test]
 fn cache_entry_is_send() {
