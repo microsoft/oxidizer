@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Centralized [`ErrorLabel`] constants for errors raised by this crate.
 
