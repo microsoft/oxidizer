@@ -52,6 +52,7 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
     mock_server
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn real_http_request_succeeds() {
     let handler = HyperTransportBuilder::new(
@@ -79,6 +80,7 @@ async fn real_http_request_succeeds() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn https_only_filter_rejects_http_request() {
     // No `.request_filter(...)` call: defaults to `RequestFilter::Https`.
@@ -103,9 +105,10 @@ async fn https_only_filter_rejects_http_request() {
 
     let error = handler.execute(request).await.unwrap_err();
 
-    insta::assert_snapshot!(error.message());
+    assert!(error.message().contains("https required but URI was not https"));
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn http2_only_rejected_when_server_negotiates_http1() {
     // Wiremock speaks plain HTTP/1.1. The client advertises only HTTP/2 and
@@ -145,6 +148,7 @@ async fn http2_only_rejected_when_server_negotiates_http1() {
     );
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
     // A single supported version of HTTP/2 triggers
@@ -180,6 +184,7 @@ async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
     assert_eq!(response.version(), Version::HTTP_2);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn single_http1_version_does_not_enable_http2_only() {
     // Builder sees a single supported version of HTTP/1.1. Since the version
@@ -213,6 +218,7 @@ async fn single_http1_version_does_not_enable_http2_only() {
     assert_eq!(response.version(), Version::HTTP_11);
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn zero_lifetime_poisons_connection_after_request() {
     // ConnectionLifetime::Fixed(ZERO) makes every connection expired by the

@@ -76,6 +76,7 @@ mod tests {
         assert!(matches!(poll, Poll::Ready(Ok(()))));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn call_translates_uri_into_base_uri_and_invokes_connector() {
         let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(
@@ -85,6 +86,7 @@ mod tests {
         adapter.call(Uri::from_static("https://example.com/")).await.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn call_propagates_invalid_uri_error() {
         let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(

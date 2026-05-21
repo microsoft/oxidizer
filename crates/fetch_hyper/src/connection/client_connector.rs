@@ -268,6 +268,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn verify_protocol_version_rejects_unsupported() {
         let base = BaseUri::from_static("https://example.com");
         let supported = vec![Version::HTTP_2];
@@ -312,6 +313,7 @@ mod tests {
         ]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn connect_with_timeout_records_metric_on_success() {
@@ -342,6 +344,7 @@ mod tests {
         tester.assert_attributes_contain(&[KeyValue::new("server.address", "example.com")]);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn connect_with_timeout_returns_error_on_connector_failure() {
         use crate::testing::{FakeConnector, TestError};
@@ -367,6 +370,7 @@ mod tests {
         assert!(err.to_string().contains("boom"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn connect_with_timeout_returns_timeout_when_connect_too_slow() {
         use std::future::pending;
@@ -393,6 +397,7 @@ mod tests {
         assert_eq!(err.recovery().kind(), RecoveryKind::Retry);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn client_connector_execute_returns_tracked_stream_on_success() {
         use bytes::Bytes;
@@ -417,6 +422,7 @@ mod tests {
         cc.execute(BaseUri::from_static("http://example.com")).await.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn client_connector_execute_rejects_unsupported_version() {
         use bytes::Bytes;

@@ -226,6 +226,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn debug_renders_handler_type() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
@@ -238,6 +239,7 @@ mod tests {
         assert!(rendered.contains("HyperHandler"), "got: {rendered}");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn malformed_response_yields_hyper_util_error() {
         // The byte stream is not a valid HTTP/1 response, so hyper's client
@@ -250,6 +252,7 @@ mod tests {
         assert!(!err.to_string().is_empty());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn http2_only_configures_hyper_correctly() {
         // Builder with HTTP/2-only flips `http2_only(true)` on hyper's builder.
@@ -304,6 +307,7 @@ mod tests {
         assert!(!info.poisoned());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn end_to_end_response_is_returned_with_body() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();

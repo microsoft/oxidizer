@@ -53,6 +53,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_advances_by_duration() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
@@ -63,6 +64,7 @@ mod tests {
         assert_eq!(watch.elapsed(), Duration::from_secs(1));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_until_advances_to_deadline() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();
@@ -74,6 +76,7 @@ mod tests {
         assert_eq!(watch.elapsed(), Duration::from_secs(2));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn sleep_until_past_deadline_returns_immediately() {
         let clock = ClockControl::new().auto_advance_timers(true).to_clock();

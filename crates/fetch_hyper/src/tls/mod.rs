@@ -67,6 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn from_client_config_makes_rustls_variant() {
         let provider = rustls::crypto::CryptoProvider::get_default()
             .cloned()
@@ -81,6 +82,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn from_arc_client_config_makes_rustls_variant() {
         let provider = rustls::crypto::CryptoProvider::get_default()
             .cloned()
@@ -97,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn from_native_tls_connector_makes_native_variant() {
         let nc = native_tls::TlsConnector::new().unwrap();
         let backend: TlsBackend = nc.into();
@@ -104,6 +107,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn clone_preserves_variant() {
         let nc = native_tls::TlsConnector::new().unwrap();
         let backend = TlsBackend::NativeTls(nc);

@@ -380,6 +380,7 @@ mod tests {
         Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!")
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fake_connector_serves_canned_response() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
@@ -400,6 +401,7 @@ mod tests {
         assert_eq!(&*body, b"Hello, World!");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn fake_connector_propagates_connect_failure() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
@@ -429,6 +431,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn https_only_filter_rejects_http_request() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();

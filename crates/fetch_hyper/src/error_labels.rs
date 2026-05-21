@@ -95,6 +95,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn native_tls_error_in_io_chain_resolves_to_tls_label() {
         // Force a native_tls::Error by attempting to build an identity from invalid PKCS#12 data.
         let Err(native_err) = native_tls::Identity::from_pkcs12(b"not-a-real-pkcs12", "wrong") else {

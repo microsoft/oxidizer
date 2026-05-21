@@ -99,17 +99,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn debug_renders_per_connection_without_closure_fmt_panic() {
         let lifetime = ConnectionLifetime::PerConnection(Arc::new(|| None));
         insta::assert_debug_snapshot!(lifetime);
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn debug_renders_unlimited() {
         insta::assert_debug_snapshot!(ConnectionLifetime::Unlimited);
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn debug_renders_fixed() {
         insta::assert_debug_snapshot!(ConnectionLifetime::Fixed(Duration::from_secs(7)));
     }

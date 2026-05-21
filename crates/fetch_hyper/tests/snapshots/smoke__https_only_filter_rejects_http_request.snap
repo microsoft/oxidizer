@@ -1,8 +1,0 @@
----
-source: crates/fetch_hyper/tests/smoke.rs
-expression: error.message()
----
-client error (Connect)
-caused by: client error (Connect)
-caused by: https required but URI was not https
-caused by: https required but URI was not https

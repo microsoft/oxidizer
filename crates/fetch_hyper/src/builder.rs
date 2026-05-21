@@ -270,6 +270,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn builder_defaults_and_setters() {
         let defaults = make_builder();
         assert!(defaults.meter.is_none(), "meter is not part of Debug output");
@@ -285,6 +286,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn meter_setter_stores_meter() {
         let provider = SdkMeterProvider::builder().build();
         let m = provider.meter("test");
@@ -293,6 +295,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn configure_hyper_runs_callback_synchronously() {
         let mut called = false;
         let _b = make_builder().configure_hyper(|_| {
@@ -301,6 +304,7 @@ mod tests {
         assert!(called);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn build_with_explicit_meter_yields_working_transport() {
         let provider = SdkMeterProvider::builder().build();
@@ -321,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn build_with_h2_only_sets_http2_only_flag() {
         // We can't easily inspect hyper's internal flag, but we can at least
         // exercise the build path with HTTP/2-only configuration to confirm
@@ -337,6 +342,7 @@ mod tests {
         .build();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn hyper_transport_clones_share_underlying_service() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
@@ -356,6 +362,7 @@ mod tests {
         assert_eq!(resp.status(), 200);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn spawner_executor_runs_future() {
         use std::sync::Arc;

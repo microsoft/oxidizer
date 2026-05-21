@@ -155,6 +155,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn create_connection_attributes_emits_expected_keys() {
         let uri = templated_uri::BaseUri::from_static("https://example.com:8443");
         let connected = hyper_util::client::legacy::connect::Connected::new();
@@ -194,6 +195,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn create_connection_failure_attributes_includes_error_type() {
         let uri = templated_uri::BaseUri::from_static("https://example.com");
         let attrs = create_connection_failure_attributes(&uri, LABEL_CONNECT);

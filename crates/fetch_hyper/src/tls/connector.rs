@@ -207,6 +207,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_with_native_tls_backend_creates_native_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
@@ -214,6 +215,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_with_native_tls_http_and_https_filter() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             native_tls_backend(),
@@ -225,6 +227,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_with_rustls_https_only_filter_and_both_versions() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             rustls_backend(),
@@ -236,6 +239,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_with_rustls_http_and_https_filter_h2_only() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(rustls_backend(), fake_connector(), RequestFilter::HttpAndHttps, &[Version::HTTP_2]);
@@ -243,6 +247,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn new_with_rustls_http1_only_with_http10_alias() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(rustls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_10]);
@@ -250,6 +255,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn clone_rustls_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
             rustls_backend(),
@@ -262,6 +268,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn clone_native_tls_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
@@ -269,6 +276,7 @@ mod tests {
         assert!(matches!(c2, TlsConnector::NativeTls(_, _)));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_native_tls_with_plain_http_returns_stream() {
         // For plain http://, native-tls passes through without performing a handshake.
@@ -282,6 +290,7 @@ mod tests {
         result.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_rustls_with_plain_http_returns_stream() {
         let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
@@ -294,6 +303,7 @@ mod tests {
         result.unwrap();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_native_tls_propagates_connector_error() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
@@ -307,6 +317,7 @@ mod tests {
         assert!(err.to_string().contains("fail"), "got: {err}");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_rustls_propagates_connector_error() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
