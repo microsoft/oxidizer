@@ -250,6 +250,7 @@ mod tests {
         let _ = stream.is_write_vectored();
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn new_starts_with_active_histogram() {
         let stream = TrackedStream::new(

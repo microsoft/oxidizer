@@ -194,6 +194,38 @@ mod tests {
     }
 
     #[test]
+    fn is_expired_false_at_exact_max_age_boundary() {
+        // Pins the comparison as strictly greater-than: at age == max_age the
+        // connection is still considered fresh. Guards against `>` -> `>=`.
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let max_age = Duration::from_secs(5);
+        let info = ConnectionInfo::new(&clock, 0, Some(max_age));
+        control.advance(max_age);
+        assert_eq!(info.age(), max_age);
+        assert!(!info.is_expired());
+        control.advance(Duration::from_nanos(1));
+        assert!(info.is_expired());
+    }
+
+    #[test]
+    fn server_port_attribute_uses_negative_one_sentinel_when_unknown() {
+        // Pins the sentinel value as `-1` (not `1`) when the scheme has no
+        // default port and the URI carries no explicit port.
+        use templated_uri::{Authority, BasePath, Origin, Scheme};
+        let origin = Origin::from_parts(Scheme::try_from("ftp").unwrap(), Authority::from_static("example.com"));
+        let uri = templated_uri::BaseUri::from_parts(origin, BasePath::default());
+        assert_eq!(uri.effective_port(), None);
+        assert_eq!(server_port_attribute(&uri), -1);
+    }
+
+    #[test]
+    fn server_port_attribute_returns_explicit_port() {
+        let uri = templated_uri::BaseUri::from_static("https://example.com:8443");
+        assert_eq!(server_port_attribute(&uri), 8443);
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn create_connection_failure_attributes_includes_error_type() {
         let uri = templated_uri::BaseUri::from_static("https://example.com");
