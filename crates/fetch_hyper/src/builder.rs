@@ -28,6 +28,12 @@ pub struct HyperTransport {
     service: DynamicService<HttpRequest, Result<HttpResponse>>,
 }
 
+impl From<HyperTransport> for DynamicService<HttpRequest, Result<HttpResponse>> {
+    fn from(transport: HyperTransport) -> Self {
+        transport.service
+    }
+}
+
 impl HyperTransport {
     pub(crate) fn new(service: DynamicService<HttpRequest, Result<HttpResponse>>) -> Self {
         Self { service }
@@ -375,6 +381,26 @@ mod tests {
         let cloned = handler.clone();
         let _ = format!("{cloned:?}");
         let resp = cloned.execute(crate::testing::create_test_request()).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn hyper_transport_into_dynamic_service_executes_request() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        let handler = HyperTransportBuilder::new(
+            FakeConnector::new_success(response_bytes, clock.clone()),
+            Spawner::new_tokio(),
+            clock,
+            tls(),
+            HttpBodyBuilder::new_fake(),
+        )
+        .request_filter(RequestFilter::HttpAndHttps)
+        .build();
+
+        let service: DynamicService<HttpRequest, Result<HttpResponse>> = handler.into();
+        let resp = service.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 

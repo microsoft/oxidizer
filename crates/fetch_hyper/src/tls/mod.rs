@@ -16,7 +16,6 @@ pub(crate) use connector::TlsConnector;
 /// cannot be used. Enable at least one `TLS` feature to make outbound
 /// connections.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum TlsBackend {
     /// Use the `rustls` backend with the given pre-built configuration.
     #[cfg(any(feature = "rustls", test))]
