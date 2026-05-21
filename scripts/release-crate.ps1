@@ -812,10 +812,17 @@ function Invoke-PostReleaseDepScan {
             $nestedReleases = @(Invoke-ReleaseFlow -CrateName $folder -Bump $bumpKind `
                 -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
 
-            $existingNames = @($ReleasesRef.Value | ForEach-Object { $_.Crate })
+            # Merge nested release records into the running set. A crate may already
+            # appear (e.g., it was a downstream cascade target of the initial release)
+            # and the nested cascade may have upgraded it further — preserve the
+            # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
+            # so Show-ReleaseSummary and the final commit message reflect on-disk state.
             foreach ($r in $nestedReleases) {
-                if ($existingNames -notcontains $r.Crate) {
+                $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $r.Crate } | Select-Object -First 1
+                if ($null -eq $existing) {
                     $ReleasesRef.Value += $r
+                } else {
+                    $existing.NewVersion = $r.NewVersion
                 }
             }
         }
