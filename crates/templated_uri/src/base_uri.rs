@@ -300,12 +300,11 @@ impl BaseUri {
         Self { origin, path: self.path }
     }
 
-    /// Returns the port of this [`BaseUri`].
+    /// Returns the explicit port of this [`BaseUri`].
     ///
-    /// Returns the explicit port from the authority when present. For HTTP and
-    /// HTTPS, the well-known default port is inferred from the scheme when no
-    /// port is specified. For other schemes without an explicit port this
-    /// method returns `None`.
+    /// Returns the explicit port from the authority when present, or `None`
+    /// when no port is specified. Default ports are not inferred from the
+    /// scheme; use [`BaseUri::effective_port`] for that.
     ///
     /// # Examples
     ///
@@ -315,17 +314,50 @@ impl BaseUri {
     /// let base_uri = BaseUri::from_static("https://example.com:8443");
     /// assert_eq!(base_uri.port(), Some(8443));
     ///
-    /// // Default HTTPS port
+    /// // No explicit port: even for HTTPS, this returns None.
     /// let base_uri = BaseUri::from_static("https://example.com");
     /// assert_eq!(base_uri.port(), None);
     ///
-    /// // Default HTTP port
+    /// // No explicit port: even for HTTP, this returns None.
     /// let base_uri = BaseUri::from_static("http://example.com");
     /// assert_eq!(base_uri.port(), None);
     /// ```
     #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.origin.port()
+    }
+
+    /// Returns the effective port of this [`BaseUri`], falling back to
+    /// well-known scheme defaults when no explicit port is present.
+    ///
+    /// Returns the explicit port from the authority when present. Otherwise,
+    /// returns the IANA-registered default port for the scheme:
+    ///
+    /// - `80` for `http`
+    /// - `443` for `https`
+    ///
+    /// Returns `None` when no explicit port is present and the scheme has no
+    /// well-known default known to this crate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::{BaseUri, Scheme};
+    /// // Explicit port
+    /// let base_uri = BaseUri::from_static("https://example.com:8443");
+    /// assert_eq!(base_uri.effective_port(), Some(8443));
+    ///
+    /// // Default HTTPS port
+    /// let base_uri = BaseUri::from_static("https://example.com");
+    /// assert_eq!(base_uri.effective_port(), Some(443));
+    ///
+    /// // Default HTTP port
+    /// let base_uri = BaseUri::from_static("http://example.com");
+    /// assert_eq!(base_uri.effective_port(), Some(80));
+    /// ```
+    #[must_use]
+    pub fn effective_port(&self) -> Option<u16> {
+        self.origin.effective_port()
     }
 
     /// Returns a new [`BaseUri`] with the given port.
@@ -817,6 +849,33 @@ mod tests {
         fn port_explicit() {
             let base_uri = BaseUri::from_static("https://example.com:8443");
             assert_eq!(base_uri.port(), Some(8443));
+        }
+
+        #[test]
+        fn port_implicit_returns_none() {
+            let base_uri = BaseUri::from_static("https://example.com");
+            assert_eq!(base_uri.port(), None);
+
+            let base_uri = BaseUri::from_static("http://example.com");
+            assert_eq!(base_uri.port(), None);
+        }
+
+        #[test]
+        fn effective_port_explicit() {
+            let base_uri = BaseUri::from_static("https://example.com:8443");
+            assert_eq!(base_uri.effective_port(), Some(8443));
+        }
+
+        #[test]
+        fn effective_port_infers_https_default() {
+            let base_uri = BaseUri::from_static("https://example.com");
+            assert_eq!(base_uri.effective_port(), Some(443));
+        }
+
+        #[test]
+        fn effective_port_infers_http_default() {
+            let base_uri = BaseUri::from_static("http://example.com");
+            assert_eq!(base_uri.effective_port(), Some(80));
         }
     }
 
