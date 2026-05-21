@@ -16,7 +16,7 @@ use hyper_util::rt::TokioIo;
 use layered::Service as _;
 use ohno::ErrorExt;
 use templated_uri::BaseUri;
-use tick::Clock;
+use tick::{Clock, ClockControl};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -42,6 +42,10 @@ fn build_tls() -> TlsBackend {
         .into()
 }
 
+fn test_clock() -> Clock {
+    ClockControl::new().auto_advance_timers(true).to_clock()
+}
+
 async fn serve(body: impl Into<Bytes>) -> MockServer {
     let mock_server = MockServer::start().await;
 
@@ -59,7 +63,7 @@ async fn real_http_request_succeeds() {
     let handler = HyperTransportBuilder::new(
         TokioConnector,
         Spawner::new_tokio(),
-        Clock::new_tokio(),
+        test_clock(),
         build_tls(),
         HttpBodyBuilder::new_fake(),
     )
@@ -87,7 +91,7 @@ async fn https_only_filter_rejects_http_request() {
     let handler = HyperTransportBuilder::new(
         TokioConnector,
         Spawner::new_tokio(),
-        Clock::new_tokio(),
+        test_clock(),
         build_tls(),
         HttpBodyBuilder::new_fake(),
     )
@@ -105,12 +109,7 @@ async fn https_only_filter_rejects_http_request() {
 
     let error = handler.execute(request).await.unwrap_err();
 
-    let message = error.message();
-    let expected_substring = "https required but URI was not https";
-    assert!(
-        message.contains(expected_substring),
-        "expected error message to contain {expected_substring:?}, got: {message}"
-    );
+    insta::assert_snapshot!(error.message());
 }
 
 #[tokio::test]
@@ -121,7 +120,7 @@ async fn http2_only_rejected_when_server_negotiates_http1() {
     let handler = HyperTransportBuilder::new(
         TokioConnector,
         Spawner::new_tokio(),
-        Clock::new_tokio(),
+        test_clock(),
         build_tls(),
         HttpBodyBuilder::new_fake(),
     )
@@ -141,11 +140,127 @@ async fn http2_only_rejected_when_server_negotiates_http1() {
 
     let error = handler.execute(request).await.unwrap_err();
 
+    // Wiremock listens on a dynamic port, so the trailing `server: <uri>`
+    // segment is non-deterministic; assert on the deterministic prefix.
     let message = error.message();
-    let expected_substring =
+    let expected_prefix =
         "the connection was established with unsupported HTTP version: HTTP/1.1, supported versions are: [HTTP/2.0, HTTP/3.0]";
     assert!(
-        message.contains(expected_substring),
-        "expected error message to contain {expected_substring:?}, got: {message}"
+        message.contains(expected_prefix),
+        "expected error message to contain {expected_prefix:?}, got: {message}"
     );
+}
+
+#[tokio::test]
+async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
+    // A single supported version of HTTP/2 triggers
+    // `hyper_builder.http2_only(true)` (HTTP/2 prior-knowledge mode).
+    // Wiremock supports HTTP/2, so prior-knowledge succeeds and the response
+    // arrives over HTTP/2. If prior-knowledge were not enabled, the client
+    // would speak HTTP/1.1 and the post-connect protocol verification step
+    // would reject the response, so this test pins down the prior-knowledge
+    // behavior selected by the `len == 1 && [0] == HTTP_2` branch.
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(),
+        test_clock(),
+        build_tls(),
+        HttpBodyBuilder::new_fake(),
+    )
+    .connect_timeout(Duration::from_secs(5))
+    .request_filter(RequestFilter::HttpAndHttps)
+    .supported_http_versions(&[Version::HTTP_2])
+    .build();
+
+    let server = serve(Bytes::from_static(b"Hello World!")).await;
+
+    let body_builder = HttpBodyBuilder::new_fake();
+    let request = HttpRequestBuilder::new(&body_builder)
+        .method(Method::GET)
+        .uri(server.uri() + "/hello-world")
+        .build()
+        .unwrap();
+
+    let response = handler
+        .execute(request)
+        .await
+        .expect("HTTP/2 prior-knowledge request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.version(), Version::HTTP_2);
+}
+
+#[tokio::test]
+async fn single_http1_version_does_not_enable_http2_only() {
+    // Builder sees a single supported version of HTTP/1.1. Since the version
+    // is not HTTP/2, prior-knowledge mode must NOT be enabled, otherwise the
+    // request would fail against an HTTP/1.1 server.
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(),
+        test_clock(),
+        build_tls(),
+        HttpBodyBuilder::new_fake(),
+    )
+    .connect_timeout(Duration::from_secs(5))
+    .request_filter(RequestFilter::HttpAndHttps)
+    .supported_http_versions(&[Version::HTTP_11])
+    .build();
+
+    let server = serve(Bytes::from_static(b"Hello World!")).await;
+
+    let body_builder = HttpBodyBuilder::new_fake();
+    let request = HttpRequestBuilder::new(&body_builder)
+        .method(Method::GET)
+        .uri(server.uri() + "/hello-world")
+        .build()
+        .unwrap();
+
+    let response = handler.execute(request).await.expect("HTTP/1.1 request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    // Crucially, the response is HTTP/1.1: prior-knowledge HTTP/2 must NOT
+    // have been enabled (which would have made wiremock answer over HTTP/2).
+    assert_eq!(response.version(), Version::HTTP_11);
+}
+
+#[tokio::test]
+async fn zero_lifetime_poisons_connection_after_request() {
+    // ConnectionLifetime::Fixed(ZERO) makes every connection expired by the
+    // time the response is delivered, exercising the poisoning branch in
+    // hyper_handler::handle_poisoning that calls Connected::poison() and
+    // ConnectionInfo::mark_poisoned(). This specific scenario requires
+    // monotonically advancing real time between connection setup and
+    // response delivery (`is_expired` is `age > max_age`, strictly), so a
+    // controlled clock would have to be advanced from inside hyper-util's
+    // pool — `Clock::new_tokio()` is used here as a deliberate exception.
+    use fetch_hyper::ConnectionInfo;
+
+    let handler = HyperTransportBuilder::new(
+        TokioConnector,
+        Spawner::new_tokio(),
+        Clock::new_tokio(),
+        build_tls(),
+        HttpBodyBuilder::new_fake(),
+    )
+    .connect_timeout(Duration::from_secs(5))
+    .request_filter(RequestFilter::HttpAndHttps)
+    .connection_lifetime(fetch_hyper::ConnectionLifetime::Fixed(Duration::ZERO))
+    .build();
+
+    let server = serve(Bytes::from_static(b"Hello World!")).await;
+
+    let body_builder = HttpBodyBuilder::new_fake();
+    let request = HttpRequestBuilder::new(&body_builder)
+        .method(Method::GET)
+        .uri(server.uri() + "/hello-world")
+        .build()
+        .unwrap();
+
+    let response = handler.execute(request).await.expect("request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let info = response
+        .extensions()
+        .get::<ConnectionInfo>()
+        .expect("ConnectionInfo extension should be attached");
+    assert!(info.poisoned(), "connection should have been poisoned by zero lifetime");
 }

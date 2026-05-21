@@ -111,8 +111,8 @@ mod tests {
 
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use testing_aids::MetricTester;
     use tick::Clock;
 
     use super::*;
@@ -143,10 +143,14 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
+    #[tracing_test::traced_test]
     fn drop_records_metric_with_inferred_port() {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
-        let histogram = provider.meter("test").f64_histogram("http.client.connection.duration").build();
+        let tester = MetricTester::new();
+        let histogram = tester
+            .meter_provider()
+            .meter("test")
+            .f64_histogram("http.client.connection.duration")
+            .build();
 
         drop(TrackedStream {
             inner: PanickingStream,
@@ -155,23 +159,11 @@ mod tests {
             connection_duration: Some(histogram),
             connected: Connected::new(),
         });
-        provider.force_flush().unwrap();
 
-        let metrics = exporter.get_finished_metrics().unwrap();
-        let metric = metrics
-            .iter()
-            .flat_map(ResourceMetrics::scope_metrics)
-            .flat_map(ScopeMetrics::metrics)
-            .find(|m| m.name() == "http.client.connection.duration")
-            .expect("metric not found");
-
-        let attrs: Vec<KeyValue> = match metric.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(h)) => h.data_points().flat_map(|dp| dp.attributes().cloned()).collect(),
-            _ => panic!("unexpected metric type"),
-        };
-
-        assert!(attrs.contains(&KeyValue::new("server.address", "example.com")));
-        assert!(attrs.contains(&KeyValue::new("server.port", 443_i64)));
+        tester.assert_attributes_contain(&[
+            KeyValue::new("server.address", "example.com"),
+            KeyValue::new("server.port", 443_i64),
+        ]);
     }
 
     #[test]

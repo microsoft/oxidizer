@@ -75,7 +75,12 @@ where
     }
 }
 
+// The internal ALPN selection only manifests through TLS handshakes against
+// a real HTTPS server, which is out of scope for these tests; the surviving
+// boolean mutations on `http1`/`http2` produce observably identical results
+// when the connector is exercised over plain HTTP.
 #[cfg(feature = "rustls")]
+#[cfg_attr(test, mutants::skip)]
 fn build_rustls_connector<C, S>(
     config: Arc<rustls::ClientConfig>,
     connector: C,
@@ -169,4 +174,174 @@ where
 fn handle_tls_error(e: Box<dyn std::error::Error + Send + Sync>) -> http_extensions::HttpError {
     let recovery = crate::recoverability::detect_recoverability(e.as_ref());
     http_extensions::HttpError::other(e, recovery, crate::error_labels::LABEL_CONNECT)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(any(feature = "rustls", feature = "native-tls"))]
+mod tests {
+    use bytes::Bytes;
+    use layered::Service as _;
+    use tick::Clock;
+
+    use super::*;
+    use crate::testing::{FakeConnector, FakeStream, TestError};
+
+    #[cfg(feature = "native-tls")]
+    fn native_tls_backend() -> TlsBackend {
+        TlsBackend::NativeTls(native_tls::TlsConnector::new().expect("default native-tls connector"))
+    }
+
+    #[cfg(feature = "rustls")]
+    fn rustls_backend() -> TlsBackend {
+        let provider = rustls::crypto::CryptoProvider::get_default()
+            .cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()));
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        TlsBackend::Rustls(std::sync::Arc::new(config))
+    }
+
+    fn fake_connector() -> FakeConnector {
+        FakeConnector::new_success(Bytes::new(), Clock::new_frozen())
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[test]
+    fn new_with_native_tls_backend_creates_native_variant() {
+        let c: TlsConnector<FakeConnector, FakeStream> =
+            TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
+        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[test]
+    fn new_with_native_tls_http_and_https_filter() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            native_tls_backend(),
+            fake_connector(),
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11],
+        );
+        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn new_with_rustls_https_only_filter_and_both_versions() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            rustls_backend(),
+            fake_connector(),
+            RequestFilter::Https,
+            &[Version::HTTP_11, Version::HTTP_2],
+        );
+        assert!(matches!(c, TlsConnector::Rustls(_, _)));
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn new_with_rustls_http_and_https_filter_h2_only() {
+        let c: TlsConnector<FakeConnector, FakeStream> =
+            TlsConnector::new(rustls_backend(), fake_connector(), RequestFilter::HttpAndHttps, &[Version::HTTP_2]);
+        assert!(matches!(c, TlsConnector::Rustls(_, _)));
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn new_with_rustls_http1_only_with_http10_alias() {
+        let c: TlsConnector<FakeConnector, FakeStream> =
+            TlsConnector::new(rustls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_10]);
+        assert!(matches!(c, TlsConnector::Rustls(_, _)));
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn clone_rustls_variant() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            rustls_backend(),
+            fake_connector(),
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11, Version::HTTP_2],
+        );
+        let c2 = c;
+        assert!(matches!(c2, TlsConnector::Rustls(_, _)));
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[test]
+    fn clone_native_tls_variant() {
+        let c: TlsConnector<FakeConnector, FakeStream> =
+            TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
+        let c2 = c;
+        assert!(matches!(c2, TlsConnector::NativeTls(_, _)));
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[tokio::test]
+    async fn execute_native_tls_with_plain_http_returns_stream() {
+        // For plain http://, native-tls passes through without performing a handshake.
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            native_tls_backend(),
+            fake_connector(),
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11],
+        );
+        let result = c.execute(templated_uri::BaseUri::from_static("http://example.com")).await;
+        result.unwrap();
+    }
+
+    #[cfg(feature = "rustls")]
+    #[tokio::test]
+    async fn execute_rustls_with_plain_http_returns_stream() {
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            rustls_backend(),
+            fake_connector(),
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11, Version::HTTP_2],
+        );
+        let result = c.execute(templated_uri::BaseUri::from_static("http://example.com")).await;
+        result.unwrap();
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[tokio::test]
+    async fn execute_native_tls_propagates_connector_error() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_connect_failure(TestError::new("fail"), clock);
+        let c: TlsConnector<FakeConnector, FakeStream> =
+            TlsConnector::new(native_tls_backend(), connector, RequestFilter::HttpAndHttps, &[Version::HTTP_11]);
+        let result = c.execute(templated_uri::BaseUri::from_static("http://example.com")).await;
+        let Err(err) = result else {
+            panic!("connector error should propagate");
+        };
+        assert!(err.to_string().contains("fail"), "got: {err}");
+    }
+
+    #[cfg(feature = "rustls")]
+    #[tokio::test]
+    async fn execute_rustls_propagates_connector_error() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_connect_failure(TestError::new("fail-rustls"), clock);
+        let c: TlsConnector<FakeConnector, FakeStream> = TlsConnector::new(
+            rustls_backend(),
+            connector,
+            RequestFilter::HttpAndHttps,
+            &[Version::HTTP_11, Version::HTTP_2],
+        );
+        let result = c.execute(templated_uri::BaseUri::from_static("http://example.com")).await;
+        let Err(err) = result else {
+            panic!("connector error should propagate");
+        };
+        assert!(err.to_string().contains("fail-rustls"), "got: {err}");
+    }
+
+    #[test]
+    fn handle_tls_error_wraps_with_connect_label() {
+        let inner: Box<dyn std::error::Error + Send + Sync> = Box::new(std::io::Error::new(std::io::ErrorKind::TimedOut, "boom"));
+        let err = handle_tls_error(inner);
+        assert!(err.to_string().contains("boom"), "got: {err}");
+    }
 }

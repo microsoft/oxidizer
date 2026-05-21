@@ -240,9 +240,10 @@ fn negotiated_version(connected: &Connected) -> Version {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
-    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics, ScopeMetrics};
-    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use testing_aids::MetricTester;
 
     use super::*;
 
@@ -272,8 +273,7 @@ mod tests {
 
         let err = verify_protocol_version(&Connected::new(), &base, &supported)
             .expect_err("HTTP/1.1 should be rejected when only HTTP/2 is supported");
-        let msg = err.to_string();
-        assert!(msg.contains("HTTP/1.1"), "unexpected message: {msg}");
+        insta::assert_snapshot!(err);
     }
 
     #[test]
@@ -288,10 +288,11 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
+    #[tracing_test::traced_test]
     fn report_connection_error_records_metric() {
-        let exporter = InMemoryMetricExporter::default();
-        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
-        let histogram = provider
+        let tester = MetricTester::new();
+        let histogram = tester
+            .meter_provider()
             .meter("test")
             .f64_histogram("http.client.connection.setup.duration")
             .build();
@@ -304,19 +305,147 @@ mod tests {
             &"connection refused",
         );
 
-        provider.force_flush().unwrap();
-        let metrics = exporter.get_finished_metrics().unwrap();
-        let count: usize = metrics
-            .iter()
-            .flat_map(ResourceMetrics::scope_metrics)
-            .flat_map(ScopeMetrics::metrics)
-            .filter(|m| m.name() == "http.client.connection.setup.duration")
-            .map(|m| match m.data() {
-                AggregatedMetrics::F64(MetricData::Histogram(h)) => h.data_points().count(),
-                _ => 0,
-            })
-            .sum();
+        tester.assert_attributes_contain(&[
+            KeyValue::new("server.address", "example.com"),
+            KeyValue::new("server.port", 8443_i64),
+            KeyValue::new("error.type", "connect"),
+        ]);
+    }
 
-        assert!(count > 0, "expected at least one data point");
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn connect_with_timeout_records_metric_on_success() {
+        use bytes::Bytes;
+
+        use crate::testing::FakeConnector;
+
+        let tester = MetricTester::new();
+        let histogram = tester
+            .meter_provider()
+            .meter("test")
+            .f64_histogram("http.client.connection.setup.duration")
+            .build();
+
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
+        let base = BaseUri::from_static("http://example.com");
+        let result = connect_with_timeout(
+            layered::Service::execute(&connector, base.clone()),
+            base,
+            &clock,
+            Duration::from_secs(5),
+            histogram.clone(),
+        )
+        .await;
+        result.unwrap();
+
+        tester.assert_attributes_contain(&[KeyValue::new("server.address", "example.com")]);
+    }
+
+    #[tokio::test]
+    async fn connect_with_timeout_returns_error_on_connector_failure() {
+        use crate::testing::{FakeConnector, TestError};
+
+        let provider = SdkMeterProvider::builder().build();
+        let histogram = provider
+            .meter("test")
+            .f64_histogram("http.client.connection.setup.duration")
+            .build();
+
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_connect_failure(TestError::new("boom"), clock.clone());
+        let base = BaseUri::from_static("http://example.com");
+        let err = connect_with_timeout(
+            layered::Service::execute(&connector, base.clone()),
+            base,
+            &clock,
+            Duration::from_secs(5),
+            histogram,
+        )
+        .await
+        .expect_err("connector failure should propagate");
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[tokio::test]
+    async fn connect_with_timeout_returns_timeout_when_connect_too_slow() {
+        use std::future::pending;
+
+        use seatbelt::{Recovery, RecoveryKind};
+
+        let provider = SdkMeterProvider::builder().build();
+        let histogram = provider
+            .meter("test")
+            .f64_histogram("http.client.connection.setup.duration")
+            .build();
+
+        let control = tick::ClockControl::new().auto_advance_timers(true);
+        let clock = control.to_clock();
+        let base = BaseUri::from_static("http://example.com");
+        // pending() never resolves, so the timeout always wins.
+        let hanging = pending::<Result<crate::testing::FakeStream>>();
+        let err = connect_with_timeout(hanging, base.clone(), &clock, Duration::from_secs(1), histogram)
+            .await
+            .expect_err("connect should time out");
+        let msg = err.to_string();
+        assert!(msg.contains("timeout"), "got: {msg}");
+        assert!(msg.contains("connection timeout"), "got: {msg}");
+        assert_eq!(err.recovery().kind(), RecoveryKind::Retry);
+    }
+
+    #[tokio::test]
+    async fn client_connector_execute_returns_tracked_stream_on_success() {
+        use bytes::Bytes;
+        use layered::Service as _;
+
+        use crate::testing::FakeConnector;
+
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
+        let provider = SdkMeterProvider::builder().build();
+        let meter = provider.meter("test");
+        let cc: ClientConnector<FakeConnector, crate::testing::FakeStream> = ClientConnector::new(
+            connector,
+            clock,
+            Duration::from_secs(5),
+            vec![Version::HTTP_11, Version::HTTP_2],
+            &meter,
+            7,
+            ConnectionLifetime::Fixed(Duration::from_secs(60)),
+        );
+        let _ = cc.clone(); // exercise Clone impl
+        cc.execute(BaseUri::from_static("http://example.com"))
+            .await
+            .expect("execute should succeed");
+    }
+
+    #[tokio::test]
+    async fn client_connector_execute_rejects_unsupported_version() {
+        use bytes::Bytes;
+        use layered::Service as _;
+
+        use crate::testing::FakeConnector;
+
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(Bytes::new(), clock.clone());
+        let provider = SdkMeterProvider::builder().build();
+        let meter = provider.meter("test");
+        // Plaintext + multiple required versions: protocol verification runs.
+        let cc: ClientConnector<FakeConnector, crate::testing::FakeStream> = ClientConnector::new(
+            connector,
+            clock,
+            Duration::from_secs(5),
+            vec![Version::HTTP_2, Version::HTTP_3],
+            &meter,
+            0,
+            ConnectionLifetime::Unlimited,
+        );
+        let err = cc
+            .execute(BaseUri::from_static("https://example.com"))
+            .await
+            .expect_err("HTTP/1.1 should be rejected");
+        assert!(err.to_string().contains("unsupported HTTP version"));
+
+        let _ = Bytes::new();
     }
 }

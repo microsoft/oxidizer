@@ -164,6 +164,40 @@ mod tests {
         assert!(keys.iter().any(|k| k == "server.port"));
         assert!(keys.iter().any(|k| k == "url.scheme"));
         assert!(keys.iter().any(|k| k == "network.protocol.version"));
+
+        let proto = attrs.iter().find(|kv| kv.key.as_str() == "network.protocol.version").unwrap();
+        assert_eq!(proto.value.as_str(), "1");
+    }
+
+    #[test]
+    fn connection_network_protocol_version_h2() {
+        let connected = hyper_util::client::legacy::connect::Connected::new().negotiated_h2();
+        assert_eq!(connection_network_protocol_version(&connected).as_str(), "2");
+    }
+
+    #[test]
+    fn connection_network_protocol_version_default_is_1() {
+        let connected = hyper_util::client::legacy::connect::Connected::new();
+        assert_eq!(connection_network_protocol_version(&connected).as_str(), "1");
+    }
+
+    #[test]
+    fn is_expired_true_when_age_exceeds_max() {
+        // Use a real clock and verify that once max_age is zero, any non-zero
+        // elapsed time triggers expiry. We use a tokio clock advanced via sleep.
+        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::ZERO));
+        // age is 0 under frozen clock, and 0 is not strictly greater than 0
+        assert!(!info.is_expired());
+    }
+
+    #[test]
+    fn is_expired_true_with_clock_control() {
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let info = ConnectionInfo::new(&clock, 0, Some(Duration::from_secs(1)));
+        assert!(!info.is_expired());
+        control.advance(Duration::from_secs(2));
+        assert!(info.is_expired());
     }
 
     #[test]

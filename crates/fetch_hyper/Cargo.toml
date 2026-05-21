@@ -80,12 +80,16 @@ bytes = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { workspace = true, features = ["test-util"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+insta = { workspace = true }
+mutants.workspace = true
 native-tls = { workspace = true }
 ohno = { workspace = true, features = ["test-util"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"], default-features = false }
 rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"] }
+testing_aids = { workspace = true }
 tick = { workspace = true, features = ["tokio", "test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"] }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
 wiremock = { workspace = true }
 
 [[test]]

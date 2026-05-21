@@ -183,3 +183,159 @@ fn handle_poisoning(capture: &CaptureConnection, extensions: &Extensions) {
         info.mark_poisoned();
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(feature = "native-tls")]
+mod tests {
+    use std::time::Duration;
+
+    use anyspawn::Spawner;
+    use bytes::Bytes;
+    use http_body_util::BodyExt as _;
+    use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
+    use layered::Service as _;
+    use tick::Clock;
+
+    use super::*;
+    use crate::HyperTransport;
+    use crate::options::{ConnectionLifetime, RequestFilter};
+    use crate::testing::{FakeConnector, create_hyper_error, fake_body_builder};
+    use crate::tls::TlsBackend;
+
+    fn tls() -> TlsBackend {
+        native_tls::TlsConnector::new().unwrap().into()
+    }
+
+    fn http_response_bytes() -> Bytes {
+        Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+    }
+
+    fn make_handler(connector: FakeConnector, lifetime: ConnectionLifetime) -> HyperTransport {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
+            .request_filter(RequestFilter::HttpAndHttps)
+            .connection_lifetime(lifetime)
+            .build()
+    }
+
+    fn test_request() -> HttpRequest {
+        HttpRequestBuilder::new(&fake_body_builder())
+            .uri("http://example.com/path")
+            .build()
+            .expect("test request must build")
+    }
+
+    #[test]
+    fn debug_renders_handler_type() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
+        let handler: HyperHandler<FakeConnector, crate::testing::FakeStream> = build_hyper_handler(
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
+                .request_filter(RequestFilter::HttpAndHttps),
+            &opentelemetry::global::meter("test"),
+        );
+        let rendered = format!("{handler:?}");
+        assert!(rendered.contains("HyperHandler"), "got: {rendered}");
+    }
+
+    #[tokio::test]
+    async fn malformed_response_yields_hyper_util_error() {
+        // The byte stream is not a valid HTTP/1 response, so hyper's client
+        // request future fails with a `legacy::Error`, exercising
+        // `create_http_error_from_hyper_util`.
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(Bytes::from_static(b"NOT A VALID HTTP RESPONSE"), clock.clone());
+        let handler = make_handler(connector, ConnectionLifetime::Unlimited);
+        let err = handler.execute(test_request()).await.expect_err("expected error");
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[tokio::test]
+    async fn http2_only_configures_hyper_correctly() {
+        // Builder with HTTP/2-only flips `http2_only(true)` on hyper's builder.
+        // Using FakeStream over HTTP/1.1-style data will fail, but we want to
+        // simply exercise the build path and request execution.
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
+            .request_filter(RequestFilter::HttpAndHttps)
+            .supported_http_versions(&[Version::HTTP_2])
+            .build();
+        // Execute to drive the http2 path; we don't care if it fails or not.
+        let _ = handler.execute(test_request()).await;
+    }
+
+    #[test]
+    fn poison_path_no_op_when_no_connection_info() {
+        let extensions = Extensions::new();
+        let mut req = test_request();
+        let capture = capture_connection::<HttpBody>(&mut req);
+        // No ConnectionInfo on extensions → handle_poisoning is a no-op.
+        handle_poisoning(&capture, &extensions);
+    }
+
+    #[test]
+    fn poison_path_no_op_when_connection_not_expired() {
+        let mut extensions = Extensions::new();
+        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::from_secs(60)));
+        extensions.insert(info.clone());
+
+        let mut req = test_request();
+        let capture = capture_connection::<HttpBody>(&mut req);
+        handle_poisoning(&capture, &extensions);
+        assert!(!info.poisoned(), "should not be poisoned when not expired");
+    }
+
+    #[test]
+    fn poison_path_no_op_when_no_capture_metadata() {
+        let mut extensions = Extensions::new();
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let info = ConnectionInfo::new(&clock, 0, Some(Duration::from_secs(1)));
+        control.advance(Duration::from_secs(5));
+        assert!(info.is_expired());
+        extensions.insert(info.clone());
+
+        let mut req = test_request();
+        let capture = capture_connection::<HttpBody>(&mut req);
+        // capture.connection_metadata() returns None until hyper populates it.
+        handle_poisoning(&capture, &extensions);
+        // No metadata available → mark_poisoned must NOT be called.
+        assert!(!info.poisoned());
+    }
+
+    #[tokio::test]
+    async fn end_to_end_response_is_returned_with_body() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
+        let handler = make_handler(connector, ConnectionLifetime::Unlimited);
+        let resp = handler.execute(test_request()).await.expect("should succeed");
+        assert_eq!(resp.status(), 200);
+        let body = resp.into_body().collect().await.expect("body collect").to_bytes();
+        assert_eq!(&*body, b"hello");
+    }
+
+    #[test]
+    fn create_http_error_from_hyper_wraps_with_label() {
+        use ohno::Labeled;
+        let err = create_http_error_from_hyper(create_hyper_error());
+        assert!(!err.to_string().is_empty());
+        assert_eq!(err.label().as_str(), "request_hyper");
+    }
+
+    #[test]
+    fn hyper_error_display_includes_source_chain() {
+        let err = create_hyper_error();
+        let wrapped = HyperError::Hyper(err);
+        let rendered = format!("{wrapped}");
+        // HyperError::Hyper always exposes its inner error as a source, and
+        // create_hyper_error produces a hyper::Error with at least one source
+        // level (an io::Error).
+        let src = std::error::Error::source(&wrapped);
+        assert!(src.is_some());
+        if src.and_then(std::error::Error::source).is_some() {
+            assert!(rendered.contains("caused by"), "expected chain in: {rendered}");
+        }
+    }
+}

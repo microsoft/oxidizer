@@ -31,6 +31,10 @@ fn for_other_errors(error: &(dyn StdError + 'static)) -> RecoveryInfo {
     error.source().map_or(RecoveryInfo::unknown(), for_other_errors)
 }
 
+// `hyper::Error` has no public constructor for the internal flags inspected
+// here (`is_canceled`, `is_timeout`, `is_closed`, `is_body_write_aborted`),
+// so the individual guard arms cannot be exercised by tests.
+#[cfg_attr(test, mutants::skip)]
 fn from_hyper_error(error: &hyper::Error) -> RecoveryInfo {
     match error {
         _ if error.is_canceled() => RecoveryInfo::retry(),
@@ -97,6 +101,17 @@ mod tests {
     fn hyper_error_path_returns_never_for_unrelated_failure() {
         let hyper_err = create_hyper_error();
         assert_eq!(from_hyper_error(&hyper_err), RecoveryInfo::never());
+    }
+
+    #[test]
+    fn detect_recoverability_unwraps_hyper_error_via_chain() {
+        // Drives the `for_other_errors` branch that downcasts to hyper::Error.
+        let hyper_err = create_hyper_error();
+        // Wrap in a TestError so the top-level downcast to HttpError / io::Error
+        // both fail and the chain traversal must reach the hyper::Error.
+        let wrapped = TestError::new("wrapped").with_inner(hyper_err);
+        // Unrelated failure resolves to Never via from_hyper_error.
+        assert_eq!(detect_recoverability(&wrapped), RecoveryInfo::never());
     }
 
     #[test]

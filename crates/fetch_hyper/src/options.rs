@@ -101,8 +101,40 @@ mod tests {
     #[test]
     fn debug_renders_per_connection_without_closure_fmt_panic() {
         let lifetime = ConnectionLifetime::PerConnection(Arc::new(|| None));
-        let rendered = format!("{lifetime:?}");
-        assert!(rendered.contains("PerConnection"));
-        assert!(rendered.contains("<closure>"));
+        insta::assert_debug_snapshot!(lifetime);
+    }
+
+    #[test]
+    fn debug_renders_unlimited() {
+        insta::assert_debug_snapshot!(ConnectionLifetime::Unlimited);
+    }
+
+    #[test]
+    fn debug_renders_fixed() {
+        insta::assert_debug_snapshot!(ConnectionLifetime::Fixed(Duration::from_secs(7)));
+    }
+
+    #[test]
+    fn per_connection_can_return_none() {
+        let lifetime = ConnectionLifetime::PerConnection(Arc::new(|| None));
+        assert!(lifetime.resolve().is_none());
+    }
+
+    #[test]
+    fn clone_preserves_variant() {
+        let unlimited = ConnectionLifetime::Unlimited;
+        assert!(matches!(unlimited, ConnectionLifetime::Unlimited));
+
+        let fixed = ConnectionLifetime::Fixed(Duration::from_secs(3));
+        match fixed {
+            ConnectionLifetime::Fixed(d) => assert_eq!(d, Duration::from_secs(3)),
+            _ => panic!("expected Fixed"),
+        }
+
+        let per_conn = ConnectionLifetime::PerConnection(Arc::new(|| Some(Duration::from_secs(1))));
+        match per_conn {
+            ConnectionLifetime::PerConnection(f) => assert_eq!(f(), Some(Duration::from_secs(1))),
+            _ => panic!("expected PerConnection"),
+        }
     }
 }

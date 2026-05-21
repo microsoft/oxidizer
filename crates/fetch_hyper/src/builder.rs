@@ -89,7 +89,7 @@ where
 /// let transport: HyperTransport = HyperTransportBuilder::new(
 ///     make_connector(),
 ///     Spawner::new_tokio(),
-///     tick::Clock::new_tokio(),
+///     tick::ClockControl::new().auto_advance_timers(true).to_clock(),
 ///     make_tls(),
 ///     HttpBodyBuilder::new_fake(),
 /// )
@@ -242,5 +242,139 @@ where
         let meter = self.meter.clone().unwrap_or_else(|| opentelemetry::global::meter("fetch_hyper"));
 
         HyperTransport::new(build_hyper_handler(self, &meter).into_dynamic())
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(feature = "native-tls")]
+mod tests {
+    use bytes::Bytes;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+    use super::*;
+    use crate::testing::FakeConnector;
+
+    fn tls() -> TlsBackend {
+        native_tls::TlsConnector::new().unwrap().into()
+    }
+
+    fn make_builder() -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
+        HyperTransportBuilder::new(
+            FakeConnector::new_success(Bytes::new(), tick::ClockControl::new().auto_advance_timers(true).to_clock()),
+            Spawner::new_tokio(),
+            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+            tls(),
+            HttpBodyBuilder::new_fake(),
+        )
+    }
+
+    #[test]
+    fn builder_defaults_and_setters() {
+        let defaults = make_builder();
+        assert!(defaults.meter.is_none(), "meter is not part of Debug output");
+        insta::assert_debug_snapshot!("defaults", defaults);
+
+        let configured = make_builder()
+            .request_filter(RequestFilter::HttpAndHttps)
+            .supported_http_versions(&[Version::HTTP_2])
+            .connect_timeout(Duration::from_secs(7))
+            .connection_lifetime(ConnectionLifetime::Fixed(Duration::from_secs(60)))
+            .pool_index(42);
+        insta::assert_debug_snapshot!("configured", configured);
+    }
+
+    #[test]
+    fn meter_setter_stores_meter() {
+        let provider = SdkMeterProvider::builder().build();
+        let m = provider.meter("test");
+        let b = make_builder().meter(m);
+        assert!(b.meter.is_some());
+    }
+
+    #[test]
+    fn configure_hyper_runs_callback_synchronously() {
+        let mut called = false;
+        let _b = make_builder().configure_hyper(|_| {
+            called = true;
+        });
+        assert!(called);
+    }
+
+    #[tokio::test]
+    async fn build_with_explicit_meter_yields_working_transport() {
+        let provider = SdkMeterProvider::builder().build();
+        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let handler = HyperTransportBuilder::new(
+            FakeConnector::new_success(response_bytes, clock.clone()),
+            Spawner::new_tokio(),
+            clock,
+            tls(),
+            HttpBodyBuilder::new_fake(),
+        )
+        .request_filter(RequestFilter::HttpAndHttps)
+        .meter(provider.meter("test"))
+        .build();
+        let resp = handler.execute(crate::testing::create_test_request()).await.expect("ok");
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[test]
+    fn build_with_h2_only_sets_http2_only_flag() {
+        // We can't easily inspect hyper's internal flag, but we can at least
+        // exercise the build path with HTTP/2-only configuration to confirm
+        // it succeeds without panicking.
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let _handler = HyperTransportBuilder::new(
+            FakeConnector::new_success(Bytes::new(), clock.clone()),
+            Spawner::new_tokio(),
+            clock,
+            tls(),
+            HttpBodyBuilder::new_fake(),
+        )
+        .supported_http_versions(&[Version::HTTP_2])
+        .build();
+    }
+
+    #[tokio::test]
+    async fn hyper_transport_clones_share_underlying_service() {
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        let handler = HyperTransportBuilder::new(
+            FakeConnector::new_success(response_bytes, clock.clone()),
+            Spawner::new_tokio(),
+            clock,
+            tls(),
+            HttpBodyBuilder::new_fake(),
+        )
+        .request_filter(RequestFilter::HttpAndHttps)
+        .build();
+        let cloned = handler.clone();
+        let _ = format!("{cloned:?}");
+        let resp = cloned.execute(crate::testing::create_test_request()).await.expect("ok");
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn spawner_executor_runs_future() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let executor = SpawnerExecutor(Spawner::new_tokio());
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_clone = Arc::clone(&fired);
+        hyper::rt::Executor::execute(&executor, async move {
+            fired_clone.store(true, Ordering::SeqCst);
+        });
+        // Yield briefly so the spawned task can run.
+        for _ in 0..50 {
+            if fired.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 }

@@ -1050,7 +1050,9 @@ dependencies = [
  "hyper-rustls",
  "hyper-tls",
  "hyper-util",
+ "insta",
  "layered",
+ "mutants",
  "native-tls",
  "ohno 0.3.2",
  "opentelemetry",
@@ -1060,11 +1062,13 @@ dependencies = [
  "rustls",
  "seatbelt",
  "templated_uri",
+ "testing_aids",
  "tick",
  "tokio",
  "tokio-native-tls",
  "tower",
  "tracing",
+ "tracing-test",
  "wiremock",
 ]
 

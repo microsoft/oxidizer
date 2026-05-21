@@ -40,6 +40,9 @@ where
     type Error = HttpError;
     type Future = Pin<Box<dyn Future<Output = Result<S>> + Send + 'static>>;
 
+    // `Poll::from(Ok(()))` is constructed identically to `Poll::Ready(Ok(()))`,
+    // so the mutation produces an equivalent program.
+    #[cfg_attr(test, mutants::skip)]
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
         Poll::Ready(Ok(()))
     }
@@ -75,7 +78,10 @@ mod tests {
 
     #[tokio::test]
     async fn call_translates_uri_into_base_uri_and_invokes_connector() {
-        let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(Bytes::from_static(b""), Clock::new_tokio()));
+        let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(
+            Bytes::from_static(b""),
+            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+        ));
         adapter
             .call(Uri::from_static("https://example.com/"))
             .await
@@ -84,7 +90,10 @@ mod tests {
 
     #[tokio::test]
     async fn call_propagates_invalid_uri_error() {
-        let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(Bytes::from_static(b""), Clock::new_tokio()));
+        let mut adapter = HyperConnectorAdapter::new(FakeConnector::new_success(
+            Bytes::from_static(b""),
+            tick::ClockControl::new().auto_advance_timers(true).to_clock(),
+        ));
         // A relative URI (no scheme/authority) is not a valid BaseUri.
         adapter
             .call(Uri::from_static("/relative/path"))

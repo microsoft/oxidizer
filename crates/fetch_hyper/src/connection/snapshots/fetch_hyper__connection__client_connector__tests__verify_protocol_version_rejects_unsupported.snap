@@ -1,0 +1,5 @@
+---
+source: crates/fetch_hyper/src/connection/client_connector.rs
+expression: err
+---
+the connection was established with unsupported HTTP version: HTTP/1.1, supported versions are: [HTTP/2.0], server: https://example.com/

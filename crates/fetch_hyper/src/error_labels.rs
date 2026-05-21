@@ -55,6 +55,7 @@ fn resolve_io_error_label(error: &std::io::Error) -> ErrorLabel {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -71,5 +72,66 @@ mod tests {
         let io = std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout");
         let label = collect_error_labels(&io);
         assert!(!label.as_str().is_empty());
+    }
+
+    #[test]
+    fn nested_io_error_unwraps_inner_kind() {
+        // Outer io::Error wraps an inner io::Error with a distinguishable kind.
+        let inner = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let outer = std::io::Error::other(inner);
+        let label = resolve_io_error_label(&outer);
+        // inner kind should win over outer "other" kind
+        let kind_label: ohno::ErrorLabel = std::io::ErrorKind::ConnectionRefused.into();
+        assert_eq!(label.as_str(), kind_label.as_str());
+    }
+
+    #[test]
+    fn io_error_without_inner_uses_kind() {
+        let io = std::io::Error::from(std::io::ErrorKind::ConnectionAborted);
+        let label = resolve_io_error_label(&io);
+        let kind_label: ohno::ErrorLabel = std::io::ErrorKind::ConnectionAborted.into();
+        assert_eq!(label.as_str(), kind_label.as_str());
+    }
+
+    #[cfg(feature = "native-tls")]
+    #[test]
+    fn native_tls_error_in_io_chain_resolves_to_tls_label() {
+        // Force a native_tls::Error by attempting to build an identity from invalid PKCS#12 data.
+        let Err(native_err) = native_tls::Identity::from_pkcs12(b"not-a-real-pkcs12", "wrong") else {
+            panic!("invalid pkcs12 must fail");
+        };
+        let io = std::io::Error::other(native_err);
+        let label = resolve_io_error_label(&io);
+        assert_eq!(label.as_str(), LABEL_TLS.as_str());
+    }
+
+    #[cfg(feature = "rustls")]
+    #[test]
+    fn rustls_error_in_io_chain_resolves_to_tls_label() {
+        let rustls_err = rustls::Error::General("synthetic".to_string());
+        let io = std::io::Error::other(rustls_err);
+        let label = resolve_io_error_label(&io);
+        assert_eq!(label.as_str(), LABEL_TLS.as_str());
+    }
+
+    #[test]
+    fn resolve_returns_none_for_unrecognized_error() {
+        #[derive(Debug)]
+        struct UnknownErr;
+        impl std::fmt::Display for UnknownErr {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("unknown")
+            }
+        }
+        impl std::error::Error for UnknownErr {}
+        assert!(resolve_error_label(&UnknownErr).is_none());
+    }
+
+    #[test]
+    fn resolve_returns_io_label_for_io_error() {
+        let io = std::io::Error::from(std::io::ErrorKind::TimedOut);
+        let label = resolve_error_label(&io).expect("io error should yield a label");
+        let expected: ohno::ErrorLabel = std::io::ErrorKind::TimedOut.into();
+        assert_eq!(label.as_str(), expected.as_str());
     }
 }

@@ -360,7 +360,6 @@ mod tests {
     use layered::Service as _;
     use native_tls::TlsConnector;
     use seatbelt::RecoveryInfo;
-    use tick::Clock;
 
     use crate::testing::{FakeConnector, TestError, create_test_request, fake_body_builder};
     use crate::{HyperTransportBuilder, RequestFilter, TlsBackend};
@@ -375,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn fake_connector_serves_canned_response() {
-        let clock = Clock::new_tokio();
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(),
@@ -400,7 +399,7 @@ mod tests {
 
     #[tokio::test]
     async fn fake_connector_propagates_connect_failure() {
-        let clock = Clock::new_tokio();
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_connect_failure(
                 TestError::new("forced connect error").with_inner_recoverability(RecoveryInfo::retry()),
@@ -429,7 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn https_only_filter_rejects_http_request() {
-        let clock = Clock::new_tokio();
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(),
