@@ -35,7 +35,7 @@ check-changes:
     just spellcheck
 
     Write-Host "`n=== Checking license headers ===" -ForegroundColor Cyan
-    just heather-check
+    just license-check
 
     Write-Host "`n=== Validating dependencies ===" -ForegroundColor Cyan
     just deny
@@ -102,14 +102,14 @@ hack:
     cargo hack {{ target_package }} check --feature-powerset --locked
 
 # Apply license boilerplate headers.
-heather:
+license:
     cargo heather --fix
 
 # Check that all files have the required license headers.
-heather-check:
+license-check:
     cargo heather
 
-alias check-heather := heather-check
+alias check-license := license-check
 
 # Run unit and integration tests under Miri.
 [script]
