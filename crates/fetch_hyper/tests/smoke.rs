@@ -5,6 +5,8 @@
 //! a real HTTP request against a local mock server using the `native-tls`
 //! backend and the `HttpAndHttps` request filter.
 
+#![allow(clippy::unwrap_used, reason = "test code")]
+
 use std::time::Duration;
 
 use anyspawn::Spawner;
