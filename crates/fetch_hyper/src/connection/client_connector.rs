@@ -137,7 +137,7 @@ where
     event!(
         name: "http.client.connection.start",
         Level::DEBUG,
-        server.address = base_uri.authority().as_str(),
+        server.address = base_uri.host(),
         server.port = base_uri.effective_port(),
         url.scheme = %base_uri.scheme(),
         url.full = %base_uri,
@@ -158,7 +158,7 @@ where
             event!(
                 name: "http.client.connection.success",
                 Level::INFO,
-                server.address = base_uri.authority().as_str(),
+                server.address = base_uri.host(),
                 server.port = base_uri.effective_port(),
                 url.scheme = %base_uri.scheme(),
                 url.full = %base_uri,
@@ -196,7 +196,7 @@ fn report_connection_error(
     event!(
         name: "http.client.connection.error",
         Level::WARN,
-        server.address = base_uri.authority().as_str(),
+        server.address = base_uri.host(),
         server.port = base_uri.effective_port(),
         url.scheme = %base_uri.scheme(),
         url.full = %base_uri,
