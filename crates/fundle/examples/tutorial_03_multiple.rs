@@ -10,9 +10,6 @@
     reason = "Unit tests"
 )]
 
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
 // Assume these are random dependencies we want to create and inject.
 pub struct Logger {}
 pub struct Database {}
