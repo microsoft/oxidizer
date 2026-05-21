@@ -263,7 +263,8 @@ mod tests {
             RequestFilter::HttpAndHttps,
             &[Version::HTTP_11, Version::HTTP_2],
         );
-        let c2 = c;
+        let c2 = c.clone();
+        assert!(matches!(c, TlsConnector::Rustls(_, _)));
         assert!(matches!(c2, TlsConnector::Rustls(_, _)));
     }
 
@@ -272,7 +273,8 @@ mod tests {
     fn clone_native_tls_variant() {
         let c: TlsConnector<FakeConnector, FakeStream> =
             TlsConnector::new(native_tls_backend(), fake_connector(), RequestFilter::Https, &[Version::HTTP_11]);
-        let c2 = c;
+        let c2 = c.clone();
+        assert!(matches!(c, TlsConnector::NativeTls(_, _)));
         assert!(matches!(c2, TlsConnector::NativeTls(_, _)));
     }
 
