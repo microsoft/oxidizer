@@ -132,7 +132,7 @@ $script:IgnoredTypes = @('test')
 #     Get-CrateVersionFromRef).
 #   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspaceCrates,
 #     Invalidate-WorkspaceMetadataCache, Test-CrateExposesTarget, Get-AllTransitiveDependents).
-#   - Modified-but-unreleased dependency analysis (Get-CratesWithFileChanges,
+#   - Modified-but-unreleased dependency analysis (Get-CratesWithUnreleasedChanges,
 #     Get-CratesWithVersionBumps, Get-UnreleasedModifiedDependencies).
 . "$PSScriptRoot/lib/releasing.ps1"
 

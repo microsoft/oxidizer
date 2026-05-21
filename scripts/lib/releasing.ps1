@@ -16,9 +16,11 @@
       - Reverse-dependency cascade computation.
       - SemVer arithmetic (Cargo's 0.x.y rules).
       - Safe git invocation (no Invoke-Expression).
-      - Detecting which crates have been modified vs a base ref, which have had
-        version bumps, and which workspace dependencies of in-release crates are
-        modified-but-unreleased (the core "unreleased upstream dependency" analysis).
+      - Detecting which crates have been bumped in this PR, which have had source
+        modifications since their own last release baseline (per-crate, derived from
+        each crate's Cargo.toml history), and which workspace dependencies of
+        in-release crates fall into the "modified-but-unreleased" bucket (the core
+        "unreleased upstream dependency" analysis).
 
     It has no top-level param() block and no side effects beyond declaring script-scope
     caches & compiled regexes.
@@ -375,57 +377,6 @@ function Get-AllTransitiveDependents {
 
 # --- FILE-CHANGE ANALYSIS ---
 
-# Repo-relative paths changed in the working tree vs the merge-base with $BaseRef.
-# Considers both committed changes (merge-base..HEAD) and uncommitted working-tree edits
-# (HEAD..working tree, untracked included). This makes the analysis correct for both the
-# CI flow (everything committed) and the interactive flow (mid-script Cargo.toml edits
-# that are not yet committed).
-function Get-GitFileChangeSet {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$BaseRef
-    )
-
-    $set = [System.Collections.Generic.HashSet[string]]::new()
-
-    $mergeBaseOut = Invoke-Git -Arguments @('merge-base', $BaseRef, 'HEAD') -RepoRoot $RepoRoot
-    $mergeBase    = (@($mergeBaseOut))[0]
-    if ([string]::IsNullOrWhiteSpace($mergeBase)) {
-        Write-Warning "Unable to determine merge-base with '$BaseRef'; falling back to '$BaseRef' as diff base."
-        $mergeBase = $BaseRef
-    }
-
-    $committed = Invoke-Git -Arguments @('diff', '--name-only', $mergeBase, 'HEAD', '--') -RepoRoot $RepoRoot
-    foreach ($line in $committed) {
-        $trimmed = $line.ToString().Trim()
-        if (-not [string]::IsNullOrEmpty($trimmed)) {
-            [void]$set.Add($trimmed.Replace('\', '/'))
-        }
-    }
-
-    # Uncommitted edits (tracked, staged + unstaged).
-    $working = Invoke-Git -Arguments @('diff', '--name-only', 'HEAD', '--') -RepoRoot $RepoRoot
-    foreach ($line in $working) {
-        $trimmed = $line.ToString().Trim()
-        if (-not [string]::IsNullOrEmpty($trimmed)) {
-            [void]$set.Add($trimmed.Replace('\', '/'))
-        }
-    }
-
-    # Untracked files (e.g. new source files added during a release).
-    $untracked = Invoke-Git -Arguments @('ls-files', '--others', '--exclude-standard') -RepoRoot $RepoRoot
-    foreach ($line in $untracked) {
-        $trimmed = $line.ToString().Trim()
-        if (-not [string]::IsNullOrEmpty($trimmed)) {
-            [void]$set.Add($trimmed.Replace('\', '/'))
-        }
-    }
-
-    # Preserve HashSet semantics across the function boundary. Without -NoEnumerate
-    # an empty HashSet collapses to $null, which breaks downstream .Contains() calls.
-    Write-Output -NoEnumerate $set
-}
-
 # Returns the crate folder name (under crates/) that contains the given repo-relative
 # path, or $null if the path is outside any crate.
 function Get-CrateFolderForPath {
@@ -439,22 +390,92 @@ function Get-CrateFolderForPath {
     return $rest.Substring(0, $slash)
 }
 
-# Returns a deduped HashSet[string] of crate folder names that have at least one
-# changed file under crates/<folder>/ vs the base ref.
-function Get-CratesWithFileChanges {
+# Returns the SHA of the most recent commit that touched the `version =` or
+# `publish =` line in the crate's Cargo.toml, or $null if no such commit exists
+# in the crate's committed history. This is the per-crate "last release boundary":
+# any change under crates/<folder>/ newer than this commit is unreleased from the
+# perspective of crates.io, regardless of which PR introduced it.
+#
+# We intentionally do not rely on git tags. The repo creates them after merge to
+# main, but a CI-time clone or a partial fetch may not have them, and a tag is
+# downstream evidence of a release while the Cargo.toml edit is the cause.
+function Get-CrateLastReleaseBaseline {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$BaseRef
+        [Parameter(Mandatory = $true)][string]$CrateFolder
     )
 
-    $changes = Get-GitFileChangeSet -RepoRoot $RepoRoot -BaseRef $BaseRef
-    $folders = [System.Collections.Generic.HashSet[string]]::new()
-    foreach ($p in $changes) {
+    $relPath = "crates/$CrateFolder/Cargo.toml"
+    # -G matches any added/removed diff line whose content matches the regex.
+    # Anchoring at column 0 keeps us on top-level keys, not version-like strings
+    # appearing inside dependency tables or arbitrary literals.
+    $out = Invoke-Git -Arguments @('log', '-1', '--format=%H', '-G', '^(version|publish)\s*=', '--', $relPath) -RepoRoot $RepoRoot -AllowFailure
+    if ($null -eq $out) { return $null }
+    $sha = (@($out))[0]
+    if ([string]::IsNullOrWhiteSpace($sha)) { return $null }
+    return $sha.ToString().Trim()
+}
+
+# For each published workspace crate, returns a hashtable folder -> ChangedFileCount
+# where the count is the number of distinct repo-relative paths under crates/<folder>/
+# that have changed since the crate's last release baseline (see
+# Get-CrateLastReleaseBaseline). Considers:
+#
+#   - committed changes between the baseline and HEAD,
+#   - tracked working-tree edits (staged + unstaged) vs HEAD,
+#   - untracked files (e.g. new source files added during a release run).
+#
+# Crates with zero modifications are omitted from the result.
+#
+# Working-tree edits and untracked files are queried once globally and bucketed
+# per crate to avoid spawning O(crates) extra git processes.
+function Get-CratesWithUnreleasedChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    $result = @{}
+    $crates = Get-WorkspaceCrates -repoRoot $RepoRoot
+
+    $workingByCrate = @{}
+    $globalWorking   = Invoke-Git -Arguments @('diff', '--name-only', 'HEAD', '--') -RepoRoot $RepoRoot
+    $globalUntracked = Invoke-Git -Arguments @('ls-files', '--others', '--exclude-standard') -RepoRoot $RepoRoot
+    foreach ($line in @(@($globalWorking) + @($globalUntracked))) {
+        $p = $line.ToString().Trim().Replace('\', '/')
+        if ([string]::IsNullOrEmpty($p)) { continue }
         $folder = Get-CrateFolderForPath -Path $p
-        if ($folder) { [void]$folders.Add($folder) }
+        if (-not $folder) { continue }
+        if (-not $workingByCrate.ContainsKey($folder)) {
+            $workingByCrate[$folder] = [System.Collections.Generic.HashSet[string]]::new()
+        }
+        [void]$workingByCrate[$folder].Add($p)
     }
-    # See Get-GitFileChangeSet for why -NoEnumerate matters.
-    Write-Output -NoEnumerate $folders
+
+    foreach ($crate in $crates) {
+        if (-not $crate.Published) { continue }
+
+        $folder = $crate.Folder
+        $files = [System.Collections.Generic.HashSet[string]]::new()
+
+        $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $folder
+        if (-not [string]::IsNullOrEmpty($baseline)) {
+            $committed = Invoke-Git -Arguments @('diff', '--name-only', $baseline, 'HEAD', '--', "crates/$folder") -RepoRoot $RepoRoot
+            foreach ($line in $committed) {
+                $p = $line.ToString().Trim().Replace('\', '/')
+                if (-not [string]::IsNullOrEmpty($p)) { [void]$files.Add($p) }
+            }
+        }
+
+        if ($workingByCrate.ContainsKey($folder)) {
+            foreach ($p in $workingByCrate[$folder]) { [void]$files.Add($p) }
+        }
+
+        if ($files.Count -gt 0) {
+            $result[$folder] = $files.Count
+        }
+    }
+
+    return $result
 }
 
 # For every published workspace crate, compares the on-disk current version with the
@@ -489,7 +510,8 @@ function Get-CratesWithVersionBumps {
         }
     }
 
-    # See Get-GitFileChangeSet for why -NoEnumerate matters.
+    # PowerShell pipeline collapses an empty HashSet to $null on return; -NoEnumerate
+    # preserves it so downstream .Contains() calls still work.
     Write-Output -NoEnumerate $bumped
 }
 
@@ -498,17 +520,25 @@ function Get-CratesWithVersionBumps {
 # For each crate in the "release set" (crates with version bumps vs base), walk its
 # transitive normal/build workspace dependencies. Report any workspace dependency that
 #
-#   1. has file changes vs the base ref, AND
-#   2. is NOT itself in the release set,
+#   1. has source modifications since its own last release baseline (i.e. since the
+#      most recent commit that touched its `version =` or `publish =` line — see
+#      Get-CrateLastReleaseBaseline), and
+#   2. is NOT itself in the release set, and
+#   3. is published (publish != false),
 #
 # along with the shortest dependency chain that reaches it from a released crate.
+#
+# Per-crate baselines (rather than a global PR-vs-base-ref diff) are required to
+# detect upstream changes that were merged to main in earlier PRs without a version
+# bump and are now being depended on by a release-set crate in this PR. Comparing
+# the working tree only against the PR base ref would miss those.
 #
 # Stops at any node already in the release set (its own bump pulls through changes).
 #
 # Returns @() when there are no findings, otherwise an array of objects:
 #   Folder            - crate folder under crates/
 #   PackageName       - cargo package name
-#   ChangedFileCount  - number of files changed under crates/<folder>/
+#   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_crate', 'mid_crate', 'this_dep'), ... )
 function Get-UnreleasedModifiedDependencies {
     param(
@@ -516,10 +546,9 @@ function Get-UnreleasedModifiedDependencies {
         [Parameter(Mandatory = $true)][string]$BaseRef
     )
 
-    $crates       = Get-WorkspaceCrates -repoRoot $RepoRoot
-    $releaseSet   = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
-    $modified     = Get-CratesWithFileChanges -RepoRoot $RepoRoot -BaseRef $BaseRef
-    $changedFiles = Get-GitFileChangeSet -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $crates      = Get-WorkspaceCrates -repoRoot $RepoRoot
+    $releaseSet  = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $modifiedMap = Get-CratesWithUnreleasedChanges -RepoRoot $RepoRoot
 
     if ($releaseSet.Count -eq 0) { return @() }
 
@@ -562,17 +591,12 @@ function Get-UnreleasedModifiedDependencies {
                     continue
                 }
 
-                if ($modified.Contains($depFolder) -and $depCrate.Published) {
+                if ($modifiedMap.ContainsKey($depFolder) -and $depCrate.Published) {
                     if (-not $findings.ContainsKey($depFolder)) {
-                        $changeCount = 0
-                        $prefix = "crates/$depFolder/"
-                        foreach ($p in $changedFiles) {
-                            if ($p.StartsWith($prefix)) { $changeCount++ }
-                        }
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
                             PackageName      = $depCrate.Name
-                            ChangedFileCount = $changeCount
+                            ChangedFileCount = $modifiedMap[$depFolder]
                             DependencyChains = @(, $depChain)
                         }
                     }
