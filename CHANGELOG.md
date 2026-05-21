@@ -17,6 +17,7 @@ Please see each crate's change log below:
 - [`fundle_macros_impl`](./crates/fundle_macros_impl/CHANGELOG.md)
 - [`http_extensions`](./crates/http_extensions/CHANGELOG.md)
 - [`layered`](./crates/layered/CHANGELOG.md)
+- [`multitude`](./crates/multitude/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
 - [`recoverable`](./crates/recoverable/CHANGELOG.md)

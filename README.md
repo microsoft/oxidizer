@@ -37,6 +37,7 @@ These are the primary crates built out of this repo:
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
+- [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
@@ -160,7 +161,19 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   files in a consistent format and layout.
 
 - **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
-  unsafe code doesn't induce undefined behaviors.
+  unsafe code doesn't induce undefined behaviors. Miri is run with multiple aliasing models — Stacked Borrows,
+  [Tree Borrows](https://perso.crans.org/vanille/treebor/), strict provenance, and a many-seeds sweep — because each
+  variant rejects a different class of UB.
+
+- **Concurrency Verification**. Crates with concurrent unsafe code can opt in to model-checking with
+  [`loom`](https://crates.io/crates/loom). Loom exhaustively explores legal interleavings of atomic operations
+  to surface memory-ordering bugs that hardware-stressing won't reproduce reliably. Run locally via `just loom`;
+  any crate with a `[target.'cfg(loom)'.dependencies]` section in its `Cargo.toml` is auto-discovered.
+
+- **Property-Based Fuzzing**. Crates can opt in to coverage-guided property tests with
+  [`bolero`](https://crates.io/crates/bolero) by adding `tests/bolero_*.rs` files. The CI fuzzing job runs each
+  target under libfuzzer for a bounded duration on every PR. Run locally via `just bolero` (override the time
+  budget with `just bolero 10m`).
 
 - **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
