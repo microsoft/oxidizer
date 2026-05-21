@@ -1,7 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-header = "Copyright (c) Microsoft Corporation."
+header = """
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License."""
 exclude = [
     "crates/multitude/scripts",
 ]
