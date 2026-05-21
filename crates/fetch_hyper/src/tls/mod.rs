@@ -10,19 +10,6 @@ pub(crate) use connector::TlsConnector;
 
 /// Selects and supplies the `TLS` backend used by the transport.
 ///
-/// Construct from a backend-specific configuration:
-///
-/// ```ignore
-/// use std::sync::Arc;
-/// use rustls::ClientConfig;
-/// use fetch_hyper::TlsBackend;
-///
-/// # fn make_config() -> ClientConfig { unimplemented!() }
-/// let backend: TlsBackend = make_config().into();
-/// // or
-/// let backend = TlsBackend::Rustls(Arc::new(make_config()));
-/// ```
-///
 /// When neither the `rustls` nor `native-tls` feature is enabled this enum
 /// has no variants and is therefore uninhabited: the crate still compiles,
 /// but a [`TlsBackend`] value cannot be constructed and the transport

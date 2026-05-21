@@ -76,21 +76,37 @@ where
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```
 /// use anyspawn::Spawner;
 /// use fetch_hyper::{HyperTransport, HyperTransportBuilder, TlsBackend};
 /// use http_extensions::HttpBodyBuilder;
+/// use hyper_util::rt::TokioIo;
+/// use layered::Execute;
+/// use templated_uri::BaseUri;
+/// use tokio::net::TcpStream;
 ///
-/// # fn make_connector() -> impl fetch_hyper::Connect<MyStream> { todo!() }
-/// # fn make_tls() -> TlsBackend { todo!() }
-/// # struct MyStream;
-/// # impl fetch_hyper::HyperIo for MyStream {}
+/// type MyStream = TokioIo<TcpStream>;
+///
+/// // Pretend we actually open a TCP connection here. The body uses
+/// // `unreachable!()` to avoid the cost of a real dial in a doctest.
+/// async fn connect(_uri: BaseUri) -> http_extensions::Result<MyStream> {
+///     unreachable!("doc example; never invoked")
+/// }
+///
 /// # async fn run() {
+/// // Constructing a real `TlsBackend` (e.g. a `native_tls::TlsConnector`)
+/// // performs expensive certificate/store initialization, so we skip it
+/// // here with `unreachable!()` — the async function below is never
+/// // actually called.
+/// let tls: TlsBackend = unreachable!("doc example; never invoked");
+///
 /// let transport: HyperTransport = HyperTransportBuilder::new(
-///     make_connector(),
+///     Execute::new(connect),
 ///     Spawner::new_tokio(),
-///     tick::ClockControl::new().auto_advance_timers(true).to_clock(),
-///     make_tls(),
+///     tick::ClockControl::new()
+///         .auto_advance_timers(true)
+///         .to_clock(),
+///     tls,
 ///     HttpBodyBuilder::new_fake(),
 /// )
 /// .configure_hyper(|builder| {
