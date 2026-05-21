@@ -55,11 +55,8 @@ function Set-StepOutput {
 }
 
 function Get-RepoRoot {
-    $output = & git rev-parse --show-toplevel 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not determine repository root: $output"
-    }
-    return ($output | Out-String).Trim()
+    $output = Invoke-Git -Arguments @('rev-parse', '--show-toplevel')
+    return ($output | Select-Object -First 1).ToString().Trim()
 }
 
 function Format-DependencyChain {

@@ -901,7 +901,7 @@ if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
     if ($resolvedBaseRef -match '^origin/(.+)$') {
         $branch = $matches[1]
         try {
-            Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path -AllowFailure | Out-Null
+            Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path | Out-Null
         } catch {
             Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
         }
