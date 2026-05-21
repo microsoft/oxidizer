@@ -56,8 +56,13 @@ where
     C: Connect<S>,
     S: HyperIo,
 {
-    #[allow(unreachable_patterns, unused_variables)]
-    pub(crate) fn new(backend: TlsBackend, connector: C, request_filter: &RequestFilter, supported_versions: &[Version]) -> Self {
+    #[expect(clippy::allow_attributes, reason = "expect would be unfulfilled when a TLS feature is enabled")]
+    #[allow(
+        unused_variables,
+        clippy::needless_pass_by_value,
+        reason = "parameters are consumed only in feature-gated match arms"
+    )]
+    pub(crate) fn new(backend: TlsBackend, connector: C, request_filter: RequestFilter, supported_versions: &[Version]) -> Self {
         match backend {
             #[cfg(feature = "rustls")]
             TlsBackend::Rustls(config) => Self::Rustls(
@@ -66,12 +71,6 @@ where
             ),
             #[cfg(feature = "native-tls")]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
-            #[cfg(not(any(feature = "rustls", feature = "native-tls")))]
-            _ => {
-                let _ = (connector, request_filter);
-                // `TlsBackend` is uninhabited when no TLS feature is enabled, so this match is exhaustive.
-                match backend {}
-            }
         }
     }
 }
@@ -80,7 +79,7 @@ where
 fn build_rustls_connector<C, S>(
     config: Arc<rustls::ClientConfig>,
     connector: C,
-    request_filter: &RequestFilter,
+    request_filter: RequestFilter,
     supported_versions: &[Version],
 ) -> hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
@@ -113,7 +112,7 @@ where
 fn build_native_tls_connector<C, S>(
     native: native_tls::TlsConnector,
     connector: C,
-    request_filter: &RequestFilter,
+    request_filter: RequestFilter,
 ) -> hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
     C: Connect<S>,

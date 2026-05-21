@@ -33,20 +33,22 @@ fn resolve_error_label(error: &(dyn std::error::Error + 'static)) -> Option<Erro
 }
 
 fn resolve_io_error_label(error: &std::io::Error) -> ErrorLabel {
-    if let Some(inner) = error.get_ref() {
-        if let Some(inner_io) = inner.downcast_ref::<std::io::Error>() {
-            return resolve_io_error_label(inner_io);
-        }
+    let Some(inner) = error.get_ref() else {
+        return error.kind().into();
+    };
 
-        #[cfg(feature = "rustls")]
-        if inner.downcast_ref::<rustls::Error>().is_some() {
-            return LABEL_TLS;
-        }
+    if let Some(inner_io) = inner.downcast_ref::<std::io::Error>() {
+        return resolve_io_error_label(inner_io);
+    }
 
-        #[cfg(feature = "native-tls")]
-        if inner.downcast_ref::<native_tls::Error>().is_some() {
-            return LABEL_TLS;
-        }
+    #[cfg(feature = "rustls")]
+    if inner.downcast_ref::<rustls::Error>().is_some() {
+        return LABEL_TLS;
+    }
+
+    #[cfg(feature = "native-tls")]
+    if inner.downcast_ref::<native_tls::Error>().is_some() {
+        return LABEL_TLS;
     }
 
     error.kind().into()

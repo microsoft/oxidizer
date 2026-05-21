@@ -149,7 +149,6 @@ where
     ///
     /// The [`HttpBodyBuilder`] is used to wrap incoming response bodies.
     #[must_use]
-    #[allow(unused_variables)]
     pub fn new(connector: C, spawner: Spawner, clock: Clock, tls: impl Into<TlsBackend>, body_builder: HttpBodyBuilder) -> Self {
         let timer = crate::timer::ClockTimer::new(clock.clone());
         let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
@@ -158,7 +157,6 @@ where
         Self {
             connector,
             clock,
-            tls: tls.into(),
             body_builder,
             request_filter: RequestFilter::default(),
             supported_http_versions: vec![Version::HTTP_11, Version::HTTP_2],
@@ -168,6 +166,7 @@ where
             meter: None,
             hyper_builder,
             _marker: PhantomData,
+            tls: tls.into(),
         }
     }
 

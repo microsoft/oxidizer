@@ -114,7 +114,7 @@ where
         hyper_builder.http2_only(true);
     }
 
-    let tls_connector = TlsConnector::new(tls, connector, &request_filter, &supported_http_versions);
+    let tls_connector = TlsConnector::new(tls, connector, request_filter, &supported_http_versions);
 
     let inner = ClientConnector::new(
         tls_connector,

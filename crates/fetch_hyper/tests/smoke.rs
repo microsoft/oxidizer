@@ -27,13 +27,19 @@ impl layered::Service<BaseUri> for TokioConnector {
     type Out = Result<TokioIo<tokio::net::TcpStream>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
-        let stream = tokio::net::TcpStream::connect((input.authority().host(), input.effective_port().unwrap())).await?;
+        let stream = tokio::net::TcpStream::connect((
+            input.authority().host(),
+            input.effective_port().expect("test BaseUri always has a port"),
+        ))
+        .await?;
         Ok(TokioIo::new(stream))
     }
 }
 
 fn build_tls() -> TlsBackend {
-    native_tls::TlsConnector::new().unwrap().into()
+    native_tls::TlsConnector::new()
+        .expect("default native-tls connector should build in tests")
+        .into()
 }
 
 async fn serve(body: impl Into<Bytes>) -> MockServer {
