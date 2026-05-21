@@ -98,6 +98,21 @@ mod tests {
     fn clone_preserves_variant() {
         let nc = native_tls::TlsConnector::new().unwrap();
         let backend = TlsBackend::NativeTls(nc);
+        let cloned = backend.clone();
         assert!(matches!(backend, TlsBackend::NativeTls(_)));
+        assert!(matches!(cloned, TlsBackend::NativeTls(_)));
+
+        let provider = rustls::crypto::CryptoProvider::get_default()
+            .cloned()
+            .unwrap_or_else(|| std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()));
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+        let rustls_backend: TlsBackend = config.into();
+        let rustls_cloned = rustls_backend.clone();
+        assert!(matches!(rustls_backend, TlsBackend::Rustls(_)));
+        assert!(matches!(rustls_cloned, TlsBackend::Rustls(_)));
     }
 }

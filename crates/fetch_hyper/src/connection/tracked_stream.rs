@@ -59,7 +59,7 @@ impl<T> Drop for TrackedStream<T> {
             name: "http.client.connection.closed",
             Level::DEBUG,
             server.address = self.base_uri.host(),
-            server.port = self.base_uri.port(),
+            server.port = self.base_uri.effective_port(),
             url.scheme = %self.base_uri.scheme(),
             http.connection.duration = duration_secs,
             "connection closed",

@@ -53,7 +53,6 @@ templated_uri = { workspace = true }
 tick = { workspace = true }
 
 # external
-bytes = { workspace = true, optional = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body-util = { workspace = true }

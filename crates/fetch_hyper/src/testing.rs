@@ -1,11 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! In-process fakes that let downstream code exercise the transport without
-//! a real network.
+//! In-process fakes used by this crate's own tests.
 //!
-//! Available when the crate is compiled with the `test-util` feature, or
-//! always within this crate's own tests. The pieces here are intentionally
+//! This module is compiled only under `#[cfg(test)]` and is therefore not
+//! reachable from downstream crates. The pieces here are intentionally
 //! minimal: a panicking stream for delegation tests, a canned-response
 //! [`FakeStream`], a [`FakeConnector`] that satisfies [`Connect`], a small
 //! [`TestError`] type, and a [`create_test_request`] helper.
