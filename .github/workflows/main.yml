@@ -462,6 +462,9 @@ jobs:
   #
   # Maintenance — when to add a job to `needs:` below:
   #
+  #   * Do NOT add jobs that are intentionally optional / advisory; this
+  #     fan-in is only for jobs that must pass before merge.
+  #
   #   * MUST add if the job has BOTH a `strategy.matrix` AND a job-level
   #     `if:` that can evaluate to false (e.g. gated on
   #     `needs.delta.outputs.skip`, `github.event_name`, etc.). Such jobs
@@ -472,8 +475,6 @@ jobs:
   #     every required job through this single context keeps branch
   #     protection simple: one workflow context to require here, plus
   #     externally-posted statuses (`license/cla`, `codecov/project`).
-  #
-  #   * Do NOT add jobs that are intentionally optional / advisory.
   #
   # When a new job is added below, also remove any direct entry for it
   # from the branch protection ruleset (only `required-checks` should be
