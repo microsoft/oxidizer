@@ -34,6 +34,9 @@ check-changes:
     Write-Host "`n=== Checking spelling ===" -ForegroundColor Cyan
     just spellcheck
 
+    Write-Host "`n=== Checking license headers ===" -ForegroundColor Cyan
+    just heather-check
+
     Write-Host "`n=== Validating dependencies ===" -ForegroundColor Cyan
     just deny
 
@@ -97,6 +100,16 @@ examples PROFILE='dev' EXCLUDE='':
 
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked
+
+# Apply license boilerplate headers.
+heather:
+    cargo heather --fix
+
+# Check that all files have the required license headers.
+heather-check:
+    cargo heather
+
+alias check-heather := heather-check
 
 # Run unit and integration tests under Miri.
 [script]
