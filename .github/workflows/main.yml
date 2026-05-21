@@ -252,14 +252,7 @@ jobs:
     # Informational check: flags workspace crates that were modified vs the PR base
     # but are not part of the version-bump set, when at least one of their downstream
     # dependents is being released. See scripts/check-unreleased-dependencies.ps1.
-    #
-    # The `needs.delta.outputs.skip != 'true'` gate is a compute optimization: when
-    # .delta.toml signals that no crate is affected, the release set is empty and the
-    # analysis is guaranteed to be a no-op. This relies on `Cargo.toml` (and the
-    # `scripts/` / workflow paths) remaining in .delta.toml's trip_wire_patterns —
-    # see the comment in .delta.toml.
-    needs: [delta]
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
