@@ -79,9 +79,9 @@ anyspawn = { workspace = true, features = ["tokio"] }
 bytes = { workspace = true }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { workspace = true, features = ["test-util"] }
-hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2"] }
 hyper-tls = { workspace = true, features = ["alpn"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
 insta = { workspace = true }
 mutants.workspace = true
 native-tls = { workspace = true }

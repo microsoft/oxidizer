@@ -240,6 +240,7 @@ fn negotiated_version(connected: &Connected) -> Version {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use ohno::ErrorExt;
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -271,8 +272,7 @@ mod tests {
         let base = BaseUri::from_static("https://example.com");
         let supported = vec![Version::HTTP_2];
 
-        let err = verify_protocol_version(&Connected::new(), &base, &supported)
-            .expect_err("HTTP/1.1 should be rejected when only HTTP/2 is supported");
+        let err = verify_protocol_version(&Connected::new(), &base, &supported).unwrap_err().message();
         insta::assert_snapshot!(err);
     }
 
