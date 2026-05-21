@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+mod clone_fn;
 mod factory;
 pub mod storage;
 
@@ -18,9 +19,30 @@ pub use builtin::{PerCore, PerNuma, PerProcess};
 pub use storage::{Storage, Strategy};
 
 use crate::ThreadAware;
-use crate::affinity::{MemoryAffinity, PinnedAffinity};
+use crate::affinity::Affinity;
 use crate::cell::factory::Factory;
-use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
+use crate::closure::{ErasedClosureOnce, ThreadAwareFnOnce, closure_once};
+
+/// Adapter that wraps a `ThreadAwareFnOnce<T>` to produce `Box<T>` instead.
+struct BoxedRelocate<F>(F);
+
+impl<F: Clone> Clone for BoxedRelocate<F> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<F: ThreadAware> ThreadAware for BoxedRelocate<F> {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        self.0.relocate(source, destination);
+    }
+}
+
+impl<T, F: ThreadAwareFnOnce<T>> ThreadAwareFnOnce<Box<T>> for BoxedRelocate<F> {
+    fn call_once(self) -> Box<T> {
+        Box::new(self.0.call_once())
+    }
+}
 
 /// Transferable reference counted type.
 ///
@@ -36,7 +58,7 @@ use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 /// # use thread_aware::affinity::*;
 /// # use std::sync::atomic::{AtomicI32, Ordering};
 /// # let affinities = pinned_affinities(&[2]);
-/// # let affinity1 = affinities[0].into();
+/// # let affinity1 = Some(affinities[0]);
 /// # let affinity2 = affinities[1];
 /// # #[derive(Clone)]
 /// # struct Counter {
@@ -60,31 +82,30 @@ use crate::closure::{ErasedClosureOnce, RelocateFnOnce, relocate_once};
 /// # }
 /// #
 /// # impl ThreadAware for Counter {
-/// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-/// #         Self {
-/// #             // Initialize a new value in the destination affinity independent
-/// #             // of the source affinity.
-/// #             value: std::sync::Arc::new(AtomicI32::new(0)),
-/// #         }
+/// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+/// #         // Initialize a new value in the destination affinity independent
+/// #         // of the source affinity.
+/// #         self.value = std::sync::Arc::new(AtomicI32::new(0));
 /// #     }
 /// # }
 ///
-/// let arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
+/// let mut arc_affinity1 = Arc::<_, PerCore>::new(Counter::new);
 /// let arc_affinity1_clone = arc_affinity1.clone();
 ///
 /// arc_affinity1.increment_by(42);
 /// assert_eq!(arc_affinity1.value(), 42);
 ///
-/// let arc_affinity2 = arc_affinity1.relocated(affinity1, affinity2);
-/// assert_eq!(arc_affinity2.value(), 0);
+/// arc_affinity1.relocate(affinity1, affinity2);
+/// assert_eq!(arc_affinity1.value(), 0);
 /// assert_eq!(arc_affinity1_clone.value(), 42);
 ///
-/// arc_affinity2.increment_by(11);
-/// let arc_affinity2_clone = arc_affinity1_clone.relocated(affinity1, affinity2);
+/// arc_affinity1.increment_by(11);
+/// let mut arc_affinity2_clone = arc_affinity1_clone;
+/// arc_affinity2_clone.relocate(affinity1, affinity2);
 /// assert_eq!(arc_affinity2_clone.value(), 11);
 /// ```
 #[derive(Debug)]
-pub struct Arc<T, S: Strategy> {
+pub struct Arc<T: ?Sized, S: Strategy> {
     storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>,
     value: sync::Arc<T>,
     factory: Factory<T>,
@@ -98,7 +119,7 @@ impl<T: PartialEq, S: Strategy> PartialEq for Arc<T, S> {
 
 impl<T: Eq, S: Strategy> Eq for Arc<T, S> {}
 
-impl<T: std::hash::Hash, S: Strategy> std::hash::Hash for Arc<T, S> {
+impl<T: std::hash::Hash + ?Sized, S: Strategy> std::hash::Hash for Arc<T, S> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.value.hash(state);
     }
@@ -116,7 +137,7 @@ impl<T: PartialOrd, S: Strategy> PartialOrd for Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> Clone for Arc<T, S> {
+impl<T: ?Sized, S: Strategy> Clone for Arc<T, S> {
     fn clone(&self) -> Self {
         Self {
             storage: sync::Arc::clone(&self.storage),
@@ -126,7 +147,7 @@ impl<T, S: Strategy> Clone for Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> Deref for Arc<T, S> {
+impl<T: ?Sized, S: Strategy> Deref for Arc<T, S> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -186,12 +207,10 @@ where
     /// #     }
     /// # }
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
+    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    /// #         // Initialize a new value in the destination affinity independent
+    /// #         // of the source affinity.
+    /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
     ///
@@ -202,7 +221,7 @@ where
     /// assert_eq!(container_clone.value(), 42);
     /// ```
     pub fn new(ctor: fn() -> T) -> Self {
-        // We wrap the function pointer in a tiny RelocateFnOnce implementation that
+        // We wrap the function pointer in a tiny ThreadAwareFnOnce implementation that
         // recreates the value independently for each affinity.
         struct Ctor<T> {
             f: fn() -> T,
@@ -215,19 +234,57 @@ where
         }
 
         impl<T> ThreadAware for Ctor<T> {
-            fn relocated(self, _source: MemoryAffinity, _destination: PinnedAffinity) -> Self {
-                self
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+        }
+
+        impl<T> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
+            fn call_once(self) -> Box<T> {
+                Box::new((self.f)())
             }
         }
 
-        impl<T> RelocateFnOnce<T> for Ctor<T> {
-            fn call_once(self) -> T {
+        // Use Self::with_closure_boxed to ensure Factory::Closure path.
+        Self::with_closure_boxed(Ctor { f: ctor })
+    }
+}
+
+impl<T, S> Arc<T, S>
+where
+    T: Send + 'static + ?Sized,
+    S: Strategy,
+{
+    /// Creates a new `Arc` with a constructor that returns `Box<T>`.
+    ///
+    /// This is the `?Sized`-compatible version of [`new`](Self::new). Use this when `T` is a
+    /// trait object (e.g., `dyn Trait`) or other unsized type. The constructor produces a
+    /// `Box<T>` which is then stored behind a [`sync::Arc`].
+    ///
+    /// ```rust
+    /// # use thread_aware::{Arc, ThreadAware, PerCore};
+    /// let arc = Arc::<dyn ThreadAware, PerCore>::new_boxed(|| Box::new(42u32));
+    /// ```
+    pub fn new_boxed(ctor: fn() -> Box<T>) -> Self {
+        struct Ctor<T: ?Sized> {
+            f: fn() -> Box<T>,
+        }
+
+        impl<T: ?Sized> Clone for Ctor<T> {
+            fn clone(&self) -> Self {
+                Self { f: self.f }
+            }
+        }
+
+        impl<T: ?Sized> ThreadAware for Ctor<T> {
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+        }
+
+        impl<T: ?Sized> ThreadAwareFnOnce<Box<T>> for Ctor<T> {
+            fn call_once(self) -> Box<T> {
                 (self.f)()
             }
         }
 
-        // Use Self::with_closure to ensure Factory::Closure path.
-        Self::with_closure(Ctor { f: ctor })
+        Self::with_closure_boxed(Ctor { f: ctor })
     }
 }
 
@@ -239,7 +296,7 @@ where
     /// Creates a new `Arc` with a closure that will be called once per-processor to create the inner value.
     ///
     /// The closure only gets called once for each processor, and it's called only when a `Arc` is actually transferred
-    /// to another processor. The closure behaves like a `RelocateFnOnce` to ensure it captures only values that are safe to
+    /// to another processor. The closure behaves like a `ThreadAwareFnOnce` to ensure it captures only values that are safe to
     /// transfer themselves.
     ///
     /// This function can be used to create an `Arc` of a type that itself doesn't implement [`ThreadAware`] because
@@ -293,12 +350,10 @@ where
     /// # }
     /// #
     /// # impl ThreadAware for Counter {
-    /// #     fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
-    /// #         Self {
-    /// #             // Initialize a new value in the destination affinity independent
-    /// #             // of the source affinity.
-    /// #             value: sync::Arc::new(AtomicI32::new(0)),
-    /// #         }
+    /// #     fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+    /// #         // Initialize a new value in the destination affinity independent
+    /// #         // of the source affinity.
+    /// #         self.value = sync::Arc::new(AtomicI32::new(0));
     /// #     }
     /// # }
     ///
@@ -317,7 +372,7 @@ where
     where
         D: ThreadAware + Send + Sync + Clone + 'static,
     {
-        Self::with_closure(relocate_once(data, f))
+        Self::with_closure_boxed(BoxedRelocate(closure_once(data, f)))
     }
 }
 
@@ -341,8 +396,9 @@ where
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
             factory: Factory::Data(|data: &T, source, destination| {
-                let data = data.clone();
-                data.relocated(source, destination)
+                let mut data = data.clone();
+                data.relocate(source, destination);
+                Box::new(data)
             }),
         }
     }
@@ -401,30 +457,68 @@ where
         Self {
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
-            factory: Factory::Data(|data: &T, _source, _destination| data.clone()),
+            factory: Factory::Data(|data: &T, _source, _destination| Box::new(data.clone())),
         }
     }
 }
 
 impl<T, S: Strategy> Arc<T, S>
 where
-    T: 'static,
+    T: ThreadAware + 'static + ?Sized,
 {
-    /// Creates a new `Arc` with a closure that will be called once per-affinity to create the inner value.
+    /// Creates a new `Arc` from a value and a clone function, supporting trait objects.
     ///
-    /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
-    /// to another affinity. The closure is a [`RelocateFnOnce`] to ensure it captures only values that are safe to
-    /// transfer themselves.
-    pub(crate) fn with_closure<F>(closure: F) -> Self
-    where
-        F: RelocateFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
-    {
-        let value = sync::Arc::new(closure.clone().call_once());
+    /// The object passed will be kept, and serves as the template for all subsequent clones
+    /// that happen on relocation. A clone is also performed for the initial `Arc`.
+    ///
+    /// The `clone_fn` receives `&V` (the concrete type) and returns `Box<T>`, enabling
+    /// use with `dyn Trait` where `Clone` is not object-safe. Each clone is
+    /// [`relocate`](ThreadAware::relocate) to its target affinity.
+    ///
+    /// ```rust
+    /// # use thread_aware::{Arc, PerCore, ThreadAware};
+    /// # #[derive(Clone)]
+    /// # struct Foo(u32);
+    /// # impl ThreadAware for Foo {
+    /// #     fn relocate(&mut self, _: Option<thread_aware::affinity::Affinity>, _: thread_aware::affinity::Affinity) {}
+    /// # }
+    /// trait MyPlugin: ThreadAware {}
+    /// impl MyPlugin for Foo {}
+    ///
+    /// let arc = Arc::<dyn MyPlugin, PerCore>::with_clone_fn(Foo(42), |v: &Foo| Box::new(v.clone()));
+    /// ```
+    pub fn with_clone_fn<V: Send + Sync + 'static>(value: V, clone_fn: fn(&V) -> Box<T>) -> Self {
+        // In a canonical case, we might have `V = u32`, `T = dyn Foo`, and `clone_fn = |&u32| -> Box<dyn Foo>`.
+        let erased = clone_fn::ErasedCloneFn::new(value, clone_fn);
+        let value = sync::Arc::clone(erased.arc());
 
         Self {
             storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
             value,
-            factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None), // We don't know the source affinity at this point
+            factory: Factory::ErasedCloneFn(erased),
+        }
+    }
+}
+
+impl<T, S: Strategy> Arc<T, S>
+where
+    T: 'static + ?Sized,
+{
+    /// Creates a new `Arc` with a closure that produces `Box<T>`, called once per-affinity to create the inner value.
+    ///
+    /// The closure only gets called once for each affinity, and it's called only when an `Arc` is actually transferred
+    /// to another affinity. The closure is a [`ThreadAwareFnOnce`] to ensure it captures only values that are safe to
+    /// transfer themselves.
+    pub(crate) fn with_closure_boxed<F>(closure: F) -> Self
+    where
+        F: ThreadAwareFnOnce<Box<T>> + Clone + ThreadAware + 'static + Send + Sync,
+    {
+        let value = sync::Arc::from(closure.clone().call_once());
+
+        Self {
+            storage: sync::Arc::new(RwLock::new(storage::Storage::new())),
+            value,
+            factory: Factory::Closure(sync::Arc::new(ErasedClosureOnce::new(closure)), None),
         }
     }
 
@@ -435,7 +529,7 @@ where
     ///
     /// # Panics
     /// This may panic if the storage does not contain data for the current affinity.
-    pub fn from_storage(storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>, current_affinity: PinnedAffinity) -> Self {
+    pub fn from_storage(storage: sync::Arc<RwLock<Storage<sync::Arc<T>, S>>>, current_affinity: Affinity) -> Self {
         let value = storage
             .read()
             .expect("Failed to acquire read lock")
@@ -486,66 +580,67 @@ impl<T, S: Strategy> Arc<T, S> {
     }
 }
 
-impl<T, S: Strategy> ThreadAware for Arc<T, S> {
-    fn relocated(self, source: MemoryAffinity, destination: PinnedAffinity) -> Self {
+impl<T: Send + Sync + ?Sized, S: Strategy + Send + Sync> ThreadAware for Arc<T, S> {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         let mut guard = self.storage.write().expect("Failed to acquire write lock");
 
-        let (value, new_factory) = if let Some(value) = guard.get_clone(destination) {
-            (value, self.factory)
+        if let Some(value) = guard.get_clone(destination) {
+            self.value = value;
         } else {
             // We need to transfer or recreate the data
-            let (data, factory) = match &self.factory {
+            let (data, new_factory) = match &self.factory {
                 // We can use the closure to create new data
                 Factory::Closure(factory, factory_source_affinity) => {
-                    let factory_clone = (**factory).clone();
+                    let mut factory_clone = (**factory).clone();
 
                     // In case factory source is stored in factory, use that - it means we already transferred the factory
                     // once, so we know the original source affinity. Otherwise, use source as that means this is the first
                     // time we're transferring the Arc, so source is the source affinity of the factory as well.
-                    let factory_source = factory_source_affinity.unwrap_or(source);
+                    let factory_source = factory_source_affinity.or(source);
 
+                    factory_clone.relocate(factory_source, destination);
                     (
-                        sync::Arc::new(factory_clone.relocated(factory_source, destination).call_once()),
-                        Factory::Closure(sync::Arc::clone(factory), Some(factory_source)),
+                        sync::Arc::from(factory_clone.call_once()),
+                        Factory::Closure(sync::Arc::clone(factory), factory_source),
                     )
                 }
 
                 // We can clone and transfer the data
-                Factory::Data(factory) => (sync::Arc::new(factory(&self.value, source, destination)), self.factory),
+                Factory::Data(factory) => (sync::Arc::from(factory(&self.value, source, destination)), self.factory.clone()),
+
+                // We can clone the data and closure it
+                Factory::ErasedCloneFn(erased) => {
+                    let cloned = erased.clone_and_relocate(source, destination);
+                    (cloned, self.factory.clone())
+                }
 
                 Factory::Manual => {
                     // If we are in manual mode, we just clone the data
                     // This effectively makes it behave like `sync::Arc<T>`
-                    (sync::Arc::clone(&self.value), self.factory)
+                    (sync::Arc::clone(&self.value), self.factory.clone())
                 }
             };
 
-            let value = data;
+            let old_value = std::mem::replace(&mut self.value, data);
 
-            let old_data = guard.replace(destination, sync::Arc::<T>::clone(&value));
+            let old_data = guard.replace(destination, sync::Arc::<T>::clone(&self.value));
             assert!(
                 old_data.is_none(),
                 "Data already exists for the destination affinity. This should be unreachable due to the the early write lock."
             );
 
-            (value, factory)
-        };
-
-        if let MemoryAffinity::Pinned(source) = source {
-            // Only restore the value to the source slot when source and destination differ.
-            // If they are the same slot, the replacement above already stored the new value
-            // there; overwriting it here would corrupt storage with the stale pre-relocation value.
-            if source != destination {
-                guard.replace(source, self.value);
+            if let Some(source) = source {
+                // Only restore the value to the source slot when source and destination differ.
+                // If they are the same slot, the replacement above already stored the new value
+                // there; overwriting it here would corrupt storage with the stale pre-relocation value.
+                if source != destination {
+                    guard.replace(source, old_value);
+                }
             }
+
+            self.factory = new_factory;
         }
 
         drop(guard);
-
-        Self {
-            storage: self.storage,
-            value,
-            factory: new_factory,
-        }
     }
 }

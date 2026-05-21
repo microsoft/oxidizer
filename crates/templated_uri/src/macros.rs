@@ -71,6 +71,27 @@ pub use templated_uri_macros::Raw;
 /// - `{/param1,param2}`: Path segment expansion (`/value1/value2`)
 /// - `{?param1,param2}`: Query parameter expansion (`?param1=value1&param2=value2`)
 ///
+/// ## Undefined Values (`Option<T>`)
+///
+/// Fields may be wrapped in `Option<T>` to represent RFC 6570 *undefined* variables.
+/// When a field is `None`, the variable and its associated prefix/separator are omitted.
+///
+/// The inner type `T` must satisfy the same trait bounds the macro requires for any
+/// non-optional field in the same position: `T: Escape` for restricted expansions
+/// (`{var}`, `{/var}`, `{?var}`, `{;var}`, `{.var}`), `T: Raw` for reserved expansions
+/// (`{+var}`), and `T: RedactedDisplay` unless the field carries `#[unredacted]` (or
+/// the struct does). For example, `Option<String>` works for `{+var}` but not for `{var}`,
+/// because `String` implements `Raw` but not `Escape`.
+///
+/// ```rust
+/// # use templated_uri::{templated, EscapedString};
+/// #[templated(template = "/search{?query,limit}", unredacted)]
+/// struct Search {
+///     query: EscapedString,
+///     limit: Option<u32>,
+/// }
+/// ```
+///
 /// ## Data Privacy
 ///
 /// By default, all fields use `RedactedDisplay` for privacy protection. Use attributes to control:

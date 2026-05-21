@@ -1,39 +1,39 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use crate::affinity::PinnedAffinity;
+use crate::affinity::Affinity;
 use crate::cell::Strategy;
 
 /// A strategy that stores data per processor core / thread.
 ///
-/// This strategy uses the processor index and count from the `PinnedAffinity` to determine
+/// This strategy uses the processor index and count from the `Affinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerCore;
 
 impl Strategy for PerCore {
-    fn index(affinity: PinnedAffinity) -> usize {
+    fn index(affinity: Affinity) -> usize {
         affinity.processor_index()
     }
 
-    fn count(affinity: PinnedAffinity) -> usize {
+    fn count(affinity: Affinity) -> usize {
         affinity.processor_count()
     }
 }
 
 /// A strategy that stores data per memory region.
 ///
-/// This strategy uses the memory region index and count from the `PinnedAffinity` to determine
+/// This strategy uses the memory region index and count from the `Affinity` to determine
 /// where to store and retrieve data.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PerNuma;
 
 impl Strategy for PerNuma {
-    fn index(affinity: PinnedAffinity) -> usize {
+    fn index(affinity: Affinity) -> usize {
         affinity.memory_region_index()
     }
 
-    fn count(affinity: PinnedAffinity) -> usize {
+    fn count(affinity: Affinity) -> usize {
         affinity.memory_region_count()
     }
 }
@@ -45,11 +45,11 @@ impl Strategy for PerNuma {
 pub struct PerProcess;
 
 impl Strategy for PerProcess {
-    fn index(_affinity: PinnedAffinity) -> usize {
+    fn index(_affinity: Affinity) -> usize {
         0
     }
 
-    fn count(_affinity: PinnedAffinity) -> usize {
+    fn count(_affinity: Affinity) -> usize {
         1
     }
 }

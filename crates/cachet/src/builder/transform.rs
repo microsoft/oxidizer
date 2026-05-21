@@ -14,8 +14,7 @@ use super::buildable::{Buildable, type_name};
 use super::cache::CacheBuilder;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::fallback::FallbackPromotionPolicy;
-use crate::telemetry::{CacheTelemetry, TelemetryConfig};
+use crate::telemetry::CacheTelemetry;
 use crate::transform::TransformAdapter;
 use crate::{CacheTier, Codec, Encoder};
 
@@ -32,7 +31,7 @@ pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
     key_encoder: Box<dyn Encoder<K, KT>>,
     value_codec: Box<dyn Codec<V, VT>>,
     clock: Clock,
-    telemetry: TelemetryConfig,
+    telemetry: CacheTelemetry,
     stampede_protection: bool,
     _phantom: PhantomData<(K, V, KT, VT)>,
 }
@@ -171,7 +170,6 @@ where
             name: None,
             primary_builder: self.post,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
             clock: clock.clone(),
             refresh: None,
             telemetry: telemetry.clone(),
@@ -225,7 +223,7 @@ where
     Post: Buildable<KT, VT>,
 {
     /// Builds the full cache hierarchy with the transform boundary.
-    pub fn build(self) -> crate::Cache<K, V, DynamicCache<K, V>> {
+    pub fn build(self) -> crate::Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -241,21 +239,15 @@ where
     Pre: Buildable<K, V>,
     Post: Buildable<KT, VT>,
 {
-    type Output = DynamicCache<K, V>;
     type TierOutput = DynamicCache<K, V>;
 
-    fn build(self) -> crate::Cache<K, V, Self::Output> {
+    fn build(self) -> crate::Cache<K, V> {
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
         let tier = self.build_tier(clock.clone(), telemetry);
 
-        crate::Cache::new(
-            type_name::<crate::Cache<K, V, Self::Output>>(None),
-            tier,
-            clock,
-            stampede_protection,
-        )
+        crate::Cache::new(type_name::<Self::TierOutput>(None), tier, clock, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
@@ -267,15 +259,7 @@ where
         let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
 
         // Combine: pre is primary, adapted is fallback
-        let fallback = crate::fallback::FallbackCache::new(
-            type_name::<Self::TierOutput>(None),
-            pre_tier,
-            adapted,
-            FallbackPromotionPolicy::always(),
-            clock,
-            None,
-            telemetry,
-        );
+        let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);
 
         DynamicCache::new(fallback)
     }

@@ -92,7 +92,9 @@
 //!     uri.try_into().map_err(Into::into)
 //! }
 //!
-//! let _uri = consume_uri(UserProfilePath { user_id: UserId(42) })?;
+//! let _uri = consume_uri(UserProfilePath {
+//!     user_id: UserId(42),
+//! })?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -107,8 +109,9 @@
 //! for an end-to-end version that wires up a [`RedactionEngine`].
 
 #[expect(unused_imports, reason = "simplifies the docs")]
-use crate::*;
-#[expect(unused_imports, reason = "simplifies the docs")]
 use ::data_privacy::{DataClass, RedactedDisplay, RedactionEngine, Sensitive};
 #[expect(unused_imports, reason = "simplifies the docs")]
 use ::http::*;
+
+#[expect(unused_imports, reason = "simplifies the docs")]
+use crate::*;

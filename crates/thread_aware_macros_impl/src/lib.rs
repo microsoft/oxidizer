@@ -31,7 +31,7 @@ pub mod field_attrs; // public so the wrapper proc-macro crate can access FieldA
 mod struct_gen;
 
 use enum_gen::build_enum_body;
-use field_attrs::{FieldAttrCfg, is_phantom_data};
+use field_attrs::is_phantom_data;
 use struct_gen::build_struct_body;
 
 /// Core implementation used by both `thread_aware_macros` and `oxidizer_macros`.
@@ -62,35 +62,21 @@ fn impl_transfer(input: &DeriveInput, root_path: &Path) -> syn::Result<TokenStre
         }
     };
 
-    // Build paths: <root_path>::ThreadAware and <root_path>::MemoryAffinity
+    // Build paths: <root_path>::ThreadAware and <root_path>::affinity::Affinity
     let mut thread_aware_path = root_path.clone();
     let mut affinity_path = root_path.clone();
-    let mut pinned_affinity_path = root_path.clone();
     // Append segments manually (Paths are immutable; construct via parse_quote!)
     thread_aware_path.segments.push(parse_quote!(ThreadAware));
     affinity_path.segments.push(parse_quote!(affinity));
-    pinned_affinity_path.segments.push(parse_quote!(affinity));
-    affinity_path.segments.push(parse_quote!(MemoryAffinity));
-    pinned_affinity_path.segments.push(parse_quote!(PinnedAffinity));
+    affinity_path.segments.push(parse_quote!(Affinity));
 
     Ok(quote! {
         impl #impl_generics #thread_aware_path for #name #ty_generics #where_clause {
-            #[allow(clippy::redundant_clone, reason = "macro generated pattern moves each field once")]
-            fn relocated(self, source: #affinity_path, destination: #pinned_affinity_path) -> Self {
+            fn relocate(&mut self, source: Option<#affinity_path>, destination: #affinity_path) {
                 #body
             }
         }
     })
-}
-
-pub(crate) fn transfer_expr(ident: &syn::Ident, cfg: &FieldAttrCfg, root_path: &Path) -> TokenStream2 {
-    if cfg.skip {
-        quote! { #ident }
-    } else {
-        let mut path = root_path.clone();
-        path.segments.push(parse_quote!(ThreadAware));
-        quote! { #path::relocated(#ident, source, destination) }
-    }
 }
 
 fn add_bounds(input: &DeriveInput, root_path: &Path) -> syn::Result<syn::Generics> {

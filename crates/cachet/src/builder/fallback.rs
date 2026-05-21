@@ -4,15 +4,13 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 
-use cachet_tier::DynamicCache;
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::Cache;
-use crate::fallback::FallbackPromotionPolicy;
 use crate::refresh::TimeToRefresh;
-use crate::telemetry::TelemetryConfig;
+use crate::telemetry::CacheTelemetry;
 
 /// Builder for a cache with fallback tiers.
 ///
@@ -24,41 +22,14 @@ pub struct FallbackBuilder<K, V, PB, FB> {
     pub(crate) name: Option<&'static str>,
     pub(crate) primary_builder: PB,
     pub(crate) fallback_builder: FB,
-    pub(crate) policy: FallbackPromotionPolicy<V>,
     pub(crate) clock: Clock,
     pub(crate) refresh: Option<TimeToRefresh<K>>,
-    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V, PB, FB> FallbackBuilder<K, V, PB, FB> {
-    /// Sets the promotion policy for this fallback tier.
-    ///
-    /// The policy determines when values from the fallback tier should be
-    /// promoted to the primary tier.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::{Cache, FallbackPromotionPolicy};
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
-    ///
-    /// let cache = Cache::builder::<String, String>(clock)
-    ///     .memory()
-    ///     .fallback(l2)
-    ///     .promotion_policy(FallbackPromotionPolicy::always())
-    ///     .build();
-    /// ```
-    #[must_use]
-    pub fn promotion_policy(mut self, policy: FallbackPromotionPolicy<V>) -> Self {
-        self.policy = policy;
-        self
-    }
-
     /// Configures background refresh for this fallback tier.
     ///
     /// When entries in the primary tier exceed the refresh duration,
@@ -93,8 +64,6 @@ where
     /// This allows building arbitrarily deep cache hierarchies like:
     /// L1 → L2 → L3 → Database
     ///
-    /// Each `FallbackBuilder` controls its own promotion policy via `.promotion_policy()`.
-    ///
     /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
     pub fn fallback<FB2>(self, fallback: FB2) -> FallbackBuilder<K, V, Self, FB2>
     where
@@ -108,7 +77,6 @@ where
             name: self.name,
             primary_builder: self,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
             clock,
             refresh: None,
             telemetry,
@@ -158,7 +126,7 @@ where
     ///     .fallback(l2)
     ///     .build();
     /// ```
-    pub fn build(self) -> Cache<K, V, DynamicCache<K, V>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }

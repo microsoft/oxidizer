@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt"
 description = "Resilience and recovery mechanisms for fallible operations."
-version = "0.4.5"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "layered", "recovery", "retry"]
 categories = ["data-structures"]
@@ -84,7 +84,7 @@ serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true }
 static_assertions.workspace = true
 tick = { workspace = true, features = ["test-util", "tokio"] }
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { workspace = true, features = ["util"] }
 tower-service.workspace = true
 tracing.workspace = true

@@ -13,7 +13,8 @@
 //! # Design Philosophy
 //!
 //! - **Concrete type**: No generics needed in your code
-//! - **Simple**: Use built-in constructors or provide a closure
+//! - **Simple**: Use built-in constructors or implement [`SpawnCustom`]
+//! - **Layered**: Compose middleware closures via [`CustomSpawnerBuilder`]
 //! - **Flexible**: Works with any async runtime
 //!
 //! # Quick Start
@@ -34,26 +35,11 @@
 //! # fn main() {}
 //! ```
 //!
-//! ## Custom Runtime
-//!
-//! ```rust
-//! use anyspawn::Spawner;
-//!
-//! let spawner = Spawner::new_custom("threadpool", |fut| {
-//!     std::thread::spawn(move || futures::executor::block_on(fut));
-//! });
-//!
-//! // Returns a JoinHandle that can be awaited or dropped
-//! let handle = spawner.spawn(async { 42 });
-//! ```
-//!
 //! # Thread-Aware Support
 //!
 //! `Spawner` implements [`ThreadAware`](thread_aware::ThreadAware) and supports
-//! per-core isolation via [`Spawner::new_thread_aware`], enabling
-//! contention-free, NUMA-friendly task dispatch. See the
-//! [thread-aware section on `Spawner`](Spawner#thread-aware-support) for
-//! details and examples.
+//! per-core isolation via custom [`SpawnCustom`] implementations, enabling
+//! contention-free, NUMA-friendly task dispatch.
 //!
 //! # Features
 //!
@@ -69,6 +55,7 @@ mod handle;
 mod spawner;
 
 pub use builder::CustomSpawnerBuilder;
-pub use custom::BoxedFuture;
+pub use custom::{BoxedBlockingTask, BoxedFuture, SpawnCustom};
 pub use handle::JoinHandle;
 pub use spawner::Spawner;
+pub use thread_aware::closure::ThreadAwareAsyncFnOnce;

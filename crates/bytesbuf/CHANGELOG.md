@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-05-18
+
+- ⚠️ Breaking
+
+  - update thread-awareness APIs and memory-affinity types to `thread_aware` 0.7
+
 ## [0.4.2] - 2026-04-09
 
 - ✨ Features

@@ -1,0 +1,101 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "multitude"
+version = "0.1.0"
+description = "Fast and flexible arena allocator."
+readme = "README.md"
+keywords = ["arena", "memory", "allocator", "bump", "rc"]
+categories = ["memory-management", "data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/multitude"
+
+[target.'cfg(loom)'.dev-dependencies]
+loom.workspace = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "allocator_api2::*",
+    "bytemuck::*",
+    "bytesbuf::*",
+    "ptr_meta::*",
+    "ptr_meta_derive::*",
+    "serde::*",
+    "serde_core::*",
+    "widestring::*",
+    "zerocopy::*",
+]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde"]
+stats = []
+dst = ["dep:ptr_meta", "ptr_meta/derive"]
+utf16 = ["dep:widestring"]
+bytes = ["dep:bytes"]
+bytemuck = ["dep:bytemuck", "dst"]
+bytesbuf = ["dep:bytesbuf", "std"]
+zerocopy = ["dep:zerocopy", "dst"]
+
+[dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+bytemuck = { workspace = true, features = ["derive"], optional = true }
+bytes = { workspace = true, optional = true }
+bytesbuf = { workspace = true, optional = true }
+ptr_meta = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+widestring = { workspace = true, features = ["alloc"], optional = true }
+zerocopy = { workspace = true, optional = true }
+
+# Loom is only used under `--cfg loom` for the model-checked tests.
+# `target.'cfg(loom)'` is matched by Cargo when `RUSTFLAGS="--cfg loom"` is set.
+[target.'cfg(loom)'.dependencies]
+loom = { workspace = true }
+
+[dev-dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+bolero = { workspace = true, features = ["std"] }
+# `std` transitively enables `bolero-engine/any`, which is required
+# because bolero-libfuzzer 0.13.0 references `bolero_engine::any::run`
+# but does not itself activate that feature on `bolero-engine`.
+bumpalo = { workspace = true, features = ["collections"] }
+criterion.workspace = true
+gungraun = { workspace = true, features = ["default"] }
+mutants.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "criterion_alloc"
+harness = false
+
+[[bench]]
+name = "criterion_drop"
+harness = false
+
+[[bench]]
+name = "gungraun_alloc"
+harness = false
+
+[[bench]]
+name = "gungraun_drop"
+harness = false
+
+[[example]]
+name = "basic"
+
+[[example]]
+name = "strings"

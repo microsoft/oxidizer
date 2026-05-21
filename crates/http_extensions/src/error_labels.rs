@@ -29,6 +29,9 @@ pub(crate) const LABEL_VALIDATION: ErrorLabel = ErrorLabel::from_static("validat
 pub(crate) const LABEL_URI_MISSING: ErrorLabel = ErrorLabel::from_static("uri_missing");
 pub(crate) const LABEL_BODY_UTF8_INVALID: ErrorLabel = ErrorLabel::from_static("body_utf8_invalid");
 
+// Routing errors
+pub(crate) const LABEL_URI_CONFLICT: ErrorLabel = ErrorLabel::from_static("uri_conflict");
+
 // Body errors
 pub(crate) const LABEL_BODY_CONSUMED: ErrorLabel = ErrorLabel::from_static("body_consumed");
 pub(crate) const LABEL_BODY_NOT_BUFFERED: ErrorLabel = ErrorLabel::from_static("body_not_buffered");

@@ -14,11 +14,10 @@ use tick::{Clock, ClockControl};
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn wrapper_name() {
+fn cache_name() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().build();
-    let wrapper = cache.inner();
-    assert!(!wrapper.name().is_empty());
+    assert!(!cache.name().is_empty());
 }
 
 #[cfg_attr(miri, ignore)]
@@ -213,15 +212,6 @@ async fn wrapper_expired_entry_returns_none() {
     // Entry should be treated as expired
     let result = cache.get(&key).await.unwrap();
     assert!(result.is_none(), "expired entry should return None");
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn wrapper_inner_returns_reference() {
-    let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().build();
-    // inner() on the CacheWrapper
-    let _inner = cache.inner().inner();
 }
 
 #[cfg_attr(miri, ignore)]

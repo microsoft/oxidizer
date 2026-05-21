@@ -60,12 +60,11 @@
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** - when a fallback tier is configured, the builder
-//!   automatically type-erases both tiers into a [`DynamicCache<K, V>`] so
-//!   the primary and fallback don't need to be the same concrete type.
-//! - **Configurable promotion** - choose whether, and under what conditions, values
-//!   found in a fallback tier are promoted back into the primary tier
-//!   ([`FallbackPromotionPolicy`]).
+//! - **Dynamic dispatch** - the builder type-erases the storage tier into a
+//!   [`DynamicCache<K, V>`], so all builders produce the same `Cache<K, V>`
+//!   output type regardless of the underlying storage or tier composition.
+//! - **Configurable insert policy** - choose whether, and under what conditions,
+//!   values are inserted into a tier ([`InsertPolicy`]).
 //! - **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
 //!   a [`tick::Clock`], making caches fully controllable in tests without sleeping.
 //!
@@ -81,7 +80,7 @@
 //! | Stampede protection | ❌ | ✅ |
 //! | Background refresh | ❌ | ✅ |
 //! | Service middleware integration | ❌ | ✅ |
-//! | OpenTelemetry metrics + logs | ❌ | ✅ |
+//! | Structured telemetry (tracing) | ❌ | ✅ |
 //! | Pluggable storage backends | ❌ | ✅ |
 //! | Clock injection for testing | ❌ | ✅ |
 //!
@@ -94,10 +93,10 @@
 //! | Type | Description |
 //! |---|---|
 //! | [`Cache`] | The user-facing cache. Wraps any `CacheTier` with `get`, `insert`, `invalidate`, `clear`, `get_or_insert`, `try_get_or_insert`, and `optionally_get_or_insert`. |
-//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, promotion policy, stampede protection, and background refresh. |
+//! | [`CacheBuilder`] | Builder for `Cache`. Configure storage, TTL, name, telemetry, fallback, insert policy, stampede protection, and background refresh. |
 //! | [`CacheEntry<V>`] | A value together with an optional cached-at timestamp and TTL. Returned by all `get` operations. |
 //! | [`CacheTier`] | The core trait for storage backends. Implement this to add your own storage. |
-//! | [`FallbackPromotionPolicy`] | Decides whether a value found in a fallback tier is promoted to the primary tier. |
+//! | [`InsertPolicy`] | Decides whether a value should be inserted into a tier. |
 //! | [`TimeToRefresh`] | Configures background refresh: how stale an entry must be before a background task refreshes it. |
 //! | [`Error`] | The error type returned by all fallible cache operations. |
 //!
@@ -114,7 +113,7 @@
 //!             .memory()                  // L2: a second in-process store (or a remote service)
 //!             .ttl(Duration::from_secs(300))
 //!     )
-//!     .promotion_policy(FallbackPromotionPolicy::always())  // promote L2 hits into L1
+//!     .insert_policy(InsertPolicy::always())  // control when values are inserted into L1
 //!     .time_to_refresh(TimeToRefresh::new(Duration::from_secs(20), spawner))  // refresh L1 in background
 //!     .build()
 //! ```
@@ -153,9 +152,9 @@
 //! | Feature | Default | Description |
 //! |---|---|---|
 //! | `memory` | ✅ | Enables `InMemoryCache` and the `.memory()` builder method via `cachet_memory`. |
-//! | `metrics` | ❌ | Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`). |
-//! | `logs` | ❌ | Enables structured `tracing` log events for every cache activity. |
+//! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
+//! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -168,7 +167,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let cache = Cache::builder::<String, i32>(clock).memory().build();
+//! let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 //!
 //! cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;
@@ -182,7 +181,7 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use cachet::{Cache, CacheEntry, FallbackPromotionPolicy};
+//! use cachet::Cache;
 //! use tick::Clock;
 //! # async {
 //!
@@ -193,47 +192,79 @@
 //!     .memory()
 //!     .ttl(Duration::from_secs(60))
 //!     .fallback(l2)
+//!     .build();
+//! # };
+//! ```
+//!
+//! ## Serialization Boundary
+//!
+//! When a fallback tier operates on serialized bytes (e.g., Redis), use `.serialize()`
+//! to add a postcard serialization boundary. Keys and values are automatically serialized
+//! to [`BytesView`](bytesbuf::BytesView) before reaching the fallback tier, and
+//! deserialized on the way back.
+//!
+//! ```ignore
+//! use cachet::{Cache, FallbackPromotionPolicy};
+//! use tick::Clock;
+//! # async {
+//!
+//! let clock = Clock::new_tokio();
+//! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+//!
+//! let cache = Cache::builder::<String, String>(clock)
+//!     .memory()
+//!     .serialize()
+//!     .fallback(remote)
 //!     .promotion_policy(FallbackPromotionPolicy::always())
 //!     .build();
+//!
+//! // Keys and values are String on the outside, BytesView in the fallback tier.
+//! cache.insert("key".to_string(), "value".to_string()).await?;
+//! # Ok::<(), cachet::Error>(())
 //! # };
 //! ```
 //!
 //! # Telemetry
 //!
-//! Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` and `.enable_logs()`.
+//! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 //!
-//! ## Metrics (OpenTelemetry)
+//! Each cache operation emits a structured [`tracing`] event with fields
+//! `cache.name`, `cache.event`, and `cache.duration_ns`.
 //!
-//! | Metric | Type | Unit | Description |
-//! |--------|------|------|-------------|
-//! | `cache.event.count` | Counter | event | Cache operation events |
-//! | `cache.operation.duration` | Histogram | s | Operation latency |
-//! | `cache.size` | Gauge | entry | Current entry count |
+//! ## Subscribing to events
 //!
-//! **Attributes:** `cache.name`, `cache.operation`, `cache.activity`
+//! Use [`telemetry::attributes`] constants to filter and match events in a
+//! custom `tracing_subscriber::Layer`:
 //!
-//! **Operations:** `cache.get`, `cache.insert`, `cache.invalidate`, `cache.clear`
+//! ```ignore
+//! use cachet::telemetry::attributes;
 //!
-//! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
-//! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback`, `cache.fallback_promotion`, `cache.error`, `cache.ok`
+//! // Filter by tracing target prefix
+//! let filter = tracing_subscriber::filter::Targets::new()
+//!     .with_target(attributes::TARGET, tracing::Level::DEBUG);
 //!
-//! ## Logs (tracing)
+//! // Match specific events in a Visit impl
+//! if event_value == attributes::EVENT_HIT { /* cache hit */ }
+//! ```
 //!
-//! Event name: `cache.event` with fields `cache.name`, `cache.operation`,
-//! `cache.activity`, `cache.duration_ns`.
+//! See the `telemetry_subscriber` example for a complete demonstration.
 //!
-//! | Level | Activities |
-//! |-------|-----------|
-//! | ERROR | `cache.error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.fallback_promotion` |
-//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
+//! ## Event types
+//!
+//! | Level | Events |
+//! |-------|--------|
+//! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback` |
+//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
 mod cache;
 mod fallback;
+mod policy;
 mod refresh;
-mod telemetry;
+#[cfg(any(feature = "serialize", test))]
+mod serialize;
+pub mod telemetry;
 mod transform;
 mod wrapper;
 
@@ -241,7 +272,7 @@ mod wrapper;
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]
 pub use cache::{Cache, CacheName};
-#[cfg(feature = "memory")]
+#[cfg(any(feature = "memory", test))]
 #[doc(inline)]
 pub use cachet_memory::InMemoryCache;
 #[cfg(feature = "service")]
@@ -255,8 +286,8 @@ pub use cachet_tier::{CacheEntry, CacheTier, Error, Result, SizeError};
 #[doc(inline)]
 pub use cachet_tier::{CacheOp, MockCache};
 #[doc(inline)]
-pub use fallback::FallbackPromotionPolicy;
+pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
 #[doc(inline)]
-pub use transform::{Codec, Encoder, TransformCodec, TransformEncoder, infallible};
+pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

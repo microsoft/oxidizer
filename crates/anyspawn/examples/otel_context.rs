@@ -1,26 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Using `CustomSpawnerBuilder` to propagate OpenTelemetry context across
-//! spawned tasks.
+//! Propagating OpenTelemetry context across spawned tasks via a layer closure.
 //!
 //! When you spawn a task with Tokio, the new task starts with an empty
-//! OpenTelemetry [`Context`]. This example adds a layer that captures the
-//! caller's current context and reattaches it inside the spawned future,
+//! OpenTelemetry [`Context`]. This example uses a layer closure to capture
+//! the caller's current context and reattach it inside the spawned future,
 //! so spans, baggage, and other context values propagate automatically.
 
-use anyspawn::{BoxedFuture, CustomSpawnerBuilder};
+use anyspawn::{BoxedBlockingTask, BoxedFuture, CustomSpawnerBuilder};
 use opentelemetry::Context;
 use opentelemetry::context::FutureExt as OtelFutureExt;
 
 #[tokio::main]
 async fn main() {
     let spawner = CustomSpawnerBuilder::tokio()
+        .layer(
+            |task: BoxedFuture| -> BoxedFuture {
+                let cx = Context::current();
+                Box::pin(task.with_context(cx))
+            },
+            |task: BoxedBlockingTask| -> BoxedBlockingTask {
+                let cx = Context::current();
+
+                Box::new(move || {
+                    let _guard = cx.attach();
+                    task();
+                })
+            },
+        )
         .name("tokio_with_otel")
-        .layer(|fut: BoxedFuture, spawn: &dyn Fn(BoxedFuture)| {
-            let cx = Context::current();
-            spawn(Box::pin(fut.with_context(cx)));
-        })
         .build();
 
     // --- demonstrate that context flows through ---
@@ -32,15 +41,27 @@ async fn main() {
     let result = spawner
         .spawn(async {
             // Inside the spawned task the context is available thanks to
-            // the layer above.
+            // the layer closure above.
             let cx = Context::current();
             let id = cx.get::<RequestId>().map_or("<missing>", |r| r.0.as_str());
             println!("spawned task sees RequestId = {id}");
             id == "abc-123"
         })
         .await;
-
     assert!(result, "context should have propagated into the spawned task");
+
+    let result = spawner
+        .spawn_blocking(|| {
+            // Inside the spawned task the context is available thanks to
+            // the layer closure above.
+            let cx = Context::current();
+            let id = cx.get::<RequestId>().map_or("<missing>", |r| r.0.as_str());
+            println!("spawned task sees RequestId = {id}");
+            id == "abc-123"
+        })
+        .await;
+    assert!(result, "context should have propagated into the spawned blocking task");
+
     println!("context propagation works!");
 }
 

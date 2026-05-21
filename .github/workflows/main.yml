@@ -125,8 +125,7 @@ jobs:
         run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
       - name: Examples
         if: success() || failure()
-        shell: pwsh
-        run: ./scripts/run-examples.ps1 -CargoProfile dev -Exclude "${{ needs.delta.outputs.exclude_not_affected }}"
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev ${{ needs.delta.outputs.exclude_not_affected }}
 
   static-analysis:
     needs: [delta]
@@ -145,15 +144,18 @@ jobs:
         with:
           enable-sccache: true
           rust-toolchain: RUST_LATEST
-          rust-components: clippy, rustfmt
+          rust-components: clippy
           cargo-tools: CARGO_DOC2README_VERSION, CARGO_WORKSPACES_VERSION, CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION, CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION, CARGO_DENY_VERSION, CARGO_SORT_VERSION
 
       # execute
       - name: Clippy
         run: cargo clippy --workspace ${{ needs.delta.outputs.exclude_not_modified }} --all-targets --all-features -- -D warnings
-      - name: Source Format
+      - name: Install Nightly Rustfmt
         if: success() || failure()
-        run: cargo fmt -- --check
+        run: rustup toolchain install ${{ env.RUST_NIGHTLY }} --profile minimal --component rustfmt
+      - name: Source Format (nightly)
+        if: success() || failure()
+        run: cargo +${{ env.RUST_NIGHTLY }} fmt --all -- --config-path ./unstable-rustfmt.toml --check
       - name: Cargo.toml Format
         if: success() || failure()
         run: cargo sort --check --grouped --workspace
@@ -234,14 +236,14 @@ jobs:
 
       - name: Post Semver Failure Comment
         if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.2
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check
           path: semver-comment.txt
 
       - name: Remove Semver Comment on Success
         if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.2
+        uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check
           delete: true
@@ -281,9 +283,49 @@ jobs:
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
-      - name: Miri
+      - name: Miri (stacked borrows)
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
+
+  model-checking:
+    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    needs: [delta, testing]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_LATEST
+          cargo-tools: JUST_VERSION
+
+      # execute
+      - name: Loom
+        run: just loom
+
+  fuzz-testing:
+    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    needs: [delta, testing]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_BOLERO_VERSION, JUST_VERSION
+
+      # execute
+      - name: Bolero
+        run: just bolero 60s
 
   mutation-testing:
     if: github.event_name == 'pull_request'
@@ -307,12 +349,19 @@ jobs:
       - name: Generate PR Diff
         run: git diff origin/main...HEAD >diff.txt
       - name: Mutate Diff
-        timeout-minutes: 45
+        timeout-minutes: 240
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs --in-place --in-diff diff.txt
 
   coverage:
     needs: [delta]
-    if: needs.delta.outputs.skip != 'true'
+    # Coverage always runs (no `delta.skip` gate) so the externally-posted
+    # `codecov/project` status check is always reported. Codecov posts that
+    # status in reaction to a coverage upload from this job; if `coverage`
+    # is skipped, `codecov/project` stays in
+    # `Expected — Waiting for status to be reported` and blocks merge. The
+    # `required-checks` fan-in only solves stuck contexts for jobs we own,
+    # so we eat the cost of running coverage on doc-only PRs here to keep
+    # the externally-posted check unblocked.
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -401,3 +450,70 @@ jobs:
       # execute
       - name: Check External Type Exposure
         run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
+
+  # Single aggregating ("fan-in") status check. Branch protection should
+  # require ONLY this context for the workflow jobs below: it succeeds when
+  # every dependency either succeeded or was skipped, and fails if any
+  # dependency failed or was cancelled. This avoids the GitHub Actions
+  # quirk where a matrix job gated by a job-level `if:` posts only a single
+  # skipped check under the bare job name, leaving matrix-expanded required
+  # contexts (`testing (ubuntu-latest)` etc.) stuck on
+  # `Expected — Waiting for status to be reported`.
+  #
+  # Maintenance — when to add a job to `needs:` below:
+  #
+  #   * Do NOT add jobs that are intentionally optional / advisory; this
+  #     fan-in is only for jobs that must pass before merge.
+  #
+  #   * MUST add if the job has BOTH a `strategy.matrix` AND a job-level
+  #     `if:` that can evaluate to false (e.g. gated on
+  #     `needs.delta.outputs.skip`, `github.event_name`, etc.). Such jobs
+  #     trigger the stuck-context bug above and can only be made required
+  #     safely via this fan-in.
+  #
+  #   * SHOULD add any other job that must pass before merge. Funnelling
+  #     every required job through this single context keeps branch
+  #     protection simple: one workflow context to require here, plus
+  #     externally-posted statuses (`license/cla`, `codecov/project`).
+  #
+  # When a new job is added below, also remove any direct entry for it
+  # from the branch protection ruleset (only `required-checks` should be
+  # listed for jobs defined in this workflow).
+  required-checks:
+    name: required-checks
+    if: always()
+    needs:
+      - delta
+      - testing
+      - static-analysis
+      - spell-check
+      - semver
+      - extended-analysis
+      - model-checking
+      - fuzz-testing
+      - mutation-testing
+      - coverage
+      - pr-title
+      - license-headers
+      - external-type-exposure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Dependency Results
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS_JSON" | jq -r 'to_entries[] | "  \(.key): \(.value.result)"'
+          # Pass when every dependency is success or skipped; fail otherwise
+          # (failure, cancelled, or any unexpected state).
+          bad=$(echo "$NEEDS_JSON" | jq -r '
+            to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | .[] | "\(.key): \(.value.result)"
+          ')
+          if [[ -n "$bad" ]]; then
+            printf '::error::One or more required jobs did not succeed or skip:\n%s\n' "$bad"
+            exit 1
+          fi
+          echo "All required jobs succeeded or were skipped."

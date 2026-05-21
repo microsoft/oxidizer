@@ -35,7 +35,7 @@ The crate centers around several key abstractions:
 ### Simple URI Construction
 
 ```rust
-use templated_uri::{BaseUri, Uri, PathAndQuery};
+use templated_uri::{BaseUri, PathAndQuery, Uri};
 
 // Create the base (scheme + authority, optionally a path prefix)
 let base_uri = BaseUri::from_static("https://api.example.com");
@@ -56,7 +56,7 @@ assert_eq!(
 For dynamic URIs with variable components, use the templating system:
 
 ```rust
-use templated_uri::{BaseUri, PathAndQueryTemplate, Uri, EscapedString, templated};
+use templated_uri::{BaseUri, EscapedString, PathAndQueryTemplate, Uri, templated};
 
 #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 #[derive(Clone)]
@@ -154,12 +154,43 @@ fragments are stripped by the `http` crate and ignored by HTTP clients.
 Template variables must implement [`Escape`][__link10] (except for reserved expansions,
 which use [`Raw`][__link11]) to ensure the resulting URI is valid.
 
+### Undefined Values (`Option<T>`)
+
+Per [RFC 6570 section 2.3][__link12], template
+variables may be *undefined*. Use `Option<T>` to model this: a `None` value is treated
+as undefined and the variable (along with its prefix or separator) is omitted from the
+rendered URI.
+
+```rust
+use templated_uri::{EscapedString, PathAndQueryTemplate, templated};
+
+#[templated(template = "/items{?query,limit}", unredacted)]
+struct ItemSearch {
+    query: EscapedString,
+    limit: Option<u32>,
+}
+
+// With limit defined:
+let path = ItemSearch {
+    query: EscapedString::from_static("rust"),
+    limit: Some(10),
+};
+assert_eq!(path.render(), "/items?query=rust&limit=10");
+
+// With limit undefined:
+let path = ItemSearch {
+    query: EscapedString::from_static("rust"),
+    limit: None,
+};
+assert_eq!(path.render(), "/items?query=rust");
+```
+
 ## Integration with HTTP Ecosystem
 
 This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
-and building upon the standard [`http`][__link12] crate types. The resulting [`Uri`][__link13] can be converted
-to an [`http::Uri`][__link14] for use with HTTP clients
-and servers based on [`hyper`][__link15] like [`reqwest`][__link16].
+and building upon the standard [`http`][__link13] crate types. The resulting [`Uri`][__link14] can be converted
+to an [`http::Uri`][__link15] for use with HTTP clients
+and servers based on [`hyper`][__link16] like [`reqwest`][__link17].
 
 
 <hr/>
@@ -167,21 +198,22 @@ and servers based on [`hyper`][__link15] like [`reqwest`][__link16].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxHx8QfjNPcpGxCmQHogYME4G48WgVKUDCN4G-N8o9dvp3-sYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMS4y
- [__link0]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
- [__link1]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
- [__link10]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Escape
- [__link11]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Raw
- [__link12]: https://docs.rs/http/latest/http/
- [__link13]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Uri
- [__link14]: https://docs.rs/http/1.4.0/http/?search=Uri
- [__link15]: https://docs.rs/hyper/latest/hyper/
- [__link16]: https://docs.rs/reqwest/latest/reqwest/
- [__link2]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BaseUri
- [__link3]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=BasePath
- [__link4]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=PathAndQueryTemplate
- [__link5]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Escaped
- [__link6]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=EscapedString
- [__link7]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=Escaped
- [__link8]: https://docs.rs/templated_uri/0.1.2/templated_uri/?search=EscapedString
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG63iTBJYMadJG6nseEEoATCvG3YJS_EajemqG70n7pjeggIrYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMi4w
+ [__link0]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Uri
+ [__link1]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=BaseUri
+ [__link10]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Escape
+ [__link11]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Raw
+ [__link12]: https://datatracker.ietf.org/doc/html/rfc6570#section-2.3
+ [__link13]: https://docs.rs/http/latest/http/
+ [__link14]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Uri
+ [__link15]: https://docs.rs/http/1.4.0/http/?search=Uri
+ [__link16]: https://docs.rs/hyper/latest/hyper/
+ [__link17]: https://docs.rs/reqwest/latest/reqwest/
+ [__link2]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=BaseUri
+ [__link3]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=BasePath
+ [__link4]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=PathAndQueryTemplate
+ [__link5]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Escaped
+ [__link6]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=EscapedString
+ [__link7]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=Escaped
+ [__link8]: https://docs.rs/templated_uri/0.2.0/templated_uri/?search=EscapedString
  [__link9]: https://datatracker.ietf.org/doc/html/rfc6570

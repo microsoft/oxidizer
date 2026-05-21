@@ -201,8 +201,6 @@ mod service;
 #[cfg(any(feature = "metrics", test))]
 mod telemetry;
 
-#[deprecated(note = "import from `seatbelt::Attempt` instead")]
-pub use crate::attempt::Attempt;
 pub use args::{CloneArgs, OnRetryArgs, RecoveryArgs, RestoreInputArgs};
 pub use backoff::Backoff;
 pub(crate) use backoff::DelayBackoff;
@@ -213,3 +211,6 @@ pub use service::Retry;
 #[cfg(feature = "tower-service")]
 pub use service::RetryFuture;
 pub(crate) use service::RetryShared;
+
+#[deprecated(note = "import from `seatbelt::Attempt` instead")]
+pub use crate::attempt::Attempt;

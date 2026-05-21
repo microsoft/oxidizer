@@ -19,6 +19,7 @@ _default:
 
 import 'justfiles/basic.just'
 import 'justfiles/coverage.just'
+import 'justfiles/extended.just'
 import 'justfiles/format.just'
 import 'justfiles/setup.just'
 import 'justfiles/spelling.just'

@@ -9,13 +9,12 @@ use http_body_util::BodyExt;
 use thread_aware::{ThreadAware, Unaware};
 use tick::Clock;
 
-#[cfg(any(feature = "json", test))]
-use crate::json::JsonError;
-use crate::{HttpError, Result};
-
 use super::options::HttpBodyOptions;
 use super::timeout_body::TimeoutBody;
 use super::{HttpBody, Kind};
+#[cfg(any(feature = "json", test))]
+use crate::json::JsonError;
+use crate::{HttpError, Result};
 
 /// Builder for creating optimized HTTP bodies.
 ///
@@ -337,9 +336,17 @@ impl Memory for MemoryWrapper {
     }
 }
 
+impl AsRef<Clock> for HttpBodyBuilder {
+    fn as_ref(&self) -> &Clock {
+        &self.clock
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::time::Duration;
+
     use bytes::Bytes;
     use bytesbuf::mem::testing::TransparentMemory;
     use futures::executor::block_on;
@@ -348,14 +355,12 @@ mod tests {
     use static_assertions::assert_impl_all;
     use tick::ClockControl;
 
-    use std::time::Duration;
-
     use super::*;
     use crate::testing::{create_stream_body, create_stream_body_from_chunks};
 
     #[test]
     fn assert_send_and_sync() {
-        assert_impl_all!(HttpBodyBuilder: Send, Sync, std::fmt::Debug);
+        assert_impl_all!(HttpBodyBuilder: Send, Sync, AsRef<Clock>, std::fmt::Debug);
     }
 
     #[test]
@@ -365,6 +370,9 @@ mod tests {
         let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
+
+        // access the clock
+        let _clock: &Clock = builder.as_ref();
     }
 
     #[test]

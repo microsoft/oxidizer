@@ -21,7 +21,8 @@ different async runtimes without generic infection.
 ## Design Philosophy
 
 * **Concrete type**: No generics needed in your code
-* **Simple**: Use built-in constructors or provide a closure
+* **Simple**: Use built-in constructors or implement [`SpawnCustom`][__link1]
+* **Layered**: Compose middleware closures via [`CustomSpawnerBuilder`][__link2]
 * **Flexible**: Works with any async runtime
 
 ## Quick Start
@@ -36,31 +37,16 @@ let result = spawner.spawn(async { 1 + 1 }).await;
 assert_eq!(result, 2);
 ```
 
-### Custom Runtime
-
-```rust
-use anyspawn::Spawner;
-
-let spawner = Spawner::new_custom("threadpool", |fut| {
-    std::thread::spawn(move || futures::executor::block_on(fut));
-});
-
-// Returns a JoinHandle that can be awaited or dropped
-let handle = spawner.spawn(async { 42 });
-```
-
 ## Thread-Aware Support
 
-`Spawner` implements [`ThreadAware`][__link1] and supports
-per-core isolation via [`Spawner::new_thread_aware`][__link2], enabling
-contention-free, NUMA-friendly task dispatch. See the
-[thread-aware section on `Spawner`][__link3] for
-details and examples.
+`Spawner` implements [`ThreadAware`][__link3] and supports
+per-core isolation via custom [`SpawnCustom`][__link4] implementations, enabling
+contention-free, NUMA-friendly task dispatch.
 
 ## Features
 
-* `tokio`: Enables the [`Spawner::new_tokio`][__link4] and
-  [`Spawner::new_tokio_with_handle`][__link5] constructors
+* `tokio`: Enables the [`Spawner::new_tokio`][__link5] and
+  [`Spawner::new_tokio_with_handle`][__link6] constructors
 
 
 <hr/>
@@ -68,10 +54,11 @@ details and examples.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9pMzxUlg8D9GxZnrkpQT5jmGyYaBtuYnUetGw3uMQ2o2j_5YWSCgmhhbnlzcGF3bmUwLjMuMIJsdGhyZWFkX2F3YXJlZTAuNi4y
- [__link0]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/thread_aware/0.6.2/thread_aware/?search=ThreadAware
- [__link2]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_thread_aware
- [__link3]: Spawner#thread-aware-support
- [__link4]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_tokio
- [__link5]: https://docs.rs/anyspawn/0.3.0/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5RxOwZfGEjeG2_e5NBDlvq5G2UGvhnaHUvnGwpHmIxmYGfgYWSCgmhhbnlzcGF3bmUwLjUuMIJsdGhyZWFkX2F3YXJlZTAuNy4w
+ [__link0]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=SpawnCustom
+ [__link2]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=CustomSpawnerBuilder
+ [__link3]: https://docs.rs/thread_aware/0.7.0/thread_aware/?search=ThreadAware
+ [__link4]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=SpawnCustom
+ [__link5]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=Spawner::new_tokio
+ [__link6]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=Spawner::new_tokio_with_handle

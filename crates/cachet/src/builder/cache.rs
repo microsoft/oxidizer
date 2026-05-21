@@ -7,16 +7,13 @@ use std::time::Duration;
 
 #[cfg(feature = "memory")]
 use cachet_memory::InMemoryCache;
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::MeterProvider;
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
-use crate::fallback::FallbackPromotionPolicy;
-use crate::telemetry::TelemetryConfig;
-use crate::wrapper::CacheWrapper;
+use crate::policy::InsertPolicy;
+use crate::telemetry::CacheTelemetry;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -43,8 +40,9 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) name: Option<&'static str>,
     pub(crate) storage: CT,
     pub(crate) ttl: Option<Duration>,
+    pub(crate) policy: InsertPolicy<V>,
     pub(crate) clock: Clock,
-    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
@@ -55,8 +53,9 @@ impl<K, V> CacheBuilder<K, V, ()> {
             name: None,
             storage: (),
             ttl: None,
+            policy: InsertPolicy::default(),
             clock,
-            telemetry: TelemetryConfig::new(),
+            telemetry: CacheTelemetry::new(),
             stampede_protection: false,
             _phantom: PhantomData,
         }
@@ -87,6 +86,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             name: self.name,
             storage,
             ttl: self.ttl,
+            policy: self.policy,
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -168,17 +168,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[cfg(any(feature = "logs", test))]
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
-        self.telemetry = self.telemetry.with_logs();
-        self
-    }
-
-    /// Configures metrics collection for this cache.
-    ///
-    /// When configured, cache operations will emit metrics via OpenTelemetry.
-    #[cfg(any(feature = "metrics", test))]
-    #[must_use]
-    pub fn enable_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.telemetry = self.telemetry.with_metrics(meter_provider);
+        self.telemetry = CacheTelemetry::with_logging();
         self
     }
 
@@ -234,6 +224,36 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
         self
     }
 
+    /// Sets the insert policy for this tier.
+    ///
+    /// The policy determines when values should be inserted into this tier.
+    /// It applies to all inserts, including direct [`Cache::insert`](crate::Cache::insert) calls,
+    /// [`Cache::get_or_insert`](crate::Cache::get_or_insert), and promotion from a fallback tier.
+    ///
+    /// If the policy rejects an insert, the operation is skipped and a
+    /// `cache.rejected` telemetry event is recorded with `cache.operation = cache.insert`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::{Cache, InsertPolicy};
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let l2 = Cache::builder::<String, String>(clock.clone()).memory();
+    ///
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .insert_policy(InsertPolicy::always())
+    ///     .fallback(l2)
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn insert_policy(mut self, policy: InsertPolicy<V>) -> Self {
+        self.policy = policy;
+        self
+    }
+
     /// Returns a reference to the builder's clock.
     pub fn clock(&self) -> &Clock {
         &self.clock
@@ -249,7 +269,7 @@ where
     /// Creates a fallback cache with this as the primary tier.
     ///
     /// The primary tier is checked first; on a miss, the fallback tier is queried
-    /// and the result is promoted to the primary tier based on the promotion policy.
+    /// and the result is inserted to the primary tier based on the insert policy.
     ///
     /// Accepts either a `CacheBuilder` or another `FallbackBuilder` as the fallback.
     pub fn fallback<FB>(self, fallback: FB) -> FallbackBuilder<K, V, Self, FB>
@@ -264,7 +284,6 @@ where
             name: self.name,
             primary_builder: self,
             fallback_builder: fallback,
-            policy: FallbackPromotionPolicy::always(),
             clock,
             refresh: None,
             telemetry,
@@ -284,7 +303,7 @@ where
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
-    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -317,33 +336,42 @@ mod tests {
 
     #[test]
     fn cache_builder_with_ttl() {
-        let clock = Clock::new_frozen();
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
             .ttl(Duration::from_secs(300))
             .build();
 
-        assert!(cache.inner().ttl.is_some());
-        assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
+        futures::executor::block_on(async {
+            cache.insert("key".to_string(), cachet_tier::CacheEntry::new(42)).await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_some(), "entry should exist before TTL");
+
+            control.advance(Duration::from_secs(301));
+            assert!(cache.get("key").await.unwrap().is_none(), "entry should expire after TTL");
+        });
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
-        let clock = Clock::new_frozen();
-        let builder = Cache::builder::<String, i32>(clock)
-            .storage(cachet_tier::MockCache::new())
-            .enable_logs();
-        assert!(builder.telemetry.logs_enabled);
-    }
+        use testing_aids::LogCapture;
 
-    #[test]
-    fn builder_enable_metrics() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-        let builder = Cache::builder::<String, i32>(clock)
+        let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .enable_metrics(&provider);
-        assert!(builder.telemetry.meter.is_some());
+            .enable_logs()
+            .build();
+
+        futures::executor::block_on(async {
+            let _ = cache.get(&"key".to_string()).await;
+        });
+
+        // Logs should contain a cache event when logging is enabled
+        capture.assert_contains(crate::telemetry::attributes::EVENT_MISS);
     }
 
     #[test]
@@ -392,13 +420,13 @@ mod tests {
     }
 
     #[test]
-    fn mock_builder_fallback_promotion_policy() {
+    fn mock_builder_fallback_insert_policy() {
         let clock = Clock::new_frozen();
         let fb = Cache::builder::<String, i32>(clock.clone()).storage(cachet_tier::MockCache::new());
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
+            .insert_policy(InsertPolicy::never())
             .fallback(fb)
-            .promotion_policy(FallbackPromotionPolicy::never())
             .build();
         assert!(!cache.name().is_empty());
     }

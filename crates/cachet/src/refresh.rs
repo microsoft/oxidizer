@@ -19,7 +19,6 @@ use parking_lot::Mutex;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
 use crate::telemetry::ext::ClockExt;
-use crate::telemetry::{CacheActivity, CacheOperation};
 
 /// Configuration for background cache refresh.
 ///
@@ -155,32 +154,20 @@ where
     }
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {
-        self.telemetry
-            .record(self.name, CacheOperation::Get, CacheActivity::RefreshHit, fetch_duration);
+        self.telemetry.refresh_hit(self.name, fetch_duration);
 
-        if self.policy.should_promote(&value) {
-            self.promote_to_primary(key, value).await;
-        }
+        self.promote_to_primary(key, value).await;
     }
 
     async fn promote_to_primary(&self, key: K, value: CacheEntry<V>) {
-        let timed = self.clock.timed_async(self.primary.insert(key, value)).await;
-
-        match timed.result {
-            Ok(()) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::FallbackPromotion, timed.duration);
-            }
-            Err(_) => {
-                self.telemetry
-                    .record(self.name, CacheOperation::Insert, CacheActivity::Error, timed.duration);
-            }
-        }
+        // Insert errors are intentionally swallowed - a failed promotion should not
+        // affect the refresh. The CacheWrapper around the primary tier already
+        // records telemetry for the insert (Inserted or Rejected).
+        let _ = self.primary.insert(key, value).await;
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
-        self.telemetry
-            .record(self.name, CacheOperation::Get, CacheActivity::RefreshMiss, duration);
+        self.telemetry.refresh_miss(self.name, duration);
     }
 }
 
@@ -329,43 +316,42 @@ mod tests {
 #[cfg(test)]
 mod fetch_and_promote_tests {
     use cachet_tier::MockCache;
-    use testing_aids::MetricTester;
+    use testing_aids::LogCapture;
     use tick::Clock;
 
     use super::*;
-    use crate::fallback::FallbackPromotionPolicy;
-    use crate::telemetry::{TelemetryConfig, attributes};
+    use crate::InsertPolicy;
+    use crate::telemetry::{CacheTelemetry, attributes};
     use crate::wrapper::CacheWrapper;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
     }
 
-    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(
-        primary: P,
-        fallback: F,
-        policy: FallbackPromotionPolicy<i32>,
-    ) -> FallbackCache<String, i32, P, F> {
+    fn build_fallback_cache<P, F: CacheTier<String, i32> + 'static>(primary: P, fallback: F) -> FallbackCache<String, i32, P, F> {
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
-        FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
+        let telemetry = CacheTelemetry::new();
+        FallbackCache::new("test", primary, fallback, clock, None, telemetry)
     }
 
-    #[cfg_attr(miri, ignore)] // OTel SDK calls SystemTime::now() which miri blocks under isolation
+    #[cfg_attr(miri, ignore)] // tracing subscriber setup is not miri-compatible
     #[test]
-    fn fallback_miss_records_refresh_miss_telemetry() {
+    fn fallback_miss_logs_refresh_miss_telemetry() {
         block_on(async {
-            let tester = MetricTester::new();
+            let capture = LogCapture::new();
+            let _guard = tracing::subscriber::set_default(capture.subscriber());
+
             let clock = Clock::new_frozen();
-            let telemetry = TelemetryConfig::new().with_metrics(tester.meter_provider()).build();
+            let telemetry = CacheTelemetry::with_logging();
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
-            let fc = FallbackCache::new("test", primary, fallback, FallbackPromotionPolicy::always(), clock, None, telemetry);
+            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
             // Fallback is empty → handle_fallback_miss Ok(None) branch
             fc.inner.fetch_and_promote("missing".to_string()).await;
 
-            tester.assert_attributes_contain(&[opentelemetry::KeyValue::new(attributes::CACHE_ACTIVITY_NAME, "cache.refresh_miss")]);
+            capture.assert_contains(attributes::FIELD_EVENT);
+            capture.assert_contains(attributes::EVENT_REFRESH_MISS);
         });
     }
 
@@ -375,7 +361,7 @@ mod fetch_and_promote_tests {
             let primary = MockCache::<String, i32>::new();
             let fallback = MockCache::<String, i32>::new();
             fallback.fail_when(|_| true);
-            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+            let fc = build_fallback_cache(primary, fallback);
 
             // Fallback errors → handle_fallback_miss Err branch
             fc.inner.fetch_and_promote("key".to_string()).await;
@@ -385,17 +371,28 @@ mod fetch_and_promote_tests {
     #[test]
     fn hit_no_promote() {
         block_on(async {
-            let primary = MockCache::<String, i32>::new();
+            let primary_mock = MockCache::<String, i32>::new();
+            let primary_check = primary_mock.clone();
             let fallback = MockCache::<String, i32>::new();
             fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-            let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::never());
+            let clock = Clock::new_frozen();
+            let telemetry = CacheTelemetry::new();
+            let primary = CacheWrapper::new(
+                "primary",
+                primary_mock,
+                clock.clone(),
+                None,
+                telemetry.clone(),
+                InsertPolicy::never(),
+            );
+            let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
             // Fallback hit with never() policy → handle_fallback_hit without promotion
             fc.inner.fetch_and_promote("key".to_string()).await;
 
             // Primary should still be empty
-            assert!(primary.get(&"key".to_string()).await.unwrap().is_none());
+            assert!(primary_check.get(&"key".to_string()).await.unwrap().is_none());
         });
     }
 
@@ -406,7 +403,7 @@ mod fetch_and_promote_tests {
             let fallback = MockCache::<String, i32>::new();
             fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-            let fc = build_fallback_cache(primary.clone(), fallback, FallbackPromotionPolicy::always());
+            let fc = build_fallback_cache(primary.clone(), fallback);
 
             // Fallback hit with always() policy → promote_to_primary success
             fc.inner.fetch_and_promote("key".to_string()).await;
@@ -426,7 +423,7 @@ mod fetch_and_promote_tests {
             let fallback = MockCache::<String, i32>::new();
             fallback.insert("key".to_string(), CacheEntry::new(42)).await.unwrap();
 
-            let fc = build_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+            let fc = build_fallback_cache(primary, fallback);
 
             // Fallback hit, primary insert fails → promote_to_primary error path
             fc.inner.fetch_and_promote("key".to_string()).await;
@@ -445,18 +442,10 @@ mod fetch_and_promote_tests {
         fallback.fail_when(|_| panic!("simulated panic in fallback get"));
 
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
 
-        let fc = FallbackCache::new(
-            "test",
-            primary,
-            fallback,
-            FallbackPromotionPolicy::always(),
-            clock,
-            Some(refresh),
-            telemetry,
-        );
+        let fc = FallbackCache::new("test", primary, fallback, clock, Some(refresh), telemetry);
 
         let key = "panic_key".to_string();
 
@@ -485,25 +474,24 @@ mod fetch_and_promote_tests {
 
     fn make_wrapper(mock: MockCache<String, i32>) -> MockWrapper {
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
-        CacheWrapper::new("test_primary", mock, clock, None, telemetry)
+        let telemetry = CacheTelemetry::new();
+        CacheWrapper::new("test_primary", mock, clock, None, telemetry, InsertPolicy::default())
     }
 
     fn build_mock_fallback_cache(
         primary: MockWrapper,
         fallback: MockCache<String, i32>,
-        policy: FallbackPromotionPolicy<i32>,
     ) -> FallbackCache<String, i32, MockWrapper, MockCache<String, i32>> {
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
-        FallbackCache::new("test", primary, fallback, policy, clock, None, telemetry)
+        let telemetry = CacheTelemetry::new();
+        FallbackCache::new("test", primary, fallback, clock, None, telemetry)
     }
 
     #[test]
     fn do_refresh_no_refresh_configured() {
         let primary = make_wrapper(MockCache::new());
         let fallback = MockCache::<String, i32>::new();
-        let fc = build_mock_fallback_cache(primary, fallback, FallbackPromotionPolicy::always());
+        let fc = build_mock_fallback_cache(primary, fallback);
         // do_refresh with no refresh configured should be a no-op
         fc.do_refresh(&"key".to_string());
     }
@@ -516,19 +504,11 @@ mod fetch_and_promote_tests {
         let primary = MockCache::<String, i32>::new();
         let fallback = MockCache::<String, i32>::new();
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
 
-        let primary_wrapper = CacheWrapper::new("primary", primary, clock.clone(), None, telemetry.clone());
-        let fc = FallbackCache::new(
-            "test",
-            primary_wrapper,
-            fallback,
-            FallbackPromotionPolicy::always(),
-            clock,
-            Some(refresh),
-            telemetry,
-        );
+        let primary_wrapper = CacheWrapper::new("primary", primary, clock.clone(), None, telemetry.clone(), InsertPolicy::default());
+        let fc = FallbackCache::new("test", primary_wrapper, fallback, clock, Some(refresh), telemetry);
 
         let key = "key".to_string();
         // First refresh adds key to in_flight set

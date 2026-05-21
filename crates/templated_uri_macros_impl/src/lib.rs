@@ -196,774 +196,383 @@ pub fn raw_derive_impl(input: TokenStream) -> TokenStream {
 #[cfg(not(miri))] // Insta can't work with Miri
 #[cfg(test)]
 mod tests {
-    use insta::assert_snapshot;
+    //! Snapshot tests for the proc-macro codegen.
+    //!
+    //! Each `assert_snapshot!(output)` is backed by a file in `src/snapshots/` named
+    //! `templated_uri_macros_impl__tests__<test_name>.snap`, where `<test_name>` is
+    //! the test function name with its leading `test_` prefix stripped (this is the
+    //! default insta behavior). So `fn test_templated_uri_impl` is backed by
+    //! `templated_uri_macros_impl__tests__templated_uri_impl.snap`.
+    //!
+    //! After intentionally changing the generated code, run `cargo insta review`
+    //! (or `cargo insta accept`) to update the snapshot files.
+
     use quote::quote;
 
     use super::*;
 
+    /// Renders the `#[templated(<attr>)] <item>` derive output, pretty-printed.
+    ///
+    /// Used by `assert_paq_snapshot!` and a few non-snapshot error tests; new tests
+    /// should prefer the macro for consistency with the snapshot-file naming pattern.
     #[expect(clippy::needless_pass_by_value, reason = "Test code")]
     fn pretty_parse(attr: TokenStream, item: TokenStream) -> String {
         let output = templated_paq_impl(&attr, item);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
+    /// Renders the `#[derive(Raw)]` output for `input`, pretty-printed.
     fn pretty_parse_raw(input: TokenStream) -> String {
         let output = raw_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
+    /// Renders the `#[derive(Escape)]` output for `input`, pretty-printed.
     fn pretty_parse_uri_param(input: TokenStream) -> String {
         let output = uri_param_derive_impl(input);
         prettyplease::unparse(&syn::parse_file(&output.to_string()).unwrap())
     }
 
+    /// Asserts the codegen for `#[templated(<attr>)] <item>` matches its snapshot.
+    ///
+    /// `$attr` is a bracket-wrapped token-tree (e.g. `[template = "/foo"]`) that's
+    /// forwarded to `quote!`; the leading `#[...]` form is mimicked because attribute
+    /// arguments are the natural reading here. The bracket may be omitted for the
+    /// no-attribute case. `$item` is a Rust item declaration (struct/enum/union)
+    /// passed directly without any wrapping. The snapshot file is derived from the
+    /// calling test function name because the inner `assert_snapshot!` call inherits
+    /// the test's source location.
+    ///
+    /// The macro binds the rendered output to a local named `output_pretty` before
+    /// calling `assert_snapshot!`, so the `expression: output_pretty` field stored
+    /// in each `.snap` file stays stable across re-accepts (otherwise insta would
+    /// rewrite it to the full `pretty_parse(::quote::quote![...], ...)` expression).
+    macro_rules! assert_paq_snapshot {
+        ($attr:tt, $item:item $(,)?) => {{
+            let output_pretty = pretty_parse(::quote::quote!$attr, ::quote::quote! { $item });
+            ::insta::assert_snapshot!(output_pretty);
+        }};
+        ($item:item $(,)?) => {{
+            let output_pretty = pretty_parse(::quote::quote! {}, ::quote::quote! { $item });
+            ::insta::assert_snapshot!(output_pretty);
+        }};
+    }
+
+    /// Asserts the `#[derive(Raw)]` codegen for `$item` matches its snapshot.
+    ///
+    /// See [`assert_paq_snapshot`] for the rationale behind the `output_pretty` local.
+    macro_rules! assert_raw_snapshot {
+        ($item:item $(,)?) => {{
+            let output_pretty = pretty_parse_raw(::quote::quote! { $item });
+            ::insta::assert_snapshot!(output_pretty);
+        }};
+    }
+
+    /// Asserts the `#[derive(Escape)]` codegen for `$item` matches its snapshot.
+    ///
+    /// See [`assert_paq_snapshot`] for the rationale behind the `output_pretty` local.
+    macro_rules! assert_uri_param_snapshot {
+        ($item:item $(,)?) => {{
+            let output_pretty = pretty_parse_uri_param(::quote::quote! { $item });
+            ::insta::assert_snapshot!(output_pretty);
+        }};
+    }
+
+    /// Asserts the `#[templated]` codegen for `<attr> <item>` produces a
+    /// `compile_error!` invocation whose rendered output contains `$expected_msg`.
+    ///
+    /// Used for tests that pin down macro error paths via substring inspection
+    /// instead of snapshots (typically because the message wording is short and
+    /// stable, so a full snapshot would be more boilerplate than signal). The
+    /// `$attr` argument may be omitted for the no-attribute case.
+    macro_rules! assert_paq_compile_error {
+        ($attr:tt, $item:item, $expected_msg:expr $(,)?) => {{
+            let output = pretty_parse(::quote::quote!$attr, ::quote::quote!{ $item });
+            assert!(
+                output.contains("compile_error"),
+                "expected compile_error! invocation in proc-macro output:\n{output}",
+            );
+            assert!(
+                output.contains($expected_msg),
+                "expected diagnostic message {:?} in proc-macro output:\n{}",
+                $expected_msg,
+                output,
+            );
+        }};
+        ($item:item, $expected_msg:expr $(,)?) => {
+            assert_paq_compile_error!([], $item, $expected_msg)
+        };
+    }
+
     #[test]
     fn test_templated_uri_impl() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/example.com/{param}/{+param2}{/param3,param4}"],
             struct Test {
                 param: String,
                 param2: EscapedString,
                 param3: String,
-                param4: String
+                param4: String,
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        struct Test {
-            param: String,
-            param2: EscapedString,
-            param3: String,
-            param4: String,
-        }
-        impl ::templated_uri::PathAndQueryTemplate for Test {
-            fn template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{+param2}{/param3,param4}"
-            }
-            fn format_template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{param2}/{param3}/{param4}"
-            }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                ::core::option::Option::None
-            }
-            fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                Ok(
-                    ::templated_uri::http::uri::PathAndQuery::try_from(
-                        ::templated_uri::PathAndQueryTemplate::render(self),
-                    )?,
-                )
-            }
-        }
-        impl ::std::fmt::Debug for Test {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_tuple("Test")
-                    .field(&"/example.com/{param}/{+param2}{/param3,param4}")
-                    .finish()
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for Test {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                f.write_str("/example.com/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                f.write_str("/")?;
-                <EscapedString as ::data_privacy::RedactedDisplay>::fmt(
-                    &self.param2,
-                    engine,
-                    f,
-                )?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
-                ::std::result::Result::Ok(())
-            }
-        }
-        impl From<Test> for ::templated_uri::PathAndQuery {
-            fn from(value: Test) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_templated_unredacted_uri_impl() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}", unredacted };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/example.com/{param}/{+param2}{/param3,param4}", unredacted],
             struct Test {
-                // #[templated(classify=Public)]
                 param: String,
                 param2: EscapedString,
-                // #[templated(classify=Restricted)]
                 param3: String,
-                // #[templated(classify=Public)]
-                param4: String
+                param4: String,
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        struct Test {
-            param: String,
-            param2: EscapedString,
-            param3: String,
-            param4: String,
-        }
-        impl ::templated_uri::PathAndQueryTemplate for Test {
-            fn template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{+param2}{/param3,param4}"
-            }
-            fn format_template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{param2}/{param3}/{param4}"
-            }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                ::core::option::Option::None
-            }
-            fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                Ok(
-                    ::templated_uri::http::uri::PathAndQuery::try_from(
-                        ::templated_uri::PathAndQueryTemplate::render(self),
-                    )?,
-                )
-            }
-        }
-        impl ::std::fmt::Debug for Test {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_tuple("Test")
-                    .field(&"/example.com/{param}/{+param2}{/param3,param4}")
-                    .finish()
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for Test {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                f.write_str("/example.com/")?;
-                ::std::write!(f, "{}", self.param)?;
-                f.write_str("/")?;
-                ::std::write!(f, "{}", self.param2)?;
-                f.write_str("/")?;
-                ::std::write!(f, "{}", self.param3)?;
-                f.write_str("/")?;
-                ::std::write!(f, "{}", self.param4)?;
-                ::std::result::Result::Ok(())
-            }
-        }
-        impl From<Test> for ::templated_uri::PathAndQuery {
-            fn from(value: Test) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_field_level_unredacted() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/example.com/{param}/{+param2}{/param3,param4}"],
             struct Test {
                 param: String,
                 #[templated(unredacted)]
                 param2: EscapedString,
                 param3: String,
-                param4: String
+                param4: String,
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        struct Test {
-            param: String,
-            param2: EscapedString,
-            param3: String,
-            param4: String,
-        }
-        impl ::templated_uri::PathAndQueryTemplate for Test {
-            fn template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{+param2}{/param3,param4}"
-            }
-            fn format_template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{param2}/{param3}/{param4}"
-            }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                ::core::option::Option::None
-            }
-            fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                Ok(
-                    ::templated_uri::http::uri::PathAndQuery::try_from(
-                        ::templated_uri::PathAndQueryTemplate::render(self),
-                    )?,
-                )
-            }
-        }
-        impl ::std::fmt::Debug for Test {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_tuple("Test")
-                    .field(&"/example.com/{param}/{+param2}{/param3,param4}")
-                    .finish()
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for Test {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                f.write_str("/example.com/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                f.write_str("/")?;
-                ::std::write!(f, "{}", self.param2)?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
-                ::std::result::Result::Ok(())
-            }
-        }
-        impl From<Test> for ::templated_uri::PathAndQuery {
-            fn from(value: Test) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+        );
     }
 
+    /// Locks in that the bare `#[unredacted]` field attribute and the namespaced
+    /// `#[templated(unredacted)]` form produce **byte-identical** codegen, instead
+    /// of duplicating the full codegen snapshot under two test names. The reference
+    /// snapshot itself lives in `test_field_level_unredacted`; if that snapshot
+    /// changes, this parity check still ensures both attribute forms move together.
     #[test]
-    fn test_standalone_unredacted() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
-        let item = quote! {
-            struct Test {
-                param: String,
-                #[unredacted]
-                param2: EscapedString,
-                param3: String,
-                param4: String
-            }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        struct Test {
-            param: String,
-            param2: EscapedString,
-            param3: String,
-            param4: String,
-        }
-        impl ::templated_uri::PathAndQueryTemplate for Test {
-            fn template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{+param2}{/param3,param4}"
-            }
-            fn format_template(&self) -> &'static core::primitive::str {
-                "/example.com/{param}/{param2}/{param3}/{param4}"
-            }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                ::core::option::Option::None
-            }
-            fn render(&self) -> ::std::string::String {
-                let param = ::templated_uri::Escape::escape(&self.param);
-                let param2 = ::templated_uri::Raw::raw(&self.param2);
-                let param3 = ::templated_uri::Escape::escape(&self.param3);
-                let param4 = ::templated_uri::Escape::escape(&self.param4);
-                ::std::format!("/example.com/{param}/{param2}/{param3}/{param4}")
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                Ok(
-                    ::templated_uri::http::uri::PathAndQuery::try_from(
-                        ::templated_uri::PathAndQueryTemplate::render(self),
-                    )?,
-                )
-            }
-        }
-        impl ::std::fmt::Debug for Test {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_tuple("Test")
-                    .field(&"/example.com/{param}/{+param2}{/param3,param4}")
-                    .finish()
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for Test {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                f.write_str("/example.com/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, engine, f)?;
-                f.write_str("/")?;
-                ::std::write!(f, "{}", self.param2)?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, engine, f)?;
-                f.write_str("/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, engine, f)?;
-                ::std::result::Result::Ok(())
-            }
-        }
-        impl From<Test> for ::templated_uri::PathAndQuery {
-            fn from(value: Test) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+    fn test_standalone_unredacted_matches_templated_form() {
+        let templated_form = pretty_parse(
+            quote! { template = "/example.com/{param}/{+param2}{/param3,param4}" },
+            quote! {
+                struct Test {
+                    param: String,
+                    #[templated(unredacted)]
+                    param2: EscapedString,
+                    param3: String,
+                    param4: String,
+                }
+            },
+        );
+        let standalone_form = pretty_parse(
+            quote! { template = "/example.com/{param}/{+param2}{/param3,param4}" },
+            quote! {
+                struct Test {
+                    param: String,
+                    #[unredacted]
+                    param2: EscapedString,
+                    param3: String,
+                    param4: String,
+                }
+            },
+        );
+        assert_eq!(
+            templated_form, standalone_form,
+            "`#[unredacted]` shorthand must produce identical codegen to `#[templated(unredacted)]`",
+        );
     }
 
     #[test]
     fn test_query_param_is_kv_expansion() {
-        let attr = quote! { template="/api/{resource}{?page,limit}" };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/api/{resource}{?page,limit}"],
             struct QueryTest {
                 resource: String,
                 page: String,
-                limit: String
+                limit: String,
             }
-        };
+        );
+    }
 
-        let output_pretty = pretty_parse(attr, item);
-        // Verify the generated RedactedDisplay emits "key=" for query params
-        assert_snapshot!(output_pretty, @r#"
-        struct QueryTest {
-            resource: String,
-            page: String,
-            limit: String,
-        }
-        impl ::templated_uri::PathAndQueryTemplate for QueryTest {
-            fn template(&self) -> &'static core::primitive::str {
-                "/api/{resource}{?page,limit}"
+    #[test]
+    fn test_optional_field_codegen() {
+        // Mixes a required-only group `{id}` with a query group `{?filter,limit}` that
+        // contains an `Option<u32>`. Locks in:
+        //   * the all-required render path (flat `push_str` / `write!` for `{id}`),
+        //   * the optional-aware render path with `__first` tracking for `{?filter,limit}`,
+        //   * the matching `RedactedDisplay` paths,
+        //   * `if let Some(ref __val) = self.limit` extraction of the inner `u32`.
+        assert_paq_snapshot!(
+            [template = "/items/{id}{?filter,limit}"],
+            struct OptionalTest {
+                id: u32,
+                filter: String,
+                limit: Option<u32>,
             }
-            fn format_template(&self) -> &'static core::primitive::str {
-                "/api/{resource}?page={page}&limit={limit}"
+        );
+    }
+
+    #[test]
+    fn test_optional_field_with_unredacted_codegen() {
+        // Pins down the `unredacted || field_unredacted` semantics inside the
+        // optional-aware redacted-display path. With a `#[unredacted]` field, the
+        // generated code MUST call `::std::write!(f, "{}", self.field)` (Display),
+        // not the `RedactedDisplay::fmt` trait path. Flipping the `||` to `&&` in
+        // `redacted_display_group_with_optional` produces a different TokenStream
+        // and this snapshot diff will catch it.
+        assert_paq_snapshot!(
+            [template = "/items{?filter,limit}"],
+            struct OptionalUnredactedTest {
+                #[unredacted]
+                filter: String,
+                #[unredacted]
+                limit: Option<u32>,
             }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                ::core::option::Option::None
+        );
+    }
+
+    #[test]
+    fn test_optional_reference_field_codegen() {
+        // For `Option<&T>`, `Some(ref __val)` binds `__val: &&T`. The macro must peel one
+        // reference so the generated trait calls resolve against `T: Escape`/`T: RedactedDisplay`
+        // rather than the much rarer `&T` impls. This snapshot pins down:
+        //   * the render path emits `Escape::escape(*__val)` (not `__val`),
+        //   * the redacted-display path emits `<str as RedactedDisplay>::fmt(*__val, ...)`
+        //     with the inner reference peeled from the UFCS receiver type.
+        assert_paq_snapshot!(
+            [template = "/items{?name}"],
+            struct ReferenceOptional {
+                name: Option<&'static str>,
             }
-            fn render(&self) -> ::std::string::String {
-                let resource = ::templated_uri::Escape::escape(&self.resource);
-                let page = ::templated_uri::Escape::escape(&self.page);
-                let limit = ::templated_uri::Escape::escape(&self.limit);
-                ::std::format!("/api/{resource}?page={page}&limit={limit}")
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                Ok(
-                    ::templated_uri::http::uri::PathAndQuery::try_from(
-                        ::templated_uri::PathAndQueryTemplate::render(self),
-                    )?,
-                )
-            }
-        }
-        impl ::std::fmt::Debug for QueryTest {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_tuple("QueryTest").field(&"/api/{resource}{?page,limit}").finish()
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for QueryTest {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                f.write_str("/api/")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, engine, f)?;
-                f.write_str("?")?;
-                f.write_str("page")?;
-                f.write_str("=")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, engine, f)?;
-                f.write_str("&")?;
-                f.write_str("limit")?;
-                f.write_str("=")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, engine, f)?;
-                ::std::result::Result::Ok(())
-            }
-        }
-        impl From<QueryTest> for ::templated_uri::PathAndQuery {
-            fn from(value: QueryTest) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_excessive_template_impl() {
-        let attr = quote! { template="/example.com/{param}/{+param2}{/param3,param4}" };
-        let item = quote! {
+        assert_paq_compile_error!(
+            [template = "/example.com/{param}/{+param2}{/param3,param4}"],
             struct ExcessiveTemplate {
                 param: String,
                 param2: EscapedString,
                 param3: String,
                 param4: String,
-                extra_param: String, // This should cause an error
-            }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert!(
-            output_pretty.contains("::core::compile_error!"),
-            "Output should contain compile_error: {output_pretty}"
-        );
-        assert!(
-            output_pretty.contains("Excess values in struct"),
-            "Output should contain error message: {output_pretty}"
+                extra_param: String,
+            },
+            "Excess values in struct"
         );
     }
 
     #[test]
     fn test_insufficient_template_impl() {
-        let attr = quote! { template="/{param}/{param2}" };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/{param}/{param2}"],
             struct InsufficientTemplate {
                 param: String,
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        struct InsufficientTemplate {
-            param: String,
-        }
-        ::core::compile_error! {
-            "Missing values in struct: [\"param2\"]"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_parse_error() {
-        let attr = quote! { template="/example.com/{param" };
-        let item = quote! {
+        // Unterminated `{`.
+        assert_paq_compile_error!(
+            [template = "/example.com/{param"],
             struct ParseErrorTest {
                 param: String,
-            }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-
-        assert!(
-            output_pretty.contains("::core::compile_error!"),
-            "Output should contain compile_error: {output_pretty}"
-        );
-        assert!(
-            output_pretty.contains("Failed to parse URI"),
-            "Output should contain error message: {output_pretty}"
+            },
+            "Failed to parse URI",
         );
 
-        let attr = quote! { template="/example.com/{>param}" };
-        let item = quote! {
+        // Invalid operator character `>`.
+        assert_paq_compile_error!(
+            [template = "/example.com/{>param}"],
             struct ParseErrorTest {
                 param: String,
-            }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert!(
-            output_pretty.contains("::core::compile_error!"),
-            "Output should contain compile_error: {output_pretty}"
-        );
-        assert!(
-            output_pretty.contains("Failed to parse URI"),
-            "Output should contain error message: {output_pretty}"
+            },
+            "Failed to parse URI"
         );
     }
 
     #[test]
     fn test_tuple_struct_rejected() {
-        let attr = quote! { template = "/test/{param}" };
-        let item = quote! {
-            struct TupleTest(String);
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert!(
-            output_pretty.contains("can only be applied to structs with named fields"),
-            "Output should reject tuple structs: {output_pretty}"
+        assert_paq_compile_error!(
+            [template = "/test/{param}"],
+            struct TupleTest(String);,
+            "can only be applied to structs with named fields"
         );
     }
 
     #[test]
     fn test_enum_struct_item_error() {
-        let attr = quote! {};
-        let item = quote! {
+        assert_paq_snapshot!(
             enum TestEnum {
                 Variant1 { param: String },
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        enum TestEnum {
-            Variant1 { param: String },
-        }
-        ::core::compile_error! {
-            "Only unnamed fields (tuples) are supported in enum variants for TemplatedUri"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_enum_single_item_only_error() {
-        let attr = quote! {};
-        let item = quote! {
+        assert_paq_snapshot!(
             enum TestEnum {
                 Variant1(String, String),
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        enum TestEnum {
-            Variant1(String, String),
-        }
-        ::core::compile_error! {
-            "TemplatedUri enum variants must have exactly one field containing a TemplatedUri struct"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_template_enum_impl() {
-        let attr = quote! {};
-        let item = quote! {
+        assert_paq_snapshot!(
             enum Test {
                 FirstTemplate(First),
                 SecondTemplate(Second),
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        enum Test {
-            FirstTemplate(First),
-            SecondTemplate(Second),
-        }
-        impl ::templated_uri::PathAndQueryTemplate for Test {
-            fn template(&self) -> &'static core::primitive::str {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.template(),
-                    Test::SecondTemplate(template_variant) => template_variant.template(),
-                }
-            }
-            fn format_template(&self) -> &'static core::primitive::str {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.format_template(),
-                    Test::SecondTemplate(template_variant) => template_variant.format_template(),
-                }
-            }
-            fn label(&self) -> ::core::option::Option<&'static core::primitive::str> {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.label(),
-                    Test::SecondTemplate(template_variant) => template_variant.label(),
-                }
-            }
-            fn to_path_and_query(
-                &self,
-            ) -> ::std::result::Result<
-                ::templated_uri::http::uri::PathAndQuery,
-                ::templated_uri::UriError,
-            > {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.to_path_and_query(),
-                    Test::SecondTemplate(template_variant) => {
-                        template_variant.to_path_and_query()
-                    }
-                }
-            }
-            fn render(&self) -> ::std::string::String {
-                match self {
-                    Test::FirstTemplate(template_variant) => template_variant.render(),
-                    Test::SecondTemplate(template_variant) => template_variant.render(),
-                }
-            }
-        }
-        impl ::std::fmt::Debug for Test {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                match self {
-                    Test::FirstTemplate(template_variant) => {
-                        f.debug_tuple("Test").field(&template_variant).finish()
-                    }
-                    Test::SecondTemplate(template_variant) => {
-                        f.debug_tuple("Test").field(&template_variant).finish()
-                    }
-                }
-            }
-        }
-        impl ::data_privacy::RedactedDisplay for Test {
-            fn fmt(
-                &self,
-                engine: &::data_privacy::RedactionEngine,
-                f: &mut ::std::fmt::Formatter,
-            ) -> ::std::fmt::Result {
-                match self {
-                    Test::FirstTemplate(template_variant) => {
-                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
-                    }
-                    Test::SecondTemplate(template_variant) => {
-                        ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
-                    }
-                }
-                Ok(())
-            }
-        }
-        impl ::std::convert::From<First> for Test {
-            fn from(template_variant: First) -> Self {
-                Self::FirstTemplate(template_variant)
-            }
-        }
-        impl ::std::convert::From<Second> for Test {
-            fn from(template_variant: Second) -> Self {
-                Self::SecondTemplate(template_variant)
-            }
-        }
-        impl From<Test> for ::templated_uri::PathAndQuery {
-            fn from(value: Test) -> Self {
-                ::templated_uri::PathAndQuery::from_template(value)
-            }
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_raw_impl() {
-        let input = quote! {
+        assert_raw_snapshot!(
             struct MyFragment(String);
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::Raw for MyFragment {
-            fn raw(&self) -> impl ::std::fmt::Display {
-                &self.0
-            }
-        }
-        ");
+        );
     }
 
     #[test]
     fn test_raw_with_custom_type() {
-        let input = quote! {
+        assert_raw_snapshot!(
             struct CustomFragment(EscapedString);
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::Raw for CustomFragment {
-            fn raw(&self) -> impl ::std::fmt::Display {
-                &self.0
-            }
-        }
-        ");
+        );
     }
 
     #[test]
     fn test_raw_named_fields_error() {
-        let input = quote! {
+        assert_raw_snapshot!(
             struct InvalidFragment {
-                value: String
+                value: String,
             }
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Raw can only be derived for tuple structs (newtype pattern)"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_raw_multiple_fields_error() {
-        let input = quote! {
+        assert_raw_snapshot!(
             struct TooManyFields(String, String);
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Raw requires exactly one field, found 2"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_raw_enum_error() {
-        let input = quote! {
+        assert_raw_snapshot!(
             enum FragmentEnum {
-                Variant(String)
+                Variant(String),
             }
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Raw cannot be derived for enums"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_raw_union_error() {
-        let input = quote! {
-            union UnsafeFragmentUnion {
-                value: u32
-            }
-        };
-
-        let output_pretty = pretty_parse_raw(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Raw cannot be derived for unions"
-        }
-        "#);
+        assert_raw_snapshot!( union UnsafeFragmentUnion {
+            value: u32,
+        });
     }
 
     #[test]
@@ -1003,94 +612,48 @@ mod tests {
 
     #[test]
     fn test_uri_param_impl() {
-        let input = quote! {
+        assert_uri_param_snapshot!(
             struct SafeFragment(String);
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r"
-        impl ::templated_uri::Escape for SafeFragment {
-            fn escape(&self) -> ::templated_uri::Escaped<impl ::std::fmt::Display> {
-                self.0.escape()
-            }
-        }
-        ");
+        );
     }
 
     #[test]
     fn test_uri_param_named_fields_error() {
-        let input = quote! {
+        assert_uri_param_snapshot!(
             struct InvalidSafeFragment {
-                value: String
+                value: String,
             }
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Escape can only be derived for tuple structs (newtype pattern)"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_uri_param_enum_error() {
-        let input = quote! {
+        assert_uri_param_snapshot!(
             enum SafeFragmentEnum {
-                Variant(String)
+                Variant(String),
             }
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Escape cannot be derived for enums"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_uri_param_union_error() {
-        let input = quote! {
-            union SafeFragmentUnion {
-                value: u32
-            }
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Escape cannot be derived for unions"
-        }
-        "#);
+        assert_uri_param_snapshot!( union SafeFragmentUnion {
+            value: u32,
+        });
     }
 
     #[test]
     fn test_uri_param_multiple_fields_error() {
-        let input = quote! {
+        assert_uri_param_snapshot!(
             struct TooManySafeFields(String, String);
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Escape requires exactly one field, found 2"
-        }
-        "#);
+        );
     }
 
     #[test]
     fn test_uri_param_zero_fields_error() {
-        let input = quote! {
+        assert_uri_param_snapshot!(
             struct NoFields();
-        };
-
-        let output_pretty = pretty_parse_uri_param(input);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Escape requires exactly one field, found 0"
-        }
-        "#);
+        );
     }
 
     #[test]
@@ -1112,20 +675,10 @@ mod tests {
     #[test]
     fn test_union_not_supported_error() {
         // Test that unions are not supported for TemplatedUri
-        let attr = quote! { template="/{param}" };
-        let item = quote! {
-            union TestUnion {
-                field1: u32,
-                field2: i32,
-            }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Unions are not supported for TemplatedUri"
-        }
-        "#);
+        assert_paq_snapshot!([ template = "/{param}" ], union TestUnion {
+            field1: u32,
+            field2: i32,
+        });
     }
 
     #[test]
@@ -1237,19 +790,12 @@ mod tests {
 
     #[test]
     fn test_generic_struct_rejected() {
-        let attr = quote! { template="/{param}" };
-        let item = quote! {
+        assert_paq_snapshot!(
+            [template = "/{param}"],
             struct GenericTemplate<T> {
                 param: T,
             }
-        };
-
-        let output_pretty = pretty_parse(attr, item);
-        assert_snapshot!(output_pretty, @r#"
-        ::core::compile_error! {
-            "Generic types are not supported for #[templated]"
-        }
-        "#);
+        );
     }
 
     #[test]

@@ -3,8 +3,7 @@
 
 use std::time::Duration;
 
-use crate::Attempt;
-use crate::RecoveryKind;
+use crate::{Attempt, RecoveryKind};
 
 /// The name of the hedging event for telemetry reporting.
 #[cfg(any(feature = "metrics", test))]
@@ -111,10 +110,11 @@ impl Drop for TelemetryGuard {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::testing::MetricTester;
     use opentelemetry::KeyValue;
     use tick::Clock;
+
+    use super::*;
+    use crate::testing::MetricTester;
 
     fn create_guard(attempt: Attempt, hedging_delay: Duration, telemetry: crate::utils::TelemetryHelper) -> TelemetryGuard {
         TelemetryGuard::new(attempt, hedging_delay, telemetry)
@@ -180,8 +180,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_log_with_hedging_delay() {
-        use crate::testing::LogCapture;
         use tracing_subscriber::util::SubscriberInitExt;
+
+        use crate::testing::LogCapture;
 
         let log_capture = LogCapture::new();
         let _default = log_capture.subscriber().set_default();

@@ -126,8 +126,7 @@
 //! config.latency = Duration::from_millis(200);
 //!
 //! let stack = (
-//!     Latency::layer("my_latency", &context)
-//!         .config(&config),
+//!     Latency::layer("my_latency", &context).config(&config),
 //!     Execute::new(execute_operation),
 //! );
 //!

@@ -1,0 +1,10 @@
+---
+source: crates/templated_uri_macros_impl/src/lib.rs
+expression: output_pretty
+---
+enum TestEnum {
+    Variant1 { param: String },
+}
+::core::compile_error! {
+    "Only unnamed fields (tuples) are supported in enum variants for TemplatedUri"
+}

@@ -27,7 +27,7 @@
 //! ## Simple URI Construction
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, Uri, PathAndQuery};
+//! use templated_uri::{BaseUri, PathAndQuery, Uri};
 //!
 //! // Create the base (scheme + authority, optionally a path prefix)
 //! let base_uri = BaseUri::from_static("https://api.example.com");
@@ -48,7 +48,7 @@
 //! For dynamic URIs with variable components, use the templating system:
 //!
 //! ```rust
-//! use templated_uri::{BaseUri, PathAndQueryTemplate, Uri, EscapedString, templated};
+//! use templated_uri::{BaseUri, EscapedString, PathAndQueryTemplate, Uri, templated};
 //!
 //! #[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
 //! #[derive(Clone)]
@@ -146,6 +146,37 @@
 //! Template variables must implement [`Escape`] (except for reserved expansions,
 //! which use [`Raw`]) to ensure the resulting URI is valid.
 //!
+//! ## Undefined Values (`Option<T>`)
+//!
+//! Per [RFC 6570 section 2.3](https://datatracker.ietf.org/doc/html/rfc6570#section-2.3), template
+//! variables may be *undefined*. Use `Option<T>` to model this: a `None` value is treated
+//! as undefined and the variable (along with its prefix or separator) is omitted from the
+//! rendered URI.
+//!
+//! ```rust
+//! use templated_uri::{EscapedString, PathAndQueryTemplate, templated};
+//!
+//! #[templated(template = "/items{?query,limit}", unredacted)]
+//! struct ItemSearch {
+//!     query: EscapedString,
+//!     limit: Option<u32>,
+//! }
+//!
+//! // With limit defined:
+//! let path = ItemSearch {
+//!     query: EscapedString::from_static("rust"),
+//!     limit: Some(10),
+//! };
+//! assert_eq!(path.render(), "/items?query=rust&limit=10");
+//!
+//! // With limit undefined:
+//! let path = ItemSearch {
+//!     query: EscapedString::from_static("rust"),
+//!     limit: None,
+//! };
+//! assert_eq!(path.render(), "/items?query=rust");
+//! ```
+//!
 //! # Integration with HTTP Ecosystem
 //!
 //! This crate seamlessly integrates with the broader Rust HTTP ecosystem by re-exporting
@@ -171,16 +202,14 @@ pub use base_uri::BaseUri;
 pub use error::UriError;
 pub use escape::{Escape, Raw};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-pub use macros::{Escape, Raw, templated};
-pub use origin::Origin;
-pub use path_and_query::PathAndQuery;
-pub use path_and_query_template::PathAndQueryTemplate;
-pub use uri::Uri;
-
-pub use http::uri::{Authority, Scheme};
-
 // Re-export the `http` crate so macro-generated code can refer to
 // `http::uri::PathAndQuery` via `::templated_uri::http` without requiring
 // downstream crates to depend on `http` directly.
 #[doc(hidden)]
 pub use http;
+pub use http::uri::{Authority, Scheme};
+pub use macros::{Escape, Raw, templated};
+pub use origin::Origin;
+pub use path_and_query::PathAndQuery;
+pub use path_and_query_template::PathAndQueryTemplate;
+pub use uri::Uri;
