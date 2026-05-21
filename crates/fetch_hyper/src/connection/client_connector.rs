@@ -414,9 +414,7 @@ mod tests {
             ConnectionLifetime::Fixed(Duration::from_secs(60)),
         );
         let _ = cc.clone(); // exercise Clone impl
-        cc.execute(BaseUri::from_static("http://example.com"))
-            .await
-            .expect("execute should succeed");
+        cc.execute(BaseUri::from_static("http://example.com")).await.unwrap();
     }
 
     #[tokio::test]

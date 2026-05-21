@@ -222,7 +222,7 @@ mod tests {
         HttpRequestBuilder::new(&fake_body_builder())
             .uri("http://example.com/path")
             .build()
-            .expect("test request must build")
+            .unwrap()
     }
 
     #[test]
@@ -309,9 +309,9 @@ mod tests {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
         let handler = make_handler(connector, ConnectionLifetime::Unlimited);
-        let resp = handler.execute(test_request()).await.expect("should succeed");
+        let resp = handler.execute(test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
-        let body = resp.into_body().collect().await.expect("body collect").to_bytes();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&*body, b"hello");
     }
 

@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn resolve_returns_io_label_for_io_error() {
         let io = std::io::Error::from(std::io::ErrorKind::TimedOut);
-        let label = resolve_error_label(&io).expect("io error should yield a label");
+        let label = resolve_error_label(&io).unwrap();
         let expected: ohno::ErrorLabel = std::io::ErrorKind::TimedOut.into();
         assert_eq!(label.as_str(), expected.as_str());
     }

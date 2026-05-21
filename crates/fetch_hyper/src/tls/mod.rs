@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn from_native_tls_connector_makes_native_variant() {
-        let nc = native_tls::TlsConnector::new().expect("default native-tls connector should build");
+        let nc = native_tls::TlsConnector::new().unwrap();
         let backend: TlsBackend = nc.into();
         assert!(matches!(backend, TlsBackend::NativeTls(_)));
     }

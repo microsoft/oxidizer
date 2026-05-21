@@ -187,7 +187,7 @@ mod tests {
     use crate::testing::{FakeConnector, FakeStream, TestError};
 
     fn native_tls_backend() -> TlsBackend {
-        TlsBackend::NativeTls(native_tls::TlsConnector::new().expect("default native-tls connector"))
+        TlsBackend::NativeTls(native_tls::TlsConnector::new().unwrap())
     }
 
     fn rustls_backend() -> TlsBackend {

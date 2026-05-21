@@ -82,10 +82,7 @@ mod tests {
             Bytes::from_static(b""),
             tick::ClockControl::new().auto_advance_timers(true).to_clock(),
         ));
-        adapter
-            .call(Uri::from_static("https://example.com/"))
-            .await
-            .expect("connect through valid URI should succeed");
+        adapter.call(Uri::from_static("https://example.com/")).await.unwrap();
     }
 
     #[tokio::test]

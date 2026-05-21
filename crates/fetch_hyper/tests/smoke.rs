@@ -27,19 +27,13 @@ impl layered::Service<BaseUri> for TokioConnector {
     type Out = Result<TokioIo<tokio::net::TcpStream>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
-        let stream = tokio::net::TcpStream::connect((
-            input.authority().host(),
-            input.effective_port().expect("test BaseUri always has a port"),
-        ))
-        .await?;
+        let stream = tokio::net::TcpStream::connect((input.authority().host(), input.effective_port().unwrap())).await?;
         Ok(TokioIo::new(stream))
     }
 }
 
 fn build_tls() -> TlsBackend {
-    native_tls::TlsConnector::new()
-        .expect("default native-tls connector should build in tests")
-        .into()
+    native_tls::TlsConnector::new().unwrap().into()
 }
 
 fn test_clock() -> Clock {
@@ -181,10 +175,7 @@ async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
         .build()
         .unwrap();
 
-    let response = handler
-        .execute(request)
-        .await
-        .expect("HTTP/2 prior-knowledge request should succeed");
+    let response = handler.execute(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.version(), Version::HTTP_2);
 }
@@ -215,7 +206,7 @@ async fn single_http1_version_does_not_enable_http2_only() {
         .build()
         .unwrap();
 
-    let response = handler.execute(request).await.expect("HTTP/1.1 request should succeed");
+    let response = handler.execute(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     // Crucially, the response is HTTP/1.1: prior-knowledge HTTP/2 must NOT
     // have been enabled (which would have made wiremock answer over HTTP/2).
@@ -255,12 +246,9 @@ async fn zero_lifetime_poisons_connection_after_request() {
         .build()
         .unwrap();
 
-    let response = handler.execute(request).await.expect("request should succeed");
+    let response = handler.execute(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let info = response
-        .extensions()
-        .get::<ConnectionInfo>()
-        .expect("ConnectionInfo extension should be attached");
+    let info = response.extensions().get::<ConnectionInfo>().unwrap();
     assert!(info.poisoned(), "connection should have been poisoned by zero lifetime");
 }

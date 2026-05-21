@@ -120,6 +120,7 @@ pub(crate) fn create_connection_failure_attributes(uri: &templated_uri::BaseUri,
 mod tests {
     use super::*;
     use crate::error_labels::LABEL_CONNECT;
+    use crate::testing::sorted_attributes;
 
     #[test]
     fn new_records_initial_state() {
@@ -158,15 +159,7 @@ mod tests {
         let uri = templated_uri::BaseUri::from_static("https://example.com:8443");
         let connected = hyper_util::client::legacy::connect::Connected::new();
         let attrs = create_connection_attributes(&uri, &connected);
-
-        let keys: Vec<_> = attrs.iter().map(|kv| kv.key.as_str().to_string()).collect();
-        assert!(keys.iter().any(|k| k == "server.address"));
-        assert!(keys.iter().any(|k| k == "server.port"));
-        assert!(keys.iter().any(|k| k == "url.scheme"));
-        assert!(keys.iter().any(|k| k == "network.protocol.version"));
-
-        let proto = attrs.iter().find(|kv| kv.key.as_str() == "network.protocol.version").unwrap();
-        assert_eq!(proto.value.as_str(), "1");
+        insta::assert_debug_snapshot!(sorted_attributes(&attrs));
     }
 
     #[test]
@@ -204,10 +197,6 @@ mod tests {
     fn create_connection_failure_attributes_includes_error_type() {
         let uri = templated_uri::BaseUri::from_static("https://example.com");
         let attrs = create_connection_failure_attributes(&uri, LABEL_CONNECT);
-        let pair = attrs
-            .iter()
-            .find(|kv| kv.key.as_str() == "error.type")
-            .expect("error.type attribute should be set");
-        assert!(pair.value.as_str().contains("connect"));
+        insta::assert_debug_snapshot!(sorted_attributes(&attrs));
     }
 }

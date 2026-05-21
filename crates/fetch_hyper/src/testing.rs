@@ -304,6 +304,15 @@ pub fn fake_body_builder() -> HttpBodyBuilder {
     HttpBodyBuilder::new_fake()
 }
 
+/// Returns OpenTelemetry [`KeyValue`]s as `(key, value)` string pairs sorted
+/// by key, suitable for deterministic snapshot assertions.
+#[must_use]
+pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = attrs.iter().map(|kv| (kv.key.to_string(), kv.value.to_string())).collect();
+    pairs.sort();
+    pairs
+}
+
 /// Returns a real [`hyper::Error`] driven by an in-memory stream.
 ///
 /// Drives a [`hyper`] handshake against a stream that fails every read and
@@ -364,7 +373,7 @@ mod tests {
     use crate::{HyperTransportBuilder, RequestFilter, TlsBackend};
 
     fn build_tls() -> TlsBackend {
-        TlsBackend::NativeTls(TlsConnector::new().expect("building a default native-tls connector should not fail in tests"))
+        TlsBackend::NativeTls(TlsConnector::new().unwrap())
     }
 
     fn http_1_response() -> Bytes {
@@ -384,15 +393,10 @@ mod tests {
         .request_filter(RequestFilter::HttpAndHttps)
         .build();
 
-        let response = handler.execute(create_test_request()).await.expect("response should succeed");
+        let response = handler.execute(create_test_request()).await.unwrap();
 
         assert_eq!(response.status(), 200);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .expect("collecting body should succeed")
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&*body, b"Hello, World!");
     }
 

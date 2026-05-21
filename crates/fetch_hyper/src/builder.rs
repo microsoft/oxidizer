@@ -316,7 +316,7 @@ mod tests {
         .request_filter(RequestFilter::HttpAndHttps)
         .meter(provider.meter("test"))
         .build();
-        let resp = handler.execute(crate::testing::create_test_request()).await.expect("ok");
+        let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 
@@ -352,7 +352,7 @@ mod tests {
         .build();
         let cloned = handler.clone();
         let _ = format!("{cloned:?}");
-        let resp = cloned.execute(crate::testing::create_test_request()).await.expect("ok");
+        let resp = cloned.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 
