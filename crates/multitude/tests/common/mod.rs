@@ -102,6 +102,90 @@ unsafe impl Allocator for TrackingAllocator {
         self.live_bytes.set(self.live_bytes.get() - layout.size() as isize);
     }
 }
+/// Send + Sync variant of [`TrackingAllocator`] for tests that need
+/// to allocate `Arc` (whose constructor requires `A: Send + Sync`).
+#[derive(Clone)]
+pub struct SendTrackingAllocator {
+    live_chunks: std::sync::Arc<core::sync::atomic::AtomicIsize>,
+    live_bytes: std::sync::Arc<core::sync::atomic::AtomicIsize>,
+}
+
+impl SendTrackingAllocator {
+    pub fn new() -> Self {
+        Self {
+            live_chunks: std::sync::Arc::new(core::sync::atomic::AtomicIsize::new(0)),
+            live_bytes: std::sync::Arc::new(core::sync::atomic::AtomicIsize::new(0)),
+        }
+    }
+
+    pub fn live_chunks(&self) -> isize {
+        self.live_chunks.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn live_bytes(&self) -> isize {
+        self.live_bytes.load(core::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+// SAFETY: forwards to Global; counters are atomic bookkeeping only.
+unsafe impl Allocator for SendTrackingAllocator {
+    #[expect(clippy::cast_possible_wrap, reason = "test allocator: chunk sizes fit in isize")]
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let p = Global.allocate(layout)?;
+        self.live_chunks.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        self.live_bytes
+            .fetch_add(layout.size() as isize, core::sync::atomic::Ordering::Relaxed);
+        Ok(p)
+    }
+
+    #[expect(clippy::cast_possible_wrap, reason = "test allocator: chunk sizes fit in isize")]
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded — caller's contract.
+        unsafe { Global.deallocate(ptr, layout) };
+        self.live_chunks.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        self.live_bytes
+            .fetch_sub(layout.size() as isize, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Pathological allocator that returns a non-null pointer whose end
+/// address lies in the upper half of the address space (above
+/// `isize::MAX`). Backing memory is **not** real — the chunk-allocation
+/// path must reject the pointer at its bounds check before reading or
+/// writing through it. `deallocate` is therefore a no-op.
+///
+/// Used to drive `chunk_end_addr_fits_in_isize`-style regression tests.
+#[derive(Clone, Copy, Default)]
+pub struct BadAddressAllocator;
+
+// SAFETY: returns synthetic pointers never read or written; `deallocate`
+// is a no-op so no foreign allocator is asked to free a fake pointer.
+unsafe impl Allocator for BadAddressAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let size = layout.size();
+        let align = layout.align();
+        // Skip zero-sized or unsupportable alignments.
+        if size == 0 || align == 0 {
+            return Err(AllocError);
+        }
+        // Aim for `end_addr > isize::MAX as usize` with the start address
+        // aligned to `align`. Choosing the next aligned address at or
+        // above `(isize::MAX as usize + 1) - size` satisfies both.
+        let target_end_floor = 1usize << (usize::BITS - 1); // isize::MAX + 1
+        let unaligned_start = target_end_floor.checked_sub(size).ok_or(AllocError)?;
+        let mask = align - 1;
+        let start_addr = unaligned_start.checked_add(mask).ok_or(AllocError)? & !mask;
+        // SAFETY: `start_addr` is non-zero by construction (target_end_floor
+        // is the high bit and start lives near it).
+        let nn = unsafe { NonNull::new_unchecked(start_addr as *mut u8) };
+        Ok(NonNull::slice_from_raw_parts(nn, size))
+    }
+
+    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {
+        // No-op: the pointer is synthetic, never backed by real memory.
+    }
+}
+
 /// constructor families (which require `A: Send + Sync`).
 #[derive(Clone)]
 pub struct SendFailingAllocator {

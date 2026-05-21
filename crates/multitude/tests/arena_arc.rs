@@ -22,6 +22,10 @@ fn cross_thread_arena_arc() {
     let h = std::thread::spawn(move || *s2);
     assert_eq!(*shared, 99);
     assert_eq!(99, h.join().unwrap());
+
+    // Folded coverage_extras::alloc_arc_value_succeeds keeps the direct happy-path assertion.
+    let h: Arc<u32> = arena.alloc_arc(7);
+    assert_eq!(*h, 7);
 }
 
 #[test]
@@ -59,6 +63,10 @@ fn alloc_arc_with_constructs_in_place() {
     let h = std::thread::spawn(move || *r2);
     assert_eq!(*r, 271);
     assert_eq!(h.join().unwrap(), 271);
+
+    // Folded coverage_extras::alloc_arc_with_closure_succeeds keeps the non-threaded closure path assertion.
+    let h: Arc<u64> = arena.alloc_arc_with(|| 42_u64);
+    assert_eq!(*h, 42);
 }
 
 #[test]
@@ -69,6 +77,10 @@ fn alloc_slice_copy_arc_works() {
     let h = std::thread::spawn(move || r2[1]);
     assert_eq!(&*r, &[7, 8, 9]);
     assert_eq!(h.join().unwrap(), 8);
+
+    // Folded coverage_extras::alloc_slice_copy_arc_succeeds keeps the larger direct slice assertion.
+    let h: Arc<[u32]> = arena.alloc_slice_copy_arc([1_u32, 2, 3, 4]);
+    assert_eq!(&*h, &[1, 2, 3, 4]);
 }
 
 #[test]
@@ -99,15 +111,39 @@ fn ptr_eq_distinguishes_handles() {
 
 #[test]
 fn debug_display_compare_hash() {
+    use std::collections::HashMap;
+    use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
+
     let arena = Arena::new();
     let a = arena.alloc_arc(1_u32);
     let b = arena.alloc_arc(2_u32);
+    let a2 = arena.alloc_arc(1_u32);
     assert_eq!(format!("{a:?}"), "1");
     assert_eq!(format!("{a}"), "1");
+    assert!(a == a2);
+    assert!(a != b);
     assert!(a < b);
     assert_eq!(a.cmp(&b), Ordering::Less);
     assert_eq!(a.partial_cmp(&b), Some(Ordering::Less));
-    let _ = common::hash_of(&a);
+
+    // Folded mutants_extras::arc_hash_forwards_to_inner / arc_pointer_format_is_non_empty.
+    let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
+    let mut h_arc = bh.build_hasher();
+    std::hash::Hash::hash(&a, &mut h_arc);
+    let arc_hash = h_arc.finish();
+    let mut h_inner = bh.build_hasher();
+    std::hash::Hash::hash(&1_u32, &mut h_inner);
+    let inner_hash = h_inner.finish();
+    let h_empty = bh.build_hasher();
+    let empty_hash = h_empty.finish();
+    assert_eq!(arc_hash, inner_hash, "Arc::hash must forward to inner hash");
+    assert_ne!(arc_hash, empty_hash, "Arc::hash must feed bytes (not be a no-op)");
+    let mut map: HashMap<Arc<u32>, &'static str> = HashMap::new();
+    map.insert(a.clone(), "v");
+    assert_eq!(map.get(&a).copied(), Some("v"));
+    let s = format!("{a:p}");
+    assert!(s.starts_with("0x"), "expected `0x` prefix, got `{s}`");
+    assert!(s.len() > 2, "expected non-empty pointer hex digits, got `{s}`");
 }
 
 #[test]
@@ -189,6 +225,10 @@ fn alloc_slice_fill_with_arc_works() {
     let arena = Arena::new();
     let r: Arc<[u64]> = arena.alloc_slice_fill_with_arc(5, |i| (i as u64) * 2);
     assert_eq!(&*r, &[0, 2, 4, 6, 8]);
+
+    // Folded coverage_extras::alloc_slice_fill_with_arc_succeeds keeps the alternate fill pattern.
+    let h: Arc<[u32]> = arena.alloc_slice_fill_with_arc(5, |i| u32::try_from(i).unwrap() * 10);
+    assert_eq!(&*h, &[0, 10, 20, 30, 40]);
 }
 
 #[test]
@@ -203,6 +243,10 @@ fn alloc_slice_fill_iter_arc_works() {
     let arena = Arena::new();
     let r: Arc<[i32]> = arena.alloc_slice_fill_iter_arc([0_i32, 1, 2, 3]);
     assert_eq!(&*r, &[0, 1, 2, 3]);
+
+    // Folded coverage_extras::alloc_slice_fill_iter_arc_succeeds keeps the iterator-based happy path.
+    let h: Arc<[u32]> = arena.alloc_slice_fill_iter_arc(0_u32..3);
+    assert_eq!(&*h, &[0, 1, 2]);
 }
 
 #[test]

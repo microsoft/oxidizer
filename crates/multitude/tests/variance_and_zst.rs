@@ -90,9 +90,8 @@ fn zst_alloc_box_succeeds() {
 #[test]
 fn zst_many_allocations_do_not_panic() {
     let arena = Arena::new();
-    // Allocate many ZSTs to stress the path. The sentinel must never
-    // be mutated; all allocs go through the slow path on the first
-    // call, then fit in the real chunk thereafter.
-    let handles: Vec<Rc<()>> = (0..1000).map(|_| arena.alloc_rc(())).collect();
-    assert_eq!(handles.len(), 1000);
+    // Allocate enough ZSTs to repeat the sentinel path a bit without spending
+    // 1000 iterations on allocations that do not consume chunk space.
+    let handles: Vec<Rc<()>> = (0..128).map(|_| arena.alloc_rc(())).collect();
+    assert_eq!(handles.len(), 128);
 }

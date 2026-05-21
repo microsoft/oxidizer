@@ -315,6 +315,10 @@ mod dst_box {
         let arena = Arena::new();
         let b = arena.alloc_slice_copy_box([1_u32, 2, 3]);
         assert_eq!(&*b, &[1, 2, 3]);
+
+        // Folded from_coverage_extras_dst::alloc_slice_copy_box_succeeds keeps the alternate payload assertion.
+        let b: multitude::Box<[u8]> = arena.alloc_slice_copy_box([10_u8, 20, 30]);
+        assert_eq!(&*b, &[10, 20, 30]);
     }
 
     #[test]
@@ -344,6 +348,16 @@ mod dst_box {
         assert_eq!(b.len(), 3);
         assert_eq!(b[0], "a");
         assert_eq!(b[2], "c");
+
+        // Folded from_coverage_extras_dst::alloc_slice_clone_box_succeeds keeps the alternate input case.
+        let src = [
+            std::string::String::from("x"),
+            std::string::String::from("y"),
+            std::string::String::from("z"),
+        ];
+        let b: multitude::Box<[String]> = arena.alloc_slice_clone_box(src);
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[2], "z");
     }
 
     #[test]
@@ -358,6 +372,10 @@ mod dst_box {
         let arena = Arena::new();
         let b: multitude::Box<[u64]> = arena.alloc_slice_fill_with_box(5, |i| (i as u64) * 10);
         assert_eq!(&*b, &[0, 10, 20, 30, 40]);
+
+        // Folded from_coverage_extras_dst::alloc_slice_fill_with_box_succeeds keeps the shorter fill case.
+        let b: multitude::Box<[u32]> = arena.alloc_slice_fill_with_box(4, |i| (i + 1) as u32);
+        assert_eq!(&*b, &[1, 2, 3, 4]);
     }
 
     #[test]
@@ -372,6 +390,10 @@ mod dst_box {
         let arena = Arena::new();
         let b: multitude::Box<[i32]> = arena.alloc_slice_fill_iter_box([7_i32, 8, 9]);
         assert_eq!(&*b, &[7, 8, 9]);
+
+        // Folded from_coverage_extras_dst::alloc_slice_fill_iter_box_succeeds keeps the range-based iterator case.
+        let b: multitude::Box<[u8]> = arena.alloc_slice_fill_iter_box(0_u8..5);
+        assert_eq!(&*b, &[0, 1, 2, 3, 4]);
     }
 
     #[test]
@@ -735,10 +757,9 @@ mod dst_panic_safety {
         }));
         assert!(result.is_err());
 
-        // Force eviction. With a buggy DST helper, the chunk's
-        // `drop_count` includes the uninitialized DST slot, and replay
-        // reads garbage.
-        for _ in 0..2000 {
+        // 256 drop-typed strings still retire multiple chunks, so eviction
+        // replays the same drop-list state this test cares about.
+        for _ in 0..256 {
             let _ = arena.alloc_rc(String::from("xxxxxxxxxx"));
         }
         drop(arena);
@@ -761,7 +782,9 @@ mod dst_panic_safety {
         }));
         assert!(result.is_err());
 
-        for _ in 0..2000 {
+        // 256 drop-typed strings still retire multiple chunks, so eviction
+        // replays the same drop-list state this test cares about.
+        for _ in 0..256 {
             let _ = arena.alloc_arc(String::from("xxxxxxxxxx"));
         }
         drop(arena);
@@ -830,40 +853,6 @@ mod from_coverage_extras_dst {
             let _b: Box<BigDrop> = arena.alloc_box(BigDrop { _bytes: [0; 4096] });
         }
         assert_eq!(DROPPED.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn alloc_slice_copy_box_succeeds() {
-        let arena = Arena::new();
-        let b: Box<[u8]> = arena.alloc_slice_copy_box([10_u8, 20, 30]);
-        assert_eq!(&*b, &[10, 20, 30]);
-    }
-
-    #[test]
-    fn alloc_slice_clone_box_succeeds() {
-        let arena = Arena::new();
-        let src = [
-            std::string::String::from("x"),
-            std::string::String::from("y"),
-            std::string::String::from("z"),
-        ];
-        let b: Box<[String]> = arena.alloc_slice_clone_box(src);
-        assert_eq!(b.len(), 3);
-        assert_eq!(b[2], "z");
-    }
-
-    #[test]
-    fn alloc_slice_fill_with_box_succeeds() {
-        let arena = Arena::new();
-        let b: Box<[u32]> = arena.alloc_slice_fill_with_box(4, |i| (i + 1) as u32);
-        assert_eq!(&*b, &[1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn alloc_slice_fill_iter_box_succeeds() {
-        let arena = Arena::new();
-        let b: Box<[u8]> = arena.alloc_slice_fill_iter_box(0_u8..5);
-        assert_eq!(&*b, &[0, 1, 2, 3, 4]);
     }
 
     #[test]

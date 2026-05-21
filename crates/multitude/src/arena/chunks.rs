@@ -147,13 +147,12 @@ impl<C: ChunkKind + ?Sized> CurrentChunk<C> {
     /// Bump `smart_pointers_issued`, aborting on overflow.
     ///
     /// We cap at `LARGE - 1` so swap-out reconciliation cannot underflow
-    /// and still has one unit of headroom for local lazy pinning.
+    /// and still has one unit of headroom for local lazy pinning. The
+    /// unconditional overflow abort matches `std::sync::Arc` behavior.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // Overflow boundary unreachable: requires 2^62 outstanding refs.
     pub(super) fn bump_smart_pointers_issued(&self) {
         let n = self.smart_pointers_issued.get();
-        // SAFETY: `LARGE - 1` needs about 2^62 live handles, so this is unreachable.
-        unsafe { core::hint::assert_unchecked(n < LARGE - 1) };
         check_smart_pointers_issued_overflow(n);
         self.smart_pointers_issued.set(n + 1);
     }

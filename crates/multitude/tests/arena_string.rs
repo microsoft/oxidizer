@@ -1063,7 +1063,9 @@ mod arena_box_str {
     #[test]
     fn arena_box_str_round_trip_through_drop_does_not_corrupt() {
         let arena = Arena::new();
-        for i in 0..1000 {
+        // 256 transient boxes still exercise repeated alloc/drop teardown on
+        // the same arena without paying for 1000 interpreted drops under miri.
+        for i in 0..256 {
             let s = arena.alloc_str_box(format!("transient-{i}"));
             // Each iteration: alloc, mutate, drop. The dec_ref + teardown
             // must keep the arena healthy across many iterations.

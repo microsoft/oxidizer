@@ -482,6 +482,35 @@ mod loom_arc {
     }
 
     #[test]
+    fn shared_cache_push_pop_race() {
+        // Models the F6 concern: verifies the popper's Relaxed read of
+        // `head.next` is sound when a concurrent pusher installs a new node
+        // above head. The implicit invariant is that no thread mutates an
+        // installed node's `next` field after the push that installed it.
+        loom::model(|| {
+            let arena = fresh_arena();
+            // Each `Arc<[u32; 256]>` takes 1 KiB + drop entry; with
+            // `max_normal_alloc = 4 KiB` chunks, these allocations refill
+            // into separate chunks so each drop/pop exercises cache traffic.
+            let cached: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
+            let racing: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
+
+            // Pre-populate the shared cache with one chunk.
+            drop(cached);
+
+            let t = thread::spawn(move || drop(racing));
+
+            // Owner allocates while the worker may be pushing another chunk,
+            // exercising `try_pop_shared_at_least` against a concurrent push.
+            let popped: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
+
+            t.join().unwrap();
+            drop(popped);
+            drop(arena);
+        });
+    }
+
+    #[test]
     fn arc_assume_init_cross_thread_clones() {
         // Two workers each call `Arc::<MaybeUninit<T>>::assume_init` on
         // their own clone of the same allocation. Both `store_drop_fn`s
