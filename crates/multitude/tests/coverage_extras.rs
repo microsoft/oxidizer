@@ -127,7 +127,9 @@ mod coverage {
         // Fill the first chunk so we force a fresh-chunk request next.
         let mut handles = std::vec::Vec::new();
         let mut hit_err = false;
-        for _ in 0..if cfg!(miri) { 100_u32 } else { 1000_u32 } {
+        // Loop is a defensive cap — the actual `try_alloc_rc` failure
+        // happens at ~14 iterations (4 KiB budget / ~280 bytes per Rc).
+        for _ in 0..100_u32 {
             if let Ok(h) = arena.try_alloc_rc([0_u8; 256]) {
                 handles.push(h);
             } else {
@@ -1382,7 +1384,10 @@ mod coverage {
             let arena = Arena::new_in(FailingAllocator::new(1)); // 1 alloc for initial chunk
             let mut v: Vec<u64, _> = Vec::new_in(&arena);
             // First pushes may succeed using the chunk, but growth will fail.
-            for _ in 0..if cfg!(miri) { 100 } else { 10_000 } {
+            // FailingAllocator(1) gives exactly one chunk; the second
+            // realloc-on-grow trips the panic well before 100 pushes —
+            // the loop bound is just a defensive cap.
+            for _ in 0..100 {
                 v.push(0);
             }
         });
@@ -1445,16 +1450,19 @@ mod coverage {
     #[test]
     fn shared_eviction_of_pinned_chunk() {
         // Line 603: push_pinned when evicting a pinned shared chunk.
-        // Use small chunks so pinned chunk gets evicted on next alloc.
-        let arena = Arena::builder().build();
+        // Use the smallest possible chunk so a modest number of pushes
+        // reliably overflows the current chunk and triggers eviction of
+        // the pinned (string-builder-owned) chunk on refill.
+        let arena = Arena::builder().with_capacity_local(512).build();
         // String builders use local chunks with pin_for_bump=true.
-        // Fill the chunk so next alloc evicts the pinned chunk.
         let mut s = arena.alloc_string();
-        let n = if cfg!(miri) { 500 } else { 10_000 };
+        // 600 ASCII chars > 512-byte chunk capacity guarantees the refill
+        // path runs while the chunk is pinned, exercising the
+        // pinned-eviction branch regardless of host/Miri.
+        let n = 600;
         for _ in 0..n {
             s.push('A'); // This grows the string builder, pinning the local chunk.
         }
-        // The push operations eventually fill the chunk and cause eviction.
         // If the chunk was pinned, it goes to the pinned list (line 603 equivalent in local path).
         assert!(s.len() >= n);
     }
@@ -2681,8 +2689,16 @@ mod coverage_complete {
 
         // Pre-allocate Arcs grouped per thread so all the work happens during
         // the dropping phase (cross-thread chunk releases).
+        //
+        // The test makes no assertions: it only exists to give coverage to
+        // the CAS retry branches in `push_shared_cache` / `pop_shared_cache`.
+        // A few hundred concurrent drops per thread is more than enough to
+        // exercise those branches; the bottleneck for finding races is
+        // scheduler-interleaving variety (covered by Miri's many-seeds race
+        // sweep and by the OS scheduler under native runs), not raw op
+        // count.
         let nthreads = 8;
-        let per_thread = 4096;
+        let per_thread = 256;
         let mut sets: Vec<Vec<multitude::Arc<u64>>> = (0..nthreads).map(|_| Vec::with_capacity(per_thread)).collect();
         for set in &mut sets {
             for _ in 0..per_thread {
