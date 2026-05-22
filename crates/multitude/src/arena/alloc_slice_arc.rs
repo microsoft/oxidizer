@@ -24,7 +24,11 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        expect_alloc(self.try_alloc_slice_copy_arc(slice))
+        let slice = slice.as_ref();
+        let ptr = expect_alloc(self.try_alloc_slice_shared_copy::<_, true>(slice));
+        // SAFETY: helper initialized the slice and accounted for this Arc.
+        let owned = unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) };
+        Arc::from_owned_in_chunk(owned)
     }
 
     /// Fallible variant of [`Self::alloc_slice_copy_arc`].
@@ -42,7 +46,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
     {
         let slice = slice.as_ref();
-        let ptr = self.try_alloc_slice_shared_copy(slice)?;
+        let ptr = self.try_alloc_slice_shared_copy::<_, false>(slice)?;
         // SAFETY: helper initialized the slice and accounted for this Arc;
         // OwnedInSharedChunk records both invariants for the safe Arc constructor.
         let owned = unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) };
@@ -65,7 +69,9 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        expect_alloc(self.try_alloc_slice_clone_arc(slice))
+        let ptr = expect_alloc(self.try_alloc_slice_shared_clone_inner::<_, true>(slice.as_ref()));
+        // SAFETY: helper initialized the slice and accounted for this Arc.
+        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_clone_arc`].
@@ -84,7 +90,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_clone_inner(slice.as_ref())?;
+        let ptr = self.try_alloc_slice_shared_clone_inner::<_, false>(slice.as_ref())?;
         // SAFETY: helper initialized the slice and accounted for this Arc.
         Ok(Arc::from_owned_in_chunk(unsafe {
             crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)
@@ -110,7 +116,9 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync,
     {
-        expect_alloc(self.try_alloc_slice_fill_with_arc(len, f))
+        let ptr = expect_alloc(self.try_alloc_slice_shared_fill_with_inner::<_, _, true>(len, f));
+        // SAFETY: helper initialized the slice and accounted for this Arc.
+        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_arc`].
@@ -131,7 +139,7 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_fill_with_inner(len, f)?;
+        let ptr = self.try_alloc_slice_shared_fill_with_inner::<_, _, false>(len, f)?;
         // SAFETY: helper initialized the slice and accounted for this Arc.
         Ok(Arc::from_owned_in_chunk(unsafe {
             crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)
@@ -157,7 +165,9 @@ impl<A: Allocator + Clone> Arena<A> {
         I::IntoIter: ExactSizeIterator,
         A: Send + Sync,
     {
-        expect_alloc(self.try_alloc_slice_fill_iter_arc(iter))
+        let ptr = expect_alloc(self.try_alloc_slice_shared_fill_iter_inner::<_, _, true>(iter));
+        // SAFETY: helper initialized the slice and accounted for this Arc.
+        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_iter_arc`].
@@ -179,7 +189,7 @@ impl<A: Allocator + Clone> Arena<A> {
         I::IntoIter: ExactSizeIterator,
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_fill_iter_inner(iter)?;
+        let ptr = self.try_alloc_slice_shared_fill_iter_inner::<_, _, false>(iter)?;
         // SAFETY: helper initialized the slice and accounted for this Arc.
         Ok(Arc::from_owned_in_chunk(unsafe {
             crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)

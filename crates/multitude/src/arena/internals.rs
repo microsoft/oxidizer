@@ -351,6 +351,7 @@ pub(super) unsafe fn bump_shared_drop_count<A: Allocator + Clone>(chunk: NonNull
 /// add+cmov and the compiler folding the constant `align - 1` /
 /// `!(align - 1)` masks for known `T`.
 #[inline]
+#[cfg(feature = "dst")]
 pub(super) fn align_up(value: usize, align: usize) -> usize {
     debug_assert!(align.is_power_of_two());
     value.saturating_add(align - 1) & !(align - 1)

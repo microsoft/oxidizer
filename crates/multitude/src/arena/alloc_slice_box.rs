@@ -27,7 +27,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     #[inline]
     pub fn alloc_slice_copy_box<T: Copy>(&self, slice: impl AsRef<[T]>) -> Box<[T], A> {
-        expect_alloc(self.try_alloc_slice_copy_box(slice))
+        let slice = slice.as_ref();
+        let ptr = expect_alloc(self.try_alloc_slice_local_copy::<_, true>(slice, AllocFlavor::Box));
+        // SAFETY: helper initialized the slice and bumped the refcount for this Box.
+        Box::from_owned_in_chunk_unsized(unsafe { crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_copy_box`].
@@ -39,7 +42,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_slice_copy_box<T: Copy>(&self, slice: impl AsRef<[T]>) -> Result<Box<[T], A>, AllocError> {
         let slice = slice.as_ref();
-        let ptr = self.try_alloc_slice_local_copy(slice, AllocFlavor::Box)?;
+        let ptr = self.try_alloc_slice_local_copy::<_, false>(slice, AllocFlavor::Box)?;
         // SAFETY: helper initialized the slice and bumped the refcount for this Box.
         Ok(Box::from_owned_in_chunk_unsized(unsafe {
             crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr)
@@ -60,7 +63,9 @@ impl<A: Allocator + Clone> Arena<A> {
     /// panic propagates.
     #[inline]
     pub fn alloc_slice_clone_box<T: Clone>(&self, slice: impl AsRef<[T]>) -> Box<[T], A> {
-        expect_alloc(self.try_alloc_slice_clone_box(slice))
+        let ptr = expect_alloc(self.try_alloc_slice_local_clone_inner::<_, true>(slice.as_ref(), AllocFlavor::Box));
+        // SAFETY: helper initialized the slice and bumped the refcount for this Box.
+        Box::from_owned_in_chunk_unsized(unsafe { crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_clone_box`].
@@ -76,7 +81,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// dropped before the panic propagates.
     #[inline]
     pub fn try_alloc_slice_clone_box<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<Box<[T], A>, AllocError> {
-        let ptr = self.try_alloc_slice_local_clone_inner(slice.as_ref(), AllocFlavor::Box)?;
+        let ptr = self.try_alloc_slice_local_clone_inner::<_, false>(slice.as_ref(), AllocFlavor::Box)?;
         // SAFETY: helper initialized the slice and bumped the refcount for this Box.
         Ok(Box::from_owned_in_chunk_unsized(unsafe {
             crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr)
@@ -98,7 +103,9 @@ impl<A: Allocator + Clone> Arena<A> {
     /// panic propagates.
     #[inline]
     pub fn alloc_slice_fill_with_box<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Box<[T], A> {
-        expect_alloc(self.try_alloc_slice_fill_with_box(len, f))
+        let ptr = expect_alloc(self.try_alloc_slice_local_fill_with_inner::<_, _, true>(len, AllocFlavor::Box, f));
+        // SAFETY: helper initialized the slice and bumped the refcount for this Box.
+        Box::from_owned_in_chunk_unsized(unsafe { crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_box`].
@@ -114,7 +121,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// panic propagates.
     #[inline]
     pub fn try_alloc_slice_fill_with_box<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Box<[T], A>, AllocError> {
-        let ptr = self.try_alloc_slice_local_fill_with_inner(len, AllocFlavor::Box, f)?;
+        let ptr = self.try_alloc_slice_local_fill_with_inner::<_, _, false>(len, AllocFlavor::Box, f)?;
         // SAFETY: helper initialized the slice and bumped the refcount for this Box.
         Ok(Box::from_owned_in_chunk_unsized(unsafe {
             crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr)
@@ -138,7 +145,9 @@ impl<A: Allocator + Clone> Arena<A> {
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
     {
-        expect_alloc(self.try_alloc_slice_fill_iter_box(iter))
+        let ptr = expect_alloc(self.try_alloc_slice_local_fill_iter_inner::<_, _, true>(iter, AllocFlavor::Box));
+        // SAFETY: helper initialized the slice and bumped the refcount for this Box.
+        Box::from_owned_in_chunk_unsized(unsafe { crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr) })
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_iter_box`].
@@ -158,7 +167,7 @@ impl<A: Allocator + Clone> Arena<A> {
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
     {
-        let ptr = self.try_alloc_slice_local_fill_iter_inner(iter, AllocFlavor::Box)?;
+        let ptr = self.try_alloc_slice_local_fill_iter_inner::<_, _, false>(iter, AllocFlavor::Box)?;
         // SAFETY: helper initialized the slice and bumped the refcount for this Box.
         Ok(Box::from_owned_in_chunk_unsized(unsafe {
             crate::internal::owned_in_chunk::OwnedInLocalChunk::from_raw_alloc(ptr)
