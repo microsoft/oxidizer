@@ -156,6 +156,73 @@ After running scenarios:
 3. Remove the worktree and branch (see "Test fixture setup" above).
 4. Refresh the **Result** column in this file with the observed outcomes.
 
+## Harness crafting hints (for future maintainers/agents)
+
+There is no committed test harness for either suite — both N and T harnesses
+have historically lived as scratch files in an agent session and were rebuilt
+each time the test cases were re-run. The lessons below are the non-obvious
+gotchas that surfaced while building those harnesses; capture them in any
+future rebuild to avoid relearning them.
+
+- **Run the *development-tree* check script with the *worktree* as cwd.** The
+  worktree is pinned to whatever HEAD you reset it to; running
+  `scripts/check-unreleased-dependencies.ps1` from inside the worktree would
+  exercise that pinned version, not the code you are testing. Invoke the
+  production script via its absolute path in the dev checkout
+  (`C:\Source\Oss\oxidizer3\scripts\check-unreleased-dependencies.ps1`) while
+  the harness's cwd is the scratch worktree.
+- **Invoke the script with `pwsh -NoProfile -File`, not `-Command`.** With
+  `-Command`, parameters get re-parsed by the outer shell and quoting around
+  `-BaseRef` / `-OutputFile` becomes a hazard. `-File` passes parameters
+  through cleanly and `$LASTEXITCODE` from the call is usable directly.
+- **Per-crate baseline means unrelated noise on `main` *will* show up.**
+  Scenarios labelled "NO findings" almost never mean "the output file should
+  not exist" — they mean "the named crate should not appear in the findings
+  table". Use an `Assert-NoFindingForCrate` helper that tolerates other rows.
+  The only scenarios where strict "no OutputFile at all" is correct are the
+  ones where the **release set is empty** (no version bumps in the PR), since
+  the check script short-circuits before any analysis runs. In the existing
+  scenarios, that is T11 and T12 only.
+- **Anchor crate-name matches to the findings-table column boundary.** Many
+  workspace crate names are substrings of other names (`bytesbuf` ⊂
+  `bytesbuf_io`, `ohno` ⊂ `ohno_macros`). Substring matches against the
+  rendered markdown will trigger on chain entries that mention the longer
+  name. Use a pattern like `\| `` $crate `` \|` (literal pipe + backtick-quoted
+  crate name + pipe) to match only a *row* for that crate.
+- **Chain-aggregation assertions must split column 3 on `<br>`.** The script
+  joins chains with literal `<br>` inside the third column of each row.
+  Regex-matching chains directly inside the row will not give a usable count;
+  split on `<br>`, trim, dedupe, then count.
+- **"BFS stops at in-release crate" is a negative assertion.** There is no
+  positive signal in the output that BFS terminated. The way to test T5-style
+  behaviour is to assert that a specific chain fragment (e.g.
+  `bytesbuf_io -> ohno`) is **absent** from the row for the modified
+  downstream crate.
+- **Untracked files count as modifications — leave them untracked.** T2 and
+  N9 verify that brand-new files under `crates/<x>/src/` are picked up. Do
+  not `git add` them in the harness — that exercises a different code path.
+- **`HashSet | Sort-Object` is a silent no-op when the HashSet was emitted
+  via `Write-Output -NoEnumerate`.** `Get-CratesWithVersionBumps` does this so
+  callers can use `.Contains()`. If a harness ever needs to sort/iterate it,
+  unwrap explicitly first: `@($hs | ForEach-Object { $_ }) | Sort-Object`.
+- **`Reset-Worktree` must clean every path any scenario touches.** N-series
+  scenarios only touch `crates/**`, so a single `git checkout -- crates &&
+  git clean -fd crates` suffices. T-series scenarios (notably T7) also edit
+  root files like `README.md` and `justfile`; the T-harness's `Reset-Worktree`
+  has an extra `git checkout -- README.md justfile`. When adding a new
+  scenario that edits a new path, extend `Reset-Worktree` accordingly or
+  scenarios may bleed state into each other.
+- **Use `git worktree add -B <branch> <path> HEAD`.** The `-B` flag creates or
+  resets the scratch branch atomically, so a leftover branch from a previous
+  failed run doesn't block re-setup. Always clean up with both
+  `git worktree remove --force` *and* `git branch -D`.
+- **`BaseRef HEAD` is the right pattern for working-tree-only scenarios.** N8,
+  N9, and T2 simulate uncommitted (or untracked) edits with no commit between
+  HEAD and the analysis point. Passing `-BaseRef HEAD` makes the script
+  compare worktree state against HEAD itself, which is what those scenarios
+  want. If the script ever switches to a strictly commit-based diff, those
+  scenarios will need to be reworked.
+
 ## Known open question
 
 If only `CHANGELOG.md` or auto-generated `README.md` files were touched in an
