@@ -132,6 +132,8 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     ///     let person: Person = json.read()?;
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
@@ -181,6 +183,8 @@ impl<T: DeserializeOwned> Json<T> {
     ///     let person: Person = json.read_owned()?; // Consumes the parser
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);

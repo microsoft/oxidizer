@@ -60,6 +60,8 @@ pub trait Write: HasMemory + Memory + Debug {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use bytesbuf::mem::Memory;
@@ -74,6 +76,8 @@ pub trait Write: HasMemory + Memory + Debug {
     ///
     /// sink.write(bytes).await.unwrap();
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn write(&mut self, data: BytesView) -> Result<(), Self::Error>;
 }
