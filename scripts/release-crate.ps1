@@ -603,7 +603,7 @@ function Invoke-CascadeStep {
         [Parameter(Mandatory = $true)][string]$TargetCrateName,
         [Parameter(Mandatory = $true)][string]$TargetNewVersion,
         [Parameter(Mandatory = $true)][string]$DepBump,
-        [Parameter(Mandatory = $true)][string]$BaseRef
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
     )
 
     $depFolder = Join-Path $RepoRoot 'crates' $Dependent
@@ -666,7 +666,7 @@ function Invoke-ReleaseFlow {
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
-        [Parameter(Mandatory = $true)][string]$BaseRef
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
     )
 
     $crateFolder    = Join-Path $RepoRoot 'crates' $CrateName
@@ -742,7 +742,7 @@ function Test-InteractiveSession {
 function Invoke-PostReleaseDepScan {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$BaseRef,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef,
         [Parameter(Mandatory = $true)][ref]$ReleasesRef,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
@@ -868,119 +868,155 @@ function Invoke-PostReleaseDepScan {
     Write-Warning "Post-release dependency scan reached its iteration cap ($maxIterations); aborting further prompts."
 }
 
-# --- SCRIPT EXECUTION ---
-
-# 1. INPUT VALIDATION
-if (-not (Test-ValidCrateName -crateName $CrateName)) {
-    Write-Error "Invalid crate name '$CrateName'. Crate names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
-    Exit 1
-}
-
-if (-not [string]::IsNullOrEmpty($Version) -and -not [string]::IsNullOrEmpty($Bump)) {
-    Write-Error "The --version and --bump options are mutually exclusive. Please specify only one."
-    Exit 1
-}
-
-if (-not (Test-ValidVersion -version $Version)) {
-    Write-Error "Invalid version format '$Version'. Version must follow semantic versioning format (e.g., '1.2.3')."
-    Exit 1
-}
-
-# 2. PRE-FLIGHT CHECKS
-if (-not (Test-CommandExists -command "git")) {
-    Write-Error "Git is not installed or not found in your PATH."
-    Exit 1
-}
-
-$repoRoot = Get-Location
-if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
-    Write-Error "This script must be run from the root of a Git repository."
-    Exit 1
-}
-
-$crateFolder = Join-Path $repoRoot 'crates' $CrateName
-if (-not (Test-Path $crateFolder)) {
-    Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
-    Exit 1
-}
-
-# 3. DETERMINE GITHUB REPO URL
-$prBaseUrl = $null
-$remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path
-if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
-    $repoIdentifier = $matches[1] -replace '\.git$', ''
-    $prBaseUrl = "https://github.com/$repoIdentifier/pull"
-} else {
-    Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
-}
-
-# 4. DEFINE FILE PATHS
-$crateCargoToml = Join-Path $crateFolder "Cargo.toml"
-$rootCargoToml = Join-Path $repoRoot "Cargo.toml"
-$changelogFile = Join-Path $crateFolder "CHANGELOG.md"
-
-if ((-not (Test-Path $crateCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
-    Write-Error "Could not find Cargo.toml file in the crate folder or repository root."
-    Exit 1
-}
-
-# 5. VERSION COMPARISON VALIDATION
-if (-not [string]::IsNullOrEmpty($Version)) {
-    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
-    if ($null -eq $currentVersion) {
-        Write-Error "Failed to get current version for comparison. Aborting."
-        Exit 1
-    }
-
-    $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $currentVersion
-    if ($versionComparison -le 0) {
-        Write-Error "Specified version '$Version' must be greater than current version '$currentVersion'. Please specify a higher version number."
-        Exit 1
-    }
-}
-
-# 6. RESOLVE BASE REF (best-effort fetch + validate)
-$resolvedBaseRef = $BaseRef
-if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
-    if ($resolvedBaseRef -match '^origin/(.+)$') {
-        $branch = $matches[1]
-        try {
-            Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path | Out-Null
-        } catch {
-            Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
-        }
-    }
-    if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
-        Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release upstream-dependency scan will be skipped."
-        $resolvedBaseRef = ''
-    }
-}
-
-# 7. EXECUTE WORKFLOW
-try {
-    $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $Bump `
-        -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
-
-    # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released
-    # crates are appended to $releases via the [ref].
-    Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
-        -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
-        -NonInteractive:$NonInteractive
+# Wrapper around the post-release workspace consistency check. Extracted to a
+# function so tests can mock it (the real call requires cargo + a fully synced
+# workspace, which is impractical inside Pester scenarios).
+function Invoke-WorkspaceCheck {
+    param([string]$RepoRoot)
 
     Write-Host ""
     Write-Host "🔍 Running workspace cargo check..." -ForegroundColor Cyan
-    cargo check --workspace --quiet | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Workspace 'cargo check' failed after version updates. Please verify the changes." -ErrorAction Stop
+
+    Push-Location $RepoRoot
+    try {
+        cargo check --workspace --quiet | Write-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Workspace 'cargo check' failed after version updates. Please verify the changes." -ErrorAction Stop
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
+# Top-level entry point. Encapsulates input validation, pre-flight checks, git
+# remote detection, base-ref resolution, the actual release workflow, and the
+# post-release workspace check. Returns the array of release records (so tests
+# can assert on them); also prints the summary and final message.
+#
+# This function exists so Pester tests can drive the full flow in-process
+# without spawning a child PowerShell — see scripts/tests/Pester/scenarios/.
+function Invoke-ReleaseMain {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $false)][string]$Version,
+        [Parameter(Mandatory = $false)][ValidateSet('major', 'minor', 'patch')][string]$Bump,
+        [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main',
+        [Parameter(Mandatory = $false)][switch]$NonInteractive
+    )
+
+    # 1. INPUT VALIDATION
+    if (-not (Test-ValidCrateName -crateName $CrateName)) {
+        Write-Error "Invalid crate name '$CrateName'. Crate names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
+        Exit 1
     }
 
-    $primary = $releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
-    $primaryNewVersion = if ($null -ne $primary) { $primary.NewVersion } else { '' }
+    if (-not [string]::IsNullOrEmpty($Version) -and -not [string]::IsNullOrEmpty($Bump)) {
+        Write-Error "The --version and --bump options are mutually exclusive. Please specify only one."
+        Exit 1
+    }
 
-    Show-ReleaseSummary -releases $releases
-    Show-FinalMessage -crateName $CrateName -newVersion $primaryNewVersion
+    if (-not (Test-ValidVersion -version $Version)) {
+        Write-Error "Invalid version format '$Version'. Version must follow semantic versioning format (e.g., '1.2.3')."
+        Exit 1
+    }
+
+    # 2. PRE-FLIGHT CHECKS
+    if (-not (Test-CommandExists -command "git")) {
+        Write-Error "Git is not installed or not found in your PATH."
+        Exit 1
+    }
+
+    $repoRoot = Get-Location
+    if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
+        Write-Error "This script must be run from the root of a Git repository."
+        Exit 1
+    }
+
+    $crateFolder = Join-Path $repoRoot 'crates' $CrateName
+    if (-not (Test-Path $crateFolder)) {
+        Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
+        Exit 1
+    }
+
+    # 3. DETERMINE GITHUB REPO URL
+    $prBaseUrl = $null
+    $remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path -AllowFailure
+    if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
+        $repoIdentifier = $matches[1] -replace '\.git$', ''
+        $prBaseUrl = "https://github.com/$repoIdentifier/pull"
+    } else {
+        Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
+    }
+
+    # 4. DEFINE FILE PATHS
+    $crateCargoToml = Join-Path $crateFolder "Cargo.toml"
+    $rootCargoToml = Join-Path $repoRoot "Cargo.toml"
+
+    if ((-not (Test-Path $crateCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
+        Write-Error "Could not find Cargo.toml file in the crate folder or repository root."
+        Exit 1
+    }
+
+    # 5. VERSION COMPARISON VALIDATION
+    if (-not [string]::IsNullOrEmpty($Version)) {
+        $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+        if ($null -eq $currentVersion) {
+            Write-Error "Failed to get current version for comparison. Aborting."
+            Exit 1
+        }
+
+        $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $currentVersion
+        if ($versionComparison -le 0) {
+            Write-Error "Specified version '$Version' must be greater than current version '$currentVersion'. Please specify a higher version number."
+            Exit 1
+        }
+    }
+
+    # 6. RESOLVE BASE REF (best-effort fetch + validate)
+    $resolvedBaseRef = $BaseRef
+    if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
+        if ($resolvedBaseRef -match '^origin/(.+)$') {
+            $branch = $matches[1]
+            try {
+                Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path | Out-Null
+            } catch {
+                Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
+            }
+        }
+        if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
+            Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release upstream-dependency scan will be skipped."
+            $resolvedBaseRef = ''
+        }
+    }
+
+    # 7. EXECUTE WORKFLOW
+    try {
+        $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $Bump `
+            -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
+
+        # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released
+        # crates are appended to $releases via the [ref].
+        Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
+            -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
+            -NonInteractive:$NonInteractive
+
+        Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
+
+        $primary = $releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
+        $primaryNewVersion = if ($null -ne $primary) { $primary.NewVersion } else { '' }
+
+        Show-ReleaseSummary -releases $releases
+        Show-FinalMessage -crateName $CrateName -newVersion $primaryNewVersion
+
+        return ,$releases
+    }
+    catch {
+        Write-Error "Script failed: $_"
+        Exit 1
+    }
 }
-catch {
-    Write-Error "Script failed: $_"
-    Exit 1
-}
+
+# --- SCRIPT EXECUTION ---
+
+Invoke-ReleaseMain -CrateName $CrateName -Version $Version -Bump $Bump -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
