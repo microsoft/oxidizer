@@ -1,0 +1,33 @@
+@{
+    Name        = 'S03-decline-all'
+    Description = 'Linear3 with both upstream crates modified: user declines both. Final release is the originally requested crate only; both upstream findings stay unreleased.'
+
+    Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
+
+    History = @(
+        @{ Op = 'ModifySource'; Crate = 'b' }
+        @{ Op = 'ModifySource'; Crate = 'c' }
+        @{ Op = 'AddCommit';    Message = 'upstream edits' }
+    )
+
+    Run = @{
+        CrateName = 'a'
+        Bump      = 'patch'
+        BaseRef   = 'HEAD~1'
+        Answers   = @(
+            @{ Match = "Release 'b' too"; Reply = 'n' }
+            @{ Match = "Release 'c' too"; Reply = 'n' }
+        )
+    }
+
+    Expect = @{
+        Released = @(
+            @{ Crate = 'a'; To = '0.1.1' }
+        )
+        PromptsRaised = @(
+            "Release 'b' too"
+            "Release 'c' too"
+        )
+        UnconsumedAnswers = @()
+    }
+}

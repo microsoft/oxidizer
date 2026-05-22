@@ -563,10 +563,13 @@ function Get-UnreleasedModifiedDependencies {
         $folderByNormName[$c.Name.Replace('-', '_')] = $c.Folder
     }
 
-    # Aggregate findings: folder -> { Folder; PackageName; ChangedFileCount; DependencyChains }
-    $findings = @{}
+    # Aggregate findings: folder -> { Folder; PackageName; ChangedFileCount; DependencyChains }.
+    # Ordered so the BFS insertion order is preserved when iterating .Values; matters because
+    # the post-release scan prompts the user in this order and a non-deterministic order
+    # makes the UX flaky and tests unreliable.
+    $findings = [ordered]@{}
 
-    foreach ($releasedFolder in @($releaseSet)) {
+    foreach ($releasedFolder in @($releaseSet | Sort-Object)) {
         if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
 
         # BFS forward over normal+build deps. Track shortest path to each visited node.
@@ -595,7 +598,7 @@ function Get-UnreleasedModifiedDependencies {
                 }
 
                 if ($modifiedMap.ContainsKey($depFolder) -and $depCrate.Published) {
-                    if (-not $findings.ContainsKey($depFolder)) {
+                    if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
                             PackageName      = $depCrate.Name
