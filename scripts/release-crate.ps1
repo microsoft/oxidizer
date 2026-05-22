@@ -335,7 +335,7 @@ function Write-Changelog {
         if ($rawCommits.Count -eq 0) {
             Write-Warning "No unreleased commits found to add to the changelog."
         } else {
-            Write-Warning "No relevant commits found to add to the changelog (all $($rawCommits.Count) commit(s) were filtered out)."
+            Write-Warning "No relevant commits found to add to the changelog (all $($rawCommits.Count) commits were filtered out)."
         }
         return
     }
@@ -698,7 +698,7 @@ function Invoke-ReleaseFlow {
     $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $RepoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
-        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crate(s): $($dependents -join ', ')" -ForegroundColor Cyan
+        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crates: $($dependents -join ', ')" -ForegroundColor Cyan
 
         $allCrates = Get-WorkspaceCrates -repoRoot $RepoRoot
         $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
@@ -780,14 +780,14 @@ function Invoke-PostReleaseDepScan {
         Write-Host ""
         Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
         foreach ($finding in $new) {
-            Write-Host "  • $($finding.Folder) — $($finding.ChangedFileCount) file(s) changed" -ForegroundColor Yellow
+            Write-Host "  • $($finding.Folder) — $($finding.ChangedFileCount) files changed" -ForegroundColor Yellow
             foreach ($chain in $finding.DependencyChains) {
                 Write-Host "      pulled in by: $($chain -join ' -> ')" -ForegroundColor DarkGray
             }
         }
 
         if (-not $isInteractive) {
-            Write-Warning "Non-interactive session: leaving the above crate(s) unreleased. Reviewer should confirm the changes are immaterial."
+            Write-Warning "Non-interactive session: leaving the above crates unreleased. Reviewer should confirm the changes are immaterial."
             foreach ($finding in $new) {
                 [void]$prompted.Add($finding.Folder)
                 [void]$declined.Add($finding.Folder)

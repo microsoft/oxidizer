@@ -122,7 +122,7 @@ try {
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('## 📦 Unreleased Upstream Dependency Changes') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('This PR releases the following workspace crate(s):') | Out-Null
+    $lines.Add('This PR releases the following workspace crates:') | Out-Null
     $lines.Add('') | Out-Null
     foreach ($f in $releaseSet) {
         $lines.Add((Format-ReleaseEntry -RepoRoot $repoRoot -BaseRef $BaseRef -Folder $f)) | Out-Null
@@ -143,7 +143,7 @@ try {
     $lines.Add('') | Out-Null
     $lines.Add('### What this means') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('Locally, the released crate(s) build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
+    $lines.Add('Locally, the released crates build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('- If the unreleased changes are **material** to the released crate''s behavior or public API, you should release the dependency too (re-run ``scripts/release-crate.ps1`` for it).') | Out-Null
     $lines.Add('- If the changes are **immaterial** (formatting, doc tweaks, internal-only refactors), this comment can be ignored.') | Out-Null
@@ -153,7 +153,7 @@ try {
     $content = ($lines -join "`n") + "`n"
     Set-Content -Path $OutputFile -Value $content -Encoding utf8 -NoNewline
 
-    Write-Host "Wrote $($findings.Count) finding(s) to '$OutputFile'."
+    Write-Host "Wrote $($findings.Count) findings to '$OutputFile'."
     Set-StepOutput -Name 'has_findings' -Value 'true'
     exit 0
 }

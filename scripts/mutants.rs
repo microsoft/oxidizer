@@ -99,7 +99,7 @@ fn main() {
     if test_groups.len() > initial_count {
         println!();
         println!(
-            "Added {} ungrouped package(s) as individual groups",
+            "Added {} ungrouped packages as individual groups",
             test_groups.len() - initial_count
         );
     }
@@ -126,7 +126,7 @@ fn main() {
     if failed_groups.is_empty() {
         println!("✅ All test groups passed!");
     } else {
-        eprintln!("❌ {} test group(s) failed:", failed_groups.len());
+        eprintln!("❌ {} test groups failed:", failed_groups.len());
         for (group, error) in &failed_groups {
             eprintln!("  - [{}]: {error}", group.join(", "));
         }

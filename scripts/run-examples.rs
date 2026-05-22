@@ -195,7 +195,7 @@ fn run(args: &Args) -> Result<(), AppError> {
         for f in &failures {
             println!("  - {f}");
         }
-        bail!("{} example(s) failed", failures.len());
+        bail!("{} examples failed", failures.len());
     }
 
     Ok(())

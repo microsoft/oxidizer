@@ -44,7 +44,7 @@ fn main() {
     println!("=== External Type Exposure Check ===");
     println!();
     println!("Toolchain: {}", args.toolchain);
-    println!("Checking {} crate(s)", filtered_packages.len());
+    println!("Checking {} crates", filtered_packages.len());
     println!("Skipped internal crates: {}", automation::INTERNAL_CRATES.join(", "));
     println!();
 
@@ -80,7 +80,7 @@ fn main() {
 
     if !failed_crates.is_empty() {
         eprintln!();
-        eprintln!("❌ {} crate(s) failed:", failed_crates.len());
+        eprintln!("❌ {} crates failed:", failed_crates.len());
         for (name, error) in &failed_crates {
             eprintln!("  - {name}: {error}");
         }
