@@ -758,6 +758,11 @@ function Invoke-PostReleaseDepScan {
 
     $declined  = [System.Collections.Generic.HashSet[string]]::new()
     $prompted  = [System.Collections.Generic.HashSet[string]]::new()
+    # Tracks crate folders currently in the release set so a foreach iteration whose
+    # target was cascade-bumped by a prior accepted release within the same loop is
+    # skipped rather than mis-prompted. Seeded from the on-disk state and grown after
+    # every nested Invoke-ReleaseFlow.
+    $currentReleaseSet = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
 
     # Termination bound: number of published workspace crates. The dep graph is a DAG,
     # so each iteration either grows ($prompted ∪ release-set) monotonically or terminates.
@@ -799,6 +804,19 @@ function Invoke-PostReleaseDepScan {
             $folder = $finding.Folder
             [void]$prompted.Add($folder)
 
+            # The list above was rendered from this iteration's pre-loop snapshot of
+            # $new. A prior accepted release within the same foreach may have
+            # cascade-bumped $folder into the release set since then; in that case
+            # the release decision has already been made and prompting again would
+            # mislead the user (saying "n" would print "Leaving X unreleased" even
+            # though X IS being released as a cascade).
+            if ($currentReleaseSet.Contains($folder)) {
+                $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $folder } | Select-Object -First 1
+                $versionSuffix = if ($null -ne $existing) { " (now at $($existing.NewVersion))" } else { '' }
+                Write-Host "  • '$folder' was cascade-bumped by a prior release in this run$versionSuffix — skipping prompt (already in release set)." -ForegroundColor DarkGray
+                continue
+            }
+
             $answer = (Read-Host "Release '$folder' too? [y/N]").Trim().ToLowerInvariant()
             if ($answer -ne 'y' -and $answer -ne 'yes') {
                 Write-Host "  Leaving '$folder' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
@@ -832,6 +850,11 @@ function Invoke-PostReleaseDepScan {
             # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
             # so Show-ReleaseSummary and the final commit message reflect on-disk state.
             foreach ($r in $nestedReleases) {
+                # Track every crate touched by the nested release (target + cascade
+                # dependents) so subsequent foreach iterations in this $new can skip
+                # crates that are now in the release set.
+                [void]$currentReleaseSet.Add($r.Crate)
+
                 $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $r.Crate } | Select-Object -First 1
                 if ($null -eq $existing) {
                     $ReleasesRef.Value += $r

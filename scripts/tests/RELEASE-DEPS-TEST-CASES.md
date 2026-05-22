@@ -97,6 +97,7 @@ all confirmed during the initial implementation.
 | T14 | Bump `bytesbuf_io`, modify only `crates/bytesbuf_io/src/…` (released crate itself)                              | NO findings (released crate excluded from upstream check)                                                  | ✅      |
 | T15 | Bump `bytesbuf_io`, modify `crates/automation/…` (`publish = false`)                                            | NO findings (`Published` filter)                                                                           | ✅      |
 | T16 | Bump `bytesbuf` (cascades to 3 crates), modify `thread_aware` (dep of all 3)                                    | All 3 chains aggregated in a single finding                                                                | ✅      |
+| T17 | Interactive: iter-1 `$new` = {ohno_macros, thread_aware, ohno, bytesbuf}; accept `thread_aware` (cascade bumps `bytesbuf` among others); foreach reaches the `bytesbuf` entry afterwards | `bytesbuf` prompt is skipped with "cascade-bumped by a prior release in this run (now at 0.5.1) — skipping prompt (already in release set)"; no misleading "Leaving 'bytesbuf' unreleased" message | ✅      |
 
 ## N-series — multi-PR / since-last-release scenarios
 
