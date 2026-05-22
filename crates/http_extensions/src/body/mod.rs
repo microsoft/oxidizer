@@ -49,12 +49,16 @@ pub(crate) mod timeout_body;
 /// # Examples
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// # use http_extensions::HttpBodyBuilder;
 /// # let builder = HttpBodyBuilder::new_fake();
 /// // Create different body types
 /// let text_body = builder.text("Hello world");
 /// let binary_body = builder.slice(&[1, 2, 3, 4]);
 /// let empty_body = builder.empty();
+/// # }
+/// # }
 /// ```
 ///
 /// # How does `HttpBody` work?
@@ -117,6 +121,8 @@ pub(crate) mod timeout_body;
 ///
 ///     Ok(())
 /// }
+/// # #[cfg(not(feature = "test-util"))] fn main() {}
+/// # #[cfg(feature = "test-util")]
 /// # #[tokio::main]
 /// # async fn main() {
 /// #     let path = std::env::temp_dir().join("http_extensions_doctest");
@@ -170,6 +176,8 @@ impl HttpBody {
     ///     println!("Received {} bytes", body_bytes.len());
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
@@ -208,6 +216,8 @@ impl HttpBody {
     ///     println!("Received: {}", text);
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
@@ -257,6 +267,8 @@ impl HttpBody {
     ///     // Now you can work with it multiple times...
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
@@ -310,6 +322,8 @@ impl HttpBody {
     ///     // Process the user data...
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake()
@@ -367,6 +381,8 @@ impl HttpBody {
     ///     // avoiding unnecessary string allocations for better performance
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake()
@@ -391,6 +407,8 @@ impl HttpBody {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let text_body = builder.text("Hello, world!");
@@ -398,6 +416,8 @@ impl HttpBody {
     ///
     /// let empty_body = builder.empty();
     /// assert_eq!(empty_body.content_length(), Some(0));
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn content_length(&self) -> Option<u64> {
@@ -416,6 +436,8 @@ impl HttpBody {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpBodyBuilder;
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let empty_body = builder.empty();
@@ -423,6 +445,8 @@ impl HttpBody {
     ///
     /// let text_body = builder.text("Hello");
     /// assert!(!text_body.is_empty());
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -467,6 +491,8 @@ impl HttpBody {
     ///
     ///     Ok(())
     /// }
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     process_body(HttpBodyBuilder::new_fake().text("test")).await.unwrap();

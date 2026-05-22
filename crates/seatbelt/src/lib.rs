@@ -148,6 +148,8 @@
 //! feature is enabled. This allows you to use `tower::ServiceBuilder` to compose middleware stacks:
 //!
 //! ```rust
+//! # fn main() {
+//! # #[cfg(all(feature = "retry", feature = "timeout", feature = "tower-service"))] {
 //! # use std::time::Duration;
 //! # use tick::Clock;
 //! use seatbelt::retry::Retry;
@@ -173,6 +175,8 @@
 //!             .timeout_error(|_| "operation timed out".to_string()),
 //!     )
 //!     .service_fn(|input: String| async move { Ok::<_, String>(format!("processed: {input}")) });
+//! # }
+//! # }
 //! # }
 //! ```
 //!

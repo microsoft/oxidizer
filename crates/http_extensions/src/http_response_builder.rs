@@ -24,6 +24,9 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse,
 /// # Examples
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
+/// # (|| {
 /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder};
 /// # let builder = HttpBodyBuilder::new_fake();
 /// // Create a response builder
@@ -39,6 +42,9 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpResponse,
 /// let response: HttpResponse = response_builder.build()?;
 ///
 /// # Ok::<(), HttpError>(())
+/// # })().unwrap();
+/// # }
+/// # }
 /// ```
 #[derive(Debug)]
 #[must_use]
@@ -61,12 +67,18 @@ impl HttpResponseBuilder<'static> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// let response = HttpResponseBuilder::new_fake()
     ///     .status(200)
     ///     .text("Test response")
     ///     .build()?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     #[cfg(any(feature = "test-util", test))]
     pub fn new_fake() -> Self {
@@ -102,6 +114,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let response_builder = HttpResponseBuilder::new(&builder)
@@ -109,6 +124,9 @@ impl HttpResponseBuilder<'_> {
     ///     .text("Hello world");
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn text(mut self, data: impl AsRef<str>) -> Self {
         let body = self.body_builder.text(data);
@@ -124,6 +142,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -135,6 +156,9 @@ impl HttpResponseBuilder<'_> {
     ///     .bytes(payload);
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn bytes(self, b: impl Into<BytesView>) -> Self {
         let body = self.body_builder.bytes(b);
@@ -153,6 +177,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use serde_json::json;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -162,6 +189,9 @@ impl HttpResponseBuilder<'_> {
     ///     .json(&json_value);
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -179,6 +209,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http::StatusCode;
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -187,6 +220,9 @@ impl HttpResponseBuilder<'_> {
     ///     .status(200); // You can also use integers
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn status(mut self, status: impl TryInto<http::StatusCode, Error: Into<http::Error>>) -> Self {
         self.builder = self.builder.status(status);
@@ -198,12 +234,18 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http::Version;
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let response_builder = HttpResponseBuilder::new(&builder).version(Version::HTTP_2);
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn version(mut self, version: Version) -> Self {
         self.builder = self.builder.version(version);
@@ -218,6 +260,8 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpResponseBuilder;
     /// #[derive(Clone)]
     /// struct RequestId(String);
@@ -227,6 +271,8 @@ impl HttpResponseBuilder<'_> {
     ///     .extension(RequestId("req-123".to_string()))
     ///     .build()
     ///     .unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn extension<T>(mut self, extension: T) -> Self
     where
@@ -249,6 +295,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http::header::CACHE_CONTROL;
     /// # use http::HeaderValue;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
@@ -261,6 +310,9 @@ impl HttpResponseBuilder<'_> {
     ///     .header("X-Custom-Header", "value");
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn header(
         mut self,
@@ -281,6 +333,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let mut response_builder = HttpResponseBuilder::new(&builder);
@@ -290,6 +345,9 @@ impl HttpResponseBuilder<'_> {
     /// }
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn headers_mut(&mut self) -> Option<&mut http::HeaderMap<HeaderValue>> {
         self.builder.headers_mut()
@@ -304,6 +362,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use http_extensions::HttpBody;
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -311,6 +372,9 @@ impl HttpResponseBuilder<'_> {
     /// let response_builder = HttpResponseBuilder::new(&builder).body(custom_body);
     ///
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn body(self, body: HttpBody) -> Self {
         self.body_result(Ok(body))
@@ -333,6 +397,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder};
     /// # let builder = HttpBodyBuilder::new_fake();
     /// let response: HttpResponse = HttpResponseBuilder::new(&builder)
@@ -340,6 +407,9 @@ impl HttpResponseBuilder<'_> {
     ///     .text("Success")
     ///     .build()?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -371,6 +441,8 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use std::pin::Pin;
     /// # use std::task::{Context, Poll};
     /// # use http_body::Body;
@@ -398,6 +470,8 @@ impl HttpResponseBuilder<'_> {
     /// let response_builder = HttpResponseBuilder::new(&builder)
     ///     .status(200)
     ///     .custom_body(CustomBody::default());
+    /// # }
+    /// # }
     /// ```
     pub fn custom_body<B>(self, body: B) -> Self
     where
@@ -419,6 +493,9 @@ impl HttpResponseBuilder<'_> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponseBuilder};
     /// # use bytesbuf::BytesView;
     /// # let body_builder = HttpBodyBuilder::new_fake();
@@ -431,6 +508,9 @@ impl HttpResponseBuilder<'_> {
     ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn stream<S>(self, stream: S) -> Self
     where
