@@ -1,5 +1,6 @@
 trigger:
 - main
+- u/sasaares/unbreak-gh-publishing
 
 parameters:
 - name: validationOsList
@@ -24,7 +25,7 @@ resources:
     name: ox-sdk
     # Override this ref to point at a feature branch in ox-sdk when iterating
     # on the publishing template from the unofficial pipeline.
-    ref: refs/heads/master
+    ref: refs/heads/u/sasaares/unbreak-gh-publishing
 
 extends:
   template: .pipelines/templates/OxidizerGitHub.Publish.yml@ox-sdk
