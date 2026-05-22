@@ -41,7 +41,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_slice_copy<T: Copy>(&self, slice: impl AsRef<[T]>) -> Result<&mut [T], AllocError> {
         let slice = slice.as_ref();
-        let ptr = self.try_alloc_slice_local_copy(slice, AllocFlavor::SimpleRef)?;
+        let ptr = self.try_alloc_slice_local_copy::<_, false>(slice, AllocFlavor::SimpleRef)?;
         // SAFETY: helper initialized the full slice and pinned the chunk via `pinned_local`/`current_local_pinned`, so the `&mut` reborrow bounded by `&self` is valid for the arena's lifetime.
         Ok(unsafe { &mut *ptr.as_ptr() })
     }
@@ -77,7 +77,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[expect(clippy::mut_from_ref, reason = "simple references: see Self::try_alloc_with")]
     #[inline]
     pub fn try_alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
-        let ptr = self.try_alloc_slice_local_fill_with_inner(len, AllocFlavor::SimpleRef, f)?;
+        let ptr = self.try_alloc_slice_local_fill_with_inner::<_, _, false>(len, AllocFlavor::SimpleRef, f)?;
         // SAFETY: helper initialized the full slice and pinned the chunk via `pinned_local`/`current_local_pinned`, so the `&mut` reborrow bounded by `&self` is valid for the arena's lifetime.
         Ok(unsafe { &mut *ptr.as_ptr() })
     }
@@ -113,7 +113,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[expect(clippy::mut_from_ref, reason = "simple references: see Self::try_alloc_with")]
     #[inline]
     pub fn try_alloc_slice_clone<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<&mut [T], AllocError> {
-        let ptr = self.try_alloc_slice_local_clone_inner(slice.as_ref(), AllocFlavor::SimpleRef)?;
+        let ptr = self.try_alloc_slice_local_clone_inner::<_, false>(slice.as_ref(), AllocFlavor::SimpleRef)?;
         // SAFETY: helper initialized the full slice and pinned the chunk via `pinned_local`/`current_local_pinned`, so the `&mut` reborrow bounded by `&self` is valid for the arena's lifetime.
         Ok(unsafe { &mut *ptr.as_ptr() })
     }
@@ -158,7 +158,7 @@ impl<A: Allocator + Clone> Arena<A> {
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
     {
-        let ptr = self.try_alloc_slice_local_fill_iter_inner(iter, AllocFlavor::SimpleRef)?;
+        let ptr = self.try_alloc_slice_local_fill_iter_inner::<_, _, false>(iter, AllocFlavor::SimpleRef)?;
         // SAFETY: helper initialized the full slice and pinned the chunk via `pinned_local`/`current_local_pinned`, so the `&mut` reborrow bounded by `&self` is valid for the arena's lifetime.
         Ok(unsafe { &mut *ptr.as_ptr() })
     }

@@ -43,10 +43,11 @@ fn alloc_box_mutable_access() {
 #[test]
 fn alloc_box_with_copy_type_no_panic() {
     // Regression: ArenaBox<T: Copy> originally tried to unlink a non-existent
-    // DropEntry. Verify many of them work.
+    // DropEntry. The bug would panic on the *first* alloc; any modest N
+    // proves the fix.
     let arena = Arena::new();
     let mut handles = std::vec::Vec::new();
-    let n: u64 = if cfg!(miri) { 256 } else { 10_000 };
+    let n: u64 = 256;
     for i in 0..n {
         handles.push(arena.alloc_box(i));
     }
