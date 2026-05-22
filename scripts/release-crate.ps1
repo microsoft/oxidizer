@@ -23,7 +23,6 @@
            is applied: enough to refresh the workspace-pinned version, but without overstating
            the change to downstream consumers.
        Dev-only dependents are skipped — they automatically pick up the new workspace version.
-       This mirrors the guidance in `.github/prompts/bump-crate-version.prompt.md`.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded crates that have no other commits since their last release get a single
        `Now requires <new-version> of \`<target>\`` entry under `🔧 Maintenance` (or `⚠️ Breaking`
