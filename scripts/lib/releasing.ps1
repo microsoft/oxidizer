@@ -53,6 +53,9 @@ function Invoke-Git {
     if ($RepoRoot) { $gitArgs += @('-C', $RepoRoot) }
     $gitArgs += $Arguments
 
+    # Suppress strict native-command error handling locally; this function manages
+    # exit codes manually via $LASTEXITCODE so callers (and AllowFailure) can react.
+    $PSNativeCommandUseErrorActionPreference = $false
     $output = & git @gitArgs 2>&1
     $exitCode = $LASTEXITCODE
 

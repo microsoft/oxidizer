@@ -1,0 +1,384 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+#
+# Phase 5 — integration tests for the analyses that orchestrate multiple
+# helpers. Each test uses a tiny synthetic Cargo workspace and exercises a
+# realistic interplay between version bumps, source edits, and the
+# release-set / unreleased-modified-deps analyses. The N1..N9 scenarios
+# from RELEASE-DEPS-TEST-CASES.md are re-encoded here so the test suite
+# replaces the manual harness.
+
+BeforeAll {
+    . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
+    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\releasing.ps1')
+    . (Join-Path $env:OXI_TEST_COMMON 'New-SyntheticWorkspace.ps1')
+}
+
+# --------------------------------------------------------------------------
+# Get-UnreleasedModifiedDependencies — BFS / aggregation coverage.
+# --------------------------------------------------------------------------
+
+Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
+
+    It 'N1 — modified upstream + bumped downstream in same PR is flagged' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n1')
+        # Earlier baseline = initial commit. In this PR: modify upstream + bump downstream.
+        $ws.ModifySource('upstream')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('PR commit')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Count | Should -Be 1
+        $findings[0].Folder | Should -Be 'upstream'
+        $findings[0].DependencyChains[0] | Should -Be @('downstream', 'upstream')
+    }
+
+    It 'N2 — earlier-PR upstream edit + current-PR downstream bump is flagged' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n2')
+        # Simulate previous PR landing an upstream edit without a bump:
+        $ws.ModifySource('upstream')
+        $ws.AddCommit('previous PR: upstream edit')
+        # Current PR bumps downstream only:
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('current PR: downstream bump')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'upstream'
+    }
+
+    It 'N3 — upstream already bumped cleanly; no further edits → no finding' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n3')
+        # Previous PR: bump upstream and release.
+        $ws.BumpVersion('upstream', '0.2.1')
+        $ws.AddCommit('release upstream 0.2.1')
+        # Current PR: bump downstream only.
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('release downstream 0.1.1')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Count | Should -Be 0
+    }
+
+    It 'N4 — bump-then-edit upstream is flagged via per-crate baseline' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n4')
+        # Earlier: bump upstream + release.
+        $ws.BumpVersion('upstream', '0.2.1')
+        $ws.AddCommit('release upstream 0.2.1')
+        # Later: edit upstream source (no bump).
+        $ws.ModifySource('upstream')
+        $ws.AddCommit('post-release upstream edit')
+        # Current PR: bump downstream only.
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('release downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'upstream'
+    }
+
+    It 'N5 — BFS reaches a modified leaf through an unchanged middle' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'n5')
+        # Modify the deepest leaf 'c' in an earlier PR.
+        $ws.ModifySource('c')
+        $ws.AddCommit('previous PR: c edit')
+        # Current PR: bump 'a' only. Middle 'b' is unchanged.
+        $ws.BumpVersion('a', '0.1.1')
+        $ws.AddCommit('current PR: bump a')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'c'
+        $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
+        $cFinding.DependencyChains[0] | Should -Be @('a', 'b', 'c')
+    }
+
+    It 'N6 — CHANGELOG-only edit in upstream still flagged (humans decide materiality)' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n6')
+        $changelog = Join-Path $ws.Path 'crates\upstream\CHANGELOG.md'
+        Add-Content -Path $changelog -Value "`n* maintenance note`n"
+        $ws.AddCommit('previous PR: upstream changelog tweak')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('current PR: bump downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'upstream'
+    }
+
+    It 'N7 — publish=false → true flip resets the baseline (pre-flip edits ignored)' {
+        Invalidate-WorkspaceMetadataCache
+        # Build a workspace where 'upstream' starts as publish=false with pre-flip
+        # edits, then is flipped to publish=true on a later commit. Current PR bumps
+        # downstream only; pre-flip edits must not be reported.
+        $spec = @{
+            Crates = @(
+                @{ Name = 'downstream'; Version = '0.1.0'; Deps = @(@{ Name = 'upstream' }) }
+                @{ Name = 'upstream';   Version = '0.2.0'; Published = $false }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'n7')
+        # Pre-flip source edit (while publish=false).
+        $ws.ModifySource('upstream')
+        $ws.AddCommit('pre-flip edit')
+        # Flip publish to true.
+        $cargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
+        $content = Get-Content $cargo -Raw
+        $content = $content -replace 'publish\s*=\s*false', 'publish = true'
+        Set-Content $cargo -Value $content -NoNewline
+        $ws.AddCommit('publish=true flip')
+        # Current PR: bump downstream only.
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('release downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        # No findings: per-crate baseline for upstream is the publish-flip commit,
+        # newer than the pre-flip edit, so no unreleased changes.
+        $findings.Count | Should -Be 0
+    }
+
+    It 'N8 — working-tree edits on upstream are flagged' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n8')
+        # Current PR: bump downstream (committed).
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('bump downstream')
+        # Uncommitted: tweak upstream source.
+        $ws.ModifySource('upstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'upstream'
+    }
+
+    It 'N9 — untracked new file in upstream is flagged' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n9')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('bump downstream')
+        Set-Content -Path (Join-Path $ws.Path 'crates\upstream\src\extra.rs') -Value '// new'
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Contain 'upstream'
+    }
+
+    It 'T6b — dev-only dep on a modified crate is NOT flagged' {
+        Invalidate-WorkspaceMetadataCache
+        # Mixed6's 'target' has a dev-dep on upstream_a (normal dep on upstream_b).
+        $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 't6b')
+        $ws.ModifySource('upstream_a')
+        $ws.AddCommit('upstream_a edit')
+        $ws.BumpVersion('target', '0.1.1')
+        $ws.AddCommit('bump target')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Not -Contain 'upstream_a'
+    }
+
+    It 'T15 — publish=false dep is NOT flagged even when modified' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 't15')
+        # 'utility' is publish=false. Modify it and bump downstream_y which depends on it.
+        $ws.ModifySource('utility')
+        $ws.AddCommit('utility edit')
+        $ws.BumpVersion('downstream_y', '0.5.1')
+        $ws.AddCommit('bump downstream_y')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Not -Contain 'utility'
+    }
+
+    It 'T16-style aggregation — one shared upstream across multiple bumped downstreams gets multiple chains' {
+        Invalidate-WorkspaceMetadataCache
+        # Diamond4: top -> {left, right}; left -> bottom; right -> bottom.
+        # Modify bottom in an earlier PR; bump both left and right.
+        $ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 't16-style')
+        $ws.ModifySource('bottom')
+        $ws.AddCommit('previous PR: bottom edit')
+        $ws.BumpVersion('left',  '0.2.1')
+        $ws.BumpVersion('right', '0.3.1')
+        $ws.AddCommit('current PR: bump left + right')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $bottom = $findings | Where-Object { $_.Folder -eq 'bottom' }
+        $bottom | Should -Not -BeNullOrEmpty
+        @($bottom.DependencyChains).Count | Should -Be 2
+    }
+
+    It 'Detached — modified crate in component B does not surface from a release in component A' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'detached')
+        # Two disconnected components: alpha→beta and gamma→delta.
+        # Modify 'gamma' (component B) and bump 'alpha' (component A).
+        $ws.ModifySource('gamma')
+        $ws.AddCommit('mod gamma')
+        $ws.BumpVersion('alpha', '0.1.1')
+        $ws.AddCommit('bump alpha')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Not -Contain 'gamma'
+        $findings.Folder | Should -Not -Contain 'delta'
+    }
+}
+
+# --------------------------------------------------------------------------
+# Update-CrateVersion — pin the known multi-version-line bug (Phase 8).
+# --------------------------------------------------------------------------
+
+Describe 'Update-CrateVersion (Phase 8 bug-pin)' {
+    BeforeAll {
+        $env:OXI_RELEASE_CRATE_NOEXEC = '1'
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
+        Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+    }
+
+    It 'updates the crate version in its own Cargo.toml' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-basic')
+        $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
+        $new = Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo
+        $new | Should -Be '0.1.1'
+        (Get-Content $crateCargo -Raw) | Should -Match 'version\s*=\s*"0\.1\.1"'
+    }
+
+    It 'updates the [workspace.dependencies] entry for the bumped crate' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-root')
+        $crateCargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
+        $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
+        Update-CrateVersion -crateName 'upstream' -version '0.2.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo | Out-Null
+        $rootContent = Get-Content $rootCargo -Raw
+        $rootContent | Should -Match 'upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.1"'
+        # And downstream's version line in the same root table is unchanged.
+        $rootContent | Should -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.1\.0"'
+    }
+
+    It 'BUG PIN — crate-level regex clobbers inline dependency version when present (Phase 8)' {
+        # Workspace inheritance is the default in our fixtures, but if a crate
+        # declares an inline `version = "..."` for a workspace dep, the current
+        # implementation overwrites that with the new crate version. The test
+        # documents the buggy behaviour so the future fix is visible as a diff.
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-bug')
+
+        # Replace the downstream Cargo.toml with one that declares upstream inline
+        # (instead of via .workspace = true).
+        $downstreamCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        Set-Content -Path $downstreamCargo -Value @"
+[package]
+name = "downstream"
+version = "0.1.0"
+edition = "2021"
+publish = true
+
+[lib]
+
+[dependencies]
+upstream = { path = "../upstream", version = "0.2.0" }
+"@ -NoNewline
+
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
+
+        $content = Get-Content $downstreamCargo -Raw
+        # Buggy outcome today: the upstream inline version was rewritten to '0.1.1'.
+        # When Phase 8 fixes this, this assertion will fail and the test should be
+        # updated to assert -Be '0.2.0'.
+        if ($content -match 'upstream\s*=\s*\{[^}]*version\s*=\s*"([^"]+)"') {
+            $upstreamDeclared = $Matches[1]
+            $upstreamDeclared | Should -Be '0.1.1' -Because 'Pinning the known Update-CrateVersion bug; Phase 8 will flip this to 0.2.0.'
+        } else {
+            throw "Could not extract upstream version from rewritten Cargo.toml: $content"
+        }
+    }
+}
+
+# --------------------------------------------------------------------------
+# Invoke-CascadeStep — re-bump-safe behavior in isolation.
+# --------------------------------------------------------------------------
+
+Describe 'Invoke-CascadeStep' {
+    BeforeAll {
+        $env:OXI_RELEASE_CRATE_NOEXEC = '1'
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
+        Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+    }
+
+    It 'bumps a dependent from the base version when not yet pre-bumped' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-fresh')
+        # Initial commit is the base; downstream starts at 0.1.0.
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Push-Location $ws.Path
+        try {
+            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
+                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD'
+        } finally {
+            Pop-Location
+        }
+
+        $result | Should -Not -BeNullOrEmpty
+        $result.Crate      | Should -Be 'downstream'
+        $result.OldVersion | Should -Be '0.1.0'
+        $result.NewVersion | Should -Be '0.1.1'
+    }
+
+    It 'skips re-bumping when the dependent was already pre-bumped to a sufficient version' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-skip')
+        # Pre-bump downstream from 0.1.0 to 0.2.0 (larger than any patch cascade).
+        $ws.BumpVersion('downstream', '0.2.0')
+        $ws.AddCommit('pre-bump downstream')
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Push-Location $ws.Path
+        try {
+            # BaseRef = HEAD~1 → downstream's "base" version is 0.1.0; required = 0.1.1; current = 0.2.0.
+            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
+                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD~1'
+        } finally {
+            Pop-Location
+        }
+
+        $result.OldVersion | Should -Be '0.2.0'
+        $result.NewVersion | Should -Be '0.2.0'
+    }
+
+    It 'upgrades a pre-bumped dependent when the cascade requires a larger version' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-upgrade')
+        # Pre-bump downstream to 0.1.1 (patch). Then cascade demands major (0.x → 0.2.0).
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('pre-bump downstream patch')
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Push-Location $ws.Path
+        try {
+            # Base ref = HEAD~1; base version = 0.1.0; required = Get-NextVersion(0.1.0, major) = 0.2.0.
+            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
+                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'major' -BaseRef 'HEAD~1'
+        } finally {
+            Pop-Location
+        }
+
+        $result.OldVersion | Should -Be '0.1.1'
+        $result.NewVersion | Should -Be '0.2.0'
+    }
+
+    It 'returns null and warns when the dependent crate is missing' {
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-missing')
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        $warnings = @()
+        Push-Location $ws.Path
+        try {
+            $result = Invoke-CascadeStep -Dependent 'nonexistent' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
+                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD' `
+                -WarningVariable warnings -WarningAction SilentlyContinue
+        } finally {
+            Pop-Location
+        }
+        $result | Should -BeNullOrEmpty
+        $warnings.Count | Should -BeGreaterOrEqual 1
+    }
+}

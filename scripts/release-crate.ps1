@@ -603,7 +603,7 @@ function Invoke-CascadeStep {
         [Parameter(Mandatory = $true)][string]$Dependent,
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
-        [Parameter(Mandatory = $true)][string]$PrBaseUrl,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$PrBaseUrl,
         [Parameter(Mandatory = $true)][string]$TargetCrateName,
         [Parameter(Mandatory = $true)][string]$TargetNewVersion,
         [Parameter(Mandatory = $true)][string]$DepBump,
