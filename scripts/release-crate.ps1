@@ -274,7 +274,11 @@ function Update-CrateVersion {
 
     function Get-EscapedRegexSpecialChars($str) {
         # Escape all regex metacharacters: . $ ^ { [ ( | ) * + ? \ /
-        return ($str -replace $script:RegexEscapeRegex, '\\$1')
+        # The replacement string `\$1` produces a literal backslash followed by
+        # the matched metacharacter — `\` is a literal in .NET replacement-string
+        # syntax (not an escape) and `$1` is the group-1 backreference. Do NOT
+        # use `\\$1` here: that double-escapes (e.g. `1.2.3` -> `1\\.2\\.3`).
+        return ($str -replace $script:RegexEscapeRegex, '\$1')
     }
 
     $escapedCrateName = Get-EscapedRegexSpecialChars($crateName)
