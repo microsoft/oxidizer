@@ -76,9 +76,12 @@ param(
     [ValidateSet('major', 'minor', 'patch')]
     [string]$Bump,
 
-    # Base ref used to compute changes for the post-release upstream-dependency scan.
-    # Default is 'origin/main' (best-effort fetched before use). Pass an empty string
-    # to skip the scan entirely.
+    # Base ref used to identify the release set (crates whose `version =` differs
+    # between this ref and HEAD) for the post-release upstream-dependency scan.
+    # The modification baseline for each upstream dep is per-crate (the dep's own
+    # last `version =` / `publish =` commit), not this ref. Default is
+    # 'origin/main' (best-effort fetched before use). Pass an empty string to skip
+    # the scan entirely.
     [Parameter(Mandatory = $false)]
     [string]$BaseRef = 'origin/main',
 
@@ -728,8 +731,10 @@ function Test-InteractiveSession {
     return $true
 }
 
-# Scans for workspace crates that were modified vs $BaseRef but are not part of the
-# release set, prompting the user (when interactive) to optionally release them too.
+# Scans for workspace crates with unreleased modifications (changes newer than the
+# crate's own last `version =` / `publish =` commit) that are transitively pulled in
+# by a release-set member but are not themselves part of the release set, prompting
+# the user (when interactive) to optionally release them too.
 # Newly-released crates are appended to the release records via [ref].
 function Invoke-PostReleaseDepScan {
     param(
@@ -770,7 +775,7 @@ function Invoke-PostReleaseDepScan {
         }
 
         Write-Host ""
-        Write-Host "⚠️  The following workspace crates have changes vs $BaseRef but are NOT part of this release:" -ForegroundColor Yellow
+        Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
         foreach ($finding in $new) {
             Write-Host "  • $($finding.Folder) — $($finding.ChangedFileCount) file(s) changed" -ForegroundColor Yellow
             foreach ($chain in $finding.DependencyChains) {

@@ -3,27 +3,42 @@
 
 <#
 .SYNOPSIS
-    Detects workspace crates that were modified vs the PR base ref but are not being
-    released, when at least one of their downstream dependents *is* being released.
+    Flags workspace crates with unreleased modifications that are transitively
+    pulled in by a crate this PR is releasing.
 
 .DESCRIPTION
     Companion CI check to the interactive analysis performed by `release-crate.ps1`.
-    Walks the transitive dependency graph forward from every crate whose version was
-    bumped in this PR. For any upstream workspace dep that has file changes and is
-    *not* itself being released, it emits a finding so reviewers can verify that the
-    change is immaterial (formatting, doc tweaks) — or that the dep should have been
-    released too.
+
+    The "release set" is computed from `$BaseRef`: every crate whose `version =`
+    in `Cargo.toml` differs between `$BaseRef` and HEAD. For each crate in that
+    set, the script walks the transitive normal/build workspace dependency graph
+    forward.
+
+    "Modified" is evaluated **per crate**, not against `$BaseRef`. For every
+    upstream dep, the baseline is the most recent commit that touched its own
+    top-level `version =` or `publish =` line in its `Cargo.toml`. Any change
+    under `crates/<dep>/` newer than that commit — committed (including merges
+    from earlier PRs that didn't bump the dep), working-tree, or untracked — is
+    considered unreleased. This catches modifications that landed on `main` in a
+    previous PR without a version bump and are now being depended on for the
+    first time.
+
+    Findings are emitted so reviewers can verify each change is immaterial
+    (formatting, doc tweaks) — or that the dep should have been released too.
 
     Writes a markdown comment to `-OutputFile` when findings exist, and sets the
-    GitHub Actions step output `has_findings` to 'true' or 'false'. Exits 0 in both
-    cases — this check is informational only and never fails the build.
+    GitHub Actions step output `has_findings` to 'true' or 'false'. Exits 0 in
+    both cases — this check is informational only and never fails the build.
 
 .PARAMETER BaseRef
-    The git ref to diff against. Defaults to 'origin/main'.
+    The git ref used to identify the *release set* (crates whose `version =`
+    differs between this ref and HEAD). It is **not** used as the modification
+    baseline — that is computed per crate from each crate's own `Cargo.toml`
+    history. Defaults to 'origin/main'.
 
 .PARAMETER OutputFile
-    Path to the markdown file written when findings are non-empty. The file is only
-    written when there is something to report.
+    Path to the markdown file written when findings are non-empty. The file is
+    only written when there is something to report.
 
 .EXAMPLE
     pwsh ./scripts/check-unreleased-dependencies.ps1 `
@@ -113,7 +128,7 @@ try {
         $lines.Add((Format-ReleaseEntry -RepoRoot $repoRoot -BaseRef $BaseRef -Folder $f)) | Out-Null
     }
     $lines.Add('') | Out-Null
-    $lines.Add('The following workspace crates were **modified** vs the base branch but are *not* part of this release:') | Out-Null
+    $lines.Add('The following workspace crates have **unreleased modifications** (changes newer than their last `version =` or `publish =` bump) and are *not* part of this release:') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
     $lines.Add('|-------|--------------:|-------------|') | Out-Null

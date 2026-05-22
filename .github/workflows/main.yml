@@ -249,9 +249,12 @@ jobs:
           delete: true
 
   release-deps:
-    # Informational check: flags workspace crates that were modified vs the PR base
-    # but are not part of the version-bump set, when at least one of their downstream
-    # dependents is being released. See scripts/check-unreleased-dependencies.ps1.
+    # Informational check: flags workspace crates that have unreleased modifications
+    # (changes newer than the crate's own last `version =` / `publish =` commit) and
+    # are transitively depended on by a crate this PR is releasing. The release set
+    # is derived from a PR-vs-base-ref version diff; the modification baseline is
+    # per-crate, so previously-merged-but-unreleased changes are flagged too. See
+    # scripts/check-unreleased-dependencies.ps1.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
