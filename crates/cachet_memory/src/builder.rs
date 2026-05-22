@@ -11,10 +11,8 @@ use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use foldhash::fast::RandomState;
-
 use crate::policy::EvictionPolicy;
-use crate::tier::InMemoryCache;
+use crate::tier::{AwareRandomState, InMemoryCache};
 
 /// Builder for configuring an `InMemoryCache`.
 ///
@@ -37,7 +35,7 @@ use crate::tier::InMemoryCache;
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
+pub struct InMemoryCacheBuilder<K, V, H = AwareRandomState> {
     pub(crate) max_capacity: Option<u64>,
     pub(crate) initial_capacity: Option<usize>,
     pub(crate) time_to_live: Option<Duration>,
@@ -68,7 +66,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_idle: None,
             name: None,
             eviction_policy: EvictionPolicy::default(),
-            hasher: RandomState::default(),
+            hasher: AwareRandomState::default(),
             _phantom: PhantomData,
         }
     }

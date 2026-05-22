@@ -13,12 +13,32 @@ use std::hash::{BuildHasher, Hash};
 use std::time::{Duration, Instant};
 
 use cachet_tier::{CacheEntry, CacheTier, Error, SizeError};
-use foldhash::fast::RandomState;
+use foldhash::fast::{FoldHasher, RandomState};
 use moka::Expiry;
 use moka::future::Cache;
-use thread_aware::{Arc, PerProcess, ThreadAware};
-
+use thread_aware::{Arc, PerProcess, ThreadAware, Unaware};
 use crate::builder::InMemoryCacheBuilder;
+
+
+/// A [`ThreadAware`] newtype for [`RandomState`]
+#[derive(Clone, Debug, ThreadAware)]
+pub struct AwareRandomState(Unaware<RandomState>);
+
+impl Default for AwareRandomState {
+    #[inline(always)]
+    fn default() -> Self {
+        Self(Unaware(RandomState::default()))
+    }
+}
+
+impl BuildHasher for AwareRandomState {
+    type Hasher = FoldHasher<'static>;
+
+    #[inline(always)]
+    fn build_hasher(&self) -> Self::Hasher {
+        self.0.build_hasher()
+    }
+}
 
 /// A concurrent in-memory cache tier.
 ///
@@ -46,7 +66,7 @@ use crate::builder::InMemoryCacheBuilder;
 /// # };
 /// ```
 #[derive(Debug, Clone, ThreadAware)]
-pub struct InMemoryCache<K, V, H = RandomState>
+pub struct InMemoryCache<K, V, H = AwareRandomState>
 where
     K: Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
