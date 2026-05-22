@@ -63,7 +63,11 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
+    # Non-mandatory so test harnesses can dot-source this script (with
+    # $env:OXI_RELEASE_CRATE_NOEXEC = '1') to access the helper functions
+    # defined within without executing the entrypoint. Production callers
+    # must still supply -CrateName; Invoke-ReleaseMain validates it.
+    [Parameter(Mandatory = $false, Position = 0)]
     [string]$CrateName,
 
     [Parameter(Mandatory = $false)]
@@ -1019,4 +1023,9 @@ function Invoke-ReleaseMain {
 
 # --- SCRIPT EXECUTION ---
 
-Invoke-ReleaseMain -CrateName $CrateName -Version $Version -Bump $Bump -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
+# Test harnesses dot-source this script with $env:OXI_RELEASE_CRATE_NOEXEC = '1'
+# to access internal helpers without running the release flow. Production
+# callers leave the variable unset and the entrypoint runs as usual.
+if ($env:OXI_RELEASE_CRATE_NOEXEC -ne '1') {
+    Invoke-ReleaseMain -CrateName $CrateName -Version $Version -Bump $Bump -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
+}
