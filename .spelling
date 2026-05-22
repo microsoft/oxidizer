@@ -556,3 +556,12 @@ addressability
 bumpable
 dereferenceable
 NonNull
+crypto
+DER
+macOS
+PEM
+rustls
+TLS
+verifier
+Verifier
+backend's

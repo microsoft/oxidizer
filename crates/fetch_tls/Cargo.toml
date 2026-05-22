@@ -1,0 +1,52 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_tls"
+description = "TLS configurations and APIs used by 'fetch' crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "tls", "fetch", "http", "client"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+rustls = ["dep:rustls-symcrypt", "dep:rustls"]
+native-tls = ["dep:native-tls"]
+
+[dependencies]
+# internal
+ohno = { workspace = true }
+
+# external
+http = { workspace = true }
+base64 = { workspace = true }
+# Disabling aws-lc by default; rustls-symcrypt is the intended crypto provider.
+rustls = { workspace = true, features = [
+    "tls12",
+    "std",
+], default-features = false, optional = true }
+rustls-pki-types = { workspace = true, features = ["alloc", "std"] }
+rustls-symcrypt = { workspace = true, optional = true }
+native-tls = { workspace = true, optional = true, features = ["alpn"] }
+
+[dev-dependencies]
+mutants = { workspace = true }
+# Test code unconditionally references both backends; pull them in as
+# dev-dependencies so `cargo test` works with no features enabled.
+rustls = { workspace = true, features = ["tls12", "std"], default-features = false }
+rustls-symcrypt = { workspace = true }
+native-tls = { workspace = true, features = ["alpn"] }
+
+[lints]
+workspace = true
