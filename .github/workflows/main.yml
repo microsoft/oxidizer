@@ -123,6 +123,9 @@ jobs:
       - name: Doc Tests
         if: success() || failure()
         run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }} --all-features
+      - name: Doc Tests (default features)
+        if: success() || failure()
+        run: cargo test --doc --verbose --workspace ${{ needs.delta.outputs.exclude_not_affected }}
       - name: Examples
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript ./scripts/run-examples.rs --cargo-profile dev ${{ needs.delta.outputs.exclude_not_affected }}

@@ -1,13 +1,14 @@
 # Feature-gated doctests
 
-Doctests that reference items behind a Cargo feature (e.g. `test-util`,
-`retry`, `timeout`) fail to compile when the feature is off. The repository
-runs doctests both with and without features, so the same source must work
-in both configurations.
+Doctests that reference items behind a non-default Cargo feature (e.g.
+`test-util`, `retry`, `timeout`) fail to compile when only default features
+are enabled. The repository runs doctests both with default features and
+with `--all-features`, so the same source must work in both configurations.
 
 The fix wraps the body in hidden `#[cfg(...)]` lines that exclude the
-feature-dependent code when the feature is off. The `#` prefix hides the
-wrapper from rendered documentation but rustdoc still compiles those lines.
+feature-dependent code when the feature is not enabled. The `#` prefix hides
+the wrapper from rendered documentation but rustdoc still compiles those
+lines.
 
 ## Pattern A — implicit `main` with `?`
 
