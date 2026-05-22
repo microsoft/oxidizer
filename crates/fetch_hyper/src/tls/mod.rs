@@ -16,10 +16,15 @@ pub(crate) use connector::TlsConnector;
 /// cannot be used. Enable at least one `TLS` feature to make outbound
 /// connections.
 #[derive(Clone, Debug)]
+#[allow(
+    clippy::allow_attributes,
+    clippy::large_enum_variant,
+    reason = "backend is not on hot path, we want to keep API clean so no Box<..>"
+)]
 pub enum TlsBackend {
     /// Use the `rustls` backend with the given pre-built configuration.
     #[cfg(any(feature = "rustls", test))]
-    Rustls(std::sync::Arc<rustls::ClientConfig>),
+    Rustls(rustls::ClientConfig),
 
     /// Use the platform `native-tls` backend with the given connector.
     #[cfg(any(feature = "native-tls", test))]
@@ -29,14 +34,14 @@ pub enum TlsBackend {
 #[cfg(any(feature = "rustls", test))]
 impl From<rustls::ClientConfig> for TlsBackend {
     fn from(config: rustls::ClientConfig) -> Self {
-        Self::Rustls(std::sync::Arc::new(config))
+        Self::Rustls(config)
     }
 }
 
 #[cfg(any(feature = "rustls", test))]
 impl From<std::sync::Arc<rustls::ClientConfig>> for TlsBackend {
     fn from(config: std::sync::Arc<rustls::ClientConfig>) -> Self {
-        Self::Rustls(config)
+        Self::Rustls(std::sync::Arc::unwrap_or_clone(config))
     }
 }
 

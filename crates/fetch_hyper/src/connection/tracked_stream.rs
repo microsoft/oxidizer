@@ -74,6 +74,8 @@ impl<T: Read + Unpin> Read for TrackedStream<T> {
 }
 
 impl<T: Write + Unpin> Write for TrackedStream<T> {
+    // Skip: `Poll::from(Ok(N))` mutations spin hyper's write loop forever (timeout, not failure).
+    #[cfg_attr(test, mutants::skip)]
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
@@ -90,6 +92,8 @@ impl<T: Write + Unpin> Write for TrackedStream<T> {
         self.inner.is_write_vectored()
     }
 
+    // Skip: see `poll_write`.
+    #[cfg_attr(test, mutants::skip)]
     fn poll_write_vectored(mut self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &[IoSlice<'_>]) -> Poll<std::io::Result<usize>> {
         Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
     }

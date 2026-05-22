@@ -4,8 +4,6 @@
 //! An enum that wraps the `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
-#[cfg(any(feature = "rustls", test))]
-use std::sync::Arc;
 
 use http::Version;
 use templated_uri::BaseUri;
@@ -82,7 +80,7 @@ where
 #[cfg(any(feature = "rustls", test))]
 #[cfg_attr(test, mutants::skip)]
 fn build_rustls_connector<C, S>(
-    config: Arc<rustls::ClientConfig>,
+    config: rustls::ClientConfig,
     connector: C,
     request_filter: RequestFilter,
     supported_versions: &[Version],
@@ -91,7 +89,6 @@ where
     C: Connect<S>,
     S: HyperIo,
 {
-    let config = Arc::unwrap_or_clone(config);
     let builder = hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(config);
 
     let builder = match request_filter {
@@ -199,7 +196,7 @@ mod tests {
             .unwrap()
             .with_root_certificates(rustls::RootCertStore::empty())
             .with_no_client_auth();
-        TlsBackend::Rustls(std::sync::Arc::new(config))
+        TlsBackend::Rustls(config)
     }
 
     fn fake_connector() -> FakeConnector {
