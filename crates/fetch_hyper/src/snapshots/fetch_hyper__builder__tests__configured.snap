@@ -1,0 +1,16 @@
+---
+source: crates/fetch_hyper/src/builder.rs
+expression: configured
+---
+fetch_hyper::builder::HyperTransportBuilder<fetch_hyper::testing::FakeConnector, fetch_hyper::testing::FakeStream> {
+    request_filter: HttpAndHttps,
+    supported_http_versions: [
+        HTTP/2.0,
+    ],
+    connect_timeout: 7s,
+    connection_lifetime: Fixed(
+        60s,
+    ),
+    pool_index: 42,
+    ..
+}
