@@ -1,20 +1,33 @@
 # Test cases for the release-deps automation
 
-This document captures **manual test scenarios** for the upstream-dependency
+This document captures **historical reference scenarios** for the upstream-dependency
 analysis implemented in `scripts/lib/releasing.ps1` and exercised by both
 `scripts/release-crate.ps1` (interactive flow) and
 `scripts/check-unreleased-dependencies.ps1` (CI flow).
 
-These are intended to be re-run by future maintainers or agents when:
+> **Most of the behaviour catalogued here is now covered by the automated
+> Pester suite** under `scripts/tests/Pester/` (run with `just test-scripts`
+> or via the `script-tests` CI job). This document remains as the original
+> source-of-truth and as a written description of the underlying semantics,
+> which is occasionally easier to scan than the test code.
 
-- The release-deps logic is modified.
+These scenarios are intended to be re-run by future maintainers or agents when:
+
+- The release-deps logic is modified in a way the automated suite does not yet cover.
 - A new edge case is reported.
-- A regression is suspected.
+- A regression is suspected and you want to verify against the prose description
+  of the expected behaviour rather than the code.
 
 There are no automated tests for this code yet — PowerShell harness setup is
 non-trivial and the logic is deeply tied to git history shapes. Until that
 infrastructure exists, this document is the source of truth for "what behaviour
 should be preserved".
+
+> **Update:** since the original version of this document was written, an
+> automated Pester suite was added (`scripts/tests/Pester/`, `just
+> test-scripts`). Most behaviours below are now pinned by Pester tests
+> against synthetic workspaces. The manual scenarios are kept for
+> diagnosability against the real workspace and as a prose specification.
 
 ## Test fixture setup
 

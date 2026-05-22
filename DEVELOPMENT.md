@@ -93,6 +93,7 @@ After installing the Rust toolchains, we setup the build target directory for fa
 
 1. Execute `just build` to build the workspace. Verify that the build is successful.
 1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
+1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
 
 ## Setup Visual Studio Code integration
 
