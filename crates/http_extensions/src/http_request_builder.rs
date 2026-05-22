@@ -31,6 +31,9 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, 
 ///    build requests via [`build`](Self::build):
 ///
 ///    ```
+///    # fn main() {
+///    # #[cfg(feature = "test-util")] {
+///    # (|| {
 ///    # use http::Method;
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
 ///    # let builder = HttpBodyBuilder::new_fake();
@@ -41,6 +44,9 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, 
 ///        .text("Hello world")
 ///        .build()?;
 ///    # Ok::<(), HttpError>(())
+///    # })().unwrap();
+///    # }
+///    # }
 ///    ```
 ///
 /// 2. **With a request handler** - Use [`with_request_handler`](Self::with_request_handler) to create
@@ -48,8 +54,11 @@ use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, 
 ///    [`fetch_text`](Self::fetch_text):
 ///
 ///    ```
+///    # #[cfg(not(feature = "test-util"))] fn main() {}
+///    # #[cfg(feature = "test-util")]
 ///    # use http_extensions::{HttpBodyBuilder, HttpError, HttpResponse, HttpResponseBuilder,
 ///    #     HttpRequestBuilderExt, FakeHandler, HttpRequestBuilder};
+///    # #[cfg(feature = "test-util")]
 ///    # #[tokio::main]
 ///    # async fn main() -> Result<(), HttpError> {
 ///    # let bb = HttpBodyBuilder::new_fake();
@@ -86,6 +95,9 @@ impl HttpRequestBuilder<'static> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http::Method;
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequest, HttpRequestBuilder};
     /// let request = HttpRequestBuilder::new_fake()
@@ -93,6 +105,9 @@ impl HttpRequestBuilder<'static> {
     ///     .uri("https://example.com")
     ///     .build()?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     #[cfg(any(feature = "test-util", test))]
     pub fn new_fake() -> Self {
@@ -220,6 +235,8 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpRequestBuilder;
     /// #[derive(Clone)]
     /// struct RequestId(String);
@@ -229,6 +246,8 @@ impl<R> HttpRequestBuilder<'_, R> {
     ///     .extension(RequestId("req-456".to_string()))
     ///     .build()
     ///     .unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn extension<T>(mut self, extension: T) -> Self
     where
@@ -393,6 +412,9 @@ impl<R> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError, HttpRequestBuilder};
     /// # use bytesbuf::BytesView;
     /// # let body_builder = HttpBodyBuilder::new_fake();
@@ -405,6 +427,9 @@ impl<R> HttpRequestBuilder<'_, R> {
     ///     .stream(futures::stream::iter(chunks))
     ///     .build()?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn stream<S>(self, stream: S) -> Self
     where
@@ -426,8 +451,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();
@@ -466,8 +494,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # Examples
     ///
     /// ```
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();
@@ -513,8 +544,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();
@@ -556,10 +590,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// ```
     /// # use http::Response;
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponse, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # use bytesbuf::BytesView;
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();
@@ -599,12 +636,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use http::Response;
     /// # use serde::Deserialize;
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User { id: u32, name: String }
     /// #
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();
@@ -656,12 +696,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// ```
     /// # use serde::Deserialize;
     /// # use std::borrow::Cow;
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
     /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, HttpResponseBuilder,
     /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
     /// #
     /// # #[derive(Deserialize)]
     /// # struct User<'a> { id: u32, #[serde(borrow)] name: Cow<'a, str> }
     /// #
+    /// # #[cfg(feature = "test-util")]
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), HttpError> {
     /// # let bb = HttpBodyBuilder::new_fake();

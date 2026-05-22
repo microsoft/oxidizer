@@ -20,6 +20,8 @@ pub trait WriteExt: Write {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use std::convert::Infallible;
@@ -36,6 +38,8 @@ pub trait WriteExt: Write {
     /// .await
     /// .unwrap();
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn prepare_and_write<F, E>(&mut self, min_capacity: usize, prepare_fn: F) -> Result<(), crate::Error>
     where
