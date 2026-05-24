@@ -42,6 +42,7 @@ These are the primary crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
+- [`sync_thunk`](./crates/sync_thunk/README.md) - Efficiently handle blocking calls in async code.
 - [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.

@@ -555,3 +555,12 @@ addressability
 bumpable
 dereferenceable
 NonNull
+DNS
+MPMC
+Thunker
+enqueued
+getter
+lookups
+thunk
+thunked
+thunker

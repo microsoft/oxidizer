@@ -1,0 +1,9 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    ::core::compile_error! {
+        "#[thunk] only accepts `&'static T` / `&'static mut T` reference parameters. Any shorter-lifetime reference can be invalidated by `mem::forget`-ing the wrapper future and dropping the referent while the worker is still using it (= use-after-free). For non-`'static` data, pass an owned value instead (e.g. `T`, `Arc<T>`, `Box<T>`, or a clone)."
+    }
+}

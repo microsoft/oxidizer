@@ -3091,6 +3091,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync_thunk"
+version = "0.1.0"
+dependencies = [
+ "bolero",
+ "criterion",
+ "crossbeam-channel",
+ "gungraun",
+ "loom",
+ "sync_thunk_macros",
+ "tokio",
+]
+
+[[package]]
+name = "sync_thunk_macros"
+version = "0.1.0"
+dependencies = [
+ "mutants",
+ "sync_thunk_macros_impl",
+]
+
+[[package]]
+name = "sync_thunk_macros_impl"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "mutants",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,9 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    ::core::compile_error! {
+        "#[thunk] does not support `self`, `&self`, `&mut self`, or typed `self` receivers. Borrowed receivers allow safe code to trigger use-after-free via `mem::forget`; owned receivers force a call-site shape the macro cannot generate soundly. Rewrite the method as a free associated function taking `Arc<Self>` (or another owned `Send + 'static` value) as a parameter:\n\n    #[thunk(from = me.thunker)]\n    async fn work(me: Arc<Self>, ...) -> R { ... }"
+    }
+}

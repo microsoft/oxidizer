@@ -1,0 +1,101 @@
+---
+source: crates/sync_thunk_macros_impl/tests/thunk_basic.rs
+expression: expand_thunk!(item)
+---
+impl Dummy {
+    #[inline]
+    #[doc(hidden)]
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        clippy::needless_pass_by_value,
+        clippy::use_self,
+        clippy::unused_self,
+        unused_variables,
+    )]
+    #[expect(clippy::needless_pass_by_value, reason = "testing")]
+    fn __with_expect_inner(me: ::std::sync::Arc<Service>, data: Vec<u8>) -> usize {
+        data.len()
+    }
+    #[doc(hidden)]
+    #[allow(clippy::use_self)]
+    fn __with_expect_shim(ptr: *mut ()) {
+        #[repr(C)]
+        #[allow(non_camel_case_types, dead_code)]
+        struct __with_expect_RawTask<__ThunkImplSelf: ?Sized> {
+            me: ::std::sync::Arc<Service>,
+            data: Vec<u8>,
+            _self_phantom: ::core::marker::PhantomData<fn() -> __ThunkImplSelf>,
+        }
+        let state = unsafe {
+            &*ptr.cast::<::sync_thunk::StackState<usize, __with_expect_RawTask<Self>>>()
+        };
+        struct __DoneOnDrop<'a, R, T>(&'a ::sync_thunk::StackState<R, T>);
+        impl<R, T> ::std::ops::Drop for __DoneOnDrop<'_, R, T> {
+            fn drop(&mut self) {
+                self.0.mark_worker_done();
+            }
+        }
+        let __done_guard = __DoneOnDrop(state);
+        let panic_result = ::std::panic::catch_unwind(
+            ::std::panic::AssertUnwindSafe(|| {
+                let task = unsafe { state.take_task() }
+                    .expect("thunk task was set before dispatch");
+                let me = task.me;
+                let data = task.data;
+                Self::__with_expect_inner(me, data)
+            }),
+        );
+        match panic_result {
+            Ok(result) => {
+                unsafe { state.complete(result) };
+            }
+            Err(payload) => {
+                unsafe { state.mark_panicked(payload) };
+            }
+        }
+        state.wake();
+        ::core::mem::drop(__done_guard);
+    }
+    async fn with_expect(me: ::std::sync::Arc<Service>, data: Vec<u8>) -> usize {
+        #[repr(C)]
+        #[allow(non_camel_case_types, dead_code)]
+        struct __with_expect_RawTask<__ThunkImplSelf: ?Sized> {
+            me: ::std::sync::Arc<Service>,
+            data: Vec<u8>,
+            _self_phantom: ::core::marker::PhantomData<fn() -> __ThunkImplSelf>,
+        }
+        unsafe impl<__ThunkImplSelf: ?Sized> Send
+        for __with_expect_RawTask<__ThunkImplSelf> {}
+        ::sync_thunk::__private::assert_send_static::<::std::sync::Arc<Service>>();
+        ::sync_thunk::__private::assert_send_static::<Vec<u8>>();
+        let state = ::sync_thunk::StackState::<
+            usize,
+            __with_expect_RawTask<Self>,
+        >::new();
+        struct __AbandonOnPanic<'a, R, T>(&'a ::sync_thunk::StackState<R, T>);
+        impl<R, T> ::std::ops::Drop for __AbandonOnPanic<'_, R, T> {
+            fn drop(&mut self) {
+                self.0.abandon();
+            }
+        }
+        let __guard = __AbandonOnPanic(&state);
+        let __thunk_sender = ::sync_thunk::__private::clone_thunker(&me.thunker);
+        let raw_task = __with_expect_RawTask::<Self> {
+            me,
+            data,
+            _self_phantom: ::core::marker::PhantomData,
+        };
+        unsafe {
+            state.set_task(raw_task);
+        }
+        let work_item = unsafe {
+            ::sync_thunk::WorkItem::new(
+                state.as_mut_ptr().cast::<()>(),
+                Self::__with_expect_shim,
+            )
+        };
+        __thunk_sender.send(work_item);
+        ::std::mem::forget(__guard);
+        ::sync_thunk::ThunkFuture::new(&state).await
+    }
+}

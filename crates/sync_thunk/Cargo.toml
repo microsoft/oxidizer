@@ -1,0 +1,65 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "sync_thunk"
+description = "Efficiently handle blocking calls in async code."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "blocking", "async"]
+categories = ["asynchronous", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/sync_thunk"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["sync_thunk_macros::*"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+crossbeam-channel.workspace = true
+sync_thunk_macros.workspace = true
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["std"] }
+
+# Non-loom dev deps. Tokio's own loom-conditional code path expects to own
+# the loom build, so it cannot be compiled under `--cfg loom` here.
+[target.'cfg(not(loom))'.dev-dependencies]
+criterion.workspace = true
+gungraun = { workspace = true, features = ["default"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+# Loom is only used under `--cfg loom` for model-checked tests of
+# `StackState` (the worker/poller publish-wake-drop race).
+[target.'cfg(loom)'.dependencies]
+loom = { workspace = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "from_field"
+
+[[example]]
+name = "from_method"
+
+[[example]]
+name = "from_parameter"
+
+[[example]]
+name = "from_static"
+
+[[bench]]
+name = "criterion_dispatch"
+harness = false
+
+[[bench]]
+name = "gungraun_dispatch"
+harness = false
