@@ -1,0 +1,102 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_hyper"
+description = "Hyper-based HTTP transport utilities for fetch."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "hyper", "fetch", "http", "tls"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "anyspawn::spawner::Spawner",
+    "http_extensions::*",
+    "layered::*",
+    "templated_uri::*",
+    "tick::clock::Clock",
+    # External dependencies
+    "http::*",
+    "hyper::*",
+    "hyper_util::client::*",
+    "opentelemetry::metrics::meter::Meter",
+    # TLS backends (feature-gated)
+    "rustls::client::client_conn::ClientConfig",
+    "native_tls::TlsConnector",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+rustls = ["dep:rustls", "dep:hyper-rustls"]
+native-tls = ["dep:native-tls", "dep:hyper-tls", "dep:tokio-native-tls"]
+
+[dependencies]
+# internal
+anyspawn = { workspace = true }
+bytesbuf = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true, features = ["dynamic-service"] }
+ohno.workspace = true
+seatbelt = { workspace = true }
+templated_uri = { workspace = true }
+tick = { workspace = true }
+
+# external
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "client"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2"] }
+opentelemetry = { workspace = true, features = ["metrics"] }
+opentelemetry-semantic-conventions = { workspace = true, features = [
+    "semconv_experimental",
+] }
+pin-project = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+
+# TLS related crates
+hyper-rustls = { workspace = true, optional = true, features = ["http1", "http2"] }
+hyper-tls = { workspace = true, optional = true, features = ["alpn"] }
+native-tls = { workspace = true, optional = true, features = ["alpn"] }
+rustls = { workspace = true, features = ["tls12", "std"], default-features = false, optional = true }
+tokio-native-tls = { workspace = true, optional = true }
+
+[dev-dependencies]
+anyspawn = { workspace = true, features = ["tokio"] }
+bytes = { workspace = true }
+futures = { workspace = true, features = ["std", "executor"] }
+http_extensions = { workspace = true, features = ["test-util"] }
+hyper-rustls = { workspace = true, features = ["http1", "http2"] }
+hyper-tls = { workspace = true, features = ["alpn"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+insta = { workspace = true }
+mutants.workspace = true
+native-tls = { workspace = true }
+ohno = { workspace = true, features = ["test-util"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"], default-features = false }
+rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"] }
+testing_aids = { workspace = true }
+tick = { workspace = true, features = ["tokio", "test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"] }
+tokio-native-tls = { workspace = true }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
+wiremock = { workspace = true }
+
+[[test]]
+name = "smoke"
+required-features = ["native-tls"]
+
+[lints]
+workspace = true

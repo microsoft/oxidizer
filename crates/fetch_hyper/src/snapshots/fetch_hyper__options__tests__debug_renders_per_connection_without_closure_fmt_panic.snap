@@ -1,0 +1,7 @@
+---
+source: crates/fetch_hyper/src/options.rs
+expression: lifetime
+---
+PerConnection(
+    <closure>,
+)
