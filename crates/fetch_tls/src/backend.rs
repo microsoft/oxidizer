@@ -44,7 +44,7 @@ pub enum TlsBackend {
 /// these defaults.
 ///
 /// In addition to backend-specific defaults, `TlsBackendDefaults` carries
-/// the *default backend selection* used by [`TlsOptions::default`] (and
+/// the *default backend selection* used by [`TlsOptions::default`](super::TlsOptions::default) (and
 /// any other [`TlsOptions`](super::TlsOptions) that did not pin a backend).
 /// Use [`TlsBackendDefaults::defaults_to_rustls`] or
 /// [`TlsBackendDefaults::defaults_to_native_tls`] to set it explicitly;
