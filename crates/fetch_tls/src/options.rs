@@ -36,8 +36,20 @@ pub(crate) enum TlsOptionsKind {
 
 /// TLS configuration for an HTTP client.
 ///
-/// Use [`TlsOptions::builder_rustls`] or [`TlsOptions::builder_native_tls`]
-/// to configure a backend from scratch, or convert from a pre-built
+/// For most callers, [`TlsOptions::new_rustls`] and
+/// [`TlsOptions::new_native_tls`] are the simplest way to construct
+/// [`TlsOptions`]: they produce a configuration with appropriate defaults
+/// for the selected backend. When you need to customize the configuration
+/// (for example, to set a client identity, override the server certificate
+/// verifier, or change supported HTTP versions), use the corresponding
+/// builder constructor [`TlsOptions::builder_rustls`] or
+/// [`TlsOptions::builder_native_tls`] instead.
+///
+/// If you do not want to pick a backend yourself, use
+/// [`TlsOptions::default`] to defer that choice to the HTTP client that
+/// adopts `fetch_tls`.
+///
+/// You can also convert from a pre-built
 /// [`rustls::ClientConfig`](::rustls::ClientConfig) /
 /// [`native_tls::TlsConnector`](::native_tls::TlsConnector) via
 /// [`From`]/[`Into`] to wrap a backend you have already built.
@@ -52,7 +64,7 @@ pub(crate) enum TlsOptionsKind {
 /// # #[cfg(feature = "rustls")] {
 /// use fetch_tls::TlsOptions;
 ///
-/// let tls = TlsOptions::builder_rustls().build();
+/// let tls = TlsOptions::new_rustls();
 /// # }
 /// ```
 ///
@@ -63,7 +75,7 @@ pub(crate) enum TlsOptionsKind {
 /// # #[cfg(feature = "native-tls")] {
 /// use fetch_tls::TlsOptions;
 ///
-/// let tls = TlsOptions::builder_native_tls().build();
+/// let tls = TlsOptions::new_native_tls();
 /// # }
 /// ```
 #[derive(Debug, Clone)]
