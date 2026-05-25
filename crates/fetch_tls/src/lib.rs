@@ -18,9 +18,13 @@
 //! The core type is [`TlsOptions`], a backend-agnostic description of a TLS
 //! client configuration. It can be constructed in a few ways:
 //!
-//! - **Explicit backend selection** — use [`TlsOptions::builder_rustls`] or
-//!   [`TlsOptions::builder_native_tls`] (via [`TlsOptionsBuilder`]) when the
-//!   consumer specifically wants `rustls` or `native-tls`.
+//! - **Explicit backend selection** — use [`TlsOptions::new_rustls`] or
+//!   [`TlsOptions::new_native_tls`] when the consumer specifically wants
+//!   `rustls` or `native-tls`. For additional customization (client
+//!   identity, custom verifier, supported HTTP versions, etc.), use the
+//!   corresponding builders [`TlsOptions::builder_rustls`] /
+//!   [`TlsOptions::builder_native_tls`] (which return a
+//!   [`TlsOptionsBuilder`]).
 //! - **Wrapping a pre-built configuration** — convert an existing
 //!   [`rustls::ClientConfig`](::rustls::ClientConfig) or
 //!   [`native_tls::TlsConnector`](::native_tls::TlsConnector) into a

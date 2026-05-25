@@ -1,12 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Test helpers for downstream crates and `fetch_tls`'s own tests.
+//! Test helpers used by `fetch_tls`'s own unit tests.
 //!
-//! Available when the `test-util` Cargo feature is enabled, or when the
-//! crate is compiled with `cfg(test)`. These helpers are **not** intended
-//! for use in production code paths — they accept any certificate and
-//! never present a client certificate.
+//! Compiled only under `cfg(test)`. These helpers are **not** intended for
+//! production code paths — they accept any server certificate and never
+//! present a client certificate.
 
 use std::sync::Arc;
 
