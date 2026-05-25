@@ -104,7 +104,7 @@ where
 /// // performs expensive certificate/store initialization, so we skip it
 /// // here with `unreachable!()` — the async function below is never
 /// // actually called.
-/// let tls: TlsBackend = unreachable!("doc example; never invoked");
+/// let tls: fetch_tls::TlsBackend = unreachable!("doc example; never invoked");
 ///
 /// let transport: HyperTransport = HyperTransportBuilder::new(
 ///     Execute::new(connect),
