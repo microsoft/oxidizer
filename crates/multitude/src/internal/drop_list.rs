@@ -190,6 +190,37 @@ pub(crate) unsafe fn drop_shim_slice<T>(value: *mut u8, len: usize) {
     unsafe { core::ptr::drop_in_place::<[T]>(slice) };
 }
 
+/// Drop guard used to force-abort the process if a wrapped `T::Drop`
+/// invocation unwinds during `replay_drops`. Under `no_std` there is
+/// no `core::panic::catch_unwind` (it's `std`-only) and
+/// `core::panic::abort_unwind` is unstable, so the only way to keep
+/// chunk reclamation correct in the face of a panicking `T::Drop` is
+/// to abort the process via double-panic (panic-in-drop while already
+/// unwinding causes `panic = unwind` to abort). For `panic = abort`
+/// builds, the original panic itself already aborts and this guard is
+/// never observed.
+///
+/// The caller is expected to `core::mem::forget(guard)` after a
+/// successful drop-shim call to suppress the destructor.
+///
+/// The type and its `Drop` are compiled unconditionally so the abort
+/// semantics are testable under `std` builds via
+/// `std::panic::catch_unwind`; only the in-tree call sites are
+/// gated on `not(feature = "std")`.
+#[cfg_attr(feature = "std", allow(dead_code, reason = "exercised via tests; live call sites are no_std-only"))]
+pub(crate) struct AbortOnUnwind;
+
+impl Drop for AbortOnUnwind {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)] // Fatal-abort path: double-panic terminates the process, untestable in-process.
+    fn drop(&mut self) {
+        #[expect(clippy::panic, reason = "fatal-path abort: double-panic forces process termination")]
+        {
+            panic!("multitude: T::Drop panicked during replay_drops; aborting to prevent chunk leak");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +284,19 @@ mod tests {
         let expected = raw.div_ceil(fn_align) * fn_align;
         assert_eq!(mem::size_of::<DropEntry>(), expected);
         assert_eq!(mem::align_of::<DropEntry>(), fn_align);
+    }
+
+    /// Dropping an `AbortOnUnwind` guard must panic — that is what
+    /// turns a panicking `T::Drop` during `replay_drops` into a
+    /// double-panic process abort under `no_std`. We assert the
+    /// `Drop` impl panics; a mutant that replaces the body with `()`
+    /// would let `catch_unwind` return `Ok` and fail this test.
+    #[cfg(feature = "std")]
+    #[test]
+    fn abort_on_unwind_drop_panics() {
+        let result = std::panic::catch_unwind(|| {
+            let _guard = AbortOnUnwind;
+        });
+        assert!(result.is_err(), "AbortOnUnwind::drop must panic");
     }
 }

@@ -38,8 +38,12 @@ pub const MAX_CHUNK_BYTES: usize = 65_536;
 /// [`MIN_CHUNK_BYTES`] up to [`MAX_CHUNK_BYTES`] inclusive).
 pub const NUM_CHUNK_CLASSES: u8 = 8;
 
-/// Largest "normal" allocation request. Requests strictly larger than
-/// this go to the oversized one-shot chunk path and are never cached.
+/// Default value of the per-arena `max_normal_alloc` knob (see
+/// [`crate::ArenaBuilder::max_normal_alloc`]). Drives the
+/// chunk-acquisition decision in [`crate::Arena`]'s slow paths:
+/// requests strictly larger than this trigger a one-shot oversized
+/// chunk *when a new chunk is needed*, but do not preempt the
+/// bump-fast-path when the current chunk already has the tail space.
 pub const MAX_NORMAL_ALLOC: usize = 16 * 1024;
 
 /// Minimum permitted value of the `max_normal_alloc` builder knob.

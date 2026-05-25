@@ -110,12 +110,22 @@ impl<A: Allocator + Clone> Arena<A> {
             }
 
             // Persist the mirrored drop count back into the chunk.
+            // `mirror_dc` (back-stack distance) is the source of truth;
+            // `chunk_dc` is a redundant counter maintained by
+            // `bump_*_drop_count`. They must agree (and the
+            // debug_assert catches divergence in debug builds). We
+            // store `mirror_dc` unconditionally: if a future regression
+            // ever caused `chunk_dc > mirror_dc`, taking `.max()` would
+            // make `replay_drops` walk past the last written entry and
+            // call a garbage `drop_fn` — much worse than under-replay
+            // (which only leaks `T::drop`).
             // SAFETY: chunk held the LARGE inflation while current.
             unsafe {
                 let mirror_dc = self.current_local.drop_count(prev);
                 let chunk_dc = (*prev.as_ptr()).drop_count.get();
                 debug_assert_eq!(mirror_dc, chunk_dc, "drop_count mirror diverged from on-chunk counter");
-                (*prev.as_ptr()).drop_count.set(mirror_dc.max(chunk_dc));
+                let _ = chunk_dc;
+                (*prev.as_ptr()).drop_count.set(mirror_dc);
             }
 
             // Snapshot the per-tenure counters, then clear the mirror

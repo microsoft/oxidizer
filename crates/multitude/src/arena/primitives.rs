@@ -101,9 +101,16 @@ impl<A: Allocator + Clone> Arena<A> {
         let align = layout.align().max(1);
         let bumped = layout.size().max(1);
 
-        // Single bump-fit probe. The `max_normal_alloc` check and the
-        // refill loop are deferred to the cold slow path so the hot
-        // path avoids a 2-level pointer chase through `Arc<ChunkProvider>`.
+        // Single bump-fit probe against the currently-installed chunk.
+        // `max_normal_alloc` gates *chunk acquisition*, not the bump
+        // probe itself: if a large request happens to fit in the tail
+        // of the chunk we already have (e.g. one grown via
+        // `with_capacity_local` or the high-water ratchet), we satisfy
+        // it from there rather than waste that paid-for space. The
+        // oversized-routing decision lives in the slow path where it
+        // is only reached after the bump miss — and where it also
+        // avoids a two-level pointer chase through `Arc<ChunkProvider>`
+        // on the hot path.
         let data_ptr = self.current_local.data_ptr.get();
         let drop_back_ptr = self.current_local.drop_back.get();
         let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
@@ -124,8 +131,12 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cold]
     #[inline(never)]
     fn allocate_layout_slow(&self, layout: Layout) -> Result<NonNull<u8>, AllocError> {
-        // Requests above `max_normal_alloc` go through a one-shot oversized
-        // chunk and leave `deallocate` the matching `+1` to release.
+        // We're here because the current chunk could not satisfy the
+        // request. At chunk-acquisition time, requests above
+        // `max_normal_alloc` go through a one-shot oversized chunk
+        // (never cached) and leave `deallocate` the matching `+1` to
+        // release. A request below the threshold instead drives the
+        // refill loop below to install a fresh normal chunk.
         if layout.size() > self.provider.max_normal_alloc {
             return self.allocate_oversized_layout(layout);
         }
@@ -199,8 +210,9 @@ impl<A: Allocator + Clone> Arena<A> {
         let align = layout.align().max(1);
         let bumped = layout.size().max(1);
 
-        // Single bump-fit probe; oversized routing and refill are
-        // deferred to the cold slow path.
+        // Single bump-fit probe against the currently-installed chunk;
+        // see [`Self::allocate_layout`] for why oversized routing is
+        // *not* checked here.
         let data_ptr = self.current_shared.data_ptr.get();
         let drop_back_ptr = self.current_shared.drop_back.get();
         let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
@@ -220,6 +232,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cold]
     #[inline(never)]
     fn allocate_shared_layout_slow(&self, layout: Layout) -> Result<NonNull<u8>, AllocError> {
+        // We're here because the current shared chunk could not satisfy
+        // the request — at chunk-acquisition time, requests above
+        // `max_normal_alloc` get a one-shot oversized chunk that
+        // bypasses the cache. See [`Self::allocate_layout_slow`].
         if layout.size() > self.provider.max_normal_alloc {
             return self.allocate_shared_oversized_layout(layout);
         }

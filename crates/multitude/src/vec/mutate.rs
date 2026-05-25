@@ -14,11 +14,12 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Increment `self.len` by one. Extracted so the `+=` operator on
     /// the length cursor inside the `resize` / `resize_with` loops is
     /// not mutated to `*=`: that mutation degenerates to `len = len * 1`,
-    /// freezing the loop counter at zero and turning every existing
-    /// length-driven test into an infinite loop (which `cargo-mutants`
-    /// then reports as a TIMEOUT instead of a fast kill). Skipping
-    /// mutation on this one-line helper preserves coverage of every
-    /// other mutation in the callers.
+    /// freezing the loop counter at its current value and turning the
+    /// length-driven loops here into infinite loops (which
+    /// `cargo-mutants` then reports as a TIMEOUT rather than a fast
+    /// kill, wasting mutation-test budget). Skipping mutation on this
+    /// one-line helper preserves coverage of every other mutation in
+    /// the callers.
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     fn inc_len(&mut self) {
