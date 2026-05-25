@@ -30,7 +30,7 @@ pub enum TlsBackend {
     Rustls(std::sync::Arc<::rustls::ClientConfig>),
 
     /// Platform native TLS backend (`SChannel` on Windows, Security Framework
-    /// on macOS, `OpenSSL` on Linux).
+    /// on `macOS`, `OpenSSL` on Linux).
     #[cfg(any(feature = "native-tls", test))]
     NativeTls(::native_tls::TlsConnector),
 }

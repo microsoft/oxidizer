@@ -28,7 +28,7 @@ Materialize a [`TlsBackend`][__link5] with [`TlsOptions::build_backend`][__link6
   server-certificate verifier) via
   [`TlsBackendDefaults::configure_rustls`][__link8].
 * **`native-tls`** — platform native TLS (`SChannel` on Windows,
-  Security Framework on macOS, `OpenSSL` on Linux).
+  Security Framework on `macOS`, `OpenSSL` on Linux).
 
 With neither feature enabled, [`TlsOptions::default`][__link9] still constructs but
 [`TlsOptions::build_backend`][__link10] returns a [`BackendError`][__link11].
@@ -39,7 +39,7 @@ With neither feature enabled, [`TlsOptions::default`][__link9] still constructs 
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5v6WTZghmSAG4j_vIHk7ZKvG5ohFGVWsHijGw5WtRenFKqdYWSDgmlmZXRjaF90bHNlMC4xLjCCam5hdGl2ZV90bHNmMC4yLjE4gmZydXN0bHNnMC4yMy40MA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2t4QyKGZLjOGzG3afJHTM1YG1p0yPzfBpVtG_wKLWa2KlkuYWSDgmlmZXRjaF90bHNlMC4xLjCCam5hdGl2ZV90bHNmMC4yLjE4gmZydXN0bHNnMC4yMy40MA
  [__link0]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::builder_rustls
  [__link10]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::build_backend

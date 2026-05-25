@@ -3,7 +3,7 @@
 
 //! Backend-agnostic `mTLS` client identity.
 //!
-//! [`ClientIdentity`] holds a DER-encoded certificate chain and private key
+//! [`ClientIdentity`] holds a `DER`-encoded certificate chain and private key
 //! and is consumed by both backends, so `mTLS` is configured the same way
 //! regardless of which backend is selected.
 
@@ -19,7 +19,7 @@ pub struct ClientIdentityError;
 ///
 /// Holds the client certificate chain and private key presented during the
 /// TLS handshake. The same value works with either backend; each one
-/// converts the contained DER bytes into its own internal form.
+/// converts the contained `DER` bytes into its own internal form.
 ///
 /// # Example
 ///
@@ -51,7 +51,7 @@ impl Clone for ClientIdentity {
 }
 
 impl ClientIdentity {
-    /// Creates a client identity from PEM-encoded certificate and private key.
+    /// Creates a client identity from `PEM`-encoded certificate and private key.
     ///
     /// `cert_pem` may contain one or more certificates (leaf first, then
     /// intermediates). `key_pem` must contain exactly one private key
@@ -62,7 +62,7 @@ impl ClientIdentity {
     ///
     /// # Errors
     ///
-    /// Returns an error if either input is not valid PEM.
+    /// Returns an error if either input is not valid `PEM`.
     pub fn from_pem(cert_pem: &[u8], key_pem: &[u8]) -> Result<Self, ClientIdentityError> {
         let cert_chain: Vec<rustls_pki_types::CertificateDer<'static>> = rustls_pki_types::CertificateDer::pem_slice_iter(cert_pem)
             .collect::<Result<_, _>>()
@@ -71,15 +71,15 @@ impl ClientIdentity {
         Ok(Self { cert_chain, private_key })
     }
 
-    /// Creates a client identity from DER-encoded certificate and private key.
+    /// Creates a client identity from `DER`-encoded certificate and private key.
     ///
     /// `cert_chain` is leaf-first; `key_der` must be a `PKCS#8`-encoded
     /// private key.
     #[must_use]
-    pub fn from_der<I, DER>(cert_chain: I, key_der: DER) -> Self
+    pub fn from_der<I, B>(cert_chain: I, key_der: B) -> Self
     where
-        I: IntoIterator<Item = DER>,
-        DER: AsRef<[u8]>,
+        I: IntoIterator<Item = B>,
+        B: AsRef<[u8]>,
     {
         let cert_chain = cert_chain
             .into_iter()
@@ -104,7 +104,7 @@ impl ClientIdentity {
 
     /// Builds a [`native_tls::Identity`] from this client identity.
     ///
-    /// Re-encodes the DER components as PEM and feeds them to
+    /// Re-encodes the `DER` components as `PEM` and feeds them to
     /// [`native_tls::Identity::from_pkcs8`], the format supported across all
     /// platform backends. Fails if the private key is not `PKCS#8` or if the
     /// platform native TLS implementation rejects the material.
@@ -133,7 +133,7 @@ impl ClientIdentity {
     }
 }
 
-/// Writes a PEM-encoded object to `out`.
+/// Writes a `PEM`-encoded object to `out`.
 ///
 /// Format per `RFC 7468`: a textual `-----BEGIN <label>-----` line, the body
 /// as `base64` broken into 64-character lines, and a matching

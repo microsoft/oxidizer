@@ -21,7 +21,7 @@
 //!   server-certificate verifier) via
 //!   [`TlsBackendDefaults::configure_rustls`].
 //! - **`native-tls`** — platform native TLS (`SChannel` on Windows,
-//!   Security Framework on macOS, `OpenSSL` on Linux).
+//!   Security Framework on `macOS`, `OpenSSL` on Linux).
 //!
 //! With neither feature enabled, [`TlsOptions::default`] still constructs but
 //! [`TlsOptions::build_backend`] returns a [`BackendError`].
