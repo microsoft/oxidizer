@@ -354,7 +354,12 @@ impl<A: Allocator + Clone> LocalChunk<A> {
             // Isolate each call (when `std` is available) so a panicking
             // `T::Drop` doesn't abort the chunk reclamation path — at
             // worst we leak that value's resources; the chunk itself
-            // still gets freed.
+            // still gets freed. Under `no_std` an unwinding `T::Drop`
+            // forces a process abort via the `AbortOnUnwind` guard
+            // below (consistent with `core` semantics under
+            // `panic = abort`; for `panic = unwind` builds, this
+            // prevents the panic from leaking the chunk by
+            // propagating out past `route_release`).
             #[cfg(feature = "std")]
             {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -364,8 +369,10 @@ impl<A: Allocator + Clone> LocalChunk<A> {
             }
             #[cfg(not(feature = "std"))]
             {
+                let abort_guard = crate::internal::drop_list::AbortOnUnwind;
                 // SAFETY: drop-shim invariant.
                 unsafe { f(value_ptr, entry.len as usize) };
+                core::mem::forget(abort_guard);
             }
         }
     }

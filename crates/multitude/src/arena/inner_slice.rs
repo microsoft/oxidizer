@@ -28,7 +28,10 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// This mirrors [`Self::try_alloc_inner_oversized_with`] but keeps
     /// oversized chunks out of `current_local`, preserving the
-    /// chunk-header mask invariant.
+    /// chunk-header mask invariant. Slice slow paths route requests
+    /// here after a bump-fit miss when `layout.size() > max_normal_alloc`
+    /// (i.e. a fresh chunk would otherwise be needed and the request
+    /// is too large for a normal one).
     #[cold]
     #[inline(never)]
     pub(super) fn try_alloc_slice_local_oversized_with<T, F>(
@@ -104,9 +107,21 @@ impl<A: Allocator + Clone> Arena<A> {
                 // SAFETY: `entry_size > 0` implies `drop_fn.is_some()`.
                 unsafe { drop_fn.unwrap_unchecked() }
             };
-            let value_offset_u16 = u16::try_from(aligned)
-                .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX");
-            let len_u16 = u16::try_from(len).expect("guarded above: entry_size > 0 implies len ≤ u16::MAX");
+            // Bound: `aligned < layout.align() ≤ MAX_SMART_PTR_ALIGN < u16::MAX` for
+            // drop-aware paths; the `len ≤ u16::MAX` invariant is enforced by the
+            // `entry_size != 0 && len > u16::MAX` guard at the top of this function.
+            // We must NOT panic here: `core::mem::forget(init_guard)` above committed
+            // the initialized slice; a panic past that point would skip element drops
+            // while `chunk_guard` still frees the backing on unwind.
+            debug_assert!(u16::try_from(aligned).is_ok() && u16::try_from(len).is_ok());
+            // SAFETY: precondition asserted via the bound chain above.
+            unsafe { core::hint::assert_unchecked(u16::try_from(aligned).is_ok()) };
+            // SAFETY: same.
+            unsafe { core::hint::assert_unchecked(u16::try_from(len).is_ok()) };
+            // SAFETY: preconditions asserted above; conversions have no panic surface.
+            let value_offset_u16 = unsafe { u16::try_from(aligned).unwrap_unchecked() };
+            // SAFETY: see comment above.
+            let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
             let entry = InnerDropEntry::new(installed_drop_fn, value_offset_u16, len_u16);
             // SAFETY: payload-extent invariant.
             unsafe { core::ptr::write(entry_ptr, entry) };
@@ -138,9 +153,10 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Cold one-shot oversized-allocation path for shared-flavor (Arc) slices.
     ///
     /// Mirror of [`Self::try_alloc_inner_arc_oversized_with`] for the
-    /// slice case. Slice fast paths delegate here whenever
-    /// `layout.size() > max_normal_alloc` to avoid routing the
-    /// oversized shared chunk through `current_shared`.
+    /// slice case. Slice slow paths route requests here after a
+    /// bump-fit miss when `layout.size() > max_normal_alloc` (a request
+    /// that fits in the current chunk's tail is satisfied directly and
+    /// never reaches this function).
     #[inline(never)]
     pub(super) fn try_alloc_slice_shared_oversized_with<T, F>(
         &self,
@@ -204,9 +220,19 @@ impl<A: Allocator + Clone> Arena<A> {
             let entry_ptr = unsafe { data_ptr.as_ptr().add(new_drop_back).cast::<InnerDropEntry>() };
             // SAFETY: `entry_size > 0` implies `drop_fn.is_some()`.
             let installed_drop_fn = unsafe { drop_fn.unwrap_unchecked() };
-            let value_offset_u16 = u16::try_from(aligned)
-                .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX");
-            let len_u16 = u16::try_from(len).expect("guarded above: entry_size > 0 implies len ≤ u16::MAX");
+            // See the local sibling for why these must not be a panic
+            // surface: `core::mem::forget(init_guard)` above already
+            // committed the initialized slice.
+            debug_assert!(u16::try_from(aligned).is_ok() && u16::try_from(len).is_ok());
+            // SAFETY: `aligned < layout.align() ≤ MAX_SMART_PTR_ALIGN < u16::MAX`.
+            unsafe { core::hint::assert_unchecked(u16::try_from(aligned).is_ok()) };
+            // SAFETY: the `entry_size != 0 && len > u16::MAX` guard at the top of
+            // this function already excluded `len > u16::MAX`.
+            unsafe { core::hint::assert_unchecked(u16::try_from(len).is_ok()) };
+            // SAFETY: preconditions asserted above; conversions have no panic surface.
+            let value_offset_u16 = unsafe { u16::try_from(aligned).unwrap_unchecked() };
+            // SAFETY: see comment above.
+            let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
             let entry = InnerDropEntry::new(installed_drop_fn, value_offset_u16, len_u16);
             // SAFETY: payload-extent invariant.
             unsafe { core::ptr::write(entry_ptr, entry) };
@@ -320,11 +346,13 @@ impl<A: Allocator + Clone> Arena<A> {
             }
             return Err(AllocError);
         }
-        // Route oversized requests to the cold one-shot path so we
-        // never install a >64 KiB-payload chunk as `current_local`
-        // (would break the chunk-recovery mask invariant).
-        // Deferred to the slow path to keep the hot bump-fit
-        // iteration free of a 2-level pointer chase through
+        // Oversized routing happens in the slow path (post-bump-miss),
+        // not here: `max_normal_alloc` gates *chunk acquisition*, so a
+        // request that fits in the current chunk's tail (e.g. when
+        // `with_capacity_local` / the high-water ratchet has grown
+        // `current_local` past `max_normal_alloc`) is satisfied
+        // directly. Doing the routing post-miss also keeps the hot
+        // bump-fit iteration free of a 2-level pointer chase through
         // `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
@@ -376,11 +404,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (value_offset, len_u16) = if entry_size > 0 {
                         // SAFETY: refcount-positive — chunk held at LARGE inflation.
                         let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-                        // Fast path is gated on `layout.size() <= max_normal_alloc <= MAX_CHUNK_BYTES`,
-                        // so any aligned offset within the chunk payload is < 64 KiB and fits in `u16`.
-                        // Same for `len_u16`: the `entry_size != 0 && len > u16::MAX` guard above
-                        // already excluded `len > u16::MAX`.
-                        // SAFETY: bounded by fast-path invariants (chunk payload < 64 KiB; len <= u16::MAX).
+                        // Bump-fit success means the allocation lands
+                        // inside the current chunk, whose bump extent
+                        // is capped at `max_bump_extent <= MAX_CHUNK_BYTES`
+                        // (< u16::MAX), so any aligned offset within
+                        // it fits in `u16`. `len_u16` is bounded by
+                        // the `entry_size != 0 && len > u16::MAX`
+                        // guard at the top of the function.
+                        // SAFETY: bounded by current-chunk extent.
                         let value_offset = unsafe { u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).unwrap_unchecked() };
                         // SAFETY: gated by `len > u16::MAX` check earlier in this function.
                         let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
@@ -445,8 +476,10 @@ impl<A: Allocator + Clone> Arena<A> {
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
             }
-            // Route oversized requests to the cold one-shot path
-            // so we never install a >64 KiB chunk as `current_local`.
+            // Bump-fit missed and we'd need a fresh chunk: oversized
+            // requests get a dedicated one-shot chunk at acquisition
+            // time so we never install a >64 KiB chunk as
+            // `current_local`.
             if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
                 let r = self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, drop_fn, init);
                 return if PANIC { Ok(expect_alloc(r)) } else { r };
@@ -526,9 +559,12 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError);
         }
         // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        // The `max_normal_alloc` check is deferred to the cold slow
-        // path to keep the hot bump-fit probe free of a 2-level
-        // pointer chase through `Arc<ChunkProvider>`.
+        // `max_normal_alloc` gates *chunk acquisition* in the slow
+        // path, not the bump probe: a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold (see the slow path below). Doing the
+        // check post-miss also keeps the hot bump-fit probe free of a
+        // 2-level pointer chase through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
 
         // Fast path: single bump-check; on miss, take the cold refill loop.
@@ -613,8 +649,9 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize, &mut MaybeUninit<T>),
     {
         let _ = bumped;
-        // Route oversized requests to the one-shot path (deferred
-        // from the hot path to avoid a provider pointer chase).
+        // Bump-fit missed — we'd need a fresh chunk. Oversized
+        // requests get a dedicated one-shot chunk at acquisition
+        // time rather than driving the refill loop.
         if layout.size() > self.provider.max_normal_alloc {
             return self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, None, init);
         }
@@ -672,10 +709,14 @@ impl<A: Allocator + Clone> Arena<A> {
         }
         let bumped = layout.size().max(1);
 
-        // Fast path: single-branch fit check; on miss, cold slow path
-        // handles both oversized routing and refill-retry. The
-        // `max_normal_alloc` check is deferred to the slow path so the
-        // hot loop avoids a 2-level pointer chase through `Arc<ChunkProvider>`.
+        // Fast path: single-branch fit check against the currently-
+        // installed chunk. On miss, the cold slow path decides between
+        // oversized routing and refill-retry. `max_normal_alloc` gates
+        // *chunk acquisition* only, so a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold. Doing the check post-miss also keeps
+        // the hot loop free of a 2-level pointer chase through
+        // `Arc<ChunkProvider>`.
         let data_ptr = self.current_local.data_ptr.get();
         let drop_back_ptr = self.current_local.drop_back.get();
         let __fit = try_bump_fit(
@@ -741,9 +782,9 @@ impl<A: Allocator + Clone> Arena<A> {
         bumped: usize,
     ) -> Result<NonNull<[T]>, AllocError> {
         let len = src.len();
-        // Route oversized allocations to the one-shot path. This check
-        // was deferred from the hot path to avoid a 2-level pointer
-        // chase through `Arc<ChunkProvider>` on every iteration.
+        // Bump-fit missed and we'd need a fresh chunk. Oversized
+        // requests get a one-shot oversized chunk; sub-threshold
+        // requests drive the refill loop below.
         if layout.size() > self.provider.max_normal_alloc {
             return self.try_alloc_slice_local_oversized_with::<T, _>(len, flavor, None, |i, slot| {
                 slot.write(src[i]);
@@ -838,10 +879,12 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError);
         }
         let bumped = layout.size().max(1);
-        // Fast path: single-branch fit check; on miss, cold slow path
-        // handles both oversized routing and refill-retry. The
-        // `max_normal_alloc` check is deferred to the slow path so the
-        // hot loop avoids a 2-level pointer chase through `Arc<ChunkProvider>`.
+        // Fast path: single-branch fit check against the currently-
+        // installed shared chunk. On miss, the cold slow path decides
+        // between oversized routing and refill-retry. `max_normal_alloc`
+        // gates *chunk acquisition* only, so a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold (mirror of the local sibling).
         let data_ptr = self.current_shared.data_ptr.get();
         let drop_back_ptr = self.current_shared.drop_back.get();
         let __fit = try_bump_fit(data_ptr, drop_back_ptr, layout.align().max(1), bumped, 0);
@@ -883,8 +926,8 @@ impl<A: Allocator + Clone> Arena<A> {
         bumped: usize,
     ) -> Result<NonNull<[T]>, AllocError> {
         let len = src.len();
-        // Route oversized allocations to the one-shot path. Deferred
-        // from the hot path (see `try_alloc_slice_shared_copy`).
+        // Bump-fit missed — pick between oversized one-shot chunk and
+        // a normal refill, just like the local sibling.
         if layout.size() > self.provider.max_normal_alloc {
             return self.try_alloc_slice_shared_oversized_with::<T, _>(len, None, |i, slot| {
                 slot.write(src[i]);
@@ -969,10 +1012,12 @@ impl<A: Allocator + Clone> Arena<A> {
             }
             return Err(AllocError);
         }
-        // Route oversized requests to the cold one-shot path.
-        // Deferred to the slow path to keep the hot bump-fit
-        // iteration free of a 2-level pointer chase through
-        // `Arc<ChunkProvider>`.
+        // `max_normal_alloc` gates *chunk acquisition*, not the bump
+        // probe: a request that fits in the current shared chunk's
+        // tail is satisfied directly. Oversized routing happens
+        // post-miss (see the bottom of the loop), which also keeps
+        // the hot bump-fit iteration free of a 2-level pointer chase
+        // through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
             let data_ptr = self.current_shared.data_ptr.get();
@@ -1071,8 +1116,10 @@ impl<A: Allocator + Clone> Arena<A> {
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
             }
-            // Route oversized requests to the cold one-shot path
-            // so we never install a >64 KiB chunk as `current_shared`.
+            // Bump-fit missed and we'd need a fresh chunk: oversized
+            // requests get a dedicated one-shot shared chunk at
+            // acquisition time so we never install a >64 KiB chunk as
+            // `current_shared`.
             if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
                 let r = self.try_alloc_slice_shared_oversized_with::<T, F>(len, drop_fn, init);
                 return if PANIC { Ok(expect_alloc(r)) } else { r };
@@ -1143,9 +1190,11 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError);
         }
         // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        // The `max_normal_alloc` check is deferred to the cold refill
-        // branch to keep the hot bump-fit probe free of a 2-level
-        // pointer chase through `Arc<ChunkProvider>`.
+        // `max_normal_alloc` gates *chunk acquisition* (the post-miss
+        // branch below), not the bump probe: a request that fits in
+        // the current shared chunk's tail is satisfied directly. The
+        // post-miss placement also keeps the hot bump-fit probe free
+        // of a 2-level pointer chase through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
             let data_ptr = self.current_shared.data_ptr.get();
@@ -1185,8 +1234,8 @@ impl<A: Allocator + Clone> Arena<A> {
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
             }
-            // Route oversized requests to the cold one-shot path
-            // (deferred from above the loop to avoid a provider pointer chase).
+            // Bump-fit missed; oversized requests get a one-shot
+            // shared chunk at acquisition time.
             if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
                 let r = self.try_alloc_slice_shared_oversized_with::<T, F>(len, None, init);
                 return if PANIC { Ok(expect_alloc(r)) } else { r };

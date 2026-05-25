@@ -46,8 +46,13 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// after the provider has been dropped.
     pub(crate) allocator: A,
 
-    /// Per-arena `max_normal_alloc` knob: requests strictly larger
-    /// than this take the oversized-chunk path.
+    /// Per-arena `max_normal_alloc` knob: at chunk-acquisition time, a
+    /// request strictly larger than this threshold causes
+    /// `acquire_local`/`acquire_shared` to hand back a one-shot
+    /// oversized chunk (never cached). It does **not** prevent an
+    /// already-installed `current_*` chunk from satisfying a
+    /// larger-than-threshold request from its tail — see
+    /// [`crate::ArenaBuilder::max_normal_alloc`] for the rationale.
     pub(crate) max_normal_alloc: usize,
 
     /// Optional lifetime cap on total chunk bytes outstanding (live +
@@ -128,25 +133,43 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     fn reserve_budget(&self, bytes: usize) -> Result<(), AllocError> {
         // Single-writer per provider: `reserve_budget` only runs on
         // the arena's owning thread. `release_budget` runs on any
-        // thread (cross-thread `Arc::drop`). Pair the cross-thread
-        // sub's Release with our Acquire load so a budget release on
-        // a remote core is promptly visible here, avoiding spurious
-        // `AllocError`s on weakly-ordered targets.
-        if let Some(budget) = self.byte_budget {
-            let current = self.total_chunk_bytes.load(Ordering::Acquire);
-            let next = current.checked_add(bytes).ok_or(AllocError)?;
-            if next > budget {
-                return Err(AllocError);
-            }
+        // thread (cross-thread `Arc::drop`).
+        //
+        // Speculative-add then rollback on overflow. A prior `load +
+        // check + fetch_add` shape had a TOCTOU window between the
+        // load and the add: a concurrent `release_budget` `fetch_sub`
+        // on a remote thread could let the load observe a stale
+        // (too-high) value, causing a false rejection of an
+        // allocation that actually fits. By committing the add first
+        // we eliminate the window — overflow simply rolls the value
+        // back. AcqRel pairs with `release_budget`'s Release so the
+        // post-add value reflects all completed releases.
+        let Some(budget) = self.byte_budget else {
+            self.total_chunk_bytes.fetch_add(bytes, Ordering::Relaxed);
+            return Ok(());
+        };
+        let prev = self.total_chunk_bytes.fetch_add(bytes, Ordering::AcqRel);
+        // Single-writer for `reserve_budget` means `prev + bytes` cannot
+        // overflow in a way the sub can't undo: even if the addition
+        // wraps `usize`, the matching `fetch_sub` below restores the
+        // original value before any other reader observes the rollback
+        // (releases only ever decrement). Reject regardless on either
+        // wraparound or budget overrun.
+        let next = prev.wrapping_add(bytes);
+        if next < prev || next > budget {
+            // Release: pair with any subsequent reader that may
+            // observe the rolled-back value.
+            self.total_chunk_bytes.fetch_sub(bytes, Ordering::Release);
+            return Err(AllocError);
         }
-        self.total_chunk_bytes.fetch_add(bytes, Ordering::Relaxed);
         Ok(())
     }
 
     /// Release `bytes` from the lifetime byte budget tracker.
     fn release_budget(&self, bytes: usize) {
         // Release so a subsequent owner-thread `reserve_budget`
-        // Acquire load sees the decrement.
+        // `fetch_add(AcqRel)` observes the decrement and admits the
+        // freed budget on the next reservation.
         self.total_chunk_bytes.fetch_sub(bytes, Ordering::Release);
     }
 
@@ -155,8 +178,13 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// The returned [`NonNull`] holds a `+1` on the chunk's refcount;
     /// the caller owns that hold.
     ///
-    /// Requests strictly larger than [`MAX_NORMAL_ALLOC`] get a
-    /// one-shot oversized chunk and leave the high-water mark untouched.
+    /// `min_payload > self.max_normal_alloc` at acquisition time
+    /// triggers a one-shot oversized chunk sized exactly to the
+    /// request (plus header + drop-list rounding); it bypasses the
+    /// cache and leaves the high-water mark untouched. Note that this
+    /// only governs the case where the caller actually needs a fresh
+    /// chunk — large requests that fit in the tail of `current_local`
+    /// are satisfied without ever reaching this function.
     #[cfg_attr(test, mutants::skip)] // Chunk-class clamp mutations still choose a class that satisfies the request.
     pub(crate) fn acquire_local(self: &Arc<Self>, min_payload: usize) -> Result<NonNull<LocalChunk<A>>, AllocError> {
         if min_payload > self.max_normal_alloc {
@@ -615,3 +643,45 @@ impl<A: Allocator + Clone> Drop for ChunkProvider<A> {
 unsafe impl<A: Allocator + Clone + Send + Sync> Send for ChunkProvider<A> {}
 // SAFETY: see the `Send` impl above.
 unsafe impl<A: Allocator + Clone + Send + Sync> Sync for ChunkProvider<A> {}
+
+#[cfg(test)]
+mod tests {
+    use allocator_api2::alloc::Global;
+
+    use super::*;
+
+    /// `reserve_budget` must reject a request whose `prev + bytes`
+    /// wraps `usize`. The seed total is set so `wrapping_add(bytes)`
+    /// produces a value strictly less than `prev`; the budget itself
+    /// is `usize::MAX`, so the only branch that can reject is the
+    /// `next < prev` wraparound check. A mutant replacing `<` with
+    /// `==` makes the wrap case `next == prev` false (they differ),
+    /// the budget check also false (small `next` ≤ `usize::MAX`),
+    /// and `reserve_budget` would erroneously return `Ok`.
+    #[test]
+    fn reserve_budget_rejects_wraparound() {
+        let provider = ChunkProvider::<Global>::new(Global, 4096, Some(usize::MAX), 0, 0);
+        let seed = usize::MAX - 100;
+        provider.total_chunk_bytes.store(seed, Ordering::Relaxed);
+        // 200 + (usize::MAX - 100) wraps to 99.
+        assert!(provider.reserve_budget(200).is_err());
+        // The fetch_sub rollback restores the seeded value.
+        assert_eq!(provider.total_chunk_bytes.load(Ordering::Relaxed), seed);
+    }
+
+    /// A zero-byte reservation under a non-trivial seed must succeed:
+    /// `next == prev` is the no-op fixed point of the `wrapping_add`,
+    /// not a wraparound, and falls within budget. A mutant replacing
+    /// `<` with `<=` on line 159 would erroneously reject this case
+    /// (`next <= prev` would be true), so this test pins the strict
+    /// inequality semantics of the wraparound check.
+    #[test]
+    fn reserve_budget_zero_bytes_succeeds_within_budget() {
+        let provider = ChunkProvider::<Global>::new(Global, 4096, Some(1024), 0, 0);
+        provider.total_chunk_bytes.store(512, Ordering::Relaxed);
+        provider.reserve_budget(0).unwrap();
+        // The counter must be unchanged: `fetch_add(0)` is a no-op
+        // and no rollback should have occurred.
+        assert_eq!(provider.total_chunk_bytes.load(Ordering::Relaxed), 512);
+    }
+}
