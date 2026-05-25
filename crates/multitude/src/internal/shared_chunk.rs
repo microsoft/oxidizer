@@ -283,6 +283,15 @@ impl<A: Allocator + Clone> SharedChunk<A> {
         unsafe { NonNull::new_unchecked(p) }
     }
 
+    /// Safe `&self`-based payload-base accessor. The borrow proves the
+    /// chunk is live, so [`Self::data_ptr`]'s safety condition is met.
+    #[inline]
+    pub(crate) fn data(&self) -> NonNull<u8> {
+        // SAFETY: `&self` proves the chunk is live for at least the
+        // duration of this borrow.
+        unsafe { Self::data_ptr(NonNull::from(self)) }
+    }
+
     /// Atomically bump the refcount. Safe because `&self` proves the
     /// chunk is live (some other party already holds a refcount).
     #[inline]

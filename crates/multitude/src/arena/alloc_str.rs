@@ -257,8 +257,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // SAFETY: refcount-positive — chunk held at LARGE inflation
         // immediately after `acquire_local`.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
-        let data_ptr = unsafe { LocalChunk::<A>::data_ptr(chunk) };
+        let data_ptr = chunk_ref.data();
         // Byte data has `align_of::<u8>() == 1`, so the chunk's
         // `CHUNK_ALIGN`-aligned payload base is trivially aligned for
         // the copy. The provider's `acquire_local(len)` postcondition

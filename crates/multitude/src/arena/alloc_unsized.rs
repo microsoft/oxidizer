@@ -312,8 +312,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let chunk = self.provider.acquire_local(needed)?;
         // SAFETY: chunk live — held at LARGE inflation.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
-        let data_ptr = unsafe { LocalChunk::<A>::data_ptr(chunk) };
+        let data_ptr = chunk_ref.data();
         let cap = chunk_ref.capacity;
         let data_addr = data_ptr.as_ptr() as usize;
         // SAFETY: provider post-condition guarantees the chunk fits.
@@ -376,8 +375,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let chunk = self.provider.acquire_shared(needed)?;
         // SAFETY: chunk live — held at LARGE inflation.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
-        let data_ptr = unsafe { SharedChunk::<A>::data_ptr(chunk) };
+        let data_ptr = chunk_ref.data();
         let cap = chunk_ref.capacity;
         let data_addr = data_ptr.as_ptr() as usize;
         // SAFETY: provider post-condition guarantees the chunk fits.

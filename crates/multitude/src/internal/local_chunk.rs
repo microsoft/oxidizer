@@ -242,6 +242,17 @@ impl<A: Allocator + Clone> LocalChunk<A> {
         unsafe { NonNull::new_unchecked(p) }
     }
 
+    /// Safe `&self`-based payload-base accessor. The borrow proves the
+    /// chunk is live, so [`Self::data_ptr`]'s safety condition is met.
+    /// The returned pointer carries chunk-wide provenance and does
+    /// *not* pin a borrow tag onto the chunk's payload region.
+    #[inline]
+    pub(crate) fn data(&self) -> NonNull<u8> {
+        // SAFETY: `&self` proves the chunk is live for at least the
+        // duration of this borrow.
+        unsafe { Self::data_ptr(NonNull::from(self)) }
+    }
+
     /// Increment the refcount. Safe because `&self` proves the chunk
     /// is live (some other party already holds a +1).
     #[inline]
