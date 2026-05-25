@@ -8,23 +8,57 @@
 
 //! Backend-agnostic TLS configuration for HTTP clients.
 //!
-//! Build a [`TlsOptions`] with [`TlsOptions::builder_rustls`] or
-//! [`TlsOptions::builder_native_tls`], or wrap a pre-built
-//! [`rustls::ClientConfig`](::rustls::ClientConfig) /
-//! [`native_tls::TlsConnector`](::native_tls::TlsConnector) via `From`/`Into`.
-//! Materialize a [`TlsBackend`] with [`TlsOptions::build_backend`].
+//! `fetch_tls` separates *what* TLS behavior a consumer wants from *which*
+//! TLS implementation actually provides it. This lets application code
+//! describe its TLS requirements once and lets the HTTP client (or other
+//! library) decide which backend to materialize at runtime.
+//!
+//! # Overview
+//!
+//! The core type is [`TlsOptions`], a backend-agnostic description of a TLS
+//! client configuration. It can be constructed in a few ways:
+//!
+//! - **Explicit backend selection** — use [`TlsOptions::builder_rustls`] or
+//!   [`TlsOptions::builder_native_tls`] (via [`TlsOptionsBuilder`]) when the
+//!   consumer specifically wants `rustls` or `native-tls`.
+//! - **Wrapping a pre-built configuration** — convert an existing
+//!   [`rustls::ClientConfig`](::rustls::ClientConfig) or
+//!   [`native_tls::TlsConnector`](::native_tls::TlsConnector) into a
+//!   [`TlsOptions`] via `From`/`Into`.
+//! - **Default construction** — [`TlsOptions::default`] produces options
+//!   that do not pin a specific backend; the choice is deferred to the
+//!   library consuming the [`TlsOptions`].
+//!
+//! # User vs. consumer perspective
+//!
+//! From an **end-user / application** perspective, only [`TlsOptions`] and
+//! [`TlsOptionsBuilder`] are relevant. Users describe their TLS requirements
+//! and hand the resulting [`TlsOptions`] to a library (for example, an HTTP
+//! client).
+//!
+//! From a **library / client** perspective that adopts `fetch_tls`, the
+//! [`TlsOptions`] is materialized into a concrete [`TlsBackend`] (backed by
+//! a specific TLS implementation) via [`TlsOptions::build_backend`]. The
+//! library supplies a [`TlsBackendDefaults`] that:
+//!
+//! - provides the information required to actually build the backend (for
+//!   example, a `rustls` crypto provider and server-certificate verifier via
+//!   [`TlsBackendDefaults::configure_rustls`]), and
+//! - decides which backend to use when the [`TlsOptions`] does not pin one
+//!   (i.e. when the consumer does not care about the underlying TLS
+//!   technology).
 //!
 //! # Features
 //!
 //! - **`rustls`** — pure-Rust [`rustls`](::rustls). `fetch_tls` does not
-//!   bundle a crypto provider; the caller supplies one (along with a
-//!   server-certificate verifier) via
+//!   bundle a crypto provider; the adopting library supplies one (along
+//!   with a server-certificate verifier) via
 //!   [`TlsBackendDefaults::configure_rustls`].
 //! - **`native-tls`** — platform native TLS (`SChannel` on Windows,
 //!   Security Framework on `macOS`, `OpenSSL` on Linux).
 //!
-//! With neither feature enabled, [`TlsOptions::default`] still constructs but
-//! [`TlsOptions::build_backend`] returns a [`BackendError`].
+//! With neither feature enabled, [`TlsOptions::default`] still constructs
+//! but [`TlsOptions::build_backend`] returns a [`BackendError`].
 
 mod backend;
 mod options;

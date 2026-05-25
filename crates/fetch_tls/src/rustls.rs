@@ -104,6 +104,17 @@ impl TlsOptions {
             shared: SharedOptions::default(),
         }
     }
+
+    /// Creates [`TlsOptions`] for the rustls backend using default settings.
+    ///
+    /// Equivalent to `TlsOptions::builder_rustls().build()`. The crypto
+    /// provider and server certificate verifier are taken from the
+    /// [`TlsBackendDefaults`](crate::TlsBackendDefaults) passed to
+    /// [`TlsOptions::build_backend`]; use [`TlsOptions::builder_rustls`] when
+    /// you need to override them or supply a client identity resolver.
+    pub fn new_rustls() -> Self {
+        Self::builder_rustls().build()
+    }
 }
 
 /// Wraps a pre-built [`rustls::ClientConfig`] as [`TlsOptions`].
@@ -264,6 +275,13 @@ mod tests {
     fn rustls_build_produces_tls_options() {
         let tls = TlsOptions::builder_rustls().build();
         assert!(matches!(tls.inner, TlsOptionsKind::Rustls(_)));
+    }
+
+    #[test]
+    fn new_rustls_produces_rustls_tls_options() {
+        let tls = TlsOptions::new_rustls();
+        assert!(matches!(tls.inner, TlsOptionsKind::Rustls(_)));
+        assert!(tls.shared.client_identity.is_none());
     }
 
     #[test]

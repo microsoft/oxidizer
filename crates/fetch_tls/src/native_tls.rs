@@ -69,6 +69,16 @@ impl TlsOptions {
             shared: SharedOptions::default(),
         }
     }
+
+    /// Creates [`TlsOptions`] for the platform native TLS backend using
+    /// default settings.
+    ///
+    /// Equivalent to `TlsOptions::builder_native_tls().build()`. Use
+    /// [`TlsOptions::builder_native_tls`] when you need to customize the
+    /// configuration before building.
+    pub fn new_native_tls() -> Self {
+        Self::builder_native_tls().build()
+    }
 }
 
 /// Wraps a pre-built [`native_tls::TlsConnector`] as [`TlsOptions`].
@@ -107,6 +117,13 @@ mod tests {
     fn build_produces_native_tls_options() {
         let tls = TlsOptions::builder_native_tls().build();
         assert!(matches!(tls.inner, TlsOptionsKind::NativeTls(_)));
+    }
+
+    #[test]
+    fn new_native_tls_produces_native_tls_options() {
+        let tls = TlsOptions::new_native_tls();
+        assert!(matches!(tls.inner, TlsOptionsKind::NativeTls(_)));
+        assert!(tls.shared.client_identity.is_none());
     }
 
     #[test]
