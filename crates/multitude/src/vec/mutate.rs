@@ -11,6 +11,20 @@ use allocator_api2::vec::Vec as ApiVec;
 use super::Vec;
 
 impl<T, A: Allocator + Clone> Vec<'_, T, A> {
+    /// Increment `self.len` by one. Extracted so the `+=` operator on
+    /// the length cursor inside the `resize` / `resize_with` loops is
+    /// not mutated to `*=`: that mutation degenerates to `len = len * 1`,
+    /// freezing the loop counter at zero and turning every existing
+    /// length-driven test into an infinite loop (which `cargo-mutants`
+    /// then reports as a TIMEOUT instead of a fast kill). Skipping
+    /// mutation on this one-line helper preserves coverage of every
+    /// other mutation in the callers.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)]
+    fn inc_len(&mut self) {
+        self.len += 1;
+    }
+
     /// Insert `value` at position `idx`, shifting subsequent elements right.
     ///
     /// # Panics
@@ -248,10 +262,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             while guard.vec.len < new_len - 1 {
                 let val = value.clone();
                 unsafe { guard.vec.data.as_ptr().add(guard.vec.len).write(val) };
-                guard.vec.len += 1;
+                guard.vec.inc_len();
             }
             unsafe { guard.vec.data.as_ptr().add(guard.vec.len).write(value) };
-            guard.vec.len += 1;
+            guard.vec.inc_len();
             core::mem::forget(guard);
         }
     }
@@ -288,7 +302,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             while guard.vec.len < new_len {
                 let val = f();
                 unsafe { guard.vec.data.as_ptr().add(guard.vec.len).write(val) };
-                guard.vec.len += 1;
+                guard.vec.inc_len();
             }
             core::mem::forget(guard);
         }

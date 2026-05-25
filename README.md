@@ -34,6 +34,7 @@ These are the primary crates built out of this repo:
 - [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
+- [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
@@ -208,8 +209,8 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
   specification. We use these PR titles as part of our automatic change log generation logic.
 
-- **License Headers**. We ensure all source files have the requisite license header. The headers are described in
-  the `.github\license-check` directory.
+- **License Headers**. We ensure all source files have the requisite license header using
+  [cargo-heather](https://crates.io/crates/cargo-heather). Run `just license-check` to check or `just license` to auto-apply.
 
 - **Spell Checking**. We use [cargo-spellcheck](https://crates.io/crates/cargo-spellcheck) to help our docs have fewer typos.
 

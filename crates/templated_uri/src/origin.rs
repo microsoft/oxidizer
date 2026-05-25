@@ -99,10 +99,52 @@ impl Origin {
     /// Returns the explicit port of this origin, if any.
     ///
     /// Returns the explicit port from the authority when present, or `None` when
-    /// the authority does not specify a port.
+    /// the authority does not specify a port. Default ports are not inferred from
+    /// the scheme; use [`Origin::effective_port`] for that.
     #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.authority.port_u16()
+    }
+
+    /// Returns the effective port of this origin, falling back to well-known
+    /// scheme defaults when no explicit port is present.
+    ///
+    /// Returns the explicit port from the authority when present. Otherwise,
+    /// returns the IANA-registered default port for the scheme:
+    ///
+    /// - `80` for `http`
+    /// - `443` for `https`
+    ///
+    /// Returns `None` when no explicit port is present and the scheme has no
+    /// well-known default known to this crate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::Origin;
+    /// // Explicit port is returned as-is.
+    /// let origin = Origin::from_static("https://example.com:8443");
+    /// assert_eq!(origin.effective_port(), Some(8443));
+    ///
+    /// // HTTPS default is used when no port is specified.
+    /// let origin = Origin::from_static("https://example.com");
+    /// assert_eq!(origin.effective_port(), Some(443));
+    ///
+    /// // HTTP default is used when no port is specified.
+    /// let origin = Origin::from_static("http://example.com");
+    /// assert_eq!(origin.effective_port(), Some(80));
+    /// ```
+    #[must_use]
+    pub fn effective_port(&self) -> Option<u16> {
+        if let Some(port) = self.authority.port_u16() {
+            return Some(port);
+        }
+
+        match self.scheme.as_str() {
+            s if s == Scheme::HTTP.as_str() => Some(HTTP_DEFAULT_PORT),
+            s if s == Scheme::HTTPS.as_str() => Some(HTTPS_DEFAULT_PORT),
+            _ => None,
+        }
     }
 
     /// Set port for this `Origin` instance.
@@ -228,6 +270,31 @@ mod tests {
         // An explicit port is always reported regardless of the scheme.
         let origin_with_port = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
         assert_eq!(origin_with_port.port(), Some(21));
+    }
+
+    #[test]
+    fn test_effective_port() {
+        // Explicit ports are returned verbatim.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080"));
+        assert_eq!(origin.effective_port(), Some(8080));
+
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443"));
+        assert_eq!(origin.effective_port(), Some(8443));
+
+        // Well-known defaults are inferred from the scheme when no port is set.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), Some(HTTP_DEFAULT_PORT));
+
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), Some(HTTPS_DEFAULT_PORT));
+
+        // Unknown schemes without an explicit port have no inferred default.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), None);
+
+        // Unknown schemes still surface an explicit port.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
+        assert_eq!(origin.effective_port(), Some(21));
     }
 
     #[test]

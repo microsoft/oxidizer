@@ -168,8 +168,8 @@ fn cross_thread_drop_no_use_after_free() {
 
 #[test]
 fn arena_drop_races_last_shared_handle_drop() {
-    // Regression test for the ArenaInner double-free race that existed
-    // before the virtual-arena-reference scheme. The scenario:
+    // Sanity-check regression for the ArenaInner double-free race that
+    // existed before the virtual-arena-reference scheme. The scenario:
     //   - Owner thread drops the Arena.
     //   - Another thread drops the last ArenaArc smart pointer at "the same
     //     time".
@@ -177,13 +177,20 @@ fn arena_drop_races_last_shared_handle_drop() {
     // ArenaInner. With the single-decrementer-wins protocol, atomic
     // serialization guarantees exactly one reclaimer.
     //
-    // This test runs the race many times. It cannot deterministically
-    // hit the failing interleaving, but in practice (and especially
-    // under Miri / TSan) it surfaces UB if it returns. We use a
-    // sync::Barrier to align the two threads' drop calls.
+    // The exhaustive coverage of this property lives in
+    // `tests/loom.rs::loom_arc::arena_drop_concurrent_with_clone_and_drop`
+    // (and several adjacent loom models), which explores every atomic
+    // interleaving. This test exists only as a complementary smoke test
+    // against the *real* code (loom substitutes `cfg(loom)` atomic shims,
+    // so it's possible for the loom model to drift from production
+    // semantics). A few barrier-synchronized iterations are enough to
+    // verify the real `std::sync::atomic` path executes without UB;
+    // running thousands of trials doesn't meaningfully improve
+    // race-detection probability over what loom already proves
+    // exhaustively.
     use std::sync::Barrier;
 
-    for _ in 0..if cfg!(miri) { 50 } else { 1000 } {
+    for _ in 0..16 {
         let arena = Arena::new();
         let handle: Arc<u64> = arena.alloc_arc(0xDEAD_BEEF);
         let barrier = std::sync::Arc::new(Barrier::new(2));
@@ -336,6 +343,54 @@ fn zeroed_arc_produces_zero_bytes() {
     // SAFETY: zero is a valid bit pattern for u64.
     let a = unsafe { a.assume_init() };
     assert_eq!(*a, 0);
+}
+
+// Coverage for the `needs_drop::<T>` branches of the Arc-flavored
+// uninit/zeroed APIs in `alloc_uninit.rs`. The other tests in this file
+// only exercise these with no-drop `u64`, so the slice-path branch
+// (which reserves a noop drop entry retargeted by `assume_init`) was
+// previously uncovered.
+#[test]
+fn try_uninit_arc_with_drop_type_uses_slice_path() {
+    let counter = AtomicUsize::new(0);
+    {
+        let arena = Arena::new();
+        let a = arena.try_alloc_uninit_arc::<DropCount<'_>>().expect("must allocate");
+        // SAFETY: `a` is the unique handle, so we have exclusive write access.
+        unsafe {
+            let p = Arc::as_ptr(&a).cast::<MaybeUninit<DropCount<'_>>>().cast_mut();
+            (*p).write(DropCount(&counter));
+        }
+        // SAFETY: just initialized.
+        let typed = unsafe { a.assume_init() };
+        assert_eq!(counter.load(AtomicOrdering::SeqCst), 0);
+        drop(typed);
+    }
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 1);
+}
+
+#[test]
+fn zeroed_arc_with_drop_type_uses_slice_path() {
+    // T: Drop. We never `assume_init`, so the noop drop shim runs at
+    // chunk teardown (it doesn't dereference the uninitialized bytes),
+    // and the real `DropCount::drop` never fires — so the counter
+    // stays at 0.
+    let counter = AtomicUsize::new(0);
+    {
+        let arena = Arena::new();
+        let _a: Arc<MaybeUninit<DropCount<'_>>> = arena.alloc_zeroed_arc::<DropCount<'_>>();
+    }
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[test]
+fn try_zeroed_arc_with_drop_type_uses_slice_path() {
+    let counter = AtomicUsize::new(0);
+    {
+        let arena = Arena::new();
+        let _a: Arc<MaybeUninit<DropCount<'_>>> = arena.try_alloc_zeroed_arc::<DropCount<'_>>().expect("must allocate");
+    }
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 0);
 }
 
 #[test]
