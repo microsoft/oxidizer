@@ -110,6 +110,21 @@ impl<C: ChunkKind + ?Sized> Default for CurrentChunk<C> {
 }
 
 impl<C: ChunkKind + ?Sized> CurrentChunk<C> {
+    /// Returns the installed chunk pointer for a non-stub slot.
+    ///
+    /// Centralizes the ubiquitous `unsafe { chunk.get().unwrap_unchecked() }`
+    /// idiom used by every bump-fit fast path; the caller's bump-fit gate
+    /// already proves non-stub state.
+    ///
+    /// # Safety
+    ///
+    /// The slot must be in non-stub state (`chunk.get().is_some()`).
+    #[inline(always)]
+    pub(super) unsafe fn chunk_assume_present(&self) -> NonNull<C> {
+        // SAFETY: caller asserts non-stub state.
+        unsafe { self.chunk.get().unwrap_unchecked() }
+    }
+
     /// Number of drop entries currently recorded in the back-stack of
     /// the chunk that this slot mirrors. Derived from the chunk's own
     /// payload extent and the slot's `drop_back` limit pointer, so the

@@ -257,7 +257,9 @@ impl<A: Allocator + Clone> Arena<A> {
         // SAFETY: refcount-positive — chunk held at LARGE inflation
         // immediately after `acquire_local`.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on
+        // `data_ptr`, which would later collide with `free_backing`.
         let data_ptr = unsafe { LocalChunk::<A>::data_ptr(chunk) };
         // Byte data has `align_of::<u8>() == 1`, so the chunk's
         // `CHUNK_ALIGN`-aligned payload base is trivially aligned for

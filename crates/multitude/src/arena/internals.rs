@@ -13,6 +13,7 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::{AllocError, Allocator, Global};
 
 use super::Arena;
+use super::chunks::ChunkKind;
 use crate::internal::drop_list::{DropEntry as InnerDropEntry, drop_shim_slice};
 use crate::internal::local_chunk::LocalChunk;
 use crate::internal::shared_chunk::SharedChunk;
@@ -31,6 +32,46 @@ pub(super) const fn compute_worst_case_size(layout: Layout, has_drop: bool) -> u
 #[cfg_attr(test, mutants::skip)]
 pub(super) const fn worst_case_refill_for(layout: Layout, entry_size: usize) -> usize {
     compute_worst_case_size(layout, entry_size != 0)
+}
+
+/// Truncate `value` to `u16` under a caller-asserted bound.
+///
+/// In debug builds the bound is checked with `debug_assert!`; in release
+/// the optimizer is told via `assert_unchecked` so the conversion has no
+/// panic surface. Centralizes the three-call `debug_assert! + assert_unchecked +
+/// unwrap_unchecked` idiom used at every drop-entry install site.
+///
+/// # Safety
+///
+/// `value <= u16::MAX`. Violating this is UB in release builds.
+#[inline(always)]
+pub(super) unsafe fn u16_truncate_unchecked(value: usize) -> u16 {
+    let res = u16::try_from(value);
+    debug_assert!(res.is_ok(), "u16_truncate_unchecked: value {value} exceeds u16::MAX");
+    // SAFETY: caller-asserted bound; debug builds panic above instead.
+    unsafe { core::hint::assert_unchecked(res.is_ok()) };
+    // SAFETY: caller-asserted bound; debug builds panic above instead.
+    unsafe { res.unwrap_unchecked() }
+}
+
+/// In-payload `u16` offset of `value_ptr` within `chunk`.
+///
+/// Folds the three-step `data_ptr + subtract + u16_truncate_unchecked`
+/// dance used at every drop-entry install site into one helper, so the
+/// chunk-liveness and offset-bound proofs live in a single place.
+///
+/// # Safety
+///
+/// - `chunk` must be live (refcount-positive) for the duration of the call.
+/// - `value_ptr` must lie within `chunk`'s payload AND within the
+///   max-bump-extent, so the offset fits in `u16`.
+#[inline(always)]
+pub(super) unsafe fn value_offset_in_chunk<C: ChunkKind + ?Sized>(chunk: NonNull<C>, value_ptr: NonNull<u8>) -> u16 {
+    // SAFETY: caller asserts `chunk` is live.
+    let payload_base_addr = unsafe { C::data_ptr_of(chunk) }.as_ptr() as usize;
+    let raw_value_offset = (value_ptr.as_ptr() as usize) - payload_base_addr;
+    // SAFETY: caller asserts the offset fits in `u16`.
+    unsafe { u16_truncate_unchecked(raw_value_offset) }
 }
 
 /// `bumped > MAX_CHUNK_BYTES` boundary predicate.
@@ -475,6 +516,29 @@ pub(super) fn align_offset(value: usize, align: usize) -> Option<usize> {
     debug_assert!(align.is_power_of_two());
     let aligned = value.checked_add(align - 1)? & !(align - 1);
     Some(aligned - value)
+}
+
+/// Computes the aligned offset of a payload of `size` bytes inside a
+/// chunk of `cap` bytes that reserves `reserved_tail` bytes at the
+/// end (e.g. for drop-back entries), feeding optimizer hints that
+/// align with the chunk provider's post-condition.
+///
+/// # Safety
+///
+/// Caller guarantees, via the chunk provider's post-condition, that
+/// the request fits the chunk: `align_offset(data_addr, align)` does
+/// not overflow, `aligned + size` does not overflow, and
+/// `aligned + size <= cap - reserved_tail`.
+#[inline]
+pub(super) unsafe fn aligned_payload_offset(data_addr: usize, align: usize, size: usize, cap: usize, reserved_tail: usize) -> usize {
+    // SAFETY: the chunk-provider post-condition cited by the caller
+    // proves each of these unchecked operations succeeds.
+    unsafe {
+        let aligned = align_offset(data_addr, align).unwrap_unchecked();
+        let end = aligned.checked_add(size).unwrap_unchecked();
+        core::hint::assert_unchecked(end <= cap.saturating_sub(reserved_tail));
+        aligned
+    }
 }
 
 impl<A: Allocator + Clone> Arena<A> {
