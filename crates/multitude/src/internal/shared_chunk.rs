@@ -410,50 +410,11 @@ impl<A: Allocator + Clone> SharedChunk<A> {
         // from outside the refcount-zero state, this store must be
         // upgraded to Release to pair with the consumer's Acquire load.
         unsafe { (*chunk.as_ptr()).drop_count.store(0, Ordering::Relaxed) };
-        let top = capacity;
-        let base = top - count * mem::size_of::<DropEntry>();
         // SAFETY: chunk-layout invariant — `count` densely packed,
-        // naturally aligned `DropEntry`s live at `data + base`.
-        #[expect(
-            clippy::cast_ptr_alignment,
-            reason = "chunk payloads are CHUNK_ALIGN aligned; `data + base` is naturally `DropEntry`-aligned by construction"
-        )]
-        // SAFETY: `base = capacity - count * size_of::<DropEntry>()`
-        // is the byte offset of the first entry; `data` is the chunk's
-        // payload base. Together they address `count` initialized
-        // `DropEntry`s.
-        let entries_ptr = unsafe { data.add(base).cast::<DropEntry>() };
-        for i in 0..count {
-            // SAFETY: `i < count`; all `count` entries are initialized
-            // at allocation time.
-            let entry = unsafe { &*entries_ptr.add(i) };
-            // SAFETY: payload-extent + drop-shim invariants.
-            let value_ptr = unsafe { data.add(entry.value_offset as usize) };
-            let f = entry.load_drop_fn(Ordering::Relaxed);
-            // Isolate each call (when `std` is available) so a panicking
-            // `T::Drop` doesn't abort the chunk reclamation path — at
-            // worst we leak that value's resources; the chunk itself
-            // still gets freed. Under `no_std` an unwinding `T::Drop`
-            // forces a process abort via the `AbortOnUnwind` guard
-            // below: this is consistent with `core` semantics under
-            // `panic = abort`, and prevents the panic from leaking
-            // the chunk by propagating past `route_release` under
-            // `panic = unwind`.
-            #[cfg(feature = "std")]
-            {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // SAFETY: drop-shim invariant.
-                    unsafe { f(value_ptr, entry.len as usize) };
-                }));
-            }
-            #[cfg(not(feature = "std"))]
-            {
-                let abort_guard = crate::internal::drop_list::AbortOnUnwind;
-                // SAFETY: drop-shim invariant.
-                unsafe { f(value_ptr, entry.len as usize) };
-                core::mem::forget(abort_guard);
-            }
-        }
+        // naturally aligned `DropEntry`s live at the tail of the
+        // payload; each one's `(value_offset, len, drop_fn)` satisfies
+        // the drop-shim invariant.
+        unsafe { crate::internal::drop_list::replay_drop_entries(data, capacity, count) };
     }
 
     /// Tear the chunk down: drop the header fields and free the
@@ -464,25 +425,24 @@ impl<A: Allocator + Clone> SharedChunk<A> {
     /// Caller must own the chunk exclusively (refcount zero) and the
     /// drop list must have already been replayed.
     pub(crate) unsafe fn free_backing(chunk: NonNull<Self>) {
-        // SAFETY: caller owns the chunk exclusively.
-        let capacity = unsafe { (*chunk.as_ptr()).capacity };
-
-        let total_bytes = alloc_size::<A>(header_size::<A>() + capacity);
-        let layout =
-            Layout::from_size_align(total_bytes, chunk_align::<A>()).expect("layout was valid at allocation time, must remain valid here");
-
         // Move `allocator` out so we can free *after* dropping the
         // other header fields.
-        // SAFETY: caller owns the chunk; `allocator` is live.
-        let allocator: A = unsafe { core::ptr::read(core::ptr::addr_of!((*chunk.as_ptr()).allocator)) };
-        // SAFETY: each `addr_of!` field is a live value and we drop
-        // it exactly once.
-        unsafe {
+        // SAFETY: caller owns the chunk exclusively; `capacity`,
+        // `allocator`, and each `addr_of!`d header field are live values
+        // dropped exactly once here.
+        let (capacity, allocator) = unsafe {
+            let capacity = (*chunk.as_ptr()).capacity;
+            let allocator: A = core::ptr::read(core::ptr::addr_of!((*chunk.as_ptr()).allocator));
             core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).provider));
             core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).refcount));
             core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).drop_count));
             core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).next));
-        }
+            (capacity, allocator)
+        };
+
+        let total_bytes = alloc_size::<A>(header_size::<A>() + capacity);
+        let layout =
+            Layout::from_size_align(total_bytes, chunk_align::<A>()).expect("layout was valid at allocation time, must remain valid here");
 
         let raw_ptr = chunk.as_ptr().cast::<u8>();
         // SAFETY: chunk-header invariant — pointer + layout matches
