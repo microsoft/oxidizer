@@ -2903,6 +2903,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "seatbelt_http"
+version = "0.2.1"
+dependencies = [
+ "futures",
+ "http",
+ "http_extensions",
+ "layered",
+ "mutants",
+ "ohno 0.3.2",
+ "seatbelt",
+ "templated_uri",
+ "tick",
+]
+
+[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
