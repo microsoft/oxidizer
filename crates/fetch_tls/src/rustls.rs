@@ -68,14 +68,14 @@ impl RustlsOptions {
             .or_else(|| defaults.map(|d| Arc::clone(&d.crypto_provider)))
             .ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendDefaults::rustls(...)",
+                    "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendDefaults::configure_rustls(...)",
                 )
             })?;
         let verifier = match self.verifier_factory {
             Some(factory) => factory(Arc::clone(&crypto_provider)),
             None => defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendDefaults::rustls(...)",
+                    "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendDefaults::configure_rustls(...)",
                 )
             })?,
         };
@@ -131,7 +131,7 @@ impl TlsOptionsBuilder<RustlsOptions> {
     /// Sets the rustls [`CryptoProvider`](rustls::crypto::CryptoProvider).
     ///
     /// Overrides the provider supplied by
-    /// [`TlsBackendDefaults::rustls`](crate::TlsBackendDefaults::rustls).
+    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
     /// If neither source supplies one, [`TlsOptions::build_backend`] returns
     /// a [`BackendError`](crate::BackendError).
     pub fn crypto_provider(mut self, crypto_provider: Arc<rustls::crypto::CryptoProvider>) -> Self {
@@ -144,12 +144,12 @@ impl TlsOptionsBuilder<RustlsOptions> {
     ///
     /// The factory is invoked during [`TlsOptions::build_backend`] with the
     /// provider resolved from this builder or
-    /// [`TlsBackendDefaults::rustls`](crate::TlsBackendDefaults::rustls).
+    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
     /// Callers that don't need the provider can simply ignore the argument
     /// and return a pre-built verifier (for example, `|_| Arc::new(MyVerifier)`).
     ///
     /// Overrides the verifier supplied by
-    /// [`TlsBackendDefaults::rustls`](crate::TlsBackendDefaults::rustls).
+    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
     /// If neither source supplies one, [`TlsOptions::build_backend`] returns
     /// a [`BackendError`](crate::BackendError).
     pub fn server_certificate_verifier<F>(mut self, factory: F) -> Self
@@ -182,13 +182,15 @@ impl TlsOptionsBuilder<RustlsOptions> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use rustls::crypto::aws_lc_rs;
+
     use super::*;
     use crate::backend::RustlsDefaults;
     use crate::client_identity::ClientIdentity;
     use crate::testing::{AcceptAllServerCertVerifier as AcceptAll, NoClientCertResolver as StubResolver};
 
     fn provider() -> Arc<rustls::crypto::CryptoProvider> {
-        Arc::new(rustls_symcrypt::default_symcrypt_provider())
+        Arc::new(aws_lc_rs::default_provider())
     }
 
     fn defaults() -> RustlsDefaults {
@@ -265,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)] // `rustls-symcrypt` FFI does not run under Miri
+    #[cfg_attr(miri, ignore)] // crypto provider FFI (aws-lc-rs) does not run under Miri
     fn build_produces_client_config_without_identity() {
         let _config = TlsOptions::builder_rustls()
             .server_certificate_verifier(|_| Arc::new(AcceptAll))

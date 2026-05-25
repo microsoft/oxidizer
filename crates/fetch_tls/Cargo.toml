@@ -21,7 +21,7 @@ all-features = true
 
 [features]
 default = []
-rustls = ["dep:rustls-symcrypt", "dep:rustls"]
+rustls = ["dep:rustls"]
 native-tls = ["dep:native-tls"]
 
 [dependencies]
@@ -32,21 +32,20 @@ ohno = { workspace = true }
 base64 = { workspace = true }
 http = { workspace = true }
 native-tls = { workspace = true, optional = true, features = ["alpn"] }
-# Disabling aws-lc by default; rustls-symcrypt is the intended crypto provider.
+# No crypto provider feature is enabled here; callers supply one via
+# `TlsBackendDefaults::configure_rustls`. See the crate docs for details.
 rustls = { workspace = true, features = [
     "tls12",
     "std",
 ], default-features = false, optional = true }
 rustls-pki-types = { workspace = true, features = ["alloc", "std"] }
-rustls-symcrypt = { workspace = true, optional = true }
 
 [dev-dependencies]
 mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
 # Test code unconditionally references both backends; pull them in as
 # dev-dependencies so `cargo test` works with no features enabled.
-rustls = { workspace = true, features = ["tls12", "std"], default-features = false }
-rustls-symcrypt = { workspace = true }
+rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"], default-features = false }
 
 [lints]
 workspace = true

@@ -16,8 +16,10 @@
 //!
 //! # Features
 //!
-//! - **`rustls`** — pure-Rust [`rustls`](::rustls) paired with
-//!   [`rustls-symcrypt`](::rustls_symcrypt) as the crypto provider.
+//! - **`rustls`** — pure-Rust [`rustls`](::rustls). `fetch_tls` does not
+//!   bundle a crypto provider; the caller supplies one (along with a
+//!   server-certificate verifier) via
+//!   [`TlsBackendDefaults::configure_rustls`].
 //! - **`native-tls`** — platform native TLS (`SChannel` on Windows,
 //!   Security Framework on macOS, `OpenSSL` on Linux).
 //!

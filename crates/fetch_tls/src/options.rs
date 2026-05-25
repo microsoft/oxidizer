@@ -5,7 +5,7 @@
 
 use http::Version;
 
-use crate::backend::BackendError;
+use crate::backend::{BackendError, DefaultBackend};
 use crate::client_identity::ClientIdentity;
 use crate::{TlsBackend, TlsBackendDefaults};
 
@@ -18,11 +18,9 @@ use crate::{TlsBackend, TlsBackendDefaults};
     reason = "configuration object; variants are consumed by downstream HTTP client crates that materialize TLS backends from TlsOptions"
 )]
 pub(crate) enum TlsOptionsKind {
-    /// No backend selected. Produced by [`TlsOptions::empty`] (and by
-    /// [`TlsOptions::default`] when neither the `rustls` nor `native-tls`
-    /// feature is enabled). Calling [`TlsOptions::build_backend`] on such
-    /// options returns a [`BackendError`].
-    Empty,
+    /// Backend is selected automatically based on how the default backend
+    /// is configured via [`TlsBackendDefaults`]; see its documentation for details.
+    Auto,
 
     /// Pre-configured TLS backend, used as-is without any modifications.
     PreConfigured(TlsBackend),
@@ -47,8 +45,8 @@ pub(crate) enum TlsOptionsKind {
 /// # Examples
 ///
 /// Minimal rustls-backed [`TlsOptions`] using default settings; supply a
-/// [`TlsBackendDefaults::rustls`](crate::TlsBackendDefaults::rustls) when
-/// calling [`TlsOptions::build_backend`] to materialize a backend:
+/// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls)
+/// when calling [`TlsOptions::build_backend`] to materialize a backend:
 ///
 /// ```rust,no_run
 /// # #[cfg(feature = "rustls")] {
@@ -103,22 +101,15 @@ impl TlsOptions {
         &self.shared.supported_http_versions
     }
 
-    /// Creates an empty [`TlsOptions`] with no backend selected.
-    ///
-    /// [`TlsOptions::build_backend`] returns a [`BackendError`]. Used by
-    /// [`TlsOptions::default`] when neither TLS feature is enabled.
-    #[cfg(any(test, not(any(feature = "rustls", feature = "native-tls"))))]
-    fn empty() -> Self {
-        Self {
-            inner: TlsOptionsKind::Empty,
-            shared: SharedOptions::default(),
-        }
-    }
-
     /// Materializes these options into a [`TlsBackend`] using `defaults`.
     ///
-    /// - rustls — requires [`TlsBackendDefaults::rustls`]; values configured
-    ///   on the builder take precedence over those in `defaults`.
+    /// - auto — selected by [`TlsOptions::default`]; the backend is chosen
+    ///   from [`TlsBackendDefaults`]'s configured default (set via
+    ///   [`TlsBackendDefaults::defaults_to_rustls`] /
+    ///   [`TlsBackendDefaults::defaults_to_native_tls`], or implicitly by
+    ///   [`TlsBackendDefaults::configure_rustls`]).
+    /// - rustls — requires [`TlsBackendDefaults::configure_rustls`]; values
+    ///   configured on the builder take precedence over those in `defaults`.
     /// - native-tls — `defaults` is ignored.
     /// - pre-configured — the wrapped backend is returned unchanged.
     ///
@@ -128,11 +119,8 @@ impl TlsOptions {
     /// rustls defaults are missing, or if backend construction fails (for
     /// example, invalid client identity material).
     pub fn build_backend(self, defaults: &TlsBackendDefaults) -> Result<TlsBackend, BackendError> {
-        let _ = defaults;
         match self.inner {
-            TlsOptionsKind::Empty => Err(BackendError::caused_by(
-                "no TLS backend is configured; enable the `rustls` or `native-tls` feature, or construct TlsOptions via one of its builders",
-            )),
+            TlsOptionsKind::Auto => self.build_auto_backend(defaults),
             TlsOptionsKind::PreConfigured(backend) => Ok(backend),
             #[cfg(any(feature = "rustls", test))]
             TlsOptionsKind::Rustls(rustls_backend) => {
@@ -146,23 +134,40 @@ impl TlsOptions {
             }
         }
     }
+
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unused_self,
+        reason = "self.shared is used by feature-gated arms; with neither rustls nor native-tls enabled only Unselected is reachable"
+    )]
+    fn build_auto_backend(self, defaults: &TlsBackendDefaults) -> Result<TlsBackend, BackendError> {
+        match defaults.default {
+            #[cfg(any(feature = "rustls", test))]
+            DefaultBackend::Rustls => {
+                let config = super::rustls::RustlsOptions::new().build(defaults.rustls.as_ref(), &self.shared)?;
+                Ok(TlsBackend::Rustls(std::sync::Arc::new(config)))
+            }
+            #[cfg(any(feature = "native-tls", test))]
+            DefaultBackend::NativeTls => {
+                let connector = super::native_tls::NativeTlsOptions::new().build(&self.shared)?;
+                Ok(TlsBackend::NativeTls(connector))
+            }
+            DefaultBackend::Unselected => Err(BackendError::caused_by(
+                "no default TLS backend is configured on TlsBackendDefaults; call defaults_to_rustls() / defaults_to_native_tls() (or configure_rustls(), which implies rustls), or construct TlsOptions via one of its builders",
+            )),
+        }
+    }
 }
 
-/// Picks a default TLS backend from enabled features:
-/// `rustls` if available, else `native-tls`, else [`TlsOptions::empty`].
+/// Constructs [`TlsOptions`] whose backend is chosen at
+/// [`TlsOptions::build_backend`] time from the supplied
+/// [`TlsBackendDefaults`]. See [`TlsBackendDefaults`] for how to select the
+/// default backend.
 impl Default for TlsOptions {
     fn default() -> Self {
-        #[cfg(feature = "rustls")]
-        {
-            Self::builder_rustls().build()
-        }
-        #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
-        {
-            Self::builder_native_tls().build()
-        }
-        #[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-        {
-            Self::empty()
+        Self {
+            inner: TlsOptionsKind::Auto,
+            shared: SharedOptions::default(),
         }
     }
 }
@@ -208,7 +213,12 @@ impl<B> TlsOptionsBuilder<B> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+
+    use rustls::crypto::aws_lc_rs;
+
     use super::*;
+    use crate::testing::AcceptAllServerCertVerifier as AcceptAll;
 
     #[test]
     fn default_supported_http_versions_is_http1_and_http2() {
@@ -217,43 +227,21 @@ mod tests {
     }
 
     #[test]
-    fn empty_constructs_empty_variant() {
-        let tls = TlsOptions::empty();
-        assert!(matches!(tls.inner, TlsOptionsKind::Empty));
+    fn default_constructs_auto_variant() {
+        let tls = TlsOptions::default();
+        assert!(matches!(tls.inner, TlsOptionsKind::Auto));
     }
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn empty_build_backend_returns_error() {
+    fn auto_without_default_backend_returns_error() {
         let defaults = TlsBackendDefaults::new();
 
-        let err = TlsOptions::empty().build_backend(&defaults).unwrap_err();
+        let err = TlsOptions::default().build_backend(&defaults).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("no TLS backend"), "unexpected error: {msg}");
+        assert!(msg.contains("no default TLS backend"), "unexpected error: {msg}");
     }
 
-    #[cfg(feature = "rustls")]
-    #[test]
-    fn default_selects_rustls_when_feature_enabled() {
-        let tls = TlsOptions::default();
-        assert!(matches!(tls.inner, TlsOptionsKind::Rustls(_)));
-    }
-
-    #[cfg(all(feature = "native-tls", not(feature = "rustls")))]
-    #[test]
-    fn default_selects_native_tls_when_only_native_tls_enabled() {
-        let tls = TlsOptions::default();
-        assert!(matches!(tls.inner, TlsOptionsKind::NativeTls(_)));
-    }
-
-    #[cfg(not(any(feature = "rustls", feature = "native-tls")))]
-    #[test]
-    fn default_is_empty_when_no_features_enabled() {
-        let tls = TlsOptions::default();
-        assert!(matches!(tls.inner, TlsOptionsKind::Empty));
-    }
-
-    #[cfg(feature = "rustls")]
     #[test]
     fn supported_http_versions_round_trips() {
         let tls = TlsOptions::builder_rustls()
@@ -262,22 +250,18 @@ mod tests {
         assert_eq!(tls.supported_http_versions(), &[Version::HTTP_11, Version::HTTP_2]);
     }
 
-    #[cfg(feature = "rustls")]
+    fn rustls_defaults() -> TlsBackendDefaults {
+        TlsBackendDefaults::new().configure_rustls(Arc::new(aws_lc_rs::default_provider()), Arc::new(AcceptAll))
+    }
+
     mod build_backend_rustls {
-        use std::sync::Arc;
-
         use super::*;
-        use crate::testing::AcceptAllServerCertVerifier as AcceptAll;
-
-        fn defaults() -> TlsBackendDefaults {
-            TlsBackendDefaults::rustls(Arc::new(rustls_symcrypt::default_symcrypt_provider()), Arc::new(AcceptAll))
-        }
 
         #[test]
         #[cfg_attr(miri, ignore)]
         fn rustls_falls_back_to_default_verifier() {
             let tls = TlsOptions::builder_rustls().build();
-            let backend = tls.build_backend(&defaults()).unwrap();
+            let backend = tls.build_backend(&rustls_defaults()).unwrap();
             assert!(matches!(backend, TlsBackend::Rustls(_)));
         }
 
@@ -287,7 +271,7 @@ mod tests {
             let tls = TlsOptions::builder_rustls()
                 .server_certificate_verifier(|_| Arc::new(AcceptAll))
                 .build();
-            let backend = tls.build_backend(&defaults()).unwrap();
+            let backend = tls.build_backend(&rustls_defaults()).unwrap();
             assert!(matches!(backend, TlsBackend::Rustls(_)));
         }
 
@@ -303,31 +287,80 @@ mod tests {
         #[test]
         #[cfg_attr(miri, ignore)]
         fn preconfigured_passes_backend_through_unchanged() {
-            let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls_symcrypt::default_symcrypt_provider()))
+            let config = rustls::ClientConfig::builder_with_provider(Arc::new(aws_lc_rs::default_provider()))
                 .with_safe_default_protocol_versions()
                 .unwrap()
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(AcceptAll))
                 .with_no_client_auth();
             let tls = TlsOptions::from(config);
-            let backend = tls.build_backend(&defaults()).unwrap();
+            let backend = tls.build_backend(&rustls_defaults()).unwrap();
             assert!(matches!(backend, TlsBackend::Rustls(_)));
         }
     }
 
-    #[cfg(feature = "native-tls")]
     mod build_backend_native_tls {
         use super::*;
-
-        fn defaults() -> TlsBackendDefaults {
-            TlsBackendDefaults::new()
-        }
 
         #[test]
         #[cfg_attr(miri, ignore)]
         fn native_tls_ignores_rustls_defaults() {
             let tls = TlsOptions::builder_native_tls().build();
-            let backend = tls.build_backend(&defaults()).unwrap();
+            let backend = tls.build_backend(&TlsBackendDefaults::new()).unwrap();
+            assert!(matches!(backend, TlsBackend::NativeTls(_)));
+        }
+    }
+
+    mod build_backend_auto {
+        use super::*;
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn configure_rustls_auto_promotes_unselected_to_rustls() {
+            let backend = TlsOptions::default().build_backend(&rustls_defaults()).unwrap();
+            assert!(matches!(backend, TlsBackend::Rustls(_)));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn defaults_to_rustls_selects_rustls() {
+            let defaults = rustls_defaults().defaults_to_rustls();
+            let backend = TlsOptions::default().build_backend(&defaults).unwrap();
+            assert!(matches!(backend, TlsBackend::Rustls(_)));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn defaults_to_rustls_without_rustls_defaults_returns_crypto_provider_error() {
+            let defaults = TlsBackendDefaults::new().defaults_to_rustls();
+            let err = TlsOptions::default().build_backend(&defaults).unwrap_err();
+            let msg = format!("{err}");
+            assert!(msg.contains("crypto provider"), "unexpected error: {msg}");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn defaults_to_native_tls_selects_native_tls() {
+            let defaults = TlsBackendDefaults::new().defaults_to_native_tls();
+            let backend = TlsOptions::default().build_backend(&defaults).unwrap();
+            assert!(matches!(backend, TlsBackend::NativeTls(_)));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn defaults_to_native_tls_after_configure_rustls_overrides_promotion() {
+            let defaults = rustls_defaults().defaults_to_native_tls();
+            let backend = TlsOptions::default().build_backend(&defaults).unwrap();
+            assert!(matches!(backend, TlsBackend::NativeTls(_)));
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore)]
+        fn configure_rustls_after_defaults_to_native_tls_keeps_native_tls() {
+            let defaults = TlsBackendDefaults::new()
+                .defaults_to_native_tls()
+                .configure_rustls(Arc::new(aws_lc_rs::default_provider()), Arc::new(AcceptAll));
+            let backend = TlsOptions::default().build_backend(&defaults).unwrap();
             assert!(matches!(backend, TlsBackend::NativeTls(_)));
         }
     }

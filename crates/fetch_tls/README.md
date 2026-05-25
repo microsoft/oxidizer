@@ -23,8 +23,10 @@ Materialize a [`TlsBackend`][__link5] with [`TlsOptions::build_backend`][__link6
 
 ## Features
 
-* **`rustls`** — pure-Rust [`rustls`][__link7] paired with
-  [`rustls-symcrypt`][__link8] as the crypto provider.
+* **`rustls`** — pure-Rust [`rustls`][__link7]. `fetch_tls` does not
+  bundle a crypto provider; the caller supplies one (along with a
+  server-certificate verifier) via
+  [`TlsBackendDefaults::configure_rustls`][__link8].
 * **`native-tls`** — platform native TLS (`SChannel` on Windows,
   Security Framework on macOS, `OpenSSL` on Linux).
 
@@ -37,7 +39,7 @@ With neither feature enabled, [`TlsOptions::default`][__link9] still constructs 
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGz0-gwD02BMqGx-aWk5R-ciAG5SPoepFPbthG4u5TGxqSEiPYWSEgmlmZXRjaF90bHNlMC4xLjCCam5hdGl2ZV90bHNmMC4yLjE4gmZydXN0bHNnMC4yMy40MIJvcnVzdGxzX3N5bWNyeXB0ZTAuMi4z
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5v6WTZghmSAG4j_vIHk7ZKvG5ohFGVWsHijGw5WtRenFKqdYWSDgmlmZXRjaF90bHNlMC4xLjCCam5hdGl2ZV90bHNmMC4yLjE4gmZydXN0bHNnMC4yMy40MA
  [__link0]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions
  [__link1]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::builder_rustls
  [__link10]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::build_backend
@@ -48,5 +50,5 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link5]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsBackend
  [__link6]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::build_backend
  [__link7]: https://crates.io/crates/rustls/0.23.40
- [__link8]: https://crates.io/crates/rustls_symcrypt/0.2.3
+ [__link8]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsBackendDefaults::configure_rustls
  [__link9]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions::default
