@@ -23,6 +23,7 @@ Please see each crate's change log below:
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
 - [`recoverable`](./crates/recoverable/CHANGELOG.md)
 - [`seatbelt`](./crates/seatbelt/CHANGELOG.md)
+- [`seatbelt_http`](./crates/seatbelt_http/CHANGELOG.md)
 - [`templated_uri`](./crates/templated_uri/CHANGELOG.md)
 - [`templated_uri_macros`](./crates/templated_uri_macros/CHANGELOG.md)
 - [`templated_uri_macros_impl`](./crates/templated_uri_macros_impl/CHANGELOG.md)

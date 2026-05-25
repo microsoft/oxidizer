@@ -44,6 +44,7 @@ ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.0" }
+seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.2.0" }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.2.0" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.0" }
