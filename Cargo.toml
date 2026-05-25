@@ -33,18 +33,19 @@ cachet_tier = { path = "crates/cachet_tier", default-features = false, version =
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.11.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.9.0" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.9.0" }
-fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.1.0" }
+fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.1.1" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.0" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.0" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.0" }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.4.0" }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.4.1" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.0" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.1.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.2" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.2" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.0" }
-templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.2.0" }
+seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.2.1" }
+templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.2.1" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.0" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.0" }
 testing_aids = { path = "crates/testing_aids", default-features = false }
