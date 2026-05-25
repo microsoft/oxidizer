@@ -9,6 +9,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use anyspawn::Spawner;
+use fetch_tls::TlsBackend;
 use http::Version;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, Result};
 use hyper_util::client::legacy;
@@ -20,7 +21,6 @@ use crate::HyperIo;
 use crate::connection::Connect;
 use crate::connection::hyper_handler::build_hyper_handler;
 use crate::options::{ConnectionLifetime, RequestFilter};
-use crate::tls::TlsBackend;
 
 /// A type-erased Hyper request handler.
 #[derive(Clone, Debug)]
@@ -84,7 +84,7 @@ where
 ///
 /// ```
 /// use anyspawn::Spawner;
-/// use fetch_hyper::{HyperTransport, HyperTransportBuilder, TlsBackend};
+/// use fetch_hyper::{HyperTransport, HyperTransportBuilder};
 /// use http_extensions::HttpBodyBuilder;
 /// use hyper_util::rt::TokioIo;
 /// use layered::Execute;

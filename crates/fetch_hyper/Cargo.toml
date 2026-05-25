@@ -38,8 +38,8 @@ allowed_external_types = [
 all-features = true
 
 [features]
-rustls = ["dep:rustls", "dep:hyper-rustls"]
-native-tls = ["dep:native-tls", "dep:hyper-tls", "dep:tokio-native-tls"]
+rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
+native-tls = ["dep:native-tls", "dep:hyper-tls", "dep:tokio-native-tls", "fetch_tls/native-tls"]
 
 [dependencies]
 # internal
@@ -51,6 +51,7 @@ ohno.workspace = true
 seatbelt = { workspace = true }
 templated_uri = { workspace = true }
 tick = { workspace = true }
+fetch_tls = { workspace = true }
 
 # external
 futures = { workspace = true, features = ["std"] }

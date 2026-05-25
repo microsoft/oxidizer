@@ -5,6 +5,7 @@
 
 use std::marker::PhantomData;
 
+use fetch_tls::TlsBackend;
 use http::Version;
 use templated_uri::BaseUri;
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
@@ -13,7 +14,6 @@ use tower::Service as _;
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
 use crate::options::RequestFilter;
-use crate::tls::TlsBackend;
 use crate::{Connect, HyperIo};
 
 /// An enum that wraps the `TLS` connector, dispatching to the correct backend at runtime.
@@ -64,7 +64,7 @@ where
         match backend {
             #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
-                build_rustls_connector(config, connector, request_filter, supported_versions),
+                build_rustls_connector(config.as_ref().clone(), connector, request_filter, supported_versions),
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
@@ -196,7 +196,8 @@ mod tests {
             .unwrap()
             .with_root_certificates(rustls::RootCertStore::empty())
             .with_no_client_auth();
-        TlsBackend::Rustls(config)
+
+        config.into()
     }
 
     fn fake_connector() -> FakeConnector {

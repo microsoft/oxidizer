@@ -1042,6 +1042,7 @@ dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "fetch_tls",
  "futures",
  "http",
  "http-body-util",

@@ -363,16 +363,17 @@ mod tests {
 
     use anyspawn::Spawner;
     use bytes::Bytes;
+    use fetch_tls::TlsBackend;
     use http_body_util::BodyExt;
     use layered::Service as _;
     use native_tls::TlsConnector;
     use seatbelt::RecoveryInfo;
 
     use crate::testing::{FakeConnector, TestError, create_test_request, fake_body_builder};
-    use crate::{HyperTransportBuilder, RequestFilter, TlsBackend};
+    use crate::{HyperTransportBuilder, RequestFilter};
 
     fn build_tls() -> TlsBackend {
-        TlsBackend::NativeTls(TlsConnector::new().unwrap())
+        TlsConnector::new().unwrap().into()
     }
 
     fn http_1_response() -> Bytes {

@@ -56,4 +56,3 @@ pub use builder::{HyperTransport, HyperTransportBuilder};
 pub use connection::{Connect, HyperIo};
 pub use options::{ConnectionLifetime, RequestFilter};
 pub use telemetry::ConnectionInfo;
-pub use tls::TlsBackend;
