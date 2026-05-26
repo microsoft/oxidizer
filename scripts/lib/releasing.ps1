@@ -106,8 +106,12 @@ function Compare-SemanticVersions {
         [string]$version2
     )
 
-    $v1Parts = $version1.Split('.') | ForEach-Object { [int]$_ }
-    $v2Parts = $version2.Split('.') | ForEach-Object { [int]$_ }
+    # Force array context — a single-segment input ('1') pipes a scalar [int] out
+    # of ForEach-Object, and `$x += 0` on a scalar [int] performs arithmetic
+    # rather than array concatenation, so the pad-to-3 loop below would never
+    # terminate.
+    $v1Parts = @($version1.Split('.') | ForEach-Object { [int]$_ })
+    $v2Parts = @($version2.Split('.') | ForEach-Object { [int]$_ })
 
     while ($v1Parts.Count -lt 3) { $v1Parts += 0 }
     while ($v2Parts.Count -lt 3) { $v2Parts += 0 }
@@ -131,7 +135,8 @@ function Get-NextVersion {
         [string]$bump
     )
 
-    $parts = $currentVersion.Split('.') | ForEach-Object { [int]$_ }
+    # Force array context — see Compare-SemanticVersions for the rationale.
+    $parts = @($currentVersion.Split('.') | ForEach-Object { [int]$_ })
     while ($parts.Count -lt 3) { $parts += 0 }
 
     if ($parts[0] -ge 1) {
@@ -158,8 +163,9 @@ function Get-BumpKindFromVersions {
         [string]$newVersion
     )
 
-    $oldParts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
-    $newParts = $newVersion.Split('.') | ForEach-Object { [int]$_ }
+    # Force array context — see Compare-SemanticVersions for the rationale.
+    $oldParts = @($oldVersion.Split('.') | ForEach-Object { [int]$_ })
+    $newParts = @($newVersion.Split('.') | ForEach-Object { [int]$_ })
     while ($oldParts.Count -lt 3) { $oldParts += 0 }
     while ($newParts.Count -lt 3) { $newParts += 0 }
 
@@ -182,7 +188,8 @@ function Test-IsBreakingChange {
         [string]$bump
     )
 
-    $parts = $oldVersion.Split('.') | ForEach-Object { [int]$_ }
+    # Force array context — see Compare-SemanticVersions for the rationale.
+    $parts = @($oldVersion.Split('.') | ForEach-Object { [int]$_ })
     while ($parts.Count -lt 3) { $parts += 0 }
 
     if ($parts[0] -ge 1) {

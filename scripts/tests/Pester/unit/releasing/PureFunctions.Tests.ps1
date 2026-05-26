@@ -27,10 +27,17 @@ Describe 'Compare-SemanticVersions' {
 
     It 'pads short versions with zeros' {
         Compare-SemanticVersions -version1 '1.2' -version2 '1.2.0' | Should -Be 0
-        # NOTE: a single-segment input like '1' triggers a latent infinite loop in
-        # Compare-SemanticVersions (Phase 8). Production callers never pass such
-        # values (Test-ValidVersion rejects them), but the pad-to-3 logic would be
-        # safer rewritten. Tracked for the bug-bash phase.
+        Compare-SemanticVersions -version1 '1.2' -version2 '1.2.1' | Should -Be -1
+        Compare-SemanticVersions -version1 '1.3' -version2 '1.2.99' | Should -Be 1
+    }
+
+    It 'pads single-segment versions with zeros (forces array context internally)' {
+        # Previously, '1'.Split('.') |ForEach-Object {[int]$_} flowed a scalar out
+        # of the pipeline and the pad-to-3 loop hung. Verifies the array-context
+        # fix in releasing.ps1.
+        Compare-SemanticVersions -version1 '1'   -version2 '1.0.0' | Should -Be 0
+        Compare-SemanticVersions -version1 '1'   -version2 '1.0.1' | Should -Be -1
+        Compare-SemanticVersions -version1 '2'   -version2 '1.99.99' | Should -Be 1
     }
 }
 
@@ -69,6 +76,17 @@ Describe 'Get-NextVersion' {
             Get-NextVersion -currentVersion '0.0.3' -bump 'patch' | Should -Be '0.0.4'
         }
     }
+
+    Context 'short-form inputs (pads to three segments)' {
+        It 'handles two-segment inputs' {
+            Get-NextVersion -currentVersion '1.2' -bump 'patch' | Should -Be '1.2.1'
+            Get-NextVersion -currentVersion '0.1' -bump 'patch' | Should -Be '0.1.1'
+        }
+        It 'handles single-segment inputs (was a latent infinite loop)' {
+            Get-NextVersion -currentVersion '1' -bump 'patch' | Should -Be '1.0.1'
+            Get-NextVersion -currentVersion '2' -bump 'major' | Should -Be '3.0.0'
+        }
+    }
 }
 
 Describe 'Get-BumpKindFromVersions' {
@@ -83,6 +101,12 @@ Describe 'Get-BumpKindFromVersions' {
     }
     Context '0.0.z' {
         It 'reports every change as major' { Get-BumpKindFromVersions -oldVersion '0.0.1' -newVersion '0.0.2' | Should -Be 'major' }
+    }
+    Context 'short-form inputs (pads to three segments)' {
+        It 'handles single-segment inputs (was a latent infinite loop)' {
+            Get-BumpKindFromVersions -oldVersion '1' -newVersion '1.0.1' | Should -Be 'patch'
+            Get-BumpKindFromVersions -oldVersion '1' -newVersion '2.0.0' | Should -Be 'major'
+        }
     }
 }
 
@@ -102,6 +126,12 @@ Describe 'Test-IsBreakingChange' {
             Test-IsBreakingChange -oldVersion '0.0.1' -bump 'patch' | Should -BeTrue
             Test-IsBreakingChange -oldVersion '0.0.1' -bump 'minor' | Should -BeTrue
             Test-IsBreakingChange -oldVersion '0.0.1' -bump 'major' | Should -BeTrue
+        }
+    }
+    Context 'short-form inputs (pads to three segments)' {
+        It 'handles single-segment inputs (was a latent infinite loop)' {
+            Test-IsBreakingChange -oldVersion '1' -bump 'major' | Should -BeTrue
+            Test-IsBreakingChange -oldVersion '1' -bump 'minor' | Should -BeFalse
         }
     }
 }
