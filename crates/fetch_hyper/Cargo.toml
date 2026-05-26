@@ -20,6 +20,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "fetch_tls::*",
     "http_extensions::*",
     "layered::*",
     "templated_uri::*",

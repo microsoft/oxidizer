@@ -16,6 +16,21 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # ohno macro-generated trait impls
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+    # External dependencies surfaced in the public API
+    "http::version::Version",
+    # TLS backends (feature-gated)
+    "rustls::client::client_conn::ClientConfig",
+    "rustls::client::client_conn::ResolvesClientCert",
+    "rustls::crypto::CryptoProvider",
+    "rustls::verify::ServerCertVerifier",
+    "native_tls::TlsConnector",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
