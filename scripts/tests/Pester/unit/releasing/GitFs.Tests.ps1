@@ -268,6 +268,37 @@ Describe 'Get-CratesWithVersionBumps' {
     }
 }
 
+Describe 'Get-FileLineEnding' {
+    It 'returns LF for a file with only LF endings' {
+        $path = Join-Path $TestDrive ('eol-lf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
+        [System.IO.File]::WriteAllText($path, "alpha`nbeta`ngamma`n")
+        Get-FileLineEnding -Path $path | Should -Be "`n"
+    }
+
+    It 'returns CRLF for a file with only CRLF endings' {
+        $path = Join-Path $TestDrive ('eol-crlf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
+        [System.IO.File]::WriteAllText($path, "alpha`r`nbeta`r`ngamma`r`n")
+        Get-FileLineEnding -Path $path | Should -Be "`r`n"
+    }
+
+    It 'returns the dominant style for a mixed file' {
+        $path = Join-Path $TestDrive ('eol-mixed-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
+        # 3 CRLFs vs 1 lone LF
+        [System.IO.File]::WriteAllText($path, "a`r`nb`r`nc`r`nd`ne")
+        Get-FileLineEnding -Path $path | Should -Be "`r`n"
+    }
+
+    It 'returns LF as the default for a missing file' {
+        Get-FileLineEnding -Path (Join-Path $TestDrive 'no-such-file.txt') | Should -Be "`n"
+    }
+
+    It 'returns LF as the default for an empty file' {
+        $path = Join-Path $TestDrive ('eol-empty-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')
+        [System.IO.File]::WriteAllText($path, '')
+        Get-FileLineEnding -Path $path | Should -Be "`n"
+    }
+}
+
 Describe 'Add-CascadeBulletToVersionSection' {
     BeforeAll {
         . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
@@ -293,7 +324,7 @@ Describe 'Add-CascadeBulletToVersionSection' {
         }
         $content = Get-Content $script:Changelog -Raw
         $content | Should -Match '- 🔧 Maintenance'
-        $content | Should -Match 'bump `depcrate` to 0\.3\.0'
+        $content | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
         $content | Should -Not -Match '- ⚠️ Breaking'
     }
 
@@ -303,7 +334,7 @@ Describe 'Add-CascadeBulletToVersionSection' {
         }
         $content = Get-Content $script:Changelog -Raw
         $content | Should -Match '- ⚠️ Breaking'
-        $content | Should -Match 'bump `bigdep` to 1\.0\.0'
+        $content | Should -Match 'Now requires `1\.0\.0` of `bigdep`'
     }
 
     It 'warns and returns when the target version section is missing' {
@@ -321,5 +352,29 @@ Describe 'Add-CascadeBulletToVersionSection' {
             Target = 'x'; Version = '0.1.0'; Breaking = $false
         } -WarningVariable warnings -WarningAction SilentlyContinue
         $warnings.Count | Should -BeGreaterOrEqual 1
+    }
+
+    It 'preserves LF line endings when the source file uses LF' {
+        $path = Join-Path $TestDrive ('cascade-lf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.md')
+        [System.IO.File]::WriteAllText($path, "# Changelog`n`n## [0.2.0] - 2025-01-01`n`n- ✨ Features`n`n  - already noted`n`n")
+        Add-CascadeBulletToVersionSection -ChangelogFile $path -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $raw = [System.IO.File]::ReadAllText($path)
+        ([regex]::Matches($raw, "`r`n")).Count | Should -Be 0
+        ([regex]::Matches($raw, "(?<!`r)`n")).Count | Should -BeGreaterThan 0
+        $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+    }
+
+    It 'preserves CRLF line endings when the source file uses CRLF' {
+        $path = Join-Path $TestDrive ('cascade-crlf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.md')
+        [System.IO.File]::WriteAllText($path, "# Changelog`r`n`r`n## [0.2.0] - 2025-01-01`r`n`r`n- ✨ Features`r`n`r`n  - already noted`r`n`r`n")
+        Add-CascadeBulletToVersionSection -ChangelogFile $path -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $raw = [System.IO.File]::ReadAllText($path)
+        ([regex]::Matches($raw, "(?<!`r)`n")).Count | Should -Be 0
+        ([regex]::Matches($raw, "`r`n")).Count | Should -BeGreaterThan 0
+        $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
     }
 }

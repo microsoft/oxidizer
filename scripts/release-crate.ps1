@@ -25,7 +25,7 @@
        Dev-only dependents are skipped — they automatically pick up the new workspace version.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded crates that have no other commits since their last release get a single
-       `bump \`<target>\` to <new-version>` entry under `🔧 Maintenance` (or `⚠️ Breaking`
+       `Now requires <new-version> of \`<target>\`` entry under `🔧 Maintenance` (or `⚠️ Breaking`
        for major bumps).
 
     By default, if neither --version nor --bump is specified, the script will perform a minor bump

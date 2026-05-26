@@ -277,16 +277,16 @@ function Write-Changelog {
     }
 
     # Prepend a cascade entry when this crate is being bumped purely because one of its
-    # dependencies was bumped. Format follows existing convention in the repo
-    # (e.g. crates/cachet/CHANGELOG.md):
+    # dependencies was bumped. Emits a structured "Now requires <version> of <target>"
+    # bullet (deliberately formal rather than colloquial) under the appropriate section:
     #   - 🔧 Maintenance
-    #     - bump `<target>` to <new-version>
+    #     - Now requires <version> of `<target>`
     # If the same section header was already produced by Format-ConventionalCommits for this
     # release, the cascade bullet is merged into that existing section instead of creating a
     # duplicate header.
     if ($null -ne $cascadeReason) {
         $sectionHeader = if ($cascadeReason.Breaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
-        $cascadeBullet = "  - bump ``$($cascadeReason.Target)`` to $($cascadeReason.Version)"
+        $cascadeBullet = "  - Now requires ``$($cascadeReason.Version)`` of ``$($cascadeReason.Target)``"
 
         $existingHeaderIdx = -1
         for ($i = 0; $i -lt $formattedCommits.Count; $i++) {
@@ -332,23 +332,26 @@ function Write-Changelog {
             # Insert the new version section there
             $headerPattern = '^# Changelog\s*\r?\n(\r?\n)*'
             if ($existingContent -match $headerPattern) {
+                # Match the existing file's line-ending convention so we don't introduce
+                # mixed endings (e.g. CRLF body + LF for the new section).
+                $eol = Get-FileLineEnding -Path $changelogFile
                 $headerMatch = [regex]::Match($existingContent, $headerPattern)
                 $insertPosition = $headerMatch.Index + $headerMatch.Length
                 $newContent = $existingContent.Substring(0, $insertPosition) +
-                              ($newVersionSection -join "`n") + "`n" +
+                              ($newVersionSection -join $eol) + $eol +
                               $existingContent.Substring($insertPosition)
-                $newContent | Set-Content $changelogFile -NoNewline
+                Set-Content -LiteralPath $changelogFile -Value $newContent -NoNewline -Encoding utf8
                 Write-Host "✅ Changelog updated at '$changelogFile'."
                 return
             }
         }
     }
 
-    # If no existing changelog or couldn't parse it, create a new one
+    # If no existing changelog or couldn't parse it, create a new one.
+    # No existing file to sample from, so default to LF (modern convention; matches
+    # what .gitattributes normalizes to in repos that enforce it).
     $changelogContent = @("# Changelog", "")
     $changelogContent += $newVersionSection
-    # Join with LF explicitly to honor .gitattributes (`* text eol=lf`); Out-File
-    # with an array would use [Environment]::NewLine (CRLF on Windows).
     Set-Content -LiteralPath $changelogFile -Value (($changelogContent -join "`n") + "`n") -NoNewline -Encoding utf8
     Write-Host "✅ Changelog created at '$changelogFile'."
 }
@@ -445,7 +448,7 @@ function Show-FinalMessage {
 
 # --- POST-RELEASE SCAN HELPERS ---
 
-# Idempotently inserts a "bump `<target>` to <version>" bullet into an
+# Idempotently inserts a "Now requires <version> of <target>" bullet into an
 # existing `## [<Version>]` section in a changelog. Used when a dependent has
 # already been version-bumped (sufficiently) in an earlier cascade pass within the
 # same PR — we don't want to re-bump, but we still want to record that this new
@@ -468,7 +471,7 @@ function Add-CascadeBulletToVersionSection {
     $targetVersion = $CascadeReason.Version
     $isBreaking    = [bool]$CascadeReason.Breaking
     $subHeader     = if ($isBreaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
-    $bullet        = "  - bump ``$targetName`` to $targetVersion"
+    $bullet        = "  - Now requires ``$targetVersion`` of ``$targetName``"
 
     $lines = @(Get-Content -LiteralPath $ChangelogFile)
     $escapedVersion = $script:RegexEscapeRegex.Replace($Version, '\$1')
@@ -525,13 +528,14 @@ function Add-CascadeBulletToVersionSection {
         }
     }
 
-    # Join with LF explicitly to honor .gitattributes (`* text eol=lf`); a string-array
-    # to Set-Content joins with [Environment]::NewLine which is CRLF on Windows and
-    # would produce noisy whole-file diffs. Preserve the file's trailing-newline shape
-    # by detecting whether the input ended with a blank line.
+    # Match the existing file's line-ending convention rather than hardcoding LF —
+    # a string-array passed to Set-Content joins with [Environment]::NewLine (CRLF on
+    # Windows), which produces noisy whole-file diffs in LF-normalized repos and
+    # mixed endings in repos that genuinely use CRLF.
+    $eol = Get-FileLineEnding -Path $ChangelogFile
     $hadTrailingNewline = ($lines.Count -gt 0) -and ($lines[-1] -eq '')
-    $body = ($new -join "`n")
-    if ($hadTrailingNewline -and -not $body.EndsWith("`n")) { $body += "`n" }
+    $body = ($new -join $eol)
+    if ($hadTrailingNewline -and -not $body.EndsWith($eol)) { $body += $eol }
     Set-Content -LiteralPath $ChangelogFile -Value $body -NoNewline -Encoding utf8
     Write-Host "📝 Recorded cascade in '$ChangelogFile' under [$Version]." -ForegroundColor DarkCyan
 }

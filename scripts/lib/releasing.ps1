@@ -93,6 +93,30 @@ function Test-GitRef {
     return ($LASTEXITCODE -eq 0)
 }
 
+# --- FILE I/O HELPERS ---
+
+# Detects the dominant line-ending convention ("`r`n" or "`n") used by the
+# file at -Path so callers can preserve it on write. Useful when the script
+# is used across repos that may not all enforce LF line endings via
+# .gitattributes. Returns "`n" when the file is missing, empty, or has no
+# detectable line endings (the modern default).
+function Get-FileLineEnding {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return "`n" }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+    if ([string]::IsNullOrEmpty($raw)) { return "`n" }
+
+    $crlf = ([regex]::Matches($raw, "`r`n")).Count
+    # Count lone LFs (LFs not immediately preceded by CR) to avoid double-counting CRLF pairs.
+    $lf   = ([regex]::Matches($raw, "(?<!`r)`n")).Count
+
+    if ($crlf -gt $lf) { return "`r`n" }
+    return "`n"
+}
+
 # --- VERSION HELPERS ---
 
 function Test-ValidCrateName {
