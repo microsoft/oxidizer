@@ -12,9 +12,9 @@
     Test-InteractiveSession. Returns a result object the test can assert on.
 
     The runner is invoked from Pester It blocks so Mock works correctly.
-    The caller is responsible for dot-sourcing release-crate.ps1 in a
-    BeforeAll (with $env:OXI_RELEASE_CRATE_NOEXEC = '1') so this runner can
-    refer to Invoke-ReleaseMain and Read-Host as known commands.
+    The caller is responsible for dot-sourcing scripts/lib/release-flow.ps1
+    in a BeforeAll so this runner can refer to Invoke-ReleaseMain and
+    Read-Host as known commands.
 
 .PARAMETER ScenarioFile
     Absolute path to a .scenario.psd1 file describing the scenario.

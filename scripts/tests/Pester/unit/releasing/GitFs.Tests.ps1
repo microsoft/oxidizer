@@ -270,9 +270,7 @@ Describe 'Get-CratesWithVersionBumps' {
 
 Describe 'Add-CascadeBulletToVersionSection' {
     BeforeAll {
-        $env:OXI_RELEASE_CRATE_NOEXEC = '1'
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
-        Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
 
     BeforeEach {

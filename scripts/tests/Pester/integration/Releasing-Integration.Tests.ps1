@@ -5,8 +5,8 @@
 # helpers. Each test uses a tiny synthetic Cargo workspace and exercises a
 # realistic interplay between version bumps, source edits, and the
 # release-set / unreleased-modified-deps analyses. The N1..N9 scenarios
-# from RELEASE-DEPS-TEST-CASES.md are re-encoded here so the test suite
-# replaces the manual harness.
+# previously documented in scripts/tests/RELEASE-DEPS-TEST-CASES.md (since
+# deleted) are encoded here.
 
 BeforeAll {
     . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
@@ -228,9 +228,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
 
 Describe 'Update-CrateVersion' {
     BeforeAll {
-        $env:OXI_RELEASE_CRATE_NOEXEC = '1'
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
-        Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
 
     It 'updates the crate version in its own Cargo.toml' {
@@ -331,9 +329,7 @@ publish = true
 
 Describe 'Invoke-CascadeStep' {
     BeforeAll {
-        $env:OXI_RELEASE_CRATE_NOEXEC = '1'
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
-        Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
 
     It 'bumps a dependent from the base version when not yet pre-bumped' {

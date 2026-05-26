@@ -17,9 +17,7 @@ BeforeAll {
     . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
     . (Join-Path $env:OXI_TEST_COMMON 'New-SyntheticWorkspace.ps1')
     . (Join-Path $env:OXI_TEST_COMMON 'Invoke-Scenario.ps1')
-    $env:OXI_RELEASE_CRATE_NOEXEC = '1'
-    . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
-    Remove-Item Env:OXI_RELEASE_CRATE_NOEXEC -ErrorAction SilentlyContinue
+    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
 
     # Discover all scenarios.
     $script:ScenarioFiles = Get-ChildItem -Path (Join-Path $PSScriptRoot '..\scenarios') -Filter '*.scenario.psd1' |
