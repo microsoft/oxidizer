@@ -193,7 +193,7 @@ mod tests {
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
+        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default(), None)
     }
 
     fn make_fallback_cache() -> TestFallbackCache {
@@ -446,6 +446,7 @@ mod tests {
             None,
             telemetry.clone(),
             InsertPolicy::default(),
+            None,
         );
         let fc = FallbackCache::new("test", primary, fallback_mock, clock, Some(refresh), telemetry);
 

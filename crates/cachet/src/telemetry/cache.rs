@@ -165,6 +165,12 @@ impl CacheTelemetry {
         self.inner.info(cache_name, attributes::EVENT_INSERTED, duration);
     }
 
+    /// Records that an insert caused an eviction because the cache was at capacity.
+    #[inline]
+    pub(crate) fn cache_eviction(&self, cache_name: CacheName, duration: Duration) {
+        self.inner.info(cache_name, attributes::EVENT_EVICTION, duration);
+    }
+
     /// Records a cache insert that was rejected by the insert policy.
     #[inline]
     pub(crate) fn insert_rejected(&self, cache_name: CacheName, duration: Duration) {
@@ -290,6 +296,7 @@ mod tests {
         assert_emits(|t| t.refresh_hit("c", Duration::ZERO), attributes::EVENT_REFRESH_HIT);
         assert_emits(|t| t.refresh_miss("c", Duration::ZERO), attributes::EVENT_REFRESH_MISS);
         assert_emits(|t| t.cache_inserted("c", Duration::ZERO), attributes::EVENT_INSERTED);
+        assert_emits(|t| t.cache_eviction("c", Duration::ZERO), attributes::EVENT_EVICTION);
         assert_emits(|t| t.insert_rejected("c", Duration::ZERO), attributes::EVENT_INSERT_REJECTED);
         assert_emits(|t| t.insert_error("c", Duration::ZERO), attributes::EVENT_INSERT_ERROR);
         assert_emits(|t| t.cache_invalidated("c", Duration::ZERO), attributes::EVENT_INVALIDATED);

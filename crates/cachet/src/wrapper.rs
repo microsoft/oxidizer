@@ -51,6 +51,7 @@ pub struct CacheWrapper<K, V, CT> {
     pub(crate) ttl: Option<Duration>,
     pub(crate) telemetry: CacheTelemetry,
     pub(crate) policy: InsertPolicy<V>,
+    pub(crate) max_capacity: Option<u64>,
     _phantom: PhantomData<(K, V)>,
 }
 
@@ -62,6 +63,7 @@ impl<K, V, CT> CacheWrapper<K, V, CT> {
         ttl: Option<Duration>,
         telemetry: CacheTelemetry,
         policy: InsertPolicy<V>,
+        max_capacity: Option<u64>,
     ) -> Self {
         Self {
             name,
@@ -70,6 +72,7 @@ impl<K, V, CT> CacheWrapper<K, V, CT> {
             ttl,
             telemetry,
             policy,
+            max_capacity,
             _phantom: PhantomData,
         }
     }
@@ -144,9 +147,19 @@ where
             return Ok(());
         }
 
+        // Check if inserting will cause an eviction (cache at capacity).
+        let at_capacity = if let Some(max_cap) = self.max_capacity {
+            self.inner.len().await.map_or(false, |len| len >= max_cap)
+        } else {
+            false
+        };
+
         let timed = self.clock.timed_async(self.inner.insert(key, entry)).await;
         match &timed.result {
             Ok(()) => {
+                if at_capacity {
+                    self.telemetry.cache_eviction(self.name, timed.duration);
+                }
                 self.telemetry.cache_inserted(self.name, timed.duration);
             }
             Err(_) => {
@@ -198,7 +211,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
 
         // Entry without TTL should not be expired
         let entry = CacheEntry::new(42);
@@ -217,6 +230,7 @@ mod tests {
             Some(Duration::from_secs(60)),
             telemetry,
             InsertPolicy::default(),
+            None,
         );
 
         // Entry without cached_at should be expired if TTL is configured (treat as expired to be safe)
@@ -233,8 +247,15 @@ mod tests {
         let telemetry = CacheTelemetry::new();
         let tier_ttl = Duration::from_secs(60);
         let entry_ttl = Duration::from_secs(30);
-        let wrapper: CacheWrapper<String, i32, _> =
-            CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new(
+            "test",
+            inner,
+            clock.clone(),
+            Some(tier_ttl),
+            telemetry,
+            InsertPolicy::default(),
+            None,
+        );
 
         let entry = CacheEntry::expires_at(42, entry_ttl, clock.system_time());
 
@@ -251,7 +272,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         let inner_check = inner.clone();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
 
         let entry = CacheEntry::new(42);
         wrapper.insert("key".to_string(), entry).await.unwrap();
@@ -269,7 +290,7 @@ mod tests {
         let telemetry = CacheTelemetry::new();
         let tier_ttl = Duration::from_secs(60);
         let wrapper: CacheWrapper<String, i32, _> =
-            CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry, InsertPolicy::default());
+            CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry, InsertPolicy::default(), None);
 
         let entry = CacheEntry::new(42);
         wrapper.insert("key".to_string(), entry).await.unwrap();
@@ -290,6 +311,7 @@ mod tests {
             Some(Duration::from_secs(60)),
             telemetry,
             InsertPolicy::default(),
+            None,
         );
 
         // Entry with cached_at in the future simulates clock going backward
@@ -304,7 +326,7 @@ mod tests {
         let telemetry = CacheTelemetry::new();
         let ttl = Duration::from_secs(60);
         let wrapper: CacheWrapper<String, i32, _> =
-            CacheWrapper::new("test", inner, clock.clone(), Some(ttl), telemetry, InsertPolicy::default());
+            CacheWrapper::new("test", inner, clock.clone(), Some(ttl), telemetry, InsertPolicy::default(), None);
 
         // Entry cached exactly TTL ago → elapsed == ttl → should NOT be expired (uses >)
         let entry = CacheEntry::expires_at(42, ttl, clock.system_time() - ttl);
@@ -316,7 +338,8 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("mock_test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> =
+            CacheWrapper::new("mock_test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         assert_eq!(wrapper.name(), "mock_test");
     }
 
@@ -325,7 +348,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let result = wrapper.handle_get_result(None, Duration::from_secs(0));
         assert!(result.is_none());
     }
@@ -342,6 +365,7 @@ mod tests {
             Some(Duration::from_secs(60)),
             telemetry,
             InsertPolicy::default(),
+            None,
         );
         // Entry without cached_at → considered expired
         let entry = CacheEntry::new(42);
@@ -354,7 +378,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let entry = CacheEntry::new(42);
         let result = wrapper.handle_get_result(Some(entry), Duration::from_secs(0));
         assert!(result.is_some());
@@ -366,7 +390,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
 
         // get miss
         assert!(wrapper.get(&"key".to_string()).await.unwrap().is_none());
@@ -392,7 +416,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         assert_eq!(wrapper.len().await.expect("len should return Ok"), 0);
         wrapper.insert("key".to_string(), CacheEntry::new(1)).await.unwrap();
         assert_eq!(wrapper.len().await.expect("len should return Ok"), 1);
@@ -405,7 +429,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Get(_)));
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let result = wrapper.get(&"key".to_string()).await;
         result.unwrap_err();
     }
@@ -417,7 +441,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Insert { .. }));
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let result = wrapper.insert("key".to_string(), CacheEntry::new(1)).await;
         result.unwrap_err();
     }
@@ -429,7 +453,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Invalidate(_)));
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let result = wrapper.invalidate(&"key".to_string()).await;
         result.unwrap_err();
     }
@@ -441,8 +465,51 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         inner.fail_when(|op| matches!(op, cachet_tier::CacheOp::Clear));
         let telemetry = CacheTelemetry::new();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
         let result = wrapper.clear().await;
         result.unwrap_err();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_at_capacity_emits_eviction_event() {
+        use testing_aids::LogCapture;
+
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let telemetry = CacheTelemetry::with_logging();
+        let wrapper: CacheWrapper<String, i32, _> =
+            CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), Some(2));
+
+        // Below capacity: no eviction event.
+        wrapper.insert("a".to_string(), CacheEntry::new(1)).await.unwrap();
+        wrapper.insert("b".to_string(), CacheEntry::new(2)).await.unwrap();
+        assert!(!capture.output().contains(crate::telemetry::attributes::EVENT_EVICTION));
+
+        // At capacity: next insert should emit eviction.
+        wrapper.insert("c".to_string(), CacheEntry::new(3)).await.unwrap();
+        capture.assert_contains(crate::telemetry::attributes::EVENT_EVICTION);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn insert_without_max_capacity_never_emits_eviction() {
+        use testing_aids::LogCapture;
+
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        let clock = Clock::new_frozen();
+        let inner = MockCache::<String, i32>::new();
+        let telemetry = CacheTelemetry::with_logging();
+        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default(), None);
+
+        for i in 0..5 {
+            wrapper.insert(format!("k{i}"), CacheEntry::new(i)).await.unwrap();
+        }
+        assert!(!capture.output().contains(crate::telemetry::attributes::EVENT_EVICTION));
     }
 }

@@ -44,6 +44,7 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) clock: Clock,
     pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
+    pub(crate) max_capacity: Option<u64>,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
@@ -57,6 +58,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock,
             telemetry: CacheTelemetry::new(),
             stampede_protection: false,
+            max_capacity: None,
             _phantom: PhantomData,
         }
     }
@@ -90,6 +92,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
+            max_capacity: self.max_capacity,
             _phantom: PhantomData,
         }
     }
@@ -221,6 +224,37 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[must_use]
     pub fn ttl(mut self, ttl: impl Into<Duration>) -> Self {
         self.ttl = Some(ttl.into());
+        self
+    }
+
+    /// Sets the maximum capacity for eviction telemetry.
+    ///
+    /// When set, a `cache.eviction` telemetry event is emitted whenever an
+    /// insert occurs while the cache is at or above this capacity, indicating
+    /// that an existing entry will be evicted to make room.
+    ///
+    /// This does **not** enforce capacity limits on the underlying storage;
+    /// it only enables eviction detection for telemetry purposes. Use the
+    /// storage backend's own capacity settings (e.g.,
+    /// [`InMemoryCacheBuilder::max_capacity`](cachet_memory::InMemoryCacheBuilder::max_capacity))
+    /// to actually bound the cache size.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use cachet_memory::InMemoryCache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .storage(InMemoryCache::with_max_capacity(1000))
+    ///     .max_capacity(1000)
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn max_capacity(mut self, capacity: u64) -> Self {
+        self.max_capacity = Some(capacity);
         self
     }
 

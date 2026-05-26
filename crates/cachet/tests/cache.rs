@@ -1,4 +1,3 @@
-
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
@@ -361,10 +360,7 @@ async fn get_or_insert_with_computes_and_caches() {
     assert_eq!(entry.ttl(), Some(std::time::Duration::from_secs(300)));
 
     // Second call returns cached value, not the new closure result
-    let entry = cache
-        .get_or_insert_with(&key, || async { CacheEntry::new(100) })
-        .await
-        .unwrap();
+    let entry = cache.get_or_insert_with(&key, || async { CacheEntry::new(100) }).await.unwrap();
     assert_eq!(*entry.value(), 42);
 }
 
@@ -403,10 +399,7 @@ async fn stampede_protection_get_or_insert_with() {
     assert_eq!(*entry.value(), 42);
 
     // Second call returns cached value
-    let entry = cache
-        .get_or_insert_with(&key, || async { CacheEntry::new(100) })
-        .await
-        .unwrap();
+    let entry = cache.get_or_insert_with(&key, || async { CacheEntry::new(100) }).await.unwrap();
     assert_eq!(*entry.value(), 42);
 }
 
@@ -424,9 +417,7 @@ async fn try_get_or_insert_with_success() {
     let ttl = std::time::Duration::from_secs(600);
 
     let entry = cache
-        .try_get_or_insert_with(&key, || async {
-            Ok::<_, Error>(CacheEntry::expires_after(42, ttl))
-        })
+        .try_get_or_insert_with(&key, || async { Ok::<_, Error>(CacheEntry::expires_after(42, ttl)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 42);
@@ -434,9 +425,7 @@ async fn try_get_or_insert_with_success() {
 
     // Cached on second call
     let entry = cache
-        .try_get_or_insert_with(&key, || async {
-            Ok::<_, Error>(CacheEntry::new(100))
-        })
+        .try_get_or_insert_with(&key, || async { Ok::<_, Error>(CacheEntry::new(100)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 42);
@@ -451,17 +440,13 @@ async fn try_get_or_insert_with_error_not_cached() {
     let key = "key".to_string();
 
     let result: Result<CacheEntry<i32>, Error> = cache
-        .try_get_or_insert_with(&key, || async {
-            Err(Error::from_message("computation failed"))
-        })
+        .try_get_or_insert_with(&key, || async { Err(Error::from_message("computation failed")) })
         .await;
     result.expect_err("error should propagate");
 
     // Not cached — second call with success should work
     let entry = cache
-        .try_get_or_insert_with(&key, || async {
-            Ok::<_, Error>(CacheEntry::new(99))
-        })
+        .try_get_or_insert_with(&key, || async { Ok::<_, Error>(CacheEntry::new(99)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 99);
@@ -485,9 +470,7 @@ async fn stampede_protection_try_get_or_insert_with_success() {
 
     // Cached on second call
     let entry = cache
-        .try_get_or_insert_with(&key, || async {
-            Ok::<_, Error>(CacheEntry::new(100))
-        })
+        .try_get_or_insert_with(&key, || async { Ok::<_, Error>(CacheEntry::new(100)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 42);
@@ -502,9 +485,7 @@ async fn stampede_protection_try_get_or_insert_with_error() {
     let key = "key".to_string();
 
     let result: Result<CacheEntry<i32>, Error> = cache
-        .try_get_or_insert_with(&key, || async {
-            Err(Error::from_message("test error"))
-        })
+        .try_get_or_insert_with(&key, || async { Err(Error::from_message("test error")) })
         .await;
     result.expect_err("error should propagate through stampede protection");
 }
