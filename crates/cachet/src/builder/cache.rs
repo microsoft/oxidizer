@@ -235,7 +235,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     ///
     /// This does **not** enforce capacity limits on the underlying storage;
     /// it only enables eviction detection for telemetry purposes. Use the
-    /// storage backend's own capacity settings (e.g.,
+    /// storage back-end's own capacity settings (e.g.,
     /// [`InMemoryCacheBuilder::max_capacity`](cachet_memory::InMemoryCacheBuilder::max_capacity))
     /// to actually bound the cache size.
     ///
