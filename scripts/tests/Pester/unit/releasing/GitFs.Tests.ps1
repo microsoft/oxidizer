@@ -293,7 +293,7 @@ Describe 'Add-CascadeBulletToVersionSection' {
         }
         $content = Get-Content $script:Changelog -Raw
         $content | Should -Match '- 🔧 Maintenance'
-        $content | Should -Match 'Now requires `0.3.0` of `depcrate`'
+        $content | Should -Match 'bump `depcrate` to 0\.3\.0'
         $content | Should -Not -Match '- ⚠️ Breaking'
     }
 
@@ -303,7 +303,7 @@ Describe 'Add-CascadeBulletToVersionSection' {
         }
         $content = Get-Content $script:Changelog -Raw
         $content | Should -Match '- ⚠️ Breaking'
-        $content | Should -Match 'Now requires `1.0.0` of `bigdep`'
+        $content | Should -Match 'bump `bigdep` to 1\.0\.0'
     }
 
     It 'warns and returns when the target version section is missing' {
