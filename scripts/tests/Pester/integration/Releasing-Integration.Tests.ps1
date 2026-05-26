@@ -223,10 +223,10 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
 }
 
 # --------------------------------------------------------------------------
-# Update-CrateVersion — pin the known multi-version-line bug (Phase 8).
+# Update-CrateVersion — exercise the [package]-scoped replacement.
 # --------------------------------------------------------------------------
 
-Describe 'Update-CrateVersion (Phase 8 bug-pin)' {
+Describe 'Update-CrateVersion' {
     BeforeAll {
         $env:OXI_RELEASE_CRATE_NOEXEC = '1'
         . (Join-Path (Get-OxiRepoRoot) 'scripts\release-crate.ps1')
@@ -255,13 +255,15 @@ Describe 'Update-CrateVersion (Phase 8 bug-pin)' {
         $rootContent | Should -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.1\.0"'
     }
 
-    It 'BUG PIN — crate-level regex clobbers inline dependency version when present (Phase 8)' {
-        # Workspace inheritance is the default in our fixtures, but if a crate
-        # declares an inline `version = "..."` for a workspace dep, the current
-        # implementation overwrites that with the new crate version. The test
-        # documents the buggy behaviour so the future fix is visible as a diff.
+    It 'preserves inline dependency version when the [package] version is bumped' {
+        # Earlier, the crate-level regex was `(?<=version\s*=\s*")[^"]+` applied
+        # via `-replace`, which clobbers every `version = "..."` in the file —
+        # including any inline workspace-dep declarations like
+        # `dep = { path = "...", version = "x.y.z" }`. Phase 8 fix scopes the
+        # replacement to the [package] table only; this test pins the corrected
+        # behavior.
         Invalidate-WorkspaceMetadataCache
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-bug')
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-inline-dep')
 
         # Replace the downstream Cargo.toml with one that declares upstream inline
         # (instead of via .workspace = true).
@@ -283,12 +285,11 @@ upstream = { path = "../upstream", version = "0.2.0" }
         Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
 
         $content = Get-Content $downstreamCargo -Raw
-        # Buggy outcome today: the upstream inline version was rewritten to '0.1.1'.
-        # When Phase 8 fixes this, this assertion will fail and the test should be
-        # updated to assert -Be '0.2.0'.
+        # [package] version was bumped.
+        $content | Should -Match 'name\s*=\s*"downstream"[^\[]*?version\s*=\s*"0\.1\.1"'
+        # Inline upstream dep's declared version is preserved.
         if ($content -match 'upstream\s*=\s*\{[^}]*version\s*=\s*"([^"]+)"') {
-            $upstreamDeclared = $Matches[1]
-            $upstreamDeclared | Should -Be '0.1.1' -Because 'Pinning the known Update-CrateVersion bug; Phase 8 will flip this to 0.2.0.'
+            $Matches[1] | Should -Be '0.2.0' -Because 'Update-CrateVersion must not rewrite inline workspace-dep versions.'
         } else {
             throw "Could not extract upstream version from rewritten Cargo.toml: $content"
         }

@@ -271,7 +271,18 @@ function Update-CrateVersion {
     }
 
     Write-Host "📝 Updating '$crateCargoToml'..."
-    (Get-Content $crateCargoToml -Raw) -replace '(?<=version\s*=\s*")[^"]+', $newVersion | Set-Content $crateCargoToml -NoNewline
+    $crateContent = Get-Content $crateCargoToml -Raw
+    # Scope the version replacement to the [package] table. A naive
+    # /version\s*=\s*"[^"]+/ replacement would also rewrite any inline workspace
+    # dependency declared as `dep = { path = "...", version = "x.y.z" }` later in
+    # the same file. Capture the [package] prefix up to (and including) the opening
+    # quote of the version literal, then substitute the literal alone.
+    $packageVersionPattern = '(\[package\][^\[]*?\bversion\s*=\s*")[^"]+'
+    if (-not ($crateContent -match $packageVersionPattern)) {
+        Write-Error "Could not find [package] version line in '$crateCargoToml'." -ErrorAction Stop
+    }
+    $crateContent = $crateContent -replace $packageVersionPattern, ('${1}' + $newVersion)
+    Set-Content $crateCargoToml -Value $crateContent -NoNewline
 
     Write-Host "📝 Updating '$rootCargoToml'..."
 
