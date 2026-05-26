@@ -82,6 +82,7 @@ tokio-native-tls = { workspace = true, optional = true }
 [dev-dependencies]
 anyspawn = { workspace = true, features = ["tokio"] }
 bytes = { workspace = true }
+fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { workspace = true, features = ["test-util"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2"] }
@@ -99,7 +100,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"
 tokio-native-tls = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
 wiremock = { workspace = true }
-fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
 
 [[test]]
 name = "smoke"
