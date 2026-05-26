@@ -130,7 +130,7 @@ $script:IgnoredTypes = @('test')
 # scripts/lib/releasing.ps1 owns the reusable building blocks used by both this
 # script and scripts/check-unreleased-dependencies.ps1:
 #   - Compiled regex patterns ($script:ConventionalCommitRegex, $script:PrReferenceRegex,
-#     $script:SemanticVersionRegex, $script:CargoVersionRegex, $script:GitHubRepoRegex,
+#     $script:SemanticVersionRegex, $script:CargoPackageVersionRegex, $script:GitHubRepoRegex,
 #     $script:RegexEscapeRegex).
 #   - Safe git invocation (Invoke-Git) and ref validation (Test-GitRef).
 #   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-BumpKindFromVersions,
@@ -272,16 +272,14 @@ function Update-CrateVersion {
 
     Write-Host "📝 Updating '$crateCargoToml'..."
     $crateContent = Get-Content $crateCargoToml -Raw
-    # Scope the version replacement to the [package] table. A naive
-    # /version\s*=\s*"[^"]+/ replacement would also rewrite any inline workspace
-    # dependency declared as `dep = { path = "...", version = "x.y.z" }` later in
-    # the same file. Capture the [package] prefix up to (and including) the opening
-    # quote of the version literal, then substitute the literal alone.
-    $packageVersionPattern = '(\[package\][^\[]*?\bversion\s*=\s*")[^"]+'
-    if (-not ($crateContent -match $packageVersionPattern)) {
+    # Scope the version replacement to the [package] table via the shared regex
+    # in releasing.ps1, which anchors to line starts so substring keys like
+    # `rust-version` cannot match and inline workspace-dep `version = "..."`
+    # declarations later in the file are left alone. Replace exactly once.
+    if (-not $script:CargoPackageVersionRegex.IsMatch($crateContent)) {
         Write-Error "Could not find [package] version line in '$crateCargoToml'." -ErrorAction Stop
     }
-    $crateContent = $crateContent -replace $packageVersionPattern, ('${1}' + $newVersion)
+    $crateContent = $script:CargoPackageVersionRegex.Replace($crateContent, ('${1}' + $newVersion), 1)
     Set-Content $crateCargoToml -Value $crateContent -NoNewline
 
     Write-Host "📝 Updating '$rootCargoToml'..."

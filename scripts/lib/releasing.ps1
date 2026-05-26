@@ -31,7 +31,16 @@
 $script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
 $script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
 $script:SemanticVersionRegex = [regex]'^\d+\.\d+\.\d+$'
-$script:CargoVersionRegex = [regex]'(?<=version\s*=\s*")[^"]+'
+# Matches a Cargo.toml's [package]-scoped `version = "..."` line.
+#   - Anchored at line start so substring keys like `rust-version` do not match.
+#   - Walks from the [package] header through lines that don't start a new TOML
+#     table (`[...]`), so a `description = "Has [brackets]"` field above the
+#     version line is fine but a `[package.metadata.*]` subtable interrupts the
+#     match (we don't support a `[package]` block whose `version` lives after a
+#     subtable — the version line is conventionally near the top).
+#   - Group 1: prefix up to (and including) the opening quote.
+#   - Group 2: the version literal itself.
+$script:CargoPackageVersionRegex = [regex]'(?m)(^\[package\](?:\r?\n(?!\[)[^\n]*)*?\r?\n[ \t]*version[ \t]*=[ \t]*")([^"]+)'
 $script:GitHubRepoRegex = [regex]'github\.com[/:]([\w.-]+/[\w.-]+)'
 $script:RegexEscapeRegex = [regex]'([\\\.$\^\{\[\(\|\)\*\+\?\/])'
 
@@ -201,7 +210,7 @@ function Test-IsBreakingChange {
     return $true
 }
 
-# Reads the `version = "..."` from a Cargo.toml on disk.
+# Reads the [package] table's `version = "..."` from a Cargo.toml on disk.
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
 
@@ -210,15 +219,15 @@ function Get-CurrentVersion {
     }
 
     $cargoContent = Get-Content $cargoTomlPath -Raw
-    $currentVersionMatch = $script:CargoVersionRegex.Match($cargoContent)
+    $currentVersionMatch = $script:CargoPackageVersionRegex.Match($cargoContent)
     if (-not $currentVersionMatch.Success) {
-        Write-Error "Could not determine current version from '$cargoTomlPath'." -ErrorAction Stop
+        Write-Error "Could not determine [package] version from '$cargoTomlPath'." -ErrorAction Stop
     }
 
-    return $currentVersionMatch.Value
+    return $currentVersionMatch.Groups[2].Value
 }
 
-# Reads the `version = "..."` from a crate's Cargo.toml as it exists at $BaseRef.
+# Reads the [package] `version = "..."` from a crate's Cargo.toml at $BaseRef.
 # Returns $null if the file does not exist at that ref (e.g. crate added in this PR).
 function Get-CrateVersionFromRef {
     param(
@@ -231,9 +240,9 @@ function Get-CrateVersionFromRef {
     if ($null -eq $output) { return $null }
 
     $content = ($output -join "`n")
-    $m = $script:CargoVersionRegex.Match($content)
+    $m = $script:CargoPackageVersionRegex.Match($content)
     if (-not $m.Success) { return $null }
-    return $m.Value
+    return $m.Groups[2].Value
 }
 
 # --- WORKSPACE METADATA ---

@@ -51,6 +51,46 @@ Describe 'Get-CurrentVersion' {
     It 'throws on a missing file' {
         { Get-CurrentVersion -cargoTomlPath (Join-Path $script:Ws.Path 'no.toml') } | Should -Throw
     }
+
+    It 'ignores rust-version when it appears in the [package] table' {
+        # Substring keys like `rust-version = "1.88"` must not be mistaken for the
+        # package's `version = "..."` literal. Writes a custom Cargo.toml with
+        # rust-version placed BEFORE version to stress the regex.
+        $tomlPath = Join-Path $TestDrive 'rust-version-before.toml'
+        Set-Content -Path $tomlPath -NoNewline -Value @'
+[package]
+name = "demo"
+rust-version = "1.88"
+version = "0.7.3"
+edition = "2021"
+'@
+        Get-CurrentVersion -cargoTomlPath $tomlPath | Should -Be '0.7.3'
+    }
+
+    It 'ignores rust-version when it appears AFTER the version line' {
+        $tomlPath = Join-Path $TestDrive 'rust-version-after.toml'
+        Set-Content -Path $tomlPath -NoNewline -Value @'
+[package]
+name = "demo"
+version = "0.7.3"
+rust-version = "1.88"
+edition = "2021"
+'@
+        Get-CurrentVersion -cargoTomlPath $tomlPath | Should -Be '0.7.3'
+    }
+
+    It 'tolerates bracket characters inside non-version fields above the version' {
+        # description = "Helper for [foo]" must not interrupt the [package]-scoped
+        # match; only an actual subtable header (^[...) should.
+        $tomlPath = Join-Path $TestDrive 'bracketed-description.toml'
+        Set-Content -Path $tomlPath -NoNewline -Value @'
+[package]
+name = "demo"
+description = "Helper for [foo] bar"
+version = "0.4.0"
+'@
+        Get-CurrentVersion -cargoTomlPath $tomlPath | Should -Be '0.4.0'
+    }
 }
 
 Describe 'Get-CrateVersionFromRef' {

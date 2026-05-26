@@ -294,6 +294,35 @@ upstream = { path = "../upstream", version = "0.2.0" }
             throw "Could not extract upstream version from rewritten Cargo.toml: $content"
         }
     }
+
+    It 'preserves rust-version when the [package] version is bumped' {
+        # The naive `\bversion` regex was vulnerable to matching `rust-version`
+        # because `-` is a non-word character (word boundary lies between `-` and
+        # `version`). The shared CargoPackageVersionRegex anchors to line start,
+        # so `rust-version = "..."` is no longer confused with the package's
+        # version literal. Pin both orderings (rust-version before vs after).
+        Invalidate-WorkspaceMetadataCache
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-rust-version')
+
+        $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        Set-Content -Path $crateCargo -NoNewline -Value @"
+[package]
+name = "downstream"
+rust-version = "1.88"
+version = "0.1.0"
+edition = "2021"
+publish = true
+
+[lib]
+"@
+
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo | Out-Null
+
+        $content = Get-Content $crateCargo -Raw
+        $content | Should -Match 'rust-version\s*=\s*"1\.88"' -Because 'rust-version must be left alone.'
+        $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
+    }
 }
 
 # --------------------------------------------------------------------------
