@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-05-25
+
+- ✨ Features
+
+  - add effective_port and make port return explicit port ([#438](https://github.com/microsoft/oxidizer/pull/438))
+
 ## Unreleased
 
 - ✨ Features

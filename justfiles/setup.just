@@ -26,6 +26,7 @@ install-tools:
         cargo-ensure-no-cyclic-deps@$env:CARGO_ENSURE_NO_CYCLIC_DEPS_VERSION `
         cargo-ensure-no-default-features@$env:CARGO_ENSURE_NO_DEFAULT_FEATURES_VERSION `
         cargo-hack@$env:CARGO_HACK_VERSION `
+        cargo-heather@$env:CARGO_HEATHER_VERSION `
         cargo-llvm-cov@$env:CARGO_LLVM_COV_VERSION `
         cargo-mutants@$env:CARGO_MUTANTS_VERSION `
         cargo-nextest@$env:CARGO_NEXTEST_VERSION `

@@ -1,0 +1,5 @@
+---
+source: crates/fetch_hyper/src/options.rs
+expression: "ConnectionLifetime::Unlimited"
+---
+Unlimited

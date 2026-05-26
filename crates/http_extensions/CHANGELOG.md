@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1] - 2026-05-25
+
+- 🔧 Maintenance
+
+  - bump `templated_uri` to 0.2.1
+
 ## [0.4.0] - 2026-05-18
 
 - ✨ Features

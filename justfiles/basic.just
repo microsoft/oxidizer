@@ -16,6 +16,9 @@ check-changes:
     Write-Host "`n=== Running doc tests ===" -ForegroundColor Cyan
     just test-docs
 
+    Write-Host "`n=== Running doc tests (default features) ===" -ForegroundColor Cyan
+    just test-docs-default
+
     Write-Host "`n=== Running Clippy ===" -ForegroundColor Cyan
     just clippy
 
@@ -30,6 +33,9 @@ check-changes:
 
     Write-Host "`n=== Checking spelling ===" -ForegroundColor Cyan
     just spellcheck
+
+    Write-Host "`n=== Checking license headers ===" -ForegroundColor Cyan
+    just license-check
 
     Write-Host "`n=== Validating dependencies ===" -ForegroundColor Cyan
     just deny
@@ -95,6 +101,16 @@ examples PROFILE='dev' EXCLUDE='':
 hack:
     cargo hack {{ target_package }} check --feature-powerset --locked
 
+# Apply license boilerplate headers.
+license:
+    cargo heather --fix
+
+# Check that all files have the required license headers.
+license-check:
+    cargo heather
+
+alias check-license := license-check
+
 # Run unit and integration tests under Miri.
 [script]
 miri FILTER="":
@@ -157,6 +173,26 @@ test-docs FILTER="":
             # Binary-only crate - skip doctests because Cargo expects library targets for doctests.
             # Binary crates (with only main.rs) cannot contain doctests, so running `cargo test --doc`
             # on them results in an error rather than gracefully running zero tests.
+            Write-Host "Skipping doctests for binary-only package: {{ package }}"
+        }
+    }
+
+# Runs doctests with only default features enabled. Doctests that reference
+# items behind a non-default feature must still compile in this configuration —
+# see AGENTS-feature-gated-doctests.md.
+[script]
+test-docs-default FILTER="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    if ("{{ package }}" -eq "") {
+        cargo +$env:RUST_MSRV test --doc --no-fail-fast --locked -- {{ FILTER }}
+    } else {
+        $lib_rs_path = "crates/{{ package }}/src/lib.rs"
+
+        if (Test-Path $lib_rs_path) {
+            cargo +$env:RUST_MSRV test {{ target_package }} --doc --no-fail-fast --locked -- {{ FILTER }}
+        } else {
             Write-Host "Skipping doctests for binary-only package: {{ package }}"
         }
     }

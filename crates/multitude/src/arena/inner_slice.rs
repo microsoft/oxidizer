@@ -14,8 +14,8 @@ use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::{
     AllocFlavor, Arena, OversizedLocalGuard, OversizedSharedGuard, ProtectiveHold, SharedArcsIssuedHold, SliceInitGuard, align_offset,
-    bump_local_drop_count, bump_shared_drop_count, compute_worst_case_size, expect_alloc, has_drop_entry, panic_alloc, slow_refill_needed,
-    try_bump_fit, worst_case_refill_for,
+    bump_local_drop_count, bump_shared_drop_count, compute_worst_case_size, expect_alloc, has_drop_entry, panic_alloc,
+    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, worst_case_refill_for,
 };
 use crate::internal::constants::MAX_SMART_PTR_ALIGN;
 use crate::internal::drop_list::{DropEntry as InnerDropEntry, noop_drop_shim};
@@ -28,7 +28,10 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// This mirrors [`Self::try_alloc_inner_oversized_with`] but keeps
     /// oversized chunks out of `current_local`, preserving the
-    /// chunk-header mask invariant.
+    /// chunk-header mask invariant. Slice slow paths route requests
+    /// here after a bump-fit miss when `layout.size() > max_normal_alloc`
+    /// (i.e. a fresh chunk would otherwise be needed and the request
+    /// is too large for a normal one).
     #[cold]
     #[inline(never)]
     pub(super) fn try_alloc_slice_local_oversized_with<T, F>(
@@ -104,9 +107,21 @@ impl<A: Allocator + Clone> Arena<A> {
                 // SAFETY: `entry_size > 0` implies `drop_fn.is_some()`.
                 unsafe { drop_fn.unwrap_unchecked() }
             };
-            let value_offset_u16 = u16::try_from(aligned)
-                .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX");
-            let len_u16 = u16::try_from(len).expect("guarded above: entry_size > 0 implies len ≤ u16::MAX");
+            // Bound: `aligned < layout.align() ≤ MAX_SMART_PTR_ALIGN < u16::MAX` for
+            // drop-aware paths; the `len ≤ u16::MAX` invariant is enforced by the
+            // `entry_size != 0 && len > u16::MAX` guard at the top of this function.
+            // We must NOT panic here: `core::mem::forget(init_guard)` above committed
+            // the initialized slice; a panic past that point would skip element drops
+            // while `chunk_guard` still frees the backing on unwind.
+            debug_assert!(u16::try_from(aligned).is_ok() && u16::try_from(len).is_ok());
+            // SAFETY: precondition asserted via the bound chain above.
+            unsafe { core::hint::assert_unchecked(u16::try_from(aligned).is_ok()) };
+            // SAFETY: same.
+            unsafe { core::hint::assert_unchecked(u16::try_from(len).is_ok()) };
+            // SAFETY: preconditions asserted above; conversions have no panic surface.
+            let value_offset_u16 = unsafe { u16::try_from(aligned).unwrap_unchecked() };
+            // SAFETY: see comment above.
+            let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
             let entry = InnerDropEntry::new(installed_drop_fn, value_offset_u16, len_u16);
             // SAFETY: payload-extent invariant.
             unsafe { core::ptr::write(entry_ptr, entry) };
@@ -138,9 +153,10 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Cold one-shot oversized-allocation path for shared-flavor (Arc) slices.
     ///
     /// Mirror of [`Self::try_alloc_inner_arc_oversized_with`] for the
-    /// slice case. Slice fast paths delegate here whenever
-    /// `layout.size() > max_normal_alloc` to avoid routing the
-    /// oversized shared chunk through `current_shared`.
+    /// slice case. Slice slow paths route requests here after a
+    /// bump-fit miss when `layout.size() > max_normal_alloc` (a request
+    /// that fits in the current chunk's tail is satisfied directly and
+    /// never reaches this function).
     #[inline(never)]
     pub(super) fn try_alloc_slice_shared_oversized_with<T, F>(
         &self,
@@ -204,9 +220,19 @@ impl<A: Allocator + Clone> Arena<A> {
             let entry_ptr = unsafe { data_ptr.as_ptr().add(new_drop_back).cast::<InnerDropEntry>() };
             // SAFETY: `entry_size > 0` implies `drop_fn.is_some()`.
             let installed_drop_fn = unsafe { drop_fn.unwrap_unchecked() };
-            let value_offset_u16 = u16::try_from(aligned)
-                .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX");
-            let len_u16 = u16::try_from(len).expect("guarded above: entry_size > 0 implies len ≤ u16::MAX");
+            // See the local sibling for why these must not be a panic
+            // surface: `core::mem::forget(init_guard)` above already
+            // committed the initialized slice.
+            debug_assert!(u16::try_from(aligned).is_ok() && u16::try_from(len).is_ok());
+            // SAFETY: `aligned < layout.align() ≤ MAX_SMART_PTR_ALIGN < u16::MAX`.
+            unsafe { core::hint::assert_unchecked(u16::try_from(aligned).is_ok()) };
+            // SAFETY: the `entry_size != 0 && len > u16::MAX` guard at the top of
+            // this function already excluded `len > u16::MAX`.
+            unsafe { core::hint::assert_unchecked(u16::try_from(len).is_ok()) };
+            // SAFETY: preconditions asserted above; conversions have no panic surface.
+            let value_offset_u16 = unsafe { u16::try_from(aligned).unwrap_unchecked() };
+            // SAFETY: see comment above.
+            let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
             let entry = InnerDropEntry::new(installed_drop_fn, value_offset_u16, len_u16);
             // SAFETY: payload-extent invariant.
             unsafe { core::ptr::write(entry_ptr, entry) };
@@ -262,7 +288,7 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "fast-path bump body must inline into every public alloc/alloc_with/alloc_box/alloc_rc call site"
     )]
     #[cfg_attr(test, mutants::skip)]
-    pub(super) fn try_alloc_slice_local_with<T, F>(
+    pub(super) fn try_alloc_slice_local_with<T, F, const PANIC: bool>(
         &self,
         len: usize,
         flavor: AllocFlavor,
@@ -272,7 +298,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         F: FnMut(usize, &mut MaybeUninit<T>),
     {
-        self.impl_alloc_slice_local_with::<T, F, false>(len, flavor, drop_fn, init)
+        self.impl_alloc_slice_local_with::<T, F, PANIC>(len, flavor, drop_fn, init)
     }
 
     /// Single source of truth for the local-flavor slice-with-init
@@ -320,13 +346,14 @@ impl<A: Allocator + Clone> Arena<A> {
             }
             return Err(AllocError);
         }
-        // Route oversized requests to the cold one-shot path so we
-        // never install a >64 KiB-payload chunk as `current_local`
-        // (would break the chunk-recovery mask invariant).
-        if layout.size() > self.provider.max_normal_alloc {
-            let r = self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, drop_fn, init);
-            return if PANIC { Ok(expect_alloc(r)) } else { r };
-        }
+        // Oversized routing happens in the slow path (post-bump-miss),
+        // not here: `max_normal_alloc` gates *chunk acquisition*, so a
+        // request that fits in the current chunk's tail (e.g. when
+        // `with_capacity_local` / the high-water ratchet has grown
+        // `current_local` past `max_normal_alloc`) is satisfied
+        // directly. Doing the routing post-miss also keeps the hot
+        // bump-fit iteration free of a 2-level pointer chase through
+        // `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
             let data_ptr = self.current_local.data_ptr.get();
@@ -377,11 +404,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (value_offset, len_u16) = if entry_size > 0 {
                         // SAFETY: refcount-positive — chunk held at LARGE inflation.
                         let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-                        // Fast path is gated on `layout.size() <= max_normal_alloc <= MAX_CHUNK_BYTES`,
-                        // so any aligned offset within the chunk payload is < 64 KiB and fits in `u16`.
-                        // Same for `len_u16`: the `entry_size != 0 && len > u16::MAX` guard above
-                        // already excluded `len > u16::MAX`.
-                        // SAFETY: bounded by fast-path invariants (chunk payload < 64 KiB; len <= u16::MAX).
+                        // Bump-fit success means the allocation lands
+                        // inside the current chunk, whose bump extent
+                        // is capped at `max_bump_extent <= MAX_CHUNK_BYTES`
+                        // (< u16::MAX), so any aligned offset within
+                        // it fits in `u16`. `len_u16` is bounded by
+                        // the `entry_size != 0 && len > u16::MAX`
+                        // guard at the top of the function.
+                        // SAFETY: bounded by current-chunk extent.
                         let value_offset = unsafe { u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).unwrap_unchecked() };
                         // SAFETY: gated by `len > u16::MAX` check earlier in this function.
                         let len_u16 = unsafe { u16::try_from(len).unwrap_unchecked() };
@@ -416,9 +446,15 @@ impl<A: Allocator + Clone> Arena<A> {
                     // runs `drop_in_place` directly; `Box<[T]>::into_rc`
                     // retargets the entry to the real shim at conversion
                     // time.
-                    if !matches!(flavor, AllocFlavor::Box)
-                        && let Some(drop_fn) = drop_fn.filter(|_| len != 0)
-                    {
+                    //
+                    // `entry_size > 0` already implies `drop_fn.is_some()
+                    // && len != 0` (see the `entry_size` computation
+                    // above), so this branch only needs to check the
+                    // flavor gate and unwrap `drop_fn` without re-checking
+                    // `len`.
+                    if has_drop_entry(entry_size) && !matches!(flavor, AllocFlavor::Box) {
+                        // SAFETY: `entry_size > 0` ⇔ `drop_fn.is_some() && len != 0`.
+                        let drop_fn = unsafe { drop_fn.unwrap_unchecked() };
                         // Overwrite the noop drop shim with the real one;
                         // `value_offset` and `len_u16` were already written
                         // by the pre-closure noop entry and are unchanged,
@@ -439,6 +475,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     // SAFETY: `fat` is non-null and covers the initialized elements.
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
+            }
+            // Bump-fit missed and we'd need a fresh chunk: oversized
+            // requests get a dedicated one-shot chunk at acquisition
+            // time so we never install a >64 KiB chunk as
+            // `current_local`.
+            if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
+                let r = self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, drop_fn, init);
+                return if PANIC { Ok(expect_alloc(r)) } else { r };
             }
             let r = self.refill_local(worst_case_refill_for(layout, entry_size));
             if PANIC {
@@ -482,7 +526,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[expect(clippy::inline_always, reason = "see method-level comment")]
     #[cfg_attr(test, mutants::skip)]
-    pub(super) fn try_alloc_slice_local_no_drop_with<T, F>(
+    pub(super) fn try_alloc_slice_local_no_drop_with<T, F, const PANIC: bool>(
         &self,
         len: usize,
         flavor: AllocFlavor,
@@ -495,7 +539,12 @@ impl<A: Allocator + Clone> Arena<A> {
             !core::mem::needs_drop::<T>(),
             "try_alloc_slice_local_no_drop_with requires T: !Drop"
         );
-        let layout = Layout::array::<T>(len).map_err(|_e| AllocError)?;
+        let Ok(layout) = Layout::array::<T>(len) else {
+            if PANIC {
+                panic_alloc();
+            }
+            return Err(AllocError);
+        };
         // SimpleRef returns `&mut [T]`, so the cap is the
         // chunk-recovery limit (`CHUNK_ALIGN`); Box/Rc need the
         // tighter smart-pointer cap so `from_value_ptr` round-trips.
@@ -504,12 +553,18 @@ impl<A: Allocator + Clone> Arena<A> {
             AllocFlavor::Box | AllocFlavor::Rc => MAX_SMART_PTR_ALIGN,
         };
         if layout.align() >= align_cap {
+            if PANIC {
+                panic_alloc();
+            }
             return Err(AllocError);
         }
         // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        if layout.size() > self.provider.max_normal_alloc {
-            return self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, None, init);
-        }
+        // `max_normal_alloc` gates *chunk acquisition* in the slow
+        // path, not the bump probe: a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold (see the slow path below). Doing the
+        // check post-miss also keeps the hot bump-fit probe free of a
+        // 2-level pointer chase through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
 
         // Fast path: single bump-check; on miss, take the cold refill loop.
@@ -523,7 +578,8 @@ impl<A: Allocator + Clone> Arena<A> {
             0, // no drop entry for !needs_drop
         );
         if !__fit.fits {
-            return self.try_alloc_slice_local_no_drop_with_slow::<T, F>(len, flavor, init, layout, bumped);
+            let r = self.try_alloc_slice_local_no_drop_with_slow::<T, F>(len, flavor, init, layout, bumped);
+            return if PANIC { Ok(expect_alloc(r)) } else { r };
         }
         let aligned_ptr = __fit.aligned_ptr;
         let end_ptr = __fit.end_ptr;
@@ -593,10 +649,16 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize, &mut MaybeUninit<T>),
     {
         let _ = bumped;
+        // Bump-fit missed — we'd need a fresh chunk. Oversized
+        // requests get a dedicated one-shot chunk at acquisition
+        // time rather than driving the refill loop.
+        if layout.size() > self.provider.max_normal_alloc {
+            return self.try_alloc_slice_local_oversized_with::<T, F>(len, flavor, None, init);
+        }
         self.refill_local(compute_worst_case_size(layout, false))?;
         // `refill_local` post-condition: the refreshed chunk fits the request,
         // so the recursive fast-path call below cannot miss the bump-fit gate.
-        self.try_alloc_slice_local_no_drop_with::<T, F>(len, flavor, init)
+        self.try_alloc_slice_local_no_drop_with::<T, F, false>(len, flavor, init)
     }
 
     /// Fast path for `T: Copy` slice allocation in a local-flavor chunk.
@@ -610,8 +672,12 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "slice fast path must inline into every public alloc_slice_* call site"
     )]
     #[cfg_attr(test, mutants::skip)]
-    pub(super) fn try_alloc_slice_local_copy<T: Copy>(&self, src: &[T], flavor: AllocFlavor) -> Result<NonNull<[T]>, AllocError> {
-        self.impl_alloc_slice_local_copy::<T, false>(src, flavor)
+    pub(super) fn try_alloc_slice_local_copy<T: Copy, const PANIC: bool>(
+        &self,
+        src: &[T],
+        flavor: AllocFlavor,
+    ) -> Result<NonNull<[T]>, AllocError> {
+        self.impl_alloc_slice_local_copy::<T, PANIC>(src, flavor)
     }
 
     /// Single source of truth for the local-flavor `T: Copy` slice
@@ -641,16 +707,16 @@ impl<A: Allocator + Clone> Arena<A> {
             }
             return Err(AllocError);
         }
-        // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        if layout.size() > self.provider.max_normal_alloc {
-            let r = self.try_alloc_slice_local_oversized_with::<T, _>(len, flavor, None, |i, slot| {
-                slot.write(src[i]);
-            });
-            return if PANIC { Ok(expect_alloc(r)) } else { r };
-        }
         let bumped = layout.size().max(1);
 
-        // Fast path: single-branch fit check; on miss, cold refill function.
+        // Fast path: single-branch fit check against the currently-
+        // installed chunk. On miss, the cold slow path decides between
+        // oversized routing and refill-retry. `max_normal_alloc` gates
+        // *chunk acquisition* only, so a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold. Doing the check post-miss also keeps
+        // the hot loop free of a 2-level pointer chase through
+        // `Arc<ChunkProvider>`.
         let data_ptr = self.current_local.data_ptr.get();
         let drop_back_ptr = self.current_local.drop_back.get();
         let __fit = try_bump_fit(
@@ -716,6 +782,14 @@ impl<A: Allocator + Clone> Arena<A> {
         bumped: usize,
     ) -> Result<NonNull<[T]>, AllocError> {
         let len = src.len();
+        // Bump-fit missed and we'd need a fresh chunk. Oversized
+        // requests get a one-shot oversized chunk; sub-threshold
+        // requests drive the refill loop below.
+        if layout.size() > self.provider.max_normal_alloc {
+            return self.try_alloc_slice_local_oversized_with::<T, _>(len, flavor, None, |i, slot| {
+                slot.write(src[i]);
+            });
+        }
         self.refill_local(compute_worst_case_size(layout, false))?;
         let data_ptr = self.current_local.data_ptr.get();
         let drop_back_ptr = self.current_local.drop_back.get();
@@ -786,7 +860,10 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "slice fast path must inline into every public alloc_slice_* call site"
     )]
     #[cfg_attr(test, mutants::skip)]
-    pub(super) fn try_alloc_slice_shared_copy<T: Copy + Send + Sync>(&self, src: &[T]) -> Result<NonNull<[T]>, AllocError> {
+    pub(super) fn try_alloc_slice_shared_copy<T: Copy + Send + Sync, const PANIC: bool>(
+        &self,
+        src: &[T],
+    ) -> Result<NonNull<[T]>, AllocError> {
         let len = src.len();
         // SAFETY: `src: &[T]`'s safety contract already bounds
         // `len * size_of::<T>() <= isize::MAX`, which is what
@@ -796,16 +873,18 @@ impl<A: Allocator + Clone> Arena<A> {
         // looser `CHUNK_ALIGN` cap (vs `MAX_SMART_PTR_ALIGN` for the
         // Drop-aware paths).
         if layout.align() >= crate::internal::constants::CHUNK_ALIGN {
+            if PANIC {
+                panic_alloc();
+            }
             return Err(AllocError);
         }
-        // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        if layout.size() > self.provider.max_normal_alloc {
-            return self.try_alloc_slice_shared_oversized_with::<T, _>(len, None, |i, slot| {
-                slot.write(src[i]);
-            });
-        }
         let bumped = layout.size().max(1);
-        // Fast path: single-branch fit check; on miss, cold refill function.
+        // Fast path: single-branch fit check against the currently-
+        // installed shared chunk. On miss, the cold slow path decides
+        // between oversized routing and refill-retry. `max_normal_alloc`
+        // gates *chunk acquisition* only, so a request that fits in the
+        // current chunk's tail is satisfied directly even if its size
+        // exceeds the threshold (mirror of the local sibling).
         let data_ptr = self.current_shared.data_ptr.get();
         let drop_back_ptr = self.current_shared.drop_back.get();
         let __fit = try_bump_fit(data_ptr, drop_back_ptr, layout.align().max(1), bumped, 0);
@@ -847,6 +926,13 @@ impl<A: Allocator + Clone> Arena<A> {
         bumped: usize,
     ) -> Result<NonNull<[T]>, AllocError> {
         let len = src.len();
+        // Bump-fit missed — pick between oversized one-shot chunk and
+        // a normal refill, just like the local sibling.
+        if layout.size() > self.provider.max_normal_alloc {
+            return self.try_alloc_slice_shared_oversized_with::<T, _>(len, None, |i, slot| {
+                slot.write(src[i]);
+            });
+        }
         self.refill_shared(compute_worst_case_size(layout, false))?;
         let data_ptr = self.current_shared.data_ptr.get();
         let drop_back_ptr = self.current_shared.drop_back.get();
@@ -868,8 +954,12 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     // Shared slice mirror of `try_alloc_slice_local_with`.
-    #[inline]
-    pub(super) fn try_alloc_slice_shared_with<T, F>(
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "shared slice fast path must inline into every public alloc_*_arc/try_alloc_*_arc call site so PANIC folds"
+    )]
+    pub(super) fn try_alloc_slice_shared_with<T, F, const PANIC: bool>(
         &self,
         len: usize,
         drop_fn: Option<unsafe fn(*mut u8, usize)>,
@@ -878,7 +968,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         F: FnMut(usize, &mut MaybeUninit<T>),
     {
-        self.impl_alloc_slice_shared_with::<T, F, false>(len, drop_fn, init)
+        self.impl_alloc_slice_shared_with::<T, F, PANIC>(len, drop_fn, init)
     }
 
     /// Single source of truth for the shared-flavor slice-with-init
@@ -922,10 +1012,12 @@ impl<A: Allocator + Clone> Arena<A> {
             }
             return Err(AllocError);
         }
-        if layout.size() > self.provider.max_normal_alloc {
-            let r = self.try_alloc_slice_shared_oversized_with::<T, F>(len, drop_fn, init);
-            return if PANIC { Ok(expect_alloc(r)) } else { r };
-        }
+        // `max_normal_alloc` gates *chunk acquisition*, not the bump
+        // probe: a request that fits in the current shared chunk's
+        // tail is satisfied directly. Oversized routing happens
+        // post-miss (see the bottom of the loop), which also keeps
+        // the hot bump-fit iteration free of a 2-level pointer chase
+        // through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
             let data_ptr = self.current_shared.data_ptr.get();
@@ -993,7 +1085,13 @@ impl<A: Allocator + Clone> Arena<A> {
 
                     // `init` succeeded: overwrite the noop entry
                     // with the real drop shim.
-                    if let Some(drop_fn) = drop_fn.filter(|_| len != 0) {
+                    //
+                    // `entry_size > 0` already implies `drop_fn.is_some()
+                    // && len != 0`, so we can unwrap `drop_fn` without a
+                    // separate `len` check.
+                    if has_drop_entry(entry_size) {
+                        // SAFETY: `entry_size > 0` ⇔ `drop_fn.is_some() && len != 0`.
+                        let drop_fn = unsafe { drop_fn.unwrap_unchecked() };
                         // Overwrite the noop drop shim with the real one;
                         // `value_offset` and `len_u16` were already written
                         // by the pre-closure noop entry and are unchanged,
@@ -1017,6 +1115,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     // SAFETY: `fat` is non-null and covers the initialized elements.
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
+            }
+            // Bump-fit missed and we'd need a fresh chunk: oversized
+            // requests get a dedicated one-shot shared chunk at
+            // acquisition time so we never install a >64 KiB chunk as
+            // `current_shared`.
+            if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
+                let r = self.try_alloc_slice_shared_oversized_with::<T, F>(len, drop_fn, init);
+                return if PANIC { Ok(expect_alloc(r)) } else { r };
             }
             let r = self.refill_shared(worst_case_refill_for(layout, entry_size));
             if PANIC {
@@ -1059,7 +1165,11 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "slice fast path must inline into every public alloc_slice_* call site"
     )]
     #[cfg_attr(test, mutants::skip)]
-    pub(super) fn try_alloc_slice_shared_no_drop_with<T, F>(&self, len: usize, mut init: F) -> Result<NonNull<[T]>, AllocError>
+    pub(super) fn try_alloc_slice_shared_no_drop_with<T, F, const PANIC: bool>(
+        &self,
+        len: usize,
+        mut init: F,
+    ) -> Result<NonNull<[T]>, AllocError>
     where
         F: FnMut(usize, &mut MaybeUninit<T>),
     {
@@ -1067,14 +1177,24 @@ impl<A: Allocator + Clone> Arena<A> {
             !core::mem::needs_drop::<T>(),
             "try_alloc_slice_shared_no_drop_with requires T: !Drop"
         );
-        let layout = Layout::array::<T>(len).map_err(|_e| AllocError)?;
+        let Ok(layout) = Layout::array::<T>(len) else {
+            if PANIC {
+                panic_alloc();
+            }
+            return Err(AllocError);
+        };
         if layout.align() >= MAX_SMART_PTR_ALIGN {
+            if PANIC {
+                panic_alloc();
+            }
             return Err(AllocError);
         }
         // `Layout::array` enforces `size_aligned <= isize::MAX`.
-        if layout.size() > self.provider.max_normal_alloc {
-            return self.try_alloc_slice_shared_oversized_with::<T, F>(len, None, init);
-        }
+        // `max_normal_alloc` gates *chunk acquisition* (the post-miss
+        // branch below), not the bump probe: a request that fits in
+        // the current shared chunk's tail is satisfied directly. The
+        // post-miss placement also keeps the hot bump-fit probe free
+        // of a 2-level pointer chase through `Arc<ChunkProvider>`.
         let bumped = layout.size().max(1);
         loop {
             let data_ptr = self.current_shared.data_ptr.get();
@@ -1114,7 +1234,18 @@ impl<A: Allocator + Clone> Arena<A> {
                     return Ok(unsafe { NonNull::new_unchecked(fat) });
                 }
             }
-            self.refill_shared(compute_worst_case_size(layout, false))?;
+            // Bump-fit missed; oversized requests get a one-shot
+            // shared chunk at acquisition time.
+            if size_exceeds_normal_alloc(layout.size(), self.provider.max_normal_alloc) {
+                let r = self.try_alloc_slice_shared_oversized_with::<T, F>(len, None, init);
+                return if PANIC { Ok(expect_alloc(r)) } else { r };
+            }
+            let r = self.refill_shared(compute_worst_case_size(layout, false));
+            if PANIC {
+                expect_alloc(r);
+            } else {
+                r?;
+            }
         }
     }
 }
@@ -1126,23 +1257,35 @@ impl<A: Allocator + Clone> Arena<A> {
 // same code that hand-written if/else versions produced.
 impl<A: Allocator + Clone> Arena<A> {
     /// `clone`-init dispatch for local-flavor slices.
-    #[inline]
-    pub(super) fn try_alloc_slice_local_clone_inner<T: Clone>(&self, slice: &[T], flavor: AllocFlavor) -> Result<NonNull<[T]>, AllocError> {
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_local_clone_inner<T: Clone, const PANIC: bool>(
+        &self,
+        slice: &[T],
+        flavor: AllocFlavor,
+    ) -> Result<NonNull<[T]>, AllocError> {
         let len = slice.len();
         let init = |i: usize, dst: &mut MaybeUninit<T>| {
             // SAFETY: destination is reserved; `i` is in `0..len` where `len == slice.len()`.
             dst.write(unsafe { slice.get_unchecked(i) }.clone());
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_local_with(len, flavor, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_local_with::<_, _, PANIC>(len, flavor, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_local_no_drop_with(len, flavor, init)
+            self.try_alloc_slice_local_no_drop_with::<_, _, PANIC>(len, flavor, init)
         }
     }
 
     /// `fill_with`-init dispatch for local-flavor slices.
-    #[inline]
-    pub(super) fn try_alloc_slice_local_fill_with_inner<T, F: FnMut(usize) -> T>(
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_local_fill_with_inner<T, F: FnMut(usize) -> T, const PANIC: bool>(
         &self,
         len: usize,
         flavor: AllocFlavor,
@@ -1152,15 +1295,23 @@ impl<A: Allocator + Clone> Arena<A> {
             dst.write(f(i));
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_local_with(len, flavor, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_local_with::<_, _, PANIC>(len, flavor, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_local_no_drop_with(len, flavor, init)
+            self.try_alloc_slice_local_no_drop_with::<_, _, PANIC>(len, flavor, init)
         }
     }
 
     /// `fill_iter`-init dispatch for local-flavor slices.
-    #[inline]
-    pub(super) fn try_alloc_slice_local_fill_iter_inner<T, I>(&self, iter: I, flavor: AllocFlavor) -> Result<NonNull<[T]>, AllocError>
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_local_fill_iter_inner<T, I, const PANIC: bool>(
+        &self,
+        iter: I,
+        flavor: AllocFlavor,
+    ) -> Result<NonNull<[T]>, AllocError>
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -1174,30 +1325,38 @@ impl<A: Allocator + Clone> Arena<A> {
             );
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_local_with(len, flavor, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_local_with::<_, _, PANIC>(len, flavor, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_local_no_drop_with(len, flavor, init)
+            self.try_alloc_slice_local_no_drop_with::<_, _, PANIC>(len, flavor, init)
         }
     }
 
     /// `clone`-init dispatch for shared-flavor slices (used by `Arc`).
-    #[inline]
-    pub(super) fn try_alloc_slice_shared_clone_inner<T: Clone>(&self, slice: &[T]) -> Result<NonNull<[T]>, AllocError> {
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_shared_clone_inner<T: Clone, const PANIC: bool>(&self, slice: &[T]) -> Result<NonNull<[T]>, AllocError> {
         let len = slice.len();
         let init = |i: usize, dst: &mut MaybeUninit<T>| {
             // SAFETY: destination is reserved; `i` is in `0..len` where `len == slice.len()`.
             dst.write(unsafe { slice.get_unchecked(i) }.clone());
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_shared_with(len, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_shared_with::<_, _, PANIC>(len, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_shared_no_drop_with(len, init)
+            self.try_alloc_slice_shared_no_drop_with::<_, _, PANIC>(len, init)
         }
     }
 
     /// `fill_with`-init dispatch for shared-flavor slices.
-    #[inline]
-    pub(super) fn try_alloc_slice_shared_fill_with_inner<T, F: FnMut(usize) -> T>(
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_shared_fill_with_inner<T, F: FnMut(usize) -> T, const PANIC: bool>(
         &self,
         len: usize,
         mut f: F,
@@ -1206,15 +1365,19 @@ impl<A: Allocator + Clone> Arena<A> {
             dst.write(f(i));
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_shared_with(len, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_shared_with::<_, _, PANIC>(len, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_shared_no_drop_with(len, init)
+            self.try_alloc_slice_shared_no_drop_with::<_, _, PANIC>(len, init)
         }
     }
 
     /// `fill_iter`-init dispatch for shared-flavor slices.
-    #[inline]
-    pub(super) fn try_alloc_slice_shared_fill_iter_inner<T, I>(&self, iter: I) -> Result<NonNull<[T]>, AllocError>
+    #[inline(always)]
+    #[expect(
+        clippy::inline_always,
+        reason = "must inline so the const PANIC flag propagates into the inner fast paths"
+    )]
+    pub(super) fn try_alloc_slice_shared_fill_iter_inner<T, I, const PANIC: bool>(&self, iter: I) -> Result<NonNull<[T]>, AllocError>
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -1228,9 +1391,9 @@ impl<A: Allocator + Clone> Arena<A> {
             );
         };
         if const { core::mem::needs_drop::<T>() } {
-            self.try_alloc_slice_shared_with(len, super::drop_fn_for_slice::<T>(), init)
+            self.try_alloc_slice_shared_with::<_, _, PANIC>(len, super::drop_fn_for_slice::<T>(), init)
         } else {
-            self.try_alloc_slice_shared_no_drop_with(len, init)
+            self.try_alloc_slice_shared_no_drop_with::<_, _, PANIC>(len, init)
         }
     }
 }

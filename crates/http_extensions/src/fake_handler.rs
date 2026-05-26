@@ -26,16 +26,22 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 /// Return a fixed status code:
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// use http::StatusCode;
 /// use http_extensions::FakeHandler;
 ///
 /// // All requests to this client will return 404 Not Found
 /// let handler = FakeHandler::from(StatusCode::NOT_FOUND);
+/// # }
+/// # }
 /// ```
 ///
 /// Return a sequence of responses:
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// use http::StatusCode;
 /// use http_extensions::FakeHandler;
 ///
@@ -49,11 +55,15 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 /// // Second request → 400 Bad Request
 /// // Third request → 500 Internal Server Error
 /// // Fourth request → Error (all responses consumed)
+/// # }
+/// # }
 /// ```
 ///
 /// Create dynamic responses based on the request:
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// use http::StatusCode;
 /// use http_extensions::{FakeHandler, HttpResponseBuilder};
 ///
@@ -70,6 +80,8 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 ///             .build()
 ///     }
 /// });
+/// # }
+/// # }
 /// ```
 ///
 /// # Working with [`HttpResponseBuilder`][crate::HttpResponseBuilder]
@@ -112,6 +124,8 @@ impl FakeHandler {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// use http::StatusCode;
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
@@ -121,6 +135,8 @@ impl FakeHandler {
     ///         .text("Hello World")
     ///         .build()
     /// });
+    /// # }
+    /// # }
     /// ```
     pub fn from_sync_handler<H>(handler: H) -> Self
     where
@@ -138,11 +154,15 @@ impl FakeHandler {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// use http_extensions::{FakeHandler, HttpError, HttpRequest};
     ///
     /// let handler = FakeHandler::from_http_error(|_request: HttpRequest| {
     ///     HttpError::validation("simulated error")
     /// });
+    /// # }
+    /// # }
     /// ```
     pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
         Self::from_sync_handler(move |req| Err(error(req)))
@@ -156,6 +176,8 @@ impl FakeHandler {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// use http::StatusCode;
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
@@ -168,6 +190,8 @@ impl FakeHandler {
     ///         .text("Response after delay")
     ///         .build()
     /// });
+    /// # }
+    /// # }
     /// ```
     pub fn from_async_handler<H, F>(handler: H) -> Self
     where
@@ -185,6 +209,8 @@ impl FakeHandler {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// use http::StatusCode;
     /// use http_extensions::FakeHandler;
     ///
@@ -193,6 +219,8 @@ impl FakeHandler {
     ///     StatusCode::BAD_REQUEST,
     ///     StatusCode::INTERNAL_SERVER_ERROR,
     /// ]);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Errors
@@ -223,6 +251,8 @@ impl FakeHandler {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// use http::StatusCode;
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
@@ -240,6 +270,8 @@ impl FakeHandler {
     /// ];
     ///
     /// let handler = FakeHandler::from_responses(responses);
+    /// # }
+    /// # }
     /// ```
     ///
     /// # Errors

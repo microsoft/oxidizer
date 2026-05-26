@@ -766,15 +766,23 @@ bytes less than the total — the chunk header eats into the class).
 There are two independent concepts:
 
 1. **`max_normal_alloc`** — a per-arena, builder-configurable
-   *routing threshold* on user-payload bytes. Default
+   *chunk-acquisition threshold* on user-payload bytes. Default
    `MAX_NORMAL_ALLOC = 16 KiB`; bounds
    `[MIN_MAX_NORMAL_ALLOC = 4 KiB, max_bump_extent::<A>()]`
    (slightly less than 64 KiB; the upper bound depends on
-   `header_size::<A>()`). Allocation requests strictly larger
-   than `max_normal_alloc` are routed to the **oversized one-shot
-   path**, which produces a chunk sized exactly to the request
+   `header_size::<A>()`). The threshold only governs the *chunk
+   acquisition* decision in each public allocator's slow path: when
+   a request cannot fit in `current_local`/`current_shared` (so a
+   fresh chunk is needed), a request strictly larger than
+   `max_normal_alloc` is satisfied via an **oversized one-shot
+   chunk** sized exactly to the request
    (`header_size + round_payload(user_payload)` bytes — no
-   class rounding).
+   class rounding). It is **not** a per-allocation gate: a request
+   above the threshold that happens to fit in the tail of the
+   already-installed `current_*` chunk (e.g. one grown via
+   `with_capacity_*` or the high-water ratchet) is served from that
+   chunk directly. This intentionally honors paid-for tail space
+   rather than wasting it on the oversized path.
 
 2. **The chunk size class system** — fixed by the implementation.
    Normal chunks always have a total allocation equal to one of
