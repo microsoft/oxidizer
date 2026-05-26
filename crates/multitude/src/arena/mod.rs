@@ -136,13 +136,16 @@ mod refill;
 mod tests;
 
 use chunks::{CurrentLocalChunk, CurrentSharedChunk, OversizedLocalGuard, OversizedSharedGuard};
+#[cfg(test)]
+use internals::align_offset;
 #[cfg(feature = "dst")]
 use internals::align_up;
 pub(crate) use internals::check_isize_overflow;
 use internals::{
-    AllocFlavor, ProtectiveHold, SharedArcsIssuedHold, SliceInitGuard, align_offset, bump_local_drop_count, bump_shared_drop_count,
-    bumped_exceeds_chunk, compute_worst_case_size, current_chunk_evicted, drop_fn_for_slice, has_drop_entry, size_exceeds_normal_alloc,
-    slow_refill_needed, try_bump_fit, worst_case_refill_for, write_through_ptr,
+    AllocFlavor, ProtectiveHold, SharedArcsIssuedHold, SliceInitGuard, aligned_payload_offset, bump_local_drop_count,
+    bump_shared_drop_count, bumped_exceeds_chunk, compute_worst_case_size, current_chunk_evicted, drop_fn_for_slice, has_drop_entry,
+    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, u16_truncate_unchecked, value_offset_in_chunk, worst_case_refill_for,
+    write_through_ptr,
 };
 pub use internals::{expect_alloc, panic_alloc};
 

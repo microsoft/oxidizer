@@ -68,9 +68,12 @@ impl<A: Allocator + Clone> Arena<A> {
         let want = min_payload.max(DEFAULT_MIN_PAYLOAD);
         let chunk = self.provider.acquire_shared(want)?;
         // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        let chunk_ref = unsafe { chunk.as_ref() };
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on `data`,
+        // which would later collide with `free_backing`.
         let data = unsafe { SharedChunk::<A>::data_ptr(chunk) };
-        // SAFETY: chunk live — acquired with inflated refcount.
-        let capacity = unsafe { chunk.as_ref() }.capacity;
+        let capacity = chunk_ref.capacity;
 
         // Cap the bump cursor at the mask-recoverable region.
         let bump_extent = capacity.min(shared_max_bump_extent::<A>());
@@ -158,9 +161,12 @@ impl<A: Allocator + Clone> Arena<A> {
         let want = min_payload.max(DEFAULT_MIN_PAYLOAD);
         let chunk = self.provider.acquire_local(want)?;
         // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        let chunk_ref = unsafe { chunk.as_ref() };
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on `data`,
+        // which would later collide with `free_backing`.
         let data = unsafe { LocalChunk::<A>::data_ptr(chunk) };
-        // SAFETY: refcount-positive — acquired with refcount inflated to LARGE.
-        let capacity = unsafe { chunk.as_ref() }.capacity;
+        let capacity = chunk_ref.capacity;
 
         // Cap the bump cursor at the mask-recoverable region.
         let bump_extent = capacity.min(local_max_bump_extent::<A>());
