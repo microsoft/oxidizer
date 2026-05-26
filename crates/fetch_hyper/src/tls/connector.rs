@@ -57,8 +57,9 @@ where
     #[expect(clippy::allow_attributes, reason = "expect would be unfulfilled when a TLS feature is enabled")]
     #[allow(
         unused_variables,
+        unreachable_patterns,
         clippy::needless_pass_by_value,
-        reason = "parameters are consumed only in feature-gated match arms"
+        reason = "parameters are consumed only in feature-gated match arms; the fallback `_` arm is unreachable when fetch_tls only carries variants whose features are enabled here"
     )]
     pub(crate) fn new(backend: TlsBackend, connector: C, request_filter: RequestFilter, supported_versions: &[Version]) -> Self {
         match backend {
@@ -69,6 +70,7 @@ where
             ),
             #[cfg(any(feature = "native-tls", test))]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
+            _ => unreachable!("make doc tests happy"),
         }
     }
 }
