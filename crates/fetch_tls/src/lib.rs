@@ -81,7 +81,7 @@ pub use native_tls::NativeTlsOptions;
 #[cfg(any(feature = "rustls", test))]
 mod rustls;
 #[cfg(any(feature = "rustls", test))]
-pub use rustls::{RustlsOptions, ServerCertVerifierFactory};
+pub use rustls::RustlsOptions;
 
 #[cfg(test)]
 mod testing;

@@ -15,11 +15,7 @@ use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKin
 
 /// Factory that builds a [`ServerCertVerifier`] from the negotiated
 /// [`CryptoProvider`].
-///
-/// Verifiers commonly need the same crypto provider as the rest of the TLS
-/// stack (for example, to share signature-verification algorithms), so the
-/// builder defers construction until the provider is known.
-pub type ServerCertVerifierFactory = dyn Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync;
+type ServerCertVerifierFactory = dyn Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync;
 
 /// Rustls TLS backend configuration.
 #[derive(Clone)]
