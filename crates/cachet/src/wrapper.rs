@@ -149,7 +149,7 @@ where
 
         // Check if inserting will cause an eviction (cache at capacity).
         let at_capacity = if let Some(max_cap) = self.max_capacity {
-            self.inner.len().await.map_or(false, |len| len >= max_cap)
+            self.inner.len().await.is_ok_and(|len| len >= max_cap)
         } else {
             false
         };
