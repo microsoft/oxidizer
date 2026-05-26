@@ -229,9 +229,14 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
 
     /// Sets the maximum capacity for eviction telemetry.
     ///
-    /// When set, a `cache.eviction` telemetry event is emitted whenever an
+    /// When set, a `cache.eviction` telemetry event may be emitted whenever an
     /// insert occurs while the cache is at or above this capacity, indicating
-    /// that an existing entry will be evicted to make room.
+    /// that an insert likely caused or coincided with eviction based on the
+    /// cache tier's reported length.
+    ///
+    /// This signal is heuristic only: it can be inaccurate for key replacement
+    /// or cache tiers with approximate length reporting, and cache tiers that
+    /// do not support `len()` will not emit this event.
     ///
     /// This does **not** enforce capacity limits on the underlying storage;
     /// it only enables eviction detection for telemetry purposes. Use the
