@@ -448,7 +448,7 @@ where
     /// When the closure returns a `CacheEntry` with a TTL set (e.g., via
     /// [`CacheEntry::expires_after`]), that TTL takes precedence over any tier-level
     /// TTL configured on the cache. This is useful when the compute function returns
-    /// data with a known validity period (e.g., tokens with an expiry timestamp).
+    /// data with a known validity period.
     ///
     /// # Concurrency
     ///
