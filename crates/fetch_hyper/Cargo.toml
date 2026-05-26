@@ -99,6 +99,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"
 tokio-native-tls = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
 wiremock = { workspace = true }
+fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
 
 [[test]]
 name = "smoke"
