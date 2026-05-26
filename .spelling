@@ -556,3 +556,4 @@ addressability
 bumpable
 dereferenceable
 NonNull
+# Diagnostic: draft-PR workflow trigger test
