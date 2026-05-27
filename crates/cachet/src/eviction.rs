@@ -43,15 +43,18 @@ impl EvictionHook {
 
     /// Invoked by the in-memory tier on each removal.
     ///
-    /// Only `Size` and `Expired` causes are reported as evictions; `Explicit`
-    /// and `Replaced` are user-initiated and already accounted for by the
-    /// `cache.invalidated` / `cache.inserted` events.
+    /// `Size` removals are reported as `cache.eviction` (capacity pressure) and
+    /// `Expired` removals as `cache.expired` (TTL/TTI expiry) so consumers can
+    /// distinguish the two. `Explicit` and `Replaced` are user-initiated and
+    /// already accounted for by `cache.invalidated` / `cache.inserted`.
     pub(crate) fn handle(&self, cause: RemovalCause) {
-        if !matches!(cause, RemovalCause::Size | RemovalCause::Expired) {
+        let Some(state) = self.state.get() else {
             return;
-        }
-        if let Some(state) = self.state.get() {
-            state.telemetry.cache_eviction(state.name, Duration::ZERO);
+        };
+        match cause {
+            RemovalCause::Size => state.telemetry.cache_eviction(state.name, Duration::ZERO),
+            RemovalCause::Expired => state.telemetry.cache_expired(state.name, Duration::ZERO),
+            RemovalCause::Explicit | RemovalCause::Replaced => {}
         }
     }
 }
@@ -79,7 +82,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn handle_after_init_emits_size_and_expired_only() {
+    fn handle_after_init_routes_by_cause() {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
@@ -89,12 +92,15 @@ mod tests {
         hook.handle(RemovalCause::Explicit);
         hook.handle(RemovalCause::Replaced);
         assert!(
-            !capture.output().contains(attributes::EVENT_EVICTION),
-            "Explicit/Replaced must not emit eviction events"
+            !capture.output().contains(attributes::EVENT_EVICTION)
+                && !capture.output().contains(attributes::EVENT_EXPIRED),
+            "Explicit/Replaced must not emit eviction or expired events"
         );
 
         hook.handle(RemovalCause::Size);
-        hook.handle(RemovalCause::Expired);
         capture.assert_contains(attributes::EVENT_EVICTION);
+
+        hook.handle(RemovalCause::Expired);
+        capture.assert_contains(attributes::EVENT_EXPIRED);
     }
 }

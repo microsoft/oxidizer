@@ -165,7 +165,9 @@ impl CacheTelemetry {
         self.inner.info(cache_name, attributes::EVENT_INSERTED, duration);
     }
 
-    /// Records that an insert caused an eviction because the cache was at capacity.
+    /// Records that an entry was evicted from the cache because it reached
+    /// the configured capacity limit.
+    #[cfg(any(feature = "memory", test))]
     #[inline]
     pub(crate) fn cache_eviction(&self, cache_name: CacheName, duration: Duration) {
         self.inner.info(cache_name, attributes::EVENT_EVICTION, duration);
