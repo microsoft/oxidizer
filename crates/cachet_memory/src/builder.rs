@@ -265,8 +265,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// # Examples
     ///
     /// ```no_run
-    /// use std::sync::atomic::{AtomicUsize, Ordering};
     /// use std::sync::Arc;
+    /// use std::sync::atomic::{AtomicUsize, Ordering};
     ///
     /// use cachet_memory::{InMemoryCache, RemovalCause};
     ///
