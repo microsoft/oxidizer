@@ -10,7 +10,7 @@ use multitude::{Arc, Arena, Box, Rc};
 const N: usize = 1_000;
 const SLICE_LEN: usize = 8;
 
-// `std::Box<u64>` is the `T: Drop` test type ΓÇö its destructor calls into the
+// `std::Box<u64>` is the `T: Drop` test type — its destructor calls into the
 // global allocator, exercising the chunk drop-list traversal.
 type DroppyT = std::boxed::Box<u64>;
 
