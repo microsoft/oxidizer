@@ -50,8 +50,6 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) stampede_protection: bool,
     #[cfg(feature = "memory")]
     pub(crate) eviction_hook: Option<Arc<EvictionHook>>,
-    #[cfg(feature = "memory")]
-    pub(crate) eviction_telemetry: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
@@ -67,8 +65,6 @@ impl<K, V> CacheBuilder<K, V, ()> {
             stampede_protection: false,
             #[cfg(feature = "memory")]
             eviction_hook: None,
-            #[cfg(feature = "memory")]
-            eviction_telemetry: false,
             _phantom: PhantomData,
         }
     }
@@ -104,8 +100,6 @@ impl<K, V> CacheBuilder<K, V, ()> {
             stampede_protection: self.stampede_protection,
             #[cfg(feature = "memory")]
             eviction_hook: self.eviction_hook,
-            #[cfg(feature = "memory")]
-            eviction_telemetry: self.eviction_telemetry,
             _phantom: PhantomData,
         }
     }
@@ -138,9 +132,9 @@ impl<K, V> CacheBuilder<K, V, ()> {
     /// [`InMemoryCacheBuilder`] for additional configuration (capacity, TTL,
     /// eviction policy, custom hasher, etc.).
     ///
-    /// Eviction telemetry is *not* installed unless
-    /// [`with_eviction_telemetry`](Self::with_eviction_telemetry) was called
-    /// before this method.
+    /// Call [`InMemoryCacheBuilder::with_eviction_telemetry`] inside the
+    /// closure to emit `cache.eviction` on capacity evictions and
+    /// `cache.expired` on background TTL/TTI expiry.
     ///
     /// # Panics
     ///
@@ -155,7 +149,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
     ///
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .memory_with(|b| b.max_capacity(1_000))
+    ///     .memory_with(|b| b.max_capacity(1_000).with_eviction_telemetry())
     ///     .build();
     /// ```
     #[cfg(feature = "memory")]
@@ -167,7 +161,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
         F: FnOnce(InMemoryCacheBuilder<K, V>) -> InMemoryCacheBuilder<K, V>,
     {
         let mut builder = configure(InMemoryCacheBuilder::<K, V>::new());
-        if self.eviction_telemetry {
+        if builder.eviction_telemetry_enabled() {
             let hook = Arc::new(EvictionHook::new());
             let hook_for_listener = Arc::clone(&hook);
             builder = builder.on_eviction(move |cause| hook_for_listener.handle(cause));
@@ -228,32 +222,6 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
         self.telemetry = CacheTelemetry::with_logging();
-        self
-    }
-
-    /// Enables eviction telemetry for the in-memory tier.
-    ///
-    /// When enabled, the next call to [`memory`](Self::memory) /
-    /// [`memory_with`](Self::memory_with) installs a listener that emits
-    /// `cache.eviction` on capacity evictions and `cache.expired` on
-    /// background TTL/TTI expiry. Must be called *before* `memory`/`memory_with`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::Cache;
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .with_eviction_telemetry()
-    ///     .memory_with(|b| b.max_capacity(1_000))
-    ///     .build();
-    /// ```
-    #[cfg(feature = "memory")]
-    #[must_use]
-    pub fn with_eviction_telemetry(mut self) -> Self {
-        self.eviction_telemetry = true;
         self
     }
 

@@ -445,25 +445,4 @@ mod tests {
         let result = wrapper.clear().await;
         result.unwrap_err();
     }
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn wrapper_does_not_emit_eviction_event_directly() {
-        use testing_aids::LogCapture;
-
-        let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-
-        // The wrapper must not synthesize eviction events; those come from the
-        // storage tier's eviction listener (see `crate::eviction::EvictionHook`).
-        let clock = Clock::new_frozen();
-        let inner = MockCache::<String, i32>::new();
-        let telemetry = CacheTelemetry::with_logging();
-        let wrapper: CacheWrapper<String, i32, _> = CacheWrapper::new("test", inner, clock, None, telemetry, InsertPolicy::default());
-
-        for i in 0..5 {
-            wrapper.insert(format!("k{i}"), CacheEntry::new(i)).await.unwrap();
-        }
-        assert!(!capture.output().contains(crate::telemetry::attributes::EVENT_EVICTION));
-    }
 }

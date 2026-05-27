@@ -31,8 +31,7 @@ async fn memory_size_eviction_emits_telemetry() {
     let cache: Cache<String, i32> = Cache::builder::<String, i32>(clock)
         .name("eviction-test")
         .enable_logs()
-        .with_eviction_telemetry()
-        .memory_with(|b| b.max_capacity(2))
+        .memory_with(|b| b.max_capacity(2).with_eviction_telemetry())
         .build();
 
     // Drive enough churn to force size-based evictions. Moka's housekeeping

@@ -51,6 +51,7 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) name: Option<&'static str>,
     pub(crate) eviction_policy: EvictionPolicy,
     pub(crate) eviction_listener: Option<EvictionListener>,
+    pub(crate) eviction_telemetry: bool,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
 }
@@ -65,6 +66,7 @@ impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
             .field("name", &self.name)
             .field("eviction_policy", &self.eviction_policy)
             .field("eviction_listener", &self.eviction_listener.as_ref().map(|_| "<set>"))
+            .field("eviction_telemetry", &self.eviction_telemetry)
             .field("hasher", &self.hasher)
             .finish()
     }
@@ -98,6 +100,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             name: None,
             eviction_policy: EvictionPolicy::default(),
             eviction_listener: None,
+            eviction_telemetry: false,
             hasher: RandomState::default(),
             _phantom: PhantomData,
         }
@@ -289,6 +292,25 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         self
     }
 
+    /// Requests that the host crate install eviction telemetry for this cache.
+    ///
+    /// This is a marker for [`cachet::CacheBuilder::memory_with`] to recognize:
+    /// when set, the host installs a listener that emits `cache.eviction` on
+    /// capacity evictions and `cache.expired` on background TTL/TTI expiry.
+    /// When `InMemoryCache` is constructed directly via [`Self::build`] without
+    /// a host, this flag has no effect — use [`Self::on_eviction`] instead.
+    #[must_use]
+    pub fn with_eviction_telemetry(mut self) -> Self {
+        self.eviction_telemetry = true;
+        self
+    }
+
+    /// Returns whether [`Self::with_eviction_telemetry`] was called on this builder.
+    #[must_use]
+    pub fn eviction_telemetry_enabled(&self) -> bool {
+        self.eviction_telemetry
+    }
+
     /// Sets a custom hash builder for the cache.
     ///
     /// By default, the cache uses [`foldhash::fast::RandomState`] for high-performance
@@ -316,6 +338,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
             name: self.name,
             eviction_policy: self.eviction_policy,
             eviction_listener: self.eviction_listener,
+            eviction_telemetry: self.eviction_telemetry,
             hasher,
             _phantom: PhantomData,
         }

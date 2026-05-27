@@ -5,7 +5,7 @@
 - ✨ Features
 
   - Add `get_or_insert_with` and `try_get_or_insert_with` methods that accept closures returning `CacheEntry<V>`, enabling per-entry TTL control on cache-miss computations.
-  - Add eviction telemetry via `cache.eviction`, along with builder support to enable it through APIs such as `with_eviction_telemetry` and `memory_with`.
+  - Add eviction telemetry via `cache.eviction` and `cache.expired`, opt-in through `InMemoryCacheBuilder::with_eviction_telemetry` together with the new `CacheBuilder::memory_with` helper.
 
 ## [0.5.0] - 2026-05-19
 
