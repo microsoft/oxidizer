@@ -10,6 +10,7 @@
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,6 +69,15 @@ impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
             .finish()
     }
 }
+
+// The `eviction_listener` field stores a `dyn Fn`, which is not auto-`UnwindSafe`
+// / `RefUnwindSafe`. We assert these traits explicitly so adding the listener does
+// not silently break downstream code that relied on the auto-trait impls
+// (flagged by `cargo semver-checks` as `auto_trait_impl_removed`). The closure
+// is invoked by moka as a fire-and-forget side effect; a panic inside it cannot
+// leave any observable state in the builder, so the assertion is sound.
+impl<K, V, H: UnwindSafe> UnwindSafe for InMemoryCacheBuilder<K, V, H> {}
+impl<K, V, H: RefUnwindSafe> RefUnwindSafe for InMemoryCacheBuilder<K, V, H> {}
 
 impl<K, V> Default for InMemoryCacheBuilder<K, V> {
     fn default() -> Self {
