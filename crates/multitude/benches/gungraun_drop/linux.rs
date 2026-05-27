@@ -278,4 +278,3 @@ library_benchmark_group!(
         drop_slice_box_droppy, drop_slice_rc_droppy, drop_slice_arc_droppy,
         drop_alloc
 );
-

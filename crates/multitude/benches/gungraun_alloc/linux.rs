@@ -670,4 +670,3 @@ library_benchmark_group!(
         alloc_vec, alloc_vec_with_capacity,
         vec_builder_bumpalo_grow, vec_builder_bumpalo_with_cap
 );
-
