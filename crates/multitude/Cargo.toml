@@ -47,6 +47,9 @@ bytes = ["dep:bytes"]
 bytemuck = ["dep:bytemuck", "dst"]
 bytesbuf = ["dep:bytesbuf", "std"]
 zerocopy = ["dep:zerocopy", "dst"]
+# Internal feature: gates gungraun (Valgrind-based) benchmarks that require
+# callgrind to be installed. Not intended for external use.
+_gungraun = []
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
@@ -89,10 +92,12 @@ harness = false
 [[bench]]
 name = "gungraun_alloc"
 harness = false
+required-features = ["_gungraun"]
 
 [[bench]]
 name = "gungraun_drop"
 harness = false
+required-features = ["_gungraun"]
 
 [[example]]
 name = "basic"
