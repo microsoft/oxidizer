@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use core::hint::black_box;
 
 use gungraun::{library_benchmark, library_benchmark_group};
