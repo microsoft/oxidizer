@@ -259,6 +259,8 @@
 
 mod builder;
 mod cache;
+#[cfg(feature = "memory")]
+mod eviction;
 mod fallback;
 mod policy;
 mod refresh;

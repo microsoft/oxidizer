@@ -7,14 +7,20 @@
 //! the underlying cache configuration, providing a stable API surface
 //! without exposing implementation details.
 
+use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
 use foldhash::fast::RandomState;
 
+use crate::notification::RemovalCause;
 use crate::policy::EvictionPolicy;
 use crate::tier::InMemoryCache;
+
+/// Type-erased eviction listener.
+pub(crate) type EvictionListener = Arc<dyn Fn(RemovalCause) + Send + Sync + 'static>;
 
 /// Builder for configuring an `InMemoryCache`.
 ///
@@ -36,7 +42,6 @@ use crate::tier::InMemoryCache;
 ///     .name("my-cache")
 ///     .build();
 /// ```
-#[derive(Debug)]
 pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) max_capacity: Option<u64>,
     pub(crate) initial_capacity: Option<usize>,
@@ -44,8 +49,24 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) time_to_idle: Option<Duration>,
     pub(crate) name: Option<&'static str>,
     pub(crate) eviction_policy: EvictionPolicy,
+    pub(crate) eviction_listener: Option<EvictionListener>,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
+}
+
+impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InMemoryCacheBuilder")
+            .field("max_capacity", &self.max_capacity)
+            .field("initial_capacity", &self.initial_capacity)
+            .field("time_to_live", &self.time_to_live)
+            .field("time_to_idle", &self.time_to_idle)
+            .field("name", &self.name)
+            .field("eviction_policy", &self.eviction_policy)
+            .field("eviction_listener", &self.eviction_listener.as_ref().map(|_| "<set>"))
+            .field("hasher", &self.hasher)
+            .finish()
+    }
 }
 
 impl<K, V> Default for InMemoryCacheBuilder<K, V> {
@@ -68,6 +89,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_idle: None,
             name: None,
             eviction_policy: EvictionPolicy::default(),
+            eviction_listener: None,
             hasher: RandomState::default(),
             _phantom: PhantomData,
         }
@@ -218,6 +240,50 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         self
     }
 
+    /// Registers a listener that is called when an entry is removed from the cache.
+    ///
+    /// The listener receives a [`RemovalCause`] indicating why the entry was removed:
+    /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expirations,
+    /// `Explicit` for [`invalidate`](cachet_tier::CacheTier::invalidate) or
+    /// [`clear`](cachet_tier::CacheTier::clear) calls, and `Replaced` for inserts
+    /// that overwrote an existing key.
+    ///
+    /// The listener runs on the cache's background maintenance task. Keep the
+    /// closure cheap; expensive work should be offloaded to a separate task.
+    ///
+    /// Replacing an already-registered listener is supported; only the most
+    /// recently configured listener is invoked.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::atomic::{AtomicUsize, Ordering};
+    /// use std::sync::Arc;
+    ///
+    /// use cachet_memory::{InMemoryCache, RemovalCause};
+    ///
+    /// let evictions = Arc::new(AtomicUsize::new(0));
+    /// let counter = Arc::clone(&evictions);
+    ///
+    /// let cache = InMemoryCache::<String, i32>::builder()
+    ///     .max_capacity(100)
+    ///     .on_eviction(move |cause| {
+    ///         if matches!(cause, RemovalCause::Size | RemovalCause::Expired) {
+    ///             counter.fetch_add(1, Ordering::Relaxed);
+    ///         }
+    ///     })
+    ///     .build()
+    ///     .expect("Failed to build cache");
+    /// ```
+    #[must_use]
+    pub fn on_eviction<F>(mut self, listener: F) -> Self
+    where
+        F: Fn(RemovalCause) + Send + Sync + 'static,
+    {
+        self.eviction_listener = Some(Arc::new(listener));
+        self
+    }
+
     /// Sets a custom hash builder for the cache.
     ///
     /// By default, the cache uses [`foldhash::fast::RandomState`] for high-performance
@@ -244,6 +310,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
             time_to_idle: self.time_to_idle,
             name: self.name,
             eviction_policy: self.eviction_policy,
+            eviction_listener: self.eviction_listener,
             hasher,
             _phantom: PhantomData,
         }

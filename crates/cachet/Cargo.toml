@@ -89,6 +89,10 @@ name = "operations"
 harness = false
 required-features = ["logs", "test-util"]
 
+[[test]]
+name = "eviction"
+required-features = ["memory", "logs"]
+
 [[bench]]
 name = "dynamic"
 harness = false

@@ -42,15 +42,12 @@ where
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        CacheWrapper::new(
-            type_name::<CT>(self.name),
-            self.storage,
-            clock,
-            self.ttl,
-            telemetry,
-            self.policy,
-            self.max_capacity,
-        )
+        let name = type_name::<CT>(self.name);
+        #[cfg(feature = "memory")]
+        if let Some(hook) = &self.eviction_hook {
+            hook.init(telemetry.clone(), name);
+        }
+        CacheWrapper::new(name, self.storage, clock, self.ttl, telemetry, self.policy)
     }
 }
 

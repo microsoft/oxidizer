@@ -385,7 +385,6 @@ mod fetch_and_promote_tests {
                 None,
                 telemetry.clone(),
                 InsertPolicy::never(),
-                None,
             );
             let fc = FallbackCache::new("test", primary, fallback, clock, None, telemetry);
 
@@ -476,7 +475,7 @@ mod fetch_and_promote_tests {
     fn make_wrapper(mock: MockCache<String, i32>) -> MockWrapper {
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        CacheWrapper::new("test_primary", mock, clock, None, telemetry, InsertPolicy::default(), None)
+        CacheWrapper::new("test_primary", mock, clock, None, telemetry, InsertPolicy::default())
     }
 
     fn build_mock_fallback_cache(
@@ -508,15 +507,7 @@ mod fetch_and_promote_tests {
         let telemetry = CacheTelemetry::new();
         let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
 
-        let primary_wrapper = CacheWrapper::new(
-            "primary",
-            primary,
-            clock.clone(),
-            None,
-            telemetry.clone(),
-            InsertPolicy::default(),
-            None,
-        );
+        let primary_wrapper = CacheWrapper::new("primary", primary, clock.clone(), None, telemetry.clone(), InsertPolicy::default());
         let fc = FallbackCache::new("test", primary_wrapper, fallback, clock, Some(refresh), telemetry);
 
         let key = "key".to_string();

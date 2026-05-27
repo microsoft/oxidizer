@@ -3,15 +3,19 @@
 
 use std::hash::Hash;
 use std::marker::PhantomData;
+#[cfg(feature = "memory")]
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "memory")]
-use cachet_memory::InMemoryCache;
+use cachet_memory::{InMemoryCache, InMemoryCacheBuilder};
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
+#[cfg(feature = "memory")]
+use crate::eviction::EvictionHook;
 use crate::policy::InsertPolicy;
 use crate::telemetry::CacheTelemetry;
 use crate::{Cache, CacheTier};
@@ -44,7 +48,10 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) clock: Clock,
     pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
-    pub(crate) max_capacity: Option<u64>,
+    #[cfg(feature = "memory")]
+    pub(crate) eviction_hook: Option<Arc<EvictionHook>>,
+    #[cfg(feature = "memory")]
+    pub(crate) eviction_telemetry: bool,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
@@ -58,7 +65,10 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock,
             telemetry: CacheTelemetry::new(),
             stampede_protection: false,
-            max_capacity: None,
+            #[cfg(feature = "memory")]
+            eviction_hook: None,
+            #[cfg(feature = "memory")]
+            eviction_telemetry: false,
             _phantom: PhantomData,
         }
     }
@@ -92,7 +102,10 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
-            max_capacity: self.max_capacity,
+            #[cfg(feature = "memory")]
+            eviction_hook: self.eviction_hook,
+            #[cfg(feature = "memory")]
+            eviction_telemetry: self.eviction_telemetry,
             _phantom: PhantomData,
         }
     }
@@ -118,7 +131,50 @@ impl<K, V> CacheBuilder<K, V, ()> {
         K: Hash + Eq + Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
     {
-        self.storage(InMemoryCache::<K, V>::new())
+        self.memory_with(|b| b)
+    }
+
+    /// Configures the cache to use in-memory storage, exposing the inner
+    /// [`InMemoryCacheBuilder`] for additional configuration (capacity, TTL,
+    /// eviction policy, custom hasher, etc.).
+    ///
+    /// Eviction telemetry is *not* installed unless
+    /// [`with_eviction_telemetry`](Self::with_eviction_telemetry) was called
+    /// before this method.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured [`InMemoryCacheBuilder`] fails validation
+    /// (for example, `max_capacity < initial_capacity`).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .memory_with(|b| b.max_capacity(1_000))
+    ///     .build();
+    /// ```
+    #[cfg(feature = "memory")]
+    #[must_use]
+    pub fn memory_with<F>(mut self, configure: F) -> CacheBuilder<K, V, InMemoryCache<K, V>>
+    where
+        K: Hash + Eq + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+        F: FnOnce(InMemoryCacheBuilder<K, V>) -> InMemoryCacheBuilder<K, V>,
+    {
+        let mut builder = configure(InMemoryCacheBuilder::<K, V>::new());
+        if self.eviction_telemetry {
+            let hook = Arc::new(EvictionHook::new());
+            let hook_for_listener = Arc::clone(&hook);
+            builder = builder.on_eviction(move |cause| hook_for_listener.handle(cause));
+            self.eviction_hook = Some(hook);
+        }
+        let storage = builder.build().expect("InMemoryCacheBuilder configuration must be valid");
+        self.storage(storage)
     }
 
     /// Configures the cache to use a service as the storage backend.
@@ -175,6 +231,37 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
         self
     }
 
+    /// Enables `cache.eviction` telemetry for the in-memory tier.
+    ///
+    /// When enabled, the next call to [`memory`](Self::memory) /
+    /// [`memory_with`](Self::memory_with) installs a moka eviction listener
+    /// that reports `Size`- and `Expired`-cause evictions through the cache's
+    /// telemetry sink. `Explicit` and `Replaced` causes are *not* reported as
+    /// evictions, since they are already covered by the `cache.invalidated`
+    /// and `cache.inserted` events.
+    ///
+    /// Must be called *before* `memory`/`memory_with`; calling it afterwards
+    /// has no effect because the storage tier is constructed at that point.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .with_eviction_telemetry()
+    ///     .memory_with(|b| b.max_capacity(1_000))
+    ///     .build();
+    /// ```
+    #[cfg(feature = "memory")]
+    #[must_use]
+    pub fn with_eviction_telemetry(mut self) -> Self {
+        self.eviction_telemetry = true;
+        self
+    }
+
     /// Enables stampede protection for cache reads.
     ///
     /// When enabled, concurrent requests for the same key will be merged
@@ -224,37 +311,6 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[must_use]
     pub fn ttl(mut self, ttl: impl Into<Duration>) -> Self {
         self.ttl = Some(ttl.into());
-        self
-    }
-
-    /// Sets the maximum capacity for eviction telemetry.
-    ///
-    /// When set, a `cache.eviction` telemetry event is emitted whenever an
-    /// insert occurs while the cache is at or above this capacity, indicating
-    /// that an existing entry will be evicted to make room.
-    ///
-    /// This does **not** enforce capacity limits on the underlying storage;
-    /// it only enables eviction detection for telemetry purposes. Use the
-    /// storage back-end's own capacity settings (e.g.,
-    /// [`InMemoryCacheBuilder::max_capacity`](cachet_memory::InMemoryCacheBuilder::max_capacity))
-    /// to actually bound the cache size.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::Cache;
-    /// use cachet_memory::InMemoryCache;
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let cache = Cache::builder::<String, i32>(clock)
-    ///     .storage(InMemoryCache::with_max_capacity(1000))
-    ///     .max_capacity(1000)
-    ///     .build();
-    /// ```
-    #[must_use]
-    pub fn max_capacity(mut self, capacity: u64) -> Self {
-        self.max_capacity = Some(capacity);
         self
     }
 

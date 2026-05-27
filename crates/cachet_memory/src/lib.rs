@@ -61,10 +61,13 @@
 //! TTL/TTI unset or set them to a sufficiently high ceiling.
 
 mod builder;
+pub mod notification;
 pub mod policy;
 mod tier;
 
 #[doc(inline)]
 pub use builder::InMemoryCacheBuilder;
+#[doc(inline)]
+pub use notification::RemovalCause;
 #[doc(inline)]
 pub use tier::InMemoryCache;
