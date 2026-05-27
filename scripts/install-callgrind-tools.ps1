@@ -7,7 +7,7 @@
 # their work off to via an encoded payload.
 #
 # Keep the version in lockstep with the `gungraun` workspace dep in
-# Cargo.toml and the install command shown in docs/callgrind-benchmarks.md.
+# Cargo.toml and the constants.env file.
 # `gungraun-runner` enforces strict string equality on the version
 # (`gungraun-runner::runner::compare_versions`), so any patch-level drift
 # between the library and the runner causes `*_cg` benches to fail at runtime
