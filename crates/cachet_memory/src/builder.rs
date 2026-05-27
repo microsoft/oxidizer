@@ -296,7 +296,12 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// This is a marker for [`cachet::CacheBuilder::memory_with`] to recognize:
     /// when set, the host installs a listener that emits `cache.eviction` on
-    /// capacity evictions and `cache.expired` on background TTL/TTI expiry.
+    /// capacity evictions ([`RemovalCause::Size`]) and `cache.expired` on
+    /// background TTL/TTI expiry ([`RemovalCause::Expired`]).
+    /// [`RemovalCause::Explicit`] and [`RemovalCause::Replaced`] are
+    /// intentionally not surfaced, as they are already covered by the host's
+    /// `cache.invalidated` and `cache.inserted` events.
+    ///
     /// When `InMemoryCache` is constructed directly via [`Self::build`] without
     /// a host, this flag has no effect — use [`Self::on_eviction`] instead.
     #[must_use]
