@@ -11,7 +11,7 @@ use core::ptr::NonNull;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::{Arena, align_up, bump_local_drop_count, check_isize_overflow};
+use super::{Arena, bump_local_drop_count, check_isize_overflow, try_bump_fit, u16_truncate_unchecked};
 use crate::internal::constants::MAX_SMART_PTR_ALIGN;
 use crate::internal::drop_list::DropEntry as InnerDropEntry;
 use crate::internal::in_chunk::InLocalChunk;
@@ -91,39 +91,76 @@ impl<A: Allocator + Clone> Arena<A> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
             return Err(AllocError);
         }
+        // `Layout` from the public `Allocator` trait is not guaranteed
+        // to satisfy `size + align <= isize::MAX`, so callers can hand
+        // us layouts that would violate `try_bump_fit`'s precondition.
+        // Reject them here before the unsafe assumption in the fast
+        // path can fire on a false predicate.
+        check_isize_overflow(layout.size(), layout.align())?;
 
-        // Requests above `max_normal_alloc` go through a one-shot oversized
-        // chunk and leave `deallocate` the matching `+1` to release.
+        let align = layout.align().max(1);
+        let bumped = layout.size().max(1);
+
+        // Single bump-fit probe against the currently-installed chunk.
+        // `max_normal_alloc` gates *chunk acquisition*, not the bump
+        // probe itself: if a large request happens to fit in the tail
+        // of the chunk we already have (e.g. one grown via
+        // `with_capacity_local` or the high-water ratchet), we satisfy
+        // it from there rather than waste that paid-for space. The
+        // oversized-routing decision lives in the slow path where it
+        // is only reached after the bump miss — and where it also
+        // avoids a two-level pointer chase through `Arc<ChunkProvider>`
+        // on the hot path.
+        let data_ptr = self.current_local.data_ptr.get();
+        let drop_back_ptr = self.current_local.drop_back.get();
+        let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
+        if fit.fits {
+            self.current_local.data_ptr.set(fit.end_ptr);
+            // Record the caller's `+1` in the deferred-reconcile counter
+            // instead of touching the chunk refcount directly.
+            self.current_local.bump_smart_pointers_issued();
+            self.charge_alloc_stats(layout.size());
+            return Ok(fit.aligned_ptr);
+        }
+
+        self.allocate_layout_slow(layout)
+    }
+
+    /// Cold tail of [`Self::allocate_layout`]: oversized routing +
+    /// refill-and-retry.
+    #[cold]
+    #[inline(never)]
+    fn allocate_layout_slow(&self, layout: Layout) -> Result<NonNull<u8>, AllocError> {
+        // We're here because the current chunk could not satisfy the
+        // request. At chunk-acquisition time, requests above
+        // `max_normal_alloc` go through a one-shot oversized chunk
+        // (never cached) and leave `deallocate` the matching `+1` to
+        // release. A request below the threshold instead drives the
+        // refill loop below to install a fresh normal chunk.
         if layout.size() > self.provider.max_normal_alloc {
             return self.allocate_oversized_layout(layout);
         }
 
+        let align = layout.align().max(1);
+        let bumped = layout.size().max(1);
+        let needed = layout.size() + layout.align().saturating_sub(core::mem::align_of::<usize>());
+
+        // Bounded refill-and-retry loop. `refill_local` can early-return
+        // `Ok(())` with a chunk a reentrant `Drop` already installed
+        // (which may not fit the request), so we must re-probe bump-fit
+        // each iteration rather than tail-recursing into
+        // `allocate_layout` (which would risk unbounded stack growth on
+        // repeated misses).
         loop {
             let data_ptr = self.current_local.data_ptr.get();
             let drop_back_ptr = self.current_local.drop_back.get();
-            let drop_back_addr = drop_back_ptr.as_ptr() as usize;
-
-            let aligned_addr = align_up(data_ptr.as_ptr() as usize, layout.align().max(1));
-            let bumped = layout.size().max(1);
-            if let Some(end_addr) = aligned_addr.checked_add(bumped)
-                && end_addr <= drop_back_addr
-            {
-                // Provenance-preserving construction from `data_ptr`.
-                let data_addr = data_ptr.as_ptr() as usize;
-                let aligned_offset = aligned_addr - data_addr;
-                // SAFETY: `aligned + bumped <= drop_back`, both lie in chunk payload.
-                let (aligned_ptr, end_ptr) = unsafe { (data_ptr.byte_add(aligned_offset), data_ptr.byte_add(aligned_offset + bumped)) };
-                let value_ptr: *mut u8 = aligned_ptr.as_ptr();
-                self.current_local.data_ptr.set(end_ptr);
-                // Record the caller's `+1` in the deferred-reconcile counter
-                // instead of touching the chunk refcount directly.
+            let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
+            if fit.fits {
+                self.current_local.data_ptr.set(fit.end_ptr);
                 self.current_local.bump_smart_pointers_issued();
                 self.charge_alloc_stats(layout.size());
-                // SAFETY: `value_ptr` is non-null.
-                return Ok(unsafe { NonNull::new_unchecked(value_ptr) });
+                return Ok(fit.aligned_ptr);
             }
-
-            let needed = layout.size() + layout.align().saturating_sub(core::mem::align_of::<usize>());
             self.refill_local(needed)?;
         }
     }
@@ -170,41 +207,59 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { core::hint::assert_unchecked(layout.align() < MAX_SMART_PTR_ALIGN) };
         check_isize_overflow(layout.size(), layout.align())?;
 
-        // Requests that exceed `max_normal_alloc` cannot fit the bump
-        // path (whose extent is capped at `shared_max_bump_extent` <
-        // `MAX_CHUNK_BYTES`). Route them through a one-shot oversized
-        // shared chunk and leave +1 on the chunk's refcount for the
-        // matching `SharedChunk::dec_ref` to release.
+        let align = layout.align().max(1);
+        let bumped = layout.size().max(1);
+
+        // Single bump-fit probe against the currently-installed chunk;
+        // see [`Self::allocate_layout`] for why oversized routing is
+        // *not* checked here.
+        let data_ptr = self.current_shared.data_ptr.get();
+        let drop_back_ptr = self.current_shared.drop_back.get();
+        let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
+        if fit.fits {
+            self.current_shared.data_ptr.set(fit.end_ptr);
+            self.current_shared.bump_smart_pointers_issued();
+            self.charge_alloc_stats(layout.size());
+            return Ok(fit.aligned_ptr);
+        }
+
+        self.allocate_shared_layout_slow(layout)
+    }
+
+    /// Cold tail of [`Self::allocate_shared_layout`]: oversized
+    /// routing + refill-and-retry.
+    #[cfg(any(feature = "dst", feature = "bytesbuf"))]
+    #[cold]
+    #[inline(never)]
+    fn allocate_shared_layout_slow(&self, layout: Layout) -> Result<NonNull<u8>, AllocError> {
+        // We're here because the current shared chunk could not satisfy
+        // the request — at chunk-acquisition time, requests above
+        // `max_normal_alloc` get a one-shot oversized chunk that
+        // bypasses the cache. See [`Self::allocate_layout_slow`].
         if layout.size() > self.provider.max_normal_alloc {
             return self.allocate_shared_oversized_layout(layout);
         }
 
+        let align = layout.align().max(1);
         let bumped = layout.size().max(1);
+        let needed = layout
+            .size()
+            .saturating_add(layout.align().saturating_sub(core::mem::align_of::<usize>()));
+
+        // Bounded refill-and-retry loop — see `allocate_layout_slow` for
+        // why we re-probe each iteration instead of tail-recursing into
+        // `allocate_shared_layout`.
         loop {
             let data_ptr = self.current_shared.data_ptr.get();
             let drop_back_ptr = self.current_shared.drop_back.get();
-            let drop_back_addr = drop_back_ptr.as_ptr() as usize;
-            let aligned_addr = align_up(data_ptr.as_ptr() as usize, layout.align().max(1));
-            if let Some(end_addr) = aligned_addr.checked_add(bumped)
-                && end_addr <= drop_back_addr
-            {
-                // Provenance-preserving construction from `data_ptr`.
-                let data_addr = data_ptr.as_ptr() as usize;
-                let aligned_offset = aligned_addr - data_addr;
-                // SAFETY: gated above; both lie in chunk payload.
-                let (aligned_ptr, end_ptr) = unsafe { (data_ptr.byte_add(aligned_offset), data_ptr.byte_add(aligned_offset + bumped)) };
-                let ptr: *mut u8 = aligned_ptr.as_ptr();
-                self.current_shared.data_ptr.set(end_ptr);
+            let fit = try_bump_fit(data_ptr, drop_back_ptr, align, bumped, 0);
+            if fit.fits {
+                self.current_shared.data_ptr.set(fit.end_ptr);
                 self.current_shared.bump_smart_pointers_issued();
                 self.charge_alloc_stats(layout.size());
-                // SAFETY: pointer is derived from a non-null chunk payload.
-                return Ok(unsafe { NonNull::new_unchecked(ptr) });
+                return Ok(fit.aligned_ptr);
             }
-            self.refill_shared(
-                layout
-                    .size()
-                    .saturating_add(layout.align().saturating_sub(core::mem::align_of::<usize>())),
-            )?;
+            self.refill_shared(needed)?;
         }
     }
 
@@ -358,7 +413,7 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { core::hint::assert_unchecked(value_offset_isize >= 0) };
         let value_offset = value_offset_isize.cast_unsigned();
         // SAFETY: payload-extent invariant — offset bounded by chunk capacity (< u16::MAX).
-        let value_offset_u16 = unsafe { u16::try_from(value_offset).unwrap_unchecked() };
+        let value_offset_u16 = unsafe { u16_truncate_unchecked(value_offset) };
 
         let entry_size = core::mem::size_of::<InnerDropEntry>();
         let drop_back_ptr = self.current_local.drop_back.get();

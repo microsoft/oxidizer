@@ -29,6 +29,10 @@ to the changelogs, though you are permitted to do so if explicitly instructed.
 
 Pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/) naming, e.g. `feat(bytesbuf): add new metric` or `fix(cachet): correct eviction logic`.
 
+## Feature-gated Doctests
+
+Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [AGENTS-feature-gated-doctests.md](AGENTS-feature-gated-doctests.md).
+
 ## Required CI Checks
 
 The `required-checks` job in `.github/workflows/main.yml` is a "fan-in"

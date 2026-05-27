@@ -136,11 +136,16 @@ mod refill;
 mod tests;
 
 use chunks::{CurrentLocalChunk, CurrentSharedChunk, OversizedLocalGuard, OversizedSharedGuard};
+#[cfg(test)]
+use internals::align_offset;
+#[cfg(feature = "dst")]
+use internals::align_up;
 pub(crate) use internals::check_isize_overflow;
 use internals::{
-    AllocFlavor, ProtectiveHold, SharedArcsIssuedHold, SliceInitGuard, align_offset, align_up, bump_local_drop_count,
+    AllocFlavor, ProtectiveHold, SharedArcsIssuedHold, SliceInitGuard, aligned_payload_offset, bump_local_drop_count,
     bump_shared_drop_count, bumped_exceeds_chunk, compute_worst_case_size, current_chunk_evicted, drop_fn_for_slice, has_drop_entry,
-    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, worst_case_refill_for, write_through_ptr,
+    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, u16_truncate_unchecked, value_offset_in_chunk, worst_case_refill_for,
+    write_through_ptr,
 };
 pub use internals::{expect_alloc, panic_alloc};
 
@@ -465,8 +470,13 @@ impl<A: Allocator + Clone> Arena<A> {
                 let mirror_dc = unsafe { self.current_local.drop_count(chunk) };
                 // SAFETY: refcount-positive.
                 let chunk_dc = unsafe { (*chunk.as_ptr()).drop_count.get() };
+                // `mirror_dc` is the source of truth; the on-chunk
+                // counter must agree (see `refill_local` for why we
+                // take `mirror_dc` rather than `.max(chunk_dc)`).
+                debug_assert_eq!(mirror_dc, chunk_dc, "drop_count mirror diverged from on-chunk counter");
+                let _ = chunk_dc;
                 // SAFETY: refcount-positive.
-                unsafe { (*chunk.as_ptr()).drop_count.set(mirror_dc.max(chunk_dc)) };
+                unsafe { (*chunk.as_ptr()).drop_count.set(mirror_dc) };
                 let rcs_issued = self.current_local.smart_pointers_issued.replace(0);
                 // `reset` takes `&mut self`, statically excluding any
                 // outstanding simple references; we therefore release

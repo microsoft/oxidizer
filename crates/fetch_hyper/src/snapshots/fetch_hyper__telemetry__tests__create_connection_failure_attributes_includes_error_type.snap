@@ -1,0 +1,22 @@
+---
+source: crates/fetch_hyper/src/telemetry.rs
+expression: sorted_attributes(&attrs)
+---
+[
+    (
+        "error.type",
+        "connect",
+    ),
+    (
+        "server.address",
+        "example.com",
+    ),
+    (
+        "server.port",
+        "443",
+    ),
+    (
+        "url.scheme",
+        "https",
+    ),
+]

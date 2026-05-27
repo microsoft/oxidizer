@@ -12,9 +12,9 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::{
-    AllocFlavor, Arena, OversizedLocalGuard, OversizedSharedGuard, ProtectiveHold, SharedArcsIssuedHold, align_offset,
+    AllocFlavor, Arena, OversizedLocalGuard, OversizedSharedGuard, ProtectiveHold, SharedArcsIssuedHold, aligned_payload_offset,
     bump_local_drop_count, bump_shared_drop_count, bumped_exceeds_chunk, current_chunk_evicted, expect_alloc, panic_alloc,
-    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, write_through_ptr,
+    size_exceeds_normal_alloc, slow_refill_needed, try_bump_fit, value_offset_in_chunk, write_through_ptr,
 };
 use crate::internal::constants::{MAX_CHUNK_BYTES, MAX_SMART_PTR_ALIGN};
 use crate::internal::drop_list::{DropEntry as InnerDropEntry, drop_shim_one, noop_drop_shim};
@@ -79,7 +79,7 @@ impl<A: Allocator + Clone> Arena<A> {
                     let value_ptr: *mut T = aligned_ptr.cast::<T>().as_ptr();
                     // SAFETY: passing the bump-fit gate above implies a non-stub slot,
                     // which implies `current_shared.chunk` is `Some`.
-                    let chunk = unsafe { self.current_shared.chunk.get().unwrap_unchecked() };
+                    let chunk = unsafe { self.current_shared.chunk_assume_present() };
 
                     // Account before `f` so reentrant refill preserves this +1.
                     self.current_shared.bump_smart_pointers_issued();
@@ -90,12 +90,16 @@ impl<A: Allocator + Clone> Arena<A> {
                         // Compute is hoisted inside the drop-entry branch so
                         // `T: !Drop` allocations skip the panic surface of the
                         // u16 cast — mirrors `try_alloc_inner_with`.
+                        //
+                        // Same bound chain as `impl_alloc_inner_value` (see
+                        // there for the full derivation): bump-fit success
+                        // implies `raw_value_offset < shared_max_bump_extent::<A>()
+                        // = CHUNK_ALIGN − shared_header_size::<A>() ≤ u16::MAX`.
                         // SAFETY: refcount-positive — chunk held at LARGE
-                        // inflation while installed as `current_shared`.
-                        let payload_base_addr = unsafe { SharedChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-                        let value_offset = u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).expect(
-                            "bump fit-gate above bounds the allocation inside the current chunk's first 64 KiB tile, and shared chunks use a CHUNK_ALIGN-aligned payload base, so value_offset is < MAX_CHUNK_BYTES <= u16::MAX",
-                        );
+                        // inflation while installed as `current_shared`;
+                        // offset bounded by current-chunk bump extent
+                        // (reachable only if an oversized chunk leaks in).
+                        let value_offset = unsafe { value_offset_in_chunk(chunk, aligned_ptr) };
                         self.current_shared.drop_back.set(new_drop_back_ptr);
                         let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
                         let noop_entry = InnerDropEntry::new(noop_drop_shim, value_offset, 1);
@@ -214,17 +218,14 @@ impl<A: Allocator + Clone> Arena<A> {
         // Chunk arrives with refcount inflated to LARGE.
         // SAFETY: refcount-positive — LARGE inflation keeps the chunk live.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on
+        // `data_ptr`, which would later collide with `free_backing`.
         let data_ptr = unsafe { LocalChunk::<A>::data_ptr(chunk) };
         let cap = chunk_ref.capacity;
         let data_addr = data_ptr.as_ptr() as usize;
-        // SAFETY: provider post-condition guarantees the chunk fits the request after
-        // alignment and drop-entry slack, so neither computation below can fail.
-        let aligned = unsafe { align_offset(data_addr, layout.align()).unwrap_unchecked() };
-        // SAFETY: same post-condition as above; computation fits well below `usize::MAX`.
-        let end = unsafe { aligned.checked_add(layout.size()).unwrap_unchecked() };
-        // SAFETY: same post-condition as above.
-        unsafe { core::hint::assert_unchecked(end <= cap.saturating_sub(entry_size)) };
+        // SAFETY: provider post-condition guarantees the request fits the chunk.
+        let aligned = unsafe { aligned_payload_offset(data_addr, layout.align().max(1), layout.size(), cap, entry_size) };
         // SAFETY: payload-extent invariant — `aligned` is `T`-aligned and within `[0, cap)`.
         let value_ptr = unsafe { data_ptr.as_ptr().add(aligned).cast::<T>() };
 
@@ -236,12 +237,6 @@ impl<A: Allocator + Clone> Arena<A> {
 
         if entry_size > 0 {
             let new_drop_back = cap - entry_size;
-            #[expect(
-                clippy::cast_ptr_alignment,
-                reason = "chunk payloads are 64 KiB aligned (CHUNK_ALIGN), so any `InnerDropEntry` slot computed as `data + new_drop_back` is naturally aligned for `InnerDropEntry`"
-            )]
-            // SAFETY: payload-extent invariant — back-stack slot lies within the chunk's payload.
-            let entry_ptr = unsafe { data_ptr.as_ptr().add(new_drop_back).cast::<InnerDropEntry>() };
             // Box flavor installs a noop here; `Box::drop` runs `drop_in_place` directly and
             // `Box::into_rc` retargets this slot to `drop_shim_one::<T>` on conversion.
             let installed_drop_fn = if matches!(flavor, AllocFlavor::Box) {
@@ -255,8 +250,8 @@ impl<A: Allocator + Clone> Arena<A> {
                     .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX"),
                 1,
             );
-            // SAFETY: payload-extent invariant.
-            unsafe { core::ptr::write(entry_ptr, entry) };
+            // SAFETY: back-stack slot lies within the chunk payload and is naturally aligned for `InnerDropEntry`.
+            unsafe { entry.write_at_offset(data_ptr, new_drop_back) };
             chunk_ref.drop_count.set(1);
         }
 
@@ -380,7 +375,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // `T: !Drop` non-Box flavors `entry_size == 0` and the chunk
         // pointer is never needed in this function — the load is
         // deferred and elided by LLVM.
-        let chunk_lazy = || unsafe { self.current_local.chunk.get().unwrap_unchecked() };
+        let chunk_lazy = || unsafe { self.current_local.chunk_assume_present() };
 
         match flavor {
             AllocFlavor::SimpleRef => {
@@ -407,18 +402,21 @@ impl<A: Allocator + Clone> Arena<A> {
 
         if entry_size > 0 {
             let chunk = chunk_lazy();
-            // SAFETY: refcount-positive — chunk held at LARGE inflation.
-            let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-            let raw_value_offset = (aligned_ptr.as_ptr() as usize) - payload_base_addr;
-            // SAFETY: caller's `assert_unchecked(bumped <= MAX_CHUNK_BYTES)`
-            // bounds the offset to `u16` range; the `debug_assert!`
-            // catches future regressions.
-            debug_assert!(
-                u16::try_from(raw_value_offset).is_ok(),
-                "value_offset must fit in u16; reachable only if oversized chunk leaks into `current_local`"
-            );
-            let value_offset = u16::try_from(raw_value_offset)
-                .expect("bump fit-gate bounds raw_value_offset < MAX_CHUNK_BYTES <= u16::MAX for normal chunks");
+            // Bound chain:
+            //   raw_value_offset < bump_extent
+            //                    = capacity.min(local_max_bump_extent::<A>())
+            //                    ≤ local_max_bump_extent::<A>()
+            //                    = CHUNK_ALIGN − local_header_size::<A>()    (header ≥ 1)
+            //                    ≤ 65536 − 1 = 65535 = u16::MAX
+            // i.e. successful bump-fit places the allocation strictly
+            // inside the first 64 KiB tile of the chunk's payload, so
+            // the offset fits in `u16`. (Note: `MAX_CHUNK_BYTES = 65536`
+            // is *not* itself ≤ `u16::MAX` — the real bound is
+            // `local_max_bump_extent::<A>()`, which is strictly less.)
+            // SAFETY: refcount-positive — chunk held at LARGE inflation;
+            // offset bounded by the chain above (reachable only if an
+            // oversized chunk leaks into `current_local`).
+            let value_offset = unsafe { value_offset_in_chunk(chunk, aligned_ptr) };
             self.current_local.drop_back.set(new_drop_back_ptr);
             let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
             // `Box` installs a noop shim (retargeted at `Box::into_rc` time);
@@ -509,16 +507,14 @@ impl<A: Allocator + Clone> Arena<A> {
         // chunk arrives with refcount inflated to LARGE.
         // SAFETY: refcount-positive — LARGE inflation keeps the chunk live.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on
+        // `data_ptr`, which would later collide with `free_backing`.
         let data_ptr = unsafe { LocalChunk::<A>::data_ptr(chunk) };
         let cap = chunk_ref.capacity;
         let data_addr = data_ptr.as_ptr() as usize;
-        // SAFETY: provider post-condition guarantees the chunk fits the request.
-        let aligned = unsafe { align_offset(data_addr, layout.align()).unwrap_unchecked() };
-        // SAFETY: same post-condition as above; computation fits well below `usize::MAX`.
-        let end = unsafe { aligned.checked_add(layout.size()).unwrap_unchecked() };
-        // SAFETY: provider post-condition.
-        unsafe { core::hint::assert_unchecked(end <= cap.saturating_sub(entry_size)) };
+        // SAFETY: provider post-condition guarantees the request fits the chunk.
+        let aligned = unsafe { aligned_payload_offset(data_addr, layout.align().max(1), layout.size(), cap, entry_size) };
         // SAFETY: payload-extent invariant — `aligned` is `T`-aligned and within `[0, cap)`.
         let value_ptr = unsafe { data_ptr.as_ptr().add(aligned).cast::<T>() };
 
@@ -528,12 +524,6 @@ impl<A: Allocator + Clone> Arena<A> {
 
         if entry_size > 0 {
             let new_drop_back = cap - entry_size;
-            #[expect(
-                clippy::cast_ptr_alignment,
-                reason = "chunk payloads are 64 KiB aligned (CHUNK_ALIGN), so any `InnerDropEntry` slot computed as `data + new_drop_back` is naturally aligned for `InnerDropEntry`"
-            )]
-            // SAFETY: payload-extent invariant — back-stack slot lies within the chunk's payload.
-            let entry_ptr = unsafe { data_ptr.as_ptr().add(new_drop_back).cast::<InnerDropEntry>() };
             // See [`Self::try_alloc_inner_oversized_with`] for the Box-flavor rationale.
             let installed_drop_fn = if matches!(flavor, AllocFlavor::Box) {
                 noop_drop_shim
@@ -546,8 +536,8 @@ impl<A: Allocator + Clone> Arena<A> {
                     .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX"),
                 1,
             );
-            // SAFETY: payload-extent invariant.
-            unsafe { core::ptr::write(entry_ptr, entry) };
+            // SAFETY: back-stack slot lies within the chunk payload and is naturally aligned for `InnerDropEntry`.
+            unsafe { entry.write_at_offset(data_ptr, new_drop_back) };
             chunk_ref.drop_count.set(1);
         }
 
@@ -592,16 +582,14 @@ impl<A: Allocator + Clone> Arena<A> {
         let chunk = self.provider.acquire_shared(needed)?;
         // SAFETY: refcount-positive — LARGE inflation keeps the chunk live.
         let chunk_ref = unsafe { chunk.as_ref() };
-        // SAFETY: refcount-positive — chunk held at LARGE inflation.
+        // SAFETY: same liveness as `chunk.as_ref()` above; we use the
+        // raw `chunk` to avoid putting a SharedReadOnly tag on
+        // `data_ptr`, which would later collide with `free_backing`.
         let data_ptr = unsafe { SharedChunk::<A>::data_ptr(chunk) };
         let cap = chunk_ref.capacity;
         let data_addr = data_ptr.as_ptr() as usize;
-        // SAFETY: provider post-condition guarantees the chunk fits the request.
-        let aligned = unsafe { align_offset(data_addr, layout.align()).unwrap_unchecked() };
-        // SAFETY: same post-condition as above; computation fits well below `usize::MAX`.
-        let end = unsafe { aligned.checked_add(layout.size()).unwrap_unchecked() };
-        // SAFETY: provider post-condition.
-        unsafe { core::hint::assert_unchecked(end <= cap.saturating_sub(entry_size)) };
+        // SAFETY: provider post-condition guarantees the request fits the chunk.
+        let aligned = unsafe { aligned_payload_offset(data_addr, layout.align().max(1), layout.size(), cap, entry_size) };
         // SAFETY: payload-extent invariant — `aligned` is `T`-aligned and within `[0, cap)`.
         let value_ptr = unsafe { data_ptr.as_ptr().add(aligned).cast::<T>() };
 
@@ -613,20 +601,14 @@ impl<A: Allocator + Clone> Arena<A> {
 
         if entry_size > 0 {
             let new_drop_back = cap - entry_size;
-            #[expect(
-                clippy::cast_ptr_alignment,
-                reason = "chunk payloads are 64 KiB aligned (CHUNK_ALIGN), so any `InnerDropEntry` slot computed as `data + new_drop_back` is naturally aligned for `InnerDropEntry`"
-            )]
-            // SAFETY: payload-extent invariant.
-            let entry_ptr = unsafe { data_ptr.as_ptr().add(new_drop_back).cast::<InnerDropEntry>() };
             let entry = InnerDropEntry::new(
                 drop_shim_one::<T>,
                 u16::try_from(aligned)
                     .expect("oversized chunk payload starts at offset 0; aligned < align < MAX_SMART_PTR_ALIGN ≤ u16::MAX"),
                 1,
             );
-            // SAFETY: payload-extent invariant.
-            unsafe { core::ptr::write(entry_ptr, entry) };
+            // SAFETY: back-stack slot lies within the chunk payload and is naturally aligned for `InnerDropEntry`.
+            unsafe { entry.write_at_offset(data_ptr, new_drop_back) };
             // No other thread can yet observe this chunk: the
             // inflation has not been published via any cross-thread handoff.
             chunk_ref.drop_count.store(1, Ordering::Relaxed);
@@ -637,7 +619,6 @@ impl<A: Allocator + Clone> Arena<A> {
         // SAFETY: chunk held LARGE while we acted as its sole tenant.
         unsafe { SharedChunk::reconcile_swap_out(chunk, 1) };
 
-        let _ = end;
         // SAFETY: `value_ptr` is non-null and now points at an initialized `T`.
         Ok(unsafe { NonNull::new_unchecked(value_ptr) })
     }
@@ -719,7 +700,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // implies `aligned + bumped <= drop_back`, with `drop_back !=
         // dangling(1)` (stub state has data_ptr == drop_back == 1, so
         // `bumped > 0` would have failed the gate).
-        let chunk = unsafe { self.current_local.chunk.get().unwrap_unchecked() };
+        let chunk = unsafe { self.current_local.chunk_assume_present() };
 
         // Protect the reserved chunk across reentrant calls from `f`.
         match flavor {
@@ -748,13 +729,14 @@ impl<A: Allocator + Clone> Arena<A> {
         // they vanish for `T: !Drop` non-Box flavors — LLVM otherwise
         // hoists the panic check unconditionally and bloats the loop.
         let value_offset = if entry_size > 0 {
+            // Same bound chain as `impl_alloc_inner_value` — successful
+            // bump-fit places the offset within `local_max_bump_extent::<A>()
+            // = CHUNK_ALIGN − local_header_size::<A>() ≤ u16::MAX`.
             // SAFETY: refcount-positive — chunk held at LARGE inflation
-            // while installed as `current_local`.
-            let payload_base_addr = unsafe { LocalChunk::<A>::data_ptr(chunk) }.as_ptr() as usize;
-            let value_offset =
-                u16::try_from((aligned_ptr.as_ptr() as usize) - payload_base_addr).expect(
-                    "bump fit-gate above bounds the allocation inside the current chunk's first 64 KiB tile, so value_offset < MAX_CHUNK_BYTES <= u16::MAX",
-                );
+            // while installed as `current_local`; offset bounded by
+            // current-chunk bump extent (reachable only if an oversized
+            // chunk leaks into `current_local`).
+            let value_offset = unsafe { value_offset_in_chunk(chunk, aligned_ptr) };
             self.current_local.drop_back.set(new_drop_back_ptr);
             let entry_ptr: *mut InnerDropEntry = new_drop_back_ptr.cast::<InnerDropEntry>().as_ptr();
             let noop_entry = InnerDropEntry::new(noop_drop_shim, value_offset, 1);

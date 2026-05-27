@@ -43,12 +43,23 @@ use crate::internal::in_chunk::InSharedChunk;
 use crate::internal::shared_chunk::SharedChunk;
 
 impl<A: Allocator + Clone + Send + Sync + 'static> Memory for Arena<A> {
+    /// Reserve `min_bytes` of arena-backed buffer space as a [`BytesBuf`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min_bytes > u32::MAX`: the `bytesbuf` crate's block
+    /// size is a `u32`, so individual reservations are capped at
+    /// `u32::MAX` bytes (just under 4 GiB) regardless of the host
+    /// pointer width. Callers needing larger buffers must chunk the
+    /// request themselves. Also panics if the arena's underlying
+    /// allocator fails.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         if min_bytes == 0 {
             return BytesBuf::new();
         }
 
-        let block_len = u32::try_from(min_bytes).expect("min_bytes exceeds bytesbuf BlockSize (u32)");
+        let block_len = u32::try_from(min_bytes)
+            .expect("min_bytes exceeds u32::MAX bytes (just under 4 GiB), the per-reservation cap imposed by bytesbuf's BlockSize");
         let block_len_nz = NonZero::new(block_len).expect("min_bytes is non-zero (handled above)");
 
         // Reserve `min_bytes` and take the block's single chunk hold.
@@ -123,8 +134,8 @@ unsafe impl BlockRefDynamic for ArenaBlockState {
         // SAFETY: `state_ptr` is live while we hold this clone, and
         // `ref_count` is atomic.
         let prev = unsafe { (*state_ptr.as_ptr()).ref_count.fetch_add(1, Ordering::Relaxed) };
+        check_arena_block_state_refcount(prev);
         debug_assert!(prev > 0, "BlockRef::clone on a dead state");
-        let _ = prev;
         state_ptr
     }
 
@@ -152,6 +163,29 @@ unsafe impl BlockRefDynamic for ArenaBlockState {
             // SAFETY: matches the original allocation layout.
             unsafe { dealloc(state_ptr.as_ptr().cast::<u8>(), layout) };
         }
+    }
+}
+
+/// Cold-path refcount overflow guard for `ArenaBlockState::clone`.
+///
+/// Mirrors `check_local_refcount` / `check_shared_refcount`: if more
+/// than `usize::MAX / 2` concurrent clones were ever observed (which
+/// would require an absurd number of live `BlockRef` wrappers — one
+/// per byte of address space), abort to prevent the `fetch_add` from
+/// wrapping through zero and triggering an unintended drop. This path
+/// is physically unreachable in tested configurations, so it is
+/// excluded from coverage and mutation testing per crate convention.
+#[inline(always)]
+#[allow(
+    clippy::inline_always,
+    reason = "must inline at every clone site to avoid a per-call function-call overhead on the BlockRef::clone hot path"
+)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(test, mutants::skip)] // Refcount overflow requires physically unreachable outstanding refs.
+fn check_arena_block_state_refcount(prev: usize) {
+    use crate::internal::constants::{LARGE, refcount_overflow_abort};
+    if prev >= LARGE.saturating_add(LARGE) {
+        refcount_overflow_abort();
     }
 }
 

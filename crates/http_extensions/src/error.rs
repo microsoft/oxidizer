@@ -190,6 +190,8 @@ impl HttpError {
     /// this is an open circuit breaker that rejects executions without consuming the request.
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::{HttpError, HttpRequest, HttpRequestBuilder};
     /// # let http_request = HttpRequestBuilder::new_fake()
     /// #     .get("https://example.com")
@@ -203,6 +205,8 @@ impl HttpError {
     ///     execute_retry(request);
     /// }
     /// # fn execute_retry(http_request: HttpRequest) {}
+    /// # }
+    /// # }
     /// ```
     #[must_use]
     pub fn unavailable(msg: impl Into<Cow<'static, str>>) -> Self {

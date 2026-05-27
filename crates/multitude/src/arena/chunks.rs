@@ -110,6 +110,21 @@ impl<C: ChunkKind + ?Sized> Default for CurrentChunk<C> {
 }
 
 impl<C: ChunkKind + ?Sized> CurrentChunk<C> {
+    /// Returns the installed chunk pointer for a non-stub slot.
+    ///
+    /// Centralizes the ubiquitous `unsafe { chunk.get().unwrap_unchecked() }`
+    /// idiom used by every bump-fit fast path; the caller's bump-fit gate
+    /// already proves non-stub state.
+    ///
+    /// # Safety
+    ///
+    /// The slot must be in non-stub state (`chunk.get().is_some()`).
+    #[inline(always)]
+    pub(super) unsafe fn chunk_assume_present(&self) -> NonNull<C> {
+        // SAFETY: caller asserts non-stub state.
+        unsafe { self.chunk.get().unwrap_unchecked() }
+    }
+
     /// Number of drop entries currently recorded in the back-stack of
     /// the chunk that this slot mirrors. Derived from the chunk's own
     /// payload extent and the slot's `drop_back` limit pointer, so the
@@ -154,6 +169,11 @@ impl<C: ChunkKind + ?Sized> CurrentChunk<C> {
     pub(super) fn bump_smart_pointers_issued(&self) {
         let n = self.smart_pointers_issued.get();
         check_smart_pointers_issued_overflow(n);
+        // SAFETY: `check_smart_pointers_issued_overflow` above would
+        // have aborted if `n >= LARGE - 1`. Asserting the postcondition
+        // lets LLVM elide downstream overflow guards and produce tighter
+        // code for the `n + 1` store and subsequent consumers.
+        unsafe { core::hint::assert_unchecked(n < LARGE - 1) };
         self.smart_pointers_issued.set(n + 1);
     }
 }

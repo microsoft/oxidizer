@@ -176,8 +176,7 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
         let ptr = self.ptr.as_non_null().cast::<T>();
         if needs_drop::<T>() {
             let chunk = self.chunk();
-            // SAFETY: caller-held refcount keeps the chunk live.
-            let data_addr = unsafe { SharedChunk::<A>::data_ptr(NonNull::from(chunk)) }.as_ptr() as usize;
+            let data_addr = chunk.data().as_ptr() as usize;
             let value_offset = self.ptr.as_ptr() as *const u8 as usize - data_addr;
             // Acquire pairs with the owner-thread Release publish so
             // all of `entries[0..count]` is visible. Retargeting the
@@ -243,8 +242,7 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
         let len = old_ptr.len();
         if needs_drop::<T>() {
             let chunk = self.chunk();
-            // SAFETY: caller-held refcount keeps the chunk live.
-            let data_addr = unsafe { SharedChunk::<A>::data_ptr(NonNull::from(chunk)) }.as_ptr() as usize;
+            let data_addr = chunk.data().as_ptr() as usize;
             let value_offset = old_ptr.as_ptr() as *const u8 as usize - data_addr;
             // Synchronization matches the scalar `assume_init` case
             // above (Acquire load + Release retarget).

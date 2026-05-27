@@ -85,8 +85,8 @@ pub const EVENT_REFRESH_HIT: &str = "cache.refresh_hit";
 /// A background refresh did not find data in the fallback tier.
 pub const EVENT_REFRESH_MISS: &str = "cache.refresh_miss";
 
-/// An entry was inserted while the cache was at or above capacity and may have
-/// caused an eviction.
+/// An entry was evicted/removed due to cache size constraints.
+/// Only emitted when eviction telemetry is enabled.
 pub const EVENT_EVICTION: &str = "cache.eviction";
 
 #[cfg(test)]

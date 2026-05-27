@@ -15,6 +15,8 @@ use std::borrow::Cow;
 /// # Example
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// use http_extensions::{HttpRequestBuilder, UriTemplateLabel};
 ///
 /// let request = HttpRequestBuilder::new_fake()
@@ -22,6 +24,8 @@ use std::borrow::Cow;
 ///     .extension(UriTemplateLabel::new("/api/users/{id}"))
 ///     .build()
 ///     .unwrap();
+/// # }
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct UriTemplateLabel(Cow<'static, str>);
