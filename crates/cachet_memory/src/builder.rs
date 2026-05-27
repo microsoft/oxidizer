@@ -452,6 +452,26 @@ mod tests {
     }
 
     #[test]
+    fn eviction_telemetry_defaults_false() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new();
+        assert!(!builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn with_eviction_telemetry_sets_flag() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().with_eviction_telemetry();
+        assert!(builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn with_hasher_preserves_eviction_telemetry_flag() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .with_eviction_telemetry()
+            .with_hasher(std::collections::hash_map::RandomState::new());
+        assert!(builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
     fn build_max_capacity_lt_initial_capacity_returns_validation_error() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
             .max_capacity(100)
