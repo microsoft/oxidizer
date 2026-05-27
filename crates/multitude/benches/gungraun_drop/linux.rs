@@ -170,7 +170,7 @@ fn setup_alloc() -> Arena {
     arena
 }
 
-// ===== bench bodies ΓÇö drop happens at scope exit =====
+// ===== bench bodies — drop happens at scope exit =====
 
 #[library_benchmark]
 #[bench::run(setup_box_u64())]
