@@ -2,25 +2,16 @@
 // Licensed under the MIT License.
 
 //! Notifications emitted by the in-memory cache.
-//!
-//! Currently, this module exposes [`RemovalCause`] which classifies why an
-//! entry was removed from the cache. It is delivered to listeners registered
-//! via [`InMemoryCacheBuilder::on_eviction`](crate::InMemoryCacheBuilder::on_eviction).
 
 /// The reason an entry was removed from the cache.
-///
-/// Mirrors moka crate's removal-cause classification, kept as a local type so that
-/// the underlying cache implementation is not exposed in the public API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RemovalCause {
-    /// The entry's TTL or TTI passed and it was removed by the cache.
-    ///
-    /// This is distinct from a get-time expiration check: this variant fires
-    /// when the cache's background maintenance proactively reaps the entry.
+    /// The entry's TTL or TTI passed and the cache's background maintenance
+    /// reaped it. This is distinct from a get-time expiration check.
     Expired,
 
-    /// The entry was removed because the cache was at capacity and the
-    /// eviction policy selected it for removal.
+    /// The cache was at capacity and the eviction policy selected this entry
+    /// for removal.
     Size,
 
     /// The entry was removed by an explicit

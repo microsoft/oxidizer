@@ -454,9 +454,8 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        // Eviction telemetry is now produced by the storage tier's eviction listener
-        // (see `crate::eviction::EvictionHook`), not by the wrapper itself. The wrapper
-        // wrapping a MockCache must therefore never synthesize eviction events.
+        // The wrapper must not synthesize eviction events; those come from the
+        // storage tier's eviction listener (see `crate::eviction::EvictionHook`).
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::with_logging();

@@ -231,17 +231,12 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
         self
     }
 
-    /// Enables `cache.eviction` telemetry for the in-memory tier.
+    /// Enables eviction telemetry for the in-memory tier.
     ///
     /// When enabled, the next call to [`memory`](Self::memory) /
-    /// [`memory_with`](Self::memory_with) installs a moka eviction listener
-    /// that reports `Size`- and `Expired`-cause evictions through the cache's
-    /// telemetry sink. `Explicit` and `Replaced` causes are *not* reported as
-    /// evictions, since they are already covered by the `cache.invalidated`
-    /// and `cache.inserted` events.
-    ///
-    /// Must be called *before* `memory`/`memory_with`; calling it afterwards
-    /// has no effect because the storage tier is constructed at that point.
+    /// [`memory_with`](Self::memory_with) installs a listener that emits
+    /// `cache.eviction` on capacity evictions and `cache.expired` on
+    /// background TTL/TTI expiry. Must be called *before* `memory`/`memory_with`.
     ///
     /// # Examples
     ///

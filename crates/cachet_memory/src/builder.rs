@@ -70,12 +70,10 @@ impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
     }
 }
 
-// The `eviction_listener` field stores a `dyn Fn`, which is not auto-`UnwindSafe`
-// / `RefUnwindSafe`. We assert these traits explicitly so adding the listener does
-// not silently break downstream code that relied on the auto-trait impls
-// (flagged by `cargo semver-checks` as `auto_trait_impl_removed`). The closure
-// is invoked by moka as a fire-and-forget side effect; a panic inside it cannot
-// leave any observable state in the builder, so the assertion is sound.
+// `eviction_listener` holds a `dyn Fn`, which is not auto-`UnwindSafe`/`RefUnwindSafe`.
+// Assert both explicitly so adding the listener doesn't break downstream code that
+// relied on the auto impls. The closure is invoked by moka as a fire-and-forget
+// callback; a panic inside it cannot leave observable state in the builder.
 impl<K, V, H: UnwindSafe> UnwindSafe for InMemoryCacheBuilder<K, V, H> {}
 impl<K, V, H: RefUnwindSafe> RefUnwindSafe for InMemoryCacheBuilder<K, V, H> {}
 
@@ -260,9 +258,6 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// The listener runs on the cache's background maintenance task. Keep the
     /// closure cheap; expensive work should be offloaded to a separate task.
-    ///
-    /// Replacing an already-registered listener is supported; only the most
-    /// recently configured listener is invoked.
     ///
     /// # Examples
     ///

@@ -33,20 +33,15 @@ impl EvictionHook {
         Self { state: OnceLock::new() }
     }
 
-    /// Binds the hook to a telemetry sink and cache name.
-    ///
-    /// Called once during `build_tier`. Subsequent calls are silently ignored
-    /// because the hook is keyed to the first build of a builder.
+    /// Binds the hook to a telemetry sink and cache name. Subsequent calls are no-ops.
     pub(crate) fn init(&self, telemetry: CacheTelemetry, name: CacheName) {
         let _ = self.state.set(HookState { telemetry, name });
     }
 
-    /// Invoked by the in-memory tier on each removal.
+    /// Routes a removal cause to the appropriate telemetry event.
     ///
-    /// `Size` removals are reported as `cache.eviction` (capacity pressure) and
-    /// `Expired` removals as `cache.expired` (TTL/TTI expiry) so consumers can
-    /// distinguish the two. `Explicit` and `Replaced` are user-initiated and
-    /// already accounted for by `cache.invalidated` / `cache.inserted`.
+    /// `Explicit` and `Replaced` are ignored because they are already covered
+    /// by the wrapper's `cache.invalidated` / `cache.inserted` events.
     pub(crate) fn handle(&self, cause: RemovalCause) {
         let Some(state) = self.state.get() else {
             return;
