@@ -253,7 +253,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// Registers a listener that is called when an entry is removed from the cache.
     ///
     /// The listener receives a [`RemovalCause`] indicating why the entry was removed:
-    /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expirations,
+    /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expiration,
     /// `Explicit` for [`invalidate`](cachet_tier::CacheTier::invalidate) or
     /// [`clear`](cachet_tier::CacheTier::clear) calls, and `Replaced` for inserts
     /// that overwrote an existing key.

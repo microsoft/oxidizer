@@ -16,7 +16,7 @@ use cachet_memory::RemovalCause;
 use crate::cache::CacheName;
 use crate::telemetry::CacheTelemetry;
 
-/// Bridges moka's eviction listener to the cachet telemetry layer.
+/// Bridges moka crate's eviction listener to the cachet telemetry layer.
 #[derive(Debug)]
 pub(crate) struct EvictionHook {
     state: OnceLock<HookState>,
@@ -92,8 +92,7 @@ mod tests {
         hook.handle(RemovalCause::Explicit);
         hook.handle(RemovalCause::Replaced);
         assert!(
-            !capture.output().contains(attributes::EVENT_EVICTION)
-                && !capture.output().contains(attributes::EVENT_EXPIRED),
+            !capture.output().contains(attributes::EVENT_EVICTION) && !capture.output().contains(attributes::EVENT_EXPIRED),
             "Explicit/Replaced must not emit eviction or expired events"
         );
 

@@ -9,7 +9,7 @@
 
 /// The reason an entry was removed from the cache.
 ///
-/// Mirrors moka's removal-cause classification, kept as a local type so that
+/// Mirrors moka crate's removal-cause classification, kept as a local type so that
 /// the underlying cache implementation is not exposed in the public API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RemovalCause {
