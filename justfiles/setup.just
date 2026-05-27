@@ -38,3 +38,6 @@ install-tools:
 
     # This tool is not well maintained and fails to actually build if using locked dependencies. Okay then.
     cargo install cargo-spellcheck@$env:CARGO_SPELLCHECK_VERSION
+
+    # Install platform-specific benchmark toolchain (Callgrind, Linux-only).
+    & (Join-Path $PSScriptRoot ".." "scripts" "install-callgrind-tools.ps1")
