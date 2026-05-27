@@ -604,8 +604,7 @@ impl<T: ?Sized, A: Allocator + Clone> Unpin for Box<T, A> {}
 /// This panics if the allocation never reserved a drop entry,
 /// because silently skipping `T::drop` would leak.
 fn retarget_box_drop_entry<A: Allocator + Clone>(chunk: &LocalChunk<A>, value_ptr: NonNull<u8>, drop_fn: unsafe fn(*mut u8, usize)) {
-    // SAFETY: `chunk` is a live reference, so `NonNull::from(chunk)` names a live chunk.
-    let data = unsafe { LocalChunk::<A>::data_ptr(NonNull::from(chunk)) };
+    let data = chunk.data();
     // SAFETY: `value_ptr` points into `chunk`'s payload, so `offset_from`
     // stays within one allocation and yields a non-negative offset.
     let value_offset = unsafe { value_ptr.as_ptr().offset_from(data.as_ptr()) } as usize;

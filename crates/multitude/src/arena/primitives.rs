@@ -11,7 +11,7 @@ use core::ptr::NonNull;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::{Arena, bump_local_drop_count, check_isize_overflow, try_bump_fit};
+use super::{Arena, bump_local_drop_count, check_isize_overflow, try_bump_fit, u16_truncate_unchecked};
 use crate::internal::constants::MAX_SMART_PTR_ALIGN;
 use crate::internal::drop_list::DropEntry as InnerDropEntry;
 use crate::internal::in_chunk::InLocalChunk;
@@ -413,7 +413,7 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { core::hint::assert_unchecked(value_offset_isize >= 0) };
         let value_offset = value_offset_isize.cast_unsigned();
         // SAFETY: payload-extent invariant — offset bounded by chunk capacity (< u16::MAX).
-        let value_offset_u16 = unsafe { u16::try_from(value_offset).unwrap_unchecked() };
+        let value_offset_u16 = unsafe { u16_truncate_unchecked(value_offset) };
 
         let entry_size = core::mem::size_of::<InnerDropEntry>();
         let drop_back_ptr = self.current_local.drop_back.get();
