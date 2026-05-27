@@ -42,10 +42,13 @@
 //! and validate the response:
 //!
 //! ```rust
+//! # #[cfg(not(feature = "test-util"))] fn main() {}
+//! # #[cfg(feature = "test-util")]
 //! # use http_extensions::{
 //! #     HttpRequestBuilder, HttpResponseBuilder, HttpBodyBuilder, HttpRequestBuilderExt,
 //! #     FakeHandler, StatusExt, Result,
 //! # };
+//! # #[cfg(feature = "test-util")]
 //! # #[tokio::main]
 //! # async fn main() -> Result<()> {
 //! // Create a body builder for constructing request/response bodies
@@ -96,25 +99,37 @@
 //!
 //! ## Validating Response Status
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # (|| {
 //! # use http_extensions::{StatusExt, HttpResponse, HttpResponseBuilder, HttpError};
 //! # let response: HttpResponse = HttpResponseBuilder::new_fake().status(200).build().unwrap();
 //! // Check if the response succeeded and return an error if not
 //! let validated_response = response.ensure_success()?;
 //! # Ok::<(), HttpError>(())
+//! # })().unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! ## Creating Request Bodies
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
 //! # use http_extensions::HttpBodyBuilder;
 //! # let builder = HttpBodyBuilder::new_fake();
 //! // Create different body types
 //! let text_body = builder.text("Hello, world!");
 //! let binary_body = builder.slice(&[1, 2, 3, 4]);
 //! let empty_body = builder.empty();
+//! # }
+//! # }
 //! ```
 //!
 //! ## Building HTTP Requests
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
 //! # use http_extensions::{HttpRequestBuilder, HttpBodyBuilder};
 //! # let body_builder = HttpBodyBuilder::new_fake();
 //! let request = HttpRequestBuilder::new(&body_builder)
@@ -122,10 +137,14 @@
 //!     .text("Hello World")
 //!     .build()
 //!     .unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! ## Building HTTP Responses
 //! ```rust
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
 //! # use http_extensions::{HttpResponseBuilder, HttpBodyBuilder};
 //! # let body_builder = HttpBodyBuilder::new_fake();
 //! let response = HttpResponseBuilder::new(&body_builder)
@@ -134,6 +153,8 @@
 //!     .body(body_builder.text("Success"))
 //!     .build()
 //!     .unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! ## Building Middleware with `RequestHandler`

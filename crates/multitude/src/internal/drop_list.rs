@@ -152,6 +152,31 @@ impl DropEntry {
         // cast at construction or via `store_drop_fn`.
         unsafe { mem::transmute::<*mut (), unsafe fn(*mut u8, usize)>(p) }
     }
+
+    /// Write `self` as a fresh entry at `data_ptr + byte_offset`. Used
+    /// by allocation paths that already proved the back-stack slot is
+    /// inside the live chunk payload and naturally aligned for
+    /// [`DropEntry`].
+    ///
+    /// # Safety
+    ///
+    /// `data_ptr + byte_offset` must point at writable, owned,
+    /// `DropEntry`-aligned bytes inside a live chunk (the back-stack
+    /// slot the caller just reserved), and the slot must not currently
+    /// hold an initialized entry (the write is non-drop / overwriting
+    /// memory).
+    #[inline]
+    pub(crate) unsafe fn write_at_offset(self, data_ptr: core::ptr::NonNull<u8>, byte_offset: usize) {
+        #[expect(
+            clippy::cast_ptr_alignment,
+            reason = "back-stack slots are placed at naturally-aligned addresses by the bump allocator (CHUNK_ALIGN >= align_of::<DropEntry>())"
+        )]
+        // SAFETY: caller proves the slot is in-payload, aligned, and writable.
+        unsafe {
+            let entry_ptr = data_ptr.as_ptr().add(byte_offset).cast::<Self>();
+            core::ptr::write(entry_ptr, self);
+        }
+    }
 }
 
 /// No-op shim for allocations whose storage is intentionally uninitialized.
@@ -190,9 +215,109 @@ pub(crate) unsafe fn drop_shim_slice<T>(value: *mut u8, len: usize) {
     unsafe { core::ptr::drop_in_place::<[T]>(slice) };
 }
 
+/// Drop guard used to force-abort the process if a wrapped `T::Drop`
+/// invocation unwinds during `replay_drops`. Under `no_std` there is
+/// no `core::panic::catch_unwind` (it's `std`-only) and
+/// `core::panic::abort_unwind` is unstable, so the only way to keep
+/// chunk reclamation correct in the face of a panicking `T::Drop` is
+/// to abort the process via double-panic (panic-in-drop while already
+/// unwinding causes `panic = unwind` to abort). For `panic = abort`
+/// builds, the original panic itself already aborts and this guard is
+/// never observed.
+///
+/// The caller is expected to `core::mem::forget(guard)` after a
+/// successful drop-shim call to suppress the destructor.
+///
+/// The type and its `Drop` are compiled unconditionally so the abort
+/// semantics are testable under `std` builds via
+/// `std::panic::catch_unwind`; only the in-tree call sites are
+/// gated on `not(feature = "std")`.
+#[cfg_attr(feature = "std", allow(dead_code, reason = "exercised via tests; live call sites are no_std-only"))]
+pub(crate) struct AbortOnUnwind;
+
+impl Drop for AbortOnUnwind {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    #[cfg_attr(test, mutants::skip)] // Fatal-abort path: double-panic terminates the process, untestable in-process.
+    fn drop(&mut self) {
+        #[expect(clippy::panic, reason = "fatal-path abort: double-panic forces process termination")]
+        {
+            panic!("multitude: T::Drop panicked during replay_drops; aborting to prevent chunk leak");
+        }
+    }
+}
+
+/// Iterate the trailing drop list at `(data, capacity)` and invoke each
+/// recorded drop-shim. Shared between [`LocalChunk::replay_drops`] and
+/// [`SharedChunk::replay_drops`] (their per-flavor parts cover the
+/// `drop_count` read / reset and the chunk-liveness contract).
+///
+/// Each call is wrapped panic-safely: under `std` with `catch_unwind`
+/// (so one panicking `T::Drop` leaks only its own value, not the
+/// chunk), under `no_std` with an [`AbortOnUnwind`] guard (no
+/// `catch_unwind`; the only way to keep chunk reclamation correct is
+/// to escalate the panic to a process abort via double-panic).
+///
+/// # Safety
+///
+/// * `data` must be the chunk's payload base and remain valid for
+///   reads for `capacity` bytes (caller-owned chunk).
+/// * The last `count * size_of::<DropEntry>()` bytes of the payload
+///   must hold `count` initialized `DropEntry`s installed by
+///   [`crate::arena::primitives`] (densely packed, naturally aligned).
+/// * Each entry's `(value_offset, len, drop_fn)` must satisfy the
+///   drop-shim invariant: `data + value_offset` points at `len`
+///   initialized values of the type `drop_fn` was synthesized for.
+/// * The caller must have reset the on-chunk `drop_count` to zero
+///   before invoking, so a panicking `Drop` cannot leave stale entries
+///   to be replayed twice.
+pub(crate) unsafe fn replay_drop_entries(data: *mut u8, capacity: usize, count: usize) {
+    if count == 0 {
+        return;
+    }
+    let base = capacity - count * mem::size_of::<DropEntry>();
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "chunk payloads are CHUNK_ALIGN aligned; `data + base` is naturally `DropEntry`-aligned by construction"
+    )]
+    // SAFETY: `base = capacity - count * size_of::<DropEntry>()` is
+    // the byte offset of the first entry; together with `data` it
+    // addresses `count` initialized `DropEntry`s.
+    let entries_ptr = unsafe { data.add(base).cast::<DropEntry>() };
+    for i in 0..count {
+        // SAFETY: `i < count`; all `count` entries are initialized at allocation time.
+        let entry = unsafe { &*entries_ptr.add(i) };
+        // SAFETY: payload-extent + drop-shim invariants.
+        let value_ptr = unsafe { data.add(entry.value_offset as usize) };
+        let f = entry.load_drop_fn(Ordering::Relaxed);
+        #[cfg(feature = "std")]
+        {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // SAFETY: drop-shim invariant.
+                unsafe { f(value_ptr, entry.len as usize) };
+            }));
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let abort_guard = AbortOnUnwind;
+            // SAFETY: drop-shim invariant.
+            unsafe { f(value_ptr, entry.len as usize) };
+            core::mem::forget(abort_guard);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replay_drop_entries_zero_count_is_noop() {
+        // `count == 0` returns immediately before touching `data` or
+        // `capacity`, so passing dangling/zero values is fine.
+        // SAFETY: see above — the early-return branch never reads
+        // through `data` nor uses `capacity`.
+        unsafe { replay_drop_entries(core::ptr::null_mut(), 0, 0) };
+    }
 
     #[test]
     fn round_payload_overflow_returns_none() {
@@ -253,5 +378,19 @@ mod tests {
         let expected = raw.div_ceil(fn_align) * fn_align;
         assert_eq!(mem::size_of::<DropEntry>(), expected);
         assert_eq!(mem::align_of::<DropEntry>(), fn_align);
+    }
+
+    /// Dropping an `AbortOnUnwind` guard must panic — that is what
+    /// turns a panicking `T::Drop` during `replay_drops` into a
+    /// double-panic process abort under `no_std`. We assert the
+    /// `Drop` impl panics; a mutant that replaces the body with `()`
+    /// would let `catch_unwind` return `Ok` and fail this test.
+    #[cfg(feature = "std")]
+    #[test]
+    fn abort_on_unwind_drop_panics() {
+        let result = std::panic::catch_unwind(|| {
+            let _guard = AbortOnUnwind;
+        });
+        assert!(result.is_err(), "AbortOnUnwind::drop must panic");
     }
 }

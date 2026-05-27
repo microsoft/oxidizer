@@ -14,6 +14,8 @@ use std::time::Duration;
 /// # Example
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// use std::time::Duration;
 ///
 /// use http_extensions::HttpRequestBuilder;
@@ -23,6 +25,8 @@ use std::time::Duration;
 ///     .response_timeout(Duration::from_secs(30))
 ///     .build()
 ///     .unwrap();
+/// # }
+/// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResponseTimeout(Duration);

@@ -68,6 +68,8 @@ pub trait Read: HasMemory + Memory + Debug {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use bytesbuf::mem::Memory;
@@ -84,6 +86,8 @@ pub trait Read: HasMemory + Memory + Debug {
     ///
     /// let bytes = buf.consume_all();
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn read_at_most_into(&mut self, len: usize, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error>;
 
@@ -108,6 +112,8 @@ pub trait Read: HasMemory + Memory + Debug {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use bytesbuf_io::Read;
@@ -139,6 +145,8 @@ pub trait Read: HasMemory + Memory + Debug {
     ///     }
     /// }
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn read_more_into(&mut self, into: BytesBuf) -> Result<(usize, BytesBuf), Self::Error>;
 
@@ -165,6 +173,8 @@ pub trait Read: HasMemory + Memory + Debug {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use bytesbuf_io::Read;
@@ -176,6 +186,8 @@ pub trait Read: HasMemory + Memory + Debug {
     ///
     /// println!("first read produced {} bytes of data", buf.len());
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn read_any(&mut self) -> Result<BytesBuf, Self::Error>;
 }

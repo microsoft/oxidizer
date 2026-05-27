@@ -176,8 +176,7 @@ impl<T, A: Allocator + Clone> Rc<MaybeUninit<T>, A> {
         let ptr = self.ptr.as_non_null().cast::<T>();
         if needs_drop::<T>() {
             let chunk = self.chunk();
-            // SAFETY: caller-held refcount keeps the chunk live.
-            let data_addr = unsafe { LocalChunk::<A>::data_ptr(NonNull::from(chunk)) }.as_ptr() as usize;
+            let data_addr = chunk.data().as_ptr() as usize;
             let value_offset = self.ptr.as_ptr() as *const u8 as usize - data_addr;
             let entry = chunk
                 .drop_entries()
@@ -238,8 +237,7 @@ impl<T, A: Allocator + Clone> Rc<[MaybeUninit<T>], A> {
         let len = old_ptr.len();
         if needs_drop::<T>() {
             let chunk = self.chunk();
-            // SAFETY: caller-held refcount keeps the chunk live.
-            let data_addr = unsafe { LocalChunk::<A>::data_ptr(NonNull::from(chunk)) }.as_ptr() as usize;
+            let data_addr = chunk.data().as_ptr() as usize;
             let value_offset = old_ptr.as_ptr() as *const u8 as usize - data_addr;
             let entry = chunk
                 .drop_entries()

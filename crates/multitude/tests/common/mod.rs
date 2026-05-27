@@ -175,9 +175,13 @@ unsafe impl Allocator for BadAddressAllocator {
         let unaligned_start = target_end_floor.checked_sub(size).ok_or(AllocError)?;
         let mask = align - 1;
         let start_addr = unaligned_start.checked_add(mask).ok_or(AllocError)? & !mask;
+        // The pointer is synthetic and never dereferenced — only its
+        // address is observed by `chunk_end_addr_fits_in_isize`. Use
+        // `without_provenance_mut` so Miri doesn't conflate the
+        // integer cast with a real exposed-provenance pointer.
         // SAFETY: `start_addr` is non-zero by construction (target_end_floor
         // is the high bit and start lives near it).
-        let nn = unsafe { NonNull::new_unchecked(start_addr as *mut u8) };
+        let nn = unsafe { NonNull::new_unchecked(core::ptr::without_provenance_mut::<u8>(start_addr)) };
         Ok(NonNull::slice_from_raw_parts(nn, size))
     }
 

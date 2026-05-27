@@ -61,11 +61,19 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
         }
     }
 
-    /// Set the size threshold above which an allocation gets its own oversized chunk.
+    /// Set the size threshold above which a request that needs a fresh
+    /// chunk gets its own oversized chunk.
     ///
-    /// Requests strictly larger than this value bypass the normal
-    /// chunk pool and are served from a one-shot oversized chunk
-    /// that is never cached.
+    /// This threshold only governs **chunk acquisition**, not the bump
+    /// fast path: an allocation strictly larger than `max_normal_alloc`
+    /// that happens to fit in the tail of the chunk already installed
+    /// as `current_{local,shared}` is satisfied from that chunk (the
+    /// goal here is to avoid wasting bump space when the caller paid
+    /// for it via `with_capacity_*` or the high-water ratchet). It is
+    /// only when no current chunk can satisfy the request — i.e. when
+    /// we'd otherwise call `refill_local`/`refill_shared` — that we
+    /// route oversized requests to a dedicated one-shot chunk that is
+    /// never cached.
     ///
     /// Must be in `[4096, MAX_CHUNK_BYTES - chunk_header_size]`. The
     /// lower bound is fixed; the upper bound is approximately 64 KiB

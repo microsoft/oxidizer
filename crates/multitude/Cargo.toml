@@ -95,7 +95,7 @@ name = "gungraun_drop"
 harness = false
 
 [[example]]
-name = "basic"
+name = "multitude_basic"
 
 [[example]]
 name = "strings"
