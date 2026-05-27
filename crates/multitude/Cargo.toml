@@ -63,6 +63,12 @@ zerocopy = { workspace = true, optional = true }
 [target.'cfg(loom)'.dependencies]
 loom = { workspace = true }
 
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [dev-dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
@@ -73,12 +79,6 @@ bumpalo = { workspace = true, features = ["collections"] }
 criterion.workspace = true
 mutants.workspace = true
 serde_json.workspace = true
-
-# Workspace dep declares `default-features = false`; we re-enable `default` here
-# (which pulls in the `benchmark` feature with `library_benchmark`,
-# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true
