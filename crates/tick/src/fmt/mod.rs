@@ -54,7 +54,7 @@
 //!
 //! use tick::SystemTimeExt;
 //!
-//! let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
+//! let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
 //! println!("Time: {}", time.display_iso_8601());
 //! // Output: Time: 1970-01-01T01:00:00Z
 //! ```

@@ -383,18 +383,18 @@ existing `_rc`/`_arc` slice methods).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxSsckQO6X9rG16hze1SNSzMGw6W-TYGhj3rG1Gc1jfyNoYcYWSFgmhieXRlbXVja2YxLjI1LjCCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjCCaW11bHRpdHVkZWUwLjEuMIJoemVyb2NvcHlmMC44LjQ4
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxSsckQO6X9rG16hze1SNSzMGw6W-TYGhj3rG1Gc1jfyNoYcYWSFgmhieXRlbXVja2YxLjI1LjCCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjCCaW11bHRpdHVkZWUwLjEuMIJoemVyb2NvcHlmMC44LjQ5
  [__link0]: https://crates.io/crates/bumpalo
  [__link1]: https://docs.rs/multitude/0.1.0/multitude/?search=rc::Rc
  [__link10]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::String
  [__link11]: https://docs.rs/multitude/0.1.0/multitude/?search=vec::Vec
  [__link12]: https://crates.io/crates/dst-factory
- [__link13]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format
+ [__link13]: strings::format!
  [__link14]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::RcUtf16Str
  [__link15]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::ArcUtf16Str
  [__link16]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::BoxUtf16Str
  [__link17]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::Utf16String
- [__link18]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format_utf16
+ [__link18]: strings::format_utf16!
  [__link19]: https://docs.rs/multitude/0.1.0/multitude/?search=rc::Rc
  [__link2]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::RcStr
  [__link20]: https://docs.rs/multitude/0.1.0/multitude/?search=arc::Arc
@@ -426,8 +426,8 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link44]: https://docs.rs/multitude/0.1.0/multitude/?search=arena::Arena
  [__link45]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::String
  [__link46]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::Utf16String
- [__link47]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format
- [__link48]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format_utf16
+ [__link47]: strings::format!
+ [__link48]: strings::format_utf16!
  [__link49]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::String
  [__link5]: https://docs.rs/multitude/0.1.0/multitude/?search=r#box::Box
  [__link50]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::String::into_arena_str
@@ -456,10 +456,10 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link71]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::ArcUtf16Str
  [__link72]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::BoxUtf16Str
  [__link73]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::Utf16String
- [__link74]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format_utf16
+ [__link74]: strings::format_utf16!
  [__link75]: https://crates.io/crates/widestring
  [__link76]: https://docs.rs/multitude/0.1.0/multitude/?search=zerocopy::ZerocopyView
- [__link77]: https://docs.rs/zerocopy/0.8.48/zerocopy/?search=FromZeros
+ [__link77]: https://docs.rs/zerocopy/0.8.49/zerocopy/?search=FromZeros
  [__link78]: `Arena::zerocopy()`
  [__link79]: https://docs.rs/multitude/0.1.0/multitude/?search=bytemuck::BytemuckView
  [__link8]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::ArcStr
