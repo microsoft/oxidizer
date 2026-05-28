@@ -472,6 +472,27 @@ mod tests {
     }
 
     #[test]
+    fn debug_impl_renders_all_fields() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .max_capacity(100)
+            .initial_capacity(10)
+            .time_to_live(Duration::from_secs(60))
+            .time_to_idle(Duration::from_secs(30))
+            .name("my_cache")
+            .with_eviction_telemetry()
+            .on_eviction(|_| {});
+        let rendered = format!("{builder:?}");
+        assert!(rendered.contains("InMemoryCacheBuilder"));
+        assert!(rendered.contains("max_capacity: Some(100)"));
+        assert!(rendered.contains("initial_capacity: Some(10)"));
+        assert!(rendered.contains("time_to_live: Some(60s)"));
+        assert!(rendered.contains("time_to_idle: Some(30s)"));
+        assert!(rendered.contains("name: Some(\"my_cache\")"));
+        assert!(rendered.contains("eviction_telemetry: true"));
+        assert!(rendered.contains("eviction_listener: Some(\"<set>\")"));
+    }
+
+    #[test]
     fn build_max_capacity_lt_initial_capacity_returns_validation_error() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
             .max_capacity(100)

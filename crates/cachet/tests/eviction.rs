@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
-use testing_aids::LogCapture;
+use testing_aids::{LogCapture, TEST_TIMEOUT};
 use tick::Clock;
 use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
@@ -37,7 +37,7 @@ async fn memory_size_eviction_emits_telemetry() {
     // Drive enough churn to force size-based evictions. Moka's housekeeping
     // runs periodically (and as a side effect of cache operations), so we keep
     // exercising the cache while waiting for an eviction event to surface.
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + TEST_TIMEOUT;
     let mut i: i32 = 0;
     while std::time::Instant::now() < deadline {
         for _ in 0..256 {
