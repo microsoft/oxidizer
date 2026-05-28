@@ -3,233 +3,536 @@
 
 //! Cache telemetry types and recording.
 
+use std::cell::Cell;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-#[cfg(any(feature = "logs", test))]
-use thread_aware::{Arc, PerCore};
+use pin_project_lite::pin_project;
+use tracing::Span;
 
 use crate::cache::CacheName;
 use crate::telemetry::attributes;
+use crate::telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent, RequestId};
 
-/// Internal state for cache telemetry when features are enabled.
-#[cfg(any(feature = "logs", test))]
-#[derive(Clone, Debug)]
-pub(crate) struct CacheTelemetryInner {
-    pub(crate) logging_enabled: bool,
+/// Process-wide counter for generating unique request IDs.
+static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+std::thread_local! {
+    static CURRENT_REQUEST_ID: Cell<RequestId> = const { Cell::new(0) };
 }
 
-#[cfg(any(feature = "logs", test))]
-impl CacheTelemetryInner {
-    #[inline]
-    fn debug(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        if self.logging_enabled {
-            tracing::debug!(
-                cache.name = cache_name,
-                cache.event = event,
-                cache.duration_ns = duration.as_nanos()
-            );
-        }
-    }
+/// Generates a unique request ID for correlating tier events with their parent operation.
+pub(crate) fn next_request_id() -> RequestId {
+    NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+}
 
-    #[inline]
-    fn info(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        if self.logging_enabled {
-            tracing::info!(
-                cache.name = cache_name,
-                cache.event = event,
-                cache.duration_ns = duration.as_nanos()
-            );
-        }
-    }
-
-    #[inline]
-    fn error(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
-        if self.logging_enabled {
-            tracing::error!(
-                cache.name = cache_name,
-                cache.event = event,
-                cache.duration_ns = duration.as_nanos()
-            );
-        }
+pin_project! {
+    /// A future wrapper that restores the request ID into the thread-local
+    /// on every poll. This ensures the correct request ID is available
+    /// even if the task migrates to a different thread between polls.
+    ///
+    /// Same pattern as `tracing::Instrument` which re-enters the span per poll.
+    pub(crate) struct WithRequestId<F> {
+        #[pin]
+        inner: F,
+        request_id: RequestId,
     }
 }
 
-/// Internal state for cache telemetry when no features are enabled (no-op).
-#[cfg(not(any(feature = "logs", test)))]
-#[derive(Clone, Debug, Default)]
-pub(crate) struct CacheTelemetryInner;
+impl<F: Future> Future for WithRequestId<F> {
+    type Output = F::Output;
 
-#[cfg(not(any(feature = "logs", test)))]
-#[expect(clippy::unused_self, reason = "Methods must match the logs-enabled impl signature")]
-impl CacheTelemetryInner {
-    #[inline]
-    fn debug(&self, _: CacheName, _: &'static str, _: Duration) {}
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        CURRENT_REQUEST_ID.with(|cell| cell.set(*this.request_id));
+        this.inner.poll(cx)
+    }
+}
 
-    #[inline]
-    fn info(&self, _: CacheName, _: &'static str, _: Duration) {}
+/// Extension trait for wrapping a future with a request ID.
+pub(crate) trait WithRequestIdExt: Sized {
+    /// Wraps this future so that `request_id` is set in the thread-local
+    /// on every poll, surviving task migration across threads.
+    fn with_request_id(self, request_id: RequestId) -> WithRequestId<Self>;
+}
 
-    #[inline]
-    fn error(&self, _: CacheName, _: &'static str, _: Duration) {}
+impl<F: Future> WithRequestIdExt for F {
+    fn with_request_id(self, request_id: RequestId) -> WithRequestId<Self> {
+        WithRequestId { inner: self, request_id }
+    }
+}
+
+/// Converts a `Duration` to nanoseconds as `u64`, saturating at `u64::MAX`.
+/// A `u64` of nanoseconds covers ~584 years — overflow is not a practical concern.
+fn saturating_nanos(duration: Duration) -> u64 {
+    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
 /// Cache telemetry provider.
 ///
 /// This type is created internally by the cache builder and handles
-/// recording cache operations as structured tracing events.
-#[derive(Clone, Debug)]
+/// creating cache operation spans and recording structured tracing events.
+#[derive(Clone, Default)]
 pub struct CacheTelemetry {
     #[cfg(any(feature = "logs", test))]
-    pub(crate) inner: Arc<CacheTelemetryInner, PerCore>,
-    #[cfg(not(any(feature = "logs", test)))]
-    pub(crate) inner: CacheTelemetryInner,
+    logging_enabled: bool,
+    handler: Option<Arc<dyn CacheEventHandler>>,
+}
+
+impl std::fmt::Debug for CacheTelemetry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CacheTelemetry")
+            .field("logging_enabled", &{
+                #[cfg(any(feature = "logs", test))]
+                {
+                    self.logging_enabled
+                }
+                #[cfg(not(any(feature = "logs", test)))]
+                {
+                    false
+                }
+            })
+            .field("has_handler", &self.handler.is_some())
+            .finish()
+    }
 }
 
 impl CacheTelemetry {
     /// Creates a new `CacheTelemetry` with logging disabled.
     #[must_use]
     pub(crate) fn new() -> Self {
-        #[cfg(any(feature = "logs", test))]
-        {
-            Self {
-                inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled: false }),
-            }
-        }
-        #[cfg(not(any(feature = "logs", test)))]
-        {
-            Self {
-                inner: CacheTelemetryInner,
-            }
+        Self {
+            #[cfg(any(feature = "logs", test))]
+            logging_enabled: false,
+            handler: None,
         }
     }
 
-    /// Creates a new `CacheTelemetry` with logging enabled.
-    #[cfg(any(feature = "logs", test))]
+    #[must_use]
+    pub(crate) fn with_handler(mut self, handler: Arc<dyn CacheEventHandler>) -> Self {
+        self.handler = Some(handler);
+        self
+    }
+
+    pub(crate) fn current_request_id() -> RequestId {
+        CURRENT_REQUEST_ID.with(Cell::get)
+    }
+
+    fn emit_tier_event(&self, request_id: RequestId, tier_name: CacheName, outcome: &'static str, duration: Duration, fallback: bool) {
+        if let Some(handler) = &self.handler {
+            handler.on_tier_event(&CacheTierEvent {
+                request_id,
+                tier_name,
+                outcome,
+                duration,
+                fallback,
+            });
+        }
+    }
+
+    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    fn record_debug_with_duration(&self, event: &'static str, duration: Duration) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            let duration_ns = saturating_nanos(duration);
+            span.record(attributes::FIELD_EVENT, event);
+            span.record(attributes::FIELD_DURATION_NS, duration_ns);
+            tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
+        }
+    }
+
+    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    fn record_info_with_duration(&self, event: &'static str, duration: Duration) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            let duration_ns = saturating_nanos(duration);
+            span.record(attributes::FIELD_EVENT, event);
+            span.record(attributes::FIELD_DURATION_NS, duration_ns);
+            tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
+        }
+    }
+
+    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    fn record_error_with_duration(&self, event: &'static str, duration: Duration) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            let duration_ns = saturating_nanos(duration);
+            span.record(attributes::FIELD_EVENT, event);
+            span.record(attributes::FIELD_DURATION_NS, duration_ns);
+            tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
+        }
+    }
+
+    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    fn record_info_event(&self, event: &'static str) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            span.record(attributes::FIELD_EVENT, event);
+            tracing::info!(cache.event = event);
+        }
+    }
+
+    pub(crate) fn record_hit(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_debug_with_duration(attributes::EVENT_HIT, duration);
+        self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_HIT, duration, fallback);
+    }
+
+    pub(crate) fn record_miss(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_debug_with_duration(attributes::EVENT_MISS, duration);
+        self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_MISS, duration, fallback);
+    }
+
+    pub(crate) fn record_expired(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_info_with_duration(attributes::EVENT_EXPIRED, duration);
+        self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_EXPIRED, duration, fallback);
+    }
+
+    pub(crate) fn record_get_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_error_with_duration(attributes::EVENT_GET_ERROR, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_GET_ERROR,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_inserted(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_info_with_duration(attributes::EVENT_INSERTED, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INSERTED,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_insert_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_error_with_duration(attributes::EVENT_INSERT_ERROR, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INSERT_ERROR,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_invalidated(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_info_with_duration(attributes::EVENT_INVALIDATED, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INVALIDATED,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_invalidate_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_error_with_duration(attributes::EVENT_INVALIDATE_ERROR, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INVALIDATE_ERROR,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_cleared(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_debug_with_duration(attributes::EVENT_CLEARED, duration);
+        self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_CLEARED, duration, fallback);
+    }
+
+    pub(crate) fn record_clear_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
+        self.record_error_with_duration(attributes::EVENT_CLEAR_ERROR, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_CLEAR_ERROR,
+            duration,
+            fallback,
+        );
+    }
+
+    pub(crate) fn record_refresh_hit(&self, duration: Duration) {
+        self.record_debug_with_duration(attributes::EVENT_REFRESH_HIT, duration);
+    }
+
+    pub(crate) fn record_refresh_miss(&self, duration: Duration) {
+        self.record_info_with_duration(attributes::EVENT_REFRESH_MISS, duration);
+    }
+
+    pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
+        self.record_info_event(attributes::EVENT_INSERT_REJECTED);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            tier_name,
+            attributes::EVENT_INSERT_REJECTED,
+            Duration::ZERO,
+            fallback,
+        );
+    }
+
+    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    pub(crate) fn record_fallback(&self) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            span.record(attributes::FIELD_FALLBACK, true);
+        }
+    }
+
+    pub(crate) fn complete_operation(
+        &self,
+        request_id: RequestId,
+        cache_name: CacheName,
+        operation: &'static str,
+        duration: Duration,
+        coalesced: bool,
+    ) {
+        let span = Span::current();
+        if !span.is_disabled() {
+            span.record(attributes::FIELD_DURATION_NS, saturating_nanos(duration));
+            if coalesced {
+                span.record(attributes::FIELD_COALESCED, true);
+            }
+        }
+
+        if let Some(handler) = &self.handler {
+            handler.on_operation_complete(&CacheOperationEvent {
+                request_id,
+                cache_name,
+                operation,
+                duration,
+                coalesced,
+            });
+        }
+    }
+}
+
+#[cfg(any(feature = "logs", test))]
+impl CacheTelemetry {
     #[must_use]
     pub(crate) fn with_logging() -> Self {
-        Self {
-            inner: Arc::from_unaware(CacheTelemetryInner { logging_enabled: true }),
+        Self::new().enable_logging()
+    }
+
+    #[must_use]
+    pub(crate) fn enable_logging(mut self) -> Self {
+        self.logging_enabled = true;
+        self
+    }
+
+    pub(crate) fn get_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.get",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty,
+                cache.coalesced = tracing::field::Empty,
+                cache.fallback = tracing::field::Empty
+            )
+        } else {
+            Span::none()
         }
     }
 
-    // -- Get --
-
-    /// Records a cache hit (key found and not expired).
-    #[inline]
-    pub(crate) fn cache_hit(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.debug(cache_name, attributes::EVENT_HIT, duration);
+    pub(crate) fn insert_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.insert",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    /// Records a cache miss (key not found).
-    #[inline]
-    pub(crate) fn cache_miss(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.debug(cache_name, attributes::EVENT_MISS, duration);
+    pub(crate) fn invalidate_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.invalidate",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    /// Records a cache entry that was found but expired.
-    #[inline]
-    pub(crate) fn cache_expired(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_EXPIRED, duration);
+    pub(crate) fn clear_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.clear",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    /// Records an error during a get operation.
-    #[inline]
-    pub(crate) fn get_error(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.error(cache_name, attributes::EVENT_GET_ERROR, duration);
+    pub(crate) fn get_or_insert_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.get_or_insert",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty,
+                cache.coalesced = tracing::field::Empty,
+                cache.fallback = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    /// Records a fallback tier lookup.
-    #[inline]
-    pub(crate) fn cache_fallback(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_FALLBACK, duration);
+    pub(crate) fn try_get_or_insert_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.try_get_or_insert",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty,
+                cache.coalesced = tracing::field::Empty,
+                cache.fallback = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    // -- Refresh --
-
-    /// Records a successful background refresh from fallback.
-    #[inline]
-    pub(crate) fn refresh_hit(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.debug(cache_name, attributes::EVENT_REFRESH_HIT, duration);
+    pub(crate) fn optionally_get_or_insert_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.optionally_get_or_insert",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty,
+                cache.coalesced = tracing::field::Empty,
+                cache.fallback = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
     }
 
-    /// Records a background refresh miss (fallback had no data or returned error).
-    #[inline]
-    pub(crate) fn refresh_miss(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_REFRESH_MISS, duration);
+    pub(crate) fn tier_span(&self, name: CacheName) -> Span {
+        if self.logging_enabled {
+            tracing::span!(
+                tracing::Level::DEBUG,
+                "cache.tier",
+                cache.name = name,
+                cache.event = tracing::field::Empty,
+                cache.duration_ns = tracing::field::Empty
+            )
+        } else {
+            Span::none()
+        }
+    }
+}
+
+#[cfg(not(any(feature = "logs", test)))]
+#[expect(clippy::unused_self, reason = "Span factories are no-ops when logs are disabled")]
+impl CacheTelemetry {
+    pub(crate) fn get_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    // -- Insert --
-
-    /// Records a successful cache insert.
-    #[inline]
-    pub(crate) fn cache_inserted(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_INSERTED, duration);
+    pub(crate) fn insert_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    /// Records a cache insert that was rejected by the insert policy.
-    #[inline]
-    pub(crate) fn insert_rejected(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_INSERT_REJECTED, duration);
+    pub(crate) fn invalidate_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    /// Records an error during an insert operation.
-    #[inline]
-    pub(crate) fn insert_error(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.error(cache_name, attributes::EVENT_INSERT_ERROR, duration);
+    pub(crate) fn clear_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    // -- Invalidate --
-
-    /// Records a successful cache invalidation.
-    #[inline]
-    pub(crate) fn cache_invalidated(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.info(cache_name, attributes::EVENT_INVALIDATED, duration);
+    pub(crate) fn get_or_insert_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    /// Records an error during an invalidate operation.
-    #[inline]
-    pub(crate) fn invalidate_error(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.error(cache_name, attributes::EVENT_INVALIDATE_ERROR, duration);
+    pub(crate) fn try_get_or_insert_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    // -- Clear --
-
-    /// Records a successful cache clear.
-    #[inline]
-    pub(crate) fn cache_cleared(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.debug(cache_name, attributes::EVENT_CLEARED, duration);
+    pub(crate) fn optionally_get_or_insert_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 
-    /// Records an error during a clear operation.
-    #[inline]
-    pub(crate) fn clear_error(&self, cache_name: CacheName, duration: Duration) {
-        self.inner.error(cache_name, attributes::EVENT_CLEAR_ERROR, duration);
+    pub(crate) fn tier_span(&self, _: CacheName) -> Span {
+        Span::none()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use testing_aids::LogCapture;
+    use tracing::Instrument;
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
+
+    fn subscriber(capture: &LogCapture) -> impl tracing::Subscriber {
+        tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(capture.clone())
+                .with_ansi(false)
+                .with_span_events(FmtSpan::CLOSE),
+        )
+    }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn logs_emit_contains_all_fields_and_values() {
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let telemetry = CacheTelemetry::with_logging();
-        telemetry.invalidate_error("my_test_cache", Duration::from_nanos(12345));
 
-        // Verify field names match public constants
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async {
+                telemetry.record_hit("my_test_cache", Duration::from_nanos(12345), false);
+                telemetry.complete_operation(request_id, "my_test_cache", "cache.get", Duration::from_nanos(12345), true);
+                telemetry.record_fallback();
+            }
+            .with_request_id(request_id)
+            .instrument(telemetry.get_span("my_test_cache")),
+        );
+
         capture.assert_contains(attributes::FIELD_NAME);
         capture.assert_contains(attributes::FIELD_EVENT);
         capture.assert_contains(attributes::FIELD_DURATION_NS);
-
-        // Verify values
+        capture.assert_contains(attributes::FIELD_COALESCED);
+        capture.assert_contains(attributes::FIELD_FALLBACK);
         capture.assert_contains("my_test_cache");
-        capture.assert_contains(attributes::EVENT_INVALIDATE_ERROR);
+        capture.assert_contains(attributes::EVENT_HIT);
         capture.assert_contains("12345");
+        capture.assert_contains("true");
     }
 
     #[cfg_attr(miri, ignore)]
@@ -237,22 +540,34 @@ mod tests {
     fn logs_emit_at_correct_severity_levels() {
         let telemetry = CacheTelemetry::with_logging();
 
-        // Error level
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-        telemetry.get_error("cache", Duration::ZERO);
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async { telemetry.record_get_error("cache", Duration::ZERO, false) }
+                .with_request_id(request_id)
+                .instrument(telemetry.tier_span("cache")),
+        );
         capture.assert_contains("ERROR");
 
-        // Info level
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-        telemetry.cache_expired("cache", Duration::ZERO);
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async { telemetry.record_expired("cache", Duration::ZERO, false) }
+                .with_request_id(request_id)
+                .instrument(telemetry.tier_span("cache")),
+        );
         capture.assert_contains("INFO");
 
-        // Debug level
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
-        telemetry.cache_hit("cache", Duration::ZERO);
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async { telemetry.record_hit("cache", Duration::ZERO, false) }
+                .with_request_id(request_id)
+                .instrument(telemetry.tier_span("cache")),
+        );
         capture.assert_contains("DEBUG");
     }
 
@@ -260,41 +575,183 @@ mod tests {
     #[test]
     fn telemetry_disabled_emits_nothing() {
         let telemetry = CacheTelemetry::new();
-
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
 
-        telemetry.cache_hit("cache", Duration::from_secs(1));
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async { telemetry.record_hit("cache", Duration::from_secs(1), false) }
+                .with_request_id(request_id)
+                .instrument(telemetry.get_span("cache")),
+        );
 
         assert!(capture.output().is_empty());
     }
 
-    /// Asserts that a telemetry helper emits the expected event string.
     #[cfg_attr(miri, ignore)]
-    fn assert_emits(f: impl FnOnce(&CacheTelemetry), expected: &str) {
+    fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
         let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(capture.subscriber());
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let telemetry = CacheTelemetry::with_logging();
-        f(&telemetry);
+        let request_id = next_request_id();
+        f(&telemetry, request_id);
         capture.assert_contains(expected);
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn every_helper_emits_its_event() {
-        assert_emits(|t| t.cache_hit("c", Duration::ZERO), attributes::EVENT_HIT);
-        assert_emits(|t| t.cache_miss("c", Duration::ZERO), attributes::EVENT_MISS);
-        assert_emits(|t| t.cache_expired("c", Duration::ZERO), attributes::EVENT_EXPIRED);
-        assert_emits(|t| t.get_error("c", Duration::ZERO), attributes::EVENT_GET_ERROR);
-        assert_emits(|t| t.cache_fallback("c", Duration::ZERO), attributes::EVENT_FALLBACK);
-        assert_emits(|t| t.refresh_hit("c", Duration::ZERO), attributes::EVENT_REFRESH_HIT);
-        assert_emits(|t| t.refresh_miss("c", Duration::ZERO), attributes::EVENT_REFRESH_MISS);
-        assert_emits(|t| t.cache_inserted("c", Duration::ZERO), attributes::EVENT_INSERTED);
-        assert_emits(|t| t.insert_rejected("c", Duration::ZERO), attributes::EVENT_INSERT_REJECTED);
-        assert_emits(|t| t.insert_error("c", Duration::ZERO), attributes::EVENT_INSERT_ERROR);
-        assert_emits(|t| t.cache_invalidated("c", Duration::ZERO), attributes::EVENT_INVALIDATED);
-        assert_emits(|t| t.invalidate_error("c", Duration::ZERO), attributes::EVENT_INVALIDATE_ERROR);
-        assert_emits(|t| t.cache_cleared("c", Duration::ZERO), attributes::EVENT_CLEARED);
-        assert_emits(|t| t.clear_error("c", Duration::ZERO), attributes::EVENT_CLEAR_ERROR);
+        assert_emits(attributes::EVENT_HIT, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_hit("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.tier_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_MISS, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_miss("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.tier_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_EXPIRED, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_expired("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.tier_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_GET_ERROR, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_get_error("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.tier_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_REFRESH_HIT, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_refresh_hit(Duration::ZERO) }
+                    .with_request_id(request_id)
+                    .instrument(t.get_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_REFRESH_MISS, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_refresh_miss(Duration::ZERO) }
+                    .with_request_id(request_id)
+                    .instrument(t.get_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_INSERTED, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_inserted("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.insert_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_insert_rejected("c", false) }
+                    .with_request_id(request_id)
+                    .instrument(t.insert_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_INSERT_ERROR, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_insert_error("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.insert_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_INVALIDATED, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_invalidated("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.invalidate_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_INVALIDATE_ERROR, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_invalidate_error("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.invalidate_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_CLEARED, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_cleared("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.clear_span("c")),
+            );
+        });
+        assert_emits(attributes::EVENT_CLEAR_ERROR, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_clear_error("c", Duration::ZERO, false) }
+                    .with_request_id(request_id)
+                    .instrument(t.clear_span("c")),
+            );
+        });
+    }
+
+    #[test]
+    fn handler_receives_tier_and_operation_events_without_logging() {
+        type EventRecord = Vec<(RequestId, String, String, u128, bool)>;
+
+        #[derive(Clone)]
+        struct RecordingHandler {
+            tier_events: Arc<Mutex<EventRecord>>,
+            operation_events: Arc<Mutex<EventRecord>>,
+        }
+
+        impl CacheEventHandler for RecordingHandler {
+            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+                self.tier_events.lock().expect("test handler mutex should not be poisoned").push((
+                    event.request_id,
+                    event.tier_name.to_string(),
+                    event.outcome.to_string(),
+                    event.duration.as_nanos(),
+                    event.fallback,
+                ));
+            }
+
+            fn on_operation_complete(&self, event: &CacheOperationEvent<'_>) {
+                self.operation_events
+                    .lock()
+                    .expect("test handler mutex should not be poisoned")
+                    .push((
+                        event.request_id,
+                        event.cache_name.to_string(),
+                        event.operation.to_string(),
+                        event.duration.as_nanos(),
+                        event.coalesced,
+                    ));
+            }
+        }
+
+        let tier_events = Arc::new(Mutex::new(Vec::new()));
+        let operation_events = Arc::new(Mutex::new(Vec::new()));
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(RecordingHandler {
+            tier_events: Arc::clone(&tier_events),
+            operation_events: Arc::clone(&operation_events),
+        }));
+
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async {
+                telemetry.record_hit("l2", Duration::from_nanos(7), true);
+                telemetry.complete_operation(request_id, "cache", "cache.get", Duration::from_nanos(11), true);
+            }
+            .with_request_id(request_id),
+        );
+
+        assert_eq!(
+            *tier_events.lock().expect("test handler mutex should not be poisoned"),
+            vec![(request_id, "l2".to_string(), attributes::EVENT_HIT.to_string(), 7, true)]
+        );
+        assert_eq!(
+            *operation_events.lock().expect("test handler mutex should not be poisoned"),
+            vec![(request_id, "cache".to_string(), "cache.get".to_string(), 11, true)]
+        );
     }
 }

@@ -230,8 +230,9 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 
-Each cache operation emits a structured [`tracing`][__link20] event with fields
-`cache.name`, `cache.event`, and `cache.duration_ns`.
+Each cache operation creates a structured [`tracing`][__link20] span and emits events inside
+that span. Span fields include `cache.name`, `cache.event`, and `cache.duration_ns`,
+with `cache.coalesced` and `cache.fallback` recorded when applicable.
 
 ### Subscribing to events
 
@@ -256,7 +257,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 |Level|Events|
 |-----|------|
 |ERROR|`cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error`|
-|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`|
 |DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared`|
 
 
@@ -265,7 +266,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-n6c1asXb8uG6CeIkUqNVu-GxjETKbvQrZwG4I5xAXRHmeEYWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4wgm1jYWNoZXRfbWVtb3J5ZTAuMi4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-oOSdNzEYacG_QJDULSptgGG0JW5KX3QM-kG0OU4DwdpoIBYWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4wgm1jYWNoZXRfbWVtb3J5ZTAuMi4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
  [__link0]: https://docs.rs/cachet/0.5.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

@@ -3,9 +3,9 @@
 
 //! Public constants for cachet telemetry field names and event values.
 //!
-//! Use these constants to filter or match cachet events in a custom
-//! `tracing_subscriber::Layer`. All cachet events are emitted with
-//! `FIELD_NAME`, `FIELD_EVENT`, and `FIELD_DURATION_NS` fields.
+//! Use these constants to filter or match cachet spans and events in a custom
+//! `tracing_subscriber::Layer`. Cache operation spans record `FIELD_NAME`,
+//! `FIELD_EVENT`, and `FIELD_DURATION_NS`, with additional flag fields when applicable.
 //!
 //! # Example
 //!
@@ -41,6 +41,12 @@ pub const FIELD_EVENT: &str = "cache.event";
 /// Field name for the operation duration in nanoseconds.
 pub const FIELD_DURATION_NS: &str = "cache.duration_ns";
 
+/// Field name recording whether request coalescing was used.
+pub const FIELD_COALESCED: &str = "cache.coalesced";
+
+/// Field name recording whether a fallback tier was consulted.
+pub const FIELD_FALLBACK: &str = "cache.fallback";
+
 // -- Event values (emitted in the `cache.event` field) --
 
 /// Cache entry was found and valid.
@@ -54,9 +60,6 @@ pub const EVENT_EXPIRED: &str = "cache.expired";
 
 /// An error occurred during a get operation.
 pub const EVENT_GET_ERROR: &str = "cache.get_error";
-
-/// A fallback tier was consulted.
-pub const EVENT_FALLBACK: &str = "cache.fallback";
 
 /// An entry was successfully inserted.
 pub const EVENT_INSERTED: &str = "cache.inserted";
@@ -95,6 +98,8 @@ mod tests {
         assert_eq!(FIELD_NAME, "cache.name");
         assert_eq!(FIELD_EVENT, "cache.event");
         assert_eq!(FIELD_DURATION_NS, "cache.duration_ns");
+        assert_eq!(FIELD_COALESCED, "cache.coalesced");
+        assert_eq!(FIELD_FALLBACK, "cache.fallback");
     }
 
     #[test]
@@ -104,7 +109,6 @@ mod tests {
             EVENT_MISS,
             EVENT_EXPIRED,
             EVENT_GET_ERROR,
-            EVENT_FALLBACK,
             EVENT_INSERTED,
             EVENT_INSERT_REJECTED,
             EVENT_INSERT_ERROR,

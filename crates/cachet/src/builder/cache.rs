@@ -3,6 +3,7 @@
 
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "memory")]
@@ -14,6 +15,7 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use crate::policy::InsertPolicy;
 use crate::telemetry::CacheTelemetry;
+use crate::telemetry::handler::CacheEventHandler;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -168,7 +170,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[cfg(any(feature = "logs", test))]
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
-        self.telemetry = CacheTelemetry::with_logging();
+        self.telemetry = self.telemetry.enable_logging();
         self
     }
 
@@ -195,6 +197,13 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[must_use]
     pub fn stampede_protection(mut self) -> Self {
         self.stampede_protection = true;
+        self
+    }
+
+    /// Registers a callback for structured cache events.
+    #[must_use]
+    pub fn event_handler(mut self, handler: impl CacheEventHandler + 'static) -> Self {
+        self.telemetry = self.telemetry.with_handler(Arc::new(handler));
         self
     }
 

@@ -228,8 +228,9 @@
 //!
 //! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 //!
-//! Each cache operation emits a structured [`tracing`] event with fields
-//! `cache.name`, `cache.event`, and `cache.duration_ns`.
+//! Each cache operation creates a structured [`tracing`] span and emits events inside
+//! that span. Span fields include `cache.name`, `cache.event`, and `cache.duration_ns`,
+//! with `cache.coalesced` and `cache.fallback` recorded when applicable.
 //!
 //! ## Subscribing to events
 //!
@@ -254,7 +255,7 @@
 //! | Level | Events |
 //! |-------|--------|
 //! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
@@ -289,5 +290,7 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[doc(inline)]
+pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

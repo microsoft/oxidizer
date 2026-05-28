@@ -15,6 +15,7 @@ use cachet_tier::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
 use tick::Clock;
 use tokio::runtime::Runtime;
+use tracing_subscriber::layer::SubscriberExt;
 
 fn rt() -> Runtime {
     Runtime::new().expect("failed to create runtime")
@@ -128,6 +129,31 @@ fn bench_wrapper_overhead(c: &mut Criterion) {
 
     // With telemetry
     group.bench_function("with_telemetry", |b| {
+        let cache = rt.block_on(async {
+            let clock = Clock::new_tokio();
+            Cache::builder(clock)
+                .storage(MockCache::<String, String>::new())
+                .enable_logs()
+                .build()
+        });
+        let key = "key".to_string();
+
+        b.iter_custom(|iters| {
+            rt.block_on(async {
+                let start = Instant::now();
+                for _ in 0..iters {
+                    let _ = black_box(cache.get(black_box(&key)).await);
+                }
+                start.elapsed()
+            })
+        });
+    });
+
+    // With telemetry + active subscriber (measures span processing overhead)
+    group.bench_function("with_telemetry_subscriber", |b| {
+        let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_ansi(false));
+        let _guard = tracing::subscriber::set_default(subscriber);
+
         let cache = rt.block_on(async {
             let clock = Clock::new_tokio();
             Cache::builder(clock)

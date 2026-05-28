@@ -13,12 +13,12 @@ use std::sync::Arc;
 use cachet_tier::{CacheEntry, CacheTier, SizeError};
 use futures::join;
 use tick::Clock;
+use tracing::Instrument;
 
 use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::CacheTelemetry;
-use crate::telemetry::ext::ClockExt;
 
 pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
@@ -102,20 +102,21 @@ where
     ///
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
-        self.inner.telemetry.cache_fallback(self.inner.name, timed.duration);
+        async {
+            self.inner.telemetry.record_fallback();
+            let fallback_value = self.inner.fallback.get(key).await?;
 
-        // Propagate any error from fallback
-        let fallback_value = timed.result?;
+            if let Some(ref v) = fallback_value {
+                // Insert errors are intentionally swallowed - a failed promotion should not
+                // fail the overall get. The CacheWrapper around the primary tier already
+                // records telemetry for the insert (Inserted, Rejected, or Error).
+                let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
+            }
 
-        if let Some(ref v) = fallback_value {
-            // Insert errors are intentionally swallowed - a failed promotion should not
-            // fail the overall get. The CacheWrapper around the primary tier already
-            // records telemetry for the insert (Inserted, Rejected, or Error).
-            let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
+            Ok(fallback_value)
         }
-
-        Ok(fallback_value)
+        .instrument(tracing::Span::current())
+        .await
     }
 }
 
@@ -193,7 +194,7 @@ mod tests {
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
+        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default(), false)
     }
 
     fn make_fallback_cache() -> TestFallbackCache {
@@ -446,6 +447,7 @@ mod tests {
             None,
             telemetry.clone(),
             InsertPolicy::default(),
+            false,
         );
         let fc = FallbackCache::new("test", primary, fallback_mock, clock, Some(refresh), telemetry);
 
