@@ -97,7 +97,7 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 720
+    timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
     steps:
       # prep
       - name: Checkout
@@ -114,6 +114,7 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-many-seeds=0..32
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
 
   report-failure:
     needs:
