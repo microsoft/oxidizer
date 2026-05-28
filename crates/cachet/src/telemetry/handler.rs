@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 use std::time::Duration;
 
 /// Unique identifier for a cache operation, used to correlate tier events

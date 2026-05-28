@@ -66,7 +66,7 @@ impl<F: Future> WithRequestIdExt for F {
 }
 
 /// Converts a `Duration` to nanoseconds as `u64`, saturating at `u64::MAX`.
-/// A `u64` of nanoseconds covers ~584 years — overflow is not a practical concern.
+/// A `u64` of nanoseconds covers around 584 years - overflow is not a practical concern.
 fn saturating_nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
@@ -318,6 +318,7 @@ impl CacheTelemetry {
 
 #[cfg(any(feature = "logs", test))]
 impl CacheTelemetry {
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_logging() -> Self {
         Self::new().enable_logging()
