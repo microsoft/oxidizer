@@ -384,6 +384,42 @@ async fn get_or_insert_with_preserves_per_entry_ttl() {
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
+async fn or_insert_family_populates_cached_at_on_miss() {
+    let clock = Clock::new_frozen();
+    let now = clock.system_time();
+    let cache = Cache::builder::<String, i32>(clock).memory().build();
+
+    let entry = cache.get_or_insert(&"a".to_string(), || async { 1 }).await.unwrap();
+    assert_eq!(entry.cached_at(), Some(now));
+
+    let entry = cache
+        .get_or_insert_with(&"b".to_string(), || async { CacheEntry::new(2) })
+        .await
+        .unwrap();
+    assert_eq!(entry.cached_at(), Some(now));
+
+    let entry = cache
+        .try_get_or_insert(&"c".to_string(), || async { Ok::<_, Error>(3) })
+        .await
+        .unwrap();
+    assert_eq!(entry.cached_at(), Some(now));
+
+    let entry = cache
+        .try_get_or_insert_with(&"d".to_string(), || async { Ok::<_, Error>(CacheEntry::new(4)) })
+        .await
+        .unwrap();
+    assert_eq!(entry.cached_at(), Some(now));
+
+    let entry = cache
+        .optionally_get_or_insert(&"e".to_string(), || async { Some(5) })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.cached_at(), Some(now));
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
 async fn stampede_protection_get_or_insert_with() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().stampede_protection().build();
