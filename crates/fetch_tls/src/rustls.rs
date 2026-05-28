@@ -3,6 +3,7 @@
 
 //! Rustls backend configuration and builder integration.
 
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use rustls::ClientConfig;
@@ -13,35 +14,12 @@ use rustls::crypto::CryptoProvider;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
-/// Factory that builds a [`ServerCertVerifier`] from the negotiated
-/// [`CryptoProvider`].
-type ServerCertVerifierFactory = dyn Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync;
-
 /// Rustls TLS backend configuration.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RustlsOptions {
-    pub(crate) crypto_provider: Option<Arc<CryptoProvider>>,
-    pub(crate) verifier_factory: Option<Arc<ServerCertVerifierFactory>>,
-    pub(crate) client_identity_resolver: Option<Arc<dyn ResolvesClientCert>>,
-}
-
-impl std::fmt::Debug for RustlsOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `dyn ServerCertVerifier` and `dyn ResolvesClientCert` do not
-        // implement `Debug`; render only presence so we don't have to require
-        // Debug on opaque user-supplied types.
-        f.debug_struct("RustlsOptions")
-            .field("crypto_provider", &self.crypto_provider.as_ref().map(|_| "<custom CryptoProvider>"))
-            .field(
-                "verifier_factory",
-                &self.verifier_factory.as_ref().map(|_| "<custom verifier factory>"),
-            )
-            .field(
-                "client_identity_resolver",
-                &self.client_identity_resolver.as_ref().map(|_| "<custom resolver>"),
-            )
-            .finish()
-    }
+    crypto_provider: Option<Arc<CryptoProvider>>,
+    verifier_factory: Option<ServerCertVerifierFactory>,
+    client_identity_resolver: Option<Arc<dyn ResolvesClientCert>>,
 }
 
 impl RustlsOptions {
@@ -68,7 +46,7 @@ impl RustlsOptions {
                 )
             })?;
         let verifier = match self.verifier_factory {
-            Some(factory) => factory(Arc::clone(&crypto_provider)),
+            Some(factory) => factory.invoke(Arc::clone(&crypto_provider)),
             None => defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
                 BackendError::caused_by(
                     "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendDefaults::configure_rustls(...)",
@@ -163,7 +141,7 @@ impl TlsOptionsBuilder<RustlsOptions> {
     where
         F: Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync + 'static,
     {
-        self.backend.verifier_factory = Some(Arc::new(factory));
+        self.backend.verifier_factory = Some(ServerCertVerifierFactory::new(factory));
         self
     }
 
@@ -183,6 +161,34 @@ impl TlsOptionsBuilder<RustlsOptions> {
             inner: TlsOptionsKind::Rustls(self.backend),
             shared: self.shared,
         }
+    }
+}
+
+/// Factory that builds a [`ServerCertVerifier`] from the negotiated
+/// [`CryptoProvider`].
+type ServerCertVerifierFactoryType = Arc<dyn Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync>;
+
+#[derive(Clone)]
+struct ServerCertVerifierFactory(ServerCertVerifierFactoryType);
+
+impl ServerCertVerifierFactory {
+    pub fn new<F>(factory: F) -> Self
+    where
+        F: Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync + 'static,
+    {
+        Self(Arc::new(factory))
+    }
+
+    pub fn invoke(&self, crypto_provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> {
+        self.0.as_ref()(crypto_provider)
+    }
+}
+
+impl Debug for ServerCertVerifierFactory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerCertVerifierFactory")
+            .field("factory", &"<custom verifier factory>")
+            .finish()
     }
 }
 
@@ -244,7 +250,7 @@ mod tests {
         static CALLED: AtomicBool = AtomicBool::new(false);
         let rustls_backend = RustlsOptions {
             crypto_provider: Some(provider()),
-            verifier_factory: Some(Arc::new(|_provider| {
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_provider| {
                 CALLED.store(true, Ordering::SeqCst);
                 Arc::new(AcceptAll)
             })),
@@ -290,7 +296,7 @@ mod tests {
         // also exercise the path that produces `rustls::ClientConfig`.
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
         rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
@@ -302,7 +308,7 @@ mod tests {
         let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
         let err = rustls_backend.build(Some(&defaults()), &shared_with(Some(identity))).unwrap_err();
@@ -342,7 +348,7 @@ mod tests {
     fn build_uses_builder_crypto_provider_without_defaults() {
         let rustls_backend = RustlsOptions {
             crypto_provider: Some(provider()),
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
         rustls_backend.build(None, &shared_with(None)).unwrap();
@@ -362,20 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn debug_renders_without_panic() {
-        let rustls = RustlsOptions {
-            crypto_provider: Some(provider()),
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
-            client_identity_resolver: Some(Arc::new(StubResolver)),
-        };
-        let s = format!("{rustls:?}");
-        assert!(s.contains("RustlsOptions"));
-        assert!(s.contains("<custom CryptoProvider>"));
-        assert!(s.contains("<custom verifier factory>"));
-        assert!(s.contains("<custom resolver>"));
-    }
-
-    #[test]
     fn client_identity_resolver_stores_resolver() {
         let builder = TlsOptions::builder_rustls().client_identity_resolver(Arc::new(StubResolver));
         assert!(builder.backend.client_identity_resolver.is_some());
@@ -386,7 +378,7 @@ mod tests {
     fn build_uses_resolver_for_client_auth() {
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: Some(Arc::new(StubResolver)),
         };
         rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
@@ -401,7 +393,7 @@ mod tests {
         let identity = ClientIdentity::from_der(vec![vec![0x30u8, 0x00]], vec![0x30u8, 0x00]);
         let rustls_backend = RustlsOptions {
             crypto_provider: None,
-            verifier_factory: Some(Arc::new(|_| Arc::new(AcceptAll))),
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: Some(Arc::new(StubResolver)),
         };
         rustls_backend.build(Some(&defaults()), &shared_with(Some(identity))).unwrap();

@@ -54,7 +54,7 @@ pub enum TlsBackend {
 /// Use [`TlsBackendDefaults::new`] when no backend-specific state is
 /// required. Building a rustls backend without
 /// [`TlsBackendDefaults::configure_rustls`] returns a [`BackendError`].
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct TlsBackendDefaults {
     #[cfg(any(feature = "rustls", test))]
     pub(crate) rustls: Option<RustlsDefaults>,
@@ -64,7 +64,7 @@ pub struct TlsBackendDefaults {
 
 /// Environment-supplied defaults specific to the rustls backend.
 #[cfg(any(feature = "rustls", test))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct RustlsDefaults {
     pub(crate) crypto_provider: std::sync::Arc<::rustls::crypto::CryptoProvider>,
     pub(crate) verifier: std::sync::Arc<dyn ::rustls::client::danger::ServerCertVerifier>,
@@ -128,21 +128,6 @@ impl TlsBackendDefaults {
     pub fn defaults_to_rustls(mut self) -> Self {
         self.default = DefaultBackend::Rustls;
         self
-    }
-}
-
-impl std::fmt::Debug for TlsBackendDefaults {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = f.debug_struct("TlsBackendDefaults");
-        #[cfg(any(feature = "rustls", test))]
-        {
-            s.field(
-                "rustls",
-                &self.rustls.as_ref().map(|_| "<rustls CryptoProvider + ServerCertVerifier>"),
-            );
-        }
-        s.field("default", &self.default);
-        s.finish()
     }
 }
 

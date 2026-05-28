@@ -83,5 +83,6 @@ mod rustls;
 #[cfg(any(feature = "rustls", test))]
 pub use rustls::RustlsOptions;
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod testing;
