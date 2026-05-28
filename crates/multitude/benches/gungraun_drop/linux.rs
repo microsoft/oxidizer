@@ -1,21 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise drop benchmarks for multitude.
-//!
-//! Mirrors `benches/criterion_drop.rs` 1:1: each gungraun function
-//! `drop_<variant>` corresponds to a criterion benchmark `drop/<variant>`.
-//! Each setup pre-fills an arena with N handles; the bench body drops them
-//! (handle vec + arena), measuring per-handle smart-pointer drop plus chunk
-//! teardown at arena drop.
-
-#![expect(missing_docs, reason = "Benchmark")]
-#![allow(unused_results, reason = "black_box of bench input is intentional")]
-#![allow(clippy::too_many_lines, reason = "benchmark file")]
-
 use core::hint::black_box;
 
-use gungraun::{Callgrind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group};
 use multitude::strings::{ArcStr, BoxStr, RcStr};
 use multitude::{Arc, Arena, Box, Rc};
 
@@ -289,10 +277,4 @@ library_benchmark_group!(
         drop_slice_box_u64, drop_slice_rc_u64, drop_slice_arc_u64,
         drop_slice_box_droppy, drop_slice_rc_droppy, drop_slice_arc_droppy,
         drop_alloc
-);
-
-main!(
-    config = LibraryBenchmarkConfig::default()
-        .tool(Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = drop_group
 );
