@@ -925,6 +925,16 @@ mod tests {
             let base_uri = BaseUri::from_static("http://example.com");
             assert_eq!(base_uri.try_effective_port().unwrap(), 80);
         }
+
+        #[test]
+        fn try_effective_port_errors_for_non_http_scheme_without_explicit_port() {
+            let base_uri = BaseUri::from_static("ftp://example.com");
+            let err = base_uri
+                .try_effective_port()
+                .expect_err("expected non-http/https URI without explicit port to error");
+
+            assert!(err.to_string().contains("ftp"));
+        }
     }
 
     mod is_https {
