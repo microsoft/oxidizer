@@ -386,7 +386,7 @@ impl BaseUri {
     /// let base_uri = BaseUri::from_static("http://example.com");
     /// assert_eq!(base_uri.try_effective_port().unwrap(), 80);
     /// ```
-    pub fn try_effective_port(&self) -> Result<u16, crate::UriError> {
+    pub fn try_effective_port(&self) -> Result<u16, UriError> {
         self.origin.try_effective_port()
     }
 
