@@ -21,7 +21,7 @@
 
     Run = @{
         CrateName = 'downstream'
-        Bump      = 'patch'
+        Change    = 'Fix'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '5' selects the
@@ -32,7 +32,7 @@
     }
 
     Expect = @{
-        # downstream: 1.0.0 -> 1.0.1 (the explicit -Bump patch on the user-named release).
+        # downstream: 1.0.0 -> 1.0.1 (the explicit -Change Fix on the user-named release).
         # upstream  : 1.2.3 -> 1.2.4 (patch chosen via option 5 — distinct from option 4 which
         # would have given 1.3.0). The [1-5] suffix in PromptsRaised pins the menu range too.
         Released = @(

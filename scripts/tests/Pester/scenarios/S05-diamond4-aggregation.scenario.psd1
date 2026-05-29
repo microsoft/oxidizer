@@ -11,7 +11,7 @@
 
     Run = @{
         CrateName = 'top'
-        Bump      = 'patch'
+        Change    = 'Fix'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # On 0.x.y the menu hides option 5 (fix) because it would be numerically

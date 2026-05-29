@@ -1277,6 +1277,45 @@ function Invoke-WorkspaceCheck {
     }
 }
 
+# Translates a semantic -Change value into the internal (Bump, Version) tuple
+# the rest of the release flow expects. The script's user-facing vocabulary
+# is intent-based (Breaking / NonBreaking / Fix / 1.0) because that's how
+# releasers reason about the change, but every layer below Invoke-ReleaseMain
+# still uses Cargo's numeric major/minor/patch terms because changelogs,
+# Cargo.toml, and commit messages are concrete version transitions.
+#
+# Returned object has exactly one of { Bump, Version } populated:
+#   - Breaking    → Bump='major'    Version=''
+#   - NonBreaking → Bump='minor'    Version=''
+#   - Fix         → Bump='patch'    Version=''
+#   - 1.0         → Bump=''         Version='1.0.0'  (the one-time graduation)
+#
+# The 1.0 graduation throws when invoked on a package that's already at or
+# beyond 1.0.0 — the caller is expected to surface the message to the user
+# and exit. This keeps the lifecycle event idempotent against accidental
+# re-invocation (you can't graduate to 1.0 twice).
+function Resolve-ReleaseSpecFromChange {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Breaking', 'NonBreaking', 'Fix', '1.0')][string]$Change,
+        [Parameter(Mandatory = $true)][string]$CurrentVersion
+    )
+
+    switch ($Change) {
+        'Breaking'    { return [pscustomobject]@{ Bump = 'major'; Version = '' } }
+        'NonBreaking' { return [pscustomobject]@{ Bump = 'minor'; Version = '' } }
+        'Fix'         { return [pscustomobject]@{ Bump = 'patch'; Version = '' } }
+        '1.0' {
+            # Force array context — see Compare-SemanticVersions for the rationale.
+            $parts = @($CurrentVersion.Split('.') | ForEach-Object { [int]$_ })
+            while ($parts.Count -lt 3) { $parts += 0 }
+            if ($parts[0] -ge 1) {
+                throw "The '-Change 1.0' option is for the one-time 0.x → 1.0.0 graduation event. Current version '$CurrentVersion' is already at 1.x or higher; use '-Change Breaking' instead."
+            }
+            return [pscustomobject]@{ Bump = ''; Version = '1.0.0' }
+        }
+    }
+}
+
 # Top-level entry point. Encapsulates input validation, pre-flight checks, git
 # remote detection, base-ref resolution, the actual release workflow, and the
 # post-release workspace check. Returns the array of release records (so tests
@@ -1289,7 +1328,7 @@ function Invoke-ReleaseMain {
     param(
         [Parameter(Mandatory = $true)][string]$CrateName,
         [Parameter(Mandatory = $false)][string]$Version,
-        [Parameter(Mandatory = $false)][ValidateSet('major', 'minor', 'patch')][string]$Bump,
+        [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Fix', '1.0')][string]$Change,
         [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main',
         [Parameter(Mandatory = $false)][switch]$NonInteractive
     )
@@ -1300,8 +1339,8 @@ function Invoke-ReleaseMain {
         Exit 1
     }
 
-    if (-not [string]::IsNullOrEmpty($Version) -and -not [string]::IsNullOrEmpty($Bump)) {
-        Write-Error "The --version and --bump options are mutually exclusive. Please specify only one."
+    if (-not [string]::IsNullOrEmpty($Version) -and -not [string]::IsNullOrEmpty($Change)) {
+        Write-Error "The --version and --change options are mutually exclusive. Please specify only one."
         Exit 1
     }
 
@@ -1347,7 +1386,33 @@ function Invoke-ReleaseMain {
         Exit 1
     }
 
-    # 5. VERSION COMPARISON VALIDATION
+    # 5. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
+    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Fix / 1.0)
+    # because that's how releasers reason about the change. Below this point the
+    # release flow continues in Cargo's numeric major/minor/patch terms because
+    # changelogs, Cargo.toml, and commit messages are concrete version transitions.
+    # The 1.0 graduation translates into an explicit -Version 1.0.0; everything
+    # else translates into the matching -Bump kind.
+    $bump = ''
+    if (-not [string]::IsNullOrEmpty($Change)) {
+        $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+        if ($null -eq $currentVersion) {
+            Write-Error "Failed to get current version for comparison. Aborting."
+            Exit 1
+        }
+        try {
+            $spec = Resolve-ReleaseSpecFromChange -Change $Change -CurrentVersion $currentVersion
+        } catch {
+            Write-Error $_.Exception.Message
+            Exit 1
+        }
+        $bump = $spec.Bump
+        if (-not [string]::IsNullOrEmpty($spec.Version)) {
+            $Version = $spec.Version
+        }
+    }
+
+    # 6. VERSION COMPARISON VALIDATION
     if (-not [string]::IsNullOrEmpty($Version)) {
         $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
         if ($null -eq $currentVersion) {
@@ -1362,7 +1427,7 @@ function Invoke-ReleaseMain {
         }
     }
 
-    # 6. RESOLVE BASE REF (best-effort fetch + validate)
+    # 7. RESOLVE BASE REF (best-effort fetch + validate)
     $resolvedBaseRef = $BaseRef
     if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
         if ($resolvedBaseRef -match '^origin/(.+)$') {
@@ -1379,9 +1444,9 @@ function Invoke-ReleaseMain {
         }
     }
 
-    # 7. EXECUTE WORKFLOW
+    # 8. EXECUTE WORKFLOW
     try {
-        $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $Bump `
+        $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $bump `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
 
         # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released

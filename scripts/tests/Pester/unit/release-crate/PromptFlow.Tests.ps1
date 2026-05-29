@@ -866,3 +866,86 @@ Describe 'Format-CascadeAnnouncement' {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Resolve-ReleaseSpecFromChange (CLI -Change → internal Bump/Version
+# translation). Pure function with one dependency: the package's current
+# version string (which the caller reads from Cargo.toml and passes in).
+# ---------------------------------------------------------------------------
+
+Describe 'Resolve-ReleaseSpecFromChange' {
+
+    Context 'Breaking maps to a major bump (no explicit Version)' {
+        It 'returns Bump=major and empty Version for a 1.x.y current version' {
+            $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '1.2.3'
+            $spec.Bump    | Should -Be 'major'
+            $spec.Version | Should -Be ''
+        }
+
+        It 'returns Bump=major and empty Version for a 0.x.y current version (caller handles Cargo semver carve-out)' {
+            $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '0.5.2'
+            $spec.Bump    | Should -Be 'major'
+            $spec.Version | Should -Be ''
+        }
+
+        It 'returns Bump=major for 0.0.x as well (every change is breaking under Cargo semver — encoded downstream)' {
+            $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '0.0.5'
+            $spec.Bump    | Should -Be 'major'
+            $spec.Version | Should -Be ''
+        }
+    }
+
+    Context 'NonBreaking maps to a minor bump' {
+        It 'returns Bump=minor and empty Version regardless of current version shape' {
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '1.2.3').Bump | Should -Be 'minor'
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.5.2').Bump | Should -Be 'minor'
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.0.5').Bump | Should -Be 'minor'
+        }
+    }
+
+    Context 'Fix maps to a patch bump' {
+        It 'returns Bump=patch and empty Version regardless of current version shape' {
+            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '1.2.3').Bump | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '0.5.2').Bump | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '0.0.5').Bump | Should -Be 'patch'
+        }
+    }
+
+    Context "'1.0' graduates a 0.x package to its first stable 1.0.0" {
+        It 'returns Version=1.0.0 (and empty Bump) for 0.x.y' {
+            $spec = Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '0.5.2'
+            $spec.Bump    | Should -Be ''
+            $spec.Version | Should -Be '1.0.0'
+        }
+
+        It 'returns Version=1.0.0 for 0.0.x as well' {
+            $spec = Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '0.0.7'
+            $spec.Bump    | Should -Be ''
+            $spec.Version | Should -Be '1.0.0'
+        }
+
+        It 'throws a clear, actionable error when invoked on a 1.x package' {
+            { Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '1.2.3' } |
+                Should -Throw "*'-Change 1.0' option is for the one-time*graduation event*'1.2.3' is already at 1.x or higher*"
+        }
+
+        It 'throws when invoked on a 2.x package as well (already past 1.0 lifecycle)' {
+            { Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '2.0.0' } |
+                Should -Throw "*graduation event*'2.0.0' is already at 1.x or higher*"
+        }
+    }
+
+    Context 'parameter validation' {
+        It 'rejects unknown -Change values via ValidateSet' {
+            { Resolve-ReleaseSpecFromChange -Change 'Major' -CurrentVersion '1.2.3' } |
+                Should -Throw "*ValidateSet*"
+        }
+
+        It "rejects the old 'major' / 'minor' / 'patch' vocabulary (no back-compat — clean rename)" {
+            { Resolve-ReleaseSpecFromChange -Change 'major' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
+            { Resolve-ReleaseSpecFromChange -Change 'minor' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
+            { Resolve-ReleaseSpecFromChange -Change 'patch' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
+        }
+    }
+}
+
+

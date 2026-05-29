@@ -12,7 +12,7 @@
 
     Run = @{
         CrateName = 'a'
-        Bump      = 'patch'
+        Change    = 'Fix'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # Iter 0 of the scan: ignore b.

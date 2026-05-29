@@ -91,7 +91,7 @@ function Invoke-Scenario {
             CrateName = $scenario.Run.CrateName
             BaseRef   = $(if ($scenario.Run.BaseRef) { $scenario.Run.BaseRef } else { 'HEAD~1' })
         }
-        if ($scenario.Run.Bump)           { $runArgs.Bump    = $scenario.Run.Bump }
+        if ($scenario.Run.Change)         { $runArgs.Change  = $scenario.Run.Change }
         if ($scenario.Run.Version)        { $runArgs.Version = $scenario.Run.Version }
         if ($scenario.Run.NonInteractive) { $runArgs.NonInteractive = $true }
 
