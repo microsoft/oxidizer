@@ -11,7 +11,7 @@
 
     Run = @{
         CrateName = 'downstream'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # "12" starts with valid digit but is a multi-character non-option — must be rejected as a whole.

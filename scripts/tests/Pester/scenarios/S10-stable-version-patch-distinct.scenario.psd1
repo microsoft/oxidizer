@@ -1,6 +1,6 @@
 @{
     Name        = 'S10-stable-version-patch-distinct'
-    Description = 'Stable (>=1.x.y) workspace: the menu offers all 5 options because non-breaking (option 4) and fix (option 5) produce distinct numeric outcomes. User picks option 5 on upstream; verifies upstream ends at 1.2.4 (a patch bump), proving the patch path is reachable end-to-end and is NOT a synonym for option 4 (which would yield 1.3.0). Counter-balances the 0.x-only synthetic-workspace presets, which collapse 4 and 5 into the same numeric bump.'
+    Description = 'Stable (>=1.x.y) workspace: the menu offers all 5 options because non-breaking (option 4) and patch (option 5) produce distinct numeric outcomes. User picks option 5 on upstream; verifies upstream ends at 1.2.4 (a patch bump), proving the patch path is reachable end-to-end and is NOT a synonym for option 4 (which would yield 1.3.0). Counter-balances the 0.x-only synthetic-workspace presets, which collapse 4 and 5 into the same numeric bump.'
 
     # Inline spec: every built-in preset uses 0.x versions, so we hand-roll a
     # stable two-package topology here to exercise the >=1.x.y branch of
@@ -21,7 +21,7 @@
 
     Run = @{
         CrateName = 'downstream'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '5' selects the
@@ -32,7 +32,7 @@
     }
 
     Expect = @{
-        # downstream: 1.0.0 -> 1.0.1 (the explicit -Change Fix on the user-named release).
+        # downstream: 1.0.0 -> 1.0.1 (the explicit -Change Patch on the user-named release).
         # upstream  : 1.2.3 -> 1.2.4 (patch chosen via option 5 — distinct from option 4 which
         # would have given 1.3.0). The [1-5] suffix in PromptsRaised pins the menu range too.
         Released = @(

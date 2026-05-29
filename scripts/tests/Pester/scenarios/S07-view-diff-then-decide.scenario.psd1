@@ -12,7 +12,7 @@
 
     Run = @{
         CrateName = 'a'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # First prompt for b: view the diff.

@@ -11,7 +11,7 @@
     Run = @{
         # 'downstream' has no dependents, so no cascade. Upstream is clean.
         CrateName = 'downstream'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD'
         Answers   = @()
     }

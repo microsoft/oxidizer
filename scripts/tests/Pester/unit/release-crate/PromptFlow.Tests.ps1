@@ -80,7 +80,7 @@ Describe 'Format-PackageMenu' {
         # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
         $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
         $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
-        $lines[4] | Should -Match '^\s*5\. Release as fix \(.+\)$'
+        $lines[4] | Should -Match '^\s*5\. Release as patch \(.+\)$'
     }
 
     It 'renders concrete x.y.z -> (next) transitions for a >=1.x.y package' {
@@ -88,19 +88,19 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (1.2.3 -> 2.0.0)'
         $lines | Should -Contain '  4. Release as non-breaking change (1.2.3 -> 1.3.0)'
-        $lines | Should -Contain '  5. Release as fix (1.2.3 -> 1.2.4)'
+        $lines | Should -Contain '  5. Release as patch (1.2.3 -> 1.2.4)'
     }
 
-    It 'hides option 5 on 0.x.y packages because non-breaking and fix collapse to the same numeric bump' {
+    It 'hides option 5 on 0.x.y packages because non-breaking and patch collapse to the same numeric bump' {
         $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (0.1.2 -> 0.2.0)'
         $lines | Should -Contain '  4. Release as non-breaking change (0.1.2 -> 0.1.3)'
-        # Option 5 must not appear at all on 0.x.y — both "fix" and "non-breaking"
+        # Option 5 must not appear at all on 0.x.y — both "patch" and "non-breaking"
         # produce the same numeric increment under Cargo semver, so the menu only
         # offers the surviving distinct choice.
         $out | Should -Not -Match '^\s*5\. '
-        $out | Should -Not -Match 'Release as fix'
+        $out | Should -Not -Match 'Release as patch'
     }
 
     It 'hides option 5 on 0.0.x packages (where minor and patch also collapse)' {
@@ -109,7 +109,7 @@ Describe 'Format-PackageMenu' {
         $lines | Should -Contain '  3. Release as breaking change (0.0.5 -> 0.0.6)'
         $lines | Should -Contain '  4. Release as non-breaking change (0.0.5 -> 0.0.6)'
         $out | Should -Not -Match '^\s*5\. '
-        $out | Should -Not -Match 'Release as fix'
+        $out | Should -Not -Match 'Release as patch'
     }
 
     It 'falls back to "(major version)" / "(minor version)" / "(patch version)" hints when CurrentVersion is missing or blank' {
@@ -124,7 +124,7 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (major version)'
         $lines | Should -Contain '  4. Release as non-breaking change (minor version)'
-        $lines | Should -Contain '  5. Release as fix (patch version)'
+        $lines | Should -Contain '  5. Release as patch (patch version)'
     }
 
     It 'does NOT include any "files changed" / numeric file-count metric' {
@@ -715,8 +715,8 @@ Describe 'Get-ChangeLabelFromBumpKind' {
         Get-ChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking change'
     }
 
-    It "maps 'patch' to 'fix'" {
-        Get-ChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'fix'
+    It "maps 'patch' to 'patch'" {
+        Get-ChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'patch'
     }
 }
 
@@ -729,8 +729,8 @@ Describe 'Get-ShortChangeLabelFromBumpKind' {
         Get-ShortChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking'
     }
 
-    It "maps 'patch' to 'fix'" {
-        Get-ShortChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'fix'
+    It "maps 'patch' to 'patch'" {
+        Get-ShortChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'patch'
     }
 }
 
@@ -754,24 +754,24 @@ Describe 'Format-CascadeAnnouncement' {
             $out | Should -Match 'as non-breaking change'
         }
 
-        It 'reads "as fix" when -ExposingBump is patch (and parenthetical is suppressed — see other tests)' {
+        It 'reads "as patch" when -ExposingBump is patch (and parenthetical is suppressed — see other tests)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
                 -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper')
-            $out | Should -Match 'as fix'
+            $out | Should -Match 'as patch'
         }
     }
 
     Context 'parenthetical clause for non-exposing dependents' {
-        It 'appends "(or fix if no API exposure of `<target>`)" when exposing=major and non-exposing=patch' {
+        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=major and non-exposing=patch' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
                 -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
-            $out | Should -Match '\(or fix if no API exposure of `http_extensions`\)'
+            $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
-        It 'appends "(or fix if no API exposure of `<target>`)" when exposing=minor and non-exposing=patch' {
+        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=minor and non-exposing=patch' {
             $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
                 -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
-            $out | Should -Match '\(or fix if no API exposure of `http_extensions`\)'
+            $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
         It 'omits the parenthetical entirely when exposing and non-exposing are both patch (no downgrade possible)' {
@@ -779,7 +779,7 @@ Describe 'Format-CascadeAnnouncement' {
                 -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Not -Match '\(or .+ if no API exposure'
             # Ensure the colon still lands directly after the headline label.
-            $out | Should -Match 'as fix:\s'
+            $out | Should -Match 'as patch:\s'
         }
 
         It 'preserves backticks around the target crate name (markdown-style code formatting in CLI output)' {
@@ -811,22 +811,22 @@ Describe 'Format-CascadeAnnouncement' {
         # already-resolved bump kinds. These tests pin the exact rendered
         # shape for each combination the caller can hand in.
 
-        It 'breaking + non-exposing patch: "as breaking change (or fix if no API exposure of `target`)"' {
+        It 'breaking + non-exposing patch: "as breaking change (or patch if no API exposure of `target`)"' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
                 -TargetCrateName 'target' -DependentNames @('a', 'b')
-            $out | Should -Be "🔗 Cascading release to 2 dependent packages as breaking change (or fix if no API exposure of ``target``): a, b"
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
-        It 'non-breaking + non-exposing patch: "as non-breaking change (or fix if no API exposure of `target`)"' {
+        It 'non-breaking + non-exposing patch: "as non-breaking change (or patch if no API exposure of `target`)"' {
             $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
                 -TargetCrateName 'target' -DependentNames @('a', 'b')
-            $out | Should -Be "🔗 Cascading release to 2 dependent packages as non-breaking change (or fix if no API exposure of ``target``): a, b"
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as non-breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
-        It 'fix + non-exposing patch: "as fix" (parenthetical suppressed, no downgrade possible)' {
+        It 'patch + non-exposing patch: "as patch" (parenthetical suppressed, no downgrade possible)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
                 -TargetCrateName 'target' -DependentNames @('a', 'b')
-            $out | Should -Be "🔗 Cascading release to 2 dependent packages as fix: a, b"
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as patch: a, b"
         }
     }
 
@@ -842,7 +842,7 @@ Describe 'Format-CascadeAnnouncement' {
             $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
                 -TargetCrateName 't' -DependentNames @('d')
-            $out | Should -Match 'as breaking change \(or fix if no API exposure of `t`\)'
+            $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
 
         It '0.x.y target + user picks non-breaking (minor): caller keeps exposing as minor; formatter reads "non-breaking change"' {
@@ -851,7 +851,7 @@ Describe 'Format-CascadeAnnouncement' {
             $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
                 -TargetCrateName 't' -DependentNames @('d')
-            $out | Should -Match 'as non-breaking change \(or fix if no API exposure of `t`\)'
+            $out | Should -Match 'as non-breaking change \(or patch if no API exposure of `t`\)'
         }
 
         It '0.0.x target (always breaking under Cargo semver): caller marks breaking, formatter reads "breaking change"' {
@@ -861,7 +861,7 @@ Describe 'Format-CascadeAnnouncement' {
             $exposingBump = if ($isBreaking) { 'major' } else { 'patch' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
                 -TargetCrateName 't' -DependentNames @('d')
-            $out | Should -Match 'as breaking change \(or fix if no API exposure of `t`\)'
+            $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
     }
 }
@@ -902,11 +902,11 @@ Describe 'Resolve-ReleaseSpecFromChange' {
         }
     }
 
-    Context 'Fix maps to a patch bump' {
+    Context 'Patch maps to a patch bump' {
         It 'returns Bump=patch and empty Version regardless of current version shape' {
-            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '1.2.3').Bump | Should -Be 'patch'
-            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '0.5.2').Bump | Should -Be 'patch'
-            (Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '0.0.5').Bump | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '1.2.3').Bump | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.5.2').Bump | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.0.5').Bump | Should -Be 'patch'
         }
     }
 
@@ -940,10 +940,16 @@ Describe 'Resolve-ReleaseSpecFromChange' {
                 Should -Throw "*ValidateSet*"
         }
 
-        It "rejects the old 'major' / 'minor' / 'patch' vocabulary (no back-compat — clean rename)" {
+        It "rejects the old 'major' / 'minor' vocabulary (no back-compat — clean rename)" {
             { Resolve-ReleaseSpecFromChange -Change 'major' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
             { Resolve-ReleaseSpecFromChange -Change 'minor' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
-            { Resolve-ReleaseSpecFromChange -Change 'patch' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
+            # Note: 'patch' (lowercase) now matches 'Patch' via ValidateSet's case-insensitive
+            # comparison, so it is intentionally NOT rejected. The Stage 2b rename eliminated
+            # the standalone numeric vocabulary; the only surviving overlap is incidental.
+        }
+
+        It "rejects the previous 'Fix' value (renamed to 'Patch' — clean break, no back-compat)" {
+            { Resolve-ReleaseSpecFromChange -Change 'Fix' -CurrentVersion '1.2.3' } | Should -Throw "*ValidateSet*"
         }
     }
 }

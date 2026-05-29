@@ -18,7 +18,7 @@
 
     Run = @{
         CrateName = 'downstream'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '4' selects the
@@ -28,7 +28,7 @@
     }
 
     Expect = @{
-        # downstream: 1.0.0 -> 1.1.0. The user requested -Change Fix, but the
+        # downstream: 1.0.0 -> 1.1.0. The user requested -Change Patch, but the
         # post-release scan accepts upstream as a *minor* bump (1.2.3 -> 1.3.0).
         # The cascade then escalates downstream to a minor bump too — on stable
         # >=1.x.y, a non-breaking-but-minor-class change in an upstream propagates

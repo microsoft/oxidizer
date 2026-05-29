@@ -12,7 +12,7 @@
 
     Run = @{
         CrateName      = 'a'
-        Change         = 'Fix'
+        Change         = 'Patch'
         BaseRef        = 'HEAD~1'
         NonInteractive = $true
         Answers        = @()

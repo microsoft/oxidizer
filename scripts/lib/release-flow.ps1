@@ -638,28 +638,28 @@ function Invoke-CascadeStep {
 
 # Maps an internal bump kind to the semantic label shown in the cascade
 # announcement (full form, used as 'as <label>'): major → 'breaking change',
-# minor → 'non-breaking change', patch → 'fix'.
+# minor → 'non-breaking change', patch → 'patch'.
 function Get-ChangeLabelFromBumpKind {
     param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
 
     switch ($BumpKind) {
         'major' { return 'breaking change' }
         'minor' { return 'non-breaking change' }
-        'patch' { return 'fix' }
+        'patch' { return 'patch' }
     }
 }
 
 # Short form of the semantic label, used inside the parenthetical that
 # describes the downgrade for non-exposing dependents (e.g. "or non-breaking
 # if no API exposure of '<target>'"). Mirrors Get-ChangeLabelFromBumpKind
-# without the trailing 'change'/'fix' noun where it would read awkwardly.
+# without the trailing 'change' noun where it would read awkwardly.
 function Get-ShortChangeLabelFromBumpKind {
     param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
 
     switch ($BumpKind) {
         'major' { return 'breaking' }
         'minor' { return 'non-breaking' }
-        'patch' { return 'fix' }
+        'patch' { return 'patch' }
     }
 }
 
@@ -667,8 +667,8 @@ function Get-ShortChangeLabelFromBumpKind {
 # dependents that re-export the target's types in their public API;
 # NonExposingBump is what we apply to internal-only consumers (today: always
 # 'patch'). When the two are identical (i.e. the target itself is being
-# released as a fix, so the non-exposing bump cannot go any lower), the
-# parenthetical clause is suppressed entirely — saying "or fix if no API
+# released as a patch, so the non-exposing bump cannot go any lower), the
+# parenthetical clause is suppressed entirely — saying "or patch if no API
 # exposure" would just repeat the headline label.
 function Format-CascadeAnnouncement {
     param(
@@ -785,7 +785,7 @@ function Test-InteractiveSession {
 # this so nested or re-entrant invocations don't clobber an outer run's list.
 $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 
-# Returns $true when option 5 (Release as fix) would be numerically indistinguishable
+# Returns $true when option 5 (Release as patch) would be numerically indistinguishable
 # from option 4 (Release as non-breaking change) for the given current version.
 # This is the case for Cargo 0.x.y versions, where the semver carve-out lumps
 # minor and patch under the same numeric increment (0.x.(y+1)) — and on 0.0.x
@@ -810,7 +810,7 @@ function Test-IsPatchOptionRedundant {
 # honours Cargo's 0.x.y semver carve-outs, so the menu always shows the same
 # version the release would produce — not a misleading numeric label.
 #
-# Option 5 (Release as fix) is hidden when it would produce the same numeric
+# Option 5 (Release as patch) is hidden when it would produce the same numeric
 # bump as option 4 (Release as non-breaking change) — see
 # Test-IsPatchOptionRedundant. This avoids presenting two indistinguishable
 # choices on Cargo 0.x.y packages.
@@ -859,7 +859,7 @@ function Format-PackageMenu {
     [void]$sb.AppendLine("  3. Release as breaking change $($bumpHints['major'])")
     [void]$sb.AppendLine("  4. Release as non-breaking change $($bumpHints['minor'])")
     if (-not $hidePatch) {
-        [void]$sb.AppendLine("  5. Release as fix $($bumpHints['patch'])")
+        [void]$sb.AppendLine("  5. Release as patch $($bumpHints['patch'])")
     }
     return $sb.ToString()
 }
@@ -1279,7 +1279,7 @@ function Invoke-WorkspaceCheck {
 
 # Translates a semantic -Change value into the internal (Bump, Version) tuple
 # the rest of the release flow expects. The script's user-facing vocabulary
-# is intent-based (Breaking / NonBreaking / Fix / 1.0) because that's how
+# is intent-based (Breaking / NonBreaking / Patch / 1.0) because that's how
 # releasers reason about the change, but every layer below Invoke-ReleaseMain
 # still uses Cargo's numeric major/minor/patch terms because changelogs,
 # Cargo.toml, and commit messages are concrete version transitions.
@@ -1287,7 +1287,7 @@ function Invoke-WorkspaceCheck {
 # Returned object has exactly one of { Bump, Version } populated:
 #   - Breaking    → Bump='major'    Version=''
 #   - NonBreaking → Bump='minor'    Version=''
-#   - Fix         → Bump='patch'    Version=''
+#   - Patch       → Bump='patch'    Version=''
 #   - 1.0         → Bump=''         Version='1.0.0'  (the one-time graduation)
 #
 # The 1.0 graduation throws when invoked on a package that's already at or
@@ -1296,14 +1296,14 @@ function Invoke-WorkspaceCheck {
 # re-invocation (you can't graduate to 1.0 twice).
 function Resolve-ReleaseSpecFromChange {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Breaking', 'NonBreaking', 'Fix', '1.0')][string]$Change,
+        [Parameter(Mandatory = $true)][ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')][string]$Change,
         [Parameter(Mandatory = $true)][string]$CurrentVersion
     )
 
     switch ($Change) {
         'Breaking'    { return [pscustomobject]@{ Bump = 'major'; Version = '' } }
         'NonBreaking' { return [pscustomobject]@{ Bump = 'minor'; Version = '' } }
-        'Fix'         { return [pscustomobject]@{ Bump = 'patch'; Version = '' } }
+        'Patch'       { return [pscustomobject]@{ Bump = 'patch'; Version = '' } }
         '1.0' {
             # Force array context — see Compare-SemanticVersions for the rationale.
             $parts = @($CurrentVersion.Split('.') | ForEach-Object { [int]$_ })
@@ -1328,7 +1328,7 @@ function Invoke-ReleaseMain {
     param(
         [Parameter(Mandatory = $true)][string]$CrateName,
         [Parameter(Mandatory = $false)][string]$Version,
-        [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Fix', '1.0')][string]$Change,
+        [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')][string]$Change,
         [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main',
         [Parameter(Mandatory = $false)][switch]$NonInteractive
     )
@@ -1387,7 +1387,7 @@ function Invoke-ReleaseMain {
     }
 
     # 5. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
-    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Fix / 1.0)
+    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Patch / 1.0)
     # because that's how releasers reason about the change. Below this point the
     # release flow continues in Cargo's numeric major/minor/patch terms because
     # changelogs, Cargo.toml, and commit messages are concrete version transitions.

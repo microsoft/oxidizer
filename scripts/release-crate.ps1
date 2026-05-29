@@ -8,9 +8,9 @@
 .DESCRIPTION
     This script automates the full release of a Rust crate in a workspace repository:
     1. Version Update: Either bump the version according to the kind of change being released
-       (Breaking / NonBreaking / Fix), graduate a 0.x package to its first stable 1.0.0, or set
+       (Breaking / NonBreaking / Patch), graduate a 0.x package to its first stable 1.0.0, or set
        a specific version explicitly. Cargo's 0.x.y SemVer rules are honored — for `0.x.y` crates
-       a Breaking change becomes `0.(x+1).0` and both NonBreaking and Fix map to bumping `y`.
+       a Breaking change becomes `0.(x+1).0` and both NonBreaking and Patch map to bumping `y`.
     2. Cascade: Every workspace crate that depends on the target via `[dependencies]` or
        `[build-dependencies]` (transitively) is also bumped. The kind of change applied to each
        dependent is informed by `[package.metadata.cargo_check_external_types]` AND by whether
@@ -48,7 +48,9 @@
     Accepted values:
     - Breaking:    SemVer-incompatible change. 1.x.y -> (x+1).0.0; 0.x.y -> 0.(x+1).0; 0.0.x -> 0.0.(x+1).
     - NonBreaking: SemVer-compatible feature or addition. 1.x.y -> x.(y+1).0; 0.x.y -> 0.x.(y+1).
-    - Fix:         SemVer-compatible bug fix. x.y.z -> x.y.(z+1).
+    - Patch:       SemVer-compatible internal change with no API impact (typically a bug fix
+                   or any other change that doesn't affect what downstream consumers can do).
+                   x.y.z -> x.y.(z+1).
     - 1.0:         One-time graduation event for a 0.x package to its first stable 1.0.0. Errors
                    out when the package is already at or beyond 1.0.0. Cascades as a Breaking
                    change.
@@ -66,8 +68,8 @@
     .\release-crate.ps1 my-crate --change Breaking
 
 .EXAMPLE
-    # Release 'my-crate' as a bug fix
-    .\release-crate.ps1 my-crate -c Fix
+    # Release 'my-crate' as a patch
+    .\release-crate.ps1 my-crate -c Patch
 
 .EXAMPLE
     # Graduate 'my-crate' from 0.x to 1.0.0
@@ -84,7 +86,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [Alias('c')]
-    [ValidateSet('Breaking', 'NonBreaking', 'Fix', '1.0')]
+    [ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')]
     [string]$Change,
 
     # Base ref used to identify the release set (crates whose `version =` differs

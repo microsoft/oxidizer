@@ -32,7 +32,7 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
         CrateName = 'zeta'
         BaseRef   = 'HEAD~2'
         Answers   = @(
-            # On 0.x.y the menu hides option 5 (fix), so accept via option 4
+            # On 0.x.y the menu hides option 5 (patch), so accept via option 4
             # (non-breaking) â€” same 0.x.(y+1) outcome under Cargo semver.
             @{ Match = "Choose option for 'b'"; Reply = '4' }
             # No prompt expected for 'a': it was cascade-bumped by accepting 'b' and

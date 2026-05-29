@@ -8,7 +8,7 @@
 
     Run = @{
         CrateName = 'a'
-        Change    = 'Fix'
+        Change    = 'Patch'
         BaseRef   = 'HEAD'
         Answers   = @()
     }
