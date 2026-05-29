@@ -287,15 +287,7 @@ jobs:
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
       - name: Miri (stacked borrows)
-        # Force chacha20's portable backend. chacha20 (pulled in by rand
-        # 0.10's default ThreadRng) ships SIMD backends that call intrinsics
-        # Miri does not always implement — notably NEON's vqtbl1q_u8 on
-        # aarch64 (see https://github.com/rust-lang/miri/issues/3172).
-        # `--cfg chacha20_backend="soft"` sidesteps that without giving up
-        # Miri coverage on any target.
         if: success() || failure()
-        env:
-          RUSTFLAGS: '--cfg chacha20_backend="soft"'
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
 
   model-checking:
