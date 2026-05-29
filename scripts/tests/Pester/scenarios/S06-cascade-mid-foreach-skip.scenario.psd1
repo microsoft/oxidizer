@@ -32,9 +32,9 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
         CrateName = 'zeta'
         BaseRef   = 'HEAD~2'
         Answers   = @(
-            @{ Match = "Release 'b' too";   Reply = 'y' }
-            @{ Match = "Bump kind for 'b'"; Reply = 'p' }
-            # No prompt expected for 'a': it was cascade-bumped by accepting 'b'.
+            @{ Match = "Choose option for 'b'"; Reply = '5' }
+            # No prompt expected for 'a': it was cascade-bumped by accepting 'b' and
+            # is filtered out of the next iteration's queue by the BFS.
         )
     }
 
@@ -50,8 +50,7 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
             @{ Crate = 'a';     To = '0.3.1' }
         )
         PromptsRaised = @(
-            "Release 'b' too"
-            "Bump kind for 'b'"
+            "Choose option for 'b'"
         )
         UnconsumedAnswers = @()
     }

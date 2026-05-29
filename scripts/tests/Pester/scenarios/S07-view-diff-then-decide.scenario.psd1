@@ -1,6 +1,6 @@
 @{
-    Name        = 'S02-accept-and-decline'
-    Description = 'Linear3 with both upstream crates modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
+    Name        = 'S07-view-diff-then-decide'
+    Description = 'User exercises the View Diff option (menu choice 1) for a finding before deciding. After viewing the diff, the menu re-renders and the user picks minor (option 4) for b, then ignores c. Validates that choice 1 re-prompts on the same package rather than advancing.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -15,21 +15,24 @@
         Bump      = 'patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
+            # First prompt for b: view the diff.
+            @{ Match = "Choose option for 'b'"; Reply = '1' }
+            # Menu re-renders for b after diff; this time choose minor.
             @{ Match = "Choose option for 'b'"; Reply = '4' }
+            # Next iteration prompts for c; user ignores.
             @{ Match = "Choose option for 'c'"; Reply = '2' }
         )
     }
 
     Expect = @{
-        # In 0.x semver convention (per Get-NextVersion), "minor" bump on 0.2.0
-        # is patch-style → 0.2.1 (true breaking is "major" → 0.3.0). b's cascade
-        # to a requires 0.1.1 which a already satisfies (from the initial patch),
-        # so a stays at 0.1.1 (bullet-only).
+        # b accepted as minor (0.x: patch-style) → 0.2.1. a's cascade bullet-only at 0.1.1.
+        # c is declined; no entry in releases.
         Released = @(
             @{ Crate = 'a'; To = '0.1.1' }
             @{ Crate = 'b'; To = '0.2.1' }
         )
         PromptsRaised = @(
+            "Choose option for 'b'"
             "Choose option for 'b'"
             "Choose option for 'c'"
         )

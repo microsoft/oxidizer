@@ -14,8 +14,7 @@
         Bump      = 'patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
-            @{ Match = "Release 'bottom' too"; Reply = 'y' }
-            @{ Match = "Bump kind for 'bottom'"; Reply = 'p' }
+            @{ Match = "Choose option for 'bottom'"; Reply = '5' }
         )
     }
 
@@ -29,8 +28,7 @@
             @{ Crate = 'right';  To = '0.3.1' }
         )
         PromptsRaised = @(
-            "Release 'bottom' too"
-            "Bump kind for 'bottom'"
+            "Choose option for 'bottom'"
         )
         UnconsumedAnswers = @()
     }

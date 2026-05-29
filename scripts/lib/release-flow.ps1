@@ -683,6 +683,242 @@ function Test-InteractiveSession {
     return $true
 }
 
+# --- POST-RELEASE-SCAN PROMPT FLOW ---
+#
+# Helpers backing Invoke-PostReleaseDepScan's per-package menu. Split out so
+# pure formatting can be unit-tested without capturing host streams, and so the
+# diff / opener side-effects can be mocked individually.
+
+# Tracks temp files produced by Show-PackageDiff so Invoke-PostReleaseDepScan
+# can delete them at the end of the run. The scan entrypoint save/restores
+# this so nested or re-entrant invocations don't clobber an outer run's list.
+$script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
+
+# Pure formatter for the per-package menu. Returns a multi-line string ready
+# for Write-Host. Returning a string (not host-writing directly) keeps the
+# function unit-testable without redirecting Information / Host streams.
+function Format-PackageMenu {
+    param(
+        [Parameter(Mandatory = $true)][object]$Finding,
+        [Parameter(Mandatory = $true)][int]$RemainingCount
+    )
+
+    $folder = [string]$Finding.Folder
+    if ($RemainingCount -gt 0) {
+        $word = if ($RemainingCount -eq 1) { 'package' } else { 'packages' }
+        $queueSuffix = " (+$RemainingCount $word queued)"
+    } else {
+        $queueSuffix = ''
+    }
+
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
+    foreach ($chain in @($Finding.DependencyChains)) {
+        [void]$sb.AppendLine("    pulled in by: $($chain -join ' -> ')")
+    }
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('  1. View diff')
+    [void]$sb.AppendLine('  2. Ignore package')
+    [void]$sb.AppendLine('  3. Bump major version')
+    [void]$sb.AppendLine('  4. Bump minor version')
+    [void]$sb.AppendLine('  5. Bump patch version')
+    return $sb.ToString()
+}
+
+# Writes the menu via Write-Host. Side-effect wrapper around Format-PackageMenu
+# so the pure formatter stays test-friendly.
+function Show-PackageMenu {
+    param(
+        [Parameter(Mandatory = $true)][object]$Finding,
+        [Parameter(Mandatory = $true)][int]$RemainingCount
+    )
+    Write-Host (Format-PackageMenu -Finding $Finding -RemainingCount $RemainingCount)
+}
+
+# Builds the diff text for a single package, anchored at its last release
+# baseline (Get-CrateLastReleaseBaseline). When no baseline is found (e.g.
+# a never-released crate), falls back to `git diff HEAD` and prefixes the
+# diff with a warning header so the reader knows the anchor is not a true
+# prior release. Untracked files are appended as plain content blocks
+# (git diff itself does not include untracked content).
+function Get-PackageDiffText {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$Folder
+    )
+
+    $sb = [System.Text.StringBuilder]::new()
+    $relRoot = "crates/$Folder"
+
+    $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $Folder
+    if ([string]::IsNullOrWhiteSpace($baseline)) {
+        [void]$sb.AppendLine("# Diff of '$Folder' (no prior version/publish baseline found - showing working tree vs HEAD)")
+        [void]$sb.AppendLine('')
+        $diff = Invoke-Git -Arguments @('diff', 'HEAD', '--', $relRoot) -RepoRoot $RepoRoot -AllowFailure
+    } else {
+        [void]$sb.AppendLine("# Diff of '$Folder' since $baseline")
+        [void]$sb.AppendLine('')
+        $diff = Invoke-Git -Arguments @('diff', $baseline, '--', $relRoot) -RepoRoot $RepoRoot -AllowFailure
+    }
+
+    if ($null -ne $diff) {
+        foreach ($line in @($diff)) {
+            [void]$sb.AppendLine($line.ToString())
+        }
+    }
+
+    $untracked = Invoke-Git -Arguments @('ls-files', '--others', '--exclude-standard', '--', $relRoot) -RepoRoot $RepoRoot -AllowFailure
+    if ($null -ne $untracked) {
+        foreach ($line in @($untracked)) {
+            $relPath = $line.ToString().Trim().Replace('\', '/')
+            if ([string]::IsNullOrEmpty($relPath)) { continue }
+            $absPath = Join-Path $RepoRoot $relPath
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine("===== UNTRACKED FILE: $relPath =====")
+            if (Test-Path -LiteralPath $absPath) {
+                try {
+                    $content = Get-Content -LiteralPath $absPath -Raw -ErrorAction Stop
+                    if ($null -ne $content) { [void]$sb.Append($content) }
+                    if ($null -eq $content -or $content.Length -eq 0 -or -not $content.EndsWith("`n")) {
+                        [void]$sb.AppendLine('')
+                    }
+                } catch {
+                    [void]$sb.AppendLine("<could not read file: $_>")
+                }
+            } else {
+                [void]$sb.AppendLine('<file no longer present on disk>')
+            }
+            [void]$sb.AppendLine('===== END UNTRACKED FILE =====')
+        }
+    }
+
+    return $sb.ToString()
+}
+
+# Writes the given diff text to a uniquely-named .txt under the OS temp
+# directory (or -Directory, for tests) and returns the resulting path.
+function Save-PackageDiffToTempFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$DiffText,
+        [string]$Directory
+    )
+
+    if (-not $Directory) { $Directory = [System.IO.Path]::GetTempPath() }
+    if (-not (Test-Path -LiteralPath $Directory)) {
+        New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+    }
+
+    $safeFolder = ($Folder -replace '[^A-Za-z0-9._-]', '_')
+    $fileName = "oxi-pkg-diff-$safeFolder-$([guid]::NewGuid().ToString('N')).txt"
+    $fullPath = Join-Path $Directory $fileName
+    Set-Content -LiteralPath $fullPath -Value $DiffText -NoNewline
+    return $fullPath
+}
+
+# Opens a path with the OS default editor. Non-blocking; never throws.
+# Platform-aware dispatch because PowerShell Core's Start-Process expects an
+# executable on non-Windows platforms, not a document path.
+function Open-PathWithDefaultEditor {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    try {
+        # PowerShell 5.1 (Windows-only) does not define $IsWindows; treat it
+        # as $true there. PowerShell Core defines all three platform globals.
+        $onWindows = $false
+        $platformVar = Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue
+        if ($null -eq $platformVar) {
+            $onWindows = $true
+        } else {
+            $onWindows = [bool]$platformVar.Value
+        }
+
+        if ($onWindows) {
+            Start-Process -FilePath $Path -ErrorAction Stop | Out-Null
+            return
+        }
+
+        if ($IsMacOS) {
+            & open $Path
+            if ($LASTEXITCODE -ne 0) { throw "open exited with code $LASTEXITCODE" }
+            return
+        }
+
+        $xdg = Get-Command xdg-open -ErrorAction SilentlyContinue
+        if ($xdg) {
+            & xdg-open $Path
+            if ($LASTEXITCODE -ne 0) { throw "xdg-open exited with code $LASTEXITCODE" }
+            return
+        }
+
+        $gio = Get-Command gio -ErrorAction SilentlyContinue
+        if ($gio) {
+            & gio open $Path
+            if ($LASTEXITCODE -ne 0) { throw "gio open exited with code $LASTEXITCODE" }
+            return
+        }
+
+        throw 'No system file-opener found (tried xdg-open, gio).'
+    } catch {
+        Write-Warning "Could not open '$Path' with the system default editor: $_"
+    }
+}
+
+# Renders the package's diff to a temp file, prints the path, and tries to
+# open it with the OS default editor. The temp file is tracked in
+# $script:TempPackageDiffPaths so Invoke-PostReleaseDepScan can clean up.
+function Show-PackageDiff {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$Folder
+    )
+
+    $diffText = Get-PackageDiffText -RepoRoot $RepoRoot -Folder $Folder
+    $tempPath = Save-PackageDiffToTempFile -Folder $Folder -DiffText $diffText
+
+    if ($null -eq $script:TempPackageDiffPaths) {
+        $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
+    }
+    [void]$script:TempPackageDiffPaths.Add($tempPath)
+
+    Write-Host ''
+    Write-Host "Diff written to: $tempPath" -ForegroundColor Cyan
+    Open-PathWithDefaultEditor -Path $tempPath
+}
+
+# Renders the menu for a single finding and runs the input-validation loop.
+# Choice 1 (View diff) re-renders the menu and re-prompts; choices 2..5
+# resolve to a release action. Empty input silently re-prompts (no warning),
+# anything else complains then re-prompts. Returns @{ Action = 'ignore' |
+# 'major' | 'minor' | 'patch' }.
+function Get-PackageReleaseDecision {
+    param(
+        [Parameter(Mandatory = $true)][object]$Finding,
+        [Parameter(Mandatory = $true)][int]$RemainingCount,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    Show-PackageMenu -Finding $Finding -RemainingCount $RemainingCount
+    while ($true) {
+        $raw = Read-Host "Choose option for '$($Finding.Folder)' [1-5]"
+        $choice = if ($null -eq $raw) { '' } else { $raw.Trim() }
+
+        if ($choice -eq '') { continue }
+        if ($choice -eq '1') {
+            Show-PackageDiff -RepoRoot $RepoRoot -Folder $Finding.Folder
+            Show-PackageMenu -Finding $Finding -RemainingCount $RemainingCount
+            continue
+        }
+        if ($choice -eq '2') { return @{ Action = 'ignore' } }
+        if ($choice -eq '3') { return @{ Action = 'major' } }
+        if ($choice -eq '4') { return @{ Action = 'minor' } }
+        if ($choice -eq '5') { return @{ Action = 'patch' } }
+
+        Write-Host "Invalid choice '$choice'. Enter a number from 1 to 5." -ForegroundColor Yellow
+    }
+}
+
 # Scans for workspace crates with unreleased modifications (changes newer than the
 # crate's own last `version =` / `publish =` commit) that are transitively pulled in
 # by a release-set member but are not themselves part of the release set, prompting
@@ -705,92 +941,74 @@ function Invoke-PostReleaseDepScan {
 
     $isInteractive = (-not $NonInteractive) -and (Test-InteractiveSession)
 
-    $declined  = [System.Collections.Generic.HashSet[string]]::new()
-    $prompted  = [System.Collections.Generic.HashSet[string]]::new()
-    # Tracks crate folders currently in the release set so a foreach iteration whose
-    # target was cascade-bumped by a prior accepted release within the same loop is
-    # skipped rather than mis-prompted. Seeded from the on-disk state and grown after
-    # every nested Invoke-ReleaseFlow.
-    $currentReleaseSet = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $declined = [System.Collections.Generic.HashSet[string]]::new()
 
-    # Termination bound: number of published workspace crates. The dep graph is a DAG,
-    # so each iteration either grows ($prompted ∪ release-set) monotonically or terminates.
+    # Termination bound: number of published workspace crates. The dep graph is
+    # a DAG, so each iteration either grows ($declined ∪ release-set)
+    # monotonically or terminates.
     $maxIterations = @(Get-WorkspaceCrates -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
     if ($maxIterations -lt 1) { $maxIterations = 1 }
 
-    for ($iter = 0; $iter -lt $maxIterations; $iter++) {
-        Invalidate-WorkspaceMetadataCache
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef)
+    # Save/restore the temp-diff-paths tracking list so a re-entry into this
+    # function (current callers never re-enter, but the helper API allows it)
+    # cannot clobber an outer run's list.
+    $prevTempPaths = $script:TempPackageDiffPaths
+    $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 
-        $new = @($findings | Where-Object { -not $prompted.Contains($_.Folder) -and -not $declined.Contains($_.Folder) })
-        if ($new.Count -eq 0) {
-            if ($iter -eq 0) {
-                Write-Host ""
-                Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
-            }
-            return
-        }
+    try {
+        $firstIter = $true
+        for ($iter = 0; $iter -lt $maxIterations; $iter++) {
+            Invalidate-WorkspaceMetadataCache
+            $queue = @(
+                @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef) |
+                    Where-Object { -not $declined.Contains($_.Folder) }
+            )
 
-        Write-Host ""
-        Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
-        foreach ($finding in $new) {
-            Write-Host "  • $($finding.Folder) — $($finding.ChangedFileCount) files changed" -ForegroundColor Yellow
-            foreach ($chain in $finding.DependencyChains) {
-                Write-Host "      pulled in by: $($chain -join ' -> ')" -ForegroundColor DarkGray
-            }
-        }
-
-        if (-not $isInteractive) {
-            Write-Warning "Non-interactive session: leaving the above crates unreleased. Reviewer should confirm the changes are immaterial."
-            foreach ($finding in $new) {
-                [void]$prompted.Add($finding.Folder)
-                [void]$declined.Add($finding.Folder)
-            }
-            return
-        }
-
-        foreach ($finding in $new) {
-            $folder = $finding.Folder
-            [void]$prompted.Add($folder)
-
-            # The list above was rendered from this iteration's pre-loop snapshot of
-            # $new. A prior accepted release within the same foreach may have
-            # cascade-bumped $folder into the release set since then; in that case
-            # the release decision has already been made and prompting again would
-            # mislead the user (saying "n" would print "Leaving X unreleased" even
-            # though X IS being released as a cascade).
-            if ($currentReleaseSet.Contains($folder)) {
-                $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $folder } | Select-Object -First 1
-                $versionSuffix = if ($null -ne $existing) { " (now at $($existing.NewVersion))" } else { '' }
-                Write-Host "  • '$folder' was cascade-bumped by a prior release in this run$versionSuffix — skipping prompt (already in release set)." -ForegroundColor DarkGray
-                continue
-            }
-
-            $answer = (Read-Host "Release '$folder' too? [y/N]").Trim().ToLowerInvariant()
-            if ($answer -ne 'y' -and $answer -ne 'yes') {
-                Write-Host "  Leaving '$folder' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
-                [void]$declined.Add($folder)
-                continue
-            }
-
-            $bumpRaw = (Read-Host "Bump kind for '$folder'? [P]atch / [M]inor / (MA)jor (default: minor)").Trim().ToLowerInvariant()
-            $bumpKind = switch ($bumpRaw) {
-                ''        { 'minor' }
-                'p'       { 'patch' }
-                'patch'   { 'patch' }
-                'm'       { 'minor' }
-                'minor'   { 'minor' }
-                'ma'      { 'major' }
-                'major'   { 'major' }
-                default   {
-                    Write-Warning "Unrecognized bump '$bumpRaw'; defaulting to 'minor'."
-                    'minor'
+            if ($queue.Count -eq 0) {
+                if ($firstIter) {
+                    Write-Host ""
+                    Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
                 }
+                return
+            }
+
+            if (-not $isInteractive) {
+                # Non-interactive parity: emit the full pending list once and bail,
+                # marking everything as declined. The reviewer-facing comment from
+                # check-unreleased-dependencies.ps1 will flag the same set.
+                Write-Host ""
+                Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
+                foreach ($finding in $queue) {
+                    Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                    foreach ($chain in $finding.DependencyChains) {
+                        Write-Host "      pulled in by: $($chain -join ' -> ')" -ForegroundColor DarkGray
+                    }
+                }
+                Write-Warning "Non-interactive session: leaving the above crates unreleased. Reviewer should confirm the changes are immaterial."
+                foreach ($finding in $queue) { [void]$declined.Add($finding.Folder) }
+                return
+            }
+
+            $firstIter = $false
+
+            # Process one finding per outer iteration. Cascade-bumped findings
+            # naturally drop out of the next iteration's queue because
+            # Get-UnreleasedModifiedDependencies stops its BFS at release-set
+            # members, so we never need an in-loop "skip if already released"
+            # guard.
+            $next       = $queue[0]
+            $remaining  = $queue.Count - 1
+            $decision   = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
+
+            if ($decision.Action -eq 'ignore') {
+                Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
+                [void]$declined.Add($next.Folder)
+                continue
             }
 
             Write-Host ""
-            Write-Host "🚀 Releasing '$folder' as $bumpKind..." -ForegroundColor Cyan
-            $nestedReleases = @(Invoke-ReleaseFlow -CrateName $folder -Bump $bumpKind `
+            Write-Host "🚀 Releasing '$($next.Folder)' as $($decision.Action)..." -ForegroundColor Cyan
+            $nestedReleases = @(Invoke-ReleaseFlow -CrateName $next.Folder -Bump $decision.Action `
                 -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
 
             # Merge nested release records into the running set. A crate may already
@@ -799,10 +1017,13 @@ function Invoke-PostReleaseDepScan {
             # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
             # so Show-ReleaseSummary and the final commit message reflect on-disk state.
             foreach ($r in $nestedReleases) {
-                # Track every crate touched by the nested release (target + cascade
-                # dependents) so subsequent foreach iterations in this $new can skip
-                # crates that are now in the release set.
-                [void]$currentReleaseSet.Add($r.Crate)
+                # If cascade pulled in a package the user previously chose to ignore,
+                # surface that so they're not confused why it appears in the release
+                # summary, and update $declined to reflect reality.
+                if ($declined.Contains($r.Crate)) {
+                    Write-Host "ℹ️  Previously ignored package '$($r.Crate)' was cascade-bumped because '$($next.Folder)' was released." -ForegroundColor DarkCyan
+                    [void]$declined.Remove($r.Crate)
+                }
 
                 $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $r.Crate } | Select-Object -First 1
                 if ($null -eq $existing) {
@@ -812,9 +1033,18 @@ function Invoke-PostReleaseDepScan {
                 }
             }
         }
-    }
 
-    Write-Warning "Post-release dependency scan reached its iteration cap ($maxIterations); aborting further prompts."
+        Write-Warning "Post-release dependency scan reached its iteration cap ($maxIterations); aborting further prompts."
+    } finally {
+        foreach ($p in $script:TempPackageDiffPaths) {
+            try {
+                if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction Stop }
+            } catch {
+                Write-Warning "Could not delete temp diff file '$p': $_"
+            }
+        }
+        $script:TempPackageDiffPaths = $prevTempPaths
+    }
 }
 
 # Wrapper around the post-release workspace consistency check. Extracted to a

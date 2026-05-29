@@ -36,6 +36,9 @@ Describe 'End-to-end release scenarios' {
         # tests run under CI / pwsh non-tty.
         Mock -CommandName Test-InteractiveSession -MockWith { $true } -Verifiable:$false
 
+        # Suppress real editor launches when scenarios exercise the View Diff path.
+        Mock -CommandName Open-PathWithDefaultEditor -MockWith { } -Verifiable:$false
+
         # Route Read-Host through the scenario answer queue.
         Mock -CommandName Read-Host -MockWith {
             param([string]$Prompt)

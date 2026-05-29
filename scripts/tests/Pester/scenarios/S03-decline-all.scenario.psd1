@@ -15,8 +15,8 @@
         Bump      = 'patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
-            @{ Match = "Release 'b' too"; Reply = 'n' }
-            @{ Match = "Release 'c' too"; Reply = 'n' }
+            @{ Match = "Choose option for 'b'"; Reply = '2' }
+            @{ Match = "Choose option for 'c'"; Reply = '2' }
         )
     }
 
@@ -25,8 +25,8 @@
             @{ Crate = 'a'; To = '0.1.1' }
         )
         PromptsRaised = @(
-            "Release 'b' too"
-            "Release 'c' too"
+            "Choose option for 'b'"
+            "Choose option for 'c'"
         )
         UnconsumedAnswers = @()
     }
