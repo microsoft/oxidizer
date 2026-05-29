@@ -137,6 +137,24 @@ impl From<HttpPathAndQuery> for PathAndQuery {
     }
 }
 
+impl TryFrom<&str> for PathAndQuery {
+    type Error = UriError;
+
+    /// Parses a string into a [`PathAndQuery`].
+    ///
+    /// The input must start with `/` (per RFC 3986 `path-abempty`); inputs without a
+    /// leading slash are rejected to avoid inconsistent rendering downstream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string does not start with `/` or is not a valid
+    /// path-and-query.
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let parsed = HttpPathAndQuery::try_from(value).map_err(|e| UriError::invalid_uri(e.to_string()))?;
+        Ok(Self::from(parsed))
+    }
+}
+
 impl TryFrom<&PathAndQuery> for HttpPathAndQuery {
     type Error = UriError;
 
@@ -219,5 +237,16 @@ mod tests {
         // Ensure owned and borrowed conversions agree.
         let converted_ref: HttpPathAndQuery = HttpPathAndQuery::try_from(&target_path).unwrap();
         assert_eq!(converted, converted_ref);
+    }
+
+    #[test]
+    fn try_from_str_succeeds() {
+        let target_path = PathAndQuery::try_from("/api/v1/users?active=true").unwrap();
+        assert_eq!(target_path.to_string().declassify_ref(), "/api/v1/users?active=true");
+    }
+
+    #[test]
+    fn try_from_str_invalid_errors() {
+        let _ = PathAndQuery::try_from("not a valid path\0").unwrap_err();
     }
 }
