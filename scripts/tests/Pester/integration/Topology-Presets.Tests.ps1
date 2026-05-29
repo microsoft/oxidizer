@@ -9,7 +9,7 @@ BeforeAll {
 
 Describe 'Topology presets (smoke)' {
     BeforeEach {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     }
 
     Context 'Linear2' {

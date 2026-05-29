@@ -626,6 +626,76 @@ Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
 }
 
 # ---------------------------------------------------------------------------
+# Invoke-PostReleaseDepScan — ignore-shortcut path (no expensive BFS recompute
+# between successive ignore decisions, because nothing on disk or in git
+# changes when the user just declines a finding).
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
+
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+        # Mock the workspace so the maxIterations cap allows several iters.
+        Mock -CommandName Get-WorkspaceCrates -MockWith {
+            ,@(
+                [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
+                [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
+                [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
+            )
+        }
+        Mock -CommandName Invalidate-WorkspaceMetadataCache -MockWith { }
+        Mock -CommandName Test-InteractiveSession -MockWith { $true }
+
+        # Each call to Get-UnreleasedModifiedDependencies returns the same three
+        # findings; the test verifies the function is invoked at most ONCE
+        # across two successive 'ignore' decisions (the second iteration
+        # filters the cached queue without re-running the BFS).
+        $script:depsCallCount = 0
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            $script:depsCallCount++
+            ,@(
+                [pscustomobject]@{ Folder = 'a'; DependencyChains = @(,@('a')) }
+                [pscustomobject]@{ Folder = 'b'; DependencyChains = @(,@('b')) }
+                [pscustomobject]@{ Folder = 'c'; DependencyChains = @(,@('c')) }
+            )
+        }
+
+        # Drive the menu via Read-Host: two 'ignore' choices then a third
+        # 'ignore' so the loop exhausts every finding without releasing
+        # anything (releases would force a recompute).
+        $script:readHostQueue = @('2', '2', '2')
+        $script:readHostIdx = 0
+        Mock -CommandName Read-Host -MockWith {
+            $r = $script:readHostQueue[$script:readHostIdx]
+            $script:readHostIdx++
+            return $r
+        }
+        # Suppress the actual menu rendering — we only care about call counts.
+        Mock -CommandName Show-PackageMenu -MockWith { }
+    }
+
+    It 'calls Get-UnreleasedModifiedDependencies exactly once when the user only chooses ignore' {
+        $releases = @()
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>$null
+        # 3 ignore decisions → 1 BFS call (initial) + filter-only on iter 2 and 3.
+        $script:depsCallCount | Should -Be 1
+    }
+
+    It 'emits the "Analyzing packages..." status line only on iterations that recompute' {
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>&1
+        # 3 ignore decisions → status line appears once (initial recompute only).
+        ([regex]::Matches(($out | Out-String), 'Analyzing packages for unreleased modifications')).Count | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Show-FinalMessage — post-success "next steps" instructions
 # ---------------------------------------------------------------------------
 

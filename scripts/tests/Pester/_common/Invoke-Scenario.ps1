@@ -46,7 +46,7 @@ function Invoke-Scenario {
     }
 
     # --- 1. Build the workspace.
-    Invalidate-WorkspaceMetadataCache
+    Reset-ReleaseScriptCaches
     $wsParams = @{ Path = $WorkspaceRoot }
     if ($scenario.Workspace.Preset) { $wsParams.Preset = $scenario.Workspace.Preset }
     if ($scenario.Workspace.Spec)   { $wsParams.Spec   = $scenario.Workspace.Spec }

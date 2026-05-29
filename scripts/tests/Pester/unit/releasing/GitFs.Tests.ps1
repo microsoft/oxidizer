@@ -14,7 +14,7 @@ BeforeAll {
 
 Describe 'Test-GitRef' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'gitref')
     }
 
@@ -39,7 +39,7 @@ Describe 'Test-GitRef' {
 
 Describe 'Get-CurrentVersion' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'currentversion')
     }
 
@@ -95,7 +95,7 @@ version = "0.4.0"
 
 Describe 'Get-CrateVersionFromRef' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionfromref')
         # Bump 'b' on a follow-up commit so we have two distinct versions in history.
         $script:Ws.BumpVersion('b', '0.2.1')
@@ -117,7 +117,7 @@ Describe 'Get-CrateVersionFromRef' {
 
 Describe 'Get-CrateLastReleaseBaseline' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'baseline')
         # Initial commit (call it C0). Now make a source-only edit (C1), then a
         # version-bumping commit (C2), then another source edit (C3). Baseline
@@ -147,7 +147,7 @@ Describe 'Get-CrateLastReleaseBaseline' {
 
 Describe 'Get-WorkspaceCrates' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'wscrates')
     }
 
@@ -175,7 +175,7 @@ Describe 'Get-WorkspaceCrates' {
 
 Describe 'Get-AllTransitiveDependents' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'transitive-diamond')
         # Diamond4: top -> {left, right}; left -> bottom; right -> bottom. Dependents of bottom are {left, right, top}.
     }
@@ -193,7 +193,7 @@ Describe 'Get-AllTransitiveDependents' {
 
     It 'excludes publish=false crates from the result' {
         # Use Mixed6 — utility is publish=false and depends on downstream_y.
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $mixed = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'transitive-mixed')
         $deps = Get-AllTransitiveDependents -crateName 'downstream_y' -repoRoot $mixed.Path
         # utility depends on downstream_y but is publish=false; should not appear.
@@ -203,7 +203,7 @@ Describe 'Get-AllTransitiveDependents' {
 
 Describe 'Get-CratesWithUnreleasedChanges' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedchanges')
         # Edit crate b after initial commit and commit it.
         $script:Ws.ModifySource('b')
@@ -217,7 +217,7 @@ Describe 'Get-CratesWithUnreleasedChanges' {
     }
 
     It 'reports working-tree edits as unreleased' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $w2 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedworking')
         # Uncommitted source edit on c.
         $w2.ModifySource('c')
@@ -226,7 +226,7 @@ Describe 'Get-CratesWithUnreleasedChanges' {
     }
 
     It 'reports untracked files as unreleased' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $w3 = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleaseduntracked')
         $newFile = Join-Path $w3.Path 'crates\a\src\new_file.rs'
         Set-Content -Path $newFile -Value '// new'
@@ -235,7 +235,7 @@ Describe 'Get-CratesWithUnreleasedChanges' {
     }
 
     It 'skips publish=false crates' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $w4 = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'unreleasedmixed')
         $w4.ModifySource('utility')
         $w4.AddCommit('utility edit')
@@ -246,7 +246,7 @@ Describe 'Get-CratesWithUnreleasedChanges' {
 
 Describe 'Get-CratesWithVersionBumps' {
     BeforeAll {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionbumps')
         # Bump 'a' relative to HEAD~ baseline.
         $script:Ws.BumpVersion('a', '0.1.1')
@@ -261,7 +261,7 @@ Describe 'Get-CratesWithVersionBumps' {
     }
 
     It 'returns an empty set when the working tree matches the base ref' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $w2 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionbumps-empty')
         $bumped = Get-CratesWithVersionBumps -RepoRoot $w2.Path -BaseRef 'HEAD'
         $bumped.Count | Should -Be 0
@@ -270,7 +270,7 @@ Describe 'Get-CratesWithVersionBumps' {
 
 Describe 'Get-PendingReleases' {
     BeforeEach {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
     }
 
     It 'returns an empty array when no version diffs against the base ref' {
@@ -441,5 +441,116 @@ Describe 'Add-CascadeBulletToVersionSection' {
         ([regex]::Matches($raw, "(?<!`r)`n")).Count | Should -Be 0
         ([regex]::Matches($raw, "`r`n")).Count | Should -BeGreaterThan 0
         $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Session-scoped caches: ensures the analyze-phase optimizations (warm git
+# lookups across post-release dep-scan iterations) actually take effect, and
+# that test isolation via Reset-ReleaseScriptCaches still clears them.
+# ---------------------------------------------------------------------------
+
+Describe 'Session-scoped git caches' {
+    BeforeAll {
+        $script:CacheWs = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'cache-tests')
+        # Build a 3-commit history so the per-crate baseline and committed
+        # diff are both well-defined and distinct from HEAD:
+        #   HEAD~2 → initial Linear3 (b at 0.2.0)
+        #   HEAD~1 → version bump for b to 0.2.1 (this is the baseline commit)
+        #   HEAD   → source edit for b (an unreleased change visible to
+        #            Get-CrateCommittedChanges)
+        $script:CacheWs.BumpVersion('b', '0.2.1')
+        $script:CacheWs.AddCommit('bump b')
+        $script:CacheWs.ModifySource('b', '// post-baseline edit')
+        $script:CacheWs.AddCommit('edit b after baseline')
+    }
+
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+    }
+
+    Context 'Get-CrateVersionFromRef' {
+        It 'returns the cached value on the second call (no git spawn)' {
+            $v1 = Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b'
+            $v1 | Should -Be '0.2.1'
+            # If the cache is bypassed, Invoke-Git will be called and the mock
+            # below will throw. A passing test confirms the cache served the
+            # second request without touching git.
+            Mock -CommandName Invoke-Git -MockWith { throw "Invoke-Git called when cache should have served the request" }
+            $v2 = Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b'
+            $v2 | Should -Be '0.2.1'
+        }
+
+        It 'caches null results for nonexistent crate folders' {
+            (Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'nope') | Should -BeNullOrEmpty
+            Mock -CommandName Invoke-Git -MockWith { throw "second call should be cached" }
+            (Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'nope') | Should -BeNullOrEmpty
+        }
+
+        It 'uses different cache slots for different BaseRefs of the same folder' {
+            # Populate cache for HEAD only.
+            (Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b') | Should -Be '0.2.1'
+            # HEAD~2 must still hit git (different cache key) and return the original version
+            # (HEAD~1 is the bump commit, also at 0.2.1; HEAD~2 is the initial Linear3 state).
+            (Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD~2' -CrateFolder 'b') | Should -Be '0.2.0'
+        }
+    }
+
+    Context 'Get-CrateLastReleaseBaseline' {
+        It 'returns the cached SHA on the second call (no git spawn)' {
+            $sha1 = Get-CrateLastReleaseBaseline -RepoRoot $script:CacheWs.Path -CrateFolder 'b'
+            $sha1 | Should -Not -BeNullOrEmpty
+            Mock -CommandName Invoke-Git -MockWith { throw "Invoke-Git called when cache should have served the request" }
+            $sha2 = Get-CrateLastReleaseBaseline -RepoRoot $script:CacheWs.Path -CrateFolder 'b'
+            $sha2 | Should -Be $sha1
+        }
+    }
+
+    Context 'Get-CrateCommittedChanges' {
+        It 'returns the same array on the second call (no git spawn)' {
+            $files1 = Get-CrateCommittedChanges -RepoRoot $script:CacheWs.Path -CrateFolder 'b'
+            # 'b' has had its version bumped after its baseline (Cargo.toml + maybe changelog),
+            # but at minimum the Cargo.toml change must show up.
+            $files1.Count | Should -BeGreaterOrEqual 1
+            Mock -CommandName Invoke-Git -MockWith { throw "Invoke-Git called when cache should have served the request" }
+            $files2 = Get-CrateCommittedChanges -RepoRoot $script:CacheWs.Path -CrateFolder 'b'
+            $files2.Count | Should -Be $files1.Count
+        }
+
+        It 'returns an empty result for a crate with no prior baseline' {
+            # The 'nope' folder doesn't exist, so Get-CrateLastReleaseBaseline returns $null.
+            # PowerShell idiomatically unwraps empty arrays to $null at the function
+            # boundary; consumers should collect with @(...) when array shape matters.
+            $files = @(Get-CrateCommittedChanges -RepoRoot $script:CacheWs.Path -CrateFolder 'nope')
+            $files.Count | Should -Be 0
+        }
+    }
+
+    Context 'Reset-ReleaseScriptCaches' {
+        It 'clears every session-scoped cache so the next call re-fetches' {
+            # Prime all three caches.
+            (Get-CrateVersionFromRef       -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b') | Out-Null
+            (Get-CrateLastReleaseBaseline  -RepoRoot $script:CacheWs.Path -CrateFolder 'b')                 | Out-Null
+            (Get-CrateCommittedChanges     -RepoRoot $script:CacheWs.Path -CrateFolder 'b')                 | Out-Null
+
+            Reset-ReleaseScriptCaches
+
+            # After reset, the next call MUST hit git. We assert this by mocking
+            # Invoke-Git to record a call — if reset failed, the cache would
+            # serve the call and the mock counter stays at 0.
+            Mock -CommandName Invoke-Git -MockWith { @() }
+            (Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b') | Out-Null
+            Should -Invoke -CommandName Invoke-Git -Times 1 -Exactly
+        }
+    }
+
+    Context 'Invalidate-WorkspaceMetadataCache' {
+        It 'does NOT clear git-derived caches (production cascade calls must not undo the speed-up)' {
+            $v1 = Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b'
+            Invalidate-WorkspaceMetadataCache
+            Mock -CommandName Invoke-Git -MockWith { throw "Invalidate-WorkspaceMetadataCache must leave git caches intact" }
+            $v2 = Get-CrateVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -CrateFolder 'b'
+            $v2 | Should -Be $v1
+        }
     }
 }

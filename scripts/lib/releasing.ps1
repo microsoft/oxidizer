@@ -253,6 +253,12 @@ function Get-CurrentVersion {
 
 # Reads the [package] `version = "..."` from a crate's Cargo.toml at $BaseRef.
 # Returns $null if the file does not exist at that ref (e.g. crate added in this PR).
+#
+# Cached for the lifetime of the script run: $BaseRef is fixed by the caller
+# for the entire run and the script never makes git commits, so the result
+# for a given (BaseRef, CrateFolder) pair is invariant. Saves N×`git show`
+# spawns per `Invoke-PostReleaseDepScan` loop iteration (the dominant cost
+# of the "Analyzing packages..." pause on Windows).
 function Get-CrateVersionFromRef {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -260,13 +266,24 @@ function Get-CrateVersionFromRef {
         [Parameter(Mandatory = $true)][string]$CrateFolder
     )
 
-    $output = Invoke-Git -Arguments @('show', "${BaseRef}:crates/$CrateFolder/Cargo.toml") -RepoRoot $RepoRoot -AllowFailure
-    if ($null -eq $output) { return $null }
+    if ($null -eq $script:CrateVersionAtRefCache) {
+        $script:CrateVersionAtRefCache = @{}
+    }
+    $cacheKey = "$RepoRoot`u{2402}$BaseRef`u{2402}$CrateFolder"
+    if ($script:CrateVersionAtRefCache.ContainsKey($cacheKey)) {
+        return $script:CrateVersionAtRefCache[$cacheKey]
+    }
 
-    $content = ($output -join "`n")
-    $m = $script:CargoPackageVersionRegex.Match($content)
-    if (-not $m.Success) { return $null }
-    return $m.Groups[2].Value
+    $output = Invoke-Git -Arguments @('show', "${BaseRef}:crates/$CrateFolder/Cargo.toml") -RepoRoot $RepoRoot -AllowFailure
+    $result = $null
+    if ($null -ne $output) {
+        $content = ($output -join "`n")
+        $m = $script:CargoPackageVersionRegex.Match($content)
+        if ($m.Success) { $result = $m.Groups[2].Value }
+    }
+
+    $script:CrateVersionAtRefCache[$cacheKey] = $result
+    return $result
 }
 
 # --- WORKSPACE METADATA ---
@@ -275,6 +292,21 @@ function Get-CrateVersionFromRef {
 # across nested release runs; mutable version data is read fresh from disk via
 # Get-CurrentVersion to avoid staleness.
 $script:CachedWorkspaceMetadata = $null
+
+# Caches for git-derived data that is invariant for the entire script run.
+# These are valid for the whole release-crate.ps1 invocation because:
+#   - $BaseRef is fixed by the caller for the entire run, and
+#   - the script never makes git commits (HEAD does not move).
+# Therefore the per-crate baseline commit, the per-crate committed-changes
+# diff, and the per-crate version-at-BaseRef are all stable for the whole
+# session. They are populated lazily (first hit) and cleared only by
+# Reset-ReleaseScriptCaches — NOT by the routine, mid-flow
+# Invalidate-WorkspaceMetadataCache calls that the cascade fires after each
+# in-memory Cargo.toml edit (those edits change cargo metadata's view of
+# on-disk versions but leave git history untouched).
+$script:CrateLastReleaseBaselineCache = $null
+$script:CrateCommittedChangesCache    = $null
+$script:CrateVersionAtRefCache        = $null
 
 function Get-WorkspaceMetadata {
     param([string]$repoRoot)
@@ -295,8 +327,28 @@ function Get-WorkspaceMetadata {
 
 # Invalidates the cached metadata. Call this after editing any Cargo.toml in the
 # workspace so subsequent analyses see fresh deps/versions.
+#
+# Intentionally does NOT clear the git-derived caches
+# (CrateLastReleaseBaselineCache, CrateCommittedChangesCache,
+# CrateVersionAtRefCache) — those are keyed on git history, which the
+# release script never mutates (no commits are made). Test isolation
+# between scenarios should call Reset-ReleaseScriptCaches instead, which
+# clears every cache including this one.
 function Invalidate-WorkspaceMetadataCache {
     $script:CachedWorkspaceMetadata = $null
+}
+
+# Clears every script-scoped cache used by the release tooling: workspace
+# metadata AND the git-derived per-crate caches (baseline commit, committed
+# changes, version-at-BaseRef). Intended for test isolation between
+# scenarios that build distinct synthetic workspaces — production code uses
+# Invalidate-WorkspaceMetadataCache for the routine mid-flow invalidation
+# after Cargo.toml edits.
+function Reset-ReleaseScriptCaches {
+    $script:CachedWorkspaceMetadata       = $null
+    $script:CrateLastReleaseBaselineCache = $null
+    $script:CrateCommittedChangesCache    = $null
+    $script:CrateVersionAtRefCache        = $null
 }
 
 # Returns information about all workspace crates as an array of objects with:
@@ -443,21 +495,77 @@ function Get-CrateFolderForPath {
 # We intentionally do not rely on git tags. The repo creates them after merge to
 # main, but a CI-time clone or a partial fetch may not have them, and a tag is
 # downstream evidence of a release while the Cargo.toml edit is the cause.
+#
+# Cached for the lifetime of the script run (the script never commits, so the
+# baseline SHA per folder is invariant). The cache is cleared by
+# Reset-ReleaseScriptCaches between test scenarios; production mid-flow
+# invalidations (Invalidate-WorkspaceMetadataCache) deliberately leave it alone.
 function Get-CrateLastReleaseBaseline {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$CrateFolder
     )
 
+    if ($null -eq $script:CrateLastReleaseBaselineCache) {
+        $script:CrateLastReleaseBaselineCache = @{}
+    }
+    $cacheKey = "$RepoRoot`u{2402}$CrateFolder"
+    if ($script:CrateLastReleaseBaselineCache.ContainsKey($cacheKey)) {
+        return $script:CrateLastReleaseBaselineCache[$cacheKey]
+    }
+
     $relPath = "crates/$CrateFolder/Cargo.toml"
     # -G matches any added/removed diff line whose content matches the regex.
     # Anchoring at column 0 keeps us on top-level keys, not version-like strings
     # appearing inside dependency tables or arbitrary literals.
     $out = Invoke-Git -Arguments @('log', '-1', '--format=%H', '-G', '^(version|publish)\s*=', '--', $relPath) -RepoRoot $RepoRoot -AllowFailure
-    if ($null -eq $out) { return $null }
-    $sha = (@($out))[0]
-    if ([string]::IsNullOrWhiteSpace($sha)) { return $null }
-    return $sha.ToString().Trim()
+    $result = $null
+    if ($null -ne $out) {
+        $sha = (@($out))[0]
+        if (-not [string]::IsNullOrWhiteSpace($sha)) {
+            $result = $sha.ToString().Trim()
+        }
+    }
+
+    $script:CrateLastReleaseBaselineCache[$cacheKey] = $result
+    return $result
+}
+
+# Returns the list of repo-relative paths under crates/<CrateFolder>/ that
+# have changed in committed history between the crate's last release baseline
+# (see Get-CrateLastReleaseBaseline) and HEAD. Returns an empty array if the
+# crate has no prior release boundary recorded.
+#
+# Cached for the lifetime of the script run (the script never commits, so the
+# committed diff per folder is invariant). The cache is cleared by
+# Reset-ReleaseScriptCaches between test scenarios.
+function Get-CrateCommittedChanges {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$CrateFolder
+    )
+
+    if ($null -eq $script:CrateCommittedChangesCache) {
+        $script:CrateCommittedChangesCache = @{}
+    }
+    $cacheKey = "$RepoRoot`u{2402}$CrateFolder"
+    if ($script:CrateCommittedChangesCache.ContainsKey($cacheKey)) {
+        return $script:CrateCommittedChangesCache[$cacheKey]
+    }
+
+    $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $CrateFolder
+    $paths = New-Object 'System.Collections.Generic.List[string]'
+    if (-not [string]::IsNullOrEmpty($baseline)) {
+        $committed = Invoke-Git -Arguments @('diff', '--name-only', $baseline, 'HEAD', '--', "crates/$CrateFolder") -RepoRoot $RepoRoot
+        foreach ($line in $committed) {
+            $p = $line.ToString().Trim().Replace('\', '/')
+            if (-not [string]::IsNullOrEmpty($p)) { $paths.Add($p) }
+        }
+    }
+    $result = $paths.ToArray()
+
+    $script:CrateCommittedChangesCache[$cacheKey] = $result
+    return $result
 }
 
 # For each published workspace crate, returns a hashtable folder -> ChangedFileCount
@@ -472,7 +580,8 @@ function Get-CrateLastReleaseBaseline {
 # Crates with zero modifications are omitted from the result.
 #
 # Working-tree edits and untracked files are queried once globally and bucketed
-# per crate to avoid spawning O(crates) extra git processes.
+# per crate to avoid spawning O(crates) extra git processes. The per-crate
+# committed diff is served from Get-CrateCommittedChanges' session cache.
 function Get-CratesWithUnreleasedChanges {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot
@@ -501,13 +610,8 @@ function Get-CratesWithUnreleasedChanges {
         $folder = $crate.Folder
         $files = [System.Collections.Generic.HashSet[string]]::new()
 
-        $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $folder
-        if (-not [string]::IsNullOrEmpty($baseline)) {
-            $committed = Invoke-Git -Arguments @('diff', '--name-only', $baseline, 'HEAD', '--', "crates/$folder") -RepoRoot $RepoRoot
-            foreach ($line in $committed) {
-                $p = $line.ToString().Trim().Replace('\', '/')
-                if (-not [string]::IsNullOrEmpty($p)) { [void]$files.Add($p) }
-            }
+        foreach ($p in Get-CrateCommittedChanges -RepoRoot $RepoRoot -CrateFolder $folder) {
+            [void]$files.Add($p)
         }
 
         if ($workingByCrate.ContainsKey($folder)) {

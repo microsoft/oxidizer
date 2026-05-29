@@ -1262,33 +1262,49 @@ function Invoke-PostReleaseDepScan {
     $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 
     try {
-        $firstIter = $true
+        # $queue is recomputed only when needed:
+        #   - On entry (first iteration).
+        #   - After any decision that actually changed on-disk / release-set
+        #     state (i.e. user accepted a release, which then runs a
+        #     cascade that may add new bumps).
+        # After an 'ignore' decision nothing on disk or in git changes, so
+        # we just filter the previous queue by the updated $declined set —
+        # avoiding ~120 git spawns and a cargo metadata recompute per click.
+        $queue = $null
+        $hasEverComputedQueue = $false
         for ($iter = 0; $iter -lt $maxIterations; $iter++) {
-            Invalidate-WorkspaceMetadataCache
-
-            # The BFS below re-walks `cargo metadata`, runs git diffs against
-            # each crate's last-release baseline, and reapplies the
-            # declined/cascade filters — on a sizeable workspace this can
-            # take several seconds. Show a status line so the user knows the
-            # script hasn't hung between their menu choice and the next
-            # prompt. Skip the indicator in non-interactive runs where the
-            # output is just log noise.
-            if ($isInteractive) {
-                Write-Host ''
-                Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
-            }
-
-            $queue = @(
-                @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef) |
-                    Where-Object { -not $declined.Contains($_.Folder) }
-            )
-
-            if ($queue.Count -eq 0) {
-                if ($firstIter) {
-                    Write-Host ""
-                    Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
+            if ($null -eq $queue) {
+                # Full recompute path: BFS over cargo metadata + per-crate
+                # diffs. The session-scoped baseline / committed-changes /
+                # version-at-ref caches keep N×git calls down to a single
+                # warm-up burst on the first iteration; later recomputes
+                # (post-release) hit the caches except for the working-tree
+                # diff and ls-files calls (2 git invocations total).
+                if ($isInteractive) {
+                    Write-Host ''
+                    Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
                 }
-                return
+
+                $queue = @(
+                    @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef) |
+                        Where-Object { -not $declined.Contains($_.Folder) }
+                )
+
+                if ($queue.Count -eq 0) {
+                    if (-not $hasEverComputedQueue) {
+                        Write-Host ""
+                        Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
+                    }
+                    return
+                }
+                $hasEverComputedQueue = $true
+            } else {
+                # Cheap path: previous decision was 'ignore', so the only
+                # change since the last queue snapshot is $declined gaining
+                # one entry. The BFS output would be identical modulo that
+                # one filter, so re-filter and skip the spawn storm.
+                $queue = @($queue | Where-Object { -not $declined.Contains($_.Folder) })
+                if ($queue.Count -eq 0) { return }
             }
 
             if (-not $isInteractive) {
@@ -1309,8 +1325,6 @@ function Invoke-PostReleaseDepScan {
                 return
             }
 
-            $firstIter = $false
-
             # Process one finding per outer iteration. Cascade-bumped findings
             # naturally drop out of the next iteration's queue because the
             # cascade commits their version bumps, so they no longer appear
@@ -1322,6 +1336,7 @@ function Invoke-PostReleaseDepScan {
             if ($decision.Action -eq 'ignore') {
                 Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
                 [void]$declined.Add($next.Folder)
+                # Keep $queue intact so the next iteration takes the cheap path.
                 continue
             }
 
@@ -1351,6 +1366,12 @@ function Invoke-PostReleaseDepScan {
                     $existing.NewVersion = $r.NewVersion
                 }
             }
+
+            # The cascade just edited Cargo.toml files; force a full BFS
+            # recompute next iteration so newly-bumped crates drop off the
+            # findings list (and any of their committed-but-still-unreleased
+            # transitive upstreams surface).
+            $queue = $null
         }
 
         Write-Warning "Post-release dependency scan reached its iteration cap ($maxIterations); aborting further prompts."

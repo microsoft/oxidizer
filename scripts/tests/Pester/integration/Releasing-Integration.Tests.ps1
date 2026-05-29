@@ -21,7 +21,7 @@ BeforeAll {
 Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
 
     It 'N1 — modified upstream + bumped downstream in same PR is flagged' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n1')
         # Earlier baseline = initial commit. In this PR: modify upstream + bump downstream.
         $ws.ModifySource('upstream')
@@ -38,7 +38,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N2 — earlier-PR upstream edit + current-PR downstream bump is flagged' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n2')
         # Simulate previous PR landing an upstream edit without a bump:
         $ws.ModifySource('upstream')
@@ -52,7 +52,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N3 — upstream already bumped cleanly; no further edits → no finding' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n3')
         # Previous PR: bump upstream and release.
         $ws.BumpVersion('upstream', '0.2.1')
@@ -66,7 +66,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N4 — bump-then-edit upstream is flagged via per-crate baseline' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n4')
         # Earlier: bump upstream + release.
         $ws.BumpVersion('upstream', '0.2.1')
@@ -83,7 +83,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N5 — BFS reaches a modified leaf through an unchanged middle' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'n5')
         # Modify the deepest leaf 'c' in an earlier PR.
         $ws.ModifySource('c')
@@ -99,7 +99,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N6 — CHANGELOG-only edit in upstream still flagged (humans decide materiality)' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n6')
         $changelog = Join-Path $ws.Path 'crates\upstream\CHANGELOG.md'
         Add-Content -Path $changelog -Value "`n* maintenance note`n"
@@ -112,7 +112,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N7 — publish=false → true flip resets the baseline (pre-flip edits ignored)' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         # Build a workspace where 'upstream' starts as publish=false with pre-flip
         # edits, then is flipped to publish=true on a later commit. Current PR bumps
         # downstream only; pre-flip edits must not be reported.
@@ -143,7 +143,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N8 — working-tree edits on upstream are flagged' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n8')
         # Current PR: bump downstream (committed).
         $ws.BumpVersion('downstream', '0.1.1')
@@ -156,7 +156,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N9 — untracked new file in upstream is flagged' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n9')
         $ws.BumpVersion('downstream', '0.1.1')
         $ws.AddCommit('bump downstream')
@@ -167,7 +167,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'T6b — dev-only dep on a modified crate is NOT flagged' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         # Mixed6's 'target' has a dev-dep on upstream_a (normal dep on upstream_b).
         $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 't6b')
         $ws.ModifySource('upstream_a')
@@ -180,7 +180,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'T15 — publish=false dep is NOT flagged even when modified' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 't15')
         # 'utility' is publish=false. Modify it and bump downstream_y which depends on it.
         $ws.ModifySource('utility')
@@ -193,7 +193,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'T16-style aggregation — one shared upstream across multiple bumped downstreams gets multiple chains' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         # Diamond4: top -> {left, right}; left -> bottom; right -> bottom.
         # Modify bottom in an earlier PR; bump both left and right.
         $ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 't16-style')
@@ -210,7 +210,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'Detached — modified crate in component B does not surface from a release in component A' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'detached')
         # Two disconnected components: alpha→beta and gamma→delta.
         # Modify 'gamma' (component B) and bump 'alpha' (component A).
@@ -225,7 +225,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
     }
 
     It 'N10 — BFS traverses past release-set intermediates and chains are suffix-subsumed' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         # Linear3: a → b → c. Modify 'c' (unreleased). Release set = {a, b}.
         # Expected: the chain 'a -> b -> c' subsumes 'b -> c', leaving one chain.
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'n10')
@@ -253,7 +253,7 @@ Describe 'Update-CrateVersion' {
     }
 
     It 'updates the crate version in its own Cargo.toml' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-basic')
         $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
@@ -263,7 +263,7 @@ Describe 'Update-CrateVersion' {
     }
 
     It 'updates the [workspace.dependencies] entry for the bumped crate' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-root')
         $crateCargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
@@ -281,7 +281,7 @@ Describe 'Update-CrateVersion' {
         # `dep = { path = "...", version = "x.y.z" }`. Phase 8 fix scopes the
         # replacement to the [package] table only; this test pins the corrected
         # behavior.
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-inline-dep')
 
         # Replace the downstream Cargo.toml with one that declares upstream inline
@@ -320,7 +320,7 @@ upstream = { path = "../upstream", version = "0.2.0" }
         # `version`). The shared CargoPackageVersionRegex anchors to line start,
         # so `rust-version = "..."` is no longer confused with the package's
         # version literal. Pin both orderings (rust-version before vs after).
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-rust-version')
 
         $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
@@ -354,7 +354,7 @@ Describe 'Invoke-CascadeStep' {
     }
 
     It 'bumps a dependent from the base version when not yet pre-bumped' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-fresh')
         # Initial commit is the base; downstream starts at 0.1.0.
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
@@ -373,7 +373,7 @@ Describe 'Invoke-CascadeStep' {
     }
 
     It 'skips re-bumping when the dependent was already pre-bumped to a sufficient version' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-skip')
         # Pre-bump downstream from 0.1.0 to 0.2.0 (larger than any patch cascade).
         $ws.BumpVersion('downstream', '0.2.0')
@@ -393,7 +393,7 @@ Describe 'Invoke-CascadeStep' {
     }
 
     It 'upgrades a pre-bumped dependent when the cascade requires a larger version' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-upgrade')
         # Pre-bump downstream to 0.1.1 (patch). Then cascade demands major (0.x → 0.2.0).
         $ws.BumpVersion('downstream', '0.1.1')
@@ -413,7 +413,7 @@ Describe 'Invoke-CascadeStep' {
     }
 
     It 'returns null and warns when the dependent crate is missing' {
-        Invalidate-WorkspaceMetadataCache
+        Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-missing')
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
         $warnings = @()
