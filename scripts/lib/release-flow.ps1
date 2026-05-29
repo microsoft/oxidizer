@@ -1186,10 +1186,11 @@ function Show-PackageDiff {
 }
 
 # Renders the menu for a single finding and runs the input-validation loop.
-# Choice 1 (View diff) re-renders the menu and re-prompts; choices 2..N
-# resolve to a release action. Empty input silently re-prompts (no warning),
-# anything else complains then re-prompts. Returns @{ Action = 'ignore' |
-# 'major' | 'minor' | 'patch' }.
+# Choice 1 (View diff) shows the diff and re-prompts WITHOUT re-rendering
+# the menu (the options are still visible higher in the scrollback); choices
+# 2..N resolve to a release action. Empty input silently re-prompts (no
+# warning), anything else complains then re-prompts. Returns @{ Action =
+# 'ignore' | 'major' | 'minor' | 'patch' }.
 #
 # When option 5 is suppressed (because it would be numerically identical to
 # option 4 — see Test-IsPatchOptionRedundant), the prompt range tightens to
@@ -1213,7 +1214,6 @@ function Get-PackageReleaseDecision {
         if ($choice -eq '') { continue }
         if ($choice -eq '1') {
             Show-PackageDiff -RepoRoot $RepoRoot -Folder $Finding.Folder
-            Show-PackageMenu -Finding $Finding -RemainingCount $RemainingCount
             continue
         }
         if ($choice -eq '2') { return @{ Action = 'ignore' } }

@@ -298,22 +298,27 @@ Describe 'Get-PackageReleaseDecision' {
         }
     }
 
-    Context 'View Diff (choice 1) re-renders the menu and re-prompts' {
-        It "calls Show-PackageDiff once when the user picks '1' then '4'" {
+    Context 'View Diff (choice 1) re-prompts without re-rendering the menu' {
+        It "calls Show-PackageDiff once when the user picks '1' then '4', menu rendered only once" {
             SetReadHostQueue -Answers @('1', '4')
             $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 0 -RepoRoot $TestDrive
             $r.Action | Should -Be 'minor'
             Should -Invoke -CommandName Show-PackageDiff -Times 1 -Exactly -ParameterFilter { $Folder -eq 'b' }
-            # Menu rendered: 1 initial + 1 after diff = 2 calls.
-            Should -Invoke -CommandName Show-PackageMenu -Times 2 -Exactly
+            # Menu rendered: 1 initial only — diff selection does NOT re-render
+            # the menu (the options are still visible in scrollback above).
+            Should -Invoke -CommandName Show-PackageMenu -Times 1 -Exactly
+            # But the Read-Host prompt IS observed twice: once initial, once
+            # after the diff is shown.
+            $script:RH_PromptsObserved.Count | Should -Be 2
         }
 
-        It "calls Show-PackageDiff twice when the user picks '1', '1', '4'" {
+        It "calls Show-PackageDiff twice when the user picks '1', '1', '4', menu still rendered only once" {
             SetReadHostQueue -Answers @('1', '1', '4')
             $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 2 -RepoRoot $TestDrive
             $r.Action | Should -Be 'minor'
             Should -Invoke -CommandName Show-PackageDiff -Times 2 -Exactly
-            Should -Invoke -CommandName Show-PackageMenu -Times 3 -Exactly
+            Should -Invoke -CommandName Show-PackageMenu -Times 1 -Exactly
+            $script:RH_PromptsObserved.Count | Should -Be 3
         }
     }
 

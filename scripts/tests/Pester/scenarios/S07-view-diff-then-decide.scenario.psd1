@@ -1,6 +1,6 @@
 @{
     Name        = 'S07-view-diff-then-decide'
-    Description = 'User exercises the View Diff option (menu choice 1) for a finding before deciding. After viewing the diff, the menu re-renders and the user picks minor (option 4) for b, then ignores c. Validates that choice 1 re-prompts on the same package rather than advancing.'
+    Description = 'User exercises the View Diff option (menu choice 1) for a finding before deciding. After viewing the diff the script re-prompts on the same package without re-rendering the menu, and the user picks minor (option 4) for b, then ignores c. Validates that choice 1 re-prompts on the same package rather than advancing.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -17,7 +17,8 @@
         Answers   = @(
             # First prompt for b: view the diff.
             @{ Match = "Choose option for 'b'"; Reply = '1' }
-            # Menu re-renders for b after diff; this time choose minor.
+            # Script re-prompts for b after diff (without re-rendering the
+            # menu); this time choose minor.
             @{ Match = "Choose option for 'b'"; Reply = '4' }
             # Next iteration prompts for c; user ignores.
             @{ Match = "Choose option for 'c'"; Reply = '2' }
