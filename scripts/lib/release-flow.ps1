@@ -714,12 +714,13 @@ function Format-PackageMenu {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
+    [void]$sb.AppendLine('  potentially affected dependency chains:')
     foreach ($chain in @($Finding.DependencyChains)) {
-        [void]$sb.AppendLine("    pulled in by: $($chain -join ' -> ')")
+        [void]$sb.AppendLine("    $($chain -join ' -> ')")
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('  1. View diff')
-    [void]$sb.AppendLine('  2. Ignore package')
+    [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial to published functionality')
     [void]$sb.AppendLine('  3. Bump major version')
     [void]$sb.AppendLine('  4. Bump minor version')
     [void]$sb.AppendLine('  5. Bump patch version')
@@ -1031,8 +1032,9 @@ function Invoke-PostReleaseDepScan {
                 Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
                 foreach ($finding in $queue) {
                     Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                    Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
                     foreach ($chain in $finding.DependencyChains) {
-                        Write-Host "      pulled in by: $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
                     }
                 }
                 Write-Warning "Non-interactive session: leaving the above crates unreleased. Reviewer should confirm the changes are immaterial."
@@ -1043,10 +1045,9 @@ function Invoke-PostReleaseDepScan {
             $firstIter = $false
 
             # Process one finding per outer iteration. Cascade-bumped findings
-            # naturally drop out of the next iteration's queue because
-            # Get-UnreleasedModifiedDependencies stops its BFS at release-set
-            # members, so we never need an in-loop "skip if already released"
-            # guard.
+            # naturally drop out of the next iteration's queue because the
+            # cascade commits their version bumps, so they no longer appear
+            # in the modified-but-unreleased set on the next BFS snapshot.
             $next       = $queue[0]
             $remaining  = $queue.Count - 1
             $decision   = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot

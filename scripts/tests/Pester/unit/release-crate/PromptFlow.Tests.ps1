@@ -51,13 +51,19 @@ Describe 'Format-PackageMenu' {
         $out | Should -Match '\(\+3 packages queued\)'
     }
 
-    It 'emits one "pulled in by:" line per dependency chain' {
+    It 'renders a "potentially affected dependency chains:" header followed by one indented line per chain' {
         $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('a', 'c', 'd'))
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-        $matches = [regex]::Matches($out, 'pulled in by:')
-        $matches.Count | Should -Be 2
-        $out | Should -Match 'pulled in by: a -> b -> d'
-        $out | Should -Match 'pulled in by: a -> c -> d'
+
+        # Single header line, regardless of how many chains.
+        ([regex]::Matches($out, 'potentially affected dependency chains:')).Count | Should -Be 1
+
+        # Split into raw lines so trailing `\r` (from StringBuilder.AppendLine on Windows)
+        # doesn't trip up `$` anchors.
+        $lines = $out -split "`r?`n"
+        $out | Should -Not -Match 'pulled in by:'
+        $lines | Should -Contain '    a -> b -> d'
+        $lines | Should -Contain '    a -> c -> d'
     }
 
     It 'lists the five menu options in the exact order and wording from the spec' {
@@ -65,7 +71,7 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
         $lines.Count | Should -Be 5
         $lines[0] | Should -Match '^\s*1\. View diff$'
-        $lines[1] | Should -Match '^\s*2\. Ignore package$'
+        $lines[1] | Should -Match '^\s*2\. Ignore package - the changes are immaterial to published functionality$'
         $lines[2] | Should -Match '^\s*3\. Bump major version$'
         $lines[3] | Should -Match '^\s*4\. Bump minor version$'
         $lines[4] | Should -Match '^\s*5\. Bump patch version$'

@@ -583,6 +583,13 @@ function Get-CratesWithVersionBumps {
 #   PackageName       - cargo package name
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_crate', 'mid_crate', 'this_dep'), ... )
+#
+# The BFS traverses past every node (including release-set members) so a chain
+# like 'foo -> bar -> baz' is recorded even when 'bar' is itself being
+# released. Chains are then reduced (deduped + suffix-subsumed) so a shorter
+# chain that is a strict suffix of a longer one (e.g. 'bar -> baz' vs
+# 'foo -> bar -> baz') is dropped to keep the prompt focused on the longest
+# path from each release-set entry point.
 function Get-UnreleasedModifiedDependencies {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -612,7 +619,9 @@ function Get-UnreleasedModifiedDependencies {
     foreach ($releasedFolder in @($releaseSet | Sort-Object)) {
         if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
 
-        # BFS forward over normal+build deps. Track shortest path to each visited node.
+        # BFS forward over normal+build deps. Track shortest path to each visited
+        # node within this start-crate's traversal (avoids cycles and keeps the
+        # recorded chain to the SHORTEST path from this entry point).
         $visited = [System.Collections.Generic.HashSet[string]]::new()
         [void]$visited.Add($releasedFolder)
         $queue = [System.Collections.Generic.Queue[object]]::new()
@@ -632,12 +641,12 @@ function Get-UnreleasedModifiedDependencies {
                 $depCrate = $byFolder[$depFolder]
                 $depChain = $node.Chain + $depFolder
 
-                if ($releaseSet.Contains($depFolder)) {
-                    # Stop traversal — this dep's own bump pulls through downstream changes.
-                    continue
-                }
-
-                if ($modifiedMap.ContainsKey($depFolder) -and $depCrate.Published) {
+                # Only record this dep as a finding when it has unreleased
+                # modifications, is published, AND is NOT already in the release
+                # set (release-set members are being published as part of this
+                # PR, so they are not findings themselves).
+                if (-not $releaseSet.Contains($depFolder) -and `
+                    $modifiedMap.ContainsKey($depFolder) -and $depCrate.Published) {
                     if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
@@ -652,14 +661,79 @@ function Get-UnreleasedModifiedDependencies {
                     }
                 }
 
-                # Continue BFS past unchanged-and-unreleased intermediates so that a
-                # hidden modified upstream dep (separated from the released crate by an
-                # unchanged intermediate) is still detected.
+                # Traverse past every node — release-set members, unchanged
+                # intermediates, and recorded findings alike. This lets us
+                # surface chains that thread through release-set members to a
+                # deeper modified-and-unreleased target (e.g. 'foo -> bar -> baz'
+                # where 'bar' is being released and 'baz' is not).
                 $queue.Enqueue([pscustomobject]@{ Folder = $depFolder; Chain = $depChain })
             }
         }
     }
 
     if ($findings.Count -eq 0) { return @() }
+
+    # Reduce each finding's chains: drop duplicates and shorter chains that are
+    # strict suffixes of a longer chain, so the user sees only the longest
+    # caller-rooted path through each branch.
+    foreach ($f in $findings.Values) {
+        $f.DependencyChains = Reduce-DependencyChains -Chains $f.DependencyChains
+    }
+
     return @($findings.Values)
+}
+
+# Deduplicates dependency chains and drops chains that are strict suffixes of
+# any other kept chain. Returns a stable-sorted array (alphabetical by joined
+# chain text) so the UX prompt and the PR comment render deterministically.
+#
+# A chain X is "subsumed by" chain Y when Y is strictly longer than X and X
+# equals the tail of Y element-for-element. Subsumption is one-directional —
+# we keep the LONGER chain because it carries strictly more context for the
+# reviewer (the same suffix plus its caller ancestry).
+function Reduce-DependencyChains {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Chains
+    )
+
+    if ($null -eq $Chains -or $Chains.Count -eq 0) { return @() }
+
+    # Step 1: dedupe by canonical string key (preserves the first occurrence).
+    $seen = [ordered]@{}
+    foreach ($c in $Chains) {
+        $arr = @($c)
+        $key = $arr -join "`u{2192}" # rightwards arrow as a separator unlikely to collide
+        if (-not $seen.Contains($key)) { $seen[$key] = $arr }
+    }
+    $unique = @($seen.Values)
+
+    # Step 2: sort by length descending and keep each chain only when no
+    # already-kept (longer) chain has it as a strict suffix.
+    $sortedByLengthDesc = @($unique | Sort-Object @{ Expression = { $_.Length }; Descending = $true })
+    $kept = New-Object System.Collections.Generic.List[object]
+    foreach ($c in $sortedByLengthDesc) {
+        $isSuffix = $false
+        foreach ($k in $kept) {
+            if ($c.Length -ge $k.Length) { continue } # strict suffix requires shorter length
+            $offset = $k.Length - $c.Length
+            $match = $true
+            for ($i = 0; $i -lt $c.Length; $i++) {
+                if ($c[$i] -ne $k[$offset + $i]) { $match = $false; break }
+            }
+            if ($match) { $isSuffix = $true; break }
+        }
+        if (-not $isSuffix) { [void]$kept.Add($c) }
+    }
+
+    # Step 3: stable alphabetical sort by joined chain text so output order
+    # is deterministic across runs and across release-set iteration order.
+    $finalSorted = @($kept | Sort-Object { ($_ -join ' -> ') })
+    # IMPORTANT: prefix the return with `,` to prevent PowerShell from
+    # unwrapping a single-element array-of-arrays into its inner array,
+    # which would silently corrupt $finding.DependencyChains[0] when only
+    # one chain survives reduction (caller would see a flat string array
+    # instead of an array containing one chain).
+    return ,$finalSorted
 }

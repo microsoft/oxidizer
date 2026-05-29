@@ -344,3 +344,71 @@ Describe 'Format-ConventionalCommits' {
         ($r -join "`n") | Should -Match 'totally unstructured commit message'
     }
 }
+
+Describe 'Reduce-DependencyChains' {
+    It 'returns an empty array when given no chains' {
+        $out = Reduce-DependencyChains -Chains @()
+        @($out).Count | Should -Be 0
+    }
+
+    It 'keeps a single chain unchanged' {
+        $out = Reduce-DependencyChains -Chains @(, @('foo', 'bar', 'baz'))
+        @($out).Count | Should -Be 1
+        $out[0] -join '|' | Should -Be 'foo|bar|baz'
+    }
+
+    It 'deduplicates identical chains' {
+        $out = Reduce-DependencyChains -Chains @(@('a', 'b'), @('a', 'b'))
+        @($out).Count | Should -Be 1
+    }
+
+    It 'drops a chain that is a strict suffix of another chain' {
+        # 'bar -> baz' is fully contained as the tail of 'foo -> bar -> baz'.
+        $out = Reduce-DependencyChains -Chains @(@('bar', 'baz'), @('foo', 'bar', 'baz'))
+        @($out).Count | Should -Be 1
+        $out[0] -join '|' | Should -Be 'foo|bar|baz'
+    }
+
+    It 'preserves multiple non-subsuming chains with different roots and intermediates' {
+        $out = Reduce-DependencyChains -Chains @(
+            @('foo', 'bar', 'baz'),
+            @('quu', 'nuu', 'baz'),
+            @('lurk', 'baz')
+        )
+        @($out).Count | Should -Be 3
+        # Output is sorted alphabetically by joined chain text.
+        ($out | ForEach-Object { $_ -join ' -> ' }) -join '|' |
+            Should -Be 'foo -> bar -> baz|lurk -> baz|quu -> nuu -> baz'
+    }
+
+    It 'does NOT drop a shorter chain that is NOT a tail-aligned suffix' {
+        # 'b -> c' is not a suffix of 'a -> b -> d' (last element differs).
+        $out = Reduce-DependencyChains -Chains @(@('a', 'b', 'd'), @('b', 'c'))
+        @($out).Count | Should -Be 2
+    }
+
+    It 'does NOT drop a shorter chain that overlaps the head, not the tail, of a longer chain' {
+        # 'foo -> bar' overlaps the head of 'foo -> bar -> baz' but is not a suffix.
+        $out = Reduce-DependencyChains -Chains @(@('foo', 'bar'), @('foo', 'bar', 'baz'))
+        @($out).Count | Should -Be 2
+    }
+
+    It 'collapses several chains into one when all are nested suffixes' {
+        $out = Reduce-DependencyChains -Chains @(
+            @('d'),
+            @('c', 'd'),
+            @('b', 'c', 'd'),
+            @('a', 'b', 'c', 'd')
+        )
+        @($out).Count | Should -Be 1
+        $out[0] -join '|' | Should -Be 'a|b|c|d'
+    }
+
+    It 'returns chains in stable alphabetical order regardless of input order' {
+        $a = Reduce-DependencyChains -Chains @(@('z', 'baz'), @('a', 'baz'))
+        $b = Reduce-DependencyChains -Chains @(@('a', 'baz'), @('z', 'baz'))
+        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' |
+            Should -Be (($b | ForEach-Object { $_ -join ' -> ' }) -join '|')
+        ($a | ForEach-Object { $_ -join ' -> ' }) -join '|' | Should -Be 'a -> baz|z -> baz'
+    }
+}

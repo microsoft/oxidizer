@@ -220,6 +220,24 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $findings.Folder | Should -Not -Contain 'gamma'
         $findings.Folder | Should -Not -Contain 'delta'
     }
+
+    It 'N10 — BFS traverses past release-set intermediates and chains are suffix-subsumed' {
+        Invalidate-WorkspaceMetadataCache
+        # Linear3: a → b → c. Modify 'c' (unreleased). Release set = {a, b}.
+        # Expected: the chain 'a -> b -> c' subsumes 'b -> c', leaving one chain.
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'n10')
+        $ws.ModifySource('c')
+        $ws.AddCommit('previous PR: c edit')
+        $ws.BumpVersion('a', '0.1.1')
+        $ws.BumpVersion('b', '0.2.1')
+        $ws.AddCommit('current PR: bump a + b')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings.Folder | Should -Be 'c'
+        $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
+        @($cFinding.DependencyChains).Count | Should -Be 1
+        @($cFinding.DependencyChains)[0] -join ',' | Should -Be 'a,b,c'
+    }
 }
 
 # --------------------------------------------------------------------------
