@@ -1065,6 +1065,19 @@ function Invoke-PostReleaseDepScan {
         $firstIter = $true
         for ($iter = 0; $iter -lt $maxIterations; $iter++) {
             Invalidate-WorkspaceMetadataCache
+
+            # The BFS below re-walks `cargo metadata`, runs git diffs against
+            # each crate's last-release baseline, and reapplies the
+            # declined/cascade filters — on a sizeable workspace this can
+            # take several seconds. Show a status line so the user knows the
+            # script hasn't hung between their menu choice and the next
+            # prompt. Skip the indicator in non-interactive runs where the
+            # output is just log noise.
+            if ($isInteractive) {
+                Write-Host ''
+                Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
+            }
+
             $queue = @(
                 @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef) |
                     Where-Object { -not $declined.Contains($_.Folder) }

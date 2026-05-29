@@ -568,3 +568,54 @@ Describe 'Open-PathWithPreferredEditor' {
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Invoke-PostReleaseDepScan — status indicator while analysing packages
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
+
+    BeforeEach {
+        # Single fake published crate for the maxIterations cap.
+        Mock -CommandName Get-WorkspaceCrates -MockWith {
+            ,@([pscustomobject]@{ Folder = 'fake'; Name = 'fake'; Published = $true })
+        }
+        # Drive the loop into "no findings" so it exits after a single iteration.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
+        Mock -CommandName Invalidate-WorkspaceMetadataCache -MockWith { }
+    }
+
+    It 'emits the "Analyzing packages..." status line in interactive mode (before the BFS runs)' {
+        Mock -CommandName Test-InteractiveSession -MockWith { $true }
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>&1
+        ($out | Out-String) | Should -Match 'Analyzing packages for unreleased modifications'
+    }
+
+    It 'suppresses the status line in non-interactive mode (output is just log noise there)' {
+        Mock -CommandName Test-InteractiveSession -MockWith { $false }
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>&1
+        ($out | Out-String) | Should -Not -Match 'Analyzing packages for unreleased modifications'
+    }
+
+    It 'still suppresses the status line when -NonInteractive parameter is explicit and Test-InteractiveSession would say yes' {
+        # The two switches are independent: -NonInteractive forces the
+        # non-interactive code path, suppressing the indicator regardless of
+        # the terminal's TTY-ness.
+        Mock -CommandName Test-InteractiveSession -MockWith { $true }
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -NonInteractive
+        } 6>&1
+        ($out | Out-String) | Should -Not -Match 'Analyzing packages for unreleased modifications'
+    }
+}
