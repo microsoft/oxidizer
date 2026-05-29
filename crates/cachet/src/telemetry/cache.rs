@@ -288,6 +288,52 @@ impl CacheTelemetry {
         }
     }
 
+    /// Records that an entry was evicted from the cache due to capacity limits.
+    ///
+    /// When moka evicts during an `insert()`, the eviction listener runs
+    /// synchronously on the inserting thread, so the thread-local request ID
+    /// is still set. This allows correlating capacity evictions with the
+    /// insert that caused them. Background maintenance evictions will have
+    /// a request ID of 0.
+    #[cfg(any(feature = "memory", test))]
+    pub(crate) fn record_eviction(&self, cache_name: CacheName) {
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            tracing::info!(cache.name = cache_name, cache.event = attributes::EVENT_EVICTION);
+        }
+
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_EVICTION,
+            Duration::ZERO,
+            false,
+        );
+    }
+
+    /// Records that an entry expired in the background (moka eviction listener).
+    ///
+    /// Unlike [`record_expired`](Self::record_expired), this fires from a
+    /// background thread with no parent span, so it emits a standalone event.
+    /// Like [`record_eviction`](Self::record_eviction), the request ID is
+    /// read from the thread-local (non-zero when triggered synchronously
+    /// during a cache operation).
+    #[cfg(any(feature = "memory", test))]
+    pub(crate) fn record_background_expired(&self, cache_name: CacheName) {
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            tracing::debug!(cache.name = cache_name, cache.event = attributes::EVENT_EXPIRED);
+        }
+
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_EXPIRED,
+            Duration::ZERO,
+            false,
+        );
+    }
+
     pub(crate) fn complete_operation(
         &self,
         request_id: RequestId,
@@ -694,6 +740,13 @@ mod tests {
                     .instrument(t.clear_span("c")),
             );
         });
+        assert_emits(attributes::EVENT_EVICTION, |t, request_id| {
+            futures::executor::block_on(
+                async { t.record_eviction("c") }
+                    .with_request_id(request_id)
+                    .instrument(t.get_span("c")),
+            );
+        });
     }
 
     #[test]
@@ -764,5 +817,69 @@ mod tests {
         let c = next_request_id();
         assert!(b > a, "request IDs must increment: got {a} then {b}");
         assert!(c > b, "request IDs must increment: got {b} then {c}");
+    }
+
+    #[test]
+    fn eviction_handler_receives_request_id_from_calling_thread() {
+        let tier_events = Arc::new(Mutex::new(Vec::<(RequestId, String, String)>::new()));
+        let events = Arc::clone(&tier_events);
+
+        struct EvictionRecorder {
+            events: Arc<Mutex<Vec<(RequestId, String, String)>>>,
+        }
+        impl CacheEventHandler for EvictionRecorder {
+            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+                self.events.lock().expect("test mutex should not be poisoned").push((
+                    event.request_id,
+                    event.tier_name.to_string(),
+                    event.outcome.to_string(),
+                ));
+            }
+            fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
+        }
+
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(EvictionRecorder { events }));
+
+        // Simulate an insert that triggers eviction on the same thread
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async {
+                telemetry.record_eviction("my_cache");
+            }
+            .with_request_id(request_id),
+        );
+
+        let recorded = tier_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(recorded.len(), 1, "expected exactly one eviction event");
+        assert_eq!(recorded[0].0, request_id, "eviction should carry the inserting thread's request_id");
+        assert_eq!(recorded[0].2, attributes::EVENT_EVICTION);
+    }
+
+    #[test]
+    fn eviction_without_request_context_has_zero_id() {
+        let tier_events = Arc::new(Mutex::new(Vec::<RequestId>::new()));
+        let events = Arc::clone(&tier_events);
+
+        struct IdRecorder {
+            events: Arc<Mutex<Vec<RequestId>>>,
+        }
+        impl CacheEventHandler for IdRecorder {
+            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+                self.events
+                    .lock()
+                    .expect("test mutex should not be poisoned")
+                    .push(event.request_id);
+            }
+            fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
+        }
+
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(IdRecorder { events }));
+
+        // No WithRequestId wrapper — simulates background maintenance thread
+        telemetry.record_eviction("bg_cache");
+
+        let recorded = tier_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0], 0, "background eviction should have request_id 0");
     }
 }

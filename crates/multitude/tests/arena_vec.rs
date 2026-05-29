@@ -1386,7 +1386,10 @@ mod io_write {
     fn many_small_writes_grow_the_buffer() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<u8>();
-        let n = if cfg!(miri) { 32 } else { 1000 };
+        // Amortized doubling: ~5 growths get us through every interesting
+        // capacity transition. 32 writes (= 256 bytes) is more than enough
+        // to exercise the `Write` impl across multiple reallocations.
+        let n = 32;
         for _ in 0..n {
             v.write_all(b"abcdefgh").unwrap();
         }

@@ -53,7 +53,7 @@ pub struct CachedData {
 }
 
 impl CachedData {
-    const EXPIRATION: Duration = Duration::from_secs(3600);
+    const EXPIRATION: Duration = Duration::from_hours(1);
 
     /// Creates a new cached data instance with the current timestamp.
     #[must_use]

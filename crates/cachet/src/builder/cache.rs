@@ -7,12 +7,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "memory")]
-use cachet_memory::InMemoryCache;
+use cachet_memory::{InMemoryCache, InMemoryCacheBuilder};
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
+#[cfg(feature = "memory")]
+use crate::eviction::EvictionHook;
 use crate::policy::InsertPolicy;
 use crate::telemetry::CacheTelemetry;
 use crate::telemetry::handler::CacheEventHandler;
@@ -46,6 +48,8 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) clock: Clock,
     pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
+    #[cfg(feature = "memory")]
+    pub(crate) eviction_hook: Option<Arc<EvictionHook>>,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
@@ -59,6 +63,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock,
             telemetry: CacheTelemetry::new(),
             stampede_protection: false,
+            #[cfg(feature = "memory")]
+            eviction_hook: None,
             _phantom: PhantomData,
         }
     }
@@ -92,6 +98,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
+            #[cfg(feature = "memory")]
+            eviction_hook: self.eviction_hook,
             _phantom: PhantomData,
         }
     }
@@ -117,7 +125,50 @@ impl<K, V> CacheBuilder<K, V, ()> {
         K: Hash + Eq + Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
     {
-        self.storage(InMemoryCache::<K, V>::new())
+        self.memory_with(|b| b)
+    }
+
+    /// Configures the cache to use in-memory storage, exposing the inner
+    /// [`InMemoryCacheBuilder`] for additional configuration (capacity, TTL,
+    /// eviction policy, custom hasher, etc.).
+    ///
+    /// Call [`InMemoryCacheBuilder::with_eviction_telemetry`] inside the
+    /// closure to emit `cache.eviction` on capacity evictions and
+    /// `cache.expired` on background TTL/TTI expiry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured [`InMemoryCacheBuilder`] fails validation
+    /// (for example, `max_capacity < initial_capacity`).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .memory_with(|b| b.max_capacity(1_000).with_eviction_telemetry())
+    ///     .build();
+    /// ```
+    #[cfg(feature = "memory")]
+    #[must_use]
+    pub fn memory_with<F>(mut self, configure: F) -> CacheBuilder<K, V, InMemoryCache<K, V>>
+    where
+        K: Hash + Eq + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+        F: FnOnce(InMemoryCacheBuilder<K, V>) -> InMemoryCacheBuilder<K, V>,
+    {
+        let mut builder = configure(InMemoryCacheBuilder::<K, V>::new());
+        if builder.eviction_telemetry_enabled() {
+            let hook = Arc::new(EvictionHook::new());
+            let hook_for_listener = Arc::clone(&hook);
+            builder = builder.on_eviction(move |cause| hook_for_listener.handle(cause));
+            self.eviction_hook = Some(hook);
+        }
+        let storage = builder.build().expect("InMemoryCacheBuilder configuration must be valid");
+        self.storage(storage)
     }
 
     /// Configures the cache to use a service as the storage backend.

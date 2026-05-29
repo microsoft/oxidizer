@@ -30,7 +30,9 @@ struct Mergers<K, V> {
     get: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
     invalidate: Merger<K, Result<(), Error>>,
     get_or_insert: Merger<K, Result<CacheEntry<V>, Error>>,
+    get_or_insert_with: Merger<K, Result<CacheEntry<V>, Error>>,
     try_get_or_insert: Merger<K, Result<CacheEntry<V>, Error>>,
+    try_get_or_insert_with: Merger<K, Result<CacheEntry<V>, Error>>,
     optionally_get_or_insert: Merger<K, Result<Option<CacheEntry<V>>, Error>>,
 }
 
@@ -44,7 +46,9 @@ where
             get: Merger::new(),
             invalidate: Merger::new(),
             get_or_insert: Merger::new(),
+            get_or_insert_with: Merger::new(),
             try_get_or_insert: Merger::new(),
+            try_get_or_insert_with: Merger::new(),
             optionally_get_or_insert: Merger::new(),
         }
     }
@@ -497,7 +501,172 @@ where
             return Ok(entry);
         }
         let value = f().await;
-        let entry = CacheEntry::new(value);
+        let mut entry = CacheEntry::new(value);
+        entry.ensure_cached_at(self.clock.system_time());
+        self.insert(key.clone(), entry.clone()).await?;
+        Ok(entry)
+    }
+
+    /// Retrieves a value from cache, or computes and caches a [`CacheEntry`] if missing.
+    ///
+    /// Like [`get_or_insert`](Self::get_or_insert), but the closure returns a full
+    /// [`CacheEntry<V>`] instead of a raw `V`. This gives callers control over
+    /// per-entry metadata such as TTL via [`CacheEntry::expires_after`].
+    ///
+    /// # Per-Entry TTL
+    ///
+    /// When the closure returns a `CacheEntry` with a TTL set (e.g., via
+    /// [`CacheEntry::expires_after`]), that TTL takes precedence over any tier-level
+    /// TTL configured on the cache. This is useful when the compute function returns
+    /// data with a known validity period.
+    ///
+    /// # Concurrency
+    ///
+    /// Subject to the same TOCTOU window as [`get_or_insert`](Self::get_or_insert) -
+    /// see its Concurrency section for details.
+    ///
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
+    /// concurrent calls for the same missing key are coalesced - only one caller
+    /// computes the value while others wait and share the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying cache operation fails or (with stampede
+    /// protection) if the leader task panics.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use cachet::{Cache, CacheEntry};
+    /// use tick::Clock;
+    /// # async {
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
+    ///
+    /// let entry = cache
+    ///     .get_or_insert_with("key", || async {
+    ///         let value = 42; // expensive computation
+    ///         let ttl = Duration::from_secs(300); // determined by response
+    ///         CacheEntry::expires_after(value, ttl)
+    ///     })
+    ///     .await?;
+    /// assert_eq!(*entry.value(), 42);
+    /// # Ok::<(), cachet::Error>(())
+    /// # };
+    /// ```
+    pub async fn get_or_insert_with<Q, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+        Fut: Future<Output = CacheEntry<V>> + Send,
+    {
+        let owned = key.to_owned();
+        if let Some(mergers) = &self.mergers {
+            mergers
+                .get_or_insert_with
+                .execute(key, move || async move { self.do_get_or_insert_with(&owned, f).await })
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.do_get_or_insert_with(&owned, f).await
+        }
+    }
+
+    async fn do_get_or_insert_with<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
+    where
+        Fut: Future<Output = CacheEntry<V>>,
+    {
+        if let Some(entry) = self.storage.get(key).await? {
+            return Ok(entry);
+        }
+        let mut entry = f().await;
+        entry.ensure_cached_at(self.clock.system_time());
+        self.insert(key.clone(), entry.clone()).await?;
+        Ok(entry)
+    }
+
+    /// Retrieves a value from cache, or computes and caches a [`CacheEntry`] if missing.
+    ///
+    /// Like [`get_or_insert_with`](Self::get_or_insert_with), but the closure can fail.
+    /// Only successful results are cached — errors are not cached, allowing retries.
+    ///
+    /// # Per-Entry TTL
+    ///
+    /// When the closure returns `Ok(CacheEntry)` with a TTL set, that TTL takes
+    /// precedence over any tier-level TTL. See [`get_or_insert_with`](Self::get_or_insert_with)
+    /// for details.
+    ///
+    /// # Stampede Protection
+    ///
+    /// When enabled via [`stampede_protection()`](crate::CacheBuilder::stampede_protection),
+    /// concurrent calls for the same missing key are coalesced. If the computation
+    /// fails, the error is shared with all waiters but not cached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The provided function returns an error (wrapped via [`Error::from_source`])
+    /// - The underlying cache operation fails
+    /// - With stampede protection, if the leader task panics
+    ///
+    /// Use [`Error::source_as`] to extract the original error type.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    ///
+    /// use cachet::{Cache, CacheEntry, Error};
+    /// use tick::Clock;
+    /// # async {
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock).memory().build();
+    ///
+    /// let result = cache
+    ///     .try_get_or_insert_with("key", || async {
+    ///         let value = 42;
+    ///         let ttl = Duration::from_secs(60);
+    ///         Ok::<_, std::io::Error>(CacheEntry::expires_after(value, ttl))
+    ///     })
+    ///     .await;
+    /// assert!(result.is_ok());
+    /// # };
+    /// ```
+    pub async fn try_get_or_insert_with<Q, E, Fut>(&self, key: &Q, f: impl FnOnce() -> Fut + Send) -> Result<CacheEntry<V>, Error>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
+        E: std::error::Error + Send + Sync + 'static,
+        Fut: Future<Output = Result<CacheEntry<V>, E>> + Send,
+    {
+        let owned = key.to_owned();
+        if let Some(mergers) = &self.mergers {
+            mergers
+                .try_get_or_insert_with
+                .execute(key, move || async move { self.do_try_get_or_insert_with(&owned, f).await })
+                .await
+                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
+        } else {
+            self.do_try_get_or_insert_with(&owned, f).await
+        }
+    }
+
+    async fn do_try_get_or_insert_with<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
+    where
+        E: std::error::Error + Send + Sync + 'static,
+        Fut: Future<Output = Result<CacheEntry<V>, E>>,
+    {
+        if let Some(entry) = self.storage.get(key).await? {
+            return Ok(entry);
+        }
+        let mut entry = f().await.map_err(Error::from_source)?;
+        entry.ensure_cached_at(self.clock.system_time());
         self.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
@@ -583,7 +752,8 @@ where
             return Ok(entry);
         }
         let value = f().await.map_err(Error::from_source)?;
-        let entry = CacheEntry::new(value);
+        let mut entry = CacheEntry::new(value);
+        entry.ensure_cached_at(self.clock.system_time());
         self.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
@@ -672,7 +842,8 @@ where
         }
         match f().await {
             Some(value) => {
-                let entry = CacheEntry::new(value);
+                let mut entry = CacheEntry::new(value);
+                entry.ensure_cached_at(self.clock.system_time());
                 self.insert(key.clone(), entry.clone()).await?;
                 Ok(Some(entry))
             }

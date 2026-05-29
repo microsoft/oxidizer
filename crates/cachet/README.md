@@ -257,7 +257,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 |Level|Events|
 |-----|------|
 |ERROR|`cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error`|
-|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction`|
 |DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared`|
 
 
@@ -266,26 +266,26 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG-oOSdNzEYacG_QJDULSptgGG0JW5KX3QM-kG0OU4DwdpoIBYWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4wgm1jYWNoZXRfbWVtb3J5ZTAuMi4wgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
- [__link0]: https://docs.rs/cachet/0.5.0/cachet/?search=TimeToRefresh
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2xL7qJyuCgIG_83YqgWgkfeG5xypaCx1UNDG_r6sBXY4Zc3YWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4xgm1jYWNoZXRfbWVtb3J5ZTAuMi4xgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
+ [__link0]: https://docs.rs/cachet/0.5.1/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
- [__link11]: https://docs.rs/cachet/0.5.0/cachet/?search=InsertPolicy
- [__link12]: https://docs.rs/cachet/0.5.0/cachet/?search=TimeToRefresh
+ [__link11]: https://docs.rs/cachet/0.5.1/cachet/?search=InsertPolicy
+ [__link12]: https://docs.rs/cachet/0.5.1/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.1.0
- [__link15]: https://crates.io/crates/cachet_memory/0.2.0
+ [__link15]: https://crates.io/crates/cachet_memory/0.2.1
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.1.0
- [__link18]: https://docs.rs/cachet/0.5.0/cachet/?search=telemetry::attributes
+ [__link18]: https://docs.rs/cachet/0.5.1/cachet/?search=telemetry::attributes
  [__link19]: https://docs.rs/bytesbuf/0.5.0/bytesbuf/?search=BytesView
- [__link2]: https://docs.rs/cachet/0.5.0/cachet/?search=CacheBuilder::stampede_protection
+ [__link2]: https://docs.rs/cachet/0.5.1/cachet/?search=CacheBuilder::stampede_protection
  [__link20]: https://crates.io/crates/tracing/0.1.44
- [__link21]: https://docs.rs/cachet/0.5.0/cachet/?search=telemetry::attributes
+ [__link21]: https://docs.rs/cachet/0.5.1/cachet/?search=telemetry::attributes
  [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=DynamicCache
- [__link5]: https://docs.rs/cachet/0.5.0/cachet/?search=InsertPolicy
+ [__link5]: https://docs.rs/cachet/0.5.1/cachet/?search=InsertPolicy
  [__link6]: https://docs.rs/tick/0.3.0/tick/?search=Clock
- [__link7]: https://docs.rs/cachet/0.5.0/cachet/?search=Cache
- [__link8]: https://docs.rs/cachet/0.5.0/cachet/?search=CacheBuilder
+ [__link7]: https://docs.rs/cachet/0.5.1/cachet/?search=Cache
+ [__link8]: https://docs.rs/cachet/0.5.1/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry

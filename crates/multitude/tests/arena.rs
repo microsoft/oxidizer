@@ -175,15 +175,22 @@ fn byte_budget_caps_total_chunk_bytes() {
 #[cfg(feature = "stats")]
 #[test]
 fn cache_reuse() {
-    let arena = Arena::builder().build();
+    // Pick the smallest possible chunk capacity so that allocating just a
+    // handful of `Rc<u64>` overflows one chunk into the next. The cache-hit
+    // semantic we want to verify is "a retired chunk is cached and then
+    // reused", which only requires `>= 2` chunks ever exist — not large
+    // populations. Under Miri the previous 1024-iteration loop dominated
+    // this test's wall time; this O(1) shape is equivalent in coverage.
+    let arena = Arena::builder().with_capacity_local(512).build();
     let mut handles = std::vec::Vec::new();
-    // 1024 Rc<u64> allocations still force multiple chunks, which is
-    // enough to prove a retired chunk gets cached and then reused.
-    for i in 0..1024_u64 {
-        handles.push(arena.alloc_rc(i));
+    // Each `alloc_rc(0_u64)` consumes the value plus an InnerDropEntry
+    // slot. With the minimum chunk capacity, a few dozen of these are
+    // guaranteed to span at least two chunks even after accounting for
+    // header overhead.
+    while arena.stats().normal_local_chunks_allocated < 2 {
+        handles.push(arena.alloc_rc(0_u64));
+        assert!(handles.len() < 1024, "failed to force a second chunk");
     }
-    let stats = arena.stats();
-    assert!(stats.normal_local_chunks_allocated >= 2);
     drop(handles);
     let chunks_before = arena.stats().normal_local_chunks_allocated;
     let _v = arena.alloc_rc(0_u64);
@@ -201,11 +208,6 @@ fn preallocate_skips_underlying_allocation_calls() {
     // First user alloc pulls from the cache — no new chunk allocated.
     let _ = arena.alloc_rc(0_u32);
     assert_eq!(arena.stats().normal_local_chunks_allocated, 1);
-    let mut handles = std::vec::Vec::new();
-    for i in 0..if cfg!(miri) { 256_u64 } else { 10_000_u64 } {
-        handles.push(arena.alloc_rc(i));
-    }
-    assert!(arena.stats().normal_local_chunks_allocated >= 1);
 }
 
 #[cfg(feature = "stats")]
@@ -357,9 +359,10 @@ fn try_alloc_vec_with_capacity_zero_works() {
 
 /// Size that forces an oversized one-shot chunk allocation (i.e. a
 /// chunk whose total size exceeds `MAX_CHUNK_BYTES = 64 KiB`).
-/// Under Miri we use the minimum size that still triggers the
-/// oversized branch to keep its tagged-pointer tracking tractable.
-const OVERSIZED_BYTES: usize = if cfg!(miri) { 65 * 1024 } else { 128 * 1024 };
+/// 65 KiB is the *minimum* size that triggers the oversized branch;
+/// any larger value exercises the same code path, so use the minimum
+/// to keep tests fast under Miri.
+const OVERSIZED_BYTES: usize = 65 * 1024;
 
 #[test]
 fn oversized_bump_alloc_does_not_leak_on_drop() {
@@ -946,13 +949,18 @@ mod large_alloc {
 
     #[test]
     fn alloc_slice_fill_with_above_chunk_boundary() {
+        // Same byte-count test (`> CHUNK_BYTES`) but with `u64` elements so
+        // the per-element `init` closure runs 8× fewer times — pure Miri
+        // win, identical chunk-boundary semantics.
+        const N_U64: usize = OVER_CHUNK / 8 + 1;
         let arena = Arena::new();
-        let s = arena.alloc_slice_fill_with::<u8, _>(OVER_CHUNK, |i| (i & 0xff) as u8);
-        assert_eq!(s.len(), OVER_CHUNK);
+        let s = arena.alloc_slice_fill_with::<u64, _>(N_U64, |i| i as u64);
+        assert_eq!(s.len(), N_U64);
         assert_eq!(s[0], 0);
-        assert_eq!(s[255], 255);
-        assert_eq!(s[CHUNK_BYTES], (CHUNK_BYTES & 0xff) as u8);
-        assert_eq!(s[OVER_CHUNK - 1], ((OVER_CHUNK - 1) & 0xff) as u8);
+        // Element that straddles the 64 KiB tile boundary.
+        let mid_idx = CHUNK_BYTES / 8;
+        assert_eq!(s[mid_idx], mid_idx as u64);
+        assert_eq!(s[N_U64 - 1], (N_U64 - 1) as u64);
     }
 
     #[test]
@@ -995,15 +1003,19 @@ mod large_alloc {
 
     #[test]
     fn alloc_slice_copy_arc_above_chunk_boundary() {
+        // Build the source as a u64 vector: 8× fewer per-element steps in
+        // the Vec construction and the subsequent `copy_nonoverlapping`
+        // tracking under Miri, same `> CHUNK_BYTES` byte count.
+        const N_U64: usize = OVER_CHUNK / 8 + 1;
         let arena = Arena::new();
-        let src: Vec<u8> = (0..OVER_CHUNK).map(|i| (i & 0xff) as u8).collect();
-        let a = arena.alloc_slice_copy_arc::<u8>(&src);
+        let src: Vec<u64> = (0..N_U64 as u64).collect();
+        let a = arena.alloc_slice_copy_arc::<u64>(&src);
         assert_eq!(a.len(), src.len());
-        // Cross-thread sanity: Arc<[u8]> over the oversized chunk must travel.
+        // Cross-thread sanity: Arc<[u64]> over the oversized chunk must travel.
         let a_clone = a.clone();
         let h = std::thread::spawn(move || {
-            assert_eq!(a_clone.len(), OVER_CHUNK);
-            assert_eq!(a_clone[OVER_CHUNK - 1], ((OVER_CHUNK - 1) & 0xff) as u8);
+            assert_eq!(a_clone.len(), N_U64);
+            assert_eq!(a_clone[N_U64 - 1], (N_U64 - 1) as u64);
         });
         h.join().unwrap();
         assert_eq!(a[0], 0);
@@ -1027,10 +1039,11 @@ mod large_alloc {
         }
 
         let counter = StdArc::new(AtomicUsize::new(0));
-        // Drop slices have a `len <= u16::MAX` cap because the back-stack
-        // entry encodes `len` in a `u16`. Pick a length that crosses the
-        // 64 KiB chunk-byte boundary while staying within that cap.
-        let len = u16::MAX as usize; // 65 535 elements of 1 byte each
+        // Cross the 64 KiB chunk-byte boundary without going all the way to
+        // `u16::MAX`.  `Counted` is pointer-sized (8 bytes), so just over
+        // `CHUNK_BYTES / 8` elements suffices.  Keeping `len` small avoids
+        // hundreds of thousands of Miri-intercepted atomic operations.
+        let len = CHUNK_BYTES / core::mem::size_of::<Counted>() + 64;
         {
             let arena = Arena::new();
             let s = arena.alloc_slice_fill_with::<Counted, _>(len, |_| Counted(counter.clone()));
@@ -1054,7 +1067,11 @@ mod large_alloc {
         }
 
         let counter = StdArc::new(AtomicUsize::new(0));
-        let len = u16::MAX as usize;
+        // Cross the 64 KiB chunk-byte boundary without going all the way to
+        // `u16::MAX`.  `Counted` is pointer-sized (8 bytes), so just over
+        // `CHUNK_BYTES / 8` elements suffices.  Keeping `len` small avoids
+        // hundreds of thousands of Miri-intercepted atomic operations.
+        let len = CHUNK_BYTES / core::mem::size_of::<Counted>() + 64;
         let arena = Arena::new();
         let arc = arena.alloc_slice_fill_with_arc::<Counted, _>(len, |_| Counted(counter.clone()));
         assert_eq!(arc.len(), len);
@@ -1103,17 +1120,23 @@ mod large_alloc {
 
     #[test]
     fn alloc_vec_grows_from_small_to_past_chunk_boundary() {
+        // We test that `arena.alloc_vec::<T>()` survives amortized-doubling
+        // relocations across chunk boundaries. The element type is
+        // immaterial — only the doubling pattern and the eventual
+        // > CHUNK_BYTES total size matter. Using `u64` cuts the push loop
+        // 8× without changing the chunk-crossing semantics (the same
+        // sequence of capacity doublings happens, just at 8× larger
+        // strides), which dominates this test's wall time under Miri.
+        const N_U64: usize = (OVER_CHUNK + 1024) / 8;
         let arena = Arena::new();
-        let mut v = arena.alloc_vec::<u8>();
+        let mut v = arena.alloc_vec::<u64>();
         assert_eq!(v.len(), 0);
-        // Push one byte at a time so the vector's amortized doubling
-        // triggers relocations across chunk boundaries.
-        for i in 0..(OVER_CHUNK + 1024) {
-            v.push((i & 0xff) as u8);
+        for i in 0..N_U64 {
+            v.push(i as u64);
         }
-        assert_eq!(v.len(), OVER_CHUNK + 1024);
+        assert_eq!(v.len(), N_U64);
         for i in 0..v.len() {
-            assert_eq!(v[i], (i & 0xff) as u8, "mismatch at index {i}");
+            assert_eq!(v[i], i as u64, "mismatch at index {i}");
         }
     }
 
@@ -1131,10 +1154,11 @@ mod large_alloc {
         }
 
         let counter = StdArc::new(AtomicUsize::new(0));
-        // Stay under `u16::MAX` so the drop-list `len` field fits; use
-        // a heavier element type so the byte footprint still crosses the
-        // 64 KiB boundary on growth.
-        let n = u16::MAX as usize;
+        // Cross the 64 KiB chunk boundary without going all the way to
+        // `u16::MAX`.  `Counted` is pointer-sized (8 bytes), so just over
+        // `CHUNK_BYTES / 8` elements suffices.  Keeping `n` small avoids
+        // hundreds of thousands of Miri-intercepted atomic operations.
+        let n = CHUNK_BYTES / core::mem::size_of::<Counted>() + 64;
         {
             let arena = Arena::new();
             let mut v = arena.alloc_vec::<Counted>();
@@ -1269,16 +1293,22 @@ mod large_alloc {
 
     #[test]
     fn many_oversized_allocations_in_one_arena() {
+        // The property under test is that an arena tolerates *multiple*
+        // oversized one-shot chunks coexisting. Using `[u128; OVER_CHUNK/16]`
+        // gives the same byte-count threshold (above `MAX_CHUNK_BYTES`) but
+        // a 16× shorter `alloc_slice_fill_with` closure loop — a big win
+        // under Miri where each closure invocation is interpreted.
+        const N_U128: usize = OVER_CHUNK / 16 + 1; // > 64 KiB worth of u128
         let arena = Arena::new();
-        let mut keepers: Vec<&[u8]> = Vec::with_capacity(8);
+        let mut keepers: Vec<&[u128]> = Vec::with_capacity(8);
         for round in 0..8u8 {
-            let s: &mut [u8] = arena.alloc_slice_fill_with::<u8, _>(OVER_CHUNK, move |_| round);
+            let s: &mut [u128] = arena.alloc_slice_fill_with::<u128, _>(N_U128, move |_| u128::from(round));
             keepers.push(s);
         }
         for (round, s) in keepers.iter().enumerate() {
-            assert_eq!(s.len(), OVER_CHUNK);
-            assert_eq!(s[0], round as u8);
-            assert_eq!(s[OVER_CHUNK - 1], round as u8);
+            assert_eq!(s.len(), N_U128);
+            assert_eq!(s[0], round as u128);
+            assert_eq!(s[N_U128 - 1], round as u128);
         }
     }
 
@@ -1370,10 +1400,10 @@ mod large_alloc {
 
         let counter = StdArc::new(AtomicUsize::new(0));
         // Choose `len` so `len * size_of::<Counted>` crosses the 64 KiB
-        // boundary while staying within `u16::MAX` (DST stores metadata
-        // as a `u16`). `Counted` is one `StdArc`-wide field; we can fit
-        // many before the u16 cap.
-        let n = u16::MAX as usize;
+        // chunk boundary.  The minimum is `CHUNK_BYTES / size_of::<Counted>() + 1`;
+        // we add a small margin without going all the way to `u16::MAX` so the
+        // test stays fast under Miri (every atomic op is intercepted there).
+        let n = CHUNK_BYTES / core::mem::size_of::<Counted>() + 64;
         {
             let arena = Arena::new();
             let layout = core::alloc::Layout::array::<Counted>(n).unwrap();
@@ -2133,9 +2163,14 @@ mod allocator_impl {
     #[cfg(feature = "stats")]
     #[test]
     fn oversized_chunk_used_when_alloc_too_big() {
+        // The default `max_normal_alloc` is 16 KiB; any slice strictly
+        // larger than that must take the oversized path. Build the source
+        // as `u128` to keep the byte count just above the threshold while
+        // letting Miri track 16× fewer source-Vec writes than a `u8` copy.
         let arena = Arena::new();
-        let big = arena.alloc_slice_copy_rc([0_u8; 32 * 1024]);
-        assert_eq!(big.len(), 32 * 1024);
+        let src: std::vec::Vec<u128> = std::vec![0_u128; 16 * 1024 / 16 + 1]; // 16 KiB + 16 B
+        let big = arena.alloc_slice_copy_rc(&*src);
+        assert_eq!(big.len(), src.len());
         assert!(arena.stats().oversized_local_chunks_allocated >= 1);
     }
 
@@ -3623,8 +3658,6 @@ mod from_mutants_extras_stats {
     #[derive(Debug)]
     #[expect(dead_code, reason = "helper for relocated over-alignment tests")]
     struct Align64(u32);
-    use std::sync::Arc as StdArc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena, ArenaBuilder, Rc};
@@ -3805,7 +3838,20 @@ mod from_mutants_extras_stats {
     /// full, and measure how many *fresh chunks* the arena needs.
     #[test]
     fn drop_entry_size_matches_expected_layout() {
-        let counter = StdArc::new(AtomicUsize::new(0));
+        // Use non-atomic counting to avoid ~15 000 Miri-intercepted atomic
+        // operations (Arc clone + fetch_add + Arc drop per element).  The
+        // test is single-threaded, so atomics were never needed.
+        use std::cell::Cell;
+        use std::rc::Rc as StdRc;
+
+        struct Counted(StdRc<Cell<usize>>);
+        impl Drop for Counted {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        let counter = StdRc::new(Cell::new(0usize));
         let chunks;
         {
             let arena = ArenaBuilder::new()
@@ -3813,9 +3859,9 @@ mod from_mutants_extras_stats {
                 .with_capacity_local(64 * 1024)
                 .build();
             let n: usize = 5000;
-            let mut keep: Vec<multitude::Rc<DropCounter>> = Vec::with_capacity(n);
+            let mut keep: Vec<multitude::Rc<Counted>> = Vec::with_capacity(n);
             for _ in 0..n {
-                keep.push(arena.alloc_rc(DropCounter(counter.clone())));
+                keep.push(arena.alloc_rc(Counted(counter.clone())));
             }
             chunks = arena.stats().normal_local_chunks_allocated;
             drop(keep);
@@ -3825,7 +3871,7 @@ mod from_mutants_extras_stats {
             chunks >= 2,
             "5000 DropEntries at 16 bytes each cannot fit in one 64 KiB chunk; got {chunks} chunks"
         );
-        assert_eq!(counter.load(Ordering::Relaxed), 5000);
+        assert_eq!(counter.get(), 5000);
     }
 
     /// Kills `chunk_provider.rs:133:25 > -> >=` in `reserve_budget`.

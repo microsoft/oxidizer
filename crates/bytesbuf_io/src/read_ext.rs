@@ -31,6 +31,8 @@ pub trait ReadExt: Read {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::Null;
     /// use bytesbuf_io::ReadExt;
@@ -42,6 +44,8 @@ pub trait ReadExt: Read {
     ///
     /// println!("read {} bytes of data", data.len());
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn read_at_most(&mut self, len: usize) -> crate::Result<BytesView>;
 
@@ -52,6 +56,8 @@ pub trait ReadExt: Read {
     /// # Example
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # testing_aids::execute_or_terminate_process(|| futures::executor::block_on(async {
     /// # use bytesbuf_io::testing::FakeRead;
     /// # use bytesbuf::BytesView;
@@ -64,6 +70,8 @@ pub trait ReadExt: Read {
     /// let data = source.read_exactly(10).await.unwrap();
     /// assert_eq!(data.len(), 10);
     /// # }));
+    /// # }
+    /// # }
     /// ```
     async fn read_exactly(&mut self, len: usize) -> crate::Result<BytesView>;
 

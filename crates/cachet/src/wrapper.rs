@@ -318,7 +318,7 @@ mod tests {
         );
 
         // Entry with cached_at in the future simulates clock going backward
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(60), clock.system_time() + Duration::from_secs(3600));
+        let entry = CacheEntry::expires_at(42, Duration::from_secs(60), clock.system_time() + Duration::from_hours(1));
         assert!(wrapper.is_expired(&entry));
     }
 

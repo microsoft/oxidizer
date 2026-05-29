@@ -255,7 +255,7 @@ mod tests {
 
         // cached_at in the future relative to now causes duration_since to return Err
         let now = clock.system_time();
-        let cached_at = now + Duration::from_secs(3600);
+        let cached_at = now + Duration::from_hours(1);
         assert!(
             refresh.should_refresh(cached_at, now),
             "should return true when system time goes backward"

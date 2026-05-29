@@ -4,7 +4,7 @@
 [package]
 name = "cachet"
 description = "A composable, customizable multi-tier caching library with rich feature support."
-version = "0.5.0"
+version = "0.5.1"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -98,6 +98,10 @@ required-features = ["test-util"]
 name = "refresh"
 harness = false
 required-features = ["test-util"]
+
+[[test]]
+name = "eviction"
+required-features = ["memory", "logs"]
 
 [[example]]
 name = "simple"

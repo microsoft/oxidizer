@@ -7,14 +7,21 @@
 //! the underlying cache configuration, providing a stable API surface
 //! without exposing implementation details.
 
+use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
+use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::sync::Arc;
 use std::time::Duration;
 
 use foldhash::fast::RandomState;
 
+use crate::notification::RemovalCause;
 use crate::policy::EvictionPolicy;
 use crate::tier::InMemoryCache;
+
+/// Type-erased eviction listener.
+pub(crate) type EvictionListener = Arc<dyn Fn(RemovalCause) + Send + Sync + 'static>;
 
 /// Builder for configuring an `InMemoryCache`.
 ///
@@ -36,7 +43,6 @@ use crate::tier::InMemoryCache;
 ///     .name("my-cache")
 ///     .build();
 /// ```
-#[derive(Debug)]
 pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) max_capacity: Option<u64>,
     pub(crate) initial_capacity: Option<usize>,
@@ -44,9 +50,34 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) time_to_idle: Option<Duration>,
     pub(crate) name: Option<&'static str>,
     pub(crate) eviction_policy: EvictionPolicy,
+    pub(crate) eviction_listener: Option<EvictionListener>,
+    pub(crate) eviction_telemetry: bool,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
 }
+
+impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InMemoryCacheBuilder")
+            .field("max_capacity", &self.max_capacity)
+            .field("initial_capacity", &self.initial_capacity)
+            .field("time_to_live", &self.time_to_live)
+            .field("time_to_idle", &self.time_to_idle)
+            .field("name", &self.name)
+            .field("eviction_policy", &self.eviction_policy)
+            .field("eviction_listener", &self.eviction_listener.as_ref().map(|_| "<set>"))
+            .field("eviction_telemetry", &self.eviction_telemetry)
+            .field("hasher", &self.hasher)
+            .finish()
+    }
+}
+
+// `eviction_listener` holds a `dyn Fn`, which is not auto-`UnwindSafe`/`RefUnwindSafe`.
+// Assert both explicitly so adding the listener doesn't break downstream code that
+// relied on the auto impls. The closure is invoked by moka as a fire-and-forget
+// callback; a panic inside it cannot leave observable state in the builder.
+impl<K, V, H: UnwindSafe> UnwindSafe for InMemoryCacheBuilder<K, V, H> {}
+impl<K, V, H: RefUnwindSafe> RefUnwindSafe for InMemoryCacheBuilder<K, V, H> {}
 
 impl<K, V> Default for InMemoryCacheBuilder<K, V> {
     fn default() -> Self {
@@ -68,6 +99,8 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             time_to_idle: None,
             name: None,
             eviction_policy: EvictionPolicy::default(),
+            eviction_listener: None,
+            eviction_telemetry: false,
             hasher: RandomState::default(),
             _phantom: PhantomData,
         }
@@ -218,6 +251,83 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
         self
     }
 
+    /// Registers a listener that is called when an entry is removed from the cache.
+    ///
+    /// The listener receives a [`RemovalCause`] indicating why the entry was removed:
+    /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expiration,
+    /// `Explicit` for [`invalidate`](cachet_tier::CacheTier::invalidate) or
+    /// [`clear`](cachet_tier::CacheTier::clear) calls, and `Replaced` for inserts
+    /// that overwrote an existing key.
+    ///
+    /// The listener runs on the cache's background maintenance task. Keep the
+    /// closure cheap; expensive work should be offloaded to a separate task.
+    ///
+    /// If a listener was already registered (for example via an earlier
+    /// `on_eviction` call, or by the host crate when
+    /// [`with_eviction_telemetry`](Self::with_eviction_telemetry) is enabled),
+    /// the new listener is chained — both run on every removal, in registration
+    /// order.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use std::sync::atomic::{AtomicUsize, Ordering};
+    ///
+    /// use cachet_memory::{InMemoryCache, RemovalCause};
+    ///
+    /// let evictions = Arc::new(AtomicUsize::new(0));
+    /// let counter = Arc::clone(&evictions);
+    ///
+    /// let cache = InMemoryCache::<String, i32>::builder()
+    ///     .max_capacity(100)
+    ///     .on_eviction(move |cause| {
+    ///         if matches!(cause, RemovalCause::Size | RemovalCause::Expired) {
+    ///             counter.fetch_add(1, Ordering::Relaxed);
+    ///         }
+    ///     })
+    ///     .build()
+    ///     .expect("Failed to build cache");
+    /// ```
+    #[must_use]
+    pub fn on_eviction<F>(mut self, listener: F) -> Self
+    where
+        F: Fn(RemovalCause) + Send + Sync + 'static,
+    {
+        self.eviction_listener = Some(match self.eviction_listener.take() {
+            Some(previous) => Arc::new(move |cause| {
+                previous(cause);
+                listener(cause);
+            }),
+            None => Arc::new(listener),
+        });
+        self
+    }
+
+    /// Requests that the host crate install eviction telemetry for this cache.
+    ///
+    /// This is a marker for `cachet::CacheBuilder::memory_with` to recognize:
+    /// when set, the host installs a listener that emits `cache.eviction` on
+    /// capacity evictions ([`RemovalCause::Size`]) and `cache.expired` on
+    /// background TTL/TTI expiry ([`RemovalCause::Expired`]).
+    /// [`RemovalCause::Explicit`] and [`RemovalCause::Replaced`] are
+    /// intentionally not surfaced, as they are already covered by the host's
+    /// `cache.invalidated` and `cache.inserted` events.
+    ///
+    /// When `InMemoryCache` is constructed directly via [`Self::build`] without
+    /// a host, this flag has no effect — use [`Self::on_eviction`] instead.
+    #[must_use]
+    pub fn with_eviction_telemetry(mut self) -> Self {
+        self.eviction_telemetry = true;
+        self
+    }
+
+    /// Returns whether [`Self::with_eviction_telemetry`] was called on this builder.
+    #[must_use]
+    pub fn eviction_telemetry_enabled(&self) -> bool {
+        self.eviction_telemetry
+    }
+
     /// Sets a custom hash builder for the cache.
     ///
     /// By default, the cache uses [`foldhash::fast::RandomState`] for high-performance
@@ -244,6 +354,8 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
             time_to_idle: self.time_to_idle,
             name: self.name,
             eviction_policy: self.eviction_policy,
+            eviction_listener: self.eviction_listener,
+            eviction_telemetry: self.eviction_telemetry,
             hasher,
             _phantom: PhantomData,
         }
@@ -349,6 +461,79 @@ mod tests {
     fn name_stores_value() {
         let builder = InMemoryCacheBuilder::<String, i32>::new().name("test");
         assert_eq!(builder.name, Some("test"));
+    }
+
+    #[test]
+    fn eviction_telemetry_defaults_false() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new();
+        assert!(!builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn with_eviction_telemetry_sets_flag() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new().with_eviction_telemetry();
+        assert!(builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn with_hasher_preserves_eviction_telemetry_flag() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .with_eviction_telemetry()
+            .with_hasher(std::collections::hash_map::RandomState::new());
+        assert!(builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn on_eviction_chains_existing_listener() {
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let first_count = Arc::new(AtomicUsize::new(0));
+        let second_count = Arc::new(AtomicUsize::new(0));
+        let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let first_count_cb = Arc::clone(&first_count);
+        let second_count_cb = Arc::clone(&second_count);
+        let order_first = Arc::clone(&order);
+        let order_second = Arc::clone(&order);
+
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .on_eviction(move |_| {
+                first_count_cb.fetch_add(1, Ordering::Relaxed);
+                order_first.lock().unwrap().push("first");
+            })
+            .on_eviction(move |_| {
+                second_count_cb.fetch_add(1, Ordering::Relaxed);
+                order_second.lock().unwrap().push("second");
+            });
+
+        let listener = builder.eviction_listener.expect("listener should be installed");
+        listener(RemovalCause::Size);
+
+        assert_eq!(first_count.load(Ordering::Relaxed), 1);
+        assert_eq!(second_count.load(Ordering::Relaxed), 1);
+        assert_eq!(*order.lock().unwrap(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn debug_impl_renders_all_fields() {
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .max_capacity(100)
+            .initial_capacity(10)
+            .time_to_live(Duration::from_secs(60))
+            .time_to_idle(Duration::from_secs(30))
+            .name("my_cache")
+            .with_eviction_telemetry()
+            .on_eviction(|_| {});
+        let rendered = format!("{builder:?}");
+        assert!(rendered.contains("InMemoryCacheBuilder"));
+        assert!(rendered.contains("max_capacity: Some(100)"));
+        assert!(rendered.contains("initial_capacity: Some(10)"));
+        assert!(rendered.contains("time_to_live: Some(60s)"));
+        assert!(rendered.contains("time_to_idle: Some(30s)"));
+        assert!(rendered.contains("name: Some(\"my_cache\")"));
+        assert!(rendered.contains("eviction_telemetry: true"));
+        assert!(rendered.contains("eviction_listener: Some(\"<set>\")"));
     }
 
     #[test]

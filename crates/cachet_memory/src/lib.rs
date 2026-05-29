@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! High-performance in-memory cache tier.
@@ -43,8 +42,26 @@
 //! - **TTL/TTI**: Configure time-to-live and time-to-idle expiration
 //! - **Per-entry TTL**: Honors [`CacheEntry::expires_after`][cachet_tier::CacheEntry::expires_after]
 //!   for per-entry expiration
+//! - **Eviction notifications**: Observe removals via
+//!   [`InMemoryCacheBuilder::on_eviction`] or opt into host-side telemetry with
+//!   [`InMemoryCacheBuilder::with_eviction_telemetry`]
 //! - **Thread-safe**: Safe for concurrent access from multiple tasks
 //! - **Zero external types**: Builder API keeps implementation details private
+//!
+//! # Eviction Notifications
+//!
+//! Two complementary hooks are available for observing entry removals:
+//!
+//! - [`InMemoryCacheBuilder::on_eviction`] takes a closure invoked with a
+//!   [`RemovalCause`] for every removal (capacity, expiry, explicit, or replace).
+//!   Use this for custom side effects.
+//! - [`InMemoryCacheBuilder::with_eviction_telemetry`] is a marker that the host
+//!   crate (`cachet`) recognizes via `CacheBuilder::memory_with` and uses to
+//!   install a built-in listener that emits `cache.eviction` for capacity
+//!   removals and `cache.expired` for background TTL/TTI expiry. Explicit and
+//!   replaced removals are intentionally not surfaced — they are already covered
+//!   by the host's `cache.invalidated` and `cache.inserted` events. The marker
+//!   has no effect when [`InMemoryCache`] is built directly without a host.
 //!
 //! # Expiration Behavior
 //!
@@ -61,10 +78,13 @@
 //! TTL/TTI unset or set them to a sufficiently high ceiling.
 
 mod builder;
+pub mod notification;
 pub mod policy;
 mod tier;
 
 #[doc(inline)]
 pub use builder::InMemoryCacheBuilder;
+#[doc(inline)]
+pub use notification::RemovalCause;
 #[doc(inline)]
 pub use tier::InMemoryCache;

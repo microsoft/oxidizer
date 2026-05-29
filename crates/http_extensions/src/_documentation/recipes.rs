@@ -123,6 +123,9 @@
 //! **Avoid** parsing the same string on every request:
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # (|| {
 //! use http_extensions::HttpRequestBuilder;
 //!
 //! for _ in 0..100 {
@@ -132,11 +135,17 @@
 //!         .build()?;
 //! }
 //! # Ok::<(), http_extensions::HttpError>(())
+//! # })().unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! **Prefer** to parse once, clone per request:
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # (|| {
 //! use http_extensions::HttpRequestBuilder;
 //! use templated_uri::Uri;
 //!
@@ -145,6 +154,9 @@
 //!     let request = HttpRequestBuilder::new_fake().get(uri.clone()).build()?;
 //! }
 //! # Ok::<(), http_extensions::HttpError>(())
+//! # })().unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! # Use Templated URIs
@@ -163,6 +175,9 @@
 //! **Avoid** raw string formatting, which loses the template and bypasses validation:
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # (|| {
 //! use http_extensions::HttpRequestBuilder;
 //!
 //! # let user_id = "test-user";
@@ -170,11 +185,17 @@
 //!     .get(format!("https://api.example.com/users/{user_id}/profile"))
 //!     .build()?;
 //! # Ok::<(), http_extensions::HttpError>(())
+//! # })().unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! **Prefer** a templated URI struct that is validated, low-allocation, and telemetry-ready:
 //!
 //! ```
+//! # fn main() {
+//! # #[cfg(feature = "test-util")] {
+//! # (|| {
 //! use http_extensions::HttpRequestBuilder;
 //! use templated_uri::templated;
 //! use uuid::Uuid;
@@ -190,6 +211,9 @@
 //!     .get(UserProfilePath { user_id })
 //!     .build()?;
 //! # Ok::<(), http_extensions::HttpError>(())
+//! # })().unwrap();
+//! # }
+//! # }
 //! ```
 //!
 //! Templated paths are relative; set a base URI on the client so the final

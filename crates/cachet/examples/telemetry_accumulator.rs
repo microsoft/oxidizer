@@ -49,6 +49,9 @@ impl AccumulatingHandler {
 
 impl CacheEventHandler for AccumulatingHandler {
     fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+        // Eviction events have request_id > 0 when triggered synchronously
+        // during an insert (capacity overflow). Background maintenance
+        // evictions have request_id == 0.
         self.pending.entry(event.request_id).or_default().push(TierRecord {
             tier_name: event.tier_name.to_owned(),
             outcome: event.outcome.to_owned(),
@@ -142,4 +145,29 @@ async fn main() {
         .expect("insert should succeed");
     let _ = cache2.get(&"user:1".to_string()).await;
     let _ = cache2.get(&"nobody".to_string()).await;
+
+    // Capacity-limited cache — evictions correlated with inserts
+    println!("\n=== Capacity-limited cache (max 2 entries) ===");
+    let cache3: Cache<String, String> = Cache::builder(Clock::new_tokio())
+        .memory_with(|b| b.max_capacity(2).with_eviction_telemetry())
+        .name("tiny")
+        .event_handler(AccumulatingHandler::new())
+        .build();
+
+    // Fill to capacity
+    cache3
+        .insert("a".to_string(), CacheEntry::new("1".to_string()))
+        .await
+        .expect("insert should succeed");
+    cache3
+        .insert("b".to_string(), CacheEntry::new("2".to_string()))
+        .await
+        .expect("insert should succeed");
+    // This insert may trigger an eviction — the eviction event will carry
+    // the same request_id as the insert, so the accumulator sees both the
+    // insert and the eviction in one summary.
+    cache3
+        .insert("c".to_string(), CacheEntry::new("3".to_string()))
+        .await
+        .expect("insert should succeed");
 }

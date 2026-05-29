@@ -36,6 +36,12 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn alloc_uninit_box<T>(&self) -> Box<MaybeUninit<T>, A> {
         // Reuse the slice path so drop-aware types still reserve a noop entry.
+        // The closure-based init keeps over-aligned T's stack-materialized
+        // value out of the caller's frame, unlike a `try_alloc_inner_value`
+        // fast path which would require passing `MaybeUninit<T>` by value
+        // (and on Windows-under-coverage that materializes a 64 KiB-aligned
+        // slot in the caller's 1 MiB stack — see the `OverAligned` notes in
+        // `tests/bytemuck_integration.rs`).
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
         let slice = self.alloc_slice_local_with_or_panic(1, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
             dst.write(MaybeUninit::uninit());
@@ -55,10 +61,13 @@ impl<A: Allocator + Clone> Arena<A> {
     pub fn try_alloc_uninit_box<T>(&self) -> Result<Box<MaybeUninit<T>, A>, AllocError> {
         // Reuse the slice path with `len = 1` so drop-aware types reserve
         // the noop entry that `assume_init().into_rc()` later retargets.
+        // See `alloc_uninit_box` for why the value-path fast path is unsafe
+        // for over-aligned T on Windows.
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_local_with(1, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        })?;
+        let slice =
+            self.try_alloc_slice_local_with::<_, _, false>(1, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            })?;
         let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
         // SAFETY: helper allocated one MaybeUninit<T> and bumped the chunk refcount for this Box.
         Ok(unsafe { Box::from_raw(NonNull::new_unchecked(ptr)) })
@@ -90,11 +99,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// is at least 32 KiB.
     #[inline]
     pub fn try_alloc_zeroed_box<T>(&self) -> Result<Box<MaybeUninit<T>, A>, AllocError> {
-        // Reuse the slice path so drop-aware types still reserve a noop entry.
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_local_with(1, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        })?;
+        let slice =
+            self.try_alloc_slice_local_with::<_, _, false>(1, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            })?;
         let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
         // SAFETY: helper allocated one MaybeUninit<T> and bumped the chunk refcount for this Box.
         Ok(unsafe { Box::from_raw(NonNull::new_unchecked(ptr)) })
@@ -119,6 +128,9 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     #[inline]
     pub fn alloc_uninit_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
+        // Reuse the slice path so drop-aware types still reserve a noop entry.
+        // See `alloc_uninit_box` for why the value-path fast path is unsafe
+        // for over-aligned T on Windows-under-coverage.
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
         let slice = self.alloc_slice_local_with_or_panic(1, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
             dst.write(MaybeUninit::uninit());
@@ -137,9 +149,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_uninit_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_local_with(1, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        })?;
+        let slice =
+            self.try_alloc_slice_local_with::<_, _, false>(1, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            })?;
         let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
         // SAFETY: helper initialized one MaybeUninit<T> and bumped the refcount for this Rc.
         Ok(unsafe { Rc::from_value_ptr(NonNull::new_unchecked(ptr)) })
@@ -172,9 +185,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_zeroed_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_local_with(1, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        })?;
+        let slice =
+            self.try_alloc_slice_local_with::<_, _, false>(1, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            })?;
         let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
         // SAFETY: helper initialized one MaybeUninit<T> and bumped the refcount for this Rc.
         Ok(unsafe { Rc::from_value_ptr(NonNull::new_unchecked(ptr)) })
@@ -202,13 +216,23 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.alloc_slice_shared_with_or_panic(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        });
-        let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
-        unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) }
+        if const { core::mem::needs_drop::<T>() } {
+            let drop_fn = Some(noop_drop_shim as unsafe fn(*mut u8, usize));
+            let slice = self.alloc_slice_shared_with_or_panic(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            });
+            let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) }
+        } else {
+            // No-drop T: bypass the slice path's per-slot loop by reusing
+            // the Arc value path. `needs_drop::<MaybeUninit<T>>() == false`
+            // ⇒ no entry reserved; the closure's `MaybeUninit::uninit()`
+            // construction compiles to a no-op.
+            let ptr = self.alloc_inner_arc_with_or_panic::<MaybeUninit<T>, _>(MaybeUninit::uninit);
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            unsafe { Arc::from_value_ptr(ptr) }
+        }
     }
 
     /// Fallible variant of [`Self::alloc_uninit_arc`].
@@ -222,13 +246,19 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_shared_with(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        })?;
-        let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
-        Ok(unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) })
+        if const { core::mem::needs_drop::<T>() } {
+            let drop_fn = Some(noop_drop_shim as unsafe fn(*mut u8, usize));
+            let slice = self.try_alloc_slice_shared_with::<_, _, false>(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            })?;
+            let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            Ok(unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) })
+        } else {
+            let ptr = self.try_alloc_inner_arc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)?;
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            Ok(unsafe { Arc::from_value_ptr(ptr) })
+        }
     }
 
     /// Like [`Self::alloc_uninit_arc`] but the value bytes are zeroed.
@@ -243,13 +273,19 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.alloc_slice_shared_with_or_panic(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        });
-        let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
-        unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) }
+        if const { core::mem::needs_drop::<T>() } {
+            let drop_fn = Some(noop_drop_shim as unsafe fn(*mut u8, usize));
+            let slice = self.alloc_slice_shared_with_or_panic(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            });
+            let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) }
+        } else {
+            let ptr = self.alloc_inner_arc_with_or_panic::<MaybeUninit<T>, _>(MaybeUninit::zeroed);
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            unsafe { Arc::from_value_ptr(ptr) }
+        }
     }
 
     /// Fallible variant of [`Self::alloc_zeroed_arc`].
@@ -263,13 +299,19 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let slice = self.try_alloc_slice_shared_with(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        })?;
-        let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
-        Ok(unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) })
+        if const { core::mem::needs_drop::<T>() } {
+            let drop_fn = Some(noop_drop_shim as unsafe fn(*mut u8, usize));
+            let slice = self.try_alloc_slice_shared_with::<_, _, false>(1, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            })?;
+            let ptr = slice.as_ptr().cast::<MaybeUninit<T>>();
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            Ok(unsafe { Arc::from_value_ptr(NonNull::new_unchecked(ptr)) })
+        } else {
+            let ptr = self.try_alloc_inner_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)?;
+            // SAFETY: helper initialized one MaybeUninit<T> and accounted for this Arc.
+            Ok(unsafe { Arc::from_value_ptr(ptr) })
+        }
     }
 
     /// Allocate `len` uninitialized `T` slots and return an
@@ -303,9 +345,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_uninit_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_local_with(len, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        })?;
+        let ptr =
+            self.try_alloc_slice_local_with::<_, _, false>(len, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            })?;
         // SAFETY: helper initialized all MaybeUninit slots and bumped the refcount for this Rc.
         Ok(unsafe { Rc::from_value_ptr(ptr) })
     }
@@ -331,9 +374,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_zeroed_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_local_with(len, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        })?;
+        let ptr =
+            self.try_alloc_slice_local_with::<_, _, false>(len, AllocFlavor::Rc, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            })?;
         // SAFETY: helper initialized all MaybeUninit slots and bumped the refcount for this Rc.
         Ok(unsafe { Rc::from_value_ptr(ptr) })
     }
@@ -375,7 +419,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
     {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_shared_with(len, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+        let ptr = self.try_alloc_slice_shared_with::<_, _, false>(len, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
             dst.write(MaybeUninit::uninit());
         })?;
         // SAFETY: helper initialized all MaybeUninit slots and accounted for this Arc.
@@ -409,7 +453,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
     {
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_shared_with(len, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+        let ptr = self.try_alloc_slice_shared_with::<_, _, false>(len, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
             dst.write(MaybeUninit::zeroed());
         })?;
         // SAFETY: helper initialized all MaybeUninit slots and accounted for this Arc.
@@ -450,9 +494,10 @@ impl<A: Allocator + Clone> Arena<A> {
         // `Box<[MaybeUninit<T>]>::assume_init().into_rc()` has an entry
         // to retarget. See `try_alloc_uninit_box` for full rationale.
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_local_with(len, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::uninit());
-        })?;
+        let ptr =
+            self.try_alloc_slice_local_with::<_, _, false>(len, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::uninit());
+            })?;
         // SAFETY: helper initialized all MaybeUninit slots and bumped the refcount for this Box.
         Ok(unsafe { Box::from_raw_unsized(ptr) })
     }
@@ -479,9 +524,10 @@ impl<A: Allocator + Clone> Arena<A> {
     pub fn try_alloc_zeroed_slice_box<T>(&self, len: usize) -> Result<Box<[MaybeUninit<T>], A>, AllocError> {
         // See `try_alloc_uninit_slice_box` for rationale.
         let drop_fn = const { core::mem::needs_drop::<T>() }.then_some(noop_drop_shim as unsafe fn(*mut u8, usize));
-        let ptr = self.try_alloc_slice_local_with(len, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
-            dst.write(MaybeUninit::zeroed());
-        })?;
+        let ptr =
+            self.try_alloc_slice_local_with::<_, _, false>(len, AllocFlavor::Box, drop_fn, |_, dst: &mut MaybeUninit<MaybeUninit<T>>| {
+                dst.write(MaybeUninit::zeroed());
+            })?;
         // SAFETY: helper initialized all MaybeUninit slots and bumped the refcount for this Box.
         Ok(unsafe { Box::from_raw_unsized(ptr) })
     }

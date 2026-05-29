@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A composable, multi-tier caching library with stampede protection, background
@@ -255,11 +254,13 @@
 //! | Level | Events |
 //! |-------|--------|
 //! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
 mod cache;
+#[cfg(feature = "memory")]
+mod eviction;
 mod fallback;
 mod policy;
 mod refresh;
