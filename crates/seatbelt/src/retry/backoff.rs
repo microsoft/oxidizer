@@ -482,7 +482,7 @@ mod tests {
     fn exponential_overflow_returns_max_duration() {
         let backoff = DelayBackoff(BackoffOptions {
             backoff_type: Backoff::Exponential,
-            base_delay: Duration::from_secs(86400), // 1 day
+            base_delay: Duration::from_hours(24),
             max_delay: None,
             use_jitter: false,
             rnd: Rnd::default(),
@@ -495,11 +495,11 @@ mod tests {
 
     #[test]
     fn exponential_overflow_with_max_delay() {
-        let max_delay = Duration::from_secs(172_800); // 2 days
+        let max_delay = Duration::from_hours(48);
 
         let backoff = DelayBackoff(BackoffOptions {
             backoff_type: Backoff::Exponential,
-            base_delay: Duration::from_secs(86400), // 1 day
+            base_delay: Duration::from_hours(24),
             max_delay: Some(max_delay),
             use_jitter: false,
             rnd: Rnd::default(),

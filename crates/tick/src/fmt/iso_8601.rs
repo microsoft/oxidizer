@@ -215,7 +215,7 @@ mod tests {
 
         // Display should return the timestamp in the ISO 8601 format
         assert_eq!(stamp.to_string(), "1970-01-01T01:00:00Z");
-        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(3600));
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_hours(1));
     }
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn from_to() {
-        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
+        let at = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
         let now = crate::Clock::new_frozen_at(at).system_time();
 
         let iso = Iso8601::try_from(now).unwrap();

@@ -63,6 +63,12 @@ zerocopy = { workspace = true, optional = true }
 [target.'cfg(loom)'.dependencies]
 loom = { workspace = true }
 
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [dev-dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
@@ -71,7 +77,6 @@ bolero = { workspace = true, features = ["std"] }
 # but does not itself activate that feature on `bolero-engine`.
 bumpalo = { workspace = true, features = ["collections"] }
 criterion.workspace = true
-gungraun = { workspace = true, features = ["default"] }
 mutants.workspace = true
 serde_json.workspace = true
 
@@ -86,6 +91,9 @@ harness = false
 name = "criterion_drop"
 harness = false
 
+# Callgrind benches require Linux (Valgrind). The bench files are gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
 [[bench]]
 name = "gungraun_alloc"
 harness = false
