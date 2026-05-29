@@ -722,13 +722,29 @@ function Get-PendingReleases {
 
 # --- CORE ANALYSIS ---
 #
+# Upholds the CASCADE-ORGANIZATION INVARIANTS documented in AGENTS.md under
+# "Release Dependency Scan":
+#   (1) Upstream cascades never introduce items to the user-review queue.
+#       Honored via the optional -ModifiedSnapshot parameter: when callers
+#       (notably Invoke-PostReleaseDepScan via Invoke-ReleaseMain) capture the
+#       modifications set BEFORE the primary release runs and pass it in,
+#       cascade-only targets (those whose only modification is the cascade-
+#       written Cargo.toml / CHANGELOG.md) never enter the snapshot and so
+#       cannot surface as findings on later iterations.
+#   (2) A release-set member is removed only when its bump is already breaking
+#       (semantic maximum). Members whose bump is non-breaking or patch and
+#       which have pre-existing modifications are reported so the user can
+#       still elevate the bump after reviewing the changes.
+#
 # For each crate in the "release set" (crates with version bumps vs base), walk its
 # transitive normal/build workspace dependencies. Report any workspace dependency that
 #
 #   1. has source modifications since its own last release baseline (i.e. since the
 #      most recent commit that touched its `version =` or `publish =` line — see
 #      Get-CrateLastReleaseBaseline), and
-#   2. is NOT itself in the release set, and
+#   2. is either (a) NOT itself in the release set, OR (b) IS in the release set
+#      but its bump (current vs base) is below "breaking" (so the user might
+#      still want to elevate it after reviewing the changes), and
 #   3. is published (publish != false),
 #
 # along with the shortest dependency chain that reaches it from a released crate.
@@ -738,12 +754,15 @@ function Get-PendingReleases {
 # bump and are now being depended on by a release-set crate in this PR. Comparing
 # the working tree only against the PR base ref would miss those.
 #
-# Stops at any node already in the release set (its own bump pulls through changes).
-#
 # Returns @() when there are no findings, otherwise an array of objects:
 #   Folder            - crate folder under crates/
 #   PackageName       - cargo package name
 #   CurrentVersion    - package's current version (Cargo.toml [package].version)
+#   InReleaseSet      - $true when the finding is also a release-set member
+#                       (its bump was applied but is below breaking); $false
+#                       otherwise. The caller uses this to distinguish
+#                       "needs review for elevation" from "needs review for
+#                       primary release".
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_crate', 'mid_crate', 'this_dep'), ... )
 #
@@ -756,12 +775,20 @@ function Get-PendingReleases {
 function Get-UnreleasedModifiedDependencies {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$BaseRef
+        [Parameter(Mandatory = $true)][string]$BaseRef,
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
     )
 
     $crates      = Get-WorkspaceCrates -repoRoot $RepoRoot
     $releaseSet  = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
-    $modifiedMap = Get-CratesWithUnreleasedChanges -RepoRoot $RepoRoot
+    # Use the caller-provided snapshot when present so Invariant A holds across
+    # cascade writes (which would otherwise pollute Get-CratesWithUnreleasedChanges's
+    # working-tree query and surface cascade-only targets as findings).
+    $modifiedMap = if ($PSBoundParameters.ContainsKey('ModifiedSnapshot') -and $null -ne $ModifiedSnapshot) {
+        $ModifiedSnapshot
+    } else {
+        Get-CratesWithUnreleasedChanges -RepoRoot $RepoRoot
+    }
 
     if ($releaseSet.Count -eq 0) { return @() }
 
@@ -804,17 +831,41 @@ function Get-UnreleasedModifiedDependencies {
                 $depCrate = $byFolder[$depFolder]
                 $depChain = $node.Chain + $depFolder
 
-                # Only record this dep as a finding when it has unreleased
-                # modifications, is published, AND is NOT already in the release
-                # set (release-set members are being published as part of this
-                # PR, so they are not findings themselves).
-                if (-not $releaseSet.Contains($depFolder) -and `
-                    $modifiedMap.ContainsKey($depFolder) -and $depCrate.Published) {
+                # Decide whether to record this dep as a finding.
+                # Surface when (modified + published) AND either:
+                #   - not a release-set member (classic case), OR
+                #   - a release-set member whose bump is below "breaking" — the
+                #     user may still want to elevate after reviewing the changes
+                #     (Invariant B).
+                $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depCrate.Published
+                $isInReleaseSet = $releaseSet.Contains($depFolder)
+
+                $surface = $false
+                if ($modifiedHere) {
+                    if (-not $isInReleaseSet) {
+                        $surface = $true
+                    } else {
+                        # Release-set member: compute the cascade-applied bump
+                        # (base → current) and surface only when below "breaking".
+                        # New crates (no base version) are never surfaced — they
+                        # have no semantically-meaningful bump to elevate.
+                        $depBase = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $depFolder
+                        if ($null -ne $depBase -and $depBase -ne $depCrate.Version) {
+                            $bumpKind = Get-BumpKindFromVersions -oldVersion $depBase -newVersion $depCrate.Version
+                            if (-not (Test-IsBreakingChange -oldVersion $depBase -bump $bumpKind)) {
+                                $surface = $true
+                            }
+                        }
+                    }
+                }
+
+                if ($surface) {
                     if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
                             PackageName      = $depCrate.Name
                             CurrentVersion   = $depCrate.Version
+                            InReleaseSet     = $isInReleaseSet
                             ChangedFileCount = $modifiedMap[$depFolder]
                             DependencyChains = @(, $depChain)
                         }

@@ -128,25 +128,48 @@ try {
         $lines.Add((Format-ReleaseEntry -RepoRoot $repoRoot -BaseRef $BaseRef -Folder $f)) | Out-Null
     }
     $lines.Add('') | Out-Null
-    $lines.Add('The following workspace crates have **unreleased modifications** (changes newer than their last `version =` or `publish =` bump) and are *not* part of this release:') | Out-Null
-    $lines.Add('') | Out-Null
-    $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
-    $lines.Add('|-------|--------------:|-------------|') | Out-Null
 
-    $sortedFindings = $findings | Sort-Object { $_.Folder }
-    foreach ($finding in $sortedFindings) {
-        $chains = @($finding.DependencyChains | ForEach-Object { Format-DependencyChain -Chain $_ })
-        $rendered = ($chains | Sort-Object -Unique | ForEach-Object { "``$_``" }) -join '<br>'
-        $lines.Add("| ``$($finding.Folder)`` | $($finding.ChangedFileCount) | $rendered |") | Out-Null
+    # Split findings into two reviewer-facing categories:
+    #   - "not part of this release"       — modified upstream that is NOT in the release set.
+    #   - "elevation candidates"           — modified upstream that IS in the release set, but
+    #                                        its bump is non-breaking / patch (so the user may
+    #                                        want to elevate after reviewing the diff).
+    $sortedFindings = @($findings | Sort-Object { $_.Folder })
+    $notReleased       = @($sortedFindings | Where-Object { -not $_.InReleaseSet })
+    $elevationCandidates = @($sortedFindings | Where-Object { $_.InReleaseSet })
+
+    if ($notReleased.Count -gt 0) {
+        $lines.Add('The following workspace crates have **unreleased modifications** (changes newer than their last `version =` or `publish =` bump) and are *not* part of this release:') | Out-Null
+        $lines.Add('') | Out-Null
+        $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
+        $lines.Add('|-------|--------------:|-------------|') | Out-Null
+        foreach ($finding in $notReleased) {
+            $chains = @($finding.DependencyChains | ForEach-Object { Format-DependencyChain -Chain $_ })
+            $rendered = ($chains | Sort-Object -Unique | ForEach-Object { "``$_``" }) -join '<br>'
+            $lines.Add("| ``$($finding.Folder)`` | $($finding.ChangedFileCount) | $rendered |") | Out-Null
+        }
+        $lines.Add('') | Out-Null
     }
 
-    $lines.Add('') | Out-Null
+    if ($elevationCandidates.Count -gt 0) {
+        $lines.Add('The following workspace crates **are** part of this release, but their bump is non-breaking / patch while they also contain modifications from earlier commits. Reviewer should confirm the bump kind is appropriate:') | Out-Null
+        $lines.Add('') | Out-Null
+        $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
+        $lines.Add('|-------|--------------:|-------------|') | Out-Null
+        foreach ($finding in $elevationCandidates) {
+            $chains = @($finding.DependencyChains | ForEach-Object { Format-DependencyChain -Chain $_ })
+            $rendered = ($chains | Sort-Object -Unique | ForEach-Object { "``$_``" }) -join '<br>'
+            $lines.Add("| ``$($finding.Folder)`` | $($finding.ChangedFileCount) | $rendered |") | Out-Null
+        }
+        $lines.Add('') | Out-Null
+    }
     $lines.Add('### What this means') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('Locally, the released crates build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('- If the unreleased changes are **material** to the released crate''s behavior or public API, you should release the dependency too (re-run ``scripts/release-crate.ps1`` for it).') | Out-Null
     $lines.Add('- If the changes are **immaterial** (formatting, doc tweaks, internal-only refactors), this comment can be ignored.') | Out-Null
+    $lines.Add('- For crates **already part of this release** that contain extra modifications, confirm that the bump kind chosen at release time (non-breaking / patch) is appropriate for the cumulative change set.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('<sub>This is an automated informational check. It does not fail the build.</sub>') | Out-Null
 

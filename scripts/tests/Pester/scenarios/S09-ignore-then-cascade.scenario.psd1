@@ -1,6 +1,6 @@
 @{
     Name        = 'S09-ignore-then-cascade'
-    Description = 'User declines b, then accepts c. Releasing c cascade-bumps b into the release set. The scan reports the override via the "Previously ignored package was cascade-bumped" notice and removes b from the declined set. Validates the ignore-then-cascade handoff path.'
+    Description = 'User declines b, then accepts c. Releasing c cascade-bumps b into the release set. The scan reports the override via the "Previously ignored package was cascade-bumped" notice and removes b from the declined set. Per Invariant B, b (now in the release set with a non-breaking cascade bump AND modifications from earlier commits) is RE-SURFACED for elevation review on the next iteration — accepting c does NOT pre-mark b as reviewed. User confirms the cascade-applied bump is sufficient by picking ignore again.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -20,7 +20,12 @@
             # Iter 1: accept c via option 4 (non-breaking). Option 5 (patch) is hidden
             # on 0.x.y because it would produce the same numeric increment.
             @{ Match = "Choose option for 'c'"; Reply = '4' }
-            # No further prompt: b is now in the release set via cascade, not a finding.
+            # Iter 2: c's cascade pulled b into the release set with a
+            # non-breaking bump (0.2.0 → 0.2.1). Because b also has
+            # pre-existing modifications, Invariant B re-surfaces it for
+            # elevation review. User picks ignore — the cascade-applied
+            # bump is fine.
+            @{ Match = "Choose option for 'b'"; Reply = '2' }
         )
     }
 
@@ -37,6 +42,7 @@
         PromptsRaised = @(
             "Choose option for 'b'"
             "Choose option for 'c'"
+            "Choose option for 'b'"
         )
         UnconsumedAnswers = @()
     }

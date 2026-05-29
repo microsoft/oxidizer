@@ -241,6 +241,176 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         @($cFinding.DependencyChains).Count | Should -Be 1
         @($cFinding.DependencyChains)[0] -join ',' | Should -Be 'a,b,c'
     }
+
+    It 'tags non-release-set findings with InReleaseSet = $false' {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'irs-classic')
+        $ws.ModifySource('upstream')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('mod upstream + bump downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet | Should -BeFalse
+    }
+}
+
+# --------------------------------------------------------------------------
+# Get-UnreleasedModifiedDependencies — Invariant B (release-set members
+# whose cascade-applied bump is below "breaking" must surface as elevation
+# candidates) and the -ModifiedSnapshot mechanism (Invariant A: cascade
+# writes must not pollute the working-tree query).
+# --------------------------------------------------------------------------
+
+Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B)' {
+
+    # Helper: build a Linear2 workspace where 'upstream' is BOTH a release-set
+    # member (its version differs from BaseRef) AND has unreleased
+    # modifications past its per-crate baseline. We arrange this by:
+    #   HEAD~2 → initial (upstream at 0.2.0)
+    #   HEAD~1 → upstream bumped to $upstreamPending (this becomes upstream's
+    #            per-crate baseline; release-set membership against
+    #            BaseRef=HEAD~2 depends on the version differing)
+    #   HEAD   → source edit on upstream + bump downstream so the loop has
+    #            something to traverse from. Now upstream is in the release
+    #            set AND has modifications post-baseline.
+    function script:NewElevationWorkspace {
+        param(
+            [string]$Path,
+            [string]$UpstreamPending  # the in-PR pending version for upstream
+        )
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path $Path
+        $ws.BumpVersion('upstream', $UpstreamPending)
+        $ws.AddCommit('bump upstream (pending release)')
+        $ws.ModifySource('upstream', '// post-bump edit, may warrant elevation')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('mod upstream + bump downstream')
+        return $ws
+    }
+
+    It 'surfaces a release-set member whose cascade-applied bump is patch (0.x — Invariant B)' {
+        Reset-ReleaseScriptCaches
+        # upstream goes 0.2.0 → 0.2.1 (patch); per Test-IsBreakingChange this
+        # is non-breaking, so the user should be prompted to elevate.
+        $ws = NewElevationWorkspace -Path (Join-Path $TestDrive 'irs-patch') -UpstreamPending '0.2.1'
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet | Should -BeTrue
+        $u.CurrentVersion | Should -Be '0.2.1'
+    }
+
+    It 'does NOT surface a release-set member whose cascade-applied bump is breaking (0.x major)' {
+        Reset-ReleaseScriptCaches
+        # upstream goes 0.2.0 → 0.3.0 (major-on-0.x, i.e. breaking per
+        # Test-IsBreakingChange) — no further elevation is possible, so the
+        # user should not be prompted.
+        $ws = NewElevationWorkspace -Path (Join-Path $TestDrive 'irs-major0x') -UpstreamPending '0.3.0'
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings | Where-Object { $_.Folder -eq 'upstream' } | Should -BeNullOrEmpty
+    }
+
+    It 'surfaces a release-set member whose cascade-applied bump is non-breaking on 1.x' {
+        Reset-ReleaseScriptCaches
+        # Build a 1.x workspace so non-breaking (minor) is distinct from
+        # breaking (major) in cargo-semver terms.
+        $spec = @{
+            Crates = @(
+                @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
+                @{ Name = 'upstream';   Version = '1.2.3' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'irs-1x-minor')
+        $ws.BumpVersion('upstream', '1.3.0')
+        $ws.AddCommit('pending minor release of upstream')
+        $ws.ModifySource('upstream', '// post-bump edit')
+        $ws.BumpVersion('downstream', '1.0.1')
+        $ws.AddCommit('mod upstream + bump downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet   | Should -BeTrue
+        $u.CurrentVersion | Should -Be '1.3.0'
+    }
+
+    It 'does NOT surface a release-set member whose cascade-applied bump is breaking on 1.x' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Crates = @(
+                @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
+                @{ Name = 'upstream';   Version = '1.2.3' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'irs-1x-major')
+        $ws.BumpVersion('upstream', '2.0.0')
+        $ws.AddCommit('pending major release of upstream')
+        $ws.ModifySource('upstream', '// post-bump edit')
+        $ws.BumpVersion('downstream', '1.0.1')
+        $ws.AddCommit('mod upstream + bump downstream')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings | Where-Object { $_.Folder -eq 'upstream' } | Should -BeNullOrEmpty
+    }
+
+    It 'still surfaces a release-set member whose pending bump is patch, even when only the working tree carries the modifications' {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'irs-worktree')
+        $ws.BumpVersion('upstream', '0.2.1')
+        $ws.AddCommit('pending patch release of upstream')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('bump downstream')
+        # Uncommitted source edit on upstream — past its per-crate baseline.
+        $ws.ModifySource('upstream', '// uncommitted further edit')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet | Should -BeTrue
+    }
+}
+
+Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invariant A)' {
+
+    It 'uses the caller-provided snapshot instead of querying the working tree' {
+        Reset-ReleaseScriptCaches
+        # Build a workspace where the working tree has NO unreleased
+        # modifications on upstream — only a pending downstream bump.
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'ms-fake-snap')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('pending downstream bump')
+
+        # Without a snapshot: the live query finds nothing on upstream.
+        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $live.Folder | Should -Not -Contain 'upstream'
+
+        # With a synthetic snapshot claiming upstream IS modified, the BFS
+        # surfaces it as a classic (non-release-set) finding.
+        $snap = @{ 'upstream' = 3 }
+        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1' -ModifiedSnapshot $snap)
+        $u = $with | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet     | Should -BeFalse
+        $u.ChangedFileCount | Should -Be 3
+    }
+
+    It 'returns no findings when the snapshot is empty even if the live query would find some' {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'ms-empty-snap')
+        # Live: upstream has an unreleased modification past its baseline.
+        $ws.ModifySource('upstream')
+        $ws.BumpVersion('downstream', '0.1.1')
+        $ws.AddCommit('mod upstream + bump downstream')
+
+        # Sanity check that the live query DOES find it.
+        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $live.Folder | Should -Contain 'upstream'
+
+        # With an empty snapshot, the BFS surfaces nothing.
+        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1' -ModifiedSnapshot @{})
+        $with.Count | Should -Be 0
+    }
 }
 
 # --------------------------------------------------------------------------

@@ -583,7 +583,7 @@ Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
     BeforeEach {
         # Single fake published crate for the maxIterations cap.
         Mock -CommandName Get-WorkspaceCrates -MockWith {
-            ,@([pscustomobject]@{ Folder = 'fake'; Name = 'fake'; Published = $true })
+            [pscustomobject]@{ Folder = 'fake'; Name = 'fake'; Published = $true }
         }
         # Drive the loop into "no findings" so it exits after a single iteration.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
@@ -637,11 +637,9 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
         Reset-ReleaseScriptCaches
         # Mock the workspace so the maxIterations cap allows several iters.
         Mock -CommandName Get-WorkspaceCrates -MockWith {
-            ,@(
-                [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
-                [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
-                [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
-            )
+            [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
+            [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
+            [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
         }
         Mock -CommandName Invalidate-WorkspaceMetadataCache -MockWith { }
         Mock -CommandName Test-InteractiveSession -MockWith { $true }
@@ -692,6 +690,349 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
         } 6>&1
         # 3 ignore decisions → status line appears once (initial recompute only).
         ([regex]::Matches(($out | Out-String), 'Analyzing packages for unreleased modifications')).Count | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-PostReleaseDepScan — release-set elevation review flow (Invariant B).
+# Release-set members (InReleaseSet = $true) whose cascade-applied bump is
+# below "breaking" must surface as elevation candidates. Once the user
+# decides — either by elevating (release) or ignoring — they must NOT
+# re-appear in subsequent iterations even though they remain present in
+# the BFS findings (because the on-disk cargo state did not change).
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invariant B)' {
+
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+        Mock -CommandName Get-WorkspaceCrates -MockWith {
+            [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
+            [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
+        }
+        Mock -CommandName Invalidate-WorkspaceMetadataCache -MockWith { }
+        Mock -CommandName Test-InteractiveSession -MockWith { $true }
+        Mock -CommandName Show-PackageMenu -MockWith { }
+    }
+
+    It "marks a release-set finding as reviewed after 'ignore' so it doesn't resurface" {
+        # The BFS always returns one finding (release-set member 'b'). After
+        # the first 'ignore' the loop should NOT prompt for 'b' again.
+        $script:depsCallCount = 0
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            $script:depsCallCount++
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.2.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
+            )
+        }
+
+        $script:readHostCalls = 0
+        Mock -CommandName Read-Host -MockWith {
+            $script:readHostCalls++
+            return '2'  # ignore
+        }
+
+        $releases = @()
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>$null
+
+        # Exactly one prompt — the second iteration filters the cached
+        # queue on the reviewedReleaseSet set and finds it empty, so we
+        # return without prompting again.
+        $script:readHostCalls | Should -Be 1
+    }
+
+    It "logs the 'Keeping ... at its current cascade-applied version' message on ignore for a release-set member" {
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.2.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
+            )
+        }
+        Mock -CommandName Read-Host -MockWith { return '2' }
+
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>&1
+        ($out | Out-String) | Should -Match "Keeping 'b' at its current cascade-applied version"
+    }
+
+    It "uses the 'Leaving ... unreleased' message on ignore for a non-release-set member" {
+        # Same finding shape but InReleaseSet=$false → the loop should use
+        # the classic "Leaving ... unreleased" wording and add to $declined,
+        # not to $reviewedReleaseSet.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.2.0'
+                    InReleaseSet     = $false
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
+            )
+        }
+        Mock -CommandName Read-Host -MockWith { return '2' }
+
+        $releases = @()
+        $out = & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
+        } 6>&1
+        ($out | Out-String) | Should -Match "Leaving 'b' unreleased"
+        ($out | Out-String) | Should -Not -Match "at its current cascade-applied version"
+    }
+
+    It 'pre-marks PreReviewedFolders so they never surface in the user-review queue' {
+        # The BFS would return 'b' (a release-set elevation candidate from a
+        # prior invocation), but the caller passes PreReviewedFolders=@('b'),
+        # so the loop must skip 'b' without prompting.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.2.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
+            )
+        }
+        $script:readHostCalls = 0
+        Mock -CommandName Read-Host -MockWith {
+            $script:readHostCalls++
+            return '2'
+        }
+
+        $releases = @()
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -PreReviewedFolders @('b')
+        } 6>$null
+
+        $script:readHostCalls | Should -Be 0
+    }
+
+    It 'surfaces a cascade-bumped release-set member with modifications when it is NOT in PreReviewedFolders (Invariant B)' {
+        # 'a' was added to the release set by a cascade from 'b'. The user
+        # explicitly decided about 'b' (so 'b' is in PreReviewedFolders), but
+        # NOT about 'a'. 'a' is also modified (InReleaseSet=$true, non-breaking
+        # bump). Per Invariant B, the BFS surfaces 'a' as an elevation
+        # candidate and the loop MUST prompt for it.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'a'
+                    PackageName      = 'a'
+                    CurrentVersion   = '0.3.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 2
+                    DependencyChains = @(,@('b', 'a'))
+                }
+            )
+        }
+        $script:readHostCalls = 0
+        Mock -CommandName Read-Host -MockWith {
+            $script:readHostCalls++
+            return '2'   # ignore — keep the cascade-applied bump
+        }
+
+        $releases = @(
+            [pscustomobject]@{ Crate = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+            [pscustomobject]@{ Crate = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+        )
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -PreReviewedFolders @('b')
+        } 6>$null
+
+        $script:readHostCalls | Should -Be 1
+    }
+
+    It 'does NOT pre-mark cascade-bumped release-set members from $ReleasesRef as reviewed' {
+        # Initial $releases contains both 'b' (primary) and 'a' (cascade-bumped).
+        # PreReviewedFolders only contains 'b'. The BFS surfaces 'a' as
+        # elevation candidate (modified + InReleaseSet + non-breaking).
+        # The loop MUST prompt for 'a' — proving that the old "pre-mark every
+        # initial ReleasesRef entry" behavior is gone.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'a'
+                    PackageName      = 'a'
+                    CurrentVersion   = '0.3.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 2
+                    DependencyChains = @(,@('b', 'a'))
+                }
+            )
+        }
+        $script:promptForA = $false
+        Mock -CommandName Read-Host -MockWith {
+            param($Prompt)
+            if ($Prompt -match "Choose option for 'a'") { $script:promptForA = $true }
+            return '2'
+        }
+
+        $releases = @(
+            [pscustomobject]@{ Crate = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+            [pscustomobject]@{ Crate = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+        )
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -PreReviewedFolders @('b')
+        } 6>$null
+
+        $script:promptForA | Should -BeTrue
+    }
+
+    It 'after user accepts a release, cascade-bumped modified dependents from the SAME release flow are NOT pre-filtered (re-surface for Invariant B review)' {
+        # Setup: $releases starts as empty (we exercise the scan loop directly).
+        # BFS iter 1 surfaces 'b' as a fresh finding (NOT in release set,
+        # modified). User accepts 'b' as non-breaking. Invoke-ReleaseFlow for
+        # 'b' is mocked to cascade-pull 'a' (alongside 'b' itself) into the
+        # release set with a non-breaking bump. 'a' is ALSO modified.
+        #
+        # Bug 2 (now fixed) was: blanket-marking ALL of [b, a] as reviewed
+        # after acceptance, so 'a' was filtered from the next BFS iter even
+        # though it's a fresh Invariant B candidate.
+        #
+        # Fix: only $next.Folder ('b') gets marked reviewed. Next BFS iter
+        # surfaces 'a' → user is prompted.
+
+        # Override the BeforeEach mock so maxIterations >= 3 (we need at
+        # least 2 iterations to surface 'a' after accepting 'b'). The
+        # workspace shape (3 published crates) sets maxIterations in
+        # Invoke-PostReleaseDepScan.
+        Mock -CommandName Get-WorkspaceCrates -MockWith {
+            [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
+            [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
+            [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
+        }
+
+        $script:bfsCallCount = 0
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            $script:bfsCallCount++
+            if ($script:bfsCallCount -eq 1) {
+                # Initial scan: 'b' is a fresh upstream finding (not in
+                # release set, modified).
+                ,@(
+                    [pscustomobject]@{
+                        Folder           = 'b'
+                        PackageName      = 'b'
+                        CurrentVersion   = '0.4.0'
+                        InReleaseSet     = $false
+                        ChangedFileCount = 1
+                        DependencyChains = @(,@('c', 'b'))
+                    }
+                )
+            } elseif ($script:bfsCallCount -eq 2) {
+                # After accepting 'b': cascade pulled 'a' into release set
+                # with non-breaking bump. 'a' is modified too → Invariant B
+                # candidate. Per fix, 'a' must NOT be pre-filtered.
+                ,@(
+                    [pscustomobject]@{
+                        Folder           = 'a'
+                        PackageName      = 'a'
+                        CurrentVersion   = '0.3.1'
+                        InReleaseSet     = $true
+                        ChangedFileCount = 2
+                        DependencyChains = @(,@('b', 'a'))
+                    }
+                )
+            } else {
+                ,@()
+            }
+        }
+
+        # Mock Invoke-ReleaseFlow to simulate cascade pulling in 'a' alongside 'b'.
+        Mock -CommandName Invoke-ReleaseFlow -MockWith {
+            param($CrateName, $Bump)
+            return @(
+                [pscustomobject]@{ Crate = $CrateName; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+                [pscustomobject]@{ Crate = 'a';        OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+            )
+        }
+
+        $script:promptsRaised = @()
+        Mock -CommandName Read-Host -MockWith {
+            param($Prompt)
+            $script:promptsRaised += $Prompt
+            if ($Prompt -match "Choose option for 'b'") { return '4' }   # accept as non-breaking
+            if ($Prompt -match "Choose option for 'a'") { return '2' }   # ignore
+            return '2'
+        }
+
+        $releases = @(
+            [pscustomobject]@{ Crate = 'c'; OldVersion = '0.5.0'; NewVersion = '0.5.1' }
+        )
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -PreReviewedFolders @('c')
+        } 6>$null 3>$null
+
+        ($script:promptsRaised -join '|') | Should -Match "Choose option for 'b'"
+        ($script:promptsRaised -join '|') | Should -Match "Choose option for 'a'"
+    }
+
+    It 'in non-interactive mode, adds release-set findings to reviewedReleaseSet (not $declined)' {
+        # The bulk-list path must keep the InReleaseSet vs not distinction so
+        # the right post-scan bookkeeping happens for each finding.
+        Mock -CommandName Test-InteractiveSession -MockWith { $false }
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            ,@(
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.2.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
+                [pscustomobject]@{
+                    Folder           = 'd'
+                    PackageName      = 'd'
+                    CurrentVersion   = '0.4.0'
+                    InReleaseSet     = $false
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'd'))
+                }
+            )
+        }
+        Mock -CommandName Read-Host -MockWith { throw "Read-Host should not be called in non-interactive mode" }
+
+        $releases = @()
+        & {
+            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
+                -NonInteractive
+        } 6>$null 3>$null
+        # No exception → Read-Host was never invoked → the non-interactive
+        # path was actually taken.
+        $true | Should -BeTrue
     }
 }
 

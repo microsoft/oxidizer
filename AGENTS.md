@@ -25,6 +25,28 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 The changelogs are updated by `scripts/release-crate.ps1` at release time, based on Git history. It is not necessary to make manual edits
 to the changelogs, though you are permitted to do so if explicitly instructed.
 
+## Release Dependency Scan
+
+`scripts/release-crate.ps1`'s post-release dependency-scan loop (which surfaces
+modified-but-unreleased workspace packages for the user to review) operates on
+two invariants — keep them intact when editing the relevant code in
+`scripts/lib/release-flow.ps1` and `scripts/lib/releasing.ps1`:
+
+1. **Upstream cascades never introduce items to the user-review queue.** A
+   package that received only a cascade bump (no pre-existing developer
+   modifications) requires no user review — its version bump is mechanical and
+   follows directly from the released dependency. Such packages must not
+   surface in the dep-scan prompt. The implementation upholds this by
+   snapshotting the "has unreleased modifications" set BEFORE the primary
+   release / cascade runs so the snapshot reflects pre-cascade reality.
+2. **A release-set member is removed from the user-review queue only when its
+   bump is already at the semantic maximum (breaking).** If a release-set
+   member has pre-existing developer modifications AND its cascade-applied
+   bump is less than breaking (non-breaking or patch), the user must still be
+   prompted because they may want to escalate the bump after reviewing the
+   changes. Only when the bump is already breaking (no higher bump exists)
+   can the member safely drop from the queue.
+
 ## Pull Requests
 
 Pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/) naming, e.g. `feat(bytesbuf): add new metric` or `fix(cachet): correct eviction logic`.

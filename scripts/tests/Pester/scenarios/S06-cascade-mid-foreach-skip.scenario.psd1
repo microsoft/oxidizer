@@ -1,8 +1,8 @@
 @{
     Name        = 'S06-cascade-mid-foreach-skip'
-    Description = 'Multi-release-set topology that naturally produces iteration order [b, a] where accepting b cascade-bumps a into the release set. a is then encountered later in the same foreach and its prompt is SKIPPED via the currentReleaseSet membership check.
+    Description = 'Multi-release-set topology where accepting b cascade-bumps a into the release set. Per Invariant B, because a is ALSO modified (pre-existing changes) AND the cascade-applied bump on a is non-breaking, a must be re-surfaced for elevation review. User ignores → a stays at the cascade-applied 0.3.1.
 
-Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha → b; zeta → a; a → b. With Sort-Object on the release-set foreach, alpha enumerates first → b is inserted into findings before a. Accepting b cascade-bumps both alpha (pre-bumped, sufficient) and a (newly bumped). When the foreach next reaches a, the skip path fires.'
+Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha → b; zeta → a; a → b. With Sort-Object on the release-set foreach, alpha enumerates first → b is inserted into findings before a. Accepting b cascade-bumps both alpha (pre-bumped, sufficient) and a (newly bumped). a being modified + cascade-bumped non-breaking triggers Invariant B prompt; user ignores.'
 
     Workspace = @{
         Spec = @{
@@ -35,8 +35,11 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha �
             # On 0.x.y the menu hides option 5 (patch), so accept via option 4
             # (non-breaking) — same 0.x.(y+1) outcome under Cargo semver.
             @{ Match = "Choose option for 'b'"; Reply = '4' }
-            # No prompt expected for 'a': it was cascade-bumped by accepting 'b' and
-            # is filtered out of the next iteration's queue by the BFS.
+            # Invariant B: 'a' was cascade-bumped into the release set with a
+            # non-breaking bump AND also has pre-existing modifications, so the
+            # next BFS iteration re-surfaces 'a' for elevation review. User
+            # answers '2' (ignore — keep the cascade-applied bump).
+            @{ Match = "Choose option for 'a'"; Reply = '2' }
         )
     }
 
@@ -55,6 +58,7 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha �
         )
         PromptsRaised = @(
             "Choose option for 'b'"
+            "Choose option for 'a'"
         )
         UnconsumedAnswers = @()
     }

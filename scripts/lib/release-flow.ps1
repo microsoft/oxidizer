@@ -224,6 +224,92 @@ function Update-CrateVersion {
     return $newVersion
 }
 
+# Re-stamps an already-pending release with a different version: the package's
+# Cargo.toml, the workspace Cargo.toml's [workspace.dependencies] entry, and
+# the CHANGELOG.md "## [oldVersion] - YYYY-MM-DD" section header are rewritten
+# in place, preserving the existing changelog body (which was generated from
+# the same commit/cascade history the user already reviewed).
+#
+# Used for in-place escalation when a downstream cascade or a subsequent
+# Invoke-ReleaseFlow re-invocation needs to lift an already-bumped package to
+# a higher version. The alternative — calling Invoke-CrateRelease again — would
+# create a second `## [<new>]` changelog section while leaving the stale
+# `## [<old>]` section in place, breaking the convention of one section per
+# released version.
+#
+# Returns the new version string. No cargo metadata invalidation here — caller
+# is responsible for calling Reset-ReleaseScriptCaches / Invalidate-WorkspaceMetadataCache
+# (the wider cascade plumbing already does so where it matters).
+function Update-PendingReleaseVersion {
+    param(
+        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $true)][string]$CrateFolder,
+        [Parameter(Mandatory = $true)][string]$RootCargoToml,
+        [Parameter(Mandatory = $true)][string]$OldVersion,
+        [Parameter(Mandatory = $true)][string]$NewVersion
+    )
+
+    if ($OldVersion -eq $NewVersion) { return $NewVersion }
+
+    $crateCargoToml = Join-Path $CrateFolder 'Cargo.toml'
+    $changelogFile  = Join-Path $CrateFolder 'CHANGELOG.md'
+
+    if (-not (Test-Path -LiteralPath $crateCargoToml)) {
+        Write-Error "Update-PendingReleaseVersion: Cargo.toml not found at '$crateCargoToml'." -ErrorAction Stop
+    }
+
+    Write-Host "📝 Re-stamping '$crateCargoToml' from $OldVersion to $NewVersion..."
+    $crateContent = Get-Content -LiteralPath $crateCargoToml -Raw
+    if (-not $script:CargoPackageVersionRegex.IsMatch($crateContent)) {
+        Write-Error "Update-PendingReleaseVersion: no [package] version line in '$crateCargoToml'." -ErrorAction Stop
+    }
+    # Replace exactly one occurrence (the [package].version), preserving the
+    # captured prefix via $1 so the surrounding whitespace / `version = "` is
+    # left intact.
+    $crateContent = $script:CargoPackageVersionRegex.Replace($crateContent, ('${1}' + $NewVersion), 1)
+    Set-Content -LiteralPath $crateCargoToml -Value $crateContent -NoNewline
+
+    Write-Host "📝 Re-stamping '$RootCargoToml' workspace entry for '$CrateName' to $NewVersion..."
+    function Get-EscapedRegexSpecialChars2($str) {
+        return ($str -replace $script:RegexEscapeRegex, '\$1')
+    }
+    $escapedCrateName = Get-EscapedRegexSpecialChars2($CrateName)
+    $crateNamePattern = $escapedCrateName.Replace('_', '[-_]')
+    # Same lookbehind regex shape as Update-CrateVersion so the same
+    # workspace-dep declaration pattern matches consistently.
+    $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
+    (Get-Content -LiteralPath $RootCargoToml -Raw) -replace $regex, $NewVersion | Set-Content -LiteralPath $RootCargoToml -NoNewline
+
+    if (Test-Path -LiteralPath $changelogFile) {
+        Write-Host "📝 Re-stamping '$changelogFile' section header from [$OldVersion] to [$NewVersion]..."
+        $eol = Get-FileLineEnding -Path $changelogFile
+        $existing = Get-Content -LiteralPath $changelogFile -Raw
+        $escapedOld = $script:RegexEscapeRegex.Replace($OldVersion, '\$1')
+        # Rewrite the FIRST occurrence of "## [oldVersion]" — section headers
+        # are unique per version, so [regex]::new(...).Replace(input, repl, 1)
+        # is sufficient and avoids accidentally clobbering body text that
+        # mentions the version.
+        $headerRegex = [regex]"## \[$escapedOld\]"
+        if (-not $headerRegex.IsMatch($existing)) {
+            Write-Warning "Update-PendingReleaseVersion: no '## [$OldVersion]' section in '$changelogFile'; leaving changelog alone."
+        } else {
+            $rewritten = $headerRegex.Replace($existing, "## [$NewVersion]", 1)
+            # Re-normalize line endings: the regex replace doesn't change line
+            # boundaries, but Set-Content with -NoNewline preserves whatever
+            # mix the file already had. Force the file's original convention.
+            $hadTrailingNewline = $existing.EndsWith("`n") -or $existing.EndsWith("`r`n")
+            if ($hadTrailingNewline -and -not ($rewritten.EndsWith("`n") -or $rewritten.EndsWith("`r`n"))) {
+                $rewritten += $eol
+            }
+            Set-Content -LiteralPath $changelogFile -Value $rewritten -NoNewline -Encoding utf8
+        }
+    } else {
+        Write-Warning "Update-PendingReleaseVersion: changelog '$changelogFile' not found; skipping header rewrite."
+    }
+
+    return $NewVersion
+}
+
 function Write-Changelog {
     param(
         [string]$crateName,
@@ -514,6 +600,28 @@ function Add-CascadeBulletToVersionSection {
         if ($lines[$i] -match '^## \[') { $sectionEnd = $i; break }
     }
 
+    # Drop any pre-existing "Now requires <any-version> of <targetName>" bullets
+    # within this section. Escalations re-fire cascades with a higher target
+    # version (and possibly a different Breaking/Maintenance classification);
+    # without this dedup, the section would accumulate stale bullets citing the
+    # old target version. Matches `<TargetName>` exactly (regex-escaped) so a
+    # bullet for an unrelated target with a similar name is left alone.
+    $escapedTargetName = $script:RegexEscapeRegex.Replace($targetName, '\$1')
+    $bulletForSameTarget = '^\s*-\s+Now requires `[^`]+` of `' + $escapedTargetName + '`\s*$'
+    $cleaned = New-Object 'System.Collections.Generic.List[string]'
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($i -gt $sectionStart -and $i -lt $sectionEnd -and $lines[$i] -match $bulletForSameTarget) {
+            continue
+        }
+        $cleaned.Add($lines[$i])
+    }
+    $linesRemoved = $lines.Count - $cleaned.Count
+    if ($linesRemoved -gt 0) {
+        # Re-locate section boundaries after the removal (section shrunk).
+        $lines = $cleaned.ToArray()
+        $sectionEnd -= $linesRemoved
+    }
+
     $subStart = -1
     for ($i = $sectionStart + 1; $i -lt $sectionEnd; $i++) {
         if ($lines[$i] -eq $subHeader) { $subStart = $i; break }
@@ -622,11 +730,17 @@ function Invoke-CascadeStep {
     }
 
     Write-Host "  • $Dependent currently $depCurrent < required $required; upgrading." -ForegroundColor DarkYellow
-    $depNew = Invoke-CrateRelease -crateName $Dependent -crateFolder $depFolder `
-        -crateCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
-        -prBaseUrl $PrBaseUrl -version $required -bump "" -cascadeReason $depCascadeReason
+    # In-place re-stamp: the dependent already has a pending changelog section
+    # at $depCurrent (commit bullets + any earlier cascade bullets). Calling
+    # Invoke-CrateRelease here would generate a second `## [$required]` section
+    # while leaving the stale `## [$depCurrent]` section behind. Update the
+    # version in Cargo.toml + workspace Cargo.toml + the existing CHANGELOG
+    # header, then append the new cascade bullet under the now-renamed section.
+    Update-PendingReleaseVersion -CrateName $Dependent -CrateFolder $depFolder `
+        -RootCargoToml $RootCargoToml -OldVersion $depCurrent -NewVersion $required | Out-Null
+    Add-CascadeBulletToVersionSection -ChangelogFile $depChange -Version $required -CascadeReason $depCascadeReason
     Invalidate-WorkspaceMetadataCache
-    return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
+    return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $required }
 }
 
 # --- CASCADE-MESSAGE FORMATTING ---
@@ -812,13 +926,21 @@ function Invoke-ReleaseFlow {
             $cascadeBump = Get-BumpKindFromVersions -oldVersion $baseVersion -newVersion $currentVersion
         } else {
             # cmp < 0: requested release would escalate the primary above its
-            # current pending version. We don't support automated escalation
-            # (the existing changelog section would need to be merged into the
-            # new one, which is non-trivial); ask the user to restore the
-            # pending artifacts and re-invoke from a clean state.
-            $artifactsHint = "crates/$CrateName/Cargo.toml, crates/$CrateName/CHANGELOG.md, crates/$CrateName/README.md, and the workspace Cargo.toml entry for '$CrateName'"
-            Write-Error "Cannot escalate pending release of '$CrateName': already pending at v$currentVersion (base v$baseVersion), but the requested change requires at least v$requiredVersion. To re-do the release at a higher version, first restore the previous pending release artifacts ($artifactsHint) to their base-ref state, then re-invoke."
-            Exit 1
+            # current pending version. Re-stamp Cargo.toml / root Cargo.toml /
+            # CHANGELOG header in place — body content (commit bullets + cascade
+            # bullets from the prior pending pass) carries forward verbatim,
+            # because the only thing that changed is the user's bump intent.
+            Write-Host "⬆️  Escalating pending release of '$CrateName' from v$currentVersion to v$requiredVersion (base v$baseVersion)." -ForegroundColor Yellow
+            Update-PendingReleaseVersion -CrateName $CrateName -CrateFolder $crateFolder `
+                -RootCargoToml $RootCargoToml -OldVersion $currentVersion -NewVersion $requiredVersion | Out-Null
+            Invalidate-WorkspaceMetadataCache
+
+            $oldVersion = $baseVersion
+            $newVersion = $requiredVersion
+            # Cascade bump derives from the effective base → escalated transition
+            # so dependents (which may already be cascade-bumped from the prior
+            # pass) get re-evaluated against the new requirement.
+            $cascadeBump = Get-BumpKindFromVersions -oldVersion $baseVersion -newVersion $requiredVersion
         }
     } else {
         $oldVersion = $currentVersion
@@ -1230,6 +1352,24 @@ function Get-PackageReleaseDecision {
 # by a release-set member but are not themselves part of the release set, prompting
 # the user (when interactive) to optionally release them too.
 # Newly-released crates are appended to the release records via [ref].
+#
+# CASCADE-ORGANIZATION INVARIANTS (see AGENTS.md "Release Dependency Scan"):
+#   A. Upstream cascades never introduce items to the user-review queue. A
+#      cascade-only target (no pre-existing modifications) must NOT surface —
+#      its bump is mechanical and follows directly from the released dependency.
+#      Enforced by snapshotting the modifications set BEFORE the primary
+#      release / cascade runs (the snapshot is passed in via -ModifiedSnapshot
+#      and forwarded to Get-UnreleasedModifiedDependencies).
+#   B. A release-set member is removed from the user-review queue ONLY when
+#      its cascade-applied bump is already breaking (semantic maximum) OR
+#      when the user has explicitly reviewed it in this run / a prior
+#      release-crate.ps1 invocation. Release-set members whose cascade-applied
+#      bump is non-breaking or patch are SURFACED when they have pre-existing
+#      modifications, because the user may want to escalate after reviewing
+#      the changes (an upstream cascade is only definitive if the ONLY
+#      change in that package is the mechanical dependency bump). Enforced
+#      jointly by Get-UnreleasedModifiedDependencies (the BFS surfacing
+#      rule) and the $reviewedReleaseSet bookkeeping inside this loop.
 function Invoke-PostReleaseDepScan {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -1237,7 +1377,29 @@ function Invoke-PostReleaseDepScan {
         [Parameter(Mandatory = $true)][ref]$ReleasesRef,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
-        [Parameter(Mandatory = $false)][switch]$NonInteractive
+        [Parameter(Mandatory = $false)][switch]$NonInteractive,
+        # Caller-captured "has unreleased modifications" hashtable. When provided,
+        # used in lieu of re-querying the working tree mid-loop. Required to
+        # uphold Invariant A across cascades (the cascade-written Cargo.toml /
+        # CHANGELOG.md / README.md edits would otherwise pollute the snapshot
+        # and surface cascade-only targets as findings).
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
+        # Folders whose release the user has already explicitly decided about
+        # — i.e. they must NOT be re-prompted as Invariant B elevation
+        # candidates in this scan. Typical contents:
+        #   - The primary target of this invocation (the user just chose
+        #     `-Change <kind>` for it; no point re-asking).
+        #   - The cross-invocation pending-releases set captured before any
+        #     work in this run (prior `release-crate.ps1` invocations in the
+        #     same PR already settled those).
+        # IMPORTANT: this list must NOT include packages that were only
+        # cascade-bumped (no explicit user review). Those must remain
+        # eligible for elevation review per Invariant B — accepting one
+        # release whose cascade pulls additional modified packages into the
+        # release set with a non-breaking bump is exactly the condition
+        # under which the user needs a chance to review and potentially
+        # elevate the cascade-applied bump.
+        [Parameter(Mandatory = $false)][string[]]$PreReviewedFolders
     )
 
     if ([string]::IsNullOrEmpty($BaseRef)) {
@@ -1247,7 +1409,26 @@ function Invoke-PostReleaseDepScan {
 
     $isInteractive = (-not $NonInteractive) -and (Test-InteractiveSession)
 
+    # $declined tracks NON-release-set findings the user said "no" to. The
+    # "ignore-then-cascade" handoff later removes from this set if a cascade
+    # ends up pulling the package into the release set anyway.
     $declined = [System.Collections.Generic.HashSet[string]]::new()
+
+    # $reviewedReleaseSet tracks release-set members whose review (either
+    # "elevate" or "ignore — current bump is fine") is complete in this run
+    # OR was decided in a prior invocation. Filtering on this set is what
+    # prevents the re-prompt loop where a release-set member with bump < breaking
+    # would otherwise keep resurfacing after the user accepts the current bump.
+    #
+    # IMPORTANT: only the primary target of THIS invocation and packages the
+    # user has explicitly decided about in prior invocations are pre-marked
+    # here. Cascade-bumped members of $ReleasesRef are NOT pre-marked —
+    # they must remain eligible for Invariant B elevation review when
+    # they also have pre-existing modifications.
+    $reviewedReleaseSet = [System.Collections.Generic.HashSet[string]]::new()
+    if ($null -ne $PreReviewedFolders) {
+        foreach ($f in $PreReviewedFolders) { [void]$reviewedReleaseSet.Add($f) }
+    }
 
     # Termination bound: number of published workspace crates. The dep graph is
     # a DAG, so each iteration either grows ($declined ∪ release-set)
@@ -1268,8 +1449,9 @@ function Invoke-PostReleaseDepScan {
         #     state (i.e. user accepted a release, which then runs a
         #     cascade that may add new bumps).
         # After an 'ignore' decision nothing on disk or in git changes, so
-        # we just filter the previous queue by the updated $declined set —
-        # avoiding ~120 git spawns and a cargo metadata recompute per click.
+        # we just filter the previous queue by the updated $declined /
+        # $reviewedReleaseSet sets — avoiding ~120 git spawns and a cargo
+        # metadata recompute per click.
         $queue = $null
         $hasEverComputedQueue = $false
         for ($iter = 0; $iter -lt $maxIterations; $iter++) {
@@ -1286,8 +1468,11 @@ function Invoke-PostReleaseDepScan {
                 }
 
                 $queue = @(
-                    @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef) |
-                        Where-Object { -not $declined.Contains($_.Folder) }
+                    @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef -ModifiedSnapshot $ModifiedSnapshot) |
+                        Where-Object {
+                            -not $declined.Contains($_.Folder) -and
+                            -not $reviewedReleaseSet.Contains($_.Folder)
+                        }
                 )
 
                 if ($queue.Count -eq 0) {
@@ -1300,28 +1485,54 @@ function Invoke-PostReleaseDepScan {
                 $hasEverComputedQueue = $true
             } else {
                 # Cheap path: previous decision was 'ignore', so the only
-                # change since the last queue snapshot is $declined gaining
-                # one entry. The BFS output would be identical modulo that
-                # one filter, so re-filter and skip the spawn storm.
-                $queue = @($queue | Where-Object { -not $declined.Contains($_.Folder) })
+                # change since the last queue snapshot is $declined or
+                # $reviewedReleaseSet gaining one entry. The BFS output would
+                # be identical modulo that one filter, so re-filter and skip
+                # the spawn storm.
+                $queue = @($queue | Where-Object {
+                    -not $declined.Contains($_.Folder) -and
+                    -not $reviewedReleaseSet.Contains($_.Folder)
+                })
                 if ($queue.Count -eq 0) { return }
             }
 
             if (-not $isInteractive) {
                 # Non-interactive parity: emit the full pending list once and bail,
-                # marking everything as declined. The reviewer-facing comment from
-                # check-unreleased-dependencies.ps1 will flag the same set.
+                # marking everything as declined / reviewed. The reviewer-facing
+                # comment from check-unreleased-dependencies.ps1 will flag the
+                # same set.
+                $notInReleaseSet = @($queue | Where-Object { -not $_.InReleaseSet })
+                $inReleaseSet    = @($queue | Where-Object { $_.InReleaseSet })
+
                 Write-Host ""
-                Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
-                foreach ($finding in $queue) {
-                    Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
-                    Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
-                    foreach ($chain in $finding.DependencyChains) {
-                        Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                if ($notInReleaseSet.Count -gt 0) {
+                    Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
+                    foreach ($finding in $notInReleaseSet) {
+                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                        Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
+                        foreach ($chain in $finding.DependencyChains) {
+                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        }
                     }
                 }
-                Write-Warning "Non-interactive session: leaving the above crates unreleased. Reviewer should confirm the changes are immaterial."
-                foreach ($finding in $queue) { [void]$declined.Add($finding.Folder) }
+                if ($inReleaseSet.Count -gt 0) {
+                    Write-Host '⚠️  The following workspace crates are being released as part of this PR with a non-breaking cascade-applied version bump, BUT also have pre-existing modifications that may warrant a higher bump (e.g. breaking). A reviewer should confirm the cascade-applied bump is sufficient:' -ForegroundColor Yellow
+                    foreach ($finding in $inReleaseSet) {
+                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                        Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
+                        foreach ($chain in $finding.DependencyChains) {
+                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                Write-Warning "Non-interactive session: leaving the above crates as-is. Reviewer should confirm the choices are appropriate."
+                foreach ($finding in $queue) {
+                    if ($finding.InReleaseSet) {
+                        [void]$reviewedReleaseSet.Add($finding.Folder)
+                    } else {
+                        [void]$declined.Add($finding.Folder)
+                    }
+                }
                 return
             }
 
@@ -1334,8 +1545,13 @@ function Invoke-PostReleaseDepScan {
             $decision   = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
 
             if ($decision.Action -eq 'ignore') {
-                Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
-                [void]$declined.Add($next.Folder)
+                if ($next.InReleaseSet) {
+                    Write-Host "  Keeping '$($next.Folder)' at its current cascade-applied version; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
+                    [void]$reviewedReleaseSet.Add($next.Folder)
+                } else {
+                    Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
+                    [void]$declined.Add($next.Folder)
+                }
                 # Keep $queue intact so the next iteration takes the cheap path.
                 continue
             }
@@ -1350,6 +1566,14 @@ function Invoke-PostReleaseDepScan {
             # and the nested cascade may have upgraded it further — preserve the
             # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
             # so Show-ReleaseSummary and the final commit message reflect on-disk state.
+            #
+            # IMPORTANT: we mark only $next.Folder (the package the user just
+            # explicitly decided about) as reviewed — NOT the cascade-bumped
+            # members of $nestedReleases. Cascade-bumped packages with
+            # pre-existing modifications must remain eligible for Invariant B
+            # elevation review on the next iteration: an upstream cascade is
+            # only definitive when the ONLY change in the cascaded package is
+            # the mechanical dependency bump.
             foreach ($r in $nestedReleases) {
                 # If cascade pulled in a package the user previously chose to ignore,
                 # surface that so they're not confused why it appears in the release
@@ -1366,6 +1590,13 @@ function Invoke-PostReleaseDepScan {
                     $existing.NewVersion = $r.NewVersion
                 }
             }
+
+            # Mark ONLY the explicitly-decided package as reviewed. The cascade
+            # may have written new versions for other dependents but those
+            # decisions were mechanical — if they happen to also have
+            # pre-existing modifications, the next BFS iteration will surface
+            # them for Invariant B elevation review.
+            [void]$reviewedReleaseSet.Add($next.Folder)
 
             # The cascade just edited Cargo.toml files; force a full BFS
             # recompute next iteration so newly-bumped crates drop off the
@@ -1619,6 +1850,26 @@ function Invoke-ReleaseMain {
 
     # 9. EXECUTE WORKFLOW
     try {
+        # Capture the modifications snapshot BEFORE running the release flow.
+        # This is what upholds Invariant A: any cascade-driven Cargo.toml /
+        # CHANGELOG.md / README.md writes performed by Invoke-ReleaseFlow (or
+        # by subsequent cascades inside Invoke-PostReleaseDepScan) would
+        # otherwise pollute Get-CratesWithUnreleasedChanges's working-tree
+        # query and cause cascade-only targets to surface as findings.
+        $preReleaseModifications = if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
+            Get-CratesWithUnreleasedChanges -RepoRoot $repoRoot.Path
+        } else { $null }
+
+        # Cross-invocation deduplication: prior `release-crate.ps1` runs in
+        # this branch may have left version bumps in the working tree that
+        # are NOT a concern for the user this time around. Pre-mark every
+        # such pending package (except the primary target of this run, which
+        # the user is actively re-deciding) as "already reviewed" so the
+        # post-release scan doesn't re-prompt for them. The primary target
+        # of THIS run is also pre-marked — the user has just chosen
+        # `-Change <kind>` for it; re-asking would be redundant.
+        $preReviewedFolders = @($pendingReleases | Where-Object { $_.Folder -ne $CrateName } | ForEach-Object { $_.Folder }) + @($CrateName)
+
         $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $bump `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
 
@@ -1626,7 +1877,9 @@ function Invoke-ReleaseMain {
         # crates are appended to $releases via the [ref].
         Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
             -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
-            -NonInteractive:$NonInteractive
+            -NonInteractive:$NonInteractive `
+            -ModifiedSnapshot $preReleaseModifications `
+            -PreReviewedFolders $preReviewedFolders
 
         Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
 

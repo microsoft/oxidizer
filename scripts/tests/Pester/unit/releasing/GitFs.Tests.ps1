@@ -442,6 +442,251 @@ Describe 'Add-CascadeBulletToVersionSection' {
         ([regex]::Matches($raw, "`r`n")).Count | Should -BeGreaterThan 0
         $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
     }
+
+    # --- dedup behavior: escalations re-fire the cascade with a HIGHER target
+    # version (and sometimes a different breaking/maintenance classification).
+    # Without the dedup, the section would accumulate stale bullets citing the
+    # earlier target version. These tests pin the "drop pre-existing bullets
+    # for the same target before inserting the new one" behavior.
+
+    It 'drops a pre-existing bullet for the same target before inserting the escalated one' {
+        # First cascade lands at 0.2.0; later the upstream is escalated to 0.3.0
+        # and we re-fire the cascade. The 0.2.0 bullet must be removed so the
+        # section only cites the final required version.
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.2.0'; Breaking = $false
+        }
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $content = Get-Content $script:Changelog -Raw
+        $content | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $content | Should -Not -Match 'Now requires `0\.2\.0` of `depcrate`'
+        # Exactly one bullet remains for this target.
+        ([regex]::Matches($content, 'Now requires `[^`]+` of `depcrate`')).Count | Should -Be 1
+    }
+
+    It 'drops a stale Maintenance bullet when escalating to a breaking cascade for the same target' {
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.2.5'; Breaking = $false
+        }
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '1.0.0'; Breaking = $true
+        }
+        $content = Get-Content $script:Changelog -Raw
+        # New Breaking-section bullet present, old Maintenance bullet gone.
+        $content | Should -Match '- ⚠️ Breaking'
+        $content | Should -Match 'Now requires `1\.0\.0` of `depcrate`'
+        $content | Should -Not -Match 'Now requires `0\.2\.5` of `depcrate`'
+    }
+
+    It 'leaves bullets for unrelated targets untouched when escalating' {
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'other'; Version = '0.1.0'; Breaking = $false
+        }
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.2.0'; Breaking = $false
+        }
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $content = Get-Content $script:Changelog -Raw
+        $content | Should -Match 'Now requires `0\.1\.0` of `other`'
+        $content | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $content | Should -Not -Match 'Now requires `0\.2\.0` of `depcrate`'
+    }
+
+    It 'leaves bullets in OTHER version sections untouched when escalating in this section' {
+        # Two pending sections — the dedup must be scoped to the section
+        # being edited so prior-release bullets in [0.1.0] are not clobbered.
+        Set-Content -Path $script:Changelog -Value @'
+# Changelog
+
+## [0.2.0] - 2025-01-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.0` of `depcrate`
+
+## [0.1.0] - 2024-01-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.5` of `depcrate`
+
+'@
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $content = Get-Content $script:Changelog -Raw
+        # The 0.2.0 section was rewritten — old 0.2.0 cite gone, 0.3.0 cite present.
+        $content | Should -Match '## \[0\.2\.0\][\s\S]*Now requires `0\.3\.0` of `depcrate`'
+        # The 0.1.0 section's historical bullet is preserved verbatim.
+        $content | Should -Match '## \[0\.1\.0\][\s\S]*Now requires `0\.1\.5` of `depcrate`'
+    }
+
+    It 'leaves a bullet for a target whose name is a strict suffix/prefix of TargetName untouched' {
+        # Bullet anchoring: `depcrate-extra` must not match a dedup pattern
+        # built for `depcrate`, and vice-versa.
+        Set-Content -Path $script:Changelog -Value @'
+# Changelog
+
+## [0.2.0] - 2025-01-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.0` of `depcrate-extra`
+  - Now requires `0.1.0` of `xdepcrate`
+  - Now requires `0.2.0` of `depcrate`
+
+'@
+        Add-CascadeBulletToVersionSection -ChangelogFile $script:Changelog -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $content = Get-Content $script:Changelog -Raw
+        $content | Should -Match 'Now requires `0\.1\.0` of `depcrate-extra`'
+        $content | Should -Match 'Now requires `0\.1\.0` of `xdepcrate`'
+        $content | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $content | Should -Not -Match 'Now requires `0\.2\.0` of `depcrate`'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Update-PendingReleaseVersion — in-place re-stamp of a partially-bumped
+# pending release. Used by Invoke-CascadeStep when an upstream cascade
+# escalates a downstream that's already been bumped in this PR: we must
+# rewrite the Cargo.toml + workspace dep + CHANGELOG header in place to
+# avoid leaving two stale `## [old]` / `## [new]` sections side by side.
+# ---------------------------------------------------------------------------
+
+Describe 'Update-PendingReleaseVersion' {
+    BeforeAll {
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+    }
+
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+        $script:UprvWs = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ('uprv-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        # Pre-bump downstream to 0.1.1 so there's a pending release for us to
+        # re-stamp. Also seed a CHANGELOG with the matching pending section so
+        # we exercise the header-rewrite branch.
+        $script:UprvCrateFolder = Join-Path $script:UprvWs.Path 'crates\downstream'
+        $script:UprvCargoToml   = Join-Path $script:UprvCrateFolder 'Cargo.toml'
+        $script:UprvChangelog   = Join-Path $script:UprvCrateFolder 'CHANGELOG.md'
+        $script:UprvRootCargo   = Join-Path $script:UprvWs.Path 'Cargo.toml'
+
+        $script:UprvWs.BumpVersion('downstream', '0.1.1')
+        # Manually re-stamp the workspace entry too so the fixture matches what
+        # release-crate.ps1 would have written when first releasing downstream.
+        $rootContent = Get-Content $script:UprvRootCargo -Raw
+        $rootContent = $rootContent -replace '(downstream\s*=\s*\{[^}]*?version\s*=\s*")[^"]+', '${1}0.1.1'
+        Set-Content -Path $script:UprvRootCargo -Value $rootContent -NoNewline
+
+        Set-Content -Path $script:UprvChangelog -Value @"
+# Changelog
+
+## [0.1.1] - 2025-01-01
+
+- ✨ Features
+
+  - first feature
+
+"@
+    }
+
+    It 'rewrites the [package].version in the crate Cargo.toml' {
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
+        $content = Get-Content $script:UprvCargoToml -Raw
+        $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.2\.0"'
+        $content | Should -Not -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
+    }
+
+    It 'rewrites the [workspace.dependencies] entry for the crate in the root Cargo.toml' {
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
+        $root = Get-Content $script:UprvRootCargo -Raw
+        $root | Should -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
+        # And no stale 0.1.1 reference for downstream in the root file.
+        $root | Should -Not -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.1\.1"'
+    }
+
+    It 'leaves OTHER workspace dep entries untouched' {
+        # Bump downstream's pending version; upstream's workspace entry must
+        # remain at its declared 0.2.0.
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
+        $root = Get-Content $script:UprvRootCargo -Raw
+        $root | Should -Match 'upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
+    }
+
+    It 'rewrites the matching CHANGELOG section header from [old] to [new]' {
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
+        $log = Get-Content $script:UprvChangelog -Raw
+        $log | Should -Match '## \[0\.2\.0\]'
+        $log | Should -Not -Match '## \[0\.1\.1\]'
+        # Body of the section is preserved verbatim.
+        $log | Should -Match 'first feature'
+    }
+
+    It 'is a no-op when OldVersion equals NewVersion' {
+        $before = Get-Content $script:UprvCargoToml -Raw
+        $beforeRoot = Get-Content $script:UprvRootCargo -Raw
+        $beforeLog  = Get-Content $script:UprvChangelog -Raw
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.1.1' | Out-Null
+        (Get-Content $script:UprvCargoToml -Raw) | Should -Be $before
+        (Get-Content $script:UprvRootCargo -Raw) | Should -Be $beforeRoot
+        (Get-Content $script:UprvChangelog -Raw) | Should -Be $beforeLog
+    }
+
+    It 'still rewrites Cargo.toml + root when the changelog is missing (warning emitted)' {
+        Remove-Item -LiteralPath $script:UprvChangelog -Force
+        $warnings = @()
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' `
+            -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        (Get-Content $script:UprvCargoToml -Raw) | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.2\.0"'
+        (Get-Content $script:UprvRootCargo -Raw) | Should -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
+        $warnings.Count | Should -BeGreaterOrEqual 1
+        ($warnings -join ' ') | Should -Match 'not found'
+    }
+
+    It 'warns when the changelog has no `## [OldVersion]` section to rewrite' {
+        Set-Content -Path $script:UprvChangelog -Value @"
+# Changelog
+
+## [9.9.9] - 2030-01-01
+
+- ✨ Features
+
+  - mismatched
+
+"@
+        $warnings = @()
+        Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' `
+            -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        $warnings.Count | Should -BeGreaterOrEqual 1
+        ($warnings -join ' ') | Should -Match '0\.1\.1'
+        # Cargo.toml + root still rewritten — the changelog miss is a non-fatal warning.
+        (Get-Content $script:UprvCargoToml -Raw) | Should -Match 'version\s*=\s*"0\.2\.0"'
+    }
+
+    It 'throws when the crate Cargo.toml does not exist' {
+        $bogusFolder = Join-Path $script:UprvWs.Path 'crates\nope'
+        {
+            Update-PendingReleaseVersion -CrateName 'nope' -CrateFolder $bogusFolder `
+                -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0'
+        } | Should -Throw
+    }
+
+    It 'returns the NewVersion string' {
+        $r = Update-PendingReleaseVersion -CrateName 'downstream' -CrateFolder $script:UprvCrateFolder `
+            -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0'
+        $r | Should -Be '0.2.0'
+    }
 }
 
 # ---------------------------------------------------------------------------
