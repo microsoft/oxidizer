@@ -88,6 +88,7 @@ fn bench_cache_operations(c: &mut Criterion) {
 // Wrapper Overhead (direct vs wrapped vs features)
 // =============================================================================
 
+#[expect(clippy::too_many_lines, reason = "benchmark function with multiple related groups")]
 fn bench_wrapper_overhead(c: &mut Criterion) {
     let rt = rt();
     let mut group = c.benchmark_group("wrapper_overhead");

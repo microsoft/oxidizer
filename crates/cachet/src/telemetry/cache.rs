@@ -452,6 +452,7 @@ impl CacheTelemetry {
 }
 
 #[cfg(not(any(feature = "logs", test)))]
+#[cfg_attr(test, mutants::skip)] // Equivalent mutants: cfg-gated off during testing.
 #[expect(clippy::unused_self, reason = "Span factories are no-ops when logs are disabled")]
 impl CacheTelemetry {
     pub(crate) fn get_span(&self, _: CacheName) -> Span {
@@ -754,5 +755,14 @@ mod tests {
             *operation_events.lock().expect("test handler mutex should not be poisoned"),
             vec![(request_id, "cache".to_string(), "cache.get".to_string(), 11, true)]
         );
+    }
+
+    #[test]
+    fn next_request_id_returns_unique_incrementing_values() {
+        let a = next_request_id();
+        let b = next_request_id();
+        let c = next_request_id();
+        assert!(b > a, "request IDs must increment: got {a} then {b}");
+        assert!(c > b, "request IDs must increment: got {b} then {c}");
     }
 }

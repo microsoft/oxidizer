@@ -52,7 +52,7 @@ impl CacheEventHandler for AccumulatingHandler {
         self.pending.entry(event.request_id).or_default().push(TierRecord {
             tier_name: event.tier_name.to_owned(),
             outcome: event.outcome.to_owned(),
-            duration_us: event.duration.as_micros() as u64,
+            duration_us: u64::try_from(event.duration.as_micros()).unwrap_or(u64::MAX),
             fallback: event.fallback,
         });
     }
@@ -118,7 +118,10 @@ async fn main() {
         .event_handler(AccumulatingHandler::new())
         .build();
 
-    cache.insert("key".to_string(), CacheEntry::new("value".to_string())).await.unwrap();
+    cache
+        .insert("key".to_string(), CacheEntry::new("value".to_string()))
+        .await
+        .expect("insert should succeed");
     let _ = cache.get(&"key".to_string()).await;
     let _ = cache.get(&"missing".to_string()).await;
 
@@ -136,7 +139,7 @@ async fn main() {
     cache2
         .insert("user:1".to_string(), CacheEntry::new("Alice".to_string()))
         .await
-        .unwrap();
+        .expect("insert should succeed");
     let _ = cache2.get(&"user:1".to_string()).await;
     let _ = cache2.get(&"nobody".to_string()).await;
 }
