@@ -693,6 +693,25 @@ function Format-CascadeAnnouncement {
     return "🔗 Cascading release to $count $noun as $headlineLabel$parenthetical`: $($DependentNames -join ', ')"
 }
 
+# Per-dependent "  • <name> -> <semantic-bump-label> (<why>)" line printed
+# under the cascade announcement. The bump label is the SHORT semantic form
+# (breaking / non-breaking / patch) so the readout matches the announcement's
+# vocabulary instead of leaking the internal Cargo bump kind. The why-clause
+# tells the user what drove the bump choice — public-API exposure vs. internal
+# use — so the reader can quickly sanity-check whether the inferred exposure
+# matches their mental model.
+function Format-CascadeDependentLine {
+    param(
+        [Parameter(Mandatory = $true)][string]$DependentName,
+        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind,
+        [Parameter(Mandatory = $true)][bool]$ExposesTarget
+    )
+
+    $label   = Get-ShortChangeLabelFromBumpKind -BumpKind $BumpKind
+    $why     = if ($ExposesTarget) { 'exposes target in public API' } else { 'internal use only' }
+    return "  • $DependentName -> $label ($why)"
+}
+
 # Runs the bump + downstream cascade for a single target crate. Returns the augmented
 # $releases array. Equivalent to the legacy inline body, but factored so the post-release
 # scan can invoke it recursively for upstream dependencies the user agrees to release.
@@ -751,8 +770,7 @@ function Invoke-ReleaseFlow {
             } else { $true }
 
             $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
-            $exposureNote = if ($exposes) { 'exposes target in public API' } else { 'internal use only' }
-            Write-Host "  • $dependent -> $depBump ($exposureNote)" -ForegroundColor DarkCyan
+            Write-Host (Format-CascadeDependentLine -DependentName $dependent -BumpKind $depBump -ExposesTarget $exposes) -ForegroundColor DarkCyan
 
             $record = Invoke-CascadeStep -Dependent $dependent -RepoRoot $RepoRoot `
                 -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl `

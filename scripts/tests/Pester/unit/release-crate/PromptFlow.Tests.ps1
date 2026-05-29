@@ -866,6 +866,55 @@ Describe 'Format-CascadeAnnouncement' {
     }
 }
 
+Describe 'Format-CascadeDependentLine' {
+
+    Context 'bump label uses the SHORT semantic vocabulary (not internal Cargo bump kinds)' {
+        It "renders 'breaking' for major (exposing dependent)" {
+            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'major' -ExposesTarget $true |
+                Should -Be '  • d -> breaking (exposes target in public API)'
+        }
+
+        It "renders 'non-breaking' for minor (exposing dependent)" {
+            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'minor' -ExposesTarget $true |
+                Should -Be '  • d -> non-breaking (exposes target in public API)'
+        }
+
+        It "renders 'patch' for patch (exposing dependent — uncommon but possible if the target itself is a patch)" {
+            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'patch' -ExposesTarget $true |
+                Should -Be '  • d -> patch (exposes target in public API)'
+        }
+    }
+
+    Context 'why-clause reflects the ExposesTarget flag' {
+        It "uses 'exposes target in public API' when ExposesTarget = `$true" {
+            $out = Format-CascadeDependentLine -DependentName 'fetch_hyper' -BumpKind 'minor' -ExposesTarget $true
+            $out | Should -Match '\(exposes target in public API\)$'
+        }
+
+        It "uses 'internal use only' when ExposesTarget = `$false (the non-exposing downgrade case)" {
+            $out = Format-CascadeDependentLine -DependentName 'seatbelt_http' -BumpKind 'patch' -ExposesTarget $false
+            $out | Should -Match '\(internal use only\)$'
+            # The bump label should still be the SHORT semantic form ('patch'), not the internal kind.
+            $out | Should -Match '-> patch '
+        }
+    }
+
+    Context 'never leaks the internal Cargo bump vocabulary' {
+        # Pin the rename: the line must never contain the words 'major' / 'minor' / 'patch'
+        # except where 'patch' is the legitimate semantic label. This protects against a
+        # regression where someone wires $depBump back into the rendered string.
+        It "does not render the word 'major' anywhere when BumpKind is major" {
+            $out = Format-CascadeDependentLine -DependentName 'd' -BumpKind 'major' -ExposesTarget $true
+            $out | Should -Not -Match '\bmajor\b'
+        }
+
+        It "does not render the word 'minor' anywhere when BumpKind is minor" {
+            $out = Format-CascadeDependentLine -DependentName 'd' -BumpKind 'minor' -ExposesTarget $true
+            $out | Should -Not -Match '\bminor\b'
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Resolve-ReleaseSpecFromChange (CLI -Change → internal Bump/Version
 # translation). Pure function with one dependency: the package's current
