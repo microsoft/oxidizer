@@ -63,7 +63,7 @@ All commands that follow are to be executed in the Ubuntu terminal.
 Next, we upgrade, install and configure development prerequisites:
 
 1. Execute `sudo apt update && sudo apt dist-upgrade -y` to upgrade everything that is already installed.
-1. Execute `sudo apt install -y curl clang llvm libclang-dev gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config libssl-dev` to ensure that essential packages are installed.
+1. Execute `sudo apt install -y curl clang llvm libclang-dev gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config libssl-dev valgrind` to ensure that essential packages are installed.
 1. [Install PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.5#installation-via-package-repository-the-package-repository).
 1. Execute `git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"` to set the correct Git authentication flow.
 1. Execute `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` and install Rust with all default settings.
