@@ -486,8 +486,7 @@ mod tests {
     #[test]
     fn on_eviction_chains_existing_listener() {
         use std::sync::Mutex;
-        use std::sync::atomic::AtomicUsize;
-        use std::sync::atomic::Ordering;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let first_count = Arc::new(AtomicUsize::new(0));
         let second_count = Arc::new(AtomicUsize::new(0));
