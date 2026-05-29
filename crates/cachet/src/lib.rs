@@ -253,11 +253,13 @@
 //! | Level | Events |
 //! |-------|--------|
 //! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`, `cache.eviction` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
 mod cache;
+#[cfg(feature = "memory")]
+mod eviction;
 mod fallback;
 mod policy;
 mod refresh;
