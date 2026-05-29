@@ -287,7 +287,14 @@ jobs:
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
       - name: Miri (stacked borrows)
-        if: success() || failure()
+        # Miri does not implement the NEON `tbl`-family intrinsics on aarch64
+        # (tracked in https://github.com/rust-lang/miri/issues/3172), so popular
+        # crates that ship a NEON backend (e.g. `rand` 0.10 via `chacha20`) fail
+        # under Miri on ARM regardless of whether they exercise the failing
+        # code path on purpose. Skip Miri on aarch64 until that gap is closed
+        # upstream; native ARM coverage is still provided by the Careful step
+        # above.
+        if: (success() || failure()) && !startsWith(matrix.target, 'aarch64')
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
 
   model-checking:
