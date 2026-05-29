@@ -210,7 +210,7 @@ mod tests {
 
         // Display should return the timestamp in the RFC 2822 format
         assert_eq!(stamp.to_string(), "Thu, 01 Jan 1970 01:00:00 GMT");
-        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_secs(3600));
+        assert_eq!(SystemTime::from(stamp), SystemTime::UNIX_EPOCH + Duration::from_hours(1));
     }
 
     #[test]
