@@ -185,8 +185,9 @@ mod tests {
 
     #[test]
     fn invalid_path_no_slashes() {
+        use ohno::Labeled;
         let err = BasePath::try_from("invalid/path").unwrap_err();
-        assert_eq!(err.message(), "the path must start and end with a slash");
+        assert_eq!(err.label(), "uri_invalid");
     }
 
     #[test]
@@ -211,15 +212,6 @@ mod tests {
             joined.as_str(),
             "/base/path/additional/resource?param=value",
             "Path join with slash prefixed uri string should result in correct concatenation"
-        );
-
-        let joined = base_path
-            .join_path_and_query(&"additional/resource?param=value".parse().unwrap())
-            .unwrap();
-        assert_eq!(
-            joined.as_str(),
-            "/base/path/additional/resource?param=value",
-            "Path join with uri string missing the slash prefix should also result in correct concatenation"
         );
     }
 

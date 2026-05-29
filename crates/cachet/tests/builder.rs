@@ -103,7 +103,7 @@ fn cache_builder_name() {
 fn fallback_builder_basic() {
     let clock = Clock::new_frozen();
 
-    let fallback = Cache::builder::<String, i32>(clock.clone()).memory().ttl(Duration::from_secs(3600));
+    let fallback = Cache::builder::<String, i32>(clock.clone()).memory().ttl(Duration::from_hours(1));
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
