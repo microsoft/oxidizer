@@ -619,3 +619,81 @@ Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
         ($out | Out-String) | Should -Not -Match 'Analyzing packages for unreleased modifications'
     }
 }
+
+# ---------------------------------------------------------------------------
+# Show-FinalMessage — post-success "next steps" instructions
+# ---------------------------------------------------------------------------
+
+Describe 'Show-FinalMessage' {
+
+    BeforeAll {
+        function script:NewRelease {
+            param([string]$Crate, [string]$NewVersion, [string]$OldVersion = '0.0.0')
+            return [pscustomobject]@{
+                Crate      = $Crate
+                OldVersion = $OldVersion
+                NewVersion = $NewVersion
+            }
+        }
+    }
+
+    Context 'single-package release' {
+        It 'uses the scoped feat(<crate>) commit form when only one package was released' {
+            $releases = @(NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1')
+            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+            ($out | Out-String) | Should -Match 'git commit -m "feat\(bytesbuf_io\): release v0\.5\.1"'
+        }
+
+        It 'does NOT mention "additional package(s)" when only one package was released' {
+            $releases = @(NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1')
+            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+            ($out | Out-String) | Should -Not -Match 'additional package'
+        }
+    }
+
+    Context 'multi-package release' {
+        It 'uses the unscoped "feat:" commit form and counts the extras when several packages were released' {
+            $releases = @(
+                NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1'
+                NewRelease -Crate 'bytesbuf'    -NewVersion '0.4.2'
+                NewRelease -Crate 'a'           -NewVersion '0.1.1'
+                NewRelease -Crate 'b'           -NewVersion '0.2.1'
+                NewRelease -Crate 'c'           -NewVersion '0.3.1'
+                NewRelease -Crate 'd'           -NewVersion '0.4.1'
+            )
+            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+            ($out | Out-String) | Should -Match 'git commit -m "feat: release bytesbuf_io v0\.5\.1 and 5 additional packages"'
+        }
+
+        It 'uses singular noun ("1 additional package") when exactly two packages were released' {
+            $releases = @(
+                NewRelease -Crate 'foo' -NewVersion '1.0.0'
+                NewRelease -Crate 'bar' -NewVersion '2.0.0'
+            )
+            $out = & { Show-FinalMessage -CrateName 'foo' -Releases $releases } 6>&1
+            ($out | Out-String) | Should -Match 'release foo v1\.0\.0 and 1 additional package"'
+            ($out | Out-String) | Should -Not -Match '1 additional packages'
+        }
+
+        It 'finds the primary release even when it is not first in the release record array' {
+            $releases = @(
+                NewRelease -Crate 'cascade_a' -NewVersion '0.1.1'
+                NewRelease -Crate 'cascade_b' -NewVersion '0.2.1'
+                NewRelease -Crate 'primary'   -NewVersion '0.7.0'
+            )
+            $out = & { Show-FinalMessage -CrateName 'primary' -Releases $releases } 6>&1
+            ($out | Out-String) | Should -Match 'release primary v0\.7\.0 and 2 additional packages"'
+        }
+    }
+
+    Context 'git push instruction' {
+        It 'emits a plain `git push` (no `origin <branch>` placeholder)' {
+            $releases = @(NewRelease -Crate 'foo' -NewVersion '1.0.0')
+            $out = & { Show-FinalMessage -CrateName 'foo' -Releases $releases } 6>&1
+            $text = $out | Out-String
+            $text | Should -Match '(?m)^\s*git push\s*$'
+            $text | Should -Not -Match 'git push origin'
+            $text | Should -Not -Match 'mybranch'
+        }
+    }
+}

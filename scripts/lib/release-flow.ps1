@@ -431,17 +431,42 @@ function Show-ReleaseSummary {
 
 function Show-FinalMessage {
     param(
-        [string]$crateName,
-        [string]$newVersion
+        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $true)][array]$Releases
     )
+
+    # Locate the primary release record (the package the user originally asked
+    # for). Defensive fallback to the first release in case it's missing — this
+    # shouldn't happen in practice but we never want the post-success message
+    # to crash and stamp the run as failed.
+    $primary = $Releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
+    if ($null -eq $primary) { $primary = $Releases | Select-Object -First 1 }
+    $primaryName    = $primary.Crate
+    $primaryVersion = $primary.NewVersion
+
+    $extraCount = @($Releases).Count - 1
+    if ($extraCount -le 0) {
+        # Single-package release: a scoped feat(<crate>): prefix is the most
+        # informative form because the commit really is about that one crate.
+        $commitMessage = "feat($primaryName): release v$primaryVersion"
+    } else {
+        # Multi-package release: the conventional-commits scope would be
+        # misleading because the commit spans many packages. Drop the scope
+        # and call out the extras so reviewers see at a glance that this is
+        # a coordinated release, not a single-crate bump.
+        $extraNoun = if ($extraCount -eq 1) { 'additional package' } else { 'additional packages' }
+        $commitMessage = "feat: release $primaryName v$primaryVersion and $extraCount $extraNoun"
+    }
 
     Write-Host "---" -ForegroundColor Green
     Write-Host "🎉 Success! Next steps:" -ForegroundColor Green
     Write-Host "1. Review the changes in the updated files." -ForegroundColor Green
     Write-Host "2. Commit the changes and push the changes:" -ForegroundColor Green
     Write-Host "   git add ." -ForegroundColor DarkGray
-    Write-Host "   git commit -m `"feat($crateName): release v$newVersion`"" -ForegroundColor DarkGray
-    Write-Host "   git push origin mybranch" -ForegroundColor DarkGray
+    Write-Host "   git commit -m `"$commitMessage`"" -ForegroundColor DarkGray
+    # Plain `git push` is sufficient because we just committed to the current
+    # branch; no need to substitute a placeholder branch name into the snippet.
+    Write-Host "   git push" -ForegroundColor DarkGray
     Write-Host "3. Once the commit is merged to main, automation will tag the commit and release to crates.io" -ForegroundColor Green
     Write-Host "---" -ForegroundColor Green
 }
@@ -1301,11 +1326,8 @@ function Invoke-ReleaseMain {
 
         Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
 
-        $primary = $releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
-        $primaryNewVersion = if ($null -ne $primary) { $primary.NewVersion } else { '' }
-
         Show-ReleaseSummary -releases $releases
-        Show-FinalMessage -crateName $CrateName -newVersion $primaryNewVersion
+        Show-FinalMessage -CrateName $CrateName -Releases $releases
 
         return ,$releases
     }
