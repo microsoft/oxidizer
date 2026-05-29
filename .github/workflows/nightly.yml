@@ -70,6 +70,8 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
+          # See main.yml's Miri step for the rationale.
+          RUSTFLAGS: '--cfg chacha20_backend="soft"'
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
 
   miri-strict-provenance:
@@ -91,6 +93,8 @@ jobs:
       - name: Miri (strict provenance)
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
+          # See main.yml's Miri step for the rationale.
+          RUSTFLAGS: '--cfg chacha20_backend="soft"'
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
 
   miri-race-coverage:
@@ -113,6 +117,8 @@ jobs:
       - name: Miri (race coverage)
         env:
           MIRIFLAGS: -Zmiri-many-seeds=0..32
+          # See main.yml's Miri step for the rationale.
+          RUSTFLAGS: '--cfg chacha20_backend="soft"'
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
 
   report-failure:
