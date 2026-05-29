@@ -712,6 +712,32 @@ function Format-CascadeDependentLine {
     return "  • $DependentName -> $label ($why)"
 }
 
+# Pure formatter for the "Detected pending uncommitted releases ..." block printed
+# at the top of Invoke-ReleaseMain. Each pending record is a [pscustomobject] with
+# Name, BaseVersion, CurrentVersion (Get-PendingReleases produces these in stable
+# Folder order). Returns '' when there are no pending releases so the caller can
+# unconditionally print and rely on Write-Host to no-op on empty input.
+#
+# Format:
+#   Detected pending uncommitted releases and included in analysis data set:
+#      <name1> <base1> -> <current1>
+#      <name2> <base2> -> <current2>
+function Format-PendingReleasesAnnouncement {
+    param(
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyCollection()]$Pending
+    )
+
+    if ($null -eq $Pending) { return '' }
+    $items = @($Pending)
+    if ($items.Count -eq 0) { return '' }
+
+    $lines = @('Detected pending uncommitted releases and included in analysis data set:')
+    foreach ($entry in $items) {
+        $lines += "   $($entry.Name) $($entry.BaseVersion) -> $($entry.CurrentVersion)"
+    }
+    return ($lines -join [Environment]::NewLine)
+}
+
 # Runs the bump + downstream cascade for a single target crate. Returns the augmented
 # $releases array. Equivalent to the legacy inline body, but factored so the post-release
 # scan can invoke it recursively for upstream dependencies the user agrees to release.
@@ -730,19 +756,84 @@ function Invoke-ReleaseFlow {
     $crateCargoToml = Join-Path $crateFolder 'Cargo.toml'
     $changelogFile  = Join-Path $crateFolder 'CHANGELOG.md'
 
-    $oldVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+    if ([string]::IsNullOrWhiteSpace($currentVersion)) {
+        Write-Error "Failed to determine current version for '$CrateName'. Aborting."
+        Exit 1
+    }
 
-    $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
-        -crateCargoToml $crateCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
-        -prBaseUrl $PrBaseUrl -version $Version -bump $Bump
-    Invalidate-WorkspaceMetadataCache
+    $baseVersion = if (-not [string]::IsNullOrEmpty($BaseRef)) {
+        Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $CrateName
+    } else { $null }
 
-    $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
-        $Bump
-    } elseif (-not [string]::IsNullOrEmpty($Version)) {
-        Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
+    # Re-invocation on a primary target that already has a pending uncommitted
+    # version bump (e.g. an earlier `release-crate.ps1` invocation in the same PR).
+    # Mirrors the base-relative no-op/upgrade logic Invoke-CascadeStep already
+    # applies to dependents: compute the version this invocation WOULD have
+    # produced starting from the base-ref version, and compare with the on-disk
+    # current version.
+    $isPendingPrimary = (-not [string]::IsNullOrEmpty($baseVersion)) -and ($currentVersion -ne $baseVersion)
+
+    if ($isPendingPrimary) {
+        $requiredVersion = if (-not [string]::IsNullOrEmpty($Version)) {
+            $Version
+        } elseif (-not [string]::IsNullOrEmpty($Bump)) {
+            Get-NextVersion -currentVersion $baseVersion -bump $Bump
+        } else {
+            # Default-bump (no -Version, no -Bump) matches Invoke-CrateRelease's
+            # internal default of 'minor'. Keeps re-invocation idempotent with
+            # the initial bare-call.
+            Get-NextVersion -currentVersion $baseVersion -bump 'minor'
+        }
+
+        $cmp = Compare-SemanticVersions -version1 $currentVersion -version2 $requiredVersion
+
+        if ($cmp -gt 0 -and -not [string]::IsNullOrEmpty($Version)) {
+            # Explicit -Version asks for something lower than the pending current.
+            # Treat as a likely user mistake (typo, stale flag) rather than silently
+            # no-opping into the higher pending version.
+            Write-Error "Cannot release '$CrateName' as v${Version}: package is already pending at v$currentVersion (base v$baseVersion). Explicit -Version downgrades are not supported."
+            Exit 1
+        }
+
+        if ($cmp -ge 0) {
+            # No-op for the primary. The on-disk Cargo.toml + changelog from the
+            # prior invocation already reflect the intended release. Cascade still
+            # runs because dependents may benefit from another idempotent pass.
+            Write-Host "ℹ️  '$CrateName' already pending at v$currentVersion (base v$baseVersion); skipping primary bump." -ForegroundColor DarkGray
+            $oldVersion = $baseVersion
+            $newVersion = $currentVersion
+
+            # Cascade bump derives from the EFFECTIVE base→current transition,
+            # not the user-requested bump. Otherwise a re-invocation with a
+            # weaker -Change (e.g. Patch on a previously-minor-bumped primary)
+            # would under-cascade dependents that need the stronger bump to
+            # stay compatible with the on-disk API changes.
+            $cascadeBump = Get-BumpKindFromVersions -oldVersion $baseVersion -newVersion $currentVersion
+        } else {
+            # cmp < 0: requested release would escalate the primary above its
+            # current pending version. We don't support automated escalation
+            # (the existing changelog section would need to be merged into the
+            # new one, which is non-trivial); ask the user to restore the
+            # pending artifacts and re-invoke from a clean state.
+            $artifactsHint = "crates/$CrateName/Cargo.toml, crates/$CrateName/CHANGELOG.md, crates/$CrateName/README.md, and the workspace Cargo.toml entry for '$CrateName'"
+            Write-Error "Cannot escalate pending release of '$CrateName': already pending at v$currentVersion (base v$baseVersion), but the requested change requires at least v$requiredVersion. To re-do the release at a higher version, first restore the previous pending release artifacts ($artifactsHint) to their base-ref state, then re-invoke."
+            Exit 1
+        }
     } else {
-        'minor'
+        $oldVersion = $currentVersion
+        $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
+            -crateCargoToml $crateCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
+            -prBaseUrl $PrBaseUrl -version $Version -bump $Bump
+        Invalidate-WorkspaceMetadataCache
+
+        $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
+            $Bump
+        } elseif (-not [string]::IsNullOrEmpty($Version)) {
+            Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
+        } else {
+            'minor'
+        }
     }
 
     $releases = @(
@@ -1404,48 +1495,12 @@ function Invoke-ReleaseMain {
         Exit 1
     }
 
-    # 5. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
-    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Patch / 1.0)
-    # because that's how releasers reason about the change. Below this point the
-    # release flow continues in Cargo's numeric major/minor/patch terms because
-    # changelogs, Cargo.toml, and commit messages are concrete version transitions.
-    # The 1.0 graduation translates into an explicit -Version 1.0.0; everything
-    # else translates into the matching -Bump kind.
-    $bump = ''
-    if (-not [string]::IsNullOrEmpty($Change)) {
-        $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
-        if ($null -eq $currentVersion) {
-            Write-Error "Failed to get current version for comparison. Aborting."
-            Exit 1
-        }
-        try {
-            $spec = Resolve-ReleaseSpecFromChange -Change $Change -CurrentVersion $currentVersion
-        } catch {
-            Write-Error $_.Exception.Message
-            Exit 1
-        }
-        $bump = $spec.Bump
-        if (-not [string]::IsNullOrEmpty($spec.Version)) {
-            $Version = $spec.Version
-        }
-    }
-
-    # 6. VERSION COMPARISON VALIDATION
-    if (-not [string]::IsNullOrEmpty($Version)) {
-        $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
-        if ($null -eq $currentVersion) {
-            Write-Error "Failed to get current version for comparison. Aborting."
-            Exit 1
-        }
-
-        $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $currentVersion
-        if ($versionComparison -le 0) {
-            Write-Error "Specified version '$Version' must be greater than current version '$currentVersion'. Please specify a higher version number."
-            Exit 1
-        }
-    }
-
-    # 7. RESOLVE BASE REF (best-effort fetch + validate)
+    # 5. RESOLVE BASE REF (best-effort fetch + validate)
+    # Done before -Change / -Version validation so we can detect cross-invocation
+    # pending releases and make those validations base-relative (otherwise a
+    # re-invocation on an already-pending package — e.g. `-Change 1.0` on a
+    # package already pending at v1.0.0, or `-Version X` where X equals the
+    # current pending version — would spuriously fail the on-disk comparison).
     $resolvedBaseRef = $BaseRef
     if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
         if ($resolvedBaseRef -match '^origin/(.+)$') {
@@ -1462,7 +1517,86 @@ function Invoke-ReleaseMain {
         }
     }
 
-    # 8. EXECUTE WORKFLOW
+    # 6. ANNOUNCE PENDING UNCOMMITTED RELEASES
+    # Helps the user notice prior `release-crate.ps1` runs whose results haven't
+    # been committed yet, so they understand why the analysis treats those
+    # packages as already-bumped. Skipped silently when BaseRef is unresolved
+    # (without a base, "pending" has no meaning).
+    $pendingReleases = @()
+    if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
+        $pendingReleases = @(Get-PendingReleases -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef)
+        if ($pendingReleases.Count -gt 0) {
+            Write-Host ""
+            Write-Host (Format-PendingReleasesAnnouncement -Pending $pendingReleases) -ForegroundColor DarkGray
+        }
+    }
+
+    # Determine whether the primary target is among the pending set. When it is,
+    # downstream validation uses BaseVersion (not on-disk current) as the anchor
+    # so this invocation is base-relative — mirroring Invoke-CascadeStep's
+    # treatment of already-bumped dependents.
+    $primaryPending = $pendingReleases | Where-Object { $_.Folder -eq $CrateName } | Select-Object -First 1
+
+    # 7. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
+    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Patch / 1.0)
+    # because that's how releasers reason about the change. Below this point the
+    # release flow continues in Cargo's numeric major/minor/patch terms because
+    # changelogs, Cargo.toml, and commit messages are concrete version transitions.
+    # The 1.0 graduation translates into an explicit -Version 1.0.0; everything
+    # else translates into the matching -Bump kind.
+    $bump = ''
+    if (-not [string]::IsNullOrEmpty($Change)) {
+        # Use BaseVersion (when pending) so a re-invocation of `-Change 1.0` on
+        # an already-graduated pending package idempotently no-ops instead of
+        # throwing "already at 1.x" from on-disk inspection. Only the 1.0
+        # branch of Resolve-ReleaseSpecFromChange consults this version.
+        $versionForChangeCheck = if ($null -ne $primaryPending) {
+            $primaryPending.BaseVersion
+        } else {
+            Get-CurrentVersion -cargoTomlPath $crateCargoToml
+        }
+        if ($null -eq $versionForChangeCheck) {
+            Write-Error "Failed to get current version for comparison. Aborting."
+            Exit 1
+        }
+        try {
+            $spec = Resolve-ReleaseSpecFromChange -Change $Change -CurrentVersion $versionForChangeCheck
+        } catch {
+            Write-Error $_.Exception.Message
+            Exit 1
+        }
+        $bump = $spec.Bump
+        if (-not [string]::IsNullOrEmpty($spec.Version)) {
+            $Version = $spec.Version
+        }
+    }
+
+    # 8. VERSION COMPARISON VALIDATION
+    if (-not [string]::IsNullOrEmpty($Version)) {
+        # Anchor is BaseVersion (when pending) so an idempotent re-invocation
+        # passing the SAME -Version as the current pending version is accepted
+        # (it satisfies `Version > BaseVersion`). The actual three-way
+        # comparison against on-disk current — equal=no-op, lower=error,
+        # higher=upgrade-error — happens in Invoke-ReleaseFlow.
+        $versionAnchor = if ($null -ne $primaryPending) {
+            $primaryPending.BaseVersion
+        } else {
+            Get-CurrentVersion -cargoTomlPath $crateCargoToml
+        }
+        if ($null -eq $versionAnchor) {
+            Write-Error "Failed to get current version for comparison. Aborting."
+            Exit 1
+        }
+
+        $versionComparison = Compare-SemanticVersions -version1 $Version -version2 $versionAnchor
+        if ($versionComparison -le 0) {
+            $anchorLabel = if ($null -ne $primaryPending) { "base version '$versionAnchor'" } else { "current version '$versionAnchor'" }
+            Write-Error "Specified version '$Version' must be greater than $anchorLabel. Please specify a higher version number."
+            Exit 1
+        }
+    }
+
+    # 9. EXECUTE WORKFLOW
     try {
         $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $bump `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)

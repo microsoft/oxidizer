@@ -41,12 +41,14 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha �
     }
 
     Expect = @{
-        # zeta started at 0.1.0, pre-bumped to 0.1.1, then re-bumped by the explicit
-        # Invoke-ReleaseMain run (default 'minor' on 0.1.1 → 0.1.2 under the 0.x convention).
-        # b accepted as patch → 0.4.0 → 0.4.1; b's cascade upgrades a (0.3.0 → 0.3.1)
-        # and bullet-onlys alpha (pre-bumped to 0.2.1 already satisfies the patch requirement).
+        # With cross-invocation pending-release detection, zeta is recognised as
+        # already pending (base 0.1.0 → current 0.1.1) and the primary bump is
+        # skipped instead of double-bumping to 0.1.2 as the legacy flow did.
+        # The cascade still runs with the EFFECTIVE base→current bump (minor
+        # on 0.x.y per Cargo semver), so a (which exposes target) takes patch
+        # from b's downstream cascade and alpha (pre-bumped) stays bullet-only.
         Released = @(
-            @{ Crate = 'zeta';  To = '0.1.2' }
+            @{ Crate = 'zeta';  To = '0.1.1' }
             @{ Crate = 'alpha'; To = '0.2.1' }
             @{ Crate = 'b';     To = '0.4.1' }
             @{ Crate = 'a';     To = '0.3.1' }

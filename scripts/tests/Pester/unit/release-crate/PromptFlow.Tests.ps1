@@ -1004,3 +1004,72 @@ Describe 'Resolve-ReleaseSpecFromChange' {
 }
 
 
+# ---------------------------------------------------------------------------
+# Format-PendingReleasesAnnouncement (pure formatter)
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PendingReleasesAnnouncement' {
+
+    BeforeAll {
+        function script:NewPending {
+            param([string]$Name, [string]$BaseVersion, [string]$CurrentVersion, [string]$Folder)
+            if ([string]::IsNullOrEmpty($Folder)) { $Folder = $Name }
+            return [pscustomobject]@{
+                Folder         = $Folder
+                Name           = $Name
+                BaseVersion    = $BaseVersion
+                CurrentVersion = $CurrentVersion
+            }
+        }
+    }
+
+    Context 'empty input' {
+        It 'returns an empty string when given an empty array' {
+            Format-PendingReleasesAnnouncement -Pending @() | Should -Be ''
+        }
+
+        It 'returns an empty string when given $null' {
+            Format-PendingReleasesAnnouncement -Pending $null | Should -Be ''
+        }
+    }
+
+    Context 'single pending package' {
+        It 'renders the spec-exact header and one indented version-transition line' {
+            $out = Format-PendingReleasesAnnouncement -Pending @(NewPending -Name 'bytesbuf' -BaseVersion '1.2.3' -CurrentVersion '1.2.4')
+            $lines = $out -split "`r?`n"
+            $lines.Count                | Should -Be 2
+            $lines[0]                   | Should -Be 'Detected pending uncommitted releases and included in analysis data set:'
+            $lines[1]                   | Should -Be '   bytesbuf 1.2.3 -> 1.2.4'
+        }
+    }
+
+    Context 'multiple pending packages' {
+        It 'renders one indented line per package preserving the input order (caller is responsible for sorting)' {
+            $out = Format-PendingReleasesAnnouncement -Pending @(
+                NewPending -Name 'bytesbuf' -BaseVersion '1.2.3' -CurrentVersion '1.2.4'
+                NewPending -Name 'foo'      -BaseVersion '0.2.2' -CurrentVersion '1.0.0'
+            )
+            $lines = $out -split "`r?`n"
+            $lines.Count                | Should -Be 3
+            $lines[0]                   | Should -Be 'Detected pending uncommitted releases and included in analysis data set:'
+            $lines[1]                   | Should -Be '   bytesbuf 1.2.3 -> 1.2.4'
+            $lines[2]                   | Should -Be '   foo 0.2.2 -> 1.0.0'
+        }
+    }
+
+    Context 'uses package Name (not Folder) for display' {
+        It 'reads the .Name property, which can differ from .Folder' {
+            $entry = [pscustomobject]@{
+                Folder         = 'fetch-hyper'         # folder uses kebab-case
+                Name           = 'fetch_hyper'         # package name uses snake_case
+                BaseVersion    = '0.5.0'
+                CurrentVersion = '0.5.1'
+            }
+            $out = Format-PendingReleasesAnnouncement -Pending @($entry)
+            $lines = $out -split "`r?`n"
+            $lines[1]                   | Should -Be '   fetch_hyper 0.5.0 -> 0.5.1'
+        }
+    }
+}
+
+

@@ -268,6 +268,71 @@ Describe 'Get-CratesWithVersionBumps' {
     }
 }
 
+Describe 'Get-PendingReleases' {
+    BeforeEach {
+        Invalidate-WorkspaceMetadataCache
+    }
+
+    It 'returns an empty array when no version diffs against the base ref' {
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ('pend-empty-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
+        $pending.Count | Should -Be 0
+    }
+
+    It 'reports one record per pending package with Folder/Name/BaseVersion/CurrentVersion' {
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-single-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        # Bump 'b' on top of HEAD baseline (uncommitted — that's the "pending" state).
+        $ws.BumpVersion('b', '0.2.2')
+
+        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
+        $pending.Count             | Should -Be 1
+        $pending[0].Folder         | Should -Be 'b'
+        $pending[0].Name           | Should -Be 'b'
+        $pending[0].BaseVersion    | Should -Be '0.2.0'
+        $pending[0].CurrentVersion | Should -Be '0.2.2'
+    }
+
+    It 'sorts pending records by Folder ascending so the announcement is deterministic' {
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-sort-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        # Bump in reverse Folder order — the helper must still emit them in alphabetical order.
+        $ws.BumpVersion('c', '0.3.1')
+        $ws.BumpVersion('a', '0.1.1')
+        $ws.BumpVersion('b', '0.2.1')
+
+        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
+        ($pending | ForEach-Object { $_.Folder }) -join ',' | Should -Be 'a,b,c'
+    }
+
+    It 'skips new-at-base crates (no base version to compare against)' {
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-new-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        # Bump existing 'a' so we have at least one genuinely-pending entry to compare against.
+        $ws.BumpVersion('a', '0.1.1')
+
+        # Manually scaffold a brand-new crate that doesn't exist at HEAD (no add+commit).
+        $newCrate = Join-Path $ws.Path 'crates\brandnew'
+        New-Item -ItemType Directory -Path $newCrate -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $newCrate 'src') -Force | Out-Null
+        Set-Content -Path (Join-Path $newCrate 'Cargo.toml') -Value @"
+[package]
+name = "brandnew"
+version = "0.1.0"
+edition = "2021"
+"@ -NoNewline
+        Set-Content -Path (Join-Path $newCrate 'src\lib.rs') -Value '' -NoNewline
+
+        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
+        ($pending | ForEach-Object { $_.Folder }) | Should -Be @('a')
+    }
+
+    It 'returns an empty array when BaseRef is empty (no base to compare against)' {
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-norefs-' + [guid]::NewGuid().Guid.Substring(0,8)))
+        $ws.BumpVersion('a', '0.1.1')
+
+        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef '')
+        $pending.Count | Should -Be 0
+    }
+}
+
 Describe 'Get-FileLineEnding' {
     It 'returns LF for a file with only LF endings' {
         $path = Join-Path $TestDrive ('eol-lf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.txt')

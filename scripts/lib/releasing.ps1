@@ -559,6 +559,63 @@ function Get-CratesWithVersionBumps {
     Write-Output -NoEnumerate $bumped
 }
 
+# Returns a sorted array of pending-release records for every published workspace
+# crate whose on-disk Cargo.toml version differs from the version at $BaseRef. Each
+# record exposes the data the announcement formatter and base-relative re-invocation
+# logic need:
+#
+#   [pscustomobject]@{
+#     Folder         = '<crate folder under crates/>'
+#     Name           = '<package name from Cargo.toml [package].name>'
+#     BaseVersion    = '<version at BaseRef>'
+#     CurrentVersion = '<version on disk>'
+#   }
+#
+# New crates not present at $BaseRef are NOT included — they have no "base version"
+# to compare against, and the rest of the script's flow treats them as fresh
+# releases anyway (Invoke-CrateRelease writes the initial Cargo.toml + changelog
+# entry). Only crates that genuinely have a prior committed version with a
+# different on-disk version qualify as "pending" in the cross-invocation sense.
+#
+# Sorted ascending by Folder for deterministic output (the announcement order
+# must be stable across runs / hosts / etc.).
+function Get-PendingReleases {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
+    )
+
+    if ([string]::IsNullOrEmpty($BaseRef)) {
+        return @()
+    }
+
+    $crates = Get-WorkspaceCrates -repoRoot $RepoRoot
+    $pending = New-Object System.Collections.Generic.List[object]
+
+    foreach ($crate in $crates) {
+        if (-not $crate.Published) { continue }
+
+        $cargoToml = Join-Path $RepoRoot "crates/$($crate.Folder)/Cargo.toml"
+        if (-not (Test-Path $cargoToml)) { continue }
+
+        $currentVersion = Get-CurrentVersion -cargoTomlPath $cargoToml
+        $baseVersion    = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $crate.Folder
+
+        # New crate at base: skip (no base version to be pending against).
+        if ($null -eq $baseVersion) { continue }
+        if ($currentVersion -eq $baseVersion) { continue }
+
+        $pending.Add([pscustomobject]@{
+            Folder         = $crate.Folder
+            Name           = $crate.Name
+            BaseVersion    = $baseVersion
+            CurrentVersion = $currentVersion
+        }) | Out-Null
+    }
+
+    return @($pending | Sort-Object -Property Folder)
+}
+
 # --- CORE ANALYSIS ---
 #
 # For each crate in the "release set" (crates with version bumps vs base), walk its
