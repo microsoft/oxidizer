@@ -318,7 +318,7 @@ impl CacheTelemetry {
     /// Like [`record_eviction`](Self::record_eviction), the request ID is
     /// read from the thread-local (non-zero when triggered synchronously
     /// during a cache operation).
-    #[cfg(any(feature = "memory", test))]
+    #[cfg(feature = "memory")]
     pub(crate) fn record_background_expired(&self, cache_name: CacheName) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
@@ -821,9 +821,6 @@ mod tests {
 
     #[test]
     fn eviction_handler_receives_request_id_from_calling_thread() {
-        let tier_events = Arc::new(Mutex::new(Vec::<(RequestId, String, String)>::new()));
-        let events = Arc::clone(&tier_events);
-
         struct EvictionRecorder {
             events: Arc<Mutex<Vec<(RequestId, String, String)>>>,
         }
@@ -838,7 +835,10 @@ mod tests {
             fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
         }
 
-        let telemetry = CacheTelemetry::new().with_handler(Arc::new(EvictionRecorder { events }));
+        let tier_events = Arc::new(Mutex::new(Vec::<(RequestId, String, String)>::new()));
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(EvictionRecorder {
+            events: Arc::clone(&tier_events),
+        }));
 
         // Simulate an insert that triggers eviction on the same thread
         let request_id = next_request_id();
@@ -857,9 +857,6 @@ mod tests {
 
     #[test]
     fn eviction_without_request_context_has_zero_id() {
-        let tier_events = Arc::new(Mutex::new(Vec::<RequestId>::new()));
-        let events = Arc::clone(&tier_events);
-
         struct IdRecorder {
             events: Arc<Mutex<Vec<RequestId>>>,
         }
@@ -873,7 +870,10 @@ mod tests {
             fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
         }
 
-        let telemetry = CacheTelemetry::new().with_handler(Arc::new(IdRecorder { events }));
+        let tier_events = Arc::new(Mutex::new(Vec::<RequestId>::new()));
+        let telemetry = CacheTelemetry::new().with_handler(Arc::new(IdRecorder {
+            events: Arc::clone(&tier_events),
+        }));
 
         // No WithRequestId wrapper — simulates background maintenance thread
         telemetry.record_eviction("bg_cache");
