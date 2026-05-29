@@ -697,3 +697,172 @@ Describe 'Show-FinalMessage' {
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Cascade-message helpers (Get-ChangeLabelFromBumpKind,
+# Get-ShortChangeLabelFromBumpKind, Format-CascadeAnnouncement). These
+# back the "🔗 Cascading release to N dependent package(s) as <label> [...]"
+# line printed by Invoke-ReleaseFlow before each cascade. Pure functions so
+# they're driven directly here without staging a workspace.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-ChangeLabelFromBumpKind' {
+    It "maps 'major' to 'breaking change'" {
+        Get-ChangeLabelFromBumpKind -BumpKind 'major' | Should -Be 'breaking change'
+    }
+
+    It "maps 'minor' to 'non-breaking change'" {
+        Get-ChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking change'
+    }
+
+    It "maps 'patch' to 'fix'" {
+        Get-ChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'fix'
+    }
+}
+
+Describe 'Get-ShortChangeLabelFromBumpKind' {
+    It "maps 'major' to 'breaking' (no trailing 'change' noun)" {
+        Get-ShortChangeLabelFromBumpKind -BumpKind 'major' | Should -Be 'breaking'
+    }
+
+    It "maps 'minor' to 'non-breaking'" {
+        Get-ShortChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking'
+    }
+
+    It "maps 'patch' to 'fix'" {
+        Get-ShortChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'fix'
+    }
+}
+
+Describe 'Format-CascadeAnnouncement' {
+
+    Context 'headline label reflects the EXPOSING bump kind' {
+        # The exposing bump is the kind that's applied to dependents that
+        # re-export the target's types in their public API. Test-IsBreakingChange
+        # is consulted at the call site to derive this — here we just assert that
+        # whatever value lands in -ExposingBump is what shows up as the headline.
+
+        It 'reads "as breaking change" when -ExposingBump is major' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+            $out | Should -Match 'as breaking change'
+        }
+
+        It 'reads "as non-breaking change" when -ExposingBump is minor' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+            $out | Should -Match 'as non-breaking change'
+        }
+
+        It 'reads "as fix" when -ExposingBump is patch (and parenthetical is suppressed — see other tests)' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper')
+            $out | Should -Match 'as fix'
+        }
+    }
+
+    Context 'parenthetical clause for non-exposing dependents' {
+        It 'appends "(or fix if no API exposure of `<target>`)" when exposing=major and non-exposing=patch' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+            $out | Should -Match '\(or fix if no API exposure of `http_extensions`\)'
+        }
+
+        It 'appends "(or fix if no API exposure of `<target>`)" when exposing=minor and non-exposing=patch' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+            $out | Should -Match '\(or fix if no API exposure of `http_extensions`\)'
+        }
+
+        It 'omits the parenthetical entirely when exposing and non-exposing are both patch (no downgrade possible)' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+            $out | Should -Not -Match '\(or .+ if no API exposure'
+            # Ensure the colon still lands directly after the headline label.
+            $out | Should -Match 'as fix:\s'
+        }
+
+        It 'preserves backticks around the target crate name (markdown-style code formatting in CLI output)' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'my-crate' -DependentNames @('a', 'b')
+            $out | Should -Match '`my-crate`'
+        }
+    }
+
+    Context 'singular vs plural "dependent package(s)" noun' {
+        It 'uses singular "dependent package" when there is exactly one dependent' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'foo' -DependentNames @('bar')
+            $out | Should -Match '1 dependent package as'
+            $out | Should -Not -Match '1 dependent packages'
+        }
+
+        It 'uses plural "dependent packages" when there are multiple dependents' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'foo' -DependentNames @('bar', 'baz', 'qux')
+            $out | Should -Match '3 dependent packages as'
+        }
+    }
+
+    Context 'full-shape rendering across all original bump kinds (target is 1.x.y conceptually)' {
+        # 1.x.y / 0.x.y / 0.0.x distinctions are made by the CALLER (via
+        # Test-IsBreakingChange, which feeds into ExposingBump). The formatter
+        # is agnostic to the underlying semver shape — it just gets the
+        # already-resolved bump kinds. These tests pin the exact rendered
+        # shape for each combination the caller can hand in.
+
+        It 'breaking + non-exposing patch: "as breaking change (or fix if no API exposure of `target`)"' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+                -TargetCrateName 'target' -DependentNames @('a', 'b')
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as breaking change (or fix if no API exposure of ``target``): a, b"
+        }
+
+        It 'non-breaking + non-exposing patch: "as non-breaking change (or fix if no API exposure of `target`)"' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+                -TargetCrateName 'target' -DependentNames @('a', 'b')
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as non-breaking change (or fix if no API exposure of ``target``): a, b"
+        }
+
+        It 'fix + non-exposing patch: "as fix" (parenthetical suppressed, no downgrade possible)' {
+            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+                -TargetCrateName 'target' -DependentNames @('a', 'b')
+            $out | Should -Be "🔗 Cascading release to 2 dependent packages as fix: a, b"
+        }
+    }
+
+    Context 'caller-level integration: cascade for 0.x.y targets where Test-IsBreakingChange promotes to major' {
+        # When the target is 0.x.y (x>=1) and the user picks "non-breaking",
+        # Test-IsBreakingChange returns $false so $exposingCascadeBump stays
+        # 'minor' (no promotion). This is just a sanity check that the
+        # caller's pre-formatter math (in Invoke-ReleaseFlow) lines up with
+        # the formatter's expectations for the 0.x.y case.
+        It '0.x.y target + user picks breaking (major): the caller promotes exposing to major; formatter reads "breaking change"' {
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -bump 'major'
+            $isBreaking | Should -BeTrue
+            $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
+            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+                -TargetCrateName 't' -DependentNames @('d')
+            $out | Should -Match 'as breaking change \(or fix if no API exposure of `t`\)'
+        }
+
+        It '0.x.y target + user picks non-breaking (minor): caller keeps exposing as minor; formatter reads "non-breaking change"' {
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -bump 'minor'
+            $isBreaking | Should -BeFalse
+            $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
+            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+                -TargetCrateName 't' -DependentNames @('d')
+            $out | Should -Match 'as non-breaking change \(or fix if no API exposure of `t`\)'
+        }
+
+        It '0.0.x target (always breaking under Cargo semver): caller marks breaking, formatter reads "breaking change"' {
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.0.5' -bump 'patch'
+            $isBreaking | Should -BeTrue
+            # Caller's $exposingCascadeBump = if($targetIsBreaking) {'major'} else {$cascadeBump}
+            $exposingBump = if ($isBreaking) { 'major' } else { 'patch' }
+            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+                -TargetCrateName 't' -DependentNames @('d')
+            $out | Should -Match 'as breaking change \(or fix if no API exposure of `t`\)'
+        }
+    }
+}
+

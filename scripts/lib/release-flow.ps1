@@ -629,6 +629,70 @@ function Invoke-CascadeStep {
     return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
 }
 
+# --- CASCADE-MESSAGE FORMATTING ---
+#
+# Pure helpers backing the cascade announcement printed by Invoke-ReleaseFlow.
+# Split out so the human-facing wording (and the "downgrade by one level"
+# mapping for non-exposing dependents) can be unit-tested without driving the
+# full release flow.
+
+# Maps an internal bump kind to the semantic label shown in the cascade
+# announcement (full form, used as 'as <label>'): major → 'breaking change',
+# minor → 'non-breaking change', patch → 'fix'.
+function Get-ChangeLabelFromBumpKind {
+    param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
+
+    switch ($BumpKind) {
+        'major' { return 'breaking change' }
+        'minor' { return 'non-breaking change' }
+        'patch' { return 'fix' }
+    }
+}
+
+# Short form of the semantic label, used inside the parenthetical that
+# describes the downgrade for non-exposing dependents (e.g. "or non-breaking
+# if no API exposure of '<target>'"). Mirrors Get-ChangeLabelFromBumpKind
+# without the trailing 'change'/'fix' noun where it would read awkwardly.
+function Get-ShortChangeLabelFromBumpKind {
+    param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
+
+    switch ($BumpKind) {
+        'major' { return 'breaking' }
+        'minor' { return 'non-breaking' }
+        'patch' { return 'fix' }
+    }
+}
+
+# Builds the cascade announcement line. ExposingBump is what we apply to
+# dependents that re-export the target's types in their public API;
+# NonExposingBump is what we apply to internal-only consumers (today: always
+# 'patch'). When the two are identical (i.e. the target itself is being
+# released as a fix, so the non-exposing bump cannot go any lower), the
+# parenthetical clause is suppressed entirely — saying "or fix if no API
+# exposure" would just repeat the headline label.
+function Format-CascadeAnnouncement {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$ExposingBump,
+        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$NonExposingBump,
+        [Parameter(Mandatory = $true)][string]$TargetCrateName,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$DependentNames
+    )
+
+    $count = @($DependentNames).Count
+    $noun  = if ($count -eq 1) { 'dependent package' } else { 'dependent packages' }
+
+    $headlineLabel = Get-ChangeLabelFromBumpKind -BumpKind $ExposingBump
+
+    if ($ExposingBump -eq $NonExposingBump) {
+        $parenthetical = ''
+    } else {
+        $downgradeLabel = Get-ShortChangeLabelFromBumpKind -BumpKind $NonExposingBump
+        $parenthetical = " (or $downgradeLabel if no API exposure of ``$TargetCrateName``)"
+    }
+
+    return "🔗 Cascading release to $count $noun as $headlineLabel$parenthetical`: $($DependentNames -join ', ')"
+}
+
 # Runs the bump + downstream cascade for a single target crate. Returns the augmented
 # $releases array. Equivalent to the legacy inline body, but factored so the post-release
 # scan can invoke it recursively for upstream dependencies the user agrees to release.
@@ -672,7 +736,9 @@ function Invoke-ReleaseFlow {
     $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $RepoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
-        Write-Host "🔗 Cascading $exposingCascadeBump bump (or patch where the dependent does not expose '$CrateName' types) to $($dependents.Count) crates: $($dependents -join ', ')" -ForegroundColor Cyan
+        $cascadeMessage = Format-CascadeAnnouncement -ExposingBump $exposingCascadeBump `
+            -NonExposingBump 'patch' -TargetCrateName $CrateName -DependentNames $dependents
+        Write-Host $cascadeMessage -ForegroundColor Cyan
 
         $allCrates = Get-WorkspaceCrates -repoRoot $RepoRoot
         $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
