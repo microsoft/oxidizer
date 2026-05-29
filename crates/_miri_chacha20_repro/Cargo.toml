@@ -1,0 +1,18 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "_miri_chacha20_repro"
+description = "Throwaway crate that reproduces a Miri unsupported-operation failure caused by rand 0.10 + chacha20 NEON on aarch64. Not for publishing."
+version = "0.0.0"
+publish = false
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/_miri_chacha20_repro"
+
+[dev-dependencies]
+rand = { version = "0.10", default-features = false, features = ["std", "thread_rng", "std_rng", "sys_rng"] }
