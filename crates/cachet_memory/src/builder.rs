@@ -262,6 +262,12 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// The listener runs on the cache's background maintenance task. Keep the
     /// closure cheap; expensive work should be offloaded to a separate task.
     ///
+    /// If a listener was already registered (for example via an earlier
+    /// `on_eviction` call, or by the host crate when
+    /// [`with_eviction_telemetry`](Self::with_eviction_telemetry) is enabled),
+    /// the new listener is chained — both run on every removal, in registration
+    /// order.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -288,7 +294,13 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     where
         F: Fn(RemovalCause) + Send + Sync + 'static,
     {
-        self.eviction_listener = Some(Arc::new(listener));
+        self.eviction_listener = Some(match self.eviction_listener.take() {
+            Some(previous) => Arc::new(move |cause| {
+                previous(cause);
+                listener(cause);
+            }),
+            None => Arc::new(listener),
+        });
         self
     }
 
@@ -469,6 +481,39 @@ mod tests {
             .with_eviction_telemetry()
             .with_hasher(std::collections::hash_map::RandomState::new());
         assert!(builder.eviction_telemetry_enabled());
+    }
+
+    #[test]
+    fn on_eviction_chains_existing_listener() {
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        let first_count = Arc::new(AtomicUsize::new(0));
+        let second_count = Arc::new(AtomicUsize::new(0));
+        let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let first_count_cb = Arc::clone(&first_count);
+        let second_count_cb = Arc::clone(&second_count);
+        let order_first = Arc::clone(&order);
+        let order_second = Arc::clone(&order);
+
+        let builder = InMemoryCacheBuilder::<String, i32>::new()
+            .on_eviction(move |_| {
+                first_count_cb.fetch_add(1, Ordering::Relaxed);
+                order_first.lock().unwrap().push("first");
+            })
+            .on_eviction(move |_| {
+                second_count_cb.fetch_add(1, Ordering::Relaxed);
+                order_second.lock().unwrap().push("second");
+            });
+
+        let listener = builder.eviction_listener.expect("listener should be installed");
+        listener(RemovalCause::Size);
+
+        assert_eq!(first_count.load(Ordering::Relaxed), 1);
+        assert_eq!(second_count.load(Ordering::Relaxed), 1);
+        assert_eq!(*order.lock().unwrap(), vec!["first", "second"]);
     }
 
     #[test]
