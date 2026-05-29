@@ -697,6 +697,12 @@ $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 # Pure formatter for the per-package menu. Returns a multi-line string ready
 # for Write-Host. Returning a string (not host-writing directly) keeps the
 # function unit-testable without redirecting Information / Host streams.
+#
+# Options 3-5 render the *concrete* version transition each choice would
+# produce (e.g. "Release as breaking change (0.1.2 -> 0.2.0)"). Get-NextVersion
+# is the single source of truth for the major/minor/patch math and already
+# honours Cargo's 0.x.y semver carve-outs, so the menu always shows the same
+# version the release would produce — not a misleading numeric label.
 function Format-PackageMenu {
     param(
         [Parameter(Mandatory = $true)][object]$Finding,
@@ -711,6 +717,22 @@ function Format-PackageMenu {
         $queueSuffix = ''
     }
 
+    # Build the version-transition annotations for options 3-5. CurrentVersion
+    # may be missing on hand-crafted test findings or in unusual non-cargo
+    # contexts — in that case omit the annotation rather than crash, so the
+    # menu still presents the choice (the release flow itself will fail loudly
+    # later if there's truly no version).
+    $current = [string]$Finding.CurrentVersion
+    $bumpHints = @{}
+    foreach ($kind in @('major', 'minor', 'patch')) {
+        if ([string]::IsNullOrWhiteSpace($current)) {
+            $bumpHints[$kind] = "($kind version)"
+        } else {
+            $next = Get-NextVersion -currentVersion $current -bump $kind
+            $bumpHints[$kind] = "($current -> $next)"
+        }
+    }
+
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
@@ -721,9 +743,9 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('  1. View diff')
     [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial to published functionality')
-    [void]$sb.AppendLine('  3. Bump major version')
-    [void]$sb.AppendLine('  4. Bump minor version')
-    [void]$sb.AppendLine('  5. Bump patch version')
+    [void]$sb.AppendLine("  3. Release as breaking change $($bumpHints['major'])")
+    [void]$sb.AppendLine("  4. Release as non-breaking change $($bumpHints['minor'])")
+    [void]$sb.AppendLine("  5. Release as fix $($bumpHints['patch'])")
     return $sb.ToString()
 }
 

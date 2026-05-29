@@ -32,6 +32,9 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $findings.Count | Should -Be 1
         $findings[0].Folder | Should -Be 'upstream'
         $findings[0].DependencyChains[0] | Should -Be @('downstream', 'upstream')
+        # CurrentVersion threads through from cargo metadata so the menu can
+        # render concrete version transitions (e.g. "0.2.0 -> 0.3.0").
+        $findings[0].CurrentVersion | Should -Be '0.2.0'
     }
 
     It 'N2 — earlier-PR upstream edit + current-PR downstream bump is flagged' {

@@ -341,6 +341,7 @@ function Get-WorkspaceCrates {
         $crates += [pscustomobject]@{
             Name                 = $package.name
             Folder               = Split-Path $manifestDir -Leaf
+            Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
             AllowedExternalTypes = $allowedTypes
@@ -581,6 +582,7 @@ function Get-CratesWithVersionBumps {
 # Returns @() when there are no findings, otherwise an array of objects:
 #   Folder            - crate folder under crates/
 #   PackageName       - cargo package name
+#   CurrentVersion    - package's current version (Cargo.toml [package].version)
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_crate', 'mid_crate', 'this_dep'), ... )
 #
@@ -651,6 +653,7 @@ function Get-UnreleasedModifiedDependencies {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
                             PackageName      = $depCrate.Name
+                            CurrentVersion   = $depCrate.Version
                             ChangedFileCount = $modifiedMap[$depFolder]
                             DependencyChains = @(, $depChain)
                         }

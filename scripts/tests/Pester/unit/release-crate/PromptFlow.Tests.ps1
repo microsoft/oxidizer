@@ -20,10 +20,15 @@ Describe 'Format-PackageMenu' {
 
     BeforeAll {
         function script:NewFinding {
-            param([string]$Folder = 'ohno', [object[]]$Chains = @(@('a', 'ohno')))
+            param(
+                [string]$Folder = 'ohno',
+                [object[]]$Chains = @(@('a', 'ohno')),
+                [string]$CurrentVersion = '1.2.3'
+            )
             return [pscustomobject]@{
                 Folder           = $Folder
                 PackageName      = $Folder
+                CurrentVersion   = $CurrentVersion
                 ChangedFileCount = 1
                 DependencyChains = $Chains
             }
@@ -72,9 +77,49 @@ Describe 'Format-PackageMenu' {
         $lines.Count | Should -Be 5
         $lines[0] | Should -Match '^\s*1\. View diff$'
         $lines[1] | Should -Match '^\s*2\. Ignore package - the changes are immaterial to published functionality$'
-        $lines[2] | Should -Match '^\s*3\. Bump major version$'
-        $lines[3] | Should -Match '^\s*4\. Bump minor version$'
-        $lines[4] | Should -Match '^\s*5\. Bump patch version$'
+        # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
+        $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
+        $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
+        $lines[4] | Should -Match '^\s*5\. Release as fix \(.+\)$'
+    }
+
+    It 'renders concrete x.y.z -> (next) transitions for a >=1.x.y package' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '1.2.3') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (1.2.3 -> 2.0.0)'
+        $lines | Should -Contain '  4. Release as non-breaking change (1.2.3 -> 1.3.0)'
+        $lines | Should -Contain '  5. Release as fix (1.2.3 -> 1.2.4)'
+    }
+
+    It 'honours Cargo 0.x semver: 0.1.2 -> 0.2.0 is breaking; 0.1.2 -> 0.1.3 is both non-breaking and fix' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (0.1.2 -> 0.2.0)'
+        $lines | Should -Contain '  4. Release as non-breaking change (0.1.2 -> 0.1.3)'
+        $lines | Should -Contain '  5. Release as fix (0.1.2 -> 0.1.3)'
+    }
+
+    It 'honours Cargo 0.0.x semver: every change is breaking, so every option shows the same patch increment' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.0.5') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (0.0.5 -> 0.0.6)'
+        $lines | Should -Contain '  4. Release as non-breaking change (0.0.5 -> 0.0.6)'
+        $lines | Should -Contain '  5. Release as fix (0.0.5 -> 0.0.6)'
+    }
+
+    It 'falls back to "(major version)" / "(minor version)" / "(patch version)" hints when CurrentVersion is missing or blank' {
+        # Defensive: hand-rolled findings without CurrentVersion should still render the menu, not crash.
+        $finding = [pscustomobject]@{
+            Folder           = 'ohno'
+            PackageName      = 'ohno'
+            ChangedFileCount = 1
+            DependencyChains = @(, @('a', 'ohno'))
+        }
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (major version)'
+        $lines | Should -Contain '  4. Release as non-breaking change (minor version)'
+        $lines | Should -Contain '  5. Release as fix (patch version)'
     }
 
     It 'does NOT include any "files changed" / numeric file-count metric' {
