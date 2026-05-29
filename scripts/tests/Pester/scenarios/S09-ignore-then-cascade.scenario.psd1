@@ -17,8 +17,9 @@
         Answers   = @(
             # Iter 0 of the scan: ignore b.
             @{ Match = "Choose option for 'b'"; Reply = '2' }
-            # Iter 1: accept c as patch.
-            @{ Match = "Choose option for 'c'"; Reply = '5' }
+            # Iter 1: accept c via option 4 (non-breaking). Option 5 (fix) is hidden
+            # on 0.x.y because it would produce the same numeric increment.
+            @{ Match = "Choose option for 'c'"; Reply = '4' }
             # No further prompt: b is now in the release set via cascade, not a finding.
         )
     }

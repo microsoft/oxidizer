@@ -14,7 +14,10 @@
         Bump      = 'patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
-            @{ Match = "Choose option for 'bottom'"; Reply = '5' }
+            # On 0.x.y the menu hides option 5 (fix) because it would be numerically
+            # identical to option 4 (non-breaking change), so we pick '4' to drive
+            # the same 0.x.y -> 0.x.(y+1) increment.
+            @{ Match = "Choose option for 'bottom'"; Reply = '4' }
         )
     }
 

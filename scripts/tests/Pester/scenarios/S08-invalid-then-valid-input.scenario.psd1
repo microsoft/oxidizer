@@ -18,8 +18,10 @@
             @{ Match = "Choose option for 'upstream'"; Reply = '12' }
             # Empty input silently re-prompts.
             @{ Match = "Choose option for 'upstream'"; Reply = '' }
-            # Finally a valid choice.
-            @{ Match = "Choose option for 'upstream'"; Reply = '5' }
+            # Finally a valid choice. On 0.x.y the menu offers [1-4] only (option 5
+            # is hidden because it would be numerically identical to option 4), so
+            # we drive the accept path via '4'.
+            @{ Match = "Choose option for 'upstream'"; Reply = '4' }
         )
     }
 

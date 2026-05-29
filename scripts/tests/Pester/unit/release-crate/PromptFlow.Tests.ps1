@@ -91,20 +91,25 @@ Describe 'Format-PackageMenu' {
         $lines | Should -Contain '  5. Release as fix (1.2.3 -> 1.2.4)'
     }
 
-    It 'honours Cargo 0.x semver: 0.1.2 -> 0.2.0 is breaking; 0.1.2 -> 0.1.3 is both non-breaking and fix' {
+    It 'hides option 5 on 0.x.y packages because non-breaking and fix collapse to the same numeric bump' {
         $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (0.1.2 -> 0.2.0)'
         $lines | Should -Contain '  4. Release as non-breaking change (0.1.2 -> 0.1.3)'
-        $lines | Should -Contain '  5. Release as fix (0.1.2 -> 0.1.3)'
+        # Option 5 must not appear at all on 0.x.y — both "fix" and "non-breaking"
+        # produce the same numeric increment under Cargo semver, so the menu only
+        # offers the surviving distinct choice.
+        $out | Should -Not -Match '^\s*5\. '
+        $out | Should -Not -Match 'Release as fix'
     }
 
-    It 'honours Cargo 0.0.x semver: every change is breaking, so every option shows the same patch increment' {
+    It 'hides option 5 on 0.0.x packages (where minor and patch also collapse)' {
         $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.0.5') -RemainingCount 0
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (0.0.5 -> 0.0.6)'
         $lines | Should -Contain '  4. Release as non-breaking change (0.0.5 -> 0.0.6)'
-        $lines | Should -Contain '  5. Release as fix (0.0.5 -> 0.0.6)'
+        $out | Should -Not -Match '^\s*5\. '
+        $out | Should -Not -Match 'Release as fix'
     }
 
     It 'falls back to "(major version)" / "(minor version)" / "(patch version)" hints when CurrentVersion is missing or blank' {
@@ -134,6 +139,34 @@ Describe 'Format-PackageMenu' {
 }
 
 # ---------------------------------------------------------------------------
+# Test-IsPatchOptionRedundant (pure semver-rule helper)
+# ---------------------------------------------------------------------------
+
+Describe 'Test-IsPatchOptionRedundant' {
+    It 'returns $false for stable >=1.x.y versions' {
+        Test-IsPatchOptionRedundant -CurrentVersion '1.0.0' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '1.2.3' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '42.7.0' | Should -BeFalse
+    }
+
+    It 'returns $true for 0.x.y versions (minor and patch collapse under Cargo semver)' {
+        Test-IsPatchOptionRedundant -CurrentVersion '0.1.0' | Should -BeTrue
+        Test-IsPatchOptionRedundant -CurrentVersion '0.4.7' | Should -BeTrue
+    }
+
+    It 'returns $true for 0.0.x versions (every bump collapses to patch)' {
+        Test-IsPatchOptionRedundant -CurrentVersion '0.0.1' | Should -BeTrue
+        Test-IsPatchOptionRedundant -CurrentVersion '0.0.42' | Should -BeTrue
+    }
+
+    It 'returns $false (conservative default) when the version is missing, null, or whitespace' {
+        Test-IsPatchOptionRedundant -CurrentVersion '' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion $null | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '   ' | Should -BeFalse
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Get-PackageReleaseDecision (input-validation loop)
 # ---------------------------------------------------------------------------
 
@@ -141,10 +174,14 @@ Describe 'Get-PackageReleaseDecision' {
 
     BeforeAll {
         function script:NewFinding {
-            param([string]$Folder = 'ohno')
+            param(
+                [string]$Folder = 'ohno',
+                [AllowEmptyString()][AllowNull()][string]$CurrentVersion
+            )
             return [pscustomobject]@{
                 Folder           = $Folder
                 PackageName      = $Folder
+                CurrentVersion   = $CurrentVersion
                 ChangedFileCount = 1
                 DependencyChains = @(, @('a', $Folder))
             }
@@ -285,6 +322,46 @@ Describe 'Get-PackageReleaseDecision' {
             SetReadHostQueue -Answers @('2')
             Get-PackageReleaseDecision -Finding (NewFinding -Folder 'mypkg') -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
             $script:RH_PromptsObserved[0] | Should -Match "Choose option for 'mypkg'"
+        }
+
+        It "advertises the full [1-5] range when CurrentVersion is unknown" {
+            SetReadHostQueue -Answers @('2')
+            Get-PackageReleaseDecision -Finding (NewFinding -Folder 'mypkg') -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-5\]'
+        }
+
+        It "advertises the narrower [1-4] range when option 5 is hidden (0.x.y package)" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'mypkg' -CurrentVersion '0.1.2'
+            Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-4\]'
+        }
+    }
+
+    Context 'option 5 is rejected when hidden (0.x.y package)' {
+        It "treats '5' as invalid and re-prompts, message references the narrower range" {
+            SetReadHostQueue -Answers @('5', '4')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'minor'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '5'"
+            ($out | Out-String) | Should -Match 'from 1 to 4'
+        }
+
+        It "still accepts '4' (non-breaking) on a 0.x.y package" {
+            SetReadHostQueue -Answers @('4')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'minor'
+        }
+
+        It "still accepts '3' (breaking) on a 0.x.y package" {
+            SetReadHostQueue -Answers @('3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'major'
         }
     }
 }

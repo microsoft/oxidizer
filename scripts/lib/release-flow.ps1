@@ -694,6 +694,21 @@ function Test-InteractiveSession {
 # this so nested or re-entrant invocations don't clobber an outer run's list.
 $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 
+# Returns $true when option 5 (Release as fix) would be numerically indistinguishable
+# from option 4 (Release as non-breaking change) for the given current version.
+# This is the case for Cargo 0.x.y versions, where the semver carve-out lumps
+# minor and patch under the same numeric increment (0.x.(y+1)) — and on 0.0.x
+# where every bump collapses to 0.0.(x+1). When CurrentVersion is unknown, we
+# conservatively return $false so all options remain visible.
+function Test-IsPatchOptionRedundant {
+    param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$CurrentVersion)
+
+    if ([string]::IsNullOrWhiteSpace($CurrentVersion)) { return $false }
+    $minorNext = Get-NextVersion -currentVersion $CurrentVersion -bump 'minor'
+    $patchNext = Get-NextVersion -currentVersion $CurrentVersion -bump 'patch'
+    return ($minorNext -eq $patchNext)
+}
+
 # Pure formatter for the per-package menu. Returns a multi-line string ready
 # for Write-Host. Returning a string (not host-writing directly) keeps the
 # function unit-testable without redirecting Information / Host streams.
@@ -703,6 +718,11 @@ $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 # is the single source of truth for the major/minor/patch math and already
 # honours Cargo's 0.x.y semver carve-outs, so the menu always shows the same
 # version the release would produce — not a misleading numeric label.
+#
+# Option 5 (Release as fix) is hidden when it would produce the same numeric
+# bump as option 4 (Release as non-breaking change) — see
+# Test-IsPatchOptionRedundant. This avoids presenting two indistinguishable
+# choices on Cargo 0.x.y packages.
 function Format-PackageMenu {
     param(
         [Parameter(Mandatory = $true)][object]$Finding,
@@ -733,6 +753,8 @@ function Format-PackageMenu {
         }
     }
 
+    $hidePatch = Test-IsPatchOptionRedundant -CurrentVersion $current
+
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
@@ -745,7 +767,9 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial to published functionality')
     [void]$sb.AppendLine("  3. Release as breaking change $($bumpHints['major'])")
     [void]$sb.AppendLine("  4. Release as non-breaking change $($bumpHints['minor'])")
-    [void]$sb.AppendLine("  5. Release as fix $($bumpHints['patch'])")
+    if (-not $hidePatch) {
+        [void]$sb.AppendLine("  5. Release as fix $($bumpHints['patch'])")
+    }
     return $sb.ToString()
 }
 
@@ -962,10 +986,15 @@ function Show-PackageDiff {
 }
 
 # Renders the menu for a single finding and runs the input-validation loop.
-# Choice 1 (View diff) re-renders the menu and re-prompts; choices 2..5
+# Choice 1 (View diff) re-renders the menu and re-prompts; choices 2..N
 # resolve to a release action. Empty input silently re-prompts (no warning),
 # anything else complains then re-prompts. Returns @{ Action = 'ignore' |
 # 'major' | 'minor' | 'patch' }.
+#
+# When option 5 is suppressed (because it would be numerically identical to
+# option 4 — see Test-IsPatchOptionRedundant), the prompt range tightens to
+# [1-4] and "5" is treated as an invalid choice. This keeps the prompt
+# honest with what the menu shows.
 function Get-PackageReleaseDecision {
     param(
         [Parameter(Mandatory = $true)][object]$Finding,
@@ -973,9 +1002,12 @@ function Get-PackageReleaseDecision {
         [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
+    $hidePatch = Test-IsPatchOptionRedundant -CurrentVersion ([string]$Finding.CurrentVersion)
+    $maxChoice = if ($hidePatch) { 4 } else { 5 }
+
     Show-PackageMenu -Finding $Finding -RemainingCount $RemainingCount
     while ($true) {
-        $raw = Read-Host "Choose option for '$($Finding.Folder)' [1-5]"
+        $raw = Read-Host "Choose option for '$($Finding.Folder)' [1-$maxChoice]"
         $choice = if ($null -eq $raw) { '' } else { $raw.Trim() }
 
         if ($choice -eq '') { continue }
@@ -987,9 +1019,9 @@ function Get-PackageReleaseDecision {
         if ($choice -eq '2') { return @{ Action = 'ignore' } }
         if ($choice -eq '3') { return @{ Action = 'major' } }
         if ($choice -eq '4') { return @{ Action = 'minor' } }
-        if ($choice -eq '5') { return @{ Action = 'patch' } }
+        if ($choice -eq '5' -and -not $hidePatch) { return @{ Action = 'patch' } }
 
-        Write-Host "Invalid choice '$choice'. Enter a number from 1 to 5." -ForegroundColor Yellow
+        Write-Host "Invalid choice '$choice'. Enter a number from 1 to $maxChoice." -ForegroundColor Yellow
     }
 }
 
