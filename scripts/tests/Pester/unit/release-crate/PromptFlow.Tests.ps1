@@ -248,10 +248,13 @@ Describe 'Show-PackageDiff' {
         # Reset the tracking list so tests don't leak into each other.
         $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
         Mock -CommandName Get-PackageDiffText -MockWith { return "diff body for $Folder`n" }
-        Mock -CommandName Open-PathWithDefaultEditor -MockWith { }
+        Mock -CommandName Open-PathWithPreferredEditor -MockWith { }
     }
 
-    It 'writes the diff to a .txt file and invokes the opener with the same path' {
+    It 'writes the diff to a file and invokes the opener with the same path' {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+        }
         # Force the temp file into $TestDrive so we can inspect / clean up.
         Mock -CommandName Save-PackageDiffToTempFile -MockWith {
             $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + '.txt')
@@ -266,16 +269,37 @@ Describe 'Show-PackageDiff' {
         Test-Path -LiteralPath $written | Should -BeTrue
         (Get-Content -LiteralPath $written -Raw) | Should -Be "diff body for bytesbuf`n"
 
-        Should -Invoke -CommandName Open-PathWithDefaultEditor -Times 1 -Exactly -ParameterFilter { $Path -eq $written }
+        Should -Invoke -CommandName Open-PathWithPreferredEditor -Times 1 -Exactly -ParameterFilter { $Path -eq $written -and $Editor.Kind -eq 'system' }
+    }
+
+    It "uses the preferred editor's extension when saving (e.g. .diff for VS Code)" {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }
+        }
+        # Spy on Save-PackageDiffToTempFile to capture the extension argument.
+        Mock -CommandName Save-PackageDiffToTempFile -MockWith {
+            $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + $Extension)
+            Set-Content -LiteralPath $p -Value $DiffText -NoNewline
+            return $p
+        }
+
+        Show-PackageDiff -RepoRoot $TestDrive -Folder 'bytesbuf' 6>$null
+
+        Should -Invoke -CommandName Save-PackageDiffToTempFile -Times 1 -Exactly -ParameterFilter { $Extension -eq '.diff' }
+        $script:TempPackageDiffPaths[0] | Should -BeLike '*.diff'
+        Should -Invoke -CommandName Open-PathWithPreferredEditor -Times 1 -Exactly -ParameterFilter { $Editor.Kind -eq 'code' }
     }
 
     It 'appends to $script:TempPackageDiffPaths even when the opener fails silently' {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+        }
         Mock -CommandName Save-PackageDiffToTempFile -MockWith {
             $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + '.txt')
             Set-Content -LiteralPath $p -Value $DiffText -NoNewline
             return $p
         }
-        Mock -CommandName Open-PathWithDefaultEditor -MockWith { }   # no-op, simulates failure absorbed by helper
+        Mock -CommandName Open-PathWithPreferredEditor -MockWith { }   # no-op, simulates failure absorbed by helper
 
         Show-PackageDiff -RepoRoot $TestDrive -Folder 'a' 6>$null
         Show-PackageDiff -RepoRoot $TestDrive -Folder 'b' 6>$null
@@ -288,11 +312,23 @@ Describe 'Show-PackageDiff' {
 # ---------------------------------------------------------------------------
 
 Describe 'Save-PackageDiffToTempFile' {
-    It 'writes the diff text to a .txt under the requested directory and returns the path' {
+    It 'defaults to .txt and writes the diff text under the requested directory' {
         $dir = Join-Path $TestDrive 'savediff'
         $p = Save-PackageDiffToTempFile -Folder 'bytesbuf_io' -DiffText "hello`nworld" -Directory $dir
         $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-bytesbuf_io-*.txt')
         (Get-Content -LiteralPath $p -Raw) | Should -Be "hello`nworld"
+    }
+
+    It 'honours an explicit -Extension (e.g. .diff for VS Code)' {
+        $dir = Join-Path $TestDrive 'savediff-ext'
+        $p = Save-PackageDiffToTempFile -Folder 'bytesbuf_io' -DiffText 'x' -Directory $dir -Extension '.diff'
+        $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-bytesbuf_io-*.diff')
+    }
+
+    It 'normalises an extension passed without the leading dot' {
+        $dir = Join-Path $TestDrive 'savediff-nodot'
+        $p = Save-PackageDiffToTempFile -Folder 'a' -DiffText 'x' -Directory $dir -Extension 'diff'
+        $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-a-*.diff')
     }
 
     It 'sanitises folder names containing characters not allowed in file names' {
@@ -303,22 +339,104 @@ Describe 'Save-PackageDiffToTempFile' {
 }
 
 # ---------------------------------------------------------------------------
-# Open-PathWithDefaultEditor (cross-platform dispatch)
+# Get-PreferredEditor (VS Code -> code-insiders -> system fallback)
 # ---------------------------------------------------------------------------
 
-Describe 'Open-PathWithDefaultEditor' {
-    Context 'on Windows' -Skip:(-not ((Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue) -eq $null -or $IsWindows)) {
-        It 'invokes Start-Process with -FilePath set to the path' {
-            Mock -CommandName Start-Process -MockWith { }
-            Open-PathWithDefaultEditor -Path 'C:\temp\demo.txt'
+Describe 'Get-PreferredEditor' {
+
+    It "returns 'code' + .diff when `code` is on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            if ($Name -eq 'code') { return [pscustomobject]@{ Name = 'code' } }
+            return $null
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code'
+        $e.FileExtension | Should -Be '.diff'
+    }
+
+    It "prefers 'code' over 'code-insiders' when both are on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            return [pscustomobject]@{ Name = $Name }
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code'
+    }
+
+    It "returns 'code-insiders' + .diff when only insiders is on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            if ($Name -eq 'code') { return $null }
+            if ($Name -eq 'code-insiders') { return [pscustomobject]@{ Name = 'code-insiders' } }
+            return $null
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code-insiders'
+        $e.FileExtension | Should -Be '.diff'
+    }
+
+    It "returns 'system' + .txt when no VS Code variant is on PATH" {
+        Mock -CommandName Get-Command -MockWith { return $null }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'system'
+        $e.FileExtension | Should -Be '.txt'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Open-PathWithPreferredEditor (dispatch on editor kind)
+# ---------------------------------------------------------------------------
+
+Describe 'Open-PathWithPreferredEditor' {
+    BeforeEach {
+        # Default safety net so a flaky test doesn't actually try to launch VS Code or the OS opener.
+        Mock -CommandName Start-Process -MockWith { }
+    }
+
+    It "invokes 'code' when the editor kind is 'code'" {
+        # Mocking external executables: Pester can mock cmdlets/functions, not arbitrary native commands,
+        # so we capture the dispatch by mocking Get-Variable for $IsWindows (irrelevant here) and asserting
+        # behavior indirectly via the LASTEXITCODE check path. The simplest assertion is that the function
+        # neither throws nor writes a warning when the (mocked) external command succeeds.
+        function script:code { param([string]$p) $global:LASTEXITCODE = 0 }
+        Mock -CommandName Write-Warning -MockWith { }
+        try {
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.diff' -Editor ([pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }) } | Should -Not -Throw
+            Should -Invoke -CommandName Write-Warning -Times 0 -Exactly
+        } finally {
+            Remove-Item function:script:code -ErrorAction SilentlyContinue
+        }
+    }
+
+    It "warns and does not throw when 'code' exits with a non-zero code" {
+        function script:code { param([string]$p) $global:LASTEXITCODE = 7 }
+        Mock -CommandName Write-Warning -MockWith { }
+        try {
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.diff' -Editor ([pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }) } | Should -Not -Throw
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'code exited with code 7' }
+        } finally {
+            Remove-Item function:script:code -ErrorAction SilentlyContinue
+        }
+    }
+
+    Context "system-kind dispatch on Windows" -Skip:(-not ((Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue) -eq $null -or $IsWindows)) {
+        It 'falls back to Start-Process for kind = system' {
+            Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt' -Editor ([pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' })
             Should -Invoke -CommandName Start-Process -Times 1 -Exactly -ParameterFilter { $FilePath -eq 'C:\temp\demo.txt' }
         }
 
         It 'emits a warning and does not throw when Start-Process throws' {
             Mock -CommandName Start-Process -MockWith { throw 'no association' }
             Mock -CommandName Write-Warning -MockWith { }
-            { Open-PathWithDefaultEditor -Path 'C:\temp\demo.txt' } | Should -Not -Throw
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt' -Editor ([pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }) } | Should -Not -Throw
             Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'no association' }
+        }
+
+        It 'resolves the editor on the fly when -Editor is omitted' {
+            Mock -CommandName Get-PreferredEditor -MockWith {
+                [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+            }
+            Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt'
+            Should -Invoke -CommandName Get-PreferredEditor -Times 1 -Exactly
+            Should -Invoke -CommandName Start-Process -Times 1 -Exactly
         }
     }
 }

@@ -796,36 +796,85 @@ function Get-PackageDiffText {
     return $sb.ToString()
 }
 
-# Writes the given diff text to a uniquely-named .txt under the OS temp
-# directory (or -Directory, for tests) and returns the resulting path.
+# Writes the given diff text to a uniquely-named file under the OS temp
+# directory (or -Directory, for tests) and returns the resulting path. The
+# extension defaults to .txt for safe handling by arbitrary text editors;
+# pass -Extension '.diff' when the file will be opened in an editor that
+# recognises the diff syntax by extension (e.g. VS Code).
 function Save-PackageDiffToTempFile {
     param(
         [Parameter(Mandatory = $true)][string]$Folder,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$DiffText,
-        [string]$Directory
+        [string]$Directory,
+        [string]$Extension = '.txt'
     )
 
     if (-not $Directory) { $Directory = [System.IO.Path]::GetTempPath() }
     if (-not (Test-Path -LiteralPath $Directory)) {
         New-Item -ItemType Directory -Path $Directory -Force | Out-Null
     }
+    if (-not $Extension.StartsWith('.')) { $Extension = '.' + $Extension }
 
     $safeFolder = ($Folder -replace '[^A-Za-z0-9._-]', '_')
-    $fileName = "oxi-pkg-diff-$safeFolder-$([guid]::NewGuid().ToString('N')).txt"
+    $fileName = "oxi-pkg-diff-$safeFolder-$([guid]::NewGuid().ToString('N'))$Extension"
     $fullPath = Join-Path $Directory $fileName
     Set-Content -LiteralPath $fullPath -Value $DiffText -NoNewline
     return $fullPath
 }
 
-# Opens a path with the OS default editor. Non-blocking; never throws.
-# Platform-aware dispatch because PowerShell Core's Start-Process expects an
-# executable on non-Windows platforms, not a document path.
-function Open-PathWithDefaultEditor {
-    param([Parameter(Mandatory = $true)][string]$Path)
+# Picks the editor used to render the package diff. Prefers VS Code
+# (`code`, then `code-insiders`) because VS Code provides diff syntax
+# highlighting out of the box for `.diff` files. Falls back to whatever
+# the OS associates with the chosen file extension (handled by
+# Open-PathWithPreferredEditor) and to `.txt` so plain text editors can
+# always open the file without a "no application registered" error.
+#
+# Returns @{ Kind = 'code' | 'code-insiders' | 'system'; FileExtension = '.diff' | '.txt' }
+function Get-PreferredEditor {
+    foreach ($cmd in @('code', 'code-insiders')) {
+        if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+            return [pscustomobject]@{
+                Kind          = $cmd
+                FileExtension = '.diff'
+            }
+        }
+    }
+    return [pscustomobject]@{
+        Kind          = 'system'
+        FileExtension = '.txt'
+    }
+}
+
+# Opens a path with the preferred editor (see Get-PreferredEditor). When
+# `-Editor` is omitted the preferred editor is resolved on the fly.
+# Non-blocking; never throws — a failure (no VS Code, no association,
+# missing system opener) degrades to a Write-Warning so the calling
+# release flow continues.
+#
+# Platform-aware system-default dispatch is needed because PowerShell
+# Core's Start-Process expects an executable on non-Windows platforms,
+# not a document path.
+function Open-PathWithPreferredEditor {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $false)][object]$Editor
+    )
+
+    if ($null -eq $Editor) { $Editor = Get-PreferredEditor }
 
     try {
-        # PowerShell 5.1 (Windows-only) does not define $IsWindows; treat it
-        # as $true there. PowerShell Core defines all three platform globals.
+        if ($Editor.Kind -eq 'code') {
+            & code $Path
+            if ($LASTEXITCODE -ne 0) { throw "code exited with code $LASTEXITCODE" }
+            return
+        }
+        if ($Editor.Kind -eq 'code-insiders') {
+            & code-insiders $Path
+            if ($LASTEXITCODE -ne 0) { throw "code-insiders exited with code $LASTEXITCODE" }
+            return
+        }
+
+        # System default dispatch.
         $onWindows = $false
         $platformVar = Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue
         if ($null -eq $platformVar) {
@@ -861,12 +910,13 @@ function Open-PathWithDefaultEditor {
 
         throw 'No system file-opener found (tried xdg-open, gio).'
     } catch {
-        Write-Warning "Could not open '$Path' with the system default editor: $_"
+        Write-Warning "Could not open '$Path' with the preferred editor ($($Editor.Kind)): $_"
     }
 }
 
 # Renders the package's diff to a temp file, prints the path, and tries to
-# open it with the OS default editor. The temp file is tracked in
+# open it with the preferred editor (VS Code if available, otherwise the
+# OS default opener). The temp file is tracked in
 # $script:TempPackageDiffPaths so Invoke-PostReleaseDepScan can clean up.
 function Show-PackageDiff {
     param(
@@ -875,7 +925,8 @@ function Show-PackageDiff {
     )
 
     $diffText = Get-PackageDiffText -RepoRoot $RepoRoot -Folder $Folder
-    $tempPath = Save-PackageDiffToTempFile -Folder $Folder -DiffText $diffText
+    $editor   = Get-PreferredEditor
+    $tempPath = Save-PackageDiffToTempFile -Folder $Folder -DiffText $diffText -Extension $editor.FileExtension
 
     if ($null -eq $script:TempPackageDiffPaths) {
         $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
@@ -884,7 +935,7 @@ function Show-PackageDiff {
 
     Write-Host ''
     Write-Host "Diff written to: $tempPath" -ForegroundColor Cyan
-    Open-PathWithDefaultEditor -Path $tempPath
+    Open-PathWithPreferredEditor -Path $tempPath -Editor $editor
 }
 
 # Renders the menu for a single finding and runs the input-validation loop.
