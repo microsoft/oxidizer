@@ -25,7 +25,7 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 The changelogs are updated by `scripts/release-crate.ps1` at release time, based on Git history. It is not necessary to make manual edits
 to the changelogs, though you are permitted to do so if explicitly instructed.
 
-## Releasing Crates
+## Releasing Packages
 
 See [docs/releasing.md](docs/releasing.md) for the release tooling
 reference: glossary (direct/transitive dependent vs dependency, cascade

@@ -318,7 +318,7 @@ Describe 'Invoke-CheckUnreleasedDependencies' {
     Context 'when there are no modified-but-unreleased dependencies' {
 
         It 'prints the "no modifications" message, sets has_findings=false, and writes no output file' {
-            # Pristine Linear2 workspace: nothing modified, no version bumps.
+            # Pristine Linear2 workspace: nothing modified, no version-number increments.
             $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ("clean-" + [guid]::NewGuid().ToString('N')))
             Mock -CommandName Get-RepoRoot -MockWith { $ws.Path }
 

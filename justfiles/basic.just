@@ -145,7 +145,7 @@ test-scripts SCOPE="":
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    & "$(git rev-parse --show-toplevel)/scripts/tests/Pester/Run-Tests.ps1" -Path "{{ SCOPE }}"
+    & ./scripts/tests/Pester/Run-Tests.ps1 -Path "{{ SCOPE }}"
 
 # Runs unit and integration tests.
 [script]

@@ -104,13 +104,17 @@ param(
     [ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')]
     [string]$Change,
 
-    # Base ref used to identify the release set (packages whose `version =` differs
-    # between this ref and HEAD) for the post-release dependency scan.
-    # The modification baseline for each transitive dependency is per-package (the
-    # dependency's own last `version =` / `publish =` commit), not this ref. Default
-    # is 'origin/main' (best-effort fetched before use). Pass an empty string to skip
-    # the scan entirely.
+    # The git ref containing the already-released versions of every package in
+    # the workspace. Anything between this ref and the current state — whether
+    # already committed on the branch or still in the working tree — is treated
+    # as a pending release that has not yet been finalized. Used to identify
+    # the release set (packages whose `version =` differs between this ref and
+    # HEAD) and the per-dependency cascade baseline. Default is 'origin/main'
+    # (best-effort fetched before use). Must be a ref that `git rev-parse` can
+    # resolve; the script aborts otherwise — dependency and dependents scanning
+    # always run, neither can be skipped.
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$BaseRef = 'origin/main'
 )
 

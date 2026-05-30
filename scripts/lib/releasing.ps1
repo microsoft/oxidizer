@@ -717,12 +717,8 @@ function Get-PackagesWithVersionChanges {
 function Get-PendingReleases {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
     )
-
-    if ([string]::IsNullOrEmpty($BaseRef)) {
-        return @()
-    }
 
     $packages = Get-WorkspacePackages -repoRoot $RepoRoot
     $pending = New-Object System.Collections.Generic.List[object]

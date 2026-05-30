@@ -324,12 +324,11 @@ edition = "2021"
         ($pending | ForEach-Object { $_.Folder }) | Should -Be @('a')
     }
 
-    It 'returns an empty array when BaseRef is empty (no base to compare against)' {
+    It 'rejects empty BaseRef (mandatory parameter)' {
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-norefs-' + [guid]::NewGuid().Guid.Substring(0,8)))
         $ws.SetVersion('a', '0.1.1')
 
-        $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef '')
-        $pending.Count | Should -Be 0
+        { Get-PendingReleases -RepoRoot $ws.Path -BaseRef '' } | Should -Throw
     }
 }
 

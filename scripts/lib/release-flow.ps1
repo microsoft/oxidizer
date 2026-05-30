@@ -361,7 +361,9 @@ function Write-Changelog {
         if ($rawCommits.Count -eq 0) {
             Write-Warning "No unreleased commits found to add to the changelog."
         } else {
-            Write-Warning "No relevant commits found to add to the changelog (all $($rawCommits.Count) commits were filtered out)."
+            $filteredCount = $rawCommits.Count
+            $noun = if ($filteredCount -eq 1) { 'commit was' } else { 'commits were' }
+            Write-Warning "No relevant commits found to add to the changelog (all $filteredCount $noun filtered out)."
         }
         return
     }
@@ -697,7 +699,7 @@ function Invoke-CascadeStep {
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
         [Parameter(Mandatory = $true)][string]$TargetNewVersion,
         [Parameter(Mandatory = $true)][string]$DependentChangeType,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
     )
 
     $depFolder = Join-Path $RepoRoot 'crates' $Dependent
@@ -710,9 +712,7 @@ function Invoke-CascadeStep {
     }
 
     $depCurrent = Get-CurrentVersion -cargoTomlPath $depCargo
-    $depBase = if (-not [string]::IsNullOrEmpty($BaseRef)) {
-        Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $Dependent
-    } else { $null }
+    $depBase = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $Dependent
 
     $depCascadeReason = @{
         Target   = $TargetPackageName
@@ -720,7 +720,7 @@ function Invoke-CascadeStep {
         Breaking = (Test-IsBreakingChange -oldVersion $depCurrent -ChangeType $DependentChangeType)
     }
 
-    # New package (no base-ref Cargo.toml) or no usable base ref: behave as the legacy
+    # New package (no base-ref Cargo.toml): behave as the legacy
     # cascade did — let Invoke-PackageRelease increment the version from $depCurrent.
     if ([string]::IsNullOrEmpty($depBase) -or $depCurrent -eq $depBase) {
         $depNew = Invoke-PackageRelease -packageName $Dependent -packageFolder $depFolder `
@@ -882,7 +882,7 @@ function Invoke-ReleaseFlow {
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
     )
 
     $packageFolder    = Join-Path $RepoRoot 'crates' $PackageName
@@ -895,9 +895,7 @@ function Invoke-ReleaseFlow {
         Exit 1
     }
 
-    $baseVersion = if (-not [string]::IsNullOrEmpty($BaseRef)) {
-        Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageName
-    } else { $null }
+    $baseVersion = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageName
 
     # Re-invocation on a primary target that already has a pending in-branch
     # version change (committed or uncommitted — both are equivalent until
@@ -1402,7 +1400,7 @@ function Get-PackageReleaseDecision {
 function Invoke-PostReleaseDepScan {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef,
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef,
         [Parameter(Mandatory = $true)][ref]$ReleasesRef,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
@@ -1429,11 +1427,6 @@ function Invoke-PostReleaseDepScan {
         # potentially elevate the cascade-applied change type.
         [Parameter(Mandatory = $false)][string[]]$PreReviewedFolders
     )
-
-    if ([string]::IsNullOrEmpty($BaseRef)) {
-        Write-Host "ℹ️  Post-release dependency scan skipped (no base ref)." -ForegroundColor DarkGray
-        return
-    }
 
     $isInteractive = Test-InteractiveSession
 
@@ -1721,7 +1714,7 @@ function Invoke-ReleaseMain {
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $false)][string]$Version,
         [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')][string]$Change,
-        [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main'
+        [Parameter(Mandatory = $false)][ValidateNotNullOrEmpty()][string]$BaseRef = 'origin/main'
     )
 
     # 1. INPUT VALIDATION
@@ -1783,20 +1776,20 @@ function Invoke-ReleaseMain {
     # re-invocation on an already-pending package — e.g. `-Change 1.0` on a
     # package already pending at v1.0.0, or `-Version X` where X equals the
     # current pending version — would spuriously fail the on-disk comparison).
+    # BaseRef is mandatory (defaulting to 'origin/main'); the dependency- and
+    # dependents-scanning logic always runs and cannot be skipped.
     $resolvedBaseRef = $BaseRef
-    if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
-        if ($resolvedBaseRef -match '^origin/(.+)$') {
-            $branch = $matches[1]
-            try {
-                Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path | Out-Null
-            } catch {
-                Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
-            }
+    if ($resolvedBaseRef -match '^origin/(.+)$') {
+        $branch = $matches[1]
+        try {
+            Invoke-Git -Arguments @('fetch', '--no-tags', 'origin', "+refs/heads/${branch}:refs/remotes/origin/${branch}") -RepoRoot $repoRoot.Path | Out-Null
+        } catch {
+            Write-Warning "git fetch for '$resolvedBaseRef' failed: $_"
         }
-        if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
-            Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release dependency scan will be skipped."
-            $resolvedBaseRef = ''
-        }
+    }
+    if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
+        Write-Error "Could not resolve base ref '$resolvedBaseRef'. Pass -BaseRef <ref> with a ref that 'git rev-parse' can resolve, or ensure 'origin/main' is fetchable."
+        Exit 1
     }
 
     # 6. ANNOUNCE PENDING RELEASES
@@ -1804,15 +1797,11 @@ function Invoke-ReleaseMain {
     # changes are still in this branch (committed or uncommitted — both are
     # equivalent until the branch merges into the base ref), so they
     # understand why the analysis treats those packages as already-
-    # incremented. Skipped silently when BaseRef is unresolved (without a
-    # base, "pending" has no meaning).
-    $pendingReleases = @()
-    if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
-        $pendingReleases = @(Get-PendingReleases -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef)
-        if ($pendingReleases.Count -gt 0) {
-            Write-Host ""
-            Write-Host (Format-PendingReleasesAnnouncement -Pending $pendingReleases) -ForegroundColor DarkGray
-        }
+    # incremented.
+    $pendingReleases = @(Get-PendingReleases -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef)
+    if ($pendingReleases.Count -gt 0) {
+        Write-Host ""
+        Write-Host (Format-PendingReleasesAnnouncement -Pending $pendingReleases) -ForegroundColor DarkGray
     }
 
     # Determine whether the primary target is among the pending set. When it is,
@@ -1888,9 +1877,7 @@ function Invoke-ReleaseMain {
         # by subsequent cascades inside Invoke-PostReleaseDepScan) would
         # otherwise pollute Get-PackagesWithUnreleasedChanges's working-tree
         # query and cause cascade-only targets to surface as findings.
-        $preReleaseModifications = if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
-            Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
-        } else { $null }
+        $preReleaseModifications = Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
 
         # Cross-invocation deduplication: prior `release-crate.ps1` runs in
         # this branch may have left version changes in the working tree that

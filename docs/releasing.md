@@ -41,10 +41,11 @@ meanings defined here.
   > depends on which way the reader visualises the graph). Always use the
   > dependency/dependent vocabulary above.
 
-- **Cascade toward dependents** — the automatic version-bump propagation
-  that happens when a released package's transitive dependents need to
-  also be released because they (transitively) consume it. This is what
-  `Invoke-CascadeStep` performs after the primary release.
+- **Cascade toward dependents** — the automatic version-number-increment
+  propagation that happens when a released package's transitive
+  dependents need to also be released because they (transitively) consume
+  it. This is what `Invoke-CascadeStep` performs after the primary
+  release.
 
 - **Cascade toward dependencies** — the inverse: re-running
   `release-crate.ps1` on a package whose direct dependencies still have

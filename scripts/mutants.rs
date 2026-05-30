@@ -97,11 +97,10 @@ fn main() {
     println!("Skipped: {}", automation::INTERNAL_CRATES.join(", "));
 
     if test_groups.len() > initial_count {
+        let added = test_groups.len() - initial_count;
+        let s = if added == 1 { "" } else { "s" };
         println!();
-        println!(
-            "Added {} ungrouped packages as individual groups",
-            test_groups.len() - initial_count
-        );
+        println!("Added {added} ungrouped package{s} as individual group{s}");
     }
 
     println!();
@@ -126,7 +125,8 @@ fn main() {
     if failed_groups.is_empty() {
         println!("✅ All test groups passed!");
     } else {
-        eprintln!("❌ {} test groups failed:", failed_groups.len());
+        let n = failed_groups.len();
+        eprintln!("❌ {n} test group{} failed:", if n == 1 { "" } else { "s" });
         for (group, error) in &failed_groups {
             eprintln!("  - [{}]: {error}", group.join(", "));
         }

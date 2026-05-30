@@ -204,7 +204,8 @@ function Invoke-CheckUnreleasedDependencies {
 
         Set-Content -Path $OutputFile -Value $content -Encoding utf8 -NoNewline
 
-        Write-Host "Wrote $($findings.Count) findings to '$OutputFile'."
+        $findingCount = $findings.Count
+        Write-Host "Wrote $findingCount finding$(if ($findingCount -eq 1) { '' } else { 's' }) to '$OutputFile'."
         Set-StepOutput -Name 'has_findings' -Value 'true'
         return
     }
