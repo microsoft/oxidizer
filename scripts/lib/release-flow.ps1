@@ -234,7 +234,7 @@ function Update-PackageVersion {
 # in place, preserving the existing changelog body (which was generated from
 # the same commit/cascade history the user already reviewed).
 #
-# Used for in-place escalation when a downstream cascade or a subsequent
+# Used for in-place escalation when a cascade toward dependents or a subsequent
 # Invoke-ReleaseFlow re-invocation needs to lift an already-incremented package
 # to a higher version. The alternative — calling Invoke-PackageRelease again —
 # would create a second `## [<new>]` changelog section while leaving the stale
@@ -838,14 +838,20 @@ function Format-CascadeDependentLine {
     return "  • $DependentName -> $label ($why)"
 }
 
-# Pure formatter for the "Detected pending uncommitted releases ..." block printed
+# Pure formatter for the "Detected pending releases ..." block printed
 # at the top of Invoke-ReleaseMain. Each pending record is a [pscustomobject] with
 # Name, BaseVersion, CurrentVersion (Get-PendingReleases produces these in stable
 # Folder order). Returns '' when there are no pending releases so the caller can
 # unconditionally print and rely on Write-Host to no-op on empty input.
 #
+# A pending release is any package whose on-disk version differs from its
+# BaseRef version, irrespective of whether that change has been committed in
+# the working branch. See docs/releasing.md for the rationale: pending
+# status is determined by comparison with BaseRef, never by working-tree
+# vs HEAD state.
+#
 # Format:
-#   Detected pending uncommitted releases and included in analysis data set:
+#   Detected pending releases and included in analysis data set:
 #      <name1> <base1> -> <current1>
 #      <name2> <base2> -> <current2>
 function Format-PendingReleasesAnnouncement {
@@ -857,17 +863,17 @@ function Format-PendingReleasesAnnouncement {
     $items = @($Pending)
     if ($items.Count -eq 0) { return '' }
 
-    $lines = @('Detected pending uncommitted releases and included in analysis data set:')
+    $lines = @('Detected pending releases and included in analysis data set:')
     foreach ($entry in $items) {
         $lines += "   $($entry.Name) $($entry.BaseVersion) -> $($entry.CurrentVersion)"
     }
     return ($lines -join [Environment]::NewLine)
 }
 
-# Runs the version increment + downstream cascade for a single target package. Returns
-# the augmented $releases array. Equivalent to the legacy inline body, but factored so
-# the post-release scan can invoke it recursively for upstream dependencies the user
-# agrees to release.
+# Runs the version increment + cascade toward dependents for a single target package.
+# Returns the augmented $releases array. Equivalent to the legacy inline body, but
+# factored so the post-release scan can invoke it recursively for transitive
+# dependencies the user agrees to release.
 function Invoke-ReleaseFlow {
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
@@ -893,8 +899,12 @@ function Invoke-ReleaseFlow {
         Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageName
     } else { $null }
 
-    # Re-invocation on a primary target that already has a pending uncommitted
-    # version change (e.g. an earlier `release-crate.ps1` invocation in the same PR).
+    # Re-invocation on a primary target that already has a pending in-branch
+    # version change (committed or uncommitted — both are equivalent until
+    # the branch merges into the base ref, so this code path makes no
+    # distinction between them; see docs/releasing.md). Typical sources of
+    # the pending change: an earlier `release-crate.ps1` invocation in the
+    # same PR, or a cascade-applied bump from a previous run.
     # Mirrors the base-relative no-op/upgrade logic Invoke-CascadeStep already
     # applies to dependents: compute the version this invocation WOULD have
     # produced starting from the base-ref version, and compare with the on-disk
@@ -1370,21 +1380,22 @@ function Get-PackageReleaseDecision {
 # the user (when interactive) to optionally release them too.
 # Newly-released packages are appended to the release records via [ref].
 #
-# CASCADE-ORGANIZATION INVARIANTS (see AGENTS.md "Release Dependency Scan"):
-#   A. Upstream cascades never introduce items to the user-review queue. A
-#      cascade-only target (no pre-existing modifications) must NOT surface —
-#      its version increment is mechanical and follows directly from the
-#      released dependency. Enforced by snapshotting the modifications set
-#      BEFORE the primary release / cascade runs (the snapshot is passed in
-#      via -ModifiedSnapshot and forwarded to Get-UnreleasedModifiedDependencies).
+# CASCADE-ORGANIZATION INVARIANTS (see docs/releasing.md "Cascade Organisation Invariants"):
+#   A. A cascade toward dependents never introduces items to the user-review
+#      queue. A cascade-only target (no pre-existing modifications) must NOT
+#      surface — its version increment is mechanical and follows directly
+#      from the released dependency. Enforced by snapshotting the
+#      modifications set BEFORE the primary release / cascade runs (the
+#      snapshot is passed in via -ModifiedSnapshot and forwarded to
+#      Get-UnreleasedModifiedDependencies).
 #   B. A release-set member is removed from the user-review queue ONLY when
 #      its cascade-applied change type is already breaking (semantic maximum)
 #      OR when the user has explicitly reviewed it in this run / a prior
 #      release-crate.ps1 invocation. Release-set members whose cascade-applied
 #      change is non-breaking or patch are SURFACED when they have pre-existing
 #      modifications, because the user may want to escalate after reviewing
-#      the changes (an upstream cascade is only definitive if the ONLY
-#      change in that package is the mechanical dependency increment).
+#      the changes (a cascade toward dependents is only definitive if the
+#      ONLY change in that package is the mechanical dependency increment).
 #      Enforced jointly by Get-UnreleasedModifiedDependencies (the BFS
 #      surfacing rule) and the $reviewedReleaseSet bookkeeping inside this
 #      loop.
@@ -1395,7 +1406,6 @@ function Invoke-PostReleaseDepScan {
         [Parameter(Mandatory = $true)][ref]$ReleasesRef,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
-        [Parameter(Mandatory = $false)][switch]$NonInteractive,
         # Caller-captured "has unreleased modifications" hashtable. When provided,
         # used in lieu of re-querying the working tree mid-loop. Required to
         # uphold Invariant A across cascades (the cascade-written Cargo.toml /
@@ -1421,11 +1431,11 @@ function Invoke-PostReleaseDepScan {
     )
 
     if ([string]::IsNullOrEmpty($BaseRef)) {
-        Write-Host "ℹ️  Post-release upstream-dependency scan skipped (no base ref)." -ForegroundColor DarkGray
+        Write-Host "ℹ️  Post-release dependency scan skipped (no base ref)." -ForegroundColor DarkGray
         return
     }
 
-    $isInteractive = (-not $NonInteractive) -and (Test-InteractiveSession)
+    $isInteractive = Test-InteractiveSession
 
     # $declined tracks NON-release-set findings the user said "no" to. The
     # "ignore-then-cascade" handoff later removes from this set if a cascade
@@ -1497,7 +1507,7 @@ function Invoke-PostReleaseDepScan {
                 if ($queue.Count -eq 0) {
                     if (-not $hasEverComputedQueue) {
                         Write-Host ""
-                        Write-Host "✅ No modified-but-unreleased upstream workspace dependencies detected." -ForegroundColor Green
+                        Write-Host "✅ No modified-but-unreleased workspace dependencies detected." -ForegroundColor Green
                     }
                     return
                 }
@@ -1581,7 +1591,7 @@ function Invoke-PostReleaseDepScan {
                 -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
 
             # Merge nested release records into the running set. A package may already
-            # appear (e.g., it was a downstream cascade target of the initial release)
+            # appear (e.g., it was a cascade-toward-dependents target of the initial release)
             # and the nested cascade may have upgraded it further — preserve the
             # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
             # so Show-ReleaseSummary and the final commit message reflect on-disk state.
@@ -1590,9 +1600,9 @@ function Invoke-PostReleaseDepScan {
             # explicitly decided about) as reviewed — NOT the cascade-released
             # members of $nestedReleases. Cascade-released packages with
             # pre-existing modifications must remain eligible for Invariant B
-            # elevation review on the next iteration: an upstream cascade is
-            # only definitive when the ONLY change in the cascaded package is
-            # the mechanical dependency increment.
+            # elevation review on the next iteration: a cascade toward
+            # dependents is only definitive when the ONLY change in the
+            # cascaded package is the mechanical dependency increment.
             foreach ($r in $nestedReleases) {
                 # If cascade pulled in a package the user previously chose to ignore,
                 # surface that so they're not confused why it appears in the release
@@ -1620,7 +1630,7 @@ function Invoke-PostReleaseDepScan {
             # The cascade just edited Cargo.toml files; force a full BFS
             # recompute next iteration so newly version-incremented packages
             # drop off the findings list (and any of their committed-but-
-            # still-unreleased transitive upstreams surface).
+            # still-unreleased transitive dependencies surface).
             $queue = $null
         }
 
@@ -1711,8 +1721,7 @@ function Invoke-ReleaseMain {
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $false)][string]$Version,
         [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')][string]$Change,
-        [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main',
-        [Parameter(Mandatory = $false)][switch]$NonInteractive
+        [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main'
     )
 
     # 1. INPUT VALIDATION
@@ -1785,16 +1794,18 @@ function Invoke-ReleaseMain {
             }
         }
         if (-not (Test-GitRef -Ref $resolvedBaseRef -RepoRoot $repoRoot.Path)) {
-            Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release upstream-dependency scan will be skipped."
+            Write-Warning "Could not resolve base ref '$resolvedBaseRef'; post-release dependency scan will be skipped."
             $resolvedBaseRef = ''
         }
     }
 
-    # 6. ANNOUNCE PENDING UNCOMMITTED RELEASES
-    # Helps the user notice prior `release-crate.ps1` runs whose results haven't
-    # been committed yet, so they understand why the analysis treats those
-    # packages as already-incremented. Skipped silently when BaseRef is
-    # unresolved (without a base, "pending" has no meaning).
+    # 6. ANNOUNCE PENDING RELEASES
+    # Helps the user notice prior `release-crate.ps1` runs whose version
+    # changes are still in this branch (committed or uncommitted — both are
+    # equivalent until the branch merges into the base ref), so they
+    # understand why the analysis treats those packages as already-
+    # incremented. Skipped silently when BaseRef is unresolved (without a
+    # base, "pending" has no meaning).
     $pendingReleases = @()
     if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
         $pendingReleases = @(Get-PendingReleases -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef)
@@ -1805,7 +1816,7 @@ function Invoke-ReleaseMain {
     }
 
     # Determine whether the primary target is among the pending set. When it is,
-    # downstream validation uses BaseVersion (not on-disk current) as the anchor
+    # subsequent validation uses BaseVersion (not on-disk current) as the anchor
     # so this invocation is base-relative — mirroring Invoke-CascadeStep's
     # treatment of already-version-incremented dependents.
     $primaryPending = $pendingReleases | Where-Object { $_.Folder -eq $PackageName } | Select-Object -First 1
@@ -1894,11 +1905,10 @@ function Invoke-ReleaseMain {
         $releases = @(Invoke-ReleaseFlow -PackageName $PackageName -Version $Version -ChangeType $changeType `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
 
-        # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released
-        # packages are appended to $releases via the [ref].
+        # Scan for modified-but-unreleased workspace dependencies and prompt the user.
+        # Newly-released packages are appended to $releases via the [ref].
         Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
             -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
-            -NonInteractive:$NonInteractive `
             -ModifiedSnapshot $preReleaseModifications `
             -PreReviewedFolders $preReviewedFolders
 

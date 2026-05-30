@@ -646,20 +646,6 @@ Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
         } 6>&1
         ($out | Out-String) | Should -Not -Match 'Analyzing packages for unreleased modifications'
     }
-
-    It 'still suppresses the status line when -NonInteractive parameter is explicit and Test-InteractiveSession would say yes' {
-        # The two switches are independent: -NonInteractive forces the
-        # non-interactive code path, suppressing the indicator regardless of
-        # the terminal's TTY-ness.
-        Mock -CommandName Test-InteractiveSession -MockWith { $true }
-        $releases = @()
-        $out = & {
-            Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
-                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
-                -NonInteractive
-        } 6>&1
-        ($out | Out-String) | Should -Not -Match 'Analyzing packages for unreleased modifications'
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1065,8 +1051,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         $releases = @()
         $out = & {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
-                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
-                -NonInteractive
+                -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
         } 6>&1 3>&1
         $text = ($out | Out-String)
 
@@ -1506,7 +1491,7 @@ Describe 'Format-PendingReleasesAnnouncement' {
             $out = Format-PendingReleasesAnnouncement -Pending @(NewPending -Name 'bytesbuf' -BaseVersion '1.2.3' -CurrentVersion '1.2.4')
             $lines = $out -split "`r?`n"
             $lines.Count                | Should -Be 2
-            $lines[0]                   | Should -Be 'Detected pending uncommitted releases and included in analysis data set:'
+            $lines[0]                   | Should -Be 'Detected pending releases and included in analysis data set:'
             $lines[1]                   | Should -Be '   bytesbuf 1.2.3 -> 1.2.4'
         }
     }
@@ -1519,7 +1504,7 @@ Describe 'Format-PendingReleasesAnnouncement' {
             )
             $lines = $out -split "`r?`n"
             $lines.Count                | Should -Be 3
-            $lines[0]                   | Should -Be 'Detected pending uncommitted releases and included in analysis data set:'
+            $lines[0]                   | Should -Be 'Detected pending releases and included in analysis data set:'
             $lines[1]                   | Should -Be '   bytesbuf 1.2.3 -> 1.2.4'
             $lines[2]                   | Should -Be '   foo 0.2.2 -> 1.0.0'
         }

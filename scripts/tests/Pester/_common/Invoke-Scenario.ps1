@@ -93,7 +93,6 @@ function Invoke-Scenario {
         }
         if ($scenario.Run.Change)         { $runArgs.Change  = $scenario.Run.Change }
         if ($scenario.Run.Version)        { $runArgs.Version = $scenario.Run.Version }
-        if ($scenario.Run.NonInteractive) { $runArgs.NonInteractive = $true }
 
         $error.Clear()
         $caught = $null

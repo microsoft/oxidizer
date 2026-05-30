@@ -20,7 +20,7 @@
         have had source modifications since their own last release baseline (per-package,
         derived from each package's Cargo.toml history), and which workspace dependencies of
         in-release packages fall into the "modified-but-unreleased" bucket (the core
-        "unreleased upstream dependency" analysis).
+        "unreleased workspace dependency" analysis).
 
     It has no top-level param() block and no side effects beyond declaring script-scope
     caches & compiled regexes.
@@ -524,7 +524,7 @@ function Get-PackageFolderForPath {
 #
 # We intentionally do not rely on git tags. The repo creates them after merge to
 # main, but a CI-time clone or a partial fetch may not have them, and a tag is
-# downstream evidence of a release while the Cargo.toml edit is the cause.
+# a side effect of a release while the Cargo.toml edit is the cause.
 #
 # Cached for the lifetime of the script run (the script never commits, so the
 # baseline SHA per folder is invariant). The cache is cleared by
@@ -690,7 +690,7 @@ function Get-PackagesWithVersionChanges {
     }
 
     # PowerShell pipeline collapses an empty HashSet to $null on return; -NoEnumerate
-    # preserves it so downstream .Contains() calls still work.
+    # preserves it so callers' .Contains() calls still work.
     Write-Output -NoEnumerate $changed
 }
 
@@ -753,20 +753,20 @@ function Get-PendingReleases {
 
 # --- CORE ANALYSIS ---
 #
-# Upholds the CASCADE-ORGANIZATION INVARIANTS documented in AGENTS.md under
-# "Release Dependency Scan":
-#   (1) Upstream cascades never introduce items to the user-review queue.
-#       Honored via the optional -ModifiedSnapshot parameter: when callers
-#       (notably Invoke-PostReleaseDepScan via Invoke-ReleaseMain) capture the
-#       modifications set BEFORE the primary release runs and pass it in,
-#       cascade-only targets (those whose only modification is the cascade-
-#       written Cargo.toml / CHANGELOG.md) never enter the snapshot and so
-#       cannot surface as findings on later iterations.
-#   (2) A release-set member is removed only when its cascade-applied change
-#       is already breaking (semantic maximum). Members whose change type is
-#       non-breaking or patch and which have pre-existing modifications are
-#       reported so the user can still elevate the change type after
-#       reviewing the changes.
+# Upholds the CASCADE-ORGANIZATION INVARIANTS documented in docs/releasing.md
+# under "Cascade Organisation Invariants":
+#   (A) A cascade toward dependents never introduces items to the user-review
+#       queue. Honored via the optional -ModifiedSnapshot parameter: when
+#       callers (notably Invoke-PostReleaseDepScan via Invoke-ReleaseMain)
+#       capture the modifications set BEFORE the primary release runs and
+#       pass it in, cascade-only targets (those whose only modification is
+#       the cascade-written Cargo.toml / CHANGELOG.md) never enter the
+#       snapshot and so cannot surface as findings on later iterations.
+#   (B) A release-set member is removed only when its cascade-applied change
+#       type is already breaking (semantic maximum). Members whose change
+#       type is non-breaking or patch and which have pre-existing
+#       modifications are reported so the user can still elevate the change
+#       type after reviewing the changes.
 #
 # For each package in the "release set" (packages with version changes vs base), walk its
 # transitive normal/build workspace dependencies. Report any workspace dependency that
@@ -782,9 +782,9 @@ function Get-PendingReleases {
 # along with the shortest dependency chain that reaches it from a released package.
 #
 # Per-package baselines (rather than a global PR-vs-base-ref diff) are required to
-# detect upstream changes that were merged to main in earlier PRs without a version
-# change and are now being depended on by a release-set package in this PR. Comparing
-# the working tree only against the PR base ref would miss those.
+# detect transitive dependency changes that were merged to main in earlier PRs without
+# a version change and are now being depended on by a release-set package in this PR.
+# Comparing the working tree only against the PR base ref would miss those.
 #
 # Returns @() when there are no findings, otherwise an array of objects:
 #   Folder            - package folder under crates/

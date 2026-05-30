@@ -21,7 +21,6 @@ To run all repository tooling locally, you will need the following prerequisites
 * [Latest version of Git](https://git-scm.com/downloads/win) with components:
   * Git LFS (Large File Storage)
 * [Latest version of PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows)
-* [Pester 5.7+](https://pester.dev/) for the release-script test suite — installed automatically by `just install-tools`. To install manually: `Install-Module -Name Pester -MinimumVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck`.
 
 For detailed configuration of the above, use your own judgement - the defaults should work but customization is also generally fine.
 

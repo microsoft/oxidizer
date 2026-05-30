@@ -22,7 +22,7 @@
            own version increment reflects the breaking change in its public API surface.
          * Otherwise, the dependent only uses the released package internally, and a patch
            change is applied: enough to refresh the workspace-pinned version, but without
-           overstating the change to downstream consumers.
+           overstating the change to its own dependents.
        Dev-only dependents are skipped — they automatically pick up the new workspace version.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded packages that have no other commits since their last release get a single
@@ -34,8 +34,7 @@
 
 .PARAMETER Name
     The name of the package to release. This should match the folder name inside the 'crates'
-    directory. The aliases `-CrateName` and `-PackageName` are accepted for backward compatibility
-    with prior iterations of this script.
+    directory. Also accepted as `-CrateName` or `-PackageName`.
 
 .PARAMETER Version
     [Optional] The specific version to set (e.g., "1.2.3"). Can be specified with --version or -v.
@@ -47,15 +46,28 @@
     Cargo version transition based on the package's current version. Can be specified with
     --change or -c. This parameter is mutually exclusive with --version.
 
-    Accepted values:
-    - Breaking:    SemVer-incompatible change. 1.x.y -> (x+1).0.0; 0.x.y -> 0.(x+1).0; 0.0.x -> 0.0.(x+1).
-    - NonBreaking: SemVer-compatible feature or addition. 1.x.y -> x.(y+1).0; 0.x.y -> 0.x.(y+1).
-    - Patch:       SemVer-compatible internal change with no API impact (typically a bug fix
-                   or any other change that doesn't affect what downstream consumers can do).
-                   x.y.z -> x.y.(z+1).
-    - 1.0:         One-time graduation event for a 0.x package to its first stable 1.0.0. Errors
-                   out when the package is already at or beyond 1.0.0. Cascades as a Breaking
-                   change.
+    The right value is the caller's judgment call. There is no algorithmic "correct" answer:
+    the author must review the actual diff being released (source + dependency edits) and
+    decide whether the cumulative change is a breaking SemVer change, a backward-compatible
+    addition, a pure internal/fix patch, or the one-time `0.x → 1.0` graduation. Picking too
+    weak a change type causes dependents (and their transitive dependents) to silently get
+    incompatible behaviour after `cargo update`; picking too strong a change type is harmless
+    except it forces direct dependents to bump as well.
+
+    Accepted values (numeric examples use Cargo's 0.x SemVer rules where the *leading
+    non-zero component* is the SemVer-major; below `1.0.0` the second integer is treated
+    as SemVer-major and the third as SemVer-minor):
+    - Breaking:    SemVer-incompatible change. 1.2.3 -> 2.0.0; 0.4.1 -> 0.5.0; 0.0.5 -> 0.0.6.
+    - NonBreaking: SemVer-compatible feature or addition. 1.2.3 -> 1.3.0; 0.4.1 -> 0.4.2;
+                   0.0.5 -> 0.0.6.
+    - Patch:       SemVer-compatible internal change with no API impact (typically a bug
+                   fix, or any other change that doesn't affect what direct dependents can
+                   do). 1.2.3 -> 1.2.4; 0.4.1 -> 0.4.2; 0.0.5 -> 0.0.6. On 0.x.y packages
+                   this numerically collides with NonBreaking — the menu hides the Patch
+                   option in that case.
+    - 1.0:         One-time graduation event for a 0.x package to its first stable 1.0.0
+                   (e.g. 0.4.1 -> 1.0.0). Errors out when the package is already at or
+                   beyond 1.0.0. Cascades as a Breaking change.
 
 .EXAMPLE
     # Default behavior — non-breaking release of 'my-package'
@@ -93,19 +105,13 @@ param(
     [string]$Change,
 
     # Base ref used to identify the release set (packages whose `version =` differs
-    # between this ref and HEAD) for the post-release upstream-dependency scan.
-    # The modification baseline for each upstream dep is per-package (the dep's own
-    # last `version =` / `publish =` commit), not this ref. Default is
-    # 'origin/main' (best-effort fetched before use). Pass an empty string to skip
+    # between this ref and HEAD) for the post-release dependency scan.
+    # The modification baseline for each transitive dependency is per-package (the
+    # dependency's own last `version =` / `publish =` commit), not this ref. Default
+    # is 'origin/main' (best-effort fetched before use). Pass an empty string to skip
     # the scan entirely.
     [Parameter(Mandatory = $false)]
-    [string]$BaseRef = 'origin/main',
-
-    # Suppress all interactive prompts (decline-by-default for the upstream-dependency
-    # scan). Auto-enabled in CI / when stdin is redirected; this switch is the explicit
-    # override for scripted callers.
-    [Parameter(Mandatory = $false)]
-    [switch]$NonInteractive
+    [string]$BaseRef = 'origin/main'
 )
 
 # All helpers, configuration, and Invoke-ReleaseMain live in the library so this
@@ -113,4 +119,4 @@ param(
 # transitively, so consumers only need this one import.
 . "$PSScriptRoot/lib/release-flow.ps1"
 
-Invoke-ReleaseMain -PackageName $Name -Version $Version -Change $Change -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
+Invoke-ReleaseMain -PackageName $Name -Version $Version -Change $Change -BaseRef $BaseRef | Out-Null
