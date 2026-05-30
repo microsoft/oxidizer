@@ -3,18 +3,18 @@
 
 <#
 .SYNOPSIS
-    Flags workspace crates with unreleased modifications that are transitively
-    pulled in by a crate this PR is releasing.
+    Flags workspace packages with unreleased modifications that are transitively
+    pulled in by a package this PR is releasing.
 
 .DESCRIPTION
     Companion CI check to the interactive analysis performed by `release-crate.ps1`.
 
-    The "release set" is computed from `$BaseRef`: every crate whose `version =`
-    in `Cargo.toml` differs between `$BaseRef` and HEAD. For each crate in that
+    The "release set" is computed from `$BaseRef`: every package whose `version =`
+    in `Cargo.toml` differs between `$BaseRef` and HEAD. For each package in that
     set, the script walks the transitive normal/build workspace dependency graph
     forward.
 
-    "Modified" is evaluated **per crate**, not against `$BaseRef`. For every
+    "Modified" is evaluated **per package**, not against `$BaseRef`. For every
     upstream dep, the baseline is the most recent commit that touched its own
     top-level `version =` or `publish =` line in its `Cargo.toml`. Any change
     under `crates/<dep>/` newer than that commit — committed (including merges
@@ -31,9 +31,9 @@
     both cases — this check is informational only and never fails the build.
 
 .PARAMETER BaseRef
-    The git ref used to identify the *release set* (crates whose `version =`
+    The git ref used to identify the *release set* (packages whose `version =`
     differs between this ref and HEAD). It is **not** used as the modification
-    baseline — that is computed per crate from each crate's own `Cargo.toml`
+    baseline — that is computed per package from each package's own `Cargo.toml`
     history. Defaults to 'origin/main'.
 
 .PARAMETER OutputFile
@@ -88,9 +88,9 @@ function Format-ReleaseEntry {
 
     $cargo = Join-Path (Join-Path $RepoRoot 'crates') $Folder 'Cargo.toml'
     $current = if (Test-Path $cargo) { Get-CurrentVersion -cargoTomlPath $cargo } else { '?' }
-    $base = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $Folder
+    $base = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $Folder
     if ([string]::IsNullOrEmpty($base)) {
-        return "  - ``$Folder`` $current (new crate)"
+        return "  - ``$Folder`` $current (new package)"
     }
     return "  - ``$Folder`` $base -> $current"
 }
@@ -112,17 +112,17 @@ try {
         exit 0
     }
 
-    # Get-CratesWithVersionBumps returns a HashSet via Write-Output -NoEnumerate so
+    # Get-PackagesWithVersionBumps returns a HashSet via Write-Output -NoEnumerate so
     # callers can use .Contains() on it. That same wrapping defeats `Sort-Object`:
     # piping a NoEnumerate'd HashSet sends it as a single object, and the sort
     # becomes a no-op. Unwrap explicitly via ForEach-Object before sorting.
-    $releaseSetHash = Get-CratesWithVersionBumps -RepoRoot $repoRoot -BaseRef $BaseRef
+    $releaseSetHash = Get-PackagesWithVersionBumps -RepoRoot $repoRoot -BaseRef $BaseRef
     $releaseSet = @($releaseSetHash | ForEach-Object { $_ }) | Sort-Object
 
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('## 📦 Unreleased Upstream Dependency Changes') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('This PR releases the following workspace crates:') | Out-Null
+    $lines.Add('This PR releases the following workspace packages:') | Out-Null
     $lines.Add('') | Out-Null
     foreach ($f in $releaseSet) {
         $lines.Add((Format-ReleaseEntry -RepoRoot $repoRoot -BaseRef $BaseRef -Folder $f)) | Out-Null
@@ -139,9 +139,9 @@ try {
     $elevationCandidates = @($sortedFindings | Where-Object { $_.InReleaseSet })
 
     if ($notReleased.Count -gt 0) {
-        $lines.Add('The following workspace crates have **unreleased modifications** (changes newer than their last `version =` or `publish =` bump) and are *not* part of this release:') | Out-Null
+        $lines.Add('The following workspace packages have **unreleased modifications** (changes newer than their last `version =` or `publish =` bump) and are *not* part of this release:') | Out-Null
         $lines.Add('') | Out-Null
-        $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
+        $lines.Add('| Package | Files changed | Reached via |') | Out-Null
         $lines.Add('|-------|--------------:|-------------|') | Out-Null
         foreach ($finding in $notReleased) {
             $chains = @($finding.DependencyChains | ForEach-Object { Format-DependencyChain -Chain $_ })
@@ -152,9 +152,9 @@ try {
     }
 
     if ($elevationCandidates.Count -gt 0) {
-        $lines.Add('The following workspace crates **are** part of this release, but their bump is non-breaking / patch while they also contain modifications from earlier commits. Reviewer should confirm the bump kind is appropriate:') | Out-Null
+        $lines.Add('The following workspace packages **are** part of this release, but their bump is non-breaking / patch while they also contain modifications from earlier commits. Reviewer should confirm the bump kind is appropriate:') | Out-Null
         $lines.Add('') | Out-Null
-        $lines.Add('| Crate | Files changed | Reached via |') | Out-Null
+        $lines.Add('| Package | Files changed | Reached via |') | Out-Null
         $lines.Add('|-------|--------------:|-------------|') | Out-Null
         foreach ($finding in $elevationCandidates) {
             $chains = @($finding.DependencyChains | ForEach-Object { Format-DependencyChain -Chain $_ })
@@ -165,11 +165,11 @@ try {
     }
     $lines.Add('### What this means') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('Locally, the released crates build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
+    $lines.Add('Locally, the released packages build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('- If the unreleased changes are **material** to the released crate''s behavior or public API, you should release the dependency too (re-run ``scripts/release-crate.ps1`` for it).') | Out-Null
+    $lines.Add('- If the unreleased changes are **material** to the released package''s behavior or public API, you should release the dependency too (re-run ``scripts/release-crate.ps1`` for it).') | Out-Null
     $lines.Add('- If the changes are **immaterial** (formatting, doc tweaks, internal-only refactors), this comment can be ignored.') | Out-Null
-    $lines.Add('- For crates **already part of this release** that contain extra modifications, confirm that the bump kind chosen at release time (non-breaking / patch) is appropriate for the cumulative change set.') | Out-Null
+    $lines.Add('- For packages **already part of this release** that contain extra modifications, confirm that the bump kind chosen at release time (non-breaking / patch) is appropriate for the cumulative change set.') | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('<sub>This is an automated informational check. It does not fail the build.</sub>') | Out-Null
 

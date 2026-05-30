@@ -57,17 +57,17 @@ Describe 'End-to-end release scenarios' {
             throw "Scenario '$Name' threw: $($result.Error)"
         }
 
-        # --- Released crates: at least every expected entry must appear with the expected version.
+        # --- Released packages: at least every expected entry must appear with the expected version.
         if ($expect.Released) {
-            $diag = "PromptsRaised: [$($result.PromptsRaised -join ' | ')]; RepliesGiven: [$($result.RepliesGiven -join ' | ')]; Releases: [$(($result.Releases | ForEach-Object { "$($_.Crate)=$($_.NewVersion)" }) -join ', ')]"
+            $diag = "PromptsRaised: [$($result.PromptsRaised -join ' | ')]; RepliesGiven: [$($result.RepliesGiven -join ' | ')]; Releases: [$(($result.Releases | ForEach-Object { "$($_.Package)=$($_.NewVersion)" }) -join ', ')]"
             foreach ($exp in @($expect.Released)) {
-                $actual = $result.Releases | Where-Object { $_.Crate -eq $exp.Crate } | Select-Object -First 1
-                $actual | Should -Not -BeNullOrEmpty -Because "scenario expected '$($exp.Crate)' in the release set; $diag"
-                $actual.NewVersion | Should -Be $exp.To -Because "scenario expected '$($exp.Crate)' to end at $($exp.To); $diag"
+                $actual = $result.Releases | Where-Object { $_.Package -eq $exp.Package } | Select-Object -First 1
+                $actual | Should -Not -BeNullOrEmpty -Because "scenario expected '$($exp.Package)' in the release set; $diag"
+                $actual.NewVersion | Should -Be $exp.To -Because "scenario expected '$($exp.Package)' to end at $($exp.To); $diag"
             }
-            # Bound the release set: no extra crates beyond those expected.
-            $expectedNames = @($expect.Released | ForEach-Object { $_.Crate })
-            $actualNames = @($result.Releases | ForEach-Object { $_.Crate })
+            # Bound the release set: no extra packages beyond those expected.
+            $expectedNames = @($expect.Released | ForEach-Object { $_.Package })
+            $actualNames = @($result.Releases | ForEach-Object { $_.Package })
             $unexpected = $actualNames | Where-Object { $expectedNames -notcontains $_ }
             $unexpected | Should -BeNullOrEmpty -Because "scenario expected only [$($expectedNames -join ', ')]; got extras: [$($unexpected -join ', ')]"
         }

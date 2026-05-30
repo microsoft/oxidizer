@@ -6,7 +6,7 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
 
     Workspace = @{
         Spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'zeta';  Version = '0.1.0'; Deps = @(@{ Name = 'a' }) }
                 @{ Name = 'alpha'; Version = '0.2.0'; Deps = @(@{ Name = 'b' }) }
                 @{ Name = 'a';     Version = '0.3.0'; Deps = @(@{ Name = 'b' }) }
@@ -17,19 +17,19 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
 
     History = @(
         # Pre-bump zeta and alpha as part of the simulated PR.
-        @{ Op = 'BumpVersion'; Crate = 'zeta';  To = '0.1.1' }
-        @{ Op = 'BumpVersion'; Crate = 'alpha'; To = '0.2.1' }
+        @{ Op = 'BumpVersion'; Package = 'zeta';  To = '0.1.1' }
+        @{ Op = 'BumpVersion'; Package = 'alpha'; To = '0.2.1' }
         @{ Op = 'AddCommit';   Message = 'pre-bump release set' }
         # Modify upstreams (publishable changes).
-        @{ Op = 'ModifySource'; Crate = 'a' }
-        @{ Op = 'ModifySource'; Crate = 'b' }
+        @{ Op = 'ModifySource'; Package = 'a' }
+        @{ Op = 'ModifySource'; Package = 'b' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        # User invokes for zeta (any pre-bumped crate works); script will detect the
+        # User invokes for zeta (any pre-bumped package works); script will detect the
         # pre-bump and proceed with the cascade + post-release scan.
-        CrateName = 'zeta'
+        PackageName = 'zeta'
         BaseRef   = 'HEAD~2'
         Answers   = @(
             # On 0.x.y the menu hides option 5 (patch), so accept via option 4
@@ -51,10 +51,10 @@ Spec: zeta and alpha are both pre-bumped (release set = {alpha, zeta}). alpha â†
         # on 0.x.y per Cargo semver), so a (which exposes target) takes patch
         # from b's downstream cascade and alpha (pre-bumped) stays bullet-only.
         Released = @(
-            @{ Crate = 'zeta';  To = '0.1.1' }
-            @{ Crate = 'alpha'; To = '0.2.1' }
-            @{ Crate = 'b';     To = '0.4.1' }
-            @{ Crate = 'a';     To = '0.3.1' }
+            @{ Package = 'zeta';  To = '0.1.1' }
+            @{ Package = 'alpha'; To = '0.2.1' }
+            @{ Package = 'b';     To = '0.4.1' }
+            @{ Package = 'a';     To = '0.3.1' }
         )
         PromptsRaised = @(
             "Choose option for 'b'"

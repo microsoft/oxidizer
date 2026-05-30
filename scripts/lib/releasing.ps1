@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Shared helpers for crate-release tooling. Dot-source from other scripts; never run directly.
+    Shared helpers for package-release tooling. Dot-source from other scripts; never run directly.
 
 .DESCRIPTION
     This file is a library, not an entrypoint. It is loaded into the caller's scope via
@@ -16,10 +16,10 @@
       - Reverse-dependency cascade computation.
       - SemVer arithmetic (Cargo's 0.x.y rules).
       - Safe git invocation (no Invoke-Expression).
-      - Detecting which crates have been bumped in this PR, which have had source
-        modifications since their own last release baseline (per-crate, derived from
-        each crate's Cargo.toml history), and which workspace dependencies of
-        in-release crates fall into the "modified-but-unreleased" bucket (the core
+      - Detecting which packages have been bumped in this PR, which have had source
+        modifications since their own last release baseline (per-package, derived from
+        each package's Cargo.toml history), and which workspace dependencies of
+        in-release packages fall into the "modified-but-unreleased" bucket (the core
         "unreleased upstream dependency" analysis).
 
     It has no top-level param() block and no side effects beyond declaring script-scope
@@ -119,9 +119,9 @@ function Get-FileLineEnding {
 
 # --- VERSION HELPERS ---
 
-function Test-ValidCrateName {
-    param([string]$crateName)
-    return $crateName -match '^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$' -and $crateName.Length -le 64
+function Test-ValidPackageName {
+    param([string]$packageName)
+    return $packageName -match '^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$' -and $packageName.Length -le 64
 }
 
 function Test-ValidVersion {
@@ -251,30 +251,30 @@ function Get-CurrentVersion {
     return $currentVersionMatch.Groups[2].Value
 }
 
-# Reads the [package] `version = "..."` from a crate's Cargo.toml at $BaseRef.
-# Returns $null if the file does not exist at that ref (e.g. crate added in this PR).
+# Reads the [package] `version = "..."` from a package's Cargo.toml at $BaseRef.
+# Returns $null if the file does not exist at that ref (e.g. package added in this PR).
 #
 # Cached for the lifetime of the script run: $BaseRef is fixed by the caller
 # for the entire run and the script never makes git commits, so the result
-# for a given (BaseRef, CrateFolder) pair is invariant. Saves N×`git show`
+# for a given (BaseRef, PackageFolder) pair is invariant. Saves N×`git show`
 # spawns per `Invoke-PostReleaseDepScan` loop iteration (the dominant cost
 # of the "Analyzing packages..." pause on Windows).
-function Get-CrateVersionFromRef {
+function Get-PackageVersionFromRef {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$BaseRef,
-        [Parameter(Mandatory = $true)][string]$CrateFolder
+        [Parameter(Mandatory = $true)][string]$PackageFolder
     )
 
-    if ($null -eq $script:CrateVersionAtRefCache) {
-        $script:CrateVersionAtRefCache = @{}
+    if ($null -eq $script:PackageVersionAtRefCache) {
+        $script:PackageVersionAtRefCache = @{}
     }
-    $cacheKey = "$RepoRoot`u{2402}$BaseRef`u{2402}$CrateFolder"
-    if ($script:CrateVersionAtRefCache.ContainsKey($cacheKey)) {
-        return $script:CrateVersionAtRefCache[$cacheKey]
+    $cacheKey = "$RepoRoot`u{2402}$BaseRef`u{2402}$PackageFolder"
+    if ($script:PackageVersionAtRefCache.ContainsKey($cacheKey)) {
+        return $script:PackageVersionAtRefCache[$cacheKey]
     }
 
-    $output = Invoke-Git -Arguments @('show', "${BaseRef}:crates/$CrateFolder/Cargo.toml") -RepoRoot $RepoRoot -AllowFailure
+    $output = Invoke-Git -Arguments @('show', "${BaseRef}:crates/$PackageFolder/Cargo.toml") -RepoRoot $RepoRoot -AllowFailure
     $result = $null
     if ($null -ne $output) {
         $content = ($output -join "`n")
@@ -282,7 +282,7 @@ function Get-CrateVersionFromRef {
         if ($m.Success) { $result = $m.Groups[2].Value }
     }
 
-    $script:CrateVersionAtRefCache[$cacheKey] = $result
+    $script:PackageVersionAtRefCache[$cacheKey] = $result
     return $result
 }
 
@@ -297,16 +297,16 @@ $script:CachedWorkspaceMetadata = $null
 # These are valid for the whole release-crate.ps1 invocation because:
 #   - $BaseRef is fixed by the caller for the entire run, and
 #   - the script never makes git commits (HEAD does not move).
-# Therefore the per-crate baseline commit, the per-crate committed-changes
-# diff, and the per-crate version-at-BaseRef are all stable for the whole
+# Therefore the per-package baseline commit, the per-package committed-changes
+# diff, and the per-package version-at-BaseRef are all stable for the whole
 # session. They are populated lazily (first hit) and cleared only by
 # Reset-ReleaseScriptCaches — NOT by the routine, mid-flow
 # Invalidate-WorkspaceMetadataCache calls that the cascade fires after each
 # in-memory Cargo.toml edit (those edits change cargo metadata's view of
 # on-disk versions but leave git history untouched).
-$script:CrateLastReleaseBaselineCache = $null
-$script:CrateCommittedChangesCache    = $null
-$script:CrateVersionAtRefCache        = $null
+$script:PackageLastReleaseBaselineCache = $null
+$script:PackageCommittedChangesCache    = $null
+$script:PackageVersionAtRefCache        = $null
 
 function Get-WorkspaceMetadata {
     param([string]$repoRoot)
@@ -329,8 +329,8 @@ function Get-WorkspaceMetadata {
 # workspace so subsequent analyses see fresh deps/versions.
 #
 # Intentionally does NOT clear the git-derived caches
-# (CrateLastReleaseBaselineCache, CrateCommittedChangesCache,
-# CrateVersionAtRefCache) — those are keyed on git history, which the
+# (PackageLastReleaseBaselineCache, PackageCommittedChangesCache,
+# PackageVersionAtRefCache) — those are keyed on git history, which the
 # release script never mutates (no commits are made). Test isolation
 # between scenarios should call Reset-ReleaseScriptCaches instead, which
 # clears every cache including this one.
@@ -339,32 +339,32 @@ function Invalidate-WorkspaceMetadataCache {
 }
 
 # Clears every script-scoped cache used by the release tooling: workspace
-# metadata AND the git-derived per-crate caches (baseline commit, committed
+# metadata AND the git-derived per-package caches (baseline commit, committed
 # changes, version-at-BaseRef). Intended for test isolation between
 # scenarios that build distinct synthetic workspaces — production code uses
 # Invalidate-WorkspaceMetadataCache for the routine mid-flow invalidation
 # after Cargo.toml edits.
 function Reset-ReleaseScriptCaches {
     $script:CachedWorkspaceMetadata       = $null
-    $script:CrateLastReleaseBaselineCache = $null
-    $script:CrateCommittedChangesCache    = $null
-    $script:CrateVersionAtRefCache        = $null
+    $script:PackageLastReleaseBaselineCache = $null
+    $script:PackageCommittedChangesCache    = $null
+    $script:PackageVersionAtRefCache        = $null
 }
 
-# Returns information about all workspace crates as an array of objects with:
+# Returns information about all workspace packages as an array of objects with:
 #   Name                  - cargo package name
-#   Folder                - folder name under crates/ (used as the script's CrateName argument)
-#   Published             - $true if the crate is published to crates.io
+#   Folder                - folder name under crates/ (used as the script's PackageName argument)
+#   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
 #   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
-#                           or $null if the crate does not declare them.
-function Get-WorkspaceCrates {
+#                           or $null if the package does not declare them.
+function Get-WorkspacePackages {
     param([string]$repoRoot)
 
     $metadata = Get-WorkspaceMetadata -repoRoot $repoRoot
     $cratesDir = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "crates"))
 
-    $crates = @()
+    $packages = @()
     foreach ($package in $metadata.packages) {
         $manifestDir = [System.IO.Path]::GetFullPath((Split-Path $package.manifest_path -Parent))
         if (-not $manifestDir.StartsWith($cratesDir, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -390,7 +390,7 @@ function Get-WorkspaceCrates {
             }
         }
 
-        $crates += [pscustomobject]@{
+        $packages += [pscustomobject]@{
             Name                 = $package.name
             Folder               = Split-Path $manifestDir -Leaf
             Version              = $package.version
@@ -400,13 +400,13 @@ function Get-WorkspaceCrates {
         }
     }
 
-    return $crates
+    return $packages
 }
 
-# Returns $true if the dependent crate exposes any type rooted at the target crate
+# Returns $true if the dependent package exposes any type rooted at the target package
 # in its public API, as declared by [package.metadata.cargo_check_external_types].
 # Conservative when metadata is missing.
-function Test-CrateExposesTarget {
+function Test-PackageExposesTarget {
     param(
         [pscustomobject]$dependent,
         [string]$targetPackageName
@@ -428,22 +428,22 @@ function Test-CrateExposesTarget {
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published
-# workspace crates that depend on the given target (transitively) via [dependencies]
+# workspace packages that depend on the given target (transitively) via [dependencies]
 # or [build-dependencies]. The target itself is not included.
 function Get-AllTransitiveDependents {
     param(
-        [string]$crateName,
+        [string]$packageName,
         [string]$repoRoot
     )
 
-    $crates = Get-WorkspaceCrates -repoRoot $repoRoot
+    $packages = Get-WorkspacePackages -repoRoot $repoRoot
 
-    $targetCrate = $crates | Where-Object { $_.Folder -eq $crateName -or $_.Name -eq $crateName } | Select-Object -First 1
-    if ($null -eq $targetCrate) {
-        Write-Warning "Crate '$crateName' not found in workspace metadata; cannot compute dependents."
+    $targetPackage = $packages | Where-Object { $_.Folder -eq $packageName -or $_.Name -eq $packageName } | Select-Object -First 1
+    if ($null -eq $targetPackage) {
+        Write-Warning "Package '$packageName' not found in workspace metadata; cannot compute dependents."
         return @()
     }
-    $normalizedTarget = $targetCrate.Name.Replace('-', '_')
+    $normalizedTarget = $targetPackage.Name.Replace('-', '_')
 
     $toVisit = [System.Collections.Generic.Queue[string]]::new()
     $toVisit.Enqueue($normalizedTarget)
@@ -453,7 +453,7 @@ function Get-AllTransitiveDependents {
     $dependents = @()
     while ($toVisit.Count -gt 0) {
         $current = $toVisit.Dequeue()
-        foreach ($candidate in $crates) {
+        foreach ($candidate in $packages) {
             $candidateNorm = $candidate.Name.Replace('-', '_')
             if ($visited.Contains($candidateNorm)) {
                 continue
@@ -473,9 +473,9 @@ function Get-AllTransitiveDependents {
 
 # --- FILE-CHANGE ANALYSIS ---
 
-# Returns the crate folder name (under crates/) that contains the given repo-relative
-# path, or $null if the path is outside any crate.
-function Get-CrateFolderForPath {
+# Returns the package folder name (under crates/) that contains the given repo-relative
+# path, or $null if the path is outside any package.
+function Get-PackageFolderForPath {
     param([string]$Path)
 
     $normalized = $Path.Replace('\', '/')
@@ -487,8 +487,8 @@ function Get-CrateFolderForPath {
 }
 
 # Returns the SHA of the most recent commit that touched the `version =` or
-# `publish =` line in the crate's Cargo.toml, or $null if no such commit exists
-# in the crate's committed history. This is the per-crate "last release boundary":
+# `publish =` line in the package's Cargo.toml, or $null if no such commit exists
+# in the package's committed history. This is the per-package "last release boundary":
 # any change under crates/<folder>/ newer than this commit is unreleased from the
 # perspective of crates.io, regardless of which PR introduced it.
 #
@@ -500,21 +500,21 @@ function Get-CrateFolderForPath {
 # baseline SHA per folder is invariant). The cache is cleared by
 # Reset-ReleaseScriptCaches between test scenarios; production mid-flow
 # invalidations (Invalidate-WorkspaceMetadataCache) deliberately leave it alone.
-function Get-CrateLastReleaseBaseline {
+function Get-PackageLastReleaseBaseline {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$CrateFolder
+        [Parameter(Mandatory = $true)][string]$PackageFolder
     )
 
-    if ($null -eq $script:CrateLastReleaseBaselineCache) {
-        $script:CrateLastReleaseBaselineCache = @{}
+    if ($null -eq $script:PackageLastReleaseBaselineCache) {
+        $script:PackageLastReleaseBaselineCache = @{}
     }
-    $cacheKey = "$RepoRoot`u{2402}$CrateFolder"
-    if ($script:CrateLastReleaseBaselineCache.ContainsKey($cacheKey)) {
-        return $script:CrateLastReleaseBaselineCache[$cacheKey]
+    $cacheKey = "$RepoRoot`u{2402}$PackageFolder"
+    if ($script:PackageLastReleaseBaselineCache.ContainsKey($cacheKey)) {
+        return $script:PackageLastReleaseBaselineCache[$cacheKey]
     }
 
-    $relPath = "crates/$CrateFolder/Cargo.toml"
+    $relPath = "crates/$PackageFolder/Cargo.toml"
     # -G matches any added/removed diff line whose content matches the regex.
     # Anchoring at column 0 keeps us on top-level keys, not version-like strings
     # appearing inside dependency tables or arbitrary literals.
@@ -527,36 +527,36 @@ function Get-CrateLastReleaseBaseline {
         }
     }
 
-    $script:CrateLastReleaseBaselineCache[$cacheKey] = $result
+    $script:PackageLastReleaseBaselineCache[$cacheKey] = $result
     return $result
 }
 
-# Returns the list of repo-relative paths under crates/<CrateFolder>/ that
-# have changed in committed history between the crate's last release baseline
-# (see Get-CrateLastReleaseBaseline) and HEAD. Returns an empty array if the
-# crate has no prior release boundary recorded.
+# Returns the list of repo-relative paths under crates/<PackageFolder>/ that
+# have changed in committed history between the package's last release baseline
+# (see Get-PackageLastReleaseBaseline) and HEAD. Returns an empty array if the
+# package has no prior release boundary recorded.
 #
 # Cached for the lifetime of the script run (the script never commits, so the
 # committed diff per folder is invariant). The cache is cleared by
 # Reset-ReleaseScriptCaches between test scenarios.
-function Get-CrateCommittedChanges {
+function Get-PackageCommittedChanges {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$CrateFolder
+        [Parameter(Mandatory = $true)][string]$PackageFolder
     )
 
-    if ($null -eq $script:CrateCommittedChangesCache) {
-        $script:CrateCommittedChangesCache = @{}
+    if ($null -eq $script:PackageCommittedChangesCache) {
+        $script:PackageCommittedChangesCache = @{}
     }
-    $cacheKey = "$RepoRoot`u{2402}$CrateFolder"
-    if ($script:CrateCommittedChangesCache.ContainsKey($cacheKey)) {
-        return $script:CrateCommittedChangesCache[$cacheKey]
+    $cacheKey = "$RepoRoot`u{2402}$PackageFolder"
+    if ($script:PackageCommittedChangesCache.ContainsKey($cacheKey)) {
+        return $script:PackageCommittedChangesCache[$cacheKey]
     }
 
-    $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $CrateFolder
+    $baseline = Get-PackageLastReleaseBaseline -RepoRoot $RepoRoot -PackageFolder $PackageFolder
     $paths = New-Object 'System.Collections.Generic.List[string]'
     if (-not [string]::IsNullOrEmpty($baseline)) {
-        $committed = Invoke-Git -Arguments @('diff', '--name-only', $baseline, 'HEAD', '--', "crates/$CrateFolder") -RepoRoot $RepoRoot
+        $committed = Invoke-Git -Arguments @('diff', '--name-only', $baseline, 'HEAD', '--', "crates/$PackageFolder") -RepoRoot $RepoRoot
         foreach ($line in $committed) {
             $p = $line.ToString().Trim().Replace('\', '/')
             if (-not [string]::IsNullOrEmpty($p)) { $paths.Add($p) }
@@ -564,58 +564,58 @@ function Get-CrateCommittedChanges {
     }
     $result = $paths.ToArray()
 
-    $script:CrateCommittedChangesCache[$cacheKey] = $result
+    $script:PackageCommittedChangesCache[$cacheKey] = $result
     return $result
 }
 
-# For each published workspace crate, returns a hashtable folder -> ChangedFileCount
+# For each published workspace package, returns a hashtable folder -> ChangedFileCount
 # where the count is the number of distinct repo-relative paths under crates/<folder>/
-# that have changed since the crate's last release baseline (see
-# Get-CrateLastReleaseBaseline). Considers:
+# that have changed since the package's last release baseline (see
+# Get-PackageLastReleaseBaseline). Considers:
 #
 #   - committed changes between the baseline and HEAD,
 #   - tracked working-tree edits (staged + unstaged) vs HEAD,
 #   - untracked files (e.g. new source files added during a release run).
 #
-# Crates with zero modifications are omitted from the result.
+# Packages with zero modifications are omitted from the result.
 #
 # Working-tree edits and untracked files are queried once globally and bucketed
-# per crate to avoid spawning O(crates) extra git processes. The per-crate
-# committed diff is served from Get-CrateCommittedChanges' session cache.
-function Get-CratesWithUnreleasedChanges {
+# per package to avoid spawning O(packages) extra git processes. The per-package
+# committed diff is served from Get-PackageCommittedChanges' session cache.
+function Get-PackagesWithUnreleasedChanges {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
     $result = @{}
-    $crates = Get-WorkspaceCrates -repoRoot $RepoRoot
+    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
 
-    $workingByCrate = @{}
+    $workingByPackage = @{}
     $globalWorking   = Invoke-Git -Arguments @('diff', '--name-only', 'HEAD', '--') -RepoRoot $RepoRoot
     $globalUntracked = Invoke-Git -Arguments @('ls-files', '--others', '--exclude-standard') -RepoRoot $RepoRoot
     foreach ($line in @(@($globalWorking) + @($globalUntracked))) {
         $p = $line.ToString().Trim().Replace('\', '/')
         if ([string]::IsNullOrEmpty($p)) { continue }
-        $folder = Get-CrateFolderForPath -Path $p
+        $folder = Get-PackageFolderForPath -Path $p
         if (-not $folder) { continue }
-        if (-not $workingByCrate.ContainsKey($folder)) {
-            $workingByCrate[$folder] = [System.Collections.Generic.HashSet[string]]::new()
+        if (-not $workingByPackage.ContainsKey($folder)) {
+            $workingByPackage[$folder] = [System.Collections.Generic.HashSet[string]]::new()
         }
-        [void]$workingByCrate[$folder].Add($p)
+        [void]$workingByPackage[$folder].Add($p)
     }
 
-    foreach ($crate in $crates) {
-        if (-not $crate.Published) { continue }
+    foreach ($package in $packages) {
+        if (-not $package.Published) { continue }
 
-        $folder = $crate.Folder
+        $folder = $package.Folder
         $files = [System.Collections.Generic.HashSet[string]]::new()
 
-        foreach ($p in Get-CrateCommittedChanges -RepoRoot $RepoRoot -CrateFolder $folder) {
+        foreach ($p in Get-PackageCommittedChanges -RepoRoot $RepoRoot -PackageFolder $folder) {
             [void]$files.Add($p)
         }
 
-        if ($workingByCrate.ContainsKey($folder)) {
-            foreach ($p in $workingByCrate[$folder]) { [void]$files.Add($p) }
+        if ($workingByPackage.ContainsKey($folder)) {
+            foreach ($p in $workingByPackage[$folder]) { [void]$files.Add($p) }
         }
 
         if ($files.Count -gt 0) {
@@ -626,35 +626,35 @@ function Get-CratesWithUnreleasedChanges {
     return $result
 }
 
-# For every published workspace crate, compares the on-disk current version with the
+# For every published workspace package, compares the on-disk current version with the
 # version at $BaseRef and returns the folders whose version differs. On-disk reads
 # avoid cache staleness when this is called between mid-run Cargo.toml edits.
-function Get-CratesWithVersionBumps {
+function Get-PackagesWithVersionBumps {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$BaseRef
     )
 
-    $crates = Get-WorkspaceCrates -repoRoot $RepoRoot
+    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
     $bumped = [System.Collections.Generic.HashSet[string]]::new()
 
-    foreach ($crate in $crates) {
-        if (-not $crate.Published) { continue }
+    foreach ($package in $packages) {
+        if (-not $package.Published) { continue }
 
-        $cargoToml = Join-Path $RepoRoot "crates/$($crate.Folder)/Cargo.toml"
+        $cargoToml = Join-Path $RepoRoot "crates/$($package.Folder)/Cargo.toml"
         if (-not (Test-Path $cargoToml)) { continue }
 
         $currentVersion = Get-CurrentVersion -cargoTomlPath $cargoToml
-        $baseVersion    = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $crate.Folder
+        $baseVersion    = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
 
-        # New crate (not present at base) counts as "bumped" (definitely being released for the first time).
+        # New package (not present at base) counts as "bumped" (definitely being released for the first time).
         if ($null -eq $baseVersion) {
-            [void]$bumped.Add($crate.Folder)
+            [void]$bumped.Add($package.Folder)
             continue
         }
 
         if ($currentVersion -ne $baseVersion) {
-            [void]$bumped.Add($crate.Folder)
+            [void]$bumped.Add($package.Folder)
         }
     }
 
@@ -664,21 +664,21 @@ function Get-CratesWithVersionBumps {
 }
 
 # Returns a sorted array of pending-release records for every published workspace
-# crate whose on-disk Cargo.toml version differs from the version at $BaseRef. Each
+# package whose on-disk Cargo.toml version differs from the version at $BaseRef. Each
 # record exposes the data the announcement formatter and base-relative re-invocation
 # logic need:
 #
 #   [pscustomobject]@{
-#     Folder         = '<crate folder under crates/>'
+#     Folder         = '<package folder under crates/>'
 #     Name           = '<package name from Cargo.toml [package].name>'
 #     BaseVersion    = '<version at BaseRef>'
 #     CurrentVersion = '<version on disk>'
 #   }
 #
-# New crates not present at $BaseRef are NOT included — they have no "base version"
+# New packages not present at $BaseRef are NOT included — they have no "base version"
 # to compare against, and the rest of the script's flow treats them as fresh
-# releases anyway (Invoke-CrateRelease writes the initial Cargo.toml + changelog
-# entry). Only crates that genuinely have a prior committed version with a
+# releases anyway (Invoke-PackageRelease writes the initial Cargo.toml + changelog
+# entry). Only packages that genuinely have a prior committed version with a
 # different on-disk version qualify as "pending" in the cross-invocation sense.
 #
 # Sorted ascending by Folder for deterministic output (the announcement order
@@ -693,25 +693,25 @@ function Get-PendingReleases {
         return @()
     }
 
-    $crates = Get-WorkspaceCrates -repoRoot $RepoRoot
+    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
     $pending = New-Object System.Collections.Generic.List[object]
 
-    foreach ($crate in $crates) {
-        if (-not $crate.Published) { continue }
+    foreach ($package in $packages) {
+        if (-not $package.Published) { continue }
 
-        $cargoToml = Join-Path $RepoRoot "crates/$($crate.Folder)/Cargo.toml"
+        $cargoToml = Join-Path $RepoRoot "crates/$($package.Folder)/Cargo.toml"
         if (-not (Test-Path $cargoToml)) { continue }
 
         $currentVersion = Get-CurrentVersion -cargoTomlPath $cargoToml
-        $baseVersion    = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $crate.Folder
+        $baseVersion    = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
 
-        # New crate at base: skip (no base version to be pending against).
+        # New package at base: skip (no base version to be pending against).
         if ($null -eq $baseVersion) { continue }
         if ($currentVersion -eq $baseVersion) { continue }
 
         $pending.Add([pscustomobject]@{
-            Folder         = $crate.Folder
-            Name           = $crate.Name
+            Folder         = $package.Folder
+            Name           = $package.Name
             BaseVersion    = $baseVersion
             CurrentVersion = $currentVersion
         }) | Out-Null
@@ -736,26 +736,26 @@ function Get-PendingReleases {
 #       which have pre-existing modifications are reported so the user can
 #       still elevate the bump after reviewing the changes.
 #
-# For each crate in the "release set" (crates with version bumps vs base), walk its
+# For each package in the "release set" (packages with version bumps vs base), walk its
 # transitive normal/build workspace dependencies. Report any workspace dependency that
 #
 #   1. has source modifications since its own last release baseline (i.e. since the
 #      most recent commit that touched its `version =` or `publish =` line — see
-#      Get-CrateLastReleaseBaseline), and
+#      Get-PackageLastReleaseBaseline), and
 #   2. is either (a) NOT itself in the release set, OR (b) IS in the release set
 #      but its bump (current vs base) is below "breaking" (so the user might
 #      still want to elevate it after reviewing the changes), and
 #   3. is published (publish != false),
 #
-# along with the shortest dependency chain that reaches it from a released crate.
+# along with the shortest dependency chain that reaches it from a released package.
 #
-# Per-crate baselines (rather than a global PR-vs-base-ref diff) are required to
+# Per-package baselines (rather than a global PR-vs-base-ref diff) are required to
 # detect upstream changes that were merged to main in earlier PRs without a version
-# bump and are now being depended on by a release-set crate in this PR. Comparing
+# bump and are now being depended on by a release-set package in this PR. Comparing
 # the working tree only against the PR base ref would miss those.
 #
 # Returns @() when there are no findings, otherwise an array of objects:
-#   Folder            - crate folder under crates/
+#   Folder            - package folder under crates/
 #   PackageName       - cargo package name
 #   CurrentVersion    - package's current version (Cargo.toml [package].version)
 #   InReleaseSet      - $true when the finding is also a release-set member
@@ -764,7 +764,7 @@ function Get-PendingReleases {
 #                       "needs review for elevation" from "needs review for
 #                       primary release".
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
-#   DependencyChains  - @( @('released_crate', 'mid_crate', 'this_dep'), ... )
+#   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
 #
 # The BFS traverses past every node (including release-set members) so a chain
 # like 'foo -> bar -> baz' is recorded even when 'bar' is itself being
@@ -779,23 +779,23 @@ function Get-UnreleasedModifiedDependencies {
         [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
     )
 
-    $crates      = Get-WorkspaceCrates -repoRoot $RepoRoot
-    $releaseSet  = Get-CratesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $packages      = Get-WorkspacePackages -repoRoot $RepoRoot
+    $releaseSet  = Get-PackagesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
     # Use the caller-provided snapshot when present so Invariant A holds across
-    # cascade writes (which would otherwise pollute Get-CratesWithUnreleasedChanges's
+    # cascade writes (which would otherwise pollute Get-PackagesWithUnreleasedChanges's
     # working-tree query and surface cascade-only targets as findings).
     $modifiedMap = if ($PSBoundParameters.ContainsKey('ModifiedSnapshot') -and $null -ne $ModifiedSnapshot) {
         $ModifiedSnapshot
     } else {
-        Get-CratesWithUnreleasedChanges -RepoRoot $RepoRoot
+        Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
     }
 
     if ($releaseSet.Count -eq 0) { return @() }
 
-    # Build folder -> crate lookup and normalized-name -> folder lookup.
+    # Build folder -> package lookup and normalized-name -> folder lookup.
     $byFolder = @{}
     $folderByNormName = @{}
-    foreach ($c in $crates) {
+    foreach ($c in $packages) {
         $byFolder[$c.Folder] = $c
         $folderByNormName[$c.Name.Replace('-', '_')] = $c.Folder
     }
@@ -810,7 +810,7 @@ function Get-UnreleasedModifiedDependencies {
         if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
 
         # BFS forward over normal+build deps. Track shortest path to each visited
-        # node within this start-crate's traversal (avoids cycles and keeps the
+        # node within this start-package's traversal (avoids cycles and keeps the
         # recorded chain to the SHORTEST path from this entry point).
         $visited = [System.Collections.Generic.HashSet[string]]::new()
         [void]$visited.Add($releasedFolder)
@@ -819,16 +819,16 @@ function Get-UnreleasedModifiedDependencies {
 
         while ($queue.Count -gt 0) {
             $node = $queue.Dequeue()
-            $crate = $byFolder[$node.Folder]
-            if ($null -eq $crate) { continue }
+            $package = $byFolder[$node.Folder]
+            if ($null -eq $package) { continue }
 
-            foreach ($depNorm in $crate.Deps) {
-                if (-not $folderByNormName.ContainsKey($depNorm)) { continue } # external crate
+            foreach ($depNorm in $package.Deps) {
+                if (-not $folderByNormName.ContainsKey($depNorm)) { continue } # external package
                 $depFolder = $folderByNormName[$depNorm]
                 if ($visited.Contains($depFolder)) { continue }
                 [void]$visited.Add($depFolder)
 
-                $depCrate = $byFolder[$depFolder]
+                $depPackage = $byFolder[$depFolder]
                 $depChain = $node.Chain + $depFolder
 
                 # Decide whether to record this dep as a finding.
@@ -837,7 +837,7 @@ function Get-UnreleasedModifiedDependencies {
                 #   - a release-set member whose bump is below "breaking" — the
                 #     user may still want to elevate after reviewing the changes
                 #     (Invariant B).
-                $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depCrate.Published
+                $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depPackage.Published
                 $isInReleaseSet = $releaseSet.Contains($depFolder)
 
                 $surface = $false
@@ -847,11 +847,11 @@ function Get-UnreleasedModifiedDependencies {
                     } else {
                         # Release-set member: compute the cascade-applied bump
                         # (base → current) and surface only when below "breaking".
-                        # New crates (no base version) are never surfaced — they
+                        # New packages (no base version) are never surfaced — they
                         # have no semantically-meaningful bump to elevate.
-                        $depBase = Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $depFolder
-                        if ($null -ne $depBase -and $depBase -ne $depCrate.Version) {
-                            $bumpKind = Get-BumpKindFromVersions -oldVersion $depBase -newVersion $depCrate.Version
+                        $depBase = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $depFolder
+                        if ($null -ne $depBase -and $depBase -ne $depPackage.Version) {
+                            $bumpKind = Get-BumpKindFromVersions -oldVersion $depBase -newVersion $depPackage.Version
                             if (-not (Test-IsBreakingChange -oldVersion $depBase -bump $bumpKind)) {
                                 $surface = $true
                             }
@@ -863,8 +863,8 @@ function Get-UnreleasedModifiedDependencies {
                     if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
-                            PackageName      = $depCrate.Name
-                            CurrentVersion   = $depCrate.Version
+                            PackageName      = $depPackage.Name
+                            CurrentVersion   = $depPackage.Version
                             InReleaseSet     = $isInReleaseSet
                             ChangedFileCount = $modifiedMap[$depFolder]
                             DependencyChains = @(, $depChain)

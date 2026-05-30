@@ -5,13 +5,13 @@
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'b' }
-        @{ Op = 'ModifySource'; Crate = 'c' }
+        @{ Op = 'ModifySource'; Package = 'b' }
+        @{ Op = 'ModifySource'; Package = 'c' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'a'
+        PackageName = 'a'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -29,8 +29,8 @@
         # b accepted as minor (0.x: patch-style) → 0.2.1. a's cascade bullet-only at 0.1.1.
         # c is declined; no entry in releases.
         Released = @(
-            @{ Crate = 'a'; To = '0.1.1' }
-            @{ Crate = 'b'; To = '0.2.1' }
+            @{ Package = 'a'; To = '0.1.1' }
+            @{ Package = 'b'; To = '0.2.1' }
         )
         PromptsRaised = @(
             "Choose option for 'b'"

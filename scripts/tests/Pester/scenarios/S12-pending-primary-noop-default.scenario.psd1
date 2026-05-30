@@ -9,12 +9,12 @@
     History = @(
         # Simulate a prior `release-crate.ps1` run that left b pending at 0.2.1
         # without an intermediate commit.
-        @{ Op = 'BumpVersion'; Crate = 'b'; To = '0.2.1' }
+        @{ Op = 'BumpVersion'; Package = 'b'; To = '0.2.1' }
     )
 
     Run = @{
         # Re-invoke for the same pending package without explicit -Change.
-        CrateName = 'b'
+        PackageName = 'b'
         BaseRef   = 'HEAD'
         Answers   = @()
     }
@@ -26,8 +26,8 @@
         # allowed_external_types heuristic — but on 0.x.y patch and minor are
         # the same numeric outcome anyway).
         Released = @(
-            @{ Crate = 'b'; To = '0.2.1' }
-            @{ Crate = 'a'; To = '0.1.1' }
+            @{ Package = 'b'; To = '0.2.1' }
+            @{ Package = 'a'; To = '0.1.1' }
         )
         UnconsumedAnswers = @()
     }

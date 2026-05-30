@@ -5,12 +5,12 @@
     Workspace = @{ Preset = 'Linear2' }   # downstream -> upstream
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'upstream' }
+        @{ Op = 'ModifySource'; Package = 'upstream' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'downstream'
+        PackageName = 'downstream'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -28,8 +28,8 @@
     Expect = @{
         # upstream accepted as patch → 0.2.0 → 0.2.1. downstream cascade bullet-only at 0.1.1.
         Released = @(
-            @{ Crate = 'downstream'; To = '0.1.1' }
-            @{ Crate = 'upstream';   To = '0.2.1' }
+            @{ Package = 'downstream'; To = '0.1.1' }
+            @{ Package = 'upstream';   To = '0.2.1' }
         )
         PromptsRaised = @(
             "Choose option for 'upstream'"

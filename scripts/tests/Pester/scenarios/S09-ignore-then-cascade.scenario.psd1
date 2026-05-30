@@ -5,13 +5,13 @@
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'b' }
-        @{ Op = 'ModifySource'; Crate = 'c' }
+        @{ Op = 'ModifySource'; Package = 'b' }
+        @{ Op = 'ModifySource'; Package = 'c' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'a'
+        PackageName = 'a'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -35,9 +35,9 @@
         # b cascade-bumped from c (0.2.0 → 0.2.1) despite being previously declined.
         # a cascade from c bullet-only (0.1.1 already >= required).
         Released = @(
-            @{ Crate = 'a'; To = '0.1.1' }
-            @{ Crate = 'c'; To = '0.3.1' }
-            @{ Crate = 'b'; To = '0.2.1' }
+            @{ Package = 'a'; To = '0.1.1' }
+            @{ Package = 'c'; To = '0.3.1' }
+            @{ Package = 'b'; To = '0.2.1' }
         )
         PromptsRaised = @(
             "Choose option for 'b'"

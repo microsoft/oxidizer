@@ -7,7 +7,7 @@
     # Get-NextVersion and the [1-5] menu range.
     Workspace = @{
         Spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -15,12 +15,12 @@
     }
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'upstream' }
+        @{ Op = 'ModifySource'; Package = 'upstream' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'downstream'
+        PackageName = 'downstream'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -36,8 +36,8 @@
         # upstream  : 1.2.3 -> 1.2.4 (patch chosen via option 5 — distinct from option 4 which
         # would have given 1.3.0). The [1-5] suffix in PromptsRaised pins the menu range too.
         Released = @(
-            @{ Crate = 'downstream'; To = '1.0.1' }
-            @{ Crate = 'upstream';   To = '1.2.4' }
+            @{ Package = 'downstream'; To = '1.0.1' }
+            @{ Package = 'upstream';   To = '1.2.4' }
         )
         PromptsRaised = @(
             "Choose option for 'upstream' [1-5]"

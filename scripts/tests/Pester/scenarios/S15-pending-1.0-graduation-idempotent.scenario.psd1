@@ -8,13 +8,13 @@
 
     History = @(
         # Prior `release-crate.ps1 -Change 1.0` on b graduated it to 1.0.0.
-        @{ Op = 'BumpVersion'; Crate = 'b'; To = '1.0.0' }
+        @{ Op = 'BumpVersion'; Package = 'b'; To = '1.0.0' }
     )
 
     Run = @{
         # Re-invoke with the same -Change 1.0. Must NOT throw the on-disk
         # "already at 1.x" error; must idempotently no-op.
-        CrateName = 'b'
+        PackageName = 'b'
         Change    = '1.0'
         BaseRef   = 'HEAD'
         Answers   = @()
@@ -25,8 +25,8 @@
         # on 0.2.0 → 1.0.0 is a breaking change at the 0→1 boundary), so a
         # cascades as major. On 0.x.y a's major bump is 0.1.0 → 0.2.0.
         Released = @(
-            @{ Crate = 'b'; To = '1.0.0' }
-            @{ Crate = 'a'; To = '0.2.0' }
+            @{ Package = 'b'; To = '1.0.0' }
+            @{ Package = 'a'; To = '0.2.0' }
         )
         UnconsumedAnswers = @()
     }

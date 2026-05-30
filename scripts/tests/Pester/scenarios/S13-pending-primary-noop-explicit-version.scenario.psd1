@@ -6,7 +6,7 @@
     # several bump kinds onto the same numeric increment).
     Workspace = @{
         Spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -15,12 +15,12 @@
 
     History = @(
         # Prior `release-crate.ps1 -Version 1.2.4` left upstream pending.
-        @{ Op = 'BumpVersion'; Crate = 'upstream'; To = '1.2.4' }
+        @{ Op = 'BumpVersion'; Package = 'upstream'; To = '1.2.4' }
     )
 
     Run = @{
         # Re-invoke with the EXACT same explicit -Version. Must idempotently no-op.
-        CrateName = 'upstream'
+        PackageName = 'upstream'
         Version   = '1.2.4'
         BaseRef   = 'HEAD'
         Answers   = @()
@@ -31,8 +31,8 @@
         # base→current bump (patch on 1.2.3 → 1.2.4) and itself doesn't expose
         # upstream, so its cascade bump is patch → 1.0.1.
         Released = @(
-            @{ Crate = 'upstream';   To = '1.2.4' }
-            @{ Crate = 'downstream'; To = '1.0.1' }
+            @{ Package = 'upstream';   To = '1.2.4' }
+            @{ Package = 'downstream'; To = '1.0.1' }
         )
         UnconsumedAnswers = @()
     }

@@ -56,14 +56,14 @@ function Invoke-Scenario {
     foreach ($step in @($scenario.History)) {
         if (-not $step.Op) { throw "Scenario '$($scenario.Name)' has a history step with no Op." }
         switch ($step.Op) {
-            'ModifySource'    { $ws.ModifySource($step.Crate) }
-            'BumpVersion'     { $ws.BumpVersion($step.Crate, $step.To) }
-            'SetPublishFalse' { $ws.SetPublishFalse($step.Crate) }
+            'ModifySource'    { $ws.ModifySource($step.Package) }
+            'BumpVersion'     { $ws.BumpVersion($step.Package, $step.To) }
+            'SetPublishFalse' { $ws.SetPublishFalse($step.Package) }
             'AddCommit'       { $ws.AddCommit($step.Message) }
             'Commit'          { $ws.AddCommit($step.Message) }
             'EditCargoToml'   {
-                # Generic raw text patch on a crate's Cargo.toml.
-                $cargo = Join-Path $ws.Path "crates\$($step.Crate)\Cargo.toml"
+                # Generic raw text patch on a package's Cargo.toml.
+                $cargo = Join-Path $ws.Path "crates\$($step.Package)\Cargo.toml"
                 $content = Get-Content $cargo -Raw
                 $content = $content -replace $step.Pattern, $step.Replacement
                 Set-Content $cargo -Value $content -NoNewline
@@ -88,7 +88,7 @@ function Invoke-Scenario {
     Push-Location $ws.Path
     try {
         $runArgs = @{
-            CrateName = $scenario.Run.CrateName
+            PackageName = $scenario.Run.PackageName
             BaseRef   = $(if ($scenario.Run.BaseRef) { $scenario.Run.BaseRef } else { 'HEAD~1' })
         }
         if ($scenario.Run.Change)         { $runArgs.Change  = $scenario.Run.Change }

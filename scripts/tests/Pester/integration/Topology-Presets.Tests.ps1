@@ -113,7 +113,7 @@ Describe 'Topology presets (smoke)' {
             @($findings).Count | Should -Be 2
             ($findings | ForEach-Object Folder | Sort-Object) -join ',' | Should -Be 'upstream_a,upstream_b'
 
-            $dependents = Get-AllTransitiveDependents -crateName 'target' -repoRoot $ws.Path
+            $dependents = Get-AllTransitiveDependents -packageName 'target' -repoRoot $ws.Path
             ($dependents | Sort-Object) -join ',' | Should -Be 'downstream_x,downstream_y'
         }
     }
@@ -134,7 +134,7 @@ Describe 'Topology presets (smoke)' {
     }
 
     Context 'Detached' {
-        It 'modified crate in component B never surfaces from a release in component A' {
+        It 'modified package in component B never surfaces from a release in component A' {
             $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'detached')
             $ws.ModifySource('delta')
             $ws.AddCommit('delta edit')

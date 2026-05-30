@@ -38,7 +38,7 @@
 # │ (Exception: `@(,@('a', 'b'))` for DependencyChains is legitimate —     │
 # │ that builds an array-of-arrays where each element is a chain.)         │
 # │                                                                         │
-# │ History: this pattern was already removed from Get-WorkspaceCrates     │
+# │ History: this pattern was already removed from Get-WorkspacePackages     │
 # │ mocks in commit 53948dc0 after it silently capped maxIterations to 1; │
 # │ a second pass cleaned up the same idiom in                             │
 # │ Get-UnreleasedModifiedDependencies mocks.                              │
@@ -618,8 +618,8 @@ Describe 'Open-PathWithPreferredEditor' {
 Describe 'Invoke-PostReleaseDepScan: analysing-packages status indicator' {
 
     BeforeEach {
-        # Single fake published crate for the maxIterations cap.
-        Mock -CommandName Get-WorkspaceCrates -MockWith {
+        # Single fake published package for the maxIterations cap.
+        Mock -CommandName Get-WorkspacePackages -MockWith {
             [pscustomobject]@{ Folder = 'fake'; Name = 'fake'; Published = $true }
         }
         # Drive the loop into "no findings" so it exits after a single iteration.
@@ -672,11 +672,11 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
 
     BeforeEach {
         Reset-ReleaseScriptCaches
-        # Mock the workspace with FOUR published crates so maxIterations=4.
+        # Mock the workspace with FOUR published packages so maxIterations=4.
         # The loop needs 3 iterations to consume the 3 ignore decisions and
         # a 4th to detect the empty cheap-path queue and return cleanly
         # without hitting the iteration cap warning.
-        Mock -CommandName Get-WorkspaceCrates -MockWith {
+        Mock -CommandName Get-WorkspacePackages -MockWith {
             [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
             [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
             [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
@@ -755,7 +755,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
     BeforeEach {
         Reset-ReleaseScriptCaches
-        Mock -CommandName Get-WorkspaceCrates -MockWith {
+        Mock -CommandName Get-WorkspacePackages -MockWith {
             [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
             [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
         }
@@ -899,8 +899,8 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         }
 
         $releases = @(
-            [pscustomobject]@{ Crate = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
-            [pscustomobject]@{ Crate = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+            [pscustomobject]@{ Package = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+            [pscustomobject]@{ Package = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
         )
         & {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
@@ -935,8 +935,8 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         }
 
         $releases = @(
-            [pscustomobject]@{ Crate = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
-            [pscustomobject]@{ Crate = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+            [pscustomobject]@{ Package = 'b'; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+            [pscustomobject]@{ Package = 'a'; OldVersion = '0.3.0'; NewVersion = '0.3.1' }
         )
         & {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
@@ -963,9 +963,9 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
         # Override the BeforeEach mock so maxIterations >= 3 (we need at
         # least 2 iterations to surface 'a' after accepting 'b'). The
-        # workspace shape (3 published crates) sets maxIterations in
+        # workspace shape (3 published packages) sets maxIterations in
         # Invoke-PostReleaseDepScan.
-        Mock -CommandName Get-WorkspaceCrates -MockWith {
+        Mock -CommandName Get-WorkspacePackages -MockWith {
             [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
             [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
             [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
@@ -1005,10 +1005,10 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
         # Mock Invoke-ReleaseFlow to simulate cascade pulling in 'a' alongside 'b'.
         Mock -CommandName Invoke-ReleaseFlow -MockWith {
-            param($CrateName, $Bump)
+            param($PackageName, $Bump)
             return @(
-                [pscustomobject]@{ Crate = $CrateName; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
-                [pscustomobject]@{ Crate = 'a';        OldVersion = '0.3.0'; NewVersion = '0.3.1' }
+                [pscustomobject]@{ Package = $PackageName; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
+                [pscustomobject]@{ Package = 'a';        OldVersion = '0.3.0'; NewVersion = '0.3.1' }
             )
         }
 
@@ -1022,7 +1022,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         }
 
         $releases = @(
-            [pscustomobject]@{ Crate = 'c'; OldVersion = '0.5.0'; NewVersion = '0.5.1' }
+            [pscustomobject]@{ Package = 'c'; OldVersion = '0.5.0'; NewVersion = '0.5.1' }
         )
         & {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
@@ -1094,9 +1094,9 @@ Describe 'Show-FinalMessage' {
 
     BeforeAll {
         function script:NewRelease {
-            param([string]$Crate, [string]$NewVersion, [string]$OldVersion = '0.0.0')
+            param([string]$Package, [string]$NewVersion, [string]$OldVersion = '0.0.0')
             return [pscustomobject]@{
-                Crate      = $Crate
+                Package      = $Package
                 OldVersion = $OldVersion
                 NewVersion = $NewVersion
             }
@@ -1104,15 +1104,15 @@ Describe 'Show-FinalMessage' {
     }
 
     Context 'single-package release' {
-        It 'uses the scoped feat(<crate>) commit form when only one package was released' {
-            $releases = @(NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1')
-            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+        It 'uses the scoped feat(<package>) commit form when only one package was released' {
+            $releases = @(NewRelease -Package 'bytesbuf_io' -NewVersion '0.5.1')
+            $out = & { Show-FinalMessage -PackageName 'bytesbuf_io' -Releases $releases } 6>&1
             ($out | Out-String) | Should -Match 'git commit -m "feat\(bytesbuf_io\): release v0\.5\.1"'
         }
 
         It 'does NOT mention "additional package(s)" when only one package was released' {
-            $releases = @(NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1')
-            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+            $releases = @(NewRelease -Package 'bytesbuf_io' -NewVersion '0.5.1')
+            $out = & { Show-FinalMessage -PackageName 'bytesbuf_io' -Releases $releases } 6>&1
             ($out | Out-String) | Should -Not -Match 'additional package'
         }
     }
@@ -1120,42 +1120,42 @@ Describe 'Show-FinalMessage' {
     Context 'multi-package release' {
         It 'uses the unscoped "feat:" commit form and counts the extras when several packages were released' {
             $releases = @(
-                NewRelease -Crate 'bytesbuf_io' -NewVersion '0.5.1'
-                NewRelease -Crate 'bytesbuf'    -NewVersion '0.4.2'
-                NewRelease -Crate 'a'           -NewVersion '0.1.1'
-                NewRelease -Crate 'b'           -NewVersion '0.2.1'
-                NewRelease -Crate 'c'           -NewVersion '0.3.1'
-                NewRelease -Crate 'd'           -NewVersion '0.4.1'
+                NewRelease -Package 'bytesbuf_io' -NewVersion '0.5.1'
+                NewRelease -Package 'bytesbuf'    -NewVersion '0.4.2'
+                NewRelease -Package 'a'           -NewVersion '0.1.1'
+                NewRelease -Package 'b'           -NewVersion '0.2.1'
+                NewRelease -Package 'c'           -NewVersion '0.3.1'
+                NewRelease -Package 'd'           -NewVersion '0.4.1'
             )
-            $out = & { Show-FinalMessage -CrateName 'bytesbuf_io' -Releases $releases } 6>&1
+            $out = & { Show-FinalMessage -PackageName 'bytesbuf_io' -Releases $releases } 6>&1
             ($out | Out-String) | Should -Match 'git commit -m "feat: release bytesbuf_io v0\.5\.1 and 5 additional packages"'
         }
 
         It 'uses singular noun ("1 additional package") when exactly two packages were released' {
             $releases = @(
-                NewRelease -Crate 'foo' -NewVersion '1.0.0'
-                NewRelease -Crate 'bar' -NewVersion '2.0.0'
+                NewRelease -Package 'foo' -NewVersion '1.0.0'
+                NewRelease -Package 'bar' -NewVersion '2.0.0'
             )
-            $out = & { Show-FinalMessage -CrateName 'foo' -Releases $releases } 6>&1
+            $out = & { Show-FinalMessage -PackageName 'foo' -Releases $releases } 6>&1
             ($out | Out-String) | Should -Match 'release foo v1\.0\.0 and 1 additional package"'
             ($out | Out-String) | Should -Not -Match '1 additional packages'
         }
 
         It 'finds the primary release even when it is not first in the release record array' {
             $releases = @(
-                NewRelease -Crate 'cascade_a' -NewVersion '0.1.1'
-                NewRelease -Crate 'cascade_b' -NewVersion '0.2.1'
-                NewRelease -Crate 'primary'   -NewVersion '0.7.0'
+                NewRelease -Package 'cascade_a' -NewVersion '0.1.1'
+                NewRelease -Package 'cascade_b' -NewVersion '0.2.1'
+                NewRelease -Package 'primary'   -NewVersion '0.7.0'
             )
-            $out = & { Show-FinalMessage -CrateName 'primary' -Releases $releases } 6>&1
+            $out = & { Show-FinalMessage -PackageName 'primary' -Releases $releases } 6>&1
             ($out | Out-String) | Should -Match 'release primary v0\.7\.0 and 2 additional packages"'
         }
     }
 
     Context 'git push instruction' {
         It 'emits a plain `git push` (no `origin <branch>` placeholder)' {
-            $releases = @(NewRelease -Crate 'foo' -NewVersion '1.0.0')
-            $out = & { Show-FinalMessage -CrateName 'foo' -Releases $releases } 6>&1
+            $releases = @(NewRelease -Package 'foo' -NewVersion '1.0.0')
+            $out = & { Show-FinalMessage -PackageName 'foo' -Releases $releases } 6>&1
             $text = $out | Out-String
             $text | Should -Match '(?m)^\s*git push\s*$'
             $text | Should -Not -Match 'git push origin'
@@ -1210,19 +1210,19 @@ Describe 'Format-CascadeAnnouncement' {
 
         It 'reads "as breaking change" when -ExposingBump is major' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match 'as breaking change'
         }
 
         It 'reads "as non-breaking change" when -ExposingBump is minor' {
             $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match 'as non-breaking change'
         }
 
         It 'reads "as patch" when -ExposingBump is patch (and parenthetical is suppressed — see other tests)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper')
             $out | Should -Match 'as patch'
         }
     }
@@ -1230,42 +1230,42 @@ Describe 'Format-CascadeAnnouncement' {
     Context 'parenthetical clause for non-exposing dependents' {
         It 'appends "(or patch if no API exposure of `<target>`)" when exposing=major and non-exposing=patch' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
         It 'appends "(or patch if no API exposure of `<target>`)" when exposing=minor and non-exposing=patch' {
             $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
         It 'omits the parenthetical entirely when exposing and non-exposing are both patch (no downgrade possible)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
-                -TargetCrateName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
+                -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Not -Match '\(or .+ if no API exposure'
             # Ensure the colon still lands directly after the headline label.
             $out | Should -Match 'as patch:\s'
         }
 
-        It 'preserves backticks around the target crate name (markdown-style code formatting in CLI output)' {
+        It 'preserves backticks around the target package name (markdown-style code formatting in CLI output)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'my-crate' -DependentNames @('a', 'b')
-            $out | Should -Match '`my-crate`'
+                -TargetPackageName 'my-package' -DependentNames @('a', 'b')
+            $out | Should -Match '`my-package`'
         }
     }
 
     Context 'singular vs plural "dependent package(s)" noun' {
         It 'uses singular "dependent package" when there is exactly one dependent' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'foo' -DependentNames @('bar')
+                -TargetPackageName 'foo' -DependentNames @('bar')
             $out | Should -Match '1 dependent package as'
             $out | Should -Not -Match '1 dependent packages'
         }
 
         It 'uses plural "dependent packages" when there are multiple dependents' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'foo' -DependentNames @('bar', 'baz', 'qux')
+                -TargetPackageName 'foo' -DependentNames @('bar', 'baz', 'qux')
             $out | Should -Match '3 dependent packages as'
         }
     }
@@ -1279,19 +1279,19 @@ Describe 'Format-CascadeAnnouncement' {
 
         It 'breaking + non-exposing patch: "as breaking change (or patch if no API exposure of `target`)"' {
             $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
-                -TargetCrateName 'target' -DependentNames @('a', 'b')
+                -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
         It 'non-breaking + non-exposing patch: "as non-breaking change (or patch if no API exposure of `target`)"' {
             $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
-                -TargetCrateName 'target' -DependentNames @('a', 'b')
+                -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as non-breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
         It 'patch + non-exposing patch: "as patch" (parenthetical suppressed, no downgrade possible)' {
             $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
-                -TargetCrateName 'target' -DependentNames @('a', 'b')
+                -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as patch: a, b"
         }
     }
@@ -1307,7 +1307,7 @@ Describe 'Format-CascadeAnnouncement' {
             $isBreaking | Should -BeTrue
             $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
-                -TargetCrateName 't' -DependentNames @('d')
+                -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
 
@@ -1316,7 +1316,7 @@ Describe 'Format-CascadeAnnouncement' {
             $isBreaking | Should -BeFalse
             $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
-                -TargetCrateName 't' -DependentNames @('d')
+                -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as non-breaking change \(or patch if no API exposure of `t`\)'
         }
 
@@ -1326,7 +1326,7 @@ Describe 'Format-CascadeAnnouncement' {
             # Caller's $exposingCascadeBump = if($targetIsBreaking) {'major'} else {$cascadeBump}
             $exposingBump = if ($isBreaking) { 'major' } else { 'patch' }
             $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
-                -TargetCrateName 't' -DependentNames @('d')
+                -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
     }

@@ -65,7 +65,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $findings.Count | Should -Be 0
     }
 
-    It 'N4 — bump-then-edit upstream is flagged via per-crate baseline' {
+    It 'N4 — bump-then-edit upstream is flagged via per-package baseline' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'n4')
         # Earlier: bump upstream + release.
@@ -117,7 +117,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # edits, then is flipped to publish=true on a later commit. Current PR bumps
         # downstream only; pre-flip edits must not be reported.
         $spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '0.1.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '0.2.0'; Published = $false }
             )
@@ -137,7 +137,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.AddCommit('release downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
-        # No findings: per-crate baseline for upstream is the publish-flip commit,
+        # No findings: per-package baseline for upstream is the publish-flip commit,
         # newer than the pre-flip edit, so no unreleased changes.
         $findings.Count | Should -Be 0
     }
@@ -166,7 +166,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $findings.Folder | Should -Contain 'upstream'
     }
 
-    It 'T6b — dev-only dep on a modified crate is NOT flagged' {
+    It 'T6b — dev-only dep on a modified package is NOT flagged' {
         Reset-ReleaseScriptCaches
         # Mixed6's 'target' has a dev-dep on upstream_a (normal dep on upstream_b).
         $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 't6b')
@@ -209,7 +209,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         @($bottom.DependencyChains).Count | Should -Be 2
     }
 
-    It 'Detached — modified crate in component B does not surface from a release in component A' {
+    It 'Detached — modified package in component B does not surface from a release in component A' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'detached')
         # Two disconnected components: alpha→beta and gamma→delta.
@@ -267,10 +267,10 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
 
     # Helper: build a Linear2 workspace where 'upstream' is BOTH a release-set
     # member (its version differs from BaseRef) AND has unreleased
-    # modifications past its per-crate baseline. We arrange this by:
+    # modifications past its per-package baseline. We arrange this by:
     #   HEAD~2 → initial (upstream at 0.2.0)
     #   HEAD~1 → upstream bumped to $upstreamPending (this becomes upstream's
-    #            per-crate baseline; release-set membership against
+    #            per-package baseline; release-set membership against
     #            BaseRef=HEAD~2 depends on the version differing)
     #   HEAD   → source edit on upstream + bump downstream so the loop has
     #            something to traverse from. Now upstream is in the release
@@ -316,7 +316,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         # Build a 1.x workspace so non-breaking (minor) is distinct from
         # breaking (major) in cargo-semver terms.
         $spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -338,7 +338,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
     It 'does NOT surface a release-set member whose cascade-applied bump is breaking on 1.x' {
         Reset-ReleaseScriptCaches
         $spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -361,7 +361,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         $ws.AddCommit('pending patch release of upstream')
         $ws.BumpVersion('downstream', '0.1.1')
         $ws.AddCommit('bump downstream')
-        # Uncommitted source edit on upstream — past its per-crate baseline.
+        # Uncommitted source edit on upstream — past its per-package baseline.
         $ws.ModifySource('upstream', '// uncommitted further edit')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
@@ -414,30 +414,30 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
 }
 
 # --------------------------------------------------------------------------
-# Update-CrateVersion — exercise the [package]-scoped replacement.
+# Update-PackageVersion — exercise the [package]-scoped replacement.
 # --------------------------------------------------------------------------
 
-Describe 'Update-CrateVersion' {
+Describe 'Update-PackageVersion' {
     BeforeAll {
         . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
 
-    It 'updates the crate version in its own Cargo.toml' {
+    It 'updates the package version in its own Cargo.toml' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-basic')
-        $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        $packageCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
-        $new = Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo
+        $new = Update-PackageVersion -packageName 'downstream' -version '0.1.1' -bump '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo
         $new | Should -Be '0.1.1'
-        (Get-Content $crateCargo -Raw) | Should -Match 'version\s*=\s*"0\.1\.1"'
+        (Get-Content $packageCargo -Raw) | Should -Match 'version\s*=\s*"0\.1\.1"'
     }
 
-    It 'updates the [workspace.dependencies] entry for the bumped crate' {
+    It 'updates the [workspace.dependencies] entry for the bumped package' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-root')
-        $crateCargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
+        $packageCargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
-        Update-CrateVersion -crateName 'upstream' -version '0.2.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'upstream' -version '0.2.1' -bump '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
         $rootContent = Get-Content $rootCargo -Raw
         $rootContent | Should -Match 'upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.1"'
         # And downstream's version line in the same root table is unchanged.
@@ -445,7 +445,7 @@ Describe 'Update-CrateVersion' {
     }
 
     It 'preserves inline dependency version when the [package] version is bumped' {
-        # Earlier, the crate-level regex was `(?<=version\s*=\s*")[^"]+` applied
+        # Earlier, the package-level regex was `(?<=version\s*=\s*")[^"]+` applied
         # via `-replace`, which clobbers every `version = "..."` in the file —
         # including any inline workspace-dep declarations like
         # `dep = { path = "...", version = "x.y.z" }`. Phase 8 fix scopes the
@@ -471,14 +471,14 @@ upstream = { path = "../upstream", version = "0.2.0" }
 "@ -NoNewline
 
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -bump '' -packageCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
 
         $content = Get-Content $downstreamCargo -Raw
         # [package] version was bumped.
         $content | Should -Match 'name\s*=\s*"downstream"[^\[]*?version\s*=\s*"0\.1\.1"'
         # Inline upstream dep's declared version is preserved.
         if ($content -match 'upstream\s*=\s*\{[^}]*version\s*=\s*"([^"]+)"') {
-            $Matches[1] | Should -Be '0.2.0' -Because 'Update-CrateVersion must not rewrite inline workspace-dep versions.'
+            $Matches[1] | Should -Be '0.2.0' -Because 'Update-PackageVersion must not rewrite inline workspace-dep versions.'
         } else {
             throw "Could not extract upstream version from rewritten Cargo.toml: $content"
         }
@@ -493,8 +493,8 @@ upstream = { path = "../upstream", version = "0.2.0" }
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-rust-version')
 
-        $crateCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
-        Set-Content -Path $crateCargo -NoNewline -Value @"
+        $packageCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        Set-Content -Path $packageCargo -NoNewline -Value @"
 [package]
 name = "downstream"
 rust-version = "1.88"
@@ -506,9 +506,9 @@ publish = true
 "@
 
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Update-CrateVersion -crateName 'downstream' -version '0.1.1' -bump '' -crateCargoToml $crateCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -bump '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
 
-        $content = Get-Content $crateCargo -Raw
+        $content = Get-Content $packageCargo -Raw
         $content | Should -Match 'rust-version\s*=\s*"1\.88"' -Because 'rust-version must be left alone.'
         $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
     }
@@ -531,13 +531,13 @@ Describe 'Invoke-CascadeStep' {
         Push-Location $ws.Path
         try {
             $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD'
+                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD'
         } finally {
             Pop-Location
         }
 
         $result | Should -Not -BeNullOrEmpty
-        $result.Crate      | Should -Be 'downstream'
+        $result.Package      | Should -Be 'downstream'
         $result.OldVersion | Should -Be '0.1.0'
         $result.NewVersion | Should -Be '0.1.1'
     }
@@ -553,7 +553,7 @@ Describe 'Invoke-CascadeStep' {
         try {
             # BaseRef = HEAD~1 → downstream's "base" version is 0.1.0; required = 0.1.1; current = 0.2.0.
             $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD~1'
+                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD~1'
         } finally {
             Pop-Location
         }
@@ -573,7 +573,7 @@ Describe 'Invoke-CascadeStep' {
         try {
             # Base ref = HEAD~1; base version = 0.1.0; required = Get-NextVersion(0.1.0, major) = 0.2.0.
             $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'major' -BaseRef 'HEAD~1'
+                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'major' -BaseRef 'HEAD~1'
         } finally {
             Pop-Location
         }
@@ -582,7 +582,7 @@ Describe 'Invoke-CascadeStep' {
         $result.NewVersion | Should -Be '0.2.0'
     }
 
-    It 'returns null and warns when the dependent crate is missing' {
+    It 'returns null and warns when the dependent package is missing' {
         Reset-ReleaseScriptCaches
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-missing')
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
@@ -590,7 +590,7 @@ Describe 'Invoke-CascadeStep' {
         Push-Location $ws.Path
         try {
             $result = Invoke-CascadeStep -Dependent 'nonexistent' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetCrateName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD' `
+                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DepBump 'patch' -BaseRef 'HEAD' `
                 -WarningVariable warnings -WarningAction SilentlyContinue
         } finally {
             Pop-Location

@@ -1,6 +1,6 @@
 @{
     Name        = 'S00-smoke-fresh-release-no-cascade'
-    Description = 'Releasing a leaf crate with no dependents and no upstream modifications produces a single release record and raises no prompts. Smoke test for the scenario runner.'
+    Description = 'Releasing a leaf package with no dependents and no upstream modifications produces a single release record and raises no prompts. Smoke test for the scenario runner.'
 
     Workspace = @{ Preset = 'Linear2' }   # downstream -> upstream
 
@@ -10,7 +10,7 @@
 
     Run = @{
         # 'downstream' has no dependents, so no cascade. Upstream is clean.
-        CrateName = 'downstream'
+        PackageName = 'downstream'
         Change    = 'Patch'
         BaseRef   = 'HEAD'
         Answers   = @()
@@ -18,7 +18,7 @@
 
     Expect = @{
         Released = @(
-            @{ Crate = 'downstream'; To = '0.1.1' }
+            @{ Package = 'downstream'; To = '0.1.1' }
         )
         PromptsRaised     = @()
         UnconsumedAnswers = @()

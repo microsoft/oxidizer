@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Owns the orchestration helpers, changelog formatters, and the Invoke-ReleaseMain
-    entrypoint that drives the full crate-release workflow. scripts/release-crate.ps1
+    entrypoint that drives the full package-release workflow. scripts/release-crate.ps1
     is a thin CLI shell that dot-sources this library and calls Invoke-ReleaseMain.
 
     This file is NOT an entrypoint. It only defines functions and module-scoped
@@ -27,12 +27,12 @@
 #     $script:RegexEscapeRegex).
 #   - Safe git invocation (Invoke-Git) and ref validation (Test-GitRef).
 #   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-BumpKindFromVersions,
-#     Test-IsBreakingChange) and crate-version readers (Get-CurrentVersion,
-#     Get-CrateVersionFromRef).
-#   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspaceCrates,
-#     Invalidate-WorkspaceMetadataCache, Test-CrateExposesTarget, Get-AllTransitiveDependents).
-#   - Modified-but-unreleased dependency analysis (Get-CratesWithUnreleasedChanges,
-#     Get-CratesWithVersionBumps, Get-UnreleasedModifiedDependencies).
+#     Test-IsBreakingChange) and package-version readers (Get-CurrentVersion,
+#     Get-PackageVersionFromRef).
+#   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspacePackages,
+#     Invalidate-WorkspaceMetadataCache, Test-PackageExposesTarget, Get-AllTransitiveDependents).
+#   - Modified-but-unreleased dependency analysis (Get-PackagesWithUnreleasedChanges,
+#     Get-PackagesWithVersionBumps, Get-UnreleasedModifiedDependencies).
 . "$PSScriptRoot/releasing.ps1"
 
 # --- CONFIGURATION ---
@@ -171,16 +171,16 @@ function Format-ConventionalCommits {
 
 # --- SCRIPT FUNCTIONS ---
 
-function Update-CrateVersion {
+function Update-PackageVersion {
     param(
-        [string]$crateName,
+        [string]$packageName,
         [string]$version,
         [string]$bump,
-        [string]$crateCargoToml,
+        [string]$packageCargoToml,
         [string]$rootCargoToml
     )
 
-    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+    $currentVersion = Get-CurrentVersion -cargoTomlPath $packageCargoToml
 
     $newVersion = ""
     if ([string]::IsNullOrEmpty($version)) {
@@ -193,17 +193,17 @@ function Update-CrateVersion {
         Write-Host "✅ Using specified version: $newVersion."
     }
 
-    Write-Host "📝 Updating '$crateCargoToml'..."
-    $crateContent = Get-Content $crateCargoToml -Raw
+    Write-Host "📝 Updating '$packageCargoToml'..."
+    $packageContent = Get-Content $packageCargoToml -Raw
     # Scope the version replacement to the [package] table via the shared regex
     # in releasing.ps1, which anchors to line starts so substring keys like
     # `rust-version` cannot match and inline workspace-dep `version = "..."`
     # declarations later in the file are left alone. Replace exactly once.
-    if (-not $script:CargoPackageVersionRegex.IsMatch($crateContent)) {
-        Write-Error "Could not find [package] version line in '$crateCargoToml'." -ErrorAction Stop
+    if (-not $script:CargoPackageVersionRegex.IsMatch($packageContent)) {
+        Write-Error "Could not find [package] version line in '$packageCargoToml'." -ErrorAction Stop
     }
-    $crateContent = $script:CargoPackageVersionRegex.Replace($crateContent, ('${1}' + $newVersion), 1)
-    Set-Content $crateCargoToml -Value $crateContent -NoNewline
+    $packageContent = $script:CargoPackageVersionRegex.Replace($packageContent, ('${1}' + $newVersion), 1)
+    Set-Content $packageCargoToml -Value $packageContent -NoNewline
 
     Write-Host "📝 Updating '$rootCargoToml'..."
 
@@ -216,9 +216,9 @@ function Update-CrateVersion {
         return ($str -replace $script:RegexEscapeRegex, '\$1')
     }
 
-    $escapedCrateName = Get-EscapedRegexSpecialChars($crateName)
-    $crateNamePattern = $escapedCrateName.Replace('_', '[-_]')
-    $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
+    $escapedPackageName = Get-EscapedRegexSpecialChars($packageName)
+    $packageNamePattern = $escapedPackageName.Replace('_', '[-_]')
+    $regex = '(?<=' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content $rootCargoToml -Raw) -replace $regex, $newVersion | Set-Content $rootCargoToml -NoNewline
 
     return $newVersion
@@ -232,7 +232,7 @@ function Update-CrateVersion {
 #
 # Used for in-place escalation when a downstream cascade or a subsequent
 # Invoke-ReleaseFlow re-invocation needs to lift an already-bumped package to
-# a higher version. The alternative — calling Invoke-CrateRelease again — would
+# a higher version. The alternative — calling Invoke-PackageRelease again — would
 # create a second `## [<new>]` changelog section while leaving the stale
 # `## [<old>]` section in place, breaking the convention of one section per
 # released version.
@@ -242,8 +242,8 @@ function Update-CrateVersion {
 # (the wider cascade plumbing already does so where it matters).
 function Update-PendingReleaseVersion {
     param(
-        [Parameter(Mandatory = $true)][string]$CrateName,
-        [Parameter(Mandatory = $true)][string]$CrateFolder,
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$PackageFolder,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $true)][string]$OldVersion,
         [Parameter(Mandatory = $true)][string]$NewVersion
@@ -251,33 +251,33 @@ function Update-PendingReleaseVersion {
 
     if ($OldVersion -eq $NewVersion) { return $NewVersion }
 
-    $crateCargoToml = Join-Path $CrateFolder 'Cargo.toml'
-    $changelogFile  = Join-Path $CrateFolder 'CHANGELOG.md'
+    $packageCargoToml = Join-Path $PackageFolder 'Cargo.toml'
+    $changelogFile  = Join-Path $PackageFolder 'CHANGELOG.md'
 
-    if (-not (Test-Path -LiteralPath $crateCargoToml)) {
-        Write-Error "Update-PendingReleaseVersion: Cargo.toml not found at '$crateCargoToml'." -ErrorAction Stop
+    if (-not (Test-Path -LiteralPath $packageCargoToml)) {
+        Write-Error "Update-PendingReleaseVersion: Cargo.toml not found at '$packageCargoToml'." -ErrorAction Stop
     }
 
-    Write-Host "📝 Re-stamping '$crateCargoToml' from $OldVersion to $NewVersion..."
-    $crateContent = Get-Content -LiteralPath $crateCargoToml -Raw
-    if (-not $script:CargoPackageVersionRegex.IsMatch($crateContent)) {
-        Write-Error "Update-PendingReleaseVersion: no [package] version line in '$crateCargoToml'." -ErrorAction Stop
+    Write-Host "📝 Re-stamping '$packageCargoToml' from $OldVersion to $NewVersion..."
+    $packageContent = Get-Content -LiteralPath $packageCargoToml -Raw
+    if (-not $script:CargoPackageVersionRegex.IsMatch($packageContent)) {
+        Write-Error "Update-PendingReleaseVersion: no [package] version line in '$packageCargoToml'." -ErrorAction Stop
     }
     # Replace exactly one occurrence (the [package].version), preserving the
     # captured prefix via $1 so the surrounding whitespace / `version = "` is
     # left intact.
-    $crateContent = $script:CargoPackageVersionRegex.Replace($crateContent, ('${1}' + $NewVersion), 1)
-    Set-Content -LiteralPath $crateCargoToml -Value $crateContent -NoNewline
+    $packageContent = $script:CargoPackageVersionRegex.Replace($packageContent, ('${1}' + $NewVersion), 1)
+    Set-Content -LiteralPath $packageCargoToml -Value $packageContent -NoNewline
 
-    Write-Host "📝 Re-stamping '$RootCargoToml' workspace entry for '$CrateName' to $NewVersion..."
+    Write-Host "📝 Re-stamping '$RootCargoToml' workspace entry for '$PackageName' to $NewVersion..."
     function Get-EscapedRegexSpecialChars2($str) {
         return ($str -replace $script:RegexEscapeRegex, '\$1')
     }
-    $escapedCrateName = Get-EscapedRegexSpecialChars2($CrateName)
-    $crateNamePattern = $escapedCrateName.Replace('_', '[-_]')
-    # Same lookbehind regex shape as Update-CrateVersion so the same
+    $escapedPackageName = Get-EscapedRegexSpecialChars2($PackageName)
+    $packageNamePattern = $escapedPackageName.Replace('_', '[-_]')
+    # Same lookbehind regex shape as Update-PackageVersion so the same
     # workspace-dep declaration pattern matches consistently.
-    $regex = '(?<=' + $crateNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
+    $regex = '(?<=' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content -LiteralPath $RootCargoToml -Raw) -replace $regex, $NewVersion | Set-Content -LiteralPath $RootCargoToml -NoNewline
 
     if (Test-Path -LiteralPath $changelogFile) {
@@ -312,28 +312,28 @@ function Update-PendingReleaseVersion {
 
 function Write-Changelog {
     param(
-        [string]$crateName,
+        [string]$packageName,
         [string]$newVersion,
-        [string]$crateFolder,
+        [string]$packageFolder,
         [string]$changelogFile,
         [string]$prBaseUrl,
-        # Optional: when this crate is being bumped purely as a cascade from another crate,
-        # describe the cascade so a maintenance entry can be written even if the crate has
+        # Optional: when this package is being bumped purely as a cascade from another package,
+        # describe the cascade so a maintenance entry can be written even if the package has
         # no commits since its last release. Shape: @{ Target = '<name>'; Version = '<x.y.z>'; Breaking = $false }
         [hashtable]$cascadeReason = $null
     )
 
-    $tags = Invoke-Git -Arguments @('tag', '--list', "$crateName-v*")
+    $tags = Invoke-Git -Arguments @('tag', '--list', "$packageName-v*")
     $latestTag = $null
     if ($null -eq $tags -or $tags.Count -eq 0) {
-        Write-Warning "No tags found for crate '$crateName'. Generating changelog from all history."
+        Write-Warning "No tags found for package '$packageName'. Generating changelog from all history."
     } else {
-        $filteredTags = @($tags | Where-Object { $_ -match "^${crateName}-v\d+\.\d+\.\d+$" })
+        $filteredTags = @($tags | Where-Object { $_ -match "^${packageName}-v\d+\.\d+\.\d+$" })
         if ($filteredTags.Count -gt 0) {
-            $sortedTags = @($filteredTags | Sort-Object { [version]($_ -replace "${crateName}-v", '') })
+            $sortedTags = @($filteredTags | Sort-Object { [version]($_ -replace "${packageName}-v", '') })
             $latestTag = $sortedTags[-1]
         } else {
-            Write-Warning "No valid semantic version tags found for crate '$crateName'. Generating changelog from all history."
+            Write-Warning "No valid semantic version tags found for package '$packageName'. Generating changelog from all history."
         }
     }
 
@@ -341,7 +341,7 @@ function Write-Changelog {
 
     # Get commits since the latest tag (unreleased commits)
     $range = if ($latestTag) { "$latestTag..HEAD" } else { "HEAD" }
-    $rawCommits = Invoke-Git -Arguments @('log', $range, '--pretty=format:%s', '--', $crateFolder)
+    $rawCommits = Invoke-Git -Arguments @('log', $range, '--pretty=format:%s', '--', $packageFolder)
     if ($null -eq $rawCommits -or $rawCommits.Count -eq 0) {
         $rawCommits = @()
     } else {
@@ -362,7 +362,7 @@ function Write-Changelog {
         return
     }
 
-    # Prepend a cascade entry when this crate is being bumped purely because one of its
+    # Prepend a cascade entry when this package is being bumped purely because one of its
     # dependencies was bumped. Emits a structured "Now requires <version> of <target>"
     # bullet (deliberately formal rather than colloquial) under the appropriate section:
     #   - 🔧 Maintenance
@@ -444,11 +444,11 @@ function Write-Changelog {
 
 function Update-Readme {
     param(
-        [string]$crateName,
-        [string]$crateFolder
+        [string]$packageName,
+        [string]$packageFolder
     )
 
-    $readmeTemplate = Join-Path $crateFolder "../README.j2"
+    $readmeTemplate = Join-Path $packageFolder "../README.j2"
     if (-not (Test-Path $readmeTemplate)) {
         Write-Warning "README template not found at '$readmeTemplate'. Skipping README generation."
         return
@@ -460,7 +460,7 @@ function Update-Readme {
     }
 
     Write-Host "📝 Updating README.md..."
-    Push-Location $crateFolder
+    Push-Location $packageFolder
     try {
         $result = cargo doc2readme --lib --template ../README.j2 2>&1
         if ($LASTEXITCODE -ne 0) {
@@ -474,13 +474,13 @@ function Update-Readme {
     }
 }
 
-# Bumps a single crate's version, regenerates its changelog and README.
+# Bumps a single package's version, regenerates its changelog and README.
 # Returns the new version string.
-function Invoke-CrateRelease {
+function Invoke-PackageRelease {
     param(
-        [string]$crateName,
-        [string]$crateFolder,
-        [string]$crateCargoToml,
+        [string]$packageName,
+        [string]$packageFolder,
+        [string]$packageCargoToml,
         [string]$rootCargoToml,
         [string]$changelogFile,
         [string]$prBaseUrl,
@@ -489,15 +489,15 @@ function Invoke-CrateRelease {
         [hashtable]$cascadeReason = $null
     )
 
-    $newVersion = Update-CrateVersion -crateName $crateName -version $version -bump $bump `
-        -crateCargoToml $crateCargoToml -rootCargoToml $rootCargoToml
+    $newVersion = Update-PackageVersion -packageName $packageName -version $version -bump $bump `
+        -packageCargoToml $packageCargoToml -rootCargoToml $rootCargoToml
     if ($null -eq $newVersion) {
-        Write-Error "Failed to update version for crate '$crateName'." -ErrorAction Stop
+        Write-Error "Failed to update version for package '$packageName'." -ErrorAction Stop
     }
 
-    Write-Changelog -crateName $crateName -newVersion $newVersion -crateFolder $crateFolder `
+    Write-Changelog -packageName $packageName -newVersion $newVersion -packageFolder $packageFolder `
         -changelogFile $changelogFile -prBaseUrl $prBaseUrl -cascadeReason $cascadeReason
-    Update-Readme -crateName $crateName -crateFolder $crateFolder
+    Update-Readme -packageName $packageName -packageFolder $packageFolder
 
     return $newVersion
 }
@@ -508,16 +508,16 @@ function Show-ReleaseSummary {
     )
 
     Write-Host ""
-    Write-Host "📦 Released crates:" -ForegroundColor Green
+    Write-Host "📦 Released packages:" -ForegroundColor Green
     foreach ($r in $releases) {
-        Write-Host "  - $($r.Crate): $($r.OldVersion) -> $($r.NewVersion)" -ForegroundColor Green
+        Write-Host "  - $($r.Package): $($r.OldVersion) -> $($r.NewVersion)" -ForegroundColor Green
     }
     Write-Host ""
 }
 
 function Show-FinalMessage {
     param(
-        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $true)][array]$Releases
     )
 
@@ -525,21 +525,21 @@ function Show-FinalMessage {
     # for). Defensive fallback to the first release in case it's missing — this
     # shouldn't happen in practice but we never want the post-success message
     # to crash and stamp the run as failed.
-    $primary = $Releases | Where-Object { $_.Crate -eq $CrateName } | Select-Object -First 1
+    $primary = $Releases | Where-Object { $_.Package -eq $PackageName } | Select-Object -First 1
     if ($null -eq $primary) { $primary = $Releases | Select-Object -First 1 }
-    $primaryName    = $primary.Crate
+    $primaryName    = $primary.Package
     $primaryVersion = $primary.NewVersion
 
     $extraCount = @($Releases).Count - 1
     if ($extraCount -le 0) {
-        # Single-package release: a scoped feat(<crate>): prefix is the most
-        # informative form because the commit really is about that one crate.
+        # Single-package release: a scoped feat(<package>): prefix is the most
+        # informative form because the commit really is about that one package.
         $commitMessage = "feat($primaryName): release v$primaryVersion"
     } else {
         # Multi-package release: the conventional-commits scope would be
         # misleading because the commit spans many packages. Drop the scope
         # and call out the extras so reviewers see at a glance that this is
-        # a coordinated release, not a single-crate bump.
+        # a coordinated release, not a single-package bump.
         $extraNoun = if ($extraCount -eq 1) { 'additional package' } else { 'additional packages' }
         $commitMessage = "feat: release $primaryName v$primaryVersion and $extraCount $extraNoun"
     }
@@ -682,7 +682,7 @@ function Invoke-CascadeStep {
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$PrBaseUrl,
-        [Parameter(Mandatory = $true)][string]$TargetCrateName,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName,
         [Parameter(Mandatory = $true)][string]$TargetNewVersion,
         [Parameter(Mandatory = $true)][string]$DepBump,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
@@ -699,23 +699,23 @@ function Invoke-CascadeStep {
 
     $depCurrent = Get-CurrentVersion -cargoTomlPath $depCargo
     $depBase = if (-not [string]::IsNullOrEmpty($BaseRef)) {
-        Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $Dependent
+        Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $Dependent
     } else { $null }
 
     $depCascadeReason = @{
-        Target   = $TargetCrateName
+        Target   = $TargetPackageName
         Version  = $TargetNewVersion
         Breaking = (Test-IsBreakingChange -oldVersion $depCurrent -bump $DepBump)
     }
 
-    # New crate (no base-ref Cargo.toml) or no usable base ref: behave as the legacy
-    # cascade did — let Invoke-CrateRelease bump from $depCurrent.
+    # New package (no base-ref Cargo.toml) or no usable base ref: behave as the legacy
+    # cascade did — let Invoke-PackageRelease bump from $depCurrent.
     if ([string]::IsNullOrEmpty($depBase) -or $depCurrent -eq $depBase) {
-        $depNew = Invoke-CrateRelease -crateName $Dependent -crateFolder $depFolder `
-            -crateCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
+        $depNew = Invoke-PackageRelease -packageName $Dependent -packageFolder $depFolder `
+            -packageCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
             -prBaseUrl $PrBaseUrl -version "" -bump $DepBump -cascadeReason $depCascadeReason
         Invalidate-WorkspaceMetadataCache
-        return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
+        return [pscustomobject]@{ Package = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
     }
 
     # Already bumped in this PR. Compute the version that THIS cascade would have
@@ -726,21 +726,21 @@ function Invoke-CascadeStep {
     if ($cmp -ge 0) {
         Write-Host "  • $Dependent already at $depCurrent (>= required $required); recording cascade only." -ForegroundColor DarkGray
         Add-CascadeBulletToVersionSection -ChangelogFile $depChange -Version $depCurrent -CascadeReason $depCascadeReason
-        return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $depCurrent }
+        return [pscustomobject]@{ Package = $Dependent; OldVersion = $depCurrent; NewVersion = $depCurrent }
     }
 
     Write-Host "  • $Dependent currently $depCurrent < required $required; upgrading." -ForegroundColor DarkYellow
     # In-place re-stamp: the dependent already has a pending changelog section
     # at $depCurrent (commit bullets + any earlier cascade bullets). Calling
-    # Invoke-CrateRelease here would generate a second `## [$required]` section
+    # Invoke-PackageRelease here would generate a second `## [$required]` section
     # while leaving the stale `## [$depCurrent]` section behind. Update the
     # version in Cargo.toml + workspace Cargo.toml + the existing CHANGELOG
     # header, then append the new cascade bullet under the now-renamed section.
-    Update-PendingReleaseVersion -CrateName $Dependent -CrateFolder $depFolder `
+    Update-PendingReleaseVersion -PackageName $Dependent -PackageFolder $depFolder `
         -RootCargoToml $RootCargoToml -OldVersion $depCurrent -NewVersion $required | Out-Null
     Add-CascadeBulletToVersionSection -ChangelogFile $depChange -Version $required -CascadeReason $depCascadeReason
     Invalidate-WorkspaceMetadataCache
-    return [pscustomobject]@{ Crate = $Dependent; OldVersion = $depCurrent; NewVersion = $required }
+    return [pscustomobject]@{ Package = $Dependent; OldVersion = $depCurrent; NewVersion = $required }
 }
 
 # --- CASCADE-MESSAGE FORMATTING ---
@@ -788,7 +788,7 @@ function Format-CascadeAnnouncement {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$ExposingBump,
         [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$NonExposingBump,
-        [Parameter(Mandatory = $true)][string]$TargetCrateName,
+        [Parameter(Mandatory = $true)][string]$TargetPackageName,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$DependentNames
     )
 
@@ -801,7 +801,7 @@ function Format-CascadeAnnouncement {
         $parenthetical = ''
     } else {
         $downgradeLabel = Get-ShortChangeLabelFromBumpKind -BumpKind $NonExposingBump
-        $parenthetical = " (or $downgradeLabel if no API exposure of ``$TargetCrateName``)"
+        $parenthetical = " (or $downgradeLabel if no API exposure of ``$TargetPackageName``)"
     }
 
     return "🔗 Cascading release to $count $noun as $headlineLabel$parenthetical`: $($DependentNames -join ', ')"
@@ -852,12 +852,12 @@ function Format-PendingReleasesAnnouncement {
     return ($lines -join [Environment]::NewLine)
 }
 
-# Runs the bump + downstream cascade for a single target crate. Returns the augmented
+# Runs the bump + downstream cascade for a single target package. Returns the augmented
 # $releases array. Equivalent to the legacy inline body, but factored so the post-release
 # scan can invoke it recursively for upstream dependencies the user agrees to release.
 function Invoke-ReleaseFlow {
     param(
-        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $false)][string]$Version = '',
         [Parameter(Mandatory = $false)][string]$Bump = '',
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -866,18 +866,18 @@ function Invoke-ReleaseFlow {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
     )
 
-    $crateFolder    = Join-Path $RepoRoot 'crates' $CrateName
-    $crateCargoToml = Join-Path $crateFolder 'Cargo.toml'
-    $changelogFile  = Join-Path $crateFolder 'CHANGELOG.md'
+    $packageFolder    = Join-Path $RepoRoot 'crates' $PackageName
+    $packageCargoToml = Join-Path $packageFolder 'Cargo.toml'
+    $changelogFile  = Join-Path $packageFolder 'CHANGELOG.md'
 
-    $currentVersion = Get-CurrentVersion -cargoTomlPath $crateCargoToml
+    $currentVersion = Get-CurrentVersion -cargoTomlPath $packageCargoToml
     if ([string]::IsNullOrWhiteSpace($currentVersion)) {
-        Write-Error "Failed to determine current version for '$CrateName'. Aborting."
+        Write-Error "Failed to determine current version for '$PackageName'. Aborting."
         Exit 1
     }
 
     $baseVersion = if (-not [string]::IsNullOrEmpty($BaseRef)) {
-        Get-CrateVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -CrateFolder $CrateName
+        Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageName
     } else { $null }
 
     # Re-invocation on a primary target that already has a pending uncommitted
@@ -894,7 +894,7 @@ function Invoke-ReleaseFlow {
         } elseif (-not [string]::IsNullOrEmpty($Bump)) {
             Get-NextVersion -currentVersion $baseVersion -bump $Bump
         } else {
-            # Default-bump (no -Version, no -Bump) matches Invoke-CrateRelease's
+            # Default-bump (no -Version, no -Bump) matches Invoke-PackageRelease's
             # internal default of 'minor'. Keeps re-invocation idempotent with
             # the initial bare-call.
             Get-NextVersion -currentVersion $baseVersion -bump 'minor'
@@ -906,7 +906,7 @@ function Invoke-ReleaseFlow {
             # Explicit -Version asks for something lower than the pending current.
             # Treat as a likely user mistake (typo, stale flag) rather than silently
             # no-opping into the higher pending version.
-            Write-Error "Cannot release '$CrateName' as v${Version}: package is already pending at v$currentVersion (base v$baseVersion). Explicit -Version downgrades are not supported."
+            Write-Error "Cannot release '$PackageName' as v${Version}: package is already pending at v$currentVersion (base v$baseVersion). Explicit -Version downgrades are not supported."
             Exit 1
         }
 
@@ -914,7 +914,7 @@ function Invoke-ReleaseFlow {
             # No-op for the primary. The on-disk Cargo.toml + changelog from the
             # prior invocation already reflect the intended release. Cascade still
             # runs because dependents may benefit from another idempotent pass.
-            Write-Host "ℹ️  '$CrateName' already pending at v$currentVersion (base v$baseVersion); skipping primary bump." -ForegroundColor DarkGray
+            Write-Host "ℹ️  '$PackageName' already pending at v$currentVersion (base v$baseVersion); skipping primary bump." -ForegroundColor DarkGray
             $oldVersion = $baseVersion
             $newVersion = $currentVersion
 
@@ -930,8 +930,8 @@ function Invoke-ReleaseFlow {
             # CHANGELOG header in place — body content (commit bullets + cascade
             # bullets from the prior pending pass) carries forward verbatim,
             # because the only thing that changed is the user's bump intent.
-            Write-Host "⬆️  Escalating pending release of '$CrateName' from v$currentVersion to v$requiredVersion (base v$baseVersion)." -ForegroundColor Yellow
-            Update-PendingReleaseVersion -CrateName $CrateName -CrateFolder $crateFolder `
+            Write-Host "⬆️  Escalating pending release of '$PackageName' from v$currentVersion to v$requiredVersion (base v$baseVersion)." -ForegroundColor Yellow
+            Update-PendingReleaseVersion -PackageName $PackageName -PackageFolder $packageFolder `
                 -RootCargoToml $RootCargoToml -OldVersion $currentVersion -NewVersion $requiredVersion | Out-Null
             Invalidate-WorkspaceMetadataCache
 
@@ -944,8 +944,8 @@ function Invoke-ReleaseFlow {
         }
     } else {
         $oldVersion = $currentVersion
-        $newVersion = Invoke-CrateRelease -crateName $CrateName -crateFolder $crateFolder `
-            -crateCargoToml $crateCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
+        $newVersion = Invoke-PackageRelease -packageName $PackageName -packageFolder $packageFolder `
+            -packageCargoToml $packageCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
             -prBaseUrl $PrBaseUrl -version $Version -bump $Bump
         Invalidate-WorkspaceMetadataCache
 
@@ -959,27 +959,27 @@ function Invoke-ReleaseFlow {
     }
 
     $releases = @(
-        [pscustomobject]@{ Crate = $CrateName; OldVersion = $oldVersion; NewVersion = $newVersion }
+        [pscustomobject]@{ Package = $PackageName; OldVersion = $oldVersion; NewVersion = $newVersion }
     )
 
     $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -bump $cascadeBump
     $exposingCascadeBump = if ($targetIsBreaking) { 'major' } else { $cascadeBump }
 
-    $dependents = @(Get-AllTransitiveDependents -crateName $CrateName -repoRoot $RepoRoot)
+    $dependents = @(Get-AllTransitiveDependents -packageName $PackageName -repoRoot $RepoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
         $cascadeMessage = Format-CascadeAnnouncement -ExposingBump $exposingCascadeBump `
-            -NonExposingBump 'patch' -TargetCrateName $CrateName -DependentNames $dependents
+            -NonExposingBump 'patch' -TargetPackageName $PackageName -DependentNames $dependents
         Write-Host $cascadeMessage -ForegroundColor Cyan
 
-        $allCrates = Get-WorkspaceCrates -repoRoot $RepoRoot
-        $targetCrate = $allCrates | Where-Object { $_.Folder -eq $CrateName -or $_.Name -eq $CrateName } | Select-Object -First 1
-        $targetPackageName = if ($null -ne $targetCrate) { $targetCrate.Name } else { $CrateName }
+        $allPackages = Get-WorkspacePackages -repoRoot $RepoRoot
+        $targetPackage = $allPackages | Where-Object { $_.Folder -eq $PackageName -or $_.Name -eq $PackageName } | Select-Object -First 1
+        $targetPackageName = if ($null -ne $targetPackage) { $targetPackage.Name } else { $PackageName }
 
         foreach ($dependent in $dependents) {
-            $depCrate = $allCrates | Where-Object { $_.Folder -eq $dependent } | Select-Object -First 1
-            $exposes = if ($null -ne $depCrate) {
-                Test-CrateExposesTarget -dependent $depCrate -targetPackageName $targetPackageName
+            $depPackage = $allPackages | Where-Object { $_.Folder -eq $dependent } | Select-Object -First 1
+            $exposes = if ($null -ne $depPackage) {
+                Test-PackageExposesTarget -dependent $depPackage -targetPackageName $targetPackageName
             } else { $true }
 
             $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
@@ -987,7 +987,7 @@ function Invoke-ReleaseFlow {
 
             $record = Invoke-CascadeStep -Dependent $dependent -RepoRoot $RepoRoot `
                 -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl `
-                -TargetCrateName $CrateName -TargetNewVersion $newVersion `
+                -TargetPackageName $PackageName -TargetNewVersion $newVersion `
                 -DepBump $depBump -BaseRef $BaseRef
             if ($null -ne $record) {
                 $releases += $record
@@ -1106,8 +1106,8 @@ function Show-PackageMenu {
 }
 
 # Builds the diff text for a single package, anchored at its last release
-# baseline (Get-CrateLastReleaseBaseline). When no baseline is found (e.g.
-# a never-released crate), falls back to `git diff HEAD` and prefixes the
+# baseline (Get-PackageLastReleaseBaseline). When no baseline is found (e.g.
+# a never-released package), falls back to `git diff HEAD` and prefixes the
 # diff with a warning header so the reader knows the anchor is not a true
 # prior release. Untracked files are appended as plain content blocks
 # (git diff itself does not include untracked content).
@@ -1120,7 +1120,7 @@ function Get-PackageDiffText {
     $sb = [System.Text.StringBuilder]::new()
     $relRoot = "crates/$Folder"
 
-    $baseline = Get-CrateLastReleaseBaseline -RepoRoot $RepoRoot -CrateFolder $Folder
+    $baseline = Get-PackageLastReleaseBaseline -RepoRoot $RepoRoot -PackageFolder $Folder
     if ([string]::IsNullOrWhiteSpace($baseline)) {
         [void]$sb.AppendLine("# Diff of '$Folder' (no prior version/publish baseline found - showing working tree vs HEAD)")
         [void]$sb.AppendLine('')
@@ -1347,11 +1347,11 @@ function Get-PackageReleaseDecision {
     }
 }
 
-# Scans for workspace crates with unreleased modifications (changes newer than the
-# crate's own last `version =` / `publish =` commit) that are transitively pulled in
+# Scans for workspace packages with unreleased modifications (changes newer than the
+# package's own last `version =` / `publish =` commit) that are transitively pulled in
 # by a release-set member but are not themselves part of the release set, prompting
 # the user (when interactive) to optionally release them too.
-# Newly-released crates are appended to the release records via [ref].
+# Newly-released packages are appended to the release records via [ref].
 #
 # CASCADE-ORGANIZATION INVARIANTS (see AGENTS.md "Release Dependency Scan"):
 #   A. Upstream cascades never introduce items to the user-review queue. A
@@ -1430,10 +1430,10 @@ function Invoke-PostReleaseDepScan {
         foreach ($f in $PreReviewedFolders) { [void]$reviewedReleaseSet.Add($f) }
     }
 
-    # Termination bound: number of published workspace crates. The dep graph is
+    # Termination bound: number of published workspace packages. The dep graph is
     # a DAG, so each iteration either grows ($declined ∪ release-set)
     # monotonically or terminates.
-    $maxIterations = @(Get-WorkspaceCrates -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
+    $maxIterations = @(Get-WorkspacePackages -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
     if ($maxIterations -lt 1) { $maxIterations = 1 }
 
     # Save/restore the temp-diff-paths tracking list so a re-entry into this
@@ -1456,7 +1456,7 @@ function Invoke-PostReleaseDepScan {
         $hasEverComputedQueue = $false
         for ($iter = 0; $iter -lt $maxIterations; $iter++) {
             if ($null -eq $queue) {
-                # Full recompute path: BFS over cargo metadata + per-crate
+                # Full recompute path: BFS over cargo metadata + per-package
                 # diffs. The session-scoped baseline / committed-changes /
                 # version-at-ref caches keep N×git calls down to a single
                 # warm-up burst on the first iteration; later recomputes
@@ -1506,7 +1506,7 @@ function Invoke-PostReleaseDepScan {
 
                 Write-Host ""
                 if ($notInReleaseSet.Count -gt 0) {
-                    Write-Host '⚠️  The following workspace crates have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
+                    Write-Host '⚠️  The following workspace packages have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
                     foreach ($finding in $notInReleaseSet) {
                         Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
                         Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
@@ -1516,7 +1516,7 @@ function Invoke-PostReleaseDepScan {
                     }
                 }
                 if ($inReleaseSet.Count -gt 0) {
-                    Write-Host '⚠️  The following workspace crates are being released as part of this PR with a non-breaking cascade-applied version bump, BUT also have pre-existing modifications that may warrant a higher bump (e.g. breaking). A reviewer should confirm the cascade-applied bump is sufficient:' -ForegroundColor Yellow
+                    Write-Host '⚠️  The following workspace packages are being released as part of this PR with a non-breaking cascade-applied version bump, BUT also have pre-existing modifications that may warrant a higher bump (e.g. breaking). A reviewer should confirm the cascade-applied bump is sufficient:' -ForegroundColor Yellow
                     foreach ($finding in $inReleaseSet) {
                         Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
                         Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
@@ -1525,7 +1525,7 @@ function Invoke-PostReleaseDepScan {
                         }
                     }
                 }
-                Write-Warning "Non-interactive session: leaving the above crates as-is. Reviewer should confirm the choices are appropriate."
+                Write-Warning "Non-interactive session: leaving the above packages as-is. Reviewer should confirm the choices are appropriate."
                 foreach ($finding in $queue) {
                     if ($finding.InReleaseSet) {
                         [void]$reviewedReleaseSet.Add($finding.Folder)
@@ -1558,10 +1558,10 @@ function Invoke-PostReleaseDepScan {
 
             Write-Host ""
             Write-Host "🚀 Releasing '$($next.Folder)' as $($decision.Action)..." -ForegroundColor Cyan
-            $nestedReleases = @(Invoke-ReleaseFlow -CrateName $next.Folder -Bump $decision.Action `
+            $nestedReleases = @(Invoke-ReleaseFlow -PackageName $next.Folder -Bump $decision.Action `
                 -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
 
-            # Merge nested release records into the running set. A crate may already
+            # Merge nested release records into the running set. A package may already
             # appear (e.g., it was a downstream cascade target of the initial release)
             # and the nested cascade may have upgraded it further — preserve the
             # original OldVersion (the pre-PR baseline) and adopt the latest NewVersion
@@ -1578,12 +1578,12 @@ function Invoke-PostReleaseDepScan {
                 # If cascade pulled in a package the user previously chose to ignore,
                 # surface that so they're not confused why it appears in the release
                 # summary, and update $declined to reflect reality.
-                if ($declined.Contains($r.Crate)) {
-                    Write-Host "ℹ️  Previously ignored package '$($r.Crate)' was cascade-bumped because '$($next.Folder)' was released." -ForegroundColor DarkCyan
-                    [void]$declined.Remove($r.Crate)
+                if ($declined.Contains($r.Package)) {
+                    Write-Host "ℹ️  Previously ignored package '$($r.Package)' was cascade-bumped because '$($next.Folder)' was released." -ForegroundColor DarkCyan
+                    [void]$declined.Remove($r.Package)
                 }
 
-                $existing = $ReleasesRef.Value | Where-Object { $_.Crate -eq $r.Crate } | Select-Object -First 1
+                $existing = $ReleasesRef.Value | Where-Object { $_.Package -eq $r.Package } | Select-Object -First 1
                 if ($null -eq $existing) {
                     $ReleasesRef.Value += $r
                 } else {
@@ -1599,7 +1599,7 @@ function Invoke-PostReleaseDepScan {
             [void]$reviewedReleaseSet.Add($next.Folder)
 
             # The cascade just edited Cargo.toml files; force a full BFS
-            # recompute next iteration so newly-bumped crates drop off the
+            # recompute next iteration so newly-bumped packages drop off the
             # findings list (and any of their committed-but-still-unreleased
             # transitive upstreams surface).
             $queue = $null
@@ -1687,7 +1687,7 @@ function Resolve-ReleaseSpecFromChange {
 function Invoke-ReleaseMain {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][string]$CrateName,
+        [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $false)][string]$Version,
         [Parameter(Mandatory = $false)][ValidateSet('Breaking', 'NonBreaking', 'Patch', '1.0')][string]$Change,
         [Parameter(Mandatory = $false)][string]$BaseRef = 'origin/main',
@@ -1695,8 +1695,8 @@ function Invoke-ReleaseMain {
     )
 
     # 1. INPUT VALIDATION
-    if (-not (Test-ValidCrateName -crateName $CrateName)) {
-        Write-Error "Invalid crate name '$CrateName'. Crate names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
+    if (-not (Test-ValidPackageName -packageName $PackageName)) {
+        Write-Error "Invalid package name '$PackageName'. Package names must contain only letters, numbers, hyphens, and underscores, cannot start or end with hyphen, and must be 64 characters or less."
         Exit 1
     }
 
@@ -1722,9 +1722,9 @@ function Invoke-ReleaseMain {
         Exit 1
     }
 
-    $crateFolder = Join-Path $repoRoot 'crates' $CrateName
-    if (-not (Test-Path $crateFolder)) {
-        Write-Error "Crate folder not found at '$crateFolder'. Please check the CrateName."
+    $packageFolder = Join-Path $repoRoot 'crates' $PackageName
+    if (-not (Test-Path $packageFolder)) {
+        Write-Error "Package folder not found at '$packageFolder'. Please check the PackageName."
         Exit 1
     }
 
@@ -1739,11 +1739,11 @@ function Invoke-ReleaseMain {
     }
 
     # 4. DEFINE FILE PATHS
-    $crateCargoToml = Join-Path $crateFolder "Cargo.toml"
+    $packageCargoToml = Join-Path $packageFolder "Cargo.toml"
     $rootCargoToml = Join-Path $repoRoot "Cargo.toml"
 
-    if ((-not (Test-Path $crateCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
-        Write-Error "Could not find Cargo.toml file in the crate folder or repository root."
+    if ((-not (Test-Path $packageCargoToml)) -or (-not (Test-Path $rootCargoToml))) {
+        Write-Error "Could not find Cargo.toml file in the package folder or repository root."
         Exit 1
     }
 
@@ -1787,7 +1787,7 @@ function Invoke-ReleaseMain {
     # downstream validation uses BaseVersion (not on-disk current) as the anchor
     # so this invocation is base-relative — mirroring Invoke-CascadeStep's
     # treatment of already-bumped dependents.
-    $primaryPending = $pendingReleases | Where-Object { $_.Folder -eq $CrateName } | Select-Object -First 1
+    $primaryPending = $pendingReleases | Where-Object { $_.Folder -eq $PackageName } | Select-Object -First 1
 
     # 7. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
     # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Patch / 1.0)
@@ -1805,7 +1805,7 @@ function Invoke-ReleaseMain {
         $versionForChangeCheck = if ($null -ne $primaryPending) {
             $primaryPending.BaseVersion
         } else {
-            Get-CurrentVersion -cargoTomlPath $crateCargoToml
+            Get-CurrentVersion -cargoTomlPath $packageCargoToml
         }
         if ($null -eq $versionForChangeCheck) {
             Write-Error "Failed to get current version for comparison. Aborting."
@@ -1833,7 +1833,7 @@ function Invoke-ReleaseMain {
         $versionAnchor = if ($null -ne $primaryPending) {
             $primaryPending.BaseVersion
         } else {
-            Get-CurrentVersion -cargoTomlPath $crateCargoToml
+            Get-CurrentVersion -cargoTomlPath $packageCargoToml
         }
         if ($null -eq $versionAnchor) {
             Write-Error "Failed to get current version for comparison. Aborting."
@@ -1854,10 +1854,10 @@ function Invoke-ReleaseMain {
         # This is what upholds Invariant A: any cascade-driven Cargo.toml /
         # CHANGELOG.md / README.md writes performed by Invoke-ReleaseFlow (or
         # by subsequent cascades inside Invoke-PostReleaseDepScan) would
-        # otherwise pollute Get-CratesWithUnreleasedChanges's working-tree
+        # otherwise pollute Get-PackagesWithUnreleasedChanges's working-tree
         # query and cause cascade-only targets to surface as findings.
         $preReleaseModifications = if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
-            Get-CratesWithUnreleasedChanges -RepoRoot $repoRoot.Path
+            Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
         } else { $null }
 
         # Cross-invocation deduplication: prior `release-crate.ps1` runs in
@@ -1868,13 +1868,13 @@ function Invoke-ReleaseMain {
         # post-release scan doesn't re-prompt for them. The primary target
         # of THIS run is also pre-marked — the user has just chosen
         # `-Change <kind>` for it; re-asking would be redundant.
-        $preReviewedFolders = @($pendingReleases | Where-Object { $_.Folder -ne $CrateName } | ForEach-Object { $_.Folder }) + @($CrateName)
+        $preReviewedFolders = @($pendingReleases | Where-Object { $_.Folder -ne $PackageName } | ForEach-Object { $_.Folder }) + @($PackageName)
 
-        $releases = @(Invoke-ReleaseFlow -CrateName $CrateName -Version $Version -Bump $bump `
+        $releases = @(Invoke-ReleaseFlow -PackageName $PackageName -Version $Version -Bump $bump `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
 
         # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released
-        # crates are appended to $releases via the [ref].
+        # packages are appended to $releases via the [ref].
         Invoke-PostReleaseDepScan -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef `
             -ReleasesRef ([ref]$releases) -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl `
             -NonInteractive:$NonInteractive `
@@ -1884,7 +1884,7 @@ function Invoke-ReleaseMain {
         Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
 
         Show-ReleaseSummary -releases $releases
-        Show-FinalMessage -CrateName $CrateName -Releases $releases
+        Show-FinalMessage -PackageName $PackageName -Releases $releases
 
         return ,$releases
     }

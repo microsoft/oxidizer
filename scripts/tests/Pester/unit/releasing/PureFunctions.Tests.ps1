@@ -163,83 +163,83 @@ Describe 'Test-ValidVersion' {
     }
 }
 
-Describe 'Test-ValidCrateName' {
+Describe 'Test-ValidPackageName' {
     It 'accepts simple alpha names' {
-        Test-ValidCrateName -crateName 'foo'   | Should -BeTrue
-        Test-ValidCrateName -crateName 'foo_bar' | Should -BeTrue
-        Test-ValidCrateName -crateName 'foo-bar' | Should -BeTrue
+        Test-ValidPackageName -packageName 'foo'   | Should -BeTrue
+        Test-ValidPackageName -packageName 'foo_bar' | Should -BeTrue
+        Test-ValidPackageName -packageName 'foo-bar' | Should -BeTrue
     }
 
     It 'accepts digits inside' {
-        Test-ValidCrateName -crateName 'crate1' | Should -BeTrue
-        Test-ValidCrateName -crateName '1crate' | Should -BeTrue
+        Test-ValidPackageName -packageName 'crate1' | Should -BeTrue
+        Test-ValidPackageName -packageName '1crate' | Should -BeTrue
     }
 
     It 'rejects empty and overly long names' {
-        Test-ValidCrateName -crateName '' | Should -BeFalse
-        Test-ValidCrateName -crateName ('a' * 65) | Should -BeFalse
+        Test-ValidPackageName -packageName '' | Should -BeFalse
+        Test-ValidPackageName -packageName ('a' * 65) | Should -BeFalse
     }
 
     It 'rejects edge underscores/hyphens' {
-        Test-ValidCrateName -crateName '-foo' | Should -BeFalse
-        Test-ValidCrateName -crateName 'foo-' | Should -BeFalse
+        Test-ValidPackageName -packageName '-foo' | Should -BeFalse
+        Test-ValidPackageName -packageName 'foo-' | Should -BeFalse
     }
 
     It 'rejects whitespace and special chars' {
-        Test-ValidCrateName -crateName 'foo bar' | Should -BeFalse
-        Test-ValidCrateName -crateName 'foo.bar' | Should -BeFalse
-        Test-ValidCrateName -crateName 'foo/bar' | Should -BeFalse
+        Test-ValidPackageName -packageName 'foo bar' | Should -BeFalse
+        Test-ValidPackageName -packageName 'foo.bar' | Should -BeFalse
+        Test-ValidPackageName -packageName 'foo/bar' | Should -BeFalse
     }
 }
 
-Describe 'Test-CrateExposesTarget' {
+Describe 'Test-PackageExposesTarget' {
     It 'returns true when no allowed_external_types declared (conservative default)' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = $null }
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
     }
 
     It 'returns true when target appears as a root in allowed_external_types' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('foo::*', 'bar::Baz') }
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'bar' | Should -BeTrue
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'bar' | Should -BeTrue
     }
 
     It 'returns false when target is not in allowed_external_types' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('std::*') }
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
     }
 
     It 'normalizes hyphens to underscores when matching' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = @('my_crate::*') }
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'my-crate' | Should -BeTrue
+        $dep = [pscustomobject]@{ AllowedExternalTypes = @('my_package::*') }
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'my-package' | Should -BeTrue
     }
 
     It 'matches whole-root only, not prefix' {
         $dep = [pscustomobject]@{ AllowedExternalTypes = @('foobar::*') }
-        Test-CrateExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
+        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
     }
 }
 
-Describe 'Get-CrateFolderForPath' {
-    It 'returns crate folder for files under crates/<x>/' {
-        Get-CrateFolderForPath -Path 'crates/foo/src/lib.rs' | Should -Be 'foo'
-        Get-CrateFolderForPath -Path 'crates/foo/Cargo.toml' | Should -Be 'foo'
-        Get-CrateFolderForPath -Path 'crates/my_crate/sub/deeper.rs' | Should -Be 'my_crate'
+Describe 'Get-PackageFolderForPath' {
+    It 'returns package folder for files under crates/<x>/' {
+        Get-PackageFolderForPath -Path 'crates/foo/src/lib.rs' | Should -Be 'foo'
+        Get-PackageFolderForPath -Path 'crates/foo/Cargo.toml' | Should -Be 'foo'
+        Get-PackageFolderForPath -Path 'crates/my_crate/sub/deeper.rs' | Should -Be 'my_crate'
     }
 
     It 'handles Windows-style separators' {
-        Get-CrateFolderForPath -Path 'crates\foo\src\lib.rs' | Should -Be 'foo'
+        Get-PackageFolderForPath -Path 'crates\foo\src\lib.rs' | Should -Be 'foo'
     }
 
     It 'returns null for paths outside crates/' {
-        Get-CrateFolderForPath -Path 'scripts/release-crate.ps1' | Should -BeNullOrEmpty
-        Get-CrateFolderForPath -Path 'Cargo.toml' | Should -BeNullOrEmpty
-        Get-CrateFolderForPath -Path 'README.md' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'scripts/release-crate.ps1' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'Cargo.toml' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'README.md' | Should -BeNullOrEmpty
     }
 
     It 'returns null for crates/ root itself' {
-        Get-CrateFolderForPath -Path 'crates' | Should -BeNullOrEmpty
-        Get-CrateFolderForPath -Path 'crates/' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'crates' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'crates/' | Should -BeNullOrEmpty
     }
 }
 

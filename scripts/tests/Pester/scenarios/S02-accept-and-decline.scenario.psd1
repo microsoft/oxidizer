@@ -1,17 +1,17 @@
 @{
     Name        = 'S02-accept-and-decline'
-    Description = 'Linear3 with both upstream crates modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
+    Description = 'Linear3 with both upstream packages modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'b' }
-        @{ Op = 'ModifySource'; Crate = 'c' }
+        @{ Op = 'ModifySource'; Package = 'b' }
+        @{ Op = 'ModifySource'; Package = 'c' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'a'
+        PackageName = 'a'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -26,8 +26,8 @@
         # to a requires 0.1.1 which a already satisfies (from the initial patch),
         # so a stays at 0.1.1 (bullet-only).
         Released = @(
-            @{ Crate = 'a'; To = '0.1.1' }
-            @{ Crate = 'b'; To = '0.2.1' }
+            @{ Package = 'a'; To = '0.1.1' }
+            @{ Package = 'b'; To = '0.2.1' }
         )
         PromptsRaised = @(
             "Choose option for 'b'"

@@ -4,7 +4,7 @@
 
     Workspace = @{
         Spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -14,14 +14,14 @@
     History = @(
         # Prior `release-crate.ps1 -Change NonBreaking` on upstream left it
         # pending at 1.3.0 (a minor bump).
-        @{ Op = 'BumpVersion'; Crate = 'upstream'; To = '1.3.0' }
+        @{ Op = 'BumpVersion'; Package = 'upstream'; To = '1.3.0' }
     )
 
     Run = @{
         # User re-invokes with a WEAKER intent (Patch). The script must NOT
         # downgrade the effective cascade strength: dependents must still
         # receive the bump the on-disk state requires.
-        CrateName = 'upstream'
+        PackageName = 'upstream'
         Change    = 'Patch'
         BaseRef   = 'HEAD'
         Answers   = @()
@@ -34,8 +34,8 @@
         # which would NOT have happened if the cascade had used the requested
         # -Change Patch (that would have given 1.0.1 instead).
         Released = @(
-            @{ Crate = 'upstream';   To = '1.3.0' }
-            @{ Crate = 'downstream'; To = '1.1.0' }
+            @{ Package = 'upstream';   To = '1.3.0' }
+            @{ Package = 'downstream'; To = '1.1.0' }
         )
         UnconsumedAnswers = @()
     }

@@ -4,7 +4,7 @@
 
     Workspace = @{
         Spec = @{
-            Crates = @(
+            Packages = @(
                 @{ Name = 'downstream'; Version = '1.0.0'; Deps = @(@{ Name = 'upstream' }) }
                 @{ Name = 'upstream';   Version = '1.2.3' }
             )
@@ -12,12 +12,12 @@
     }
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'upstream' }
+        @{ Op = 'ModifySource'; Package = 'upstream' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )
 
     Run = @{
-        CrateName = 'downstream'
+        PackageName = 'downstream'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -36,8 +36,8 @@
         # logic in Invoke-ReleaseFlow).
         # upstream: 1.2.3 -> 1.3.0 (minor; option 5 would have given 1.2.4).
         Released = @(
-            @{ Crate = 'downstream'; To = '1.1.0' }
-            @{ Crate = 'upstream';   To = '1.3.0' }
+            @{ Package = 'downstream'; To = '1.1.0' }
+            @{ Package = 'upstream';   To = '1.3.0' }
         )
         PromptsRaised = @(
             "Choose option for 'upstream' [1-5]"

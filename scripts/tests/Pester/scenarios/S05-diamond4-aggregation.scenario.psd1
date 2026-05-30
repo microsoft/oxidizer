@@ -5,12 +5,12 @@
     Workspace = @{ Preset = 'Diamond4' }
 
     History = @(
-        @{ Op = 'ModifySource'; Crate = 'bottom' }
+        @{ Op = 'ModifySource'; Package = 'bottom' }
         @{ Op = 'AddCommit';    Message = 'bottom edits' }
     )
 
     Run = @{
-        CrateName = 'top'
+        PackageName = 'top'
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
@@ -25,10 +25,10 @@
         # top is bumped per request, bottom is released via the prompt, and bottom's
         # cascade pulls in its dependents (left, right). top is in release set already.
         Released = @(
-            @{ Crate = 'top';    To = '0.1.1' }
-            @{ Crate = 'bottom'; To = '0.4.1' }
-            @{ Crate = 'left';   To = '0.2.1' }
-            @{ Crate = 'right';  To = '0.3.1' }
+            @{ Package = 'top';    To = '0.1.1' }
+            @{ Package = 'bottom'; To = '0.4.1' }
+            @{ Package = 'left';   To = '0.2.1' }
+            @{ Package = 'right';  To = '0.3.1' }
         )
         PromptsRaised = @(
             "Choose option for 'bottom'"
