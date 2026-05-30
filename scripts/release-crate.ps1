@@ -32,8 +32,10 @@
     By default, if neither --version nor --change is specified, the script performs a NonBreaking
     release of the target package (e.g., 1.2.3 -> 1.3.0, or 0.3.3 -> 0.3.4 for `0.x.y` packages).
 
-.PARAMETER PackageName
-    The name of the package to release. This should match the folder name inside the 'crates' directory.
+.PARAMETER Name
+    The name of the package to release. This should match the folder name inside the 'crates'
+    directory. The aliases `-CrateName` and `-PackageName` are accepted for backward compatibility
+    with prior iterations of this script.
 
 .PARAMETER Version
     [Optional] The specific version to set (e.g., "1.2.3"). Can be specified with --version or -v.
@@ -78,7 +80,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [string]$PackageName,
+    [Alias('CrateName', 'PackageName')]
+    [string]$Name,
 
     [Parameter(Mandatory = $false)]
     [Alias('v')]
@@ -110,4 +113,4 @@ param(
 # transitively, so consumers only need this one import.
 . "$PSScriptRoot/lib/release-flow.ps1"
 
-Invoke-ReleaseMain -PackageName $PackageName -Version $Version -Change $Change -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
+Invoke-ReleaseMain -PackageName $Name -Version $Version -Change $Change -BaseRef $BaseRef -NonInteractive:$NonInteractive | Out-Null
