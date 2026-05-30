@@ -163,6 +163,12 @@ where
             moka_builder = moka_builder.name(name);
         }
 
+        if let Some(listener) = builder.eviction_listener {
+            moka_builder = moka_builder.eviction_listener(move |_key, _value, cause| {
+                listener(crate::notification::from_moka(cause));
+            });
+        }
+
         Self {
             inner: Arc::from_unaware(
                 moka_builder

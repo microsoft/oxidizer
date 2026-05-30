@@ -198,7 +198,7 @@ and servers based on [`hyper`][__link16] like [`reqwest`][__link17].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG63iTBJYMadJG6nseEEoATCvG3YJS_EajemqG70n7pjeggIrYWSCgmRodHRwZTEuNC4wgm10ZW1wbGF0ZWRfdXJpZTAuMi4x
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG63iTBJYMadJG6nseEEoATCvG3YJS_EajemqG70n7pjeggIrYWSCgmRodHRwZTEuNC4xgm10ZW1wbGF0ZWRfdXJpZTAuMi4x
  [__link0]: https://docs.rs/templated_uri/0.2.1/templated_uri/?search=Uri
  [__link1]: https://docs.rs/templated_uri/0.2.1/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.2.1/templated_uri/?search=Escape
@@ -206,7 +206,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link12]: https://datatracker.ietf.org/doc/html/rfc6570#section-2.3
  [__link13]: https://docs.rs/http/latest/http/
  [__link14]: https://docs.rs/templated_uri/0.2.1/templated_uri/?search=Uri
- [__link15]: https://docs.rs/http/1.4.0/http/?search=Uri
+ [__link15]: https://docs.rs/http/1.4.1/http/?search=Uri
  [__link16]: https://docs.rs/hyper/latest/hyper/
  [__link17]: https://docs.rs/reqwest/latest/reqwest/
  [__link2]: https://docs.rs/templated_uri/0.2.1/templated_uri/?search=BaseUri
