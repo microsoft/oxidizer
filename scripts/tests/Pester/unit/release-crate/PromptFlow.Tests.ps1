@@ -6,6 +6,43 @@
 # scripts/lib/release-flow.ps1 and are deliberately split so the pure
 # formatting layer can be asserted on without capturing host streams and the
 # IO/IO-adjacent layer can be exercised with mocks.
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ Pester mock pitfall (DO NOT use `,@(...)` to wrap arrays in mocks)      │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ When mocking a function whose output is consumed via the pattern        │
+# │     $queue = @( @(SomeFunc ...) | Where-Object { ... } )                │
+# │ (see release-flow.ps1's Invoke-PostReleaseDepScan), the leading-comma   │
+# │ wrapping idiom                                                          │
+# │     Mock SomeFunc -MockWith {                                           │
+# │         ,@(  item1, item2, item3  )       # <-- WRONG                   │
+# │     }                                                                   │
+# │ does NOT do what it looks like. PowerShell emits the inner @() as a    │
+# │ single object on the pipeline (the comma forces it). The outer @() of  │
+# │ the consumer then collects 1 pipeline output (the inner array), so    │
+# │ $queue.Count == 1 instead of N, and $queue[0] is the inner array — not │
+# │ a finding. Member-enumeration on the fused element ($queue[0].Folder)  │
+# │ returns the space-joined property values ('a b c'), which often looks  │
+# │ "right" enough to pass weak substring assertions but causes the loop   │
+# │ to execute only one iteration instead of N.                            │
+# │                                                                         │
+# │ ALWAYS emit items directly:                                            │
+# │     Mock SomeFunc -MockWith {                                           │
+# │         [pscustomobject]@{ Folder = 'a'; ... }      # <-- correct       │
+# │         [pscustomobject]@{ Folder = 'b'; ... }                          │
+# │         [pscustomobject]@{ Folder = 'c'; ... }                          │
+# │     }                                                                   │
+# │ The pipeline naturally streams each, the consumer's @() collects them │
+# │ into an N-element array, and $queue[0] is the first finding object.   │
+# │                                                                         │
+# │ (Exception: `@(,@('a', 'b'))` for DependencyChains is legitimate —     │
+# │ that builds an array-of-arrays where each element is a chain.)         │
+# │                                                                         │
+# │ History: this pattern was already removed from Get-WorkspaceCrates     │
+# │ mocks in commit 53948dc0 after it silently capped maxIterations to 1; │
+# │ a second pass cleaned up the same idiom in                             │
+# │ Get-UnreleasedModifiedDependencies mocks.                              │
+# └─────────────────────────────────────────────────────────────────────────┘
 
 BeforeAll {
     . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
@@ -635,35 +672,42 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
 
     BeforeEach {
         Reset-ReleaseScriptCaches
-        # Mock the workspace so the maxIterations cap allows several iters.
+        # Mock the workspace with FOUR published crates so maxIterations=4.
+        # The loop needs 3 iterations to consume the 3 ignore decisions and
+        # a 4th to detect the empty cheap-path queue and return cleanly
+        # without hitting the iteration cap warning.
         Mock -CommandName Get-WorkspaceCrates -MockWith {
             [pscustomobject]@{ Folder = 'a'; Name = 'a'; Published = $true }
             [pscustomobject]@{ Folder = 'b'; Name = 'b'; Published = $true }
             [pscustomobject]@{ Folder = 'c'; Name = 'c'; Published = $true }
+            [pscustomobject]@{ Folder = 'd'; Name = 'd'; Published = $true }
         }
         Mock -CommandName Invalidate-WorkspaceMetadataCache -MockWith { }
         Mock -CommandName Test-InteractiveSession -MockWith { $true }
 
         # Each call to Get-UnreleasedModifiedDependencies returns the same three
-        # findings; the test verifies the function is invoked at most ONCE
-        # across two successive 'ignore' decisions (the second iteration
-        # filters the cached queue without re-running the BFS).
+        # findings; the test verifies the function is invoked exactly ONCE
+        # across three successive 'ignore' decisions (iters 2 and 3 filter
+        # the cached queue without re-running the BFS).
+        #
+        # IMPORTANT: emit findings directly (one per line) — see the
+        # `,@(...)` pitfall comment block at the top of this file.
         $script:depsCallCount = 0
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
             $script:depsCallCount++
-            ,@(
-                [pscustomobject]@{ Folder = 'a'; DependencyChains = @(,@('a')) }
-                [pscustomobject]@{ Folder = 'b'; DependencyChains = @(,@('b')) }
-                [pscustomobject]@{ Folder = 'c'; DependencyChains = @(,@('c')) }
-            )
+            [pscustomobject]@{ Folder = 'a'; DependencyChains = @(,@('a')) }
+            [pscustomobject]@{ Folder = 'b'; DependencyChains = @(,@('b')) }
+            [pscustomobject]@{ Folder = 'c'; DependencyChains = @(,@('c')) }
         }
 
-        # Drive the menu via Read-Host: two 'ignore' choices then a third
-        # 'ignore' so the loop exhausts every finding without releasing
-        # anything (releases would force a recompute).
+        # Drive the menu via Read-Host: three 'ignore' choices so the loop
+        # exhausts every finding without releasing anything (releases would
+        # force a recompute).
         $script:readHostQueue = @('2', '2', '2')
         $script:readHostIdx = 0
+        $script:readHostCallCount = 0
         Mock -CommandName Read-Host -MockWith {
+            $script:readHostCallCount++
             $r = $script:readHostQueue[$script:readHostIdx]
             $script:readHostIdx++
             return $r
@@ -678,8 +722,13 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
                 -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml')
         } 6>$null
-        # 3 ignore decisions → 1 BFS call (initial) + filter-only on iter 2 and 3.
-        $script:depsCallCount | Should -Be 1
+        # 3 ignore decisions → 1 BFS call (initial) + filter-only on iter 2, 3, 4.
+        $script:depsCallCount    | Should -Be 1
+        # Sanity: confirm the loop actually did 3 ignore decisions, not 1.
+        # (If the BFS mock ever regresses to a `,@(...)` wrap, the queue
+        # would collapse to a single faux finding and Read-Host would be
+        # called only once.)
+        $script:readHostCallCount | Should -Be 3
     }
 
     It 'emits the "Analyzing packages..." status line only on iterations that recompute' {
@@ -719,18 +768,18 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # The BFS always returns one finding (release-set member 'b'). After
         # the first 'ignore' the loop should NOT prompt for 'b' again.
         $script:depsCallCount = 0
+        # IMPORTANT: emit findings directly — see the `,@(...)` pitfall
+        # comment block at the top of this file.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
             $script:depsCallCount++
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'b'
-                    PackageName      = 'b'
-                    CurrentVersion   = '0.2.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'b'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'b'
+                PackageName      = 'b'
+                CurrentVersion   = '0.2.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'b'))
+            }
         }
 
         $script:readHostCalls = 0
@@ -753,16 +802,14 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
     It "logs the 'Keeping ... at its current cascade-applied version' message on ignore for a release-set member" {
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'b'
-                    PackageName      = 'b'
-                    CurrentVersion   = '0.2.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'b'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'b'
+                PackageName      = 'b'
+                CurrentVersion   = '0.2.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'b'))
+            }
         }
         Mock -CommandName Read-Host -MockWith { return '2' }
 
@@ -779,16 +826,14 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # the classic "Leaving ... unreleased" wording and add to $declined,
         # not to $reviewedReleaseSet.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'b'
-                    PackageName      = 'b'
-                    CurrentVersion   = '0.2.0'
-                    InReleaseSet     = $false
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'b'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'b'
+                PackageName      = 'b'
+                CurrentVersion   = '0.2.0'
+                InReleaseSet     = $false
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'b'))
+            }
         }
         Mock -CommandName Read-Host -MockWith { return '2' }
 
@@ -806,16 +851,14 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # prior invocation), but the caller passes PreReviewedFolders=@('b'),
         # so the loop must skip 'b' without prompting.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'b'
-                    PackageName      = 'b'
-                    CurrentVersion   = '0.2.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'b'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'b'
+                PackageName      = 'b'
+                CurrentVersion   = '0.2.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'b'))
+            }
         }
         $script:readHostCalls = 0
         Mock -CommandName Read-Host -MockWith {
@@ -840,16 +883,14 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # bump). Per Invariant B, the BFS surfaces 'a' as an elevation
         # candidate and the loop MUST prompt for it.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'a'
-                    PackageName      = 'a'
-                    CurrentVersion   = '0.3.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 2
-                    DependencyChains = @(,@('b', 'a'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'a'
+                PackageName      = 'a'
+                CurrentVersion   = '0.3.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 2
+                DependencyChains = @(,@('b', 'a'))
+            }
         }
         $script:readHostCalls = 0
         Mock -CommandName Read-Host -MockWith {
@@ -877,16 +918,14 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # The loop MUST prompt for 'a' — proving that the old "pre-mark every
         # initial ReleasesRef entry" behavior is gone.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'a'
-                    PackageName      = 'a'
-                    CurrentVersion   = '0.3.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 2
-                    DependencyChains = @(,@('b', 'a'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'a'
+                PackageName      = 'a'
+                CurrentVersion   = '0.3.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 2
+                DependencyChains = @(,@('b', 'a'))
+            }
         }
         $script:promptForA = $false
         Mock -CommandName Read-Host -MockWith {
@@ -938,33 +977,30 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
             if ($script:bfsCallCount -eq 1) {
                 # Initial scan: 'b' is a fresh upstream finding (not in
                 # release set, modified).
-                ,@(
-                    [pscustomobject]@{
-                        Folder           = 'b'
-                        PackageName      = 'b'
-                        CurrentVersion   = '0.4.0'
-                        InReleaseSet     = $false
-                        ChangedFileCount = 1
-                        DependencyChains = @(,@('c', 'b'))
-                    }
-                )
+                [pscustomobject]@{
+                    Folder           = 'b'
+                    PackageName      = 'b'
+                    CurrentVersion   = '0.4.0'
+                    InReleaseSet     = $false
+                    ChangedFileCount = 1
+                    DependencyChains = @(,@('c', 'b'))
+                }
             } elseif ($script:bfsCallCount -eq 2) {
                 # After accepting 'b': cascade pulled 'a' into release set
                 # with non-breaking bump. 'a' is modified too → Invariant B
                 # candidate. Per fix, 'a' must NOT be pre-filtered.
-                ,@(
-                    [pscustomobject]@{
-                        Folder           = 'a'
-                        PackageName      = 'a'
-                        CurrentVersion   = '0.3.1'
-                        InReleaseSet     = $true
-                        ChangedFileCount = 2
-                        DependencyChains = @(,@('b', 'a'))
-                    }
-                )
-            } else {
-                ,@()
+                [pscustomobject]@{
+                    Folder           = 'a'
+                    PackageName      = 'a'
+                    CurrentVersion   = '0.3.1'
+                    InReleaseSet     = $true
+                    ChangedFileCount = 2
+                    DependencyChains = @(,@('b', 'a'))
+                }
             }
+            # else: no output → empty findings list (defensive; shouldn't be
+            # reached because the cheap-path filters the queue empty after
+            # ignoring 'a').
         }
 
         # Mock Invoke-ReleaseFlow to simulate cascade pulling in 'a' alongside 'b'.
@@ -1000,39 +1036,53 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
     It 'in non-interactive mode, adds release-set findings to reviewedReleaseSet (not $declined)' {
         # The bulk-list path must keep the InReleaseSet vs not distinction so
-        # the right post-scan bookkeeping happens for each finding.
+        # the right post-scan bookkeeping happens for each finding, AND each
+        # finding must be rendered as its own bullet (regression guard against
+        # the `,@(...)` mock pitfall that fuses N findings into a single
+        # "Frankenstein" finding whose `.Folder` is the space-joined string of
+        # all folder names — see comment block at the top of this file).
         Mock -CommandName Test-InteractiveSession -MockWith { $false }
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
-            ,@(
-                [pscustomobject]@{
-                    Folder           = 'b'
-                    PackageName      = 'b'
-                    CurrentVersion   = '0.2.1'
-                    InReleaseSet     = $true
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'b'))
-                }
-                [pscustomobject]@{
-                    Folder           = 'd'
-                    PackageName      = 'd'
-                    CurrentVersion   = '0.4.0'
-                    InReleaseSet     = $false
-                    ChangedFileCount = 1
-                    DependencyChains = @(,@('c', 'd'))
-                }
-            )
+            [pscustomobject]@{
+                Folder           = 'b'
+                PackageName      = 'b'
+                CurrentVersion   = '0.2.1'
+                InReleaseSet     = $true
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'b'))
+            }
+            [pscustomobject]@{
+                Folder           = 'd'
+                PackageName      = 'd'
+                CurrentVersion   = '0.4.0'
+                InReleaseSet     = $false
+                ChangedFileCount = 1
+                DependencyChains = @(,@('c', 'd'))
+            }
         }
         Mock -CommandName Read-Host -MockWith { throw "Read-Host should not be called in non-interactive mode" }
 
         $releases = @()
-        & {
+        $out = & {
             Invoke-PostReleaseDepScan -RepoRoot $TestDrive -BaseRef 'origin/main' `
                 -ReleasesRef ([ref]$releases) -RootCargoToml (Join-Path $TestDrive 'Cargo.toml') `
                 -NonInteractive
-        } 6>$null 3>$null
+        } 6>&1 3>&1
+        $text = ($out | Out-String)
+
         # No exception → Read-Host was never invoked → the non-interactive
         # path was actually taken.
-        $true | Should -BeTrue
+        # Each finding must appear as its own bullet. A single fused bullet
+        # ('• b d') would indicate the BFS mock collapsed both findings into
+        # one element via the `,@(...)` pitfall.
+        $text | Should -Match '(?m)^\s*•\s+b\s*$'
+        $text | Should -Match '(?m)^\s*•\s+d\s*$'
+        $text | Should -Not -Match '•\s+b\s+d'
+
+        # Each group's header must be emitted (proving both InReleaseSet and
+        # non-InReleaseSet findings reached their respective branches).
+        $text | Should -Match 'are NOT part of this release'
+        $text | Should -Match 'cascade-applied version bump'
     }
 }
 
