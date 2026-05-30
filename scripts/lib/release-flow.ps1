@@ -590,6 +590,13 @@ function Add-CascadeBulletToVersionSection {
     $bullet        = "  - Now requires ``$targetVersion`` of ``$targetName``"
 
     $lines = @(Get-Content -LiteralPath $ChangelogFile)
+    # Capture trailing-newline status from the raw bytes — Get-Content above
+    # invisibly strips the file's final terminator, so a $lines[-1] -eq ''
+    # check would only fire when the file ends with TWO newlines (a blank
+    # trailing line). The normal CHANGELOG.md shape — one trailing '\n' — would
+    # otherwise be silently flattened on every cascade write.
+    $rawForEol = [System.IO.File]::ReadAllText($ChangelogFile)
+    $hadTrailingNewline = $rawForEol.EndsWith("`n") -or $rawForEol.EndsWith("`r`n")
     $escapedVersion = $script:RegexEscapeRegex.Replace($Version, '\$1')
     $sectionStart = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -671,7 +678,6 @@ function Add-CascadeBulletToVersionSection {
     # Windows), which produces noisy whole-file diffs in LF-normalized repos and
     # mixed endings in repos that genuinely use CRLF.
     $eol = Get-FileLineEnding -Path $ChangelogFile
-    $hadTrailingNewline = ($lines.Count -gt 0) -and ($lines[-1] -eq '')
     $body = ($new -join $eol)
     if ($hadTrailingNewline -and -not $body.EndsWith($eol)) { $body += $eol }
     Set-Content -LiteralPath $ChangelogFile -Value $body -NoNewline -Encoding utf8

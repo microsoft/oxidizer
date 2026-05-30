@@ -443,6 +443,47 @@ Describe 'Add-CascadeBulletToVersionSection' {
         $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
     }
 
+    It 'preserves a single trailing newline (the normal shape produced by Write-Changelog)' {
+        # Regression: an earlier implementation read the file with `Get-Content`
+        # (no -Raw), which strips the final terminator invisibly, then checked
+        # `$lines[-1] -eq ''`. That only matched files ending with two newlines
+        # (a blank trailing line). For the common case of a single trailing
+        # `\n` the check returned $false and Set-Content -NoNewline silently
+        # dropped the final newline on every cascade write.
+        $path = Join-Path $TestDrive ('cascade-single-nl-' + [guid]::NewGuid().Guid.Substring(0,8) + '.md')
+        [System.IO.File]::WriteAllText($path, "# Changelog`n`n## [0.2.0] - 2025-01-01`n`n- ✨ Features`n  - thing`n")
+        Add-CascadeBulletToVersionSection -ChangelogFile $path -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $raw = [System.IO.File]::ReadAllText($path)
+        $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $raw.EndsWith("`n") | Should -BeTrue -Because 'the input ended with a single newline; the cascade write must not strip it'
+    }
+
+    It 'preserves a single trailing CRLF (Windows single-terminator shape)' {
+        $path = Join-Path $TestDrive ('cascade-single-crlf-' + [guid]::NewGuid().Guid.Substring(0,8) + '.md')
+        [System.IO.File]::WriteAllText($path, "# Changelog`r`n`r`n## [0.2.0] - 2025-01-01`r`n`r`n- ✨ Features`r`n  - thing`r`n")
+        Add-CascadeBulletToVersionSection -ChangelogFile $path -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $raw = [System.IO.File]::ReadAllText($path)
+        $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $raw.EndsWith("`r`n") | Should -BeTrue -Because 'CRLF single-terminator must round-trip cleanly'
+    }
+
+    It 'leaves a file without a trailing newline without adding one (round-trip)' {
+        # The reverse case: if the input has NO trailing newline, the cascade
+        # write must not synthesize one.
+        $path = Join-Path $TestDrive ('cascade-no-nl-' + [guid]::NewGuid().Guid.Substring(0,8) + '.md')
+        [System.IO.File]::WriteAllText($path, "# Changelog`n`n## [0.2.0] - 2025-01-01`n`n- ✨ Features`n  - thing")
+        Add-CascadeBulletToVersionSection -ChangelogFile $path -Version '0.2.0' -CascadeReason @{
+            Target = 'depcrate'; Version = '0.3.0'; Breaking = $false
+        }
+        $raw = [System.IO.File]::ReadAllText($path)
+        $raw | Should -Match 'Now requires `0\.3\.0` of `depcrate`'
+        $raw.EndsWith("`n") | Should -BeFalse -Because 'no trailing newline in input must mean no trailing newline in output'
+    }
+
     # --- dedup behavior: escalations re-fire the cascade with a HIGHER target
     # version (and sometimes a different breaking/maintenance classification).
     # Without the dedup, the section would accumulate stale bullets citing the
