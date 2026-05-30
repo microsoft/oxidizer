@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1]
+
+- ✨ Features
+
+  - Add `InMemoryCacheBuilder::on_eviction` for observing entry removals, along with the new public [`RemovalCause`] enum.
+  - Add `InMemoryCacheBuilder::with_eviction_telemetry` as a marker for the `cachet` host crate to install built-in eviction telemetry via `CacheBuilder::memory_with`.
+
 ## [0.2.0] - 2026-05-19
 
 - ✔️ Tasks

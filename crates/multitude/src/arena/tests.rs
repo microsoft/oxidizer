@@ -329,6 +329,27 @@ fn alloc_slice_local_with_or_panic_no_drop_fn_does_not_reserve_drop_entry() {
     );
 }
 
+/// Kills `inner_slice.rs:975:47 && -> ||` mutant in `try_alloc_slice_shared_with`.
+/// With the mutation `drop_fn.is_some() || len != 0`, an empty slice of a Drop
+/// type would erroneously reserve a drop entry. Verify `drop_back` stays put.
+#[test]
+fn alloc_slice_shared_with_or_panic_empty_drop_type_does_not_reserve_drop_entry() {
+    let arena = Arena::<Global>::new();
+    let _ = arena.alloc_arc(0_u32);
+    let drop_back_before = arena.current_shared.drop_back.get();
+    let raw = arena.alloc_slice_shared_with_or_panic::<u8, _>(0, Some(noop_drop_shim), |_, slot| {
+        slot.write(0);
+    });
+    let drop_back_after = arena.current_shared.drop_back.get();
+    // SAFETY: `raw` was just returned by the shared slice allocator which
+    // bumped the chunk's smart-pointer refcount by 1 for us.
+    let _arc: crate::Arc<[u8], Global> = unsafe { crate::Arc::from_value_ptr(raw) };
+    assert_eq!(
+        drop_back_before, drop_back_after,
+        "drop_back must not retreat for empty slice even with drop_fn"
+    );
+}
+
 /// Kills `arena.rs:3603:47 && -> ||` mutant — shared-flavor sibling of
 /// the previous test.
 #[test]

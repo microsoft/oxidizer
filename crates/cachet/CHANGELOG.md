@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1] - 2026-05-21
+
+- ✨ Features
+
+  - Add `get_or_insert_with` and `try_get_or_insert_with` methods that accept closures returning `CacheEntry<V>`, enabling per-entry TTL control on cache-miss computations.
+  - Add eviction telemetry via `cache.eviction` and `cache.expired`, opt-in through `InMemoryCacheBuilder::with_eviction_telemetry` together with the new `CacheBuilder::memory_with` helper.
+
 ## [0.5.0] - 2026-05-19
 
 - ✔️ Tasks

@@ -1,26 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise allocation benchmarks for multitude.
-//!
-//! Mirrors `benches/criterion_alloc.rs` 1:1: each gungraun function
-//! `<group>_<variant>` corresponds to a criterion benchmark
-//! `<group>/<variant>`.
-//!
-//! Run with `cargo bench --bench gungraun_alloc` on a Linux host with Valgrind.
-
-#![expect(missing_docs, reason = "Benchmark")]
-#![allow(unused_results, reason = "black_box of bench input is intentional")]
-#![allow(
-    clippy::needless_pass_by_value,
-    reason = "gungraun bench inputs are passed by value by the framework"
-)]
-#![allow(clippy::ref_as_ptr, reason = "trivial pointer cast in bench plumbing")]
-#![allow(clippy::too_many_lines, reason = "benchmark file")]
-
 use core::hint::black_box;
 
-use gungraun::{Callgrind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
+use gungraun::{library_benchmark, library_benchmark_group};
 use multitude::Arena;
 
 const N: usize = 1_000;
@@ -686,10 +669,4 @@ library_benchmark_group!(
         string_builder_bumpalo_grow, string_builder_bumpalo_with_cap,
         alloc_vec, alloc_vec_with_capacity,
         vec_builder_bumpalo_grow, vec_builder_bumpalo_with_cap
-);
-
-main!(
-    config = LibraryBenchmarkConfig::default()
-        .tool(Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = alloc_group
 );
