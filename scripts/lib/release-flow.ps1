@@ -700,11 +700,20 @@ function Write-Changelog {
         [string]$packageFolder,
         [string]$changelogFile,
         [string]$prBaseUrl,
-        # Optional: when this package is being released purely as a cascade from another package,
-        # describe the cascade so a maintenance entry can be written even if the package has
-        # no commits since its last release. Shape: @{ Target = '<name>'; Version = '<x.y.z>'; Breaking = $false }
-        [hashtable]$cascadeReason = $null
+        # Optional: when this package is being released as a cascade-from-dependency,
+        # describe one or more cascades so a maintenance/breaking entry can be
+        # written even if the package has no commits since its last release. Each
+        # element shape: @{ Target = '<name>'; Version = '<x.y.z>'; Breaking = $false }.
+        # The section header is `⚠️ Breaking` if ANY reason is Breaking, otherwise
+        # `🔧 Maintenance`; one bullet is emitted per reason in deterministic
+        # (Target-sorted) order. Element shape is duck-typed (.Target / .Version /
+        # .Breaking) so both hashtables and [pscustomobject] are accepted; the
+        # bundled-input path (Resolve-ReleaseSet) builds pscustomobjects while the
+        # legacy Invoke-CascadeStep path builds hashtables.
+        [object[]]$cascadeReasons = $null
     )
+
+    $hasCascade = ($null -ne $cascadeReasons) -and ($cascadeReasons.Count -gt 0)
 
     $tags = Invoke-Git -Arguments @('tag', '--list', "$packageName-v*")
     $latestTag = $null
@@ -736,7 +745,7 @@ function Write-Changelog {
         $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
     }
 
-    if ($formattedCommits.Count -eq 0 -and $null -eq $cascadeReason) {
+    if ($formattedCommits.Count -eq 0 -and -not $hasCascade) {
         if ($rawCommits.Count -eq 0) {
             Write-Warning "No unreleased commits found to add to the changelog."
         } else {
@@ -747,17 +756,27 @@ function Write-Changelog {
         return
     }
 
-    # Prepend a cascade entry when this package is being released purely because one of its
-    # dependencies was released. Emits a structured "Now requires <version> of <target>"
-    # bullet (deliberately formal rather than colloquial) under the appropriate section:
-    #   - 🔧 Maintenance
-    #     - Now requires <version> of `<target>`
-    # If the same section header was already produced by Format-ConventionalCommits for this
-    # release, the cascade bullet is merged into that existing section instead of creating a
-    # duplicate header.
-    if ($null -ne $cascadeReason) {
-        $sectionHeader = if ($cascadeReason.Breaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
-        $cascadeBullet = "  - Now requires ``$($cascadeReason.Version)`` of ``$($cascadeReason.Target)``"
+    # Prepend cascade entries when this package is being released because one
+    # (or more) of its dependencies was released. Emits structured
+    # "Now requires <version> of <target>" bullets — deliberately formal
+    # rather than colloquial — under the appropriate section:
+    #   - 🔧 Maintenance        (when no contributing cascade is breaking)
+    #   - ⚠️ Breaking           (when at least one contributing cascade is breaking)
+    # Bullets are sorted by Target name for deterministic output across runs.
+    # If the same section header was already produced by
+    # Format-ConventionalCommits for this release, the cascade bullets are
+    # merged into that existing section instead of creating a duplicate header.
+    if ($hasCascade) {
+        $anyBreaking = $false
+        foreach ($r in $cascadeReasons) {
+            if ([bool]$r.Breaking) { $anyBreaking = $true; break }
+        }
+        $sectionHeader = if ($anyBreaking) { '- ⚠️ Breaking' } else { '- 🔧 Maintenance' }
+
+        $sortedReasons = @($cascadeReasons | Sort-Object -Property @{ Expression = { $_.Target } })
+        $cascadeBullets = @($sortedReasons | ForEach-Object {
+            "  - Now requires ``$($_.Version)`` of ``$($_.Target)``"
+        })
 
         $existingHeaderIdx = -1
         for ($i = 0; $i -lt $formattedCommits.Count; $i++) {
@@ -779,9 +798,9 @@ function Write-Changelog {
             }
             $before = if ($insertIdx -gt 0) { @($formattedCommits[0..($insertIdx - 1)]) } else { @() }
             $after  = if ($insertIdx -lt $formattedCommits.Count) { @($formattedCommits[$insertIdx..($formattedCommits.Count - 1)]) } else { @() }
-            $formattedCommits = $before + @($cascadeBullet) + $after
+            $formattedCommits = $before + $cascadeBullets + $after
         } else {
-            $cascadeLines = @($sectionHeader, "", $cascadeBullet)
+            $cascadeLines = @($sectionHeader, "") + $cascadeBullets
             if ($formattedCommits.Count -gt 0) {
                 $formattedCommits = $cascadeLines + @("") + $formattedCommits
             } else {
@@ -871,7 +890,7 @@ function Invoke-PackageRelease {
         [string]$prBaseUrl,
         [string]$version,
         [string]$ChangeType,
-        [hashtable]$cascadeReason = $null
+        [object[]]$cascadeReasons = $null
     )
 
     $newVersion = Update-PackageVersion -packageName $packageName -version $version -ChangeType $ChangeType `
@@ -881,7 +900,7 @@ function Invoke-PackageRelease {
     }
 
     Write-Changelog -packageName $packageName -newVersion $newVersion -packageFolder $packageFolder `
-        -changelogFile $changelogFile -prBaseUrl $prBaseUrl -cascadeReason $cascadeReason
+        -changelogFile $changelogFile -prBaseUrl $prBaseUrl -cascadeReasons $cascadeReasons
     Update-Readme -packageName $packageName -packageFolder $packageFolder
 
     return $newVersion
@@ -1104,7 +1123,7 @@ function Invoke-CascadeStep {
     if ([string]::IsNullOrEmpty($depBase) -or $depCurrent -eq $depBase) {
         $depNew = Invoke-PackageRelease -packageName $Dependent -packageFolder $depFolder `
             -packageCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
-            -prBaseUrl $PrBaseUrl -version "" -ChangeType $DependentChangeType -cascadeReason $depCascadeReason
+            -prBaseUrl $PrBaseUrl -version "" -ChangeType $DependentChangeType -cascadeReasons @($depCascadeReason)
         Invalidate-WorkspaceMetadataCache
         return [pscustomobject]@{ Package = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
     }
