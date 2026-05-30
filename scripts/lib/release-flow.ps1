@@ -93,6 +93,117 @@ function Sort-KeysByPreferredOrder {
     return $sortedKeys
 }
 
+# Parses the -Packages argument array of `release-packages.ps1` into structured
+# release request entries. Each token is a string of the form '<name>@<change>',
+# where <change> is one of:
+#
+#   - breaking, nonbreaking, patch  (case-insensitive change-type keywords)
+#   - 1.0.0                         (the one-time 0.x → 1.0.0 graduation token)
+#   - x.y.z                         (explicit semver pin — exactly three dotted
+#                                    non-negative integers)
+#
+# Returns an array of pscustomobject entries, one per token:
+#
+#   @{
+#     Name                   = '<as-typed>'             # case preserved
+#     RequestedChangeType    = 'breaking'|'non-breaking'|'patch'|$null
+#     RequestedTargetVersion = '1.2.3'|$null
+#     IsGraduation           = $true|$false             # exactly '1.0.0' token
+#     RawToken               = '<original token>'
+#   }
+#
+# For the graduation keyword '1.0.0', the entry has both fields populated:
+# RequestedChangeType='breaking', RequestedTargetVersion='1.0.0',
+# IsGraduation=$true. The resolver later treats it as a breaking change with a
+# pinned target version, and errors if the package is already at >=1.0.0.
+#
+# Validation:
+#   - The -Packages array must contain at least one token.
+#   - Each token must contain exactly one '@', neither at the start nor at the
+#     end. Names are validated via Test-ValidPackageName. Duplicate names
+#     (case-insensitive) are rejected so the resolver receives a clean unique
+#     keyset.
+#   - Whitespace-only tokens are rejected; leading/trailing whitespace around
+#     a token is trimmed first.
+#   - Unknown change-type keywords or malformed semvers throw a descriptive
+#     error that quotes both the token and the offending change-spec text.
+function Parse-ReleaseTokens {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string[]]$Tokens
+    )
+
+    if ($null -eq $Tokens -or @($Tokens).Count -eq 0) {
+        throw "No packages to release. Provide at least one '<name>@<change>' token via -Packages."
+    }
+
+    $seenNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $results = New-Object 'System.Collections.Generic.List[object]'
+
+    foreach ($raw in $Tokens) {
+        if ($null -eq $raw) {
+            throw "Encountered a null token in -Packages. Each entry must be a '<name>@<change>' string."
+        }
+        $token = $raw.Trim()
+        if ([string]::IsNullOrEmpty($token)) {
+            throw "Encountered an empty or whitespace-only token in -Packages. Each entry must be a '<name>@<change>' string."
+        }
+
+        $firstAt = $token.IndexOf('@')
+        $lastAt  = $token.LastIndexOf('@')
+        if ($firstAt -lt 1 -or $firstAt -ge ($token.Length - 1) -or $firstAt -ne $lastAt) {
+            throw "Malformed package token '$raw'. Expected the form '<name>@<change>' with exactly one '@' separating a non-empty package name from a non-empty change specifier (e.g. 'bytesbuf@breaking', 'fetch_hyper@1.2.3', 'http_extensions@1.0.0')."
+        }
+
+        $name       = $token.Substring(0, $firstAt)
+        $changeSpec = $token.Substring($firstAt + 1)
+
+        if (-not (Test-ValidPackageName -packageName $name)) {
+            throw "Invalid package name '$name' in token '$raw'. Package names must contain only letters, numbers, hyphens, and underscores; must not start or end with a hyphen; and must be 64 characters or less."
+        }
+
+        if (-not $seenNames.Add($name)) {
+            throw "Duplicate package name '$name' in -Packages list. Each package may appear at most once; release each package with a single combined change type."
+        }
+
+        $requestedChangeType    = $null
+        $requestedTargetVersion = $null
+        $isGraduation           = $false
+
+        switch -CaseSensitive ($changeSpec.ToLowerInvariant()) {
+            'breaking'    { $requestedChangeType = 'breaking';     break }
+            'nonbreaking' { $requestedChangeType = 'non-breaking'; break }
+            'patch'       { $requestedChangeType = 'patch';        break }
+            default {
+                if ($changeSpec -match '^\d+\.\d+\.\d+$') {
+                    if ($changeSpec -eq '1.0.0') {
+                        $isGraduation           = $true
+                        $requestedChangeType    = 'breaking'
+                        $requestedTargetVersion = '1.0.0'
+                    } else {
+                        $requestedTargetVersion = $changeSpec
+                    }
+                } else {
+                    throw "Invalid change specifier '$changeSpec' in token '$raw'. Expected one of: 'breaking', 'nonbreaking', 'patch', '1.0.0' (one-time 0.x→1.0.0 graduation), or an explicit semantic version 'x.y.z'."
+                }
+            }
+        }
+
+        $results.Add([pscustomobject]@{
+            Name                   = $name
+            RequestedChangeType    = $requestedChangeType
+            RequestedTargetVersion = $requestedTargetVersion
+            IsGraduation           = $isGraduation
+            RawToken               = $raw
+        })
+    }
+
+    return $results.ToArray()
+}
+
 function Format-ConventionalCommits {
     param(
         [string[]]$rawCommitMessages,
