@@ -186,7 +186,13 @@ function Update-PackageVersion {
     if ([string]::IsNullOrEmpty($version)) {
         $bumpType = if ([string]::IsNullOrEmpty($bump)) { 'minor' } else { $bump }
         $newVersion = Get-NextVersion -currentVersion $currentVersion -bump $bumpType
-        Write-Host "✅ Incrementing $bumpType version from $currentVersion to $newVersion."
+        # User-visible output uses CHANGE-TYPE vocabulary (breaking change /
+        # non-breaking change / patch), NOT the internal `major|minor|patch`
+        # Cargo bump-kind enum: the latter is a misnomer for `0.x.y` packages
+        # where a 'major' bump actually moves the MINOR version component
+        # (e.g. 0.4.1 -> 0.5.0). See AGENTS.md "Release Versioning Vocabulary".
+        $changeLabel = Get-ChangeLabelFromBumpKind -BumpKind $bumpType
+        Write-Host "✅ Releasing $changeLabel`: $currentVersion -> $newVersion."
     }
     else {
         $newVersion = $version

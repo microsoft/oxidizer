@@ -157,13 +157,35 @@ function Compare-SemanticVersions {
     return 0
 }
 
-# Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules:
-#   - For x.y.z (x >= 1): major -> (x+1).0.0, minor -> x.(y+1).0, patch -> x.y.(z+1)
-#   - For 0.x.y (x >= 1): major -> 0.(x+1).0, minor and patch -> 0.x.(y+1)
-#   - For 0.0.x          : every bump -> 0.0.(x+1) (every change is breaking)
+# Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules.
+#
+# IMPORTANT VOCABULARY (also documented in AGENTS.md "Release Versioning Vocabulary"):
+#
+#   * CHANGE TYPE — the semantic intent of a release: 'breaking' /
+#     'non-breaking' / 'patch'. This is what the user thinks about and what the
+#     CLI accepts via `release-crate.ps1 -Change Breaking|NonBreaking|Patch|1.0`.
+#
+#   * VERSION COMPONENT — a position in the SemVer string `major.minor.patch`
+#     (the integers in x.y.z). These names are POSITIONAL, not semantic.
+#
+#   * Internal `$bump` enum (`major|minor|patch`) — confusingly named for
+#     historical reasons. It is a CHANGE-TYPE label, NOT a version-component
+#     selector: `major` means "breaking change", `minor` means "non-breaking
+#     change", `patch` means "patch". The mapping to the actual version
+#     component that gets incremented depends on the current version:
+#       - For x.y.z (x >= 1): major -> (x+1).0.0, minor -> x.(y+1).0, patch -> x.y.(z+1)
+#         (here change-type and version-component happen to coincide).
+#       - For 0.x.y (x >= 1): major -> 0.(x+1).0 (the MINOR component bumps!),
+#                             minor and patch -> 0.x.(y+1) (patch component).
+#       - For 0.0.x          : every bump -> 0.0.(x+1) (every change is breaking).
+#
+# DO NOT leak the internal `major|minor|patch` enum into user-visible output —
+# always translate via `Get-ChangeLabelFromBumpKind` in release-flow.ps1 first.
 function Get-NextVersion {
     param(
         [string]$currentVersion,
+        # NOTE: this is a CHANGE-TYPE label, not a version-component name.
+        # See the comment block above for the mapping rules.
         [ValidateSet('major', 'minor', 'patch')]
         [string]$bump
     )

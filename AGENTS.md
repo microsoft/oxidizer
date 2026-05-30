@@ -25,6 +25,31 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 The changelogs are updated by `scripts/release-crate.ps1` at release time, based on Git history. It is not necessary to make manual edits
 to the changelogs, though you are permitted to do so if explicitly instructed.
 
+## Release Versioning Vocabulary
+
+When working on release tooling (`scripts/release-crate.ps1` and the helpers
+in `scripts/lib/`), keep two vocabularies strictly separate:
+
+- **Change types** describe the *semantic intent* of a release:
+  `breaking` / `non-breaking` / `patch`. This is what the user reasons about
+  and what the `release-crate.ps1` CLI accepts via
+  `-Change Breaking|NonBreaking|Patch|1.0`. All user-visible output should
+  use change-type vocabulary.
+- **Version components** are *positions* in the SemVer string
+  `major.minor.patch` (the three integers in `x.y.z`). These names are
+  positional, not semantic. Do not call a `0.4.1 -> 0.5.0` increment a
+  "major version bump" — the value of the *major component* (0) did not
+  change, even though the change is breaking under Cargo's 0.x semver rules.
+
+The internal `$bump` parameter on `Get-NextVersion` / `Update-PackageVersion`
+/ `Invoke-ReleaseFlow` uses the string values `'major' | 'minor' | 'patch'`
+for historical reasons, but it is a CHANGE-TYPE enum, NOT a
+version-component selector. The mapping from change-type to which version
+component actually increments depends on whether the current version is
+`1.x.y`, `0.x.y` (x >= 1), or `0.0.x`. Always translate to change-type
+vocabulary via `Get-ChangeLabelFromBumpKind` before emitting user-facing
+output.
+
 ## Release Dependency Scan
 
 `scripts/release-crate.ps1`'s post-release dependency-scan loop (which surfaces

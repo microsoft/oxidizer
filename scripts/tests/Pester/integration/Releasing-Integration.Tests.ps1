@@ -515,6 +515,174 @@ publish = true
 }
 
 # --------------------------------------------------------------------------
+# Update-PackageVersion — user-visible "Releasing <change-type>:" announcement.
+# --------------------------------------------------------------------------
+#
+# Regression guard for a UX bug where the function emitted
+# "✅ Incrementing $bumpType version from <old> to <new>." with $bumpType set
+# to the internal Cargo bump-kind enum ('major'/'minor'/'patch'). On 0.x.y
+# packages a 'major' bump moves the MINOR version component (e.g.
+# 0.4.1 -> 0.5.0), so labeling it a "major version" increment was wrong on
+# two counts: (1) the *major component* (the leading 0) did not change, and
+# (2) the internal enum is a change-TYPE label, not a version-component name.
+#
+# Per AGENTS.md "Release Versioning Vocabulary", user-visible output must use
+# change-type vocabulary (breaking change / non-breaking change / patch) and
+# never leak the internal bump-kind enum.
+
+Describe 'Update-PackageVersion: user-visible change-type vocabulary' {
+    BeforeAll {
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+    }
+
+    BeforeEach {
+        Reset-ReleaseScriptCaches
+    }
+
+    # Helper: seed a synthetic Linear2 workspace and force `downstream` to a
+    # specific starting version so we can exercise both 0.x and 1.x rules.
+    function script:NewBumpFixture {
+        param([string]$Path, [string]$StartVersion)
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path $Path
+        $packageCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+        # Seed `downstream` to the requested starting version. Force-write
+        # via Update-PackageVersion so root Cargo.toml stays in sync.
+        Update-PackageVersion -packageName 'downstream' -version $StartVersion -bump '' `
+            -packageCargoToml $packageCargo -rootCargoToml $rootCargo 6>$null | Out-Null
+        return [pscustomobject]@{
+            PackageCargo = $packageCargo
+            RootCargo    = $rootCargo
+        }
+    }
+
+    Context "internal bump-kind 'major'" {
+        It 'on a 0.x.y package: announces a breaking change with the MINOR component bumped (regression guard)' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-major-0x') -StartVersion '0.4.1'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'major' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            # Numeric transition: 0.4.1 -> 0.5.0 (minor component moves on 0.x major bump).
+            $script:new | Should -Be '0.5.0'
+            $text | Should -Match 'Releasing breaking change: 0\.4\.1 -> 0\.5\.0'
+            # Regression: the internal enum must not leak as "major version".
+            $text | Should -Not -Match 'major version'
+            $text | Should -Not -Match 'Incrementing'
+        }
+
+        It 'on a 1.x.y package: announces a breaking change with the MAJOR component bumped' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-major-1x') -StartVersion '1.2.3'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'major' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '2.0.0'
+            $text | Should -Match 'Releasing breaking change: 1\.2\.3 -> 2\.0\.0'
+            $text | Should -Not -Match 'major version'
+        }
+    }
+
+    Context "internal bump-kind 'minor'" {
+        It 'on a 0.x.y package: announces a non-breaking change with the PATCH component bumped' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-minor-0x') -StartVersion '0.4.1'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'minor' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '0.4.2'
+            $text | Should -Match 'Releasing non-breaking change: 0\.4\.1 -> 0\.4\.2'
+            $text | Should -Not -Match 'minor version'
+        }
+
+        It 'on a 1.x.y package: announces a non-breaking change with the MINOR component bumped' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-minor-1x') -StartVersion '1.2.3'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'minor' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '1.3.0'
+            $text | Should -Match 'Releasing non-breaking change: 1\.2\.3 -> 1\.3\.0'
+            $text | Should -Not -Match 'minor version'
+        }
+    }
+
+    Context "internal bump-kind 'patch'" {
+        It 'on a 0.x.y package: announces a patch with the PATCH component bumped' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-patch-0x') -StartVersion '0.4.1'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'patch' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '0.4.2'
+            $text | Should -Match 'Releasing patch: 0\.4\.1 -> 0\.4\.2'
+            $text | Should -Not -Match 'patch version'
+        }
+
+        It 'on a 1.x.y package: announces a patch with the PATCH component bumped' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-patch-1x') -StartVersion '1.2.3'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump 'patch' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '1.2.4'
+            $text | Should -Match 'Releasing patch: 1\.2\.3 -> 1\.2\.4'
+            $text | Should -Not -Match 'patch version'
+        }
+    }
+
+    Context 'implicit default bump (neither -version nor -bump supplied)' {
+        It 'defaults to non-breaking change vocabulary (internal default is bump=minor)' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-default') -StartVersion '1.2.3'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -bump '' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '1.3.0'
+            $text | Should -Match 'Releasing non-breaking change: 1\.2\.3 -> 1\.3\.0'
+        }
+    }
+
+    Context 'explicit -version (caller supplies the new version verbatim)' {
+        It 'uses the "Using specified version:" wording and skips the change-type label' {
+            $fx = NewBumpFixture -Path (Join-Path $TestDrive 'uvc-cv-explicit') -StartVersion '0.4.1'
+            $new = $null
+            $out = & {
+                $script:new = Update-PackageVersion -packageName 'downstream' -version '9.9.9' -bump '' `
+                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
+            } 6>&1
+            $text = ($out | Out-String)
+
+            $script:new | Should -Be '9.9.9'
+            $text | Should -Match 'Using specified version: 9\.9\.9'
+            # When the version is explicit there is no change-type to announce.
+            $text | Should -Not -Match 'Releasing (breaking|non-breaking|patch)'
+        }
+    }
+}
+
+# --------------------------------------------------------------------------
 # Invoke-CascadeStep — re-bump-safe behavior in isolation.
 # --------------------------------------------------------------------------
 
