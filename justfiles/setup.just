@@ -48,3 +48,6 @@ install-tools:
     } else {
         Write-Host "Pester $($pester.Version) already installed; skipping."
     }
+
+    # Install platform-specific benchmark toolchain (Callgrind, Linux-only).
+    & (Join-Path $PSScriptRoot ".." "scripts" "install-callgrind-tools.ps1")

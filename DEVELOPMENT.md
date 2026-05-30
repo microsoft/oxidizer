@@ -49,7 +49,7 @@ After installing the Rust toolchain, we setup repository-specific tooling:
 1. Execute `just build` to build the workspace. Verify that the build is successful.
 1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
 1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
-1. Validate that debugging works by opening `crates/tick/examples/basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
+1. Validate that debugging works by opening `crates/tick/examples/tick_basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
 
 # Linux (WSL) environment setup
 
@@ -65,7 +65,7 @@ All commands that follow are to be executed in the Ubuntu terminal.
 Next, we upgrade, install and configure development prerequisites:
 
 1. Execute `sudo apt update && sudo apt dist-upgrade -y` to upgrade everything that is already installed.
-1. Execute `sudo apt install -y curl clang llvm libclang-dev gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config libssl-dev` to ensure that essential packages are installed.
+1. Execute `sudo apt install -y curl clang llvm libclang-dev gdb perl python3 python3-pip git git-lfs build-essential cmake pkg-config libssl-dev valgrind` to ensure that essential packages are installed.
 1. [Install PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu?view=powershell-7.5#installation-via-package-repository-the-package-repository).
 1. Execute `git config --global credential.helper "/mnt/c/Program\ Files/Git/mingw64/bin/git-credential-manager.exe"` to set the correct Git authentication flow.
 1. Execute `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` and install Rust with all default settings.
@@ -113,7 +113,7 @@ Validate the setup by executing the following tasks from the task palette (F1):
 1. `Tasks: Run Build Task`
 1. `Tasks: Run Test Task`
 
-Validate that debugging works by opening `crates/tick/examples/basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
+Validate that debugging works by opening `crates/tick/examples/tick_basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
 
 # Before submitting a pull request
 
