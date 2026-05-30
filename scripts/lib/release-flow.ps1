@@ -204,6 +204,274 @@ function Parse-ReleaseTokens {
     return $results.ToArray()
 }
 
+# BFS over a workspace baseline to find all published transitive dependents of
+# a cargo package (identified by its underscore-normalized cargo name). Mirrors
+# Get-AllTransitiveDependents but operates against an in-memory baseline
+# snapshot, so it produces deterministic answers even after disk state changes.
+#
+# Behaviour parity: traverses through unpublished workspace packages (so they
+# act as conduits between published packages) but only returns published
+# packages in the result list. The target itself is never returned.
+function Get-TransitivePublishedDependentsFromBaseline {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Baseline,
+        [Parameter(Mandatory = $true)][string]$TargetCargoName
+    )
+
+    $toVisit = [System.Collections.Generic.Queue[string]]::new()
+    $toVisit.Enqueue($TargetCargoName)
+    $visited = [System.Collections.Generic.HashSet[string]]::new()
+    [void]$visited.Add($TargetCargoName)
+
+    $dependents = New-Object 'System.Collections.Generic.List[string]'
+    while ($toVisit.Count -gt 0) {
+        $current = $toVisit.Dequeue()
+        foreach ($candidate in $Baseline) {
+            $candidateNorm = $candidate.Name.Replace('-', '_')
+            if ($visited.Contains($candidateNorm)) { continue }
+            if ($candidate.Deps -contains $current) {
+                [void]$visited.Add($candidateNorm)
+                $toVisit.Enqueue($candidateNorm)
+                if ($candidate.Published) {
+                    $dependents.Add($candidate.Folder)
+                }
+            }
+        }
+    }
+
+    return @($dependents)
+}
+
+# Turns the parsed token entries from Parse-ReleaseTokens into a *resolved
+# release set* — every package that will receive a release in this invocation,
+# whether the user asked for it directly or it was pulled in by cascade.
+#
+# Inputs:
+#   -ParsedTokens     : the @() output of Parse-ReleaseTokens.
+#   -WorkspaceBaseline: an *immutable* snapshot of Get-WorkspacePackages,
+#                       captured BEFORE any release writes are performed. The
+#                       same snapshot must be passed to every Resolve-ReleaseSet
+#                       call during a single release-packages run, otherwise
+#                       cascade math would double-bump (the on-disk state
+#                       mutates as releases land).
+#
+# Returns: an array of pscustomobject entries, one per resolved package:
+#
+#   @{
+#     Folder                  = '<crate folder>'
+#     Name                    = '<cargo package name>'  # may differ from Folder
+#     CurrentVersion          = '<baseline version>'
+#     RequestedChangeType     = 'breaking'|'non-breaking'|'patch'|$null   # null for cascade-source
+#     RequestedTargetVersion  = '<pin>'|$null                              # null when not pinned
+#     IsGraduation            = $true|$false
+#     EffectiveChangeType     = 'breaking'|'non-breaking'|'patch'         # after cascade resolution
+#     EffectiveTargetVersion  = '<version>'                                # after cascade resolution
+#     Source                  = 'user'|'cascade'
+#     AutoUpgraded            = $true|$false   # user-source entry strengthened by cascade
+#     CascadeReasons          = [List<{Target,Version,Breaking}>]          # one per (target → dep) edge
+#     RawToken                = '<original token>'|$null                   # null for cascade-source
+#   }
+#
+# Resolution algorithm:
+#   1. Seed every token as a user-source entry. Reject:
+#        - tokens for non-workspace packages
+#        - tokens for unpublished workspace packages
+#        - explicit version pins not strictly greater than the current version
+#        - graduation '1.0.0' applied to a package already at >= 1.0.0
+#   2. For each user-source entry, BFS via
+#      Get-TransitivePublishedDependentsFromBaseline to collect all published
+#      transitive dependents. For each dependent compute the cascade-applied
+#      change type from exposing/non-exposing semantics (mirrors the existing
+#      Invoke-ReleaseFlow cascade), and either:
+#        - upgrade an existing entry (rank-ordered: patch < non-breaking <
+#          breaking). For user-source entries with -Change keyword,
+#          auto-upgrade silently and set AutoUpgraded=$true. For user-source
+#          entries with an explicit version pin, throw if the pin would
+#          numerically undershoot the cascade-required version; otherwise
+#          honour the pin and bump only the change-type tag.
+#        - or create a new cascade-source entry.
+#      Cascade reasons are recorded per (target → dep) edge with dedup by
+#      target name (re-encountering an edge for an already-strengthened target
+#      overwrites the prior reason in place).
+#
+# Note: cascade is one-level. The set of dependents reachable from a user
+# target is the transitive published dependents BFS, but the cascade-applied
+# change type for each dependent is derived from exposure of the USER TARGET
+# (not of any intermediate). This matches Invoke-ReleaseFlow's pre-existing
+# semantics; tightening the analysis is out of scope for the redesign.
+function Resolve-ReleaseSet {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+    )
+
+    if ($null -eq $ParsedTokens -or @($ParsedTokens).Count -eq 0) {
+        throw "Resolve-ReleaseSet: ParsedTokens is empty. Parse-ReleaseTokens should reject empty input upstream."
+    }
+
+    $baselineByFolder = @{}
+    $baselineByCargo  = @{}
+    foreach ($pkg in $WorkspaceBaseline) {
+        $baselineByFolder[$pkg.Folder] = $pkg
+        $baselineByCargo[$pkg.Name.Replace('-', '_')] = $pkg
+    }
+
+    $rank = @{ 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
+
+    $resolved = [ordered]@{}
+
+    foreach ($req in $ParsedTokens) {
+        $pkg = $baselineByFolder[$req.Name]
+        if ($null -eq $pkg) {
+            $normalizedReq = $req.Name.Replace('-', '_')
+            $pkg = $baselineByCargo[$normalizedReq]
+        }
+        if ($null -eq $pkg) {
+            throw "Package '$($req.Name)' is not part of the workspace (no folder under 'crates/' and no Cargo package by that name). Token: '$($req.RawToken)'."
+        }
+        if (-not $pkg.Published) {
+            throw "Package '$($pkg.Folder)' has 'publish = false' in its Cargo.toml; only published packages can be released. Token: '$($req.RawToken)'."
+        }
+
+        if ($resolved.Contains($pkg.Folder)) {
+            throw "Internal error: package '$($pkg.Folder)' resolved twice from -Packages (token '$($req.RawToken)'). Parse-ReleaseTokens should have rejected the duplicate upstream."
+        }
+
+        $currentVersion = $pkg.Version
+
+        if (-not [string]::IsNullOrEmpty($req.RequestedTargetVersion)) {
+            $target = $req.RequestedTargetVersion
+            $cmp = Compare-SemanticVersions -version1 $target -version2 $currentVersion
+            if ($cmp -le 0) {
+                throw "Cannot release '$($pkg.Folder)' as v$($target): package is already at v$currentVersion. Explicit version pins must be strictly greater than the current version. Token: '$($req.RawToken)'."
+            }
+            if ($req.IsGraduation) {
+                $currentMajor = [int]($currentVersion.Split('.')[0])
+                if ($currentMajor -ge 1) {
+                    throw "Cannot graduate '$($pkg.Folder)' to 1.0.0: package is already at v$currentVersion (>= 1.0.0). The '1.0.0' graduation token is only valid for packages whose current version is in the 0.x.y range. Token: '$($req.RawToken)'."
+                }
+            }
+            $effectiveChangeType    = Get-ChangeTypeFromVersions -oldVersion $currentVersion -newVersion $target
+            $effectiveTargetVersion = $target
+        } else {
+            $effectiveChangeType    = $req.RequestedChangeType
+            $effectiveTargetVersion = Get-NextVersion -currentVersion $currentVersion -ChangeType $effectiveChangeType
+        }
+
+        $resolved[$pkg.Folder] = [pscustomobject]@{
+            Folder                  = $pkg.Folder
+            Name                    = $pkg.Name
+            CurrentVersion          = $currentVersion
+            RequestedChangeType     = $req.RequestedChangeType
+            RequestedTargetVersion  = $req.RequestedTargetVersion
+            IsGraduation            = $req.IsGraduation
+            EffectiveChangeType     = $effectiveChangeType
+            EffectiveTargetVersion  = $effectiveTargetVersion
+            Source                  = 'user'
+            AutoUpgraded            = $false
+            CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
+            RawToken                = $req.RawToken
+        }
+    }
+
+    # Snapshot the user-source folder names before cascade adds cascade-source
+    # entries — we don't iterate cascade-source entries for their own cascades
+    # (Invoke-ReleaseFlow's pre-existing one-level semantics).
+    $userFolders = @($resolved.Keys) | ForEach-Object { $_ }
+
+    foreach ($targetFolder in $userFolders) {
+        $targetEntry = $resolved[$targetFolder]
+        $targetPkg   = $baselineByFolder[$targetFolder]
+
+        $targetIsBreaking = Test-IsBreakingChange -oldVersion $targetEntry.CurrentVersion -ChangeType $targetEntry.EffectiveChangeType
+        $exposingCascadeChangeType = if ($targetIsBreaking) { 'breaking' } else { $targetEntry.EffectiveChangeType }
+
+        $targetCargoNorm = $targetPkg.Name.Replace('-', '_')
+        $reachable = Get-TransitivePublishedDependentsFromBaseline -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoNorm
+
+        foreach ($depFolder in $reachable) {
+            $depPkg  = $baselineByFolder[$depFolder]
+            $exposes = Test-PackageExposesTarget -dependent $depPkg -targetPackageName $targetPkg.Name
+            $dependentChangeType = if ($exposes) { $exposingCascadeChangeType } else { 'patch' }
+
+            $depBreakingForReason = Test-IsBreakingChange -oldVersion $depPkg.Version -ChangeType $dependentChangeType
+            $cascadeReason = [pscustomobject]@{
+                Target   = $targetPkg.Name
+                Version  = $targetEntry.EffectiveTargetVersion
+                Breaking = $depBreakingForReason
+            }
+
+            if ($resolved.Contains($depFolder)) {
+                $existing = $resolved[$depFolder]
+
+                # Dedup cascade reasons by target name (re-encountering the
+                # same edge after a strengthening pass overwrites the prior
+                # reason in place rather than adding a duplicate).
+                $existingReasonIdx = -1
+                for ($i = 0; $i -lt $existing.CascadeReasons.Count; $i++) {
+                    if ($existing.CascadeReasons[$i].Target -eq $cascadeReason.Target) {
+                        $existingReasonIdx = $i
+                        break
+                    }
+                }
+                if ($existingReasonIdx -ge 0) {
+                    $existing.CascadeReasons[$existingReasonIdx] = $cascadeReason
+                } else {
+                    $existing.CascadeReasons.Add($cascadeReason)
+                }
+
+                $existingRank = $rank[$existing.EffectiveChangeType]
+                $newRank      = $rank[$dependentChangeType]
+                if ($newRank -gt $existingRank) {
+                    $cascadeRequiredVersion = Get-NextVersion -currentVersion $existing.CurrentVersion -ChangeType $dependentChangeType
+
+                    if (-not [string]::IsNullOrEmpty($existing.RequestedTargetVersion)) {
+                        # User pinned an explicit version. Verify it numerically
+                        # satisfies the cascade requirement; if not, the user
+                        # has to revise their request.
+                        $cmpPin = Compare-SemanticVersions -version1 $existing.RequestedTargetVersion -version2 $cascadeRequiredVersion
+                        if ($cmpPin -lt 0) {
+                            $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+                            throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin or use a change-type keyword."
+                        }
+                        # Pin still satisfies. Bump the EffectiveChangeType tag
+                        # (so cascade re-exposure decisions for this entry's
+                        # own dependents — if we iterated them, which we don't
+                        # at present — would be correct) but keep the pin as
+                        # the version.
+                        $existing.EffectiveChangeType = $dependentChangeType
+                    } else {
+                        $existing.EffectiveChangeType    = $dependentChangeType
+                        $existing.EffectiveTargetVersion = $cascadeRequiredVersion
+                        if ($existing.Source -eq 'user') {
+                            $existing.AutoUpgraded = $true
+                        }
+                    }
+                }
+            } else {
+                $newEntry = [pscustomobject]@{
+                    Folder                  = $depPkg.Folder
+                    Name                    = $depPkg.Name
+                    CurrentVersion          = $depPkg.Version
+                    RequestedChangeType     = $null
+                    RequestedTargetVersion  = $null
+                    IsGraduation            = $false
+                    EffectiveChangeType     = $dependentChangeType
+                    EffectiveTargetVersion  = Get-NextVersion -currentVersion $depPkg.Version -ChangeType $dependentChangeType
+                    Source                  = 'cascade'
+                    AutoUpgraded            = $false
+                    CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken                = $null
+                }
+                $newEntry.CascadeReasons.Add($cascadeReason)
+                $resolved[$depPkg.Folder] = $newEntry
+            }
+        }
+    }
+
+    return @($resolved.Values)
+}
+
 function Format-ConventionalCommits {
     param(
         [string[]]$rawCommitMessages,
