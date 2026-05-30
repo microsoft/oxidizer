@@ -1,6 +1,6 @@
 @{
     Name        = 'S05-diamond4-aggregation'
-    Description = 'Diamond4 (top -> left, right; left, right -> bottom): release top, modify bottom only. Bottom is reachable via two paths (top->left->bottom and top->right->bottom); both chains should be aggregated under a single finding. User accepts, bottom releases with a single bump.'
+    Description = 'Diamond4 (top -> left, right; left, right -> bottom): release top, modify bottom only. Bottom is reachable via two paths (top->left->bottom and top->right->bottom); both chains should be aggregated under a single finding. User accepts, bottom releases with a single release.'
 
     Workspace = @{ Preset = 'Diamond4' }
 
@@ -22,7 +22,7 @@
     }
 
     Expect = @{
-        # top is bumped per request, bottom is released via the prompt, and bottom's
+        # top is released per request, bottom is released via the prompt, and bottom's
         # cascade pulls in its dependents (left, right). top is in release set already.
         Released = @(
             @{ Package = 'top';    To = '0.1.1' }

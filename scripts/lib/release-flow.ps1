@@ -26,13 +26,13 @@
 #     $script:SemanticVersionRegex, $script:CargoPackageVersionRegex, $script:GitHubRepoRegex,
 #     $script:RegexEscapeRegex).
 #   - Safe git invocation (Invoke-Git) and ref validation (Test-GitRef).
-#   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-BumpKindFromVersions,
+#   - SemVer arithmetic (Compare-SemanticVersions, Get-NextVersion, Get-ChangeTypeFromVersions,
 #     Test-IsBreakingChange) and package-version readers (Get-CurrentVersion,
 #     Get-PackageVersionFromRef).
 #   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspacePackages,
 #     Invalidate-WorkspaceMetadataCache, Test-PackageExposesTarget, Get-AllTransitiveDependents).
 #   - Modified-but-unreleased dependency analysis (Get-PackagesWithUnreleasedChanges,
-#     Get-PackagesWithVersionBumps, Get-UnreleasedModifiedDependencies).
+#     Get-PackagesWithVersionChanges, Get-UnreleasedModifiedDependencies).
 . "$PSScriptRoot/releasing.ps1"
 
 # --- CONFIGURATION ---
@@ -175,7 +175,7 @@ function Update-PackageVersion {
     param(
         [string]$packageName,
         [string]$version,
-        [string]$bump,
+        [string]$ChangeType,
         [string]$packageCargoToml,
         [string]$rootCargoToml
     )
@@ -184,14 +184,12 @@ function Update-PackageVersion {
 
     $newVersion = ""
     if ([string]::IsNullOrEmpty($version)) {
-        $bumpType = if ([string]::IsNullOrEmpty($bump)) { 'minor' } else { $bump }
-        $newVersion = Get-NextVersion -currentVersion $currentVersion -bump $bumpType
+        $effectiveChangeType = if ([string]::IsNullOrEmpty($ChangeType)) { 'non-breaking' } else { $ChangeType }
+        $newVersion = Get-NextVersion -currentVersion $currentVersion -ChangeType $effectiveChangeType
         # User-visible output uses CHANGE-TYPE vocabulary (breaking change /
-        # non-breaking change / patch), NOT the internal `major|minor|patch`
-        # Cargo bump-kind enum: the latter is a misnomer for `0.x.y` packages
-        # where a 'major' bump actually moves the MINOR version component
-        # (e.g. 0.4.1 -> 0.5.0). See AGENTS.md "Release Versioning Vocabulary".
-        $changeLabel = Get-ChangeLabelFromBumpKind -BumpKind $bumpType
+        # non-breaking change / patch) — see AGENTS.md "Release Versioning
+        # Vocabulary".
+        $changeLabel = Get-ChangeTypeLabel -ChangeType $effectiveChangeType
         Write-Host "✅ Releasing $changeLabel`: $currentVersion -> $newVersion."
     }
     else {
@@ -237,9 +235,9 @@ function Update-PackageVersion {
 # the same commit/cascade history the user already reviewed).
 #
 # Used for in-place escalation when a downstream cascade or a subsequent
-# Invoke-ReleaseFlow re-invocation needs to lift an already-bumped package to
-# a higher version. The alternative — calling Invoke-PackageRelease again — would
-# create a second `## [<new>]` changelog section while leaving the stale
+# Invoke-ReleaseFlow re-invocation needs to lift an already-incremented package
+# to a higher version. The alternative — calling Invoke-PackageRelease again —
+# would create a second `## [<new>]` changelog section while leaving the stale
 # `## [<old>]` section in place, breaking the convention of one section per
 # released version.
 #
@@ -323,7 +321,7 @@ function Write-Changelog {
         [string]$packageFolder,
         [string]$changelogFile,
         [string]$prBaseUrl,
-        # Optional: when this package is being bumped purely as a cascade from another package,
+        # Optional: when this package is being released purely as a cascade from another package,
         # describe the cascade so a maintenance entry can be written even if the package has
         # no commits since its last release. Shape: @{ Target = '<name>'; Version = '<x.y.z>'; Breaking = $false }
         [hashtable]$cascadeReason = $null
@@ -368,8 +366,8 @@ function Write-Changelog {
         return
     }
 
-    # Prepend a cascade entry when this package is being bumped purely because one of its
-    # dependencies was bumped. Emits a structured "Now requires <version> of <target>"
+    # Prepend a cascade entry when this package is being released purely because one of its
+    # dependencies was released. Emits a structured "Now requires <version> of <target>"
     # bullet (deliberately formal rather than colloquial) under the appropriate section:
     #   - 🔧 Maintenance
     #     - Now requires <version> of `<target>`
@@ -480,7 +478,7 @@ function Update-Readme {
     }
 }
 
-# Bumps a single package's version, regenerates its changelog and README.
+# Increments a single package's version, regenerates its changelog and README.
 # Returns the new version string.
 function Invoke-PackageRelease {
     param(
@@ -491,11 +489,11 @@ function Invoke-PackageRelease {
         [string]$changelogFile,
         [string]$prBaseUrl,
         [string]$version,
-        [string]$bump,
+        [string]$ChangeType,
         [hashtable]$cascadeReason = $null
     )
 
-    $newVersion = Update-PackageVersion -packageName $packageName -version $version -bump $bump `
+    $newVersion = Update-PackageVersion -packageName $packageName -version $version -ChangeType $ChangeType `
         -packageCargoToml $packageCargoToml -rootCargoToml $rootCargoToml
     if ($null -eq $newVersion) {
         Write-Error "Failed to update version for package '$packageName'." -ErrorAction Stop
@@ -545,7 +543,7 @@ function Show-FinalMessage {
         # Multi-package release: the conventional-commits scope would be
         # misleading because the commit spans many packages. Drop the scope
         # and call out the extras so reviewers see at a glance that this is
-        # a coordinated release, not a single-package bump.
+        # a coordinated release, not a single-package release.
         $extraNoun = if ($extraCount -eq 1) { 'additional package' } else { 'additional packages' }
         $commitMessage = "feat: release $primaryName v$primaryVersion and $extraCount $extraNoun"
     }
@@ -567,11 +565,12 @@ function Show-FinalMessage {
 
 # Idempotently inserts a "Now requires <version> of <target>" bullet into an
 # existing `## [<Version>]` section in a changelog. Used when a dependent has
-# already been version-bumped (sufficiently) in an earlier cascade pass within the
-# same PR — we don't want to re-bump, but we still want to record that this new
-# release also pulled through. Operates by reading the file, locating the target
-# section, finding (or creating) the appropriate `- 🔧 Maintenance` or `- ⚠️ Breaking`
-# sub-header, and inserting the bullet unless an exact match already exists.
+# already been version-incremented (sufficiently) in an earlier cascade pass
+# within the same PR — we don't want to increment again, but we still want
+# to record that this new release also pulled through. Operates by reading
+# the file, locating the target section, finding (or creating) the
+# appropriate `- 🔧 Maintenance` or `- ⚠️ Breaking` sub-header, and inserting
+# the bullet unless an exact match already exists.
 function Add-CascadeBulletToVersionSection {
     param(
         [Parameter(Mandatory = $true)][string]$ChangelogFile,
@@ -679,9 +678,10 @@ function Add-CascadeBulletToVersionSection {
     Write-Host "📝 Recorded cascade in '$ChangelogFile' under [$Version]." -ForegroundColor DarkCyan
 }
 
-# Cascades a single dependent. Re-bump-safe: if the dependent has already been bumped
-# during this PR (its on-disk version differs from $BaseRef) we either skip the bump
-# (when the existing bump is sufficient) or upgrade to the required version.
+# Cascades a single dependent. Idempotent on already-released packages: if the dependent
+# has already had its version incremented during this PR (its on-disk version differs from
+# $BaseRef) we either skip the re-application (when the existing version is sufficient) or
+# upgrade to the required version.
 function Invoke-CascadeStep {
     param(
         [Parameter(Mandatory = $true)][string]$Dependent,
@@ -690,7 +690,7 @@ function Invoke-CascadeStep {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$PrBaseUrl,
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
         [Parameter(Mandatory = $true)][string]$TargetNewVersion,
-        [Parameter(Mandatory = $true)][string]$DepBump,
+        [Parameter(Mandatory = $true)][string]$DependentChangeType,
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$BaseRef
     )
 
@@ -711,22 +711,22 @@ function Invoke-CascadeStep {
     $depCascadeReason = @{
         Target   = $TargetPackageName
         Version  = $TargetNewVersion
-        Breaking = (Test-IsBreakingChange -oldVersion $depCurrent -bump $DepBump)
+        Breaking = (Test-IsBreakingChange -oldVersion $depCurrent -ChangeType $DependentChangeType)
     }
 
     # New package (no base-ref Cargo.toml) or no usable base ref: behave as the legacy
-    # cascade did — let Invoke-PackageRelease bump from $depCurrent.
+    # cascade did — let Invoke-PackageRelease increment the version from $depCurrent.
     if ([string]::IsNullOrEmpty($depBase) -or $depCurrent -eq $depBase) {
         $depNew = Invoke-PackageRelease -packageName $Dependent -packageFolder $depFolder `
             -packageCargoToml $depCargo -rootCargoToml $RootCargoToml -changelogFile $depChange `
-            -prBaseUrl $PrBaseUrl -version "" -bump $DepBump -cascadeReason $depCascadeReason
+            -prBaseUrl $PrBaseUrl -version "" -ChangeType $DependentChangeType -cascadeReason $depCascadeReason
         Invalidate-WorkspaceMetadataCache
         return [pscustomobject]@{ Package = $Dependent; OldVersion = $depCurrent; NewVersion = $depNew }
     }
 
-    # Already bumped in this PR. Compute the version that THIS cascade would have
-    # produced starting from the base-ref version, and compare.
-    $required = Get-NextVersion -currentVersion $depBase -bump $DepBump
+    # Already version-incremented in this PR. Compute the version that THIS cascade would
+    # have produced starting from the base-ref version, and compare.
+    $required = Get-NextVersion -currentVersion $depBase -ChangeType $DependentChangeType
     $cmp = Compare-SemanticVersions -version1 $depCurrent -version2 $required
 
     if ($cmp -ge 0) {
@@ -756,44 +756,44 @@ function Invoke-CascadeStep {
 # mapping for non-exposing dependents) can be unit-tested without driving the
 # full release flow.
 
-# Maps an internal bump kind to the semantic label shown in the cascade
-# announcement (full form, used as 'as <label>'): major → 'breaking change',
-# minor → 'non-breaking change', patch → 'patch'.
-function Get-ChangeLabelFromBumpKind {
-    param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
+# Maps a change type to the semantic label shown in the cascade announcement
+# (full form, used as 'as <label>'): breaking → 'breaking change',
+# non-breaking → 'non-breaking change', patch → 'patch'.
+function Get-ChangeTypeLabel {
+    param([Parameter(Mandatory = $true)][ValidateSet('breaking', 'non-breaking', 'patch')][string]$ChangeType)
 
-    switch ($BumpKind) {
-        'major' { return 'breaking change' }
-        'minor' { return 'non-breaking change' }
-        'patch' { return 'patch' }
+    switch ($ChangeType) {
+        'breaking'     { return 'breaking change' }
+        'non-breaking' { return 'non-breaking change' }
+        'patch'        { return 'patch' }
     }
 }
 
 # Short form of the semantic label, used inside the parenthetical that
 # describes the downgrade for non-exposing dependents (e.g. "or non-breaking
-# if no API exposure of '<target>'"). Mirrors Get-ChangeLabelFromBumpKind
-# without the trailing 'change' noun where it would read awkwardly.
-function Get-ShortChangeLabelFromBumpKind {
-    param([Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind)
+# if no API exposure of '<target>'"). Mirrors Get-ChangeTypeLabel without the
+# trailing 'change' noun where it would read awkwardly.
+function Get-ShortChangeTypeLabel {
+    param([Parameter(Mandatory = $true)][ValidateSet('breaking', 'non-breaking', 'patch')][string]$ChangeType)
 
-    switch ($BumpKind) {
-        'major' { return 'breaking' }
-        'minor' { return 'non-breaking' }
-        'patch' { return 'patch' }
+    switch ($ChangeType) {
+        'breaking'     { return 'breaking' }
+        'non-breaking' { return 'non-breaking' }
+        'patch'        { return 'patch' }
     }
 }
 
-# Builds the cascade announcement line. ExposingBump is what we apply to
+# Builds the cascade announcement line. ExposingChangeType is what we apply to
 # dependents that re-export the target's types in their public API;
-# NonExposingBump is what we apply to internal-only consumers (today: always
+# NonExposingChangeType is what we apply to internal-only consumers (today: always
 # 'patch'). When the two are identical (i.e. the target itself is being
-# released as a patch, so the non-exposing bump cannot go any lower), the
-# parenthetical clause is suppressed entirely — saying "or patch if no API
-# exposure" would just repeat the headline label.
+# released as a patch, so the non-exposing cascade-applied change cannot go
+# any lower), the parenthetical clause is suppressed entirely — saying "or
+# patch if no API exposure" would just repeat the headline label.
 function Format-CascadeAnnouncement {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$ExposingBump,
-        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$NonExposingBump,
+        [Parameter(Mandatory = $true)][ValidateSet('breaking', 'non-breaking', 'patch')][string]$ExposingChangeType,
+        [Parameter(Mandatory = $true)][ValidateSet('breaking', 'non-breaking', 'patch')][string]$NonExposingChangeType,
         [Parameter(Mandatory = $true)][string]$TargetPackageName,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$DependentNames
     )
@@ -801,33 +801,33 @@ function Format-CascadeAnnouncement {
     $count = @($DependentNames).Count
     $noun  = if ($count -eq 1) { 'dependent package' } else { 'dependent packages' }
 
-    $headlineLabel = Get-ChangeLabelFromBumpKind -BumpKind $ExposingBump
+    $headlineLabel = Get-ChangeTypeLabel -ChangeType $ExposingChangeType
 
-    if ($ExposingBump -eq $NonExposingBump) {
+    if ($ExposingChangeType -eq $NonExposingChangeType) {
         $parenthetical = ''
     } else {
-        $downgradeLabel = Get-ShortChangeLabelFromBumpKind -BumpKind $NonExposingBump
+        $downgradeLabel = Get-ShortChangeTypeLabel -ChangeType $NonExposingChangeType
         $parenthetical = " (or $downgradeLabel if no API exposure of ``$TargetPackageName``)"
     }
 
     return "🔗 Cascading release to $count $noun as $headlineLabel$parenthetical`: $($DependentNames -join ', ')"
 }
 
-# Per-dependent "  • <name> -> <semantic-bump-label> (<why>)" line printed
-# under the cascade announcement. The bump label is the SHORT semantic form
-# (breaking / non-breaking / patch) so the readout matches the announcement's
-# vocabulary instead of leaking the internal Cargo bump kind. The why-clause
-# tells the user what drove the bump choice — public-API exposure vs. internal
-# use — so the reader can quickly sanity-check whether the inferred exposure
+# Per-dependent "  • <name> -> <change-type-label> (<why>)" line printed
+# under the cascade announcement. The label uses the SHORT semantic change-
+# type form (breaking / non-breaking / patch) so the readout matches the
+# announcement's vocabulary. The why-clause tells the user what drove the
+# cascade-applied change-type choice — public-API exposure vs. internal use —
+# so the reader can quickly sanity-check whether the inferred exposure
 # matches their mental model.
 function Format-CascadeDependentLine {
     param(
         [Parameter(Mandatory = $true)][string]$DependentName,
-        [Parameter(Mandatory = $true)][ValidateSet('major', 'minor', 'patch')][string]$BumpKind,
+        [Parameter(Mandatory = $true)][ValidateSet('breaking', 'non-breaking', 'patch')][string]$ChangeType,
         [Parameter(Mandatory = $true)][bool]$ExposesTarget
     )
 
-    $label   = Get-ShortChangeLabelFromBumpKind -BumpKind $BumpKind
+    $label   = Get-ShortChangeTypeLabel -ChangeType $ChangeType
     $why     = if ($ExposesTarget) { 'exposes target in public API' } else { 'internal use only' }
     return "  • $DependentName -> $label ($why)"
 }
@@ -858,14 +858,15 @@ function Format-PendingReleasesAnnouncement {
     return ($lines -join [Environment]::NewLine)
 }
 
-# Runs the bump + downstream cascade for a single target package. Returns the augmented
-# $releases array. Equivalent to the legacy inline body, but factored so the post-release
-# scan can invoke it recursively for upstream dependencies the user agrees to release.
+# Runs the version increment + downstream cascade for a single target package. Returns
+# the augmented $releases array. Equivalent to the legacy inline body, but factored so
+# the post-release scan can invoke it recursively for upstream dependencies the user
+# agrees to release.
 function Invoke-ReleaseFlow {
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $false)][string]$Version = '',
-        [Parameter(Mandatory = $false)][string]$Bump = '',
+        [Parameter(Mandatory = $false)][string]$ChangeType = '',
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$RootCargoToml,
         [Parameter(Mandatory = $false)][string]$PrBaseUrl,
@@ -887,7 +888,7 @@ function Invoke-ReleaseFlow {
     } else { $null }
 
     # Re-invocation on a primary target that already has a pending uncommitted
-    # version bump (e.g. an earlier `release-crate.ps1` invocation in the same PR).
+    # version change (e.g. an earlier `release-crate.ps1` invocation in the same PR).
     # Mirrors the base-relative no-op/upgrade logic Invoke-CascadeStep already
     # applies to dependents: compute the version this invocation WOULD have
     # produced starting from the base-ref version, and compare with the on-disk
@@ -897,13 +898,13 @@ function Invoke-ReleaseFlow {
     if ($isPendingPrimary) {
         $requiredVersion = if (-not [string]::IsNullOrEmpty($Version)) {
             $Version
-        } elseif (-not [string]::IsNullOrEmpty($Bump)) {
-            Get-NextVersion -currentVersion $baseVersion -bump $Bump
+        } elseif (-not [string]::IsNullOrEmpty($ChangeType)) {
+            Get-NextVersion -currentVersion $baseVersion -ChangeType $ChangeType
         } else {
-            # Default-bump (no -Version, no -Bump) matches Invoke-PackageRelease's
-            # internal default of 'minor'. Keeps re-invocation idempotent with
-            # the initial bare-call.
-            Get-NextVersion -currentVersion $baseVersion -bump 'minor'
+            # Default change type (no -Version, no -ChangeType) matches
+            # Invoke-PackageRelease's internal default of 'non-breaking'.
+            # Keeps re-invocation idempotent with the initial bare call.
+            Get-NextVersion -currentVersion $baseVersion -ChangeType 'non-breaking'
         }
 
         $cmp = Compare-SemanticVersions -version1 $currentVersion -version2 $requiredVersion
@@ -920,22 +921,24 @@ function Invoke-ReleaseFlow {
             # No-op for the primary. The on-disk Cargo.toml + changelog from the
             # prior invocation already reflect the intended release. Cascade still
             # runs because dependents may benefit from another idempotent pass.
-            Write-Host "ℹ️  '$PackageName' already pending at v$currentVersion (base v$baseVersion); skipping primary bump." -ForegroundColor DarkGray
+            Write-Host "ℹ️  '$PackageName' already pending at v$currentVersion (base v$baseVersion); skipping primary release." -ForegroundColor DarkGray
             $oldVersion = $baseVersion
             $newVersion = $currentVersion
 
-            # Cascade bump derives from the EFFECTIVE base→current transition,
-            # not the user-requested bump. Otherwise a re-invocation with a
-            # weaker -Change (e.g. Patch on a previously-minor-bumped primary)
-            # would under-cascade dependents that need the stronger bump to
-            # stay compatible with the on-disk API changes.
-            $cascadeBump = Get-BumpKindFromVersions -oldVersion $baseVersion -newVersion $currentVersion
+            # Cascade-applied change type derives from the EFFECTIVE base→current
+            # transition, not the user-requested change type. Otherwise a re-
+            # invocation with a weaker -Change (e.g. Patch on a previously
+            # non-breaking primary) would under-cascade dependents that need
+            # the stronger change to stay compatible with the on-disk API
+            # changes.
+            $cascadeChangeType = Get-ChangeTypeFromVersions -oldVersion $baseVersion -newVersion $currentVersion
         } else {
             # cmp < 0: requested release would escalate the primary above its
             # current pending version. Re-stamp Cargo.toml / root Cargo.toml /
             # CHANGELOG header in place — body content (commit bullets + cascade
             # bullets from the prior pending pass) carries forward verbatim,
-            # because the only thing that changed is the user's bump intent.
+            # because the only thing that changed is the user's change-type
+            # intent.
             Write-Host "⬆️  Escalating pending release of '$PackageName' from v$currentVersion to v$requiredVersion (base v$baseVersion)." -ForegroundColor Yellow
             Update-PendingReleaseVersion -PackageName $PackageName -PackageFolder $packageFolder `
                 -RootCargoToml $RootCargoToml -OldVersion $currentVersion -NewVersion $requiredVersion | Out-Null
@@ -943,24 +946,25 @@ function Invoke-ReleaseFlow {
 
             $oldVersion = $baseVersion
             $newVersion = $requiredVersion
-            # Cascade bump derives from the effective base → escalated transition
-            # so dependents (which may already be cascade-bumped from the prior
-            # pass) get re-evaluated against the new requirement.
-            $cascadeBump = Get-BumpKindFromVersions -oldVersion $baseVersion -newVersion $requiredVersion
+            # Cascade-applied change type derives from the effective base →
+            # escalated transition so dependents (which may already be cascade-
+            # released from the prior pass) get re-evaluated against the new
+            # requirement.
+            $cascadeChangeType = Get-ChangeTypeFromVersions -oldVersion $baseVersion -newVersion $requiredVersion
         }
     } else {
         $oldVersion = $currentVersion
         $newVersion = Invoke-PackageRelease -packageName $PackageName -packageFolder $packageFolder `
             -packageCargoToml $packageCargoToml -rootCargoToml $RootCargoToml -changelogFile $changelogFile `
-            -prBaseUrl $PrBaseUrl -version $Version -bump $Bump
+            -prBaseUrl $PrBaseUrl -version $Version -ChangeType $ChangeType
         Invalidate-WorkspaceMetadataCache
 
-        $cascadeBump = if (-not [string]::IsNullOrEmpty($Bump)) {
-            $Bump
+        $cascadeChangeType = if (-not [string]::IsNullOrEmpty($ChangeType)) {
+            $ChangeType
         } elseif (-not [string]::IsNullOrEmpty($Version)) {
-            Get-BumpKindFromVersions -oldVersion $oldVersion -newVersion $newVersion
+            Get-ChangeTypeFromVersions -oldVersion $oldVersion -newVersion $newVersion
         } else {
-            'minor'
+            'non-breaking'
         }
     }
 
@@ -968,14 +972,14 @@ function Invoke-ReleaseFlow {
         [pscustomobject]@{ Package = $PackageName; OldVersion = $oldVersion; NewVersion = $newVersion }
     )
 
-    $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -bump $cascadeBump
-    $exposingCascadeBump = if ($targetIsBreaking) { 'major' } else { $cascadeBump }
+    $targetIsBreaking = Test-IsBreakingChange -oldVersion $oldVersion -ChangeType $cascadeChangeType
+    $exposingCascadeChangeType = if ($targetIsBreaking) { 'breaking' } else { $cascadeChangeType }
 
     $dependents = @(Get-AllTransitiveDependents -packageName $PackageName -repoRoot $RepoRoot)
     if ($dependents.Count -gt 0) {
         Write-Host ""
-        $cascadeMessage = Format-CascadeAnnouncement -ExposingBump $exposingCascadeBump `
-            -NonExposingBump 'patch' -TargetPackageName $PackageName -DependentNames $dependents
+        $cascadeMessage = Format-CascadeAnnouncement -ExposingChangeType $exposingCascadeChangeType `
+            -NonExposingChangeType 'patch' -TargetPackageName $PackageName -DependentNames $dependents
         Write-Host $cascadeMessage -ForegroundColor Cyan
 
         $allPackages = Get-WorkspacePackages -repoRoot $RepoRoot
@@ -988,13 +992,13 @@ function Invoke-ReleaseFlow {
                 Test-PackageExposesTarget -dependent $depPackage -targetPackageName $targetPackageName
             } else { $true }
 
-            $depBump = if ($exposes) { $exposingCascadeBump } else { 'patch' }
-            Write-Host (Format-CascadeDependentLine -DependentName $dependent -BumpKind $depBump -ExposesTarget $exposes) -ForegroundColor DarkCyan
+            $dependentChangeType = if ($exposes) { $exposingCascadeChangeType } else { 'patch' }
+            Write-Host (Format-CascadeDependentLine -DependentName $dependent -ChangeType $dependentChangeType -ExposesTarget $exposes) -ForegroundColor DarkCyan
 
             $record = Invoke-CascadeStep -Dependent $dependent -RepoRoot $RepoRoot `
                 -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl `
                 -TargetPackageName $PackageName -TargetNewVersion $newVersion `
-                -DepBump $depBump -BaseRef $BaseRef
+                -DependentChangeType $dependentChangeType -BaseRef $BaseRef
             if ($null -ne $record) {
                 $releases += $record
             }
@@ -1025,16 +1029,17 @@ $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 # Returns $true when option 5 (Release as patch) would be numerically indistinguishable
 # from option 4 (Release as non-breaking change) for the given current version.
 # This is the case for Cargo 0.x.y versions, where the semver carve-out lumps
-# minor and patch under the same numeric increment (0.x.(y+1)) — and on 0.0.x
-# where every bump collapses to 0.0.(x+1). When CurrentVersion is unknown, we
-# conservatively return $false so all options remain visible.
+# the non-breaking and patch change types under the same numeric increment
+# (0.x.(y+1)) — and on 0.0.x where every change type collapses to 0.0.(x+1).
+# When CurrentVersion is unknown, we conservatively return $false so all
+# options remain visible.
 function Test-IsPatchOptionRedundant {
     param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$CurrentVersion)
 
     if ([string]::IsNullOrWhiteSpace($CurrentVersion)) { return $false }
-    $minorNext = Get-NextVersion -currentVersion $CurrentVersion -bump 'minor'
-    $patchNext = Get-NextVersion -currentVersion $CurrentVersion -bump 'patch'
-    return ($minorNext -eq $patchNext)
+    $nonBreakingNext = Get-NextVersion -currentVersion $CurrentVersion -ChangeType 'non-breaking'
+    $patchNext = Get-NextVersion -currentVersion $CurrentVersion -ChangeType 'patch'
+    return ($nonBreakingNext -eq $patchNext)
 }
 
 # Pure formatter for the per-package menu. Returns a multi-line string ready
@@ -1043,12 +1048,12 @@ function Test-IsPatchOptionRedundant {
 #
 # Options 3-5 render the *concrete* version transition each choice would
 # produce (e.g. "Release as breaking change (0.1.2 -> 0.2.0)"). Get-NextVersion
-# is the single source of truth for the major/minor/patch math and already
+# is the single source of truth for the version-component math and already
 # honours Cargo's 0.x.y semver carve-outs, so the menu always shows the same
 # version the release would produce — not a misleading numeric label.
 #
 # Option 5 (Release as patch) is hidden when it would produce the same numeric
-# bump as option 4 (Release as non-breaking change) — see
+# increment as option 4 (Release as non-breaking change) — see
 # Test-IsPatchOptionRedundant. This avoids presenting two indistinguishable
 # choices on Cargo 0.x.y packages.
 function Format-PackageMenu {
@@ -1071,13 +1076,13 @@ function Format-PackageMenu {
     # menu still presents the choice (the release flow itself will fail loudly
     # later if there's truly no version).
     $current = [string]$Finding.CurrentVersion
-    $bumpHints = @{}
-    foreach ($kind in @('major', 'minor', 'patch')) {
+    $changeTypeHints = @{}
+    foreach ($kind in @('breaking', 'non-breaking', 'patch')) {
         if ([string]::IsNullOrWhiteSpace($current)) {
-            $bumpHints[$kind] = "($kind version)"
+            $changeTypeHints[$kind] = "($kind)"
         } else {
-            $next = Get-NextVersion -currentVersion $current -bump $kind
-            $bumpHints[$kind] = "($current -> $next)"
+            $next = Get-NextVersion -currentVersion $current -ChangeType $kind
+            $changeTypeHints[$kind] = "($current -> $next)"
         }
     }
 
@@ -1093,10 +1098,10 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('  1. View diff')
     [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial to published functionality')
-    [void]$sb.AppendLine("  3. Release as breaking change $($bumpHints['major'])")
-    [void]$sb.AppendLine("  4. Release as non-breaking change $($bumpHints['minor'])")
+    [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
+    [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
     if (-not $hidePatch) {
-        [void]$sb.AppendLine("  5. Release as patch $($bumpHints['patch'])")
+        [void]$sb.AppendLine("  5. Release as patch $($changeTypeHints['patch'])")
     }
     return $sb.ToString()
 }
@@ -1318,7 +1323,7 @@ function Show-PackageDiff {
 # the menu (the options are still visible higher in the scrollback); choices
 # 2..N resolve to a release action. Empty input silently re-prompts (no
 # warning), anything else complains then re-prompts. Returns @{ Action =
-# 'ignore' | 'major' | 'minor' | 'patch' }.
+# 'ignore' | 'breaking' | 'non-breaking' | 'patch' }.
 #
 # When option 5 is suppressed (because it would be numerically identical to
 # option 4 — see Test-IsPatchOptionRedundant), the prompt range tightens to
@@ -1345,8 +1350,8 @@ function Get-PackageReleaseDecision {
             continue
         }
         if ($choice -eq '2') { return @{ Action = 'ignore' } }
-        if ($choice -eq '3') { return @{ Action = 'major' } }
-        if ($choice -eq '4') { return @{ Action = 'minor' } }
+        if ($choice -eq '3') { return @{ Action = 'breaking' } }
+        if ($choice -eq '4') { return @{ Action = 'non-breaking' } }
         if ($choice -eq '5' -and -not $hidePatch) { return @{ Action = 'patch' } }
 
         Write-Host "Invalid choice '$choice'. Enter a number from 1 to $maxChoice." -ForegroundColor Yellow
@@ -1362,20 +1367,21 @@ function Get-PackageReleaseDecision {
 # CASCADE-ORGANIZATION INVARIANTS (see AGENTS.md "Release Dependency Scan"):
 #   A. Upstream cascades never introduce items to the user-review queue. A
 #      cascade-only target (no pre-existing modifications) must NOT surface —
-#      its bump is mechanical and follows directly from the released dependency.
-#      Enforced by snapshotting the modifications set BEFORE the primary
-#      release / cascade runs (the snapshot is passed in via -ModifiedSnapshot
-#      and forwarded to Get-UnreleasedModifiedDependencies).
+#      its version increment is mechanical and follows directly from the
+#      released dependency. Enforced by snapshotting the modifications set
+#      BEFORE the primary release / cascade runs (the snapshot is passed in
+#      via -ModifiedSnapshot and forwarded to Get-UnreleasedModifiedDependencies).
 #   B. A release-set member is removed from the user-review queue ONLY when
-#      its cascade-applied bump is already breaking (semantic maximum) OR
-#      when the user has explicitly reviewed it in this run / a prior
+#      its cascade-applied change type is already breaking (semantic maximum)
+#      OR when the user has explicitly reviewed it in this run / a prior
 #      release-crate.ps1 invocation. Release-set members whose cascade-applied
-#      bump is non-breaking or patch are SURFACED when they have pre-existing
+#      change is non-breaking or patch are SURFACED when they have pre-existing
 #      modifications, because the user may want to escalate after reviewing
 #      the changes (an upstream cascade is only definitive if the ONLY
-#      change in that package is the mechanical dependency bump). Enforced
-#      jointly by Get-UnreleasedModifiedDependencies (the BFS surfacing
-#      rule) and the $reviewedReleaseSet bookkeeping inside this loop.
+#      change in that package is the mechanical dependency increment).
+#      Enforced jointly by Get-UnreleasedModifiedDependencies (the BFS
+#      surfacing rule) and the $reviewedReleaseSet bookkeeping inside this
+#      loop.
 function Invoke-PostReleaseDepScan {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -1399,12 +1405,12 @@ function Invoke-PostReleaseDepScan {
         #     work in this run (prior `release-crate.ps1` invocations in the
         #     same PR already settled those).
         # IMPORTANT: this list must NOT include packages that were only
-        # cascade-bumped (no explicit user review). Those must remain
+        # cascade-released (no explicit user review). Those must remain
         # eligible for elevation review per Invariant B — accepting one
         # release whose cascade pulls additional modified packages into the
-        # release set with a non-breaking bump is exactly the condition
-        # under which the user needs a chance to review and potentially
-        # elevate the cascade-applied bump.
+        # release set with a non-breaking change type is exactly the
+        # condition under which the user needs a chance to review and
+        # potentially elevate the cascade-applied change type.
         [Parameter(Mandatory = $false)][string[]]$PreReviewedFolders
     )
 
@@ -1421,14 +1427,15 @@ function Invoke-PostReleaseDepScan {
     $declined = [System.Collections.Generic.HashSet[string]]::new()
 
     # $reviewedReleaseSet tracks release-set members whose review (either
-    # "elevate" or "ignore — current bump is fine") is complete in this run
-    # OR was decided in a prior invocation. Filtering on this set is what
-    # prevents the re-prompt loop where a release-set member with bump < breaking
-    # would otherwise keep resurfacing after the user accepts the current bump.
+    # "elevate" or "ignore — current change type is fine") is complete in
+    # this run OR was decided in a prior invocation. Filtering on this set
+    # is what prevents the re-prompt loop where a release-set member with
+    # a non-breaking or patch cascade-applied change would otherwise keep
+    # resurfacing after the user accepts the current change type.
     #
     # IMPORTANT: only the primary target of THIS invocation and packages the
     # user has explicitly decided about in prior invocations are pre-marked
-    # here. Cascade-bumped members of $ReleasesRef are NOT pre-marked —
+    # here. Cascade-released members of $ReleasesRef are NOT pre-marked —
     # they must remain eligible for Invariant B elevation review when
     # they also have pre-existing modifications.
     $reviewedReleaseSet = [System.Collections.Generic.HashSet[string]]::new()
@@ -1453,7 +1460,7 @@ function Invoke-PostReleaseDepScan {
         #   - On entry (first iteration).
         #   - After any decision that actually changed on-disk / release-set
         #     state (i.e. user accepted a release, which then runs a
-        #     cascade that may add new bumps).
+        #     cascade that may introduce new version changes).
         # After an 'ignore' decision nothing on disk or in git changes, so
         # we just filter the previous queue by the updated $declined /
         # $reviewedReleaseSet sets — avoiding ~120 git spawns and a cargo
@@ -1522,7 +1529,7 @@ function Invoke-PostReleaseDepScan {
                     }
                 }
                 if ($inReleaseSet.Count -gt 0) {
-                    Write-Host '⚠️  The following workspace packages are being released as part of this PR with a non-breaking cascade-applied version bump, BUT also have pre-existing modifications that may warrant a higher bump (e.g. breaking). A reviewer should confirm the cascade-applied bump is sufficient:' -ForegroundColor Yellow
+                    Write-Host '⚠️  The following workspace packages are being released as part of this PR with a non-breaking cascade-applied version change, BUT also have pre-existing modifications that may warrant a more impactful change type (e.g. breaking). A reviewer should confirm the cascade-applied change type is sufficient:' -ForegroundColor Yellow
                     foreach ($finding in $inReleaseSet) {
                         Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
                         Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
@@ -1542,9 +1549,9 @@ function Invoke-PostReleaseDepScan {
                 return
             }
 
-            # Process one finding per outer iteration. Cascade-bumped findings
+            # Process one finding per outer iteration. Cascade-released findings
             # naturally drop out of the next iteration's queue because the
-            # cascade commits their version bumps, so they no longer appear
+            # cascade commits their version changes, so they no longer appear
             # in the modified-but-unreleased set on the next BFS snapshot.
             $next       = $queue[0]
             $remaining  = $queue.Count - 1
@@ -1564,7 +1571,7 @@ function Invoke-PostReleaseDepScan {
 
             Write-Host ""
             Write-Host "🚀 Releasing '$($next.Folder)' as $($decision.Action)..." -ForegroundColor Cyan
-            $nestedReleases = @(Invoke-ReleaseFlow -PackageName $next.Folder -Bump $decision.Action `
+            $nestedReleases = @(Invoke-ReleaseFlow -PackageName $next.Folder -ChangeType $decision.Action `
                 -RepoRoot $RepoRoot -RootCargoToml $RootCargoToml -PrBaseUrl $PrBaseUrl -BaseRef $BaseRef)
 
             # Merge nested release records into the running set. A package may already
@@ -1574,18 +1581,18 @@ function Invoke-PostReleaseDepScan {
             # so Show-ReleaseSummary and the final commit message reflect on-disk state.
             #
             # IMPORTANT: we mark only $next.Folder (the package the user just
-            # explicitly decided about) as reviewed — NOT the cascade-bumped
-            # members of $nestedReleases. Cascade-bumped packages with
+            # explicitly decided about) as reviewed — NOT the cascade-released
+            # members of $nestedReleases. Cascade-released packages with
             # pre-existing modifications must remain eligible for Invariant B
             # elevation review on the next iteration: an upstream cascade is
             # only definitive when the ONLY change in the cascaded package is
-            # the mechanical dependency bump.
+            # the mechanical dependency increment.
             foreach ($r in $nestedReleases) {
                 # If cascade pulled in a package the user previously chose to ignore,
                 # surface that so they're not confused why it appears in the release
                 # summary, and update $declined to reflect reality.
                 if ($declined.Contains($r.Package)) {
-                    Write-Host "ℹ️  Previously ignored package '$($r.Package)' was cascade-bumped because '$($next.Folder)' was released." -ForegroundColor DarkCyan
+                    Write-Host "ℹ️  Previously ignored package '$($r.Package)' was cascade-released because '$($next.Folder)' was released." -ForegroundColor DarkCyan
                     [void]$declined.Remove($r.Package)
                 }
 
@@ -1605,9 +1612,9 @@ function Invoke-PostReleaseDepScan {
             [void]$reviewedReleaseSet.Add($next.Folder)
 
             # The cascade just edited Cargo.toml files; force a full BFS
-            # recompute next iteration so newly-bumped packages drop off the
-            # findings list (and any of their committed-but-still-unreleased
-            # transitive upstreams surface).
+            # recompute next iteration so newly version-incremented packages
+            # drop off the findings list (and any of their committed-but-
+            # still-unreleased transitive upstreams surface).
             $queue = $null
         }
 
@@ -1644,18 +1651,20 @@ function Invoke-WorkspaceCheck {
     }
 }
 
-# Translates a semantic -Change value into the internal (Bump, Version) tuple
-# the rest of the release flow expects. The script's user-facing vocabulary
-# is intent-based (Breaking / NonBreaking / Patch / 1.0) because that's how
-# releasers reason about the change, but every layer below Invoke-ReleaseMain
-# still uses Cargo's numeric major/minor/patch terms because changelogs,
-# Cargo.toml, and commit messages are concrete version transitions.
+# Translates a semantic -Change value into the internal (ChangeType, Version)
+# tuple the rest of the release flow expects. The script's user-facing
+# vocabulary is intent-based (Breaking / NonBreaking / Patch / 1.0) because
+# that's how releasers reason about the change. The internal vocabulary
+# uses the same semantic terms (breaking / non-breaking / patch) — only
+# the wire format differs (PascalCase on the CLI to match PowerShell
+# parameter conventions, lower-kebab-case internally as canonical enum
+# values consumed by Get-NextVersion and friends).
 #
-# Returned object has exactly one of { Bump, Version } populated:
-#   - Breaking    → Bump='major'    Version=''
-#   - NonBreaking → Bump='minor'    Version=''
-#   - Patch       → Bump='patch'    Version=''
-#   - 1.0         → Bump=''         Version='1.0.0'  (the one-time graduation)
+# Returned object has exactly one of { ChangeType, Version } populated:
+#   - Breaking    → ChangeType='breaking'     Version=''
+#   - NonBreaking → ChangeType='non-breaking' Version=''
+#   - Patch       → ChangeType='patch'        Version=''
+#   - 1.0         → ChangeType=''             Version='1.0.0'  (one-time graduation)
 #
 # The 1.0 graduation throws when invoked on a package that's already at or
 # beyond 1.0.0 — the caller is expected to surface the message to the user
@@ -1668,9 +1677,9 @@ function Resolve-ReleaseSpecFromChange {
     )
 
     switch ($Change) {
-        'Breaking'    { return [pscustomobject]@{ Bump = 'major'; Version = '' } }
-        'NonBreaking' { return [pscustomobject]@{ Bump = 'minor'; Version = '' } }
-        'Patch'       { return [pscustomobject]@{ Bump = 'patch'; Version = '' } }
+        'Breaking'    { return [pscustomobject]@{ ChangeType = 'breaking';     Version = '' } }
+        'NonBreaking' { return [pscustomobject]@{ ChangeType = 'non-breaking'; Version = '' } }
+        'Patch'       { return [pscustomobject]@{ ChangeType = 'patch';        Version = '' } }
         '1.0' {
             # Force array context — see Compare-SemanticVersions for the rationale.
             $parts = @($CurrentVersion.Split('.') | ForEach-Object { [int]$_ })
@@ -1678,7 +1687,7 @@ function Resolve-ReleaseSpecFromChange {
             if ($parts[0] -ge 1) {
                 throw "The '-Change 1.0' option is for the one-time 0.x → 1.0.0 graduation event. Current version '$CurrentVersion' is already at 1.x or higher; use '-Change Breaking' instead."
             }
-            return [pscustomobject]@{ Bump = ''; Version = '1.0.0' }
+            return [pscustomobject]@{ ChangeType = ''; Version = '1.0.0' }
         }
     }
 }
@@ -1778,8 +1787,8 @@ function Invoke-ReleaseMain {
     # 6. ANNOUNCE PENDING UNCOMMITTED RELEASES
     # Helps the user notice prior `release-crate.ps1` runs whose results haven't
     # been committed yet, so they understand why the analysis treats those
-    # packages as already-bumped. Skipped silently when BaseRef is unresolved
-    # (without a base, "pending" has no meaning).
+    # packages as already-incremented. Skipped silently when BaseRef is
+    # unresolved (without a base, "pending" has no meaning).
     $pendingReleases = @()
     if (-not [string]::IsNullOrEmpty($resolvedBaseRef)) {
         $pendingReleases = @(Get-PendingReleases -RepoRoot $repoRoot.Path -BaseRef $resolvedBaseRef)
@@ -1792,17 +1801,17 @@ function Invoke-ReleaseMain {
     # Determine whether the primary target is among the pending set. When it is,
     # downstream validation uses BaseVersion (not on-disk current) as the anchor
     # so this invocation is base-relative — mirroring Invoke-CascadeStep's
-    # treatment of already-bumped dependents.
+    # treatment of already-version-incremented dependents.
     $primaryPending = $pendingReleases | Where-Object { $_.Folder -eq $PackageName } | Select-Object -First 1
 
-    # 7. RESOLVE -Change INTO INTERNAL ($Bump, $Version)
-    # The CLI surface uses semantic vocabulary (Breaking / NonBreaking / Patch / 1.0)
-    # because that's how releasers reason about the change. Below this point the
-    # release flow continues in Cargo's numeric major/minor/patch terms because
-    # changelogs, Cargo.toml, and commit messages are concrete version transitions.
-    # The 1.0 graduation translates into an explicit -Version 1.0.0; everything
-    # else translates into the matching -Bump kind.
-    $bump = ''
+    # 7. RESOLVE -Change INTO INTERNAL ($ChangeType, $Version)
+    # The CLI surface uses PascalCase semantic vocabulary (Breaking /
+    # NonBreaking / Patch / 1.0) to match PowerShell parameter conventions;
+    # below this point the internal canonical enum uses the same semantic
+    # terms in lower-kebab-case (breaking / non-breaking / patch). The 1.0
+    # graduation translates into an explicit -Version 1.0.0; everything else
+    # translates into the matching change-type value.
+    $changeType = ''
     if (-not [string]::IsNullOrEmpty($Change)) {
         # Use BaseVersion (when pending) so a re-invocation of `-Change 1.0` on
         # an already-graduated pending package idempotently no-ops instead of
@@ -1823,7 +1832,7 @@ function Invoke-ReleaseMain {
             Write-Error $_.Exception.Message
             Exit 1
         }
-        $bump = $spec.Bump
+        $changeType = $spec.ChangeType
         if (-not [string]::IsNullOrEmpty($spec.Version)) {
             $Version = $spec.Version
         }
@@ -1867,7 +1876,7 @@ function Invoke-ReleaseMain {
         } else { $null }
 
         # Cross-invocation deduplication: prior `release-crate.ps1` runs in
-        # this branch may have left version bumps in the working tree that
+        # this branch may have left version changes in the working tree that
         # are NOT a concern for the user this time around. Pre-mark every
         # such pending package (except the primary target of this run, which
         # the user is actively re-deciding) as "already reviewed" so the
@@ -1876,7 +1885,7 @@ function Invoke-ReleaseMain {
         # `-Change <kind>` for it; re-asking would be redundant.
         $preReviewedFolders = @($pendingReleases | Where-Object { $_.Folder -ne $PackageName } | ForEach-Object { $_.Folder }) + @($PackageName)
 
-        $releases = @(Invoke-ReleaseFlow -PackageName $PackageName -Version $Version -Bump $bump `
+        $releases = @(Invoke-ReleaseFlow -PackageName $PackageName -Version $Version -ChangeType $changeType `
             -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml -PrBaseUrl $prBaseUrl -BaseRef $resolvedBaseRef)
 
         # Scan for modified-but-unreleased upstream deps and prompt the user. Newly-released

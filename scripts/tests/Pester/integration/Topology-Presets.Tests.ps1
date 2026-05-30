@@ -17,8 +17,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'linear2')
             $ws.ModifySource('upstream')
             $ws.AddCommit('upstream edit')
-            $ws.BumpVersion('downstream', '0.1.1')
-            $ws.AddCommit('bump downstream')
+            $ws.SetVersion('downstream', '0.1.1')
+            $ws.AddCommit('change downstream')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings | Should -HaveCount 1
@@ -33,8 +33,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'linear3')
             $ws.ModifySource('c')
             $ws.AddCommit('c edit')
-            $ws.BumpVersion('a', '0.1.1')
-            $ws.AddCommit('bump a')
+            $ws.SetVersion('a', '0.1.1')
+            $ws.AddCommit('change a')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings.Folder | Should -Be 'c'
@@ -47,8 +47,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Linear4 -Path (Join-Path $TestDrive 'linear4')
             $ws.ModifySource('d')
             $ws.AddCommit('d edit')
-            $ws.BumpVersion('a', '0.1.1')
-            $ws.AddCommit('bump a')
+            $ws.SetVersion('a', '0.1.1')
+            $ws.AddCommit('change a')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings.Folder | Should -Be 'd'
@@ -61,8 +61,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'diamond4')
             $ws.ModifySource('bottom')
             $ws.AddCommit('bottom edit')
-            $ws.BumpVersion('top', '0.1.1')
-            $ws.AddCommit('bump top')
+            $ws.SetVersion('top', '0.1.1')
+            $ws.AddCommit('change top')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings.Folder | Should -Be 'bottom'
@@ -75,8 +75,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Macros3 -Path (Join-Path $TestDrive 'macros3')
             $ws.ModifySource('macros_impl')
             $ws.AddCommit('macros_impl edit')
-            $ws.BumpVersion('user', '0.1.1')
-            $ws.AddCommit('bump user')
+            $ws.SetVersion('user', '0.1.1')
+            $ws.AddCommit('change user')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings.Folder | Should -Be 'macros_impl'
@@ -85,14 +85,14 @@ Describe 'Topology presets (smoke)' {
     }
 
     Context 'FanOut5' {
-        It 'one shared upstream reported once across multiple bumped dependents' {
+        It 'one shared upstream reported once across multiple version-changed dependents' {
             $ws = New-SyntheticWorkspace -Preset FanOut5 -Path (Join-Path $TestDrive 'fanout5')
             $ws.ModifySource('shared_upstream')
             $ws.AddCommit('shared edit')
-            $ws.BumpVersion('user1', '0.1.1')
-            $ws.BumpVersion('user2', '0.2.1')
-            $ws.BumpVersion('user3', '0.3.1')
-            $ws.AddCommit('bump users')
+            $ws.SetVersion('user1', '0.1.1')
+            $ws.SetVersion('user2', '0.2.1')
+            $ws.SetVersion('user3', '0.3.1')
+            $ws.AddCommit('change users')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             $findings.Folder | Should -Be 'shared_upstream'
@@ -106,8 +106,8 @@ Describe 'Topology presets (smoke)' {
             $ws.ModifySource('upstream_a')
             $ws.ModifySource('upstream_b')
             $ws.AddCommit('upstream edits')
-            $ws.BumpVersion('target', '0.3.1')
-            $ws.AddCommit('bump target')
+            $ws.SetVersion('target', '0.3.1')
+            $ws.AddCommit('change target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             @($findings).Count | Should -Be 2
@@ -125,8 +125,8 @@ Describe 'Topology presets (smoke)' {
             $ws.ModifySource('upstream_b')
             $ws.ModifySource('utility')
             $ws.AddCommit('upstream edits')
-            $ws.BumpVersion('target', '0.1.1')
-            $ws.AddCommit('bump target')
+            $ws.SetVersion('target', '0.1.1')
+            $ws.AddCommit('change target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             ($findings | ForEach-Object Folder) | Should -Be 'upstream_b'
@@ -138,8 +138,8 @@ Describe 'Topology presets (smoke)' {
             $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'detached')
             $ws.ModifySource('delta')
             $ws.AddCommit('delta edit')
-            $ws.BumpVersion('alpha', '0.1.1')
-            $ws.AddCommit('bump alpha')
+            $ws.SetVersion('alpha', '0.1.1')
+            $ws.AddCommit('change alpha')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
             @($findings).Count | Should -Be 0

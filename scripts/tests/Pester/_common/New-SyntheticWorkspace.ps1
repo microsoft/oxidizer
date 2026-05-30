@@ -12,7 +12,7 @@
     (Linear2, Linear3, Linear4, Diamond4, Macros3, FanOut5, UpDown5, Mixed6,
     Detached) and a `-Spec` parameter for ad-hoc topologies.
 
-    The returned object exposes mutation helpers (ModifySource, BumpVersion,
+    The returned object exposes mutation helpers (ModifySource, SetVersion,
     SetPublishFalse, AddCommit, ...) so scenarios can build their pre-release
     git history declaratively.
 
@@ -293,12 +293,12 @@ function New-SyntheticWorkspace {
         Set-Content -Path $full -Value $Content -NoNewline
     }
 
-    $ws | Add-Member -MemberType ScriptMethod -Name 'BumpVersion' -Value {
+    $ws | Add-Member -MemberType ScriptMethod -Name 'SetVersion' -Value {
         param([string]$Package, [string]$NewVersion)
         $packagePath = Join-Path $this.Path "crates\$Package\Cargo.toml"
         $rootPath  = Join-Path $this.Path 'Cargo.toml'
         if (-not (Test-Path $packagePath)) {
-            throw "BumpVersion: package '$Package' not found at '$packagePath'"
+            throw "SetVersion: package '$Package' not found at '$packagePath'"
         }
 
         $content = Get-Content $packagePath -Raw

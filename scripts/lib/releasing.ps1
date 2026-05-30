@@ -16,9 +16,9 @@
       - Reverse-dependency cascade computation.
       - SemVer arithmetic (Cargo's 0.x.y rules).
       - Safe git invocation (no Invoke-Expression).
-      - Detecting which packages have been bumped in this PR, which have had source
-        modifications since their own last release baseline (per-package, derived from
-        each package's Cargo.toml history), and which workspace dependencies of
+      - Detecting which packages have had their version incremented in this PR, which
+        have had source modifications since their own last release baseline (per-package,
+        derived from each package's Cargo.toml history), and which workspace dependencies of
         in-release packages fall into the "modified-but-unreleased" bucket (the core
         "unreleased upstream dependency" analysis).
 
@@ -157,37 +157,35 @@ function Compare-SemanticVersions {
     return 0
 }
 
-# Computes the next version for the given bump kind, honoring Cargo's 0.x.y SemVer rules.
+# Computes the next version for the given change type, honoring Cargo's 0.x.y SemVer rules.
 #
 # IMPORTANT VOCABULARY (also documented in AGENTS.md "Release Versioning Vocabulary"):
 #
 #   * CHANGE TYPE — the semantic intent of a release: 'breaking' /
 #     'non-breaking' / 'patch'. This is what the user thinks about and what the
 #     CLI accepts via `release-crate.ps1 -Change Breaking|NonBreaking|Patch|1.0`.
+#     Internally the same vocabulary is used for the `$changeType` enum (and
+#     for `-ChangeType` parameters throughout the release tooling).
 #
 #   * VERSION COMPONENT — a position in the SemVer string `major.minor.patch`
 #     (the integers in x.y.z). These names are POSITIONAL, not semantic.
 #
-#   * Internal `$bump` enum (`major|minor|patch`) — confusingly named for
-#     historical reasons. It is a CHANGE-TYPE label, NOT a version-component
-#     selector: `major` means "breaking change", `minor` means "non-breaking
-#     change", `patch` means "patch". The mapping to the actual version
-#     component that gets incremented depends on the current version:
-#       - For x.y.z (x >= 1): major -> (x+1).0.0, minor -> x.(y+1).0, patch -> x.y.(z+1)
-#         (here change-type and version-component happen to coincide).
-#       - For 0.x.y (x >= 1): major -> 0.(x+1).0 (the MINOR component bumps!),
-#                             minor and patch -> 0.x.(y+1) (patch component).
-#       - For 0.0.x          : every bump -> 0.0.(x+1) (every change is breaking).
+# The mapping from change type to the actual version component that gets
+# incremented depends on the current version:
+#   - For x.y.z (x >= 1): breaking -> (x+1).0.0, non-breaking -> x.(y+1).0, patch -> x.y.(z+1)
+#     (here the change type and the version-component name happen to coincide).
+#   - For 0.x.y (x >= 1): breaking -> 0.(x+1).0 (the MINOR component is incremented!),
+#                         non-breaking and patch -> 0.x.(y+1) (patch component).
+#   - For 0.0.x          : every change -> 0.0.(x+1) (every change is breaking).
 #
-# DO NOT leak the internal `major|minor|patch` enum into user-visible output —
-# always translate via `Get-ChangeLabelFromBumpKind` in release-flow.ps1 first.
+# DO NOT leak the internal `breaking|non-breaking|patch` enum directly into
+# user-visible output without a translation step — use `Get-ChangeTypeLabel`
+# in release-flow.ps1 to get a user-friendly noun phrase.
 function Get-NextVersion {
     param(
         [string]$currentVersion,
-        # NOTE: this is a CHANGE-TYPE label, not a version-component name.
-        # See the comment block above for the mapping rules.
-        [ValidateSet('major', 'minor', 'patch')]
-        [string]$bump
+        [ValidateSet('breaking', 'non-breaking', 'patch')]
+        [string]$ChangeType
     )
 
     # Force array context — see Compare-SemanticVersions for the rationale.
@@ -195,16 +193,16 @@ function Get-NextVersion {
     while ($parts.Count -lt 3) { $parts += 0 }
 
     if ($parts[0] -ge 1) {
-        switch ($bump) {
-            'major' { return "$($parts[0] + 1).0.0" }
-            'minor' { return "$($parts[0]).$($parts[1] + 1).0" }
-            'patch' { return "$($parts[0]).$($parts[1]).$($parts[2] + 1)" }
+        switch ($ChangeType) {
+            'breaking'     { return "$($parts[0] + 1).0.0" }
+            'non-breaking' { return "$($parts[0]).$($parts[1] + 1).0" }
+            'patch'        { return "$($parts[0]).$($parts[1]).$($parts[2] + 1)" }
         }
     }
     elseif ($parts[1] -ge 1) {
-        switch ($bump) {
-            'major' { return "0.$($parts[1] + 1).0" }
-            default { return "0.$($parts[1]).$($parts[2] + 1)" }
+        switch ($ChangeType) {
+            'breaking' { return "0.$($parts[1] + 1).0" }
+            default    { return "0.$($parts[1]).$($parts[2] + 1)" }
         }
     }
     else {
@@ -212,7 +210,17 @@ function Get-NextVersion {
     }
 }
 
-function Get-BumpKindFromVersions {
+# Recovers the change type implied by a (oldVersion -> newVersion) transition.
+#
+# NOTE: this function returns the CONSERVATIVE LOWER BOUND of the change type
+# implied by the numeric transition. For a 0.x.y package the transition
+# 0.4.1 -> 0.4.2 could have originated from EITHER a 'non-breaking' OR a
+# 'patch' change type — both collapse to the same numeric increment under
+# Cargo's 0.x SemVer rules. We return 'patch' in that case because that is the
+# tightest claim we can make from numbers alone. Every consumer (cascade math,
+# Test-IsBreakingChange) treats 'non-breaking' and 'patch' identically on 0.x
+# packages, so the ambiguity has no functional impact at call sites.
+function Get-ChangeTypeFromVersions {
     param(
         [string]$oldVersion,
         [string]$newVersion
@@ -225,22 +233,22 @@ function Get-BumpKindFromVersions {
     while ($newParts.Count -lt 3) { $newParts += 0 }
 
     if ($oldParts[0] -ge 1) {
-        if ($newParts[0] -ne $oldParts[0]) { return 'major' }
-        if ($newParts[1] -ne $oldParts[1]) { return 'minor' }
+        if ($newParts[0] -ne $oldParts[0]) { return 'breaking' }
+        if ($newParts[1] -ne $oldParts[1]) { return 'non-breaking' }
         return 'patch'
     }
     if ($oldParts[1] -ge 1) {
-        if ($newParts[1] -ne $oldParts[1]) { return 'major' }
+        if ($newParts[1] -ne $oldParts[1]) { return 'breaking' }
         return 'patch'
     }
-    return 'major'
+    return 'breaking'
 }
 
 function Test-IsBreakingChange {
     param(
         [string]$oldVersion,
-        [ValidateSet('major', 'minor', 'patch')]
-        [string]$bump
+        [ValidateSet('breaking', 'non-breaking', 'patch')]
+        [string]$ChangeType
     )
 
     # Force array context — see Compare-SemanticVersions for the rationale.
@@ -248,10 +256,10 @@ function Test-IsBreakingChange {
     while ($parts.Count -lt 3) { $parts += 0 }
 
     if ($parts[0] -ge 1) {
-        return $bump -eq 'major'
+        return $ChangeType -eq 'breaking'
     }
     if ($parts[1] -ge 1) {
-        return $bump -eq 'major'
+        return $ChangeType -eq 'breaking'
     }
     return $true
 }
@@ -651,14 +659,14 @@ function Get-PackagesWithUnreleasedChanges {
 # For every published workspace package, compares the on-disk current version with the
 # version at $BaseRef and returns the folders whose version differs. On-disk reads
 # avoid cache staleness when this is called between mid-run Cargo.toml edits.
-function Get-PackagesWithVersionBumps {
+function Get-PackagesWithVersionChanges {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][string]$BaseRef
     )
 
     $packages = Get-WorkspacePackages -repoRoot $RepoRoot
-    $bumped = [System.Collections.Generic.HashSet[string]]::new()
+    $changed = [System.Collections.Generic.HashSet[string]]::new()
 
     foreach ($package in $packages) {
         if (-not $package.Published) { continue }
@@ -669,20 +677,21 @@ function Get-PackagesWithVersionBumps {
         $currentVersion = Get-CurrentVersion -cargoTomlPath $cargoToml
         $baseVersion    = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $package.Folder
 
-        # New package (not present at base) counts as "bumped" (definitely being released for the first time).
+        # New package (not present at base) counts as version-changed (it is
+        # being released for the first time).
         if ($null -eq $baseVersion) {
-            [void]$bumped.Add($package.Folder)
+            [void]$changed.Add($package.Folder)
             continue
         }
 
         if ($currentVersion -ne $baseVersion) {
-            [void]$bumped.Add($package.Folder)
+            [void]$changed.Add($package.Folder)
         }
     }
 
     # PowerShell pipeline collapses an empty HashSet to $null on return; -NoEnumerate
     # preserves it so downstream .Contains() calls still work.
-    Write-Output -NoEnumerate $bumped
+    Write-Output -NoEnumerate $changed
 }
 
 # Returns a sorted array of pending-release records for every published workspace
@@ -753,27 +762,28 @@ function Get-PendingReleases {
 #       cascade-only targets (those whose only modification is the cascade-
 #       written Cargo.toml / CHANGELOG.md) never enter the snapshot and so
 #       cannot surface as findings on later iterations.
-#   (2) A release-set member is removed only when its bump is already breaking
-#       (semantic maximum). Members whose bump is non-breaking or patch and
-#       which have pre-existing modifications are reported so the user can
-#       still elevate the bump after reviewing the changes.
+#   (2) A release-set member is removed only when its cascade-applied change
+#       is already breaking (semantic maximum). Members whose change type is
+#       non-breaking or patch and which have pre-existing modifications are
+#       reported so the user can still elevate the change type after
+#       reviewing the changes.
 #
-# For each package in the "release set" (packages with version bumps vs base), walk its
+# For each package in the "release set" (packages with version changes vs base), walk its
 # transitive normal/build workspace dependencies. Report any workspace dependency that
 #
 #   1. has source modifications since its own last release baseline (i.e. since the
 #      most recent commit that touched its `version =` or `publish =` line — see
 #      Get-PackageLastReleaseBaseline), and
 #   2. is either (a) NOT itself in the release set, OR (b) IS in the release set
-#      but its bump (current vs base) is below "breaking" (so the user might
-#      still want to elevate it after reviewing the changes), and
+#      but its cascade-applied change type (current vs base) is below "breaking"
+#      (so the user might still want to elevate it after reviewing the changes), and
 #   3. is published (publish != false),
 #
 # along with the shortest dependency chain that reaches it from a released package.
 #
 # Per-package baselines (rather than a global PR-vs-base-ref diff) are required to
 # detect upstream changes that were merged to main in earlier PRs without a version
-# bump and are now being depended on by a release-set package in this PR. Comparing
+# change and are now being depended on by a release-set package in this PR. Comparing
 # the working tree only against the PR base ref would miss those.
 #
 # Returns @() when there are no findings, otherwise an array of objects:
@@ -781,8 +791,8 @@ function Get-PendingReleases {
 #   PackageName       - cargo package name
 #   CurrentVersion    - package's current version (Cargo.toml [package].version)
 #   InReleaseSet      - $true when the finding is also a release-set member
-#                       (its bump was applied but is below breaking); $false
-#                       otherwise. The caller uses this to distinguish
+#                       (its cascade-applied change type was below breaking);
+#                       $false otherwise. The caller uses this to distinguish
 #                       "needs review for elevation" from "needs review for
 #                       primary release".
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
@@ -802,7 +812,7 @@ function Get-UnreleasedModifiedDependencies {
     )
 
     $packages      = Get-WorkspacePackages -repoRoot $RepoRoot
-    $releaseSet  = Get-PackagesWithVersionBumps -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $releaseSet  = Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef
     # Use the caller-provided snapshot when present so Invariant A holds across
     # cascade writes (which would otherwise pollute Get-PackagesWithUnreleasedChanges's
     # working-tree query and surface cascade-only targets as findings).
@@ -856,9 +866,9 @@ function Get-UnreleasedModifiedDependencies {
                 # Decide whether to record this dep as a finding.
                 # Surface when (modified + published) AND either:
                 #   - not a release-set member (classic case), OR
-                #   - a release-set member whose bump is below "breaking" — the
-                #     user may still want to elevate after reviewing the changes
-                #     (Invariant B).
+                #   - a release-set member whose cascade-applied change type
+                #     is below "breaking" — the user may still want to elevate
+                #     after reviewing the changes (Invariant B).
                 $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depPackage.Published
                 $isInReleaseSet = $releaseSet.Contains($depFolder)
 
@@ -867,14 +877,15 @@ function Get-UnreleasedModifiedDependencies {
                     if (-not $isInReleaseSet) {
                         $surface = $true
                     } else {
-                        # Release-set member: compute the cascade-applied bump
-                        # (base → current) and surface only when below "breaking".
-                        # New packages (no base version) are never surfaced — they
-                        # have no semantically-meaningful bump to elevate.
+                        # Release-set member: compute the cascade-applied
+                        # change type (base → current) and surface only when
+                        # below "breaking". New packages (no base version)
+                        # are never surfaced — they have no semantically-
+                        # meaningful change type to elevate.
                         $depBase = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $depFolder
                         if ($null -ne $depBase -and $depBase -ne $depPackage.Version) {
-                            $bumpKind = Get-BumpKindFromVersions -oldVersion $depBase -newVersion $depPackage.Version
-                            if (-not (Test-IsBreakingChange -oldVersion $depBase -bump $bumpKind)) {
+                            $depChangeType = Get-ChangeTypeFromVersions -oldVersion $depBase -newVersion $depPackage.Version
+                            if (-not (Test-IsBreakingChange -oldVersion $depBase -ChangeType $depChangeType)) {
                                 $surface = $true
                             }
                         }

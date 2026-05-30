@@ -21,10 +21,10 @@
     }
 
     Expect = @{
-        # In 0.x semver convention (per Get-NextVersion), "minor" bump on 0.2.0
-        # is patch-style → 0.2.1 (true breaking is "major" → 0.3.0). b's cascade
-        # to a requires 0.1.1 which a already satisfies (from the initial patch),
-        # so a stays at 0.1.1 (bullet-only).
+        # In 0.x semver convention (per Get-NextVersion), a "non-breaking" change
+        # on 0.2.0 is patch-style → 0.2.1 (true breaking is "breaking" → 0.3.0).
+        # b's cascade to a requires 0.1.1 which a already satisfies (from the
+        # initial patch), so a stays at 0.1.1 (bullet-only).
         Released = @(
             @{ Package = 'a'; To = '0.1.1' }
             @{ Package = 'b'; To = '0.2.1' }

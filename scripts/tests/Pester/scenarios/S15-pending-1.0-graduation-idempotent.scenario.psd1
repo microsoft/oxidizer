@@ -8,7 +8,7 @@
 
     History = @(
         # Prior `release-crate.ps1 -Change 1.0` on b graduated it to 1.0.0.
-        @{ Op = 'BumpVersion'; Package = 'b'; To = '1.0.0' }
+        @{ Op = 'SetVersion'; Package = 'b'; To = '1.0.0' }
     )
 
     Run = @{
@@ -21,9 +21,9 @@
     }
 
     Expect = @{
-        # b stays at 1.0.0 (no-op). Cascade uses the EFFECTIVE bump (major
+        # b stays at 1.0.0 (no-op). Cascade uses the effective change (major
         # on 0.2.0 → 1.0.0 is a breaking change at the 0→1 boundary), so a
-        # cascades as major. On 0.x.y a's major bump is 0.1.0 → 0.2.0.
+        # cascades as major. On 0.x.y a's breaking change is 0.1.0 → 0.2.0.
         Released = @(
             @{ Package = 'b'; To = '1.0.0' }
             @{ Package = 'a'; To = '0.2.0' }

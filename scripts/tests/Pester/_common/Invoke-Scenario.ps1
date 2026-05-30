@@ -57,7 +57,7 @@ function Invoke-Scenario {
         if (-not $step.Op) { throw "Scenario '$($scenario.Name)' has a history step with no Op." }
         switch ($step.Op) {
             'ModifySource'    { $ws.ModifySource($step.Package) }
-            'BumpVersion'     { $ws.BumpVersion($step.Package, $step.To) }
+            'SetVersion'      { $ws.SetVersion($step.Package, $step.To) }
             'SetPublishFalse' { $ws.SetPublishFalse($step.Package) }
             'AddCommit'       { $ws.AddCommit($step.Message) }
             'Commit'          { $ws.AddCommit($step.Message) }

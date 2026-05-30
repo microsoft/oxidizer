@@ -43,95 +43,95 @@ Describe 'Compare-SemanticVersions' {
 
 Describe 'Get-NextVersion' {
     Context 'x.y.z (x >= 1)' {
-        It 'major bumps x and resets y,z' {
-            Get-NextVersion -currentVersion '1.2.3' -bump 'major' | Should -Be '2.0.0'
-            Get-NextVersion -currentVersion '9.0.0' -bump 'major' | Should -Be '10.0.0'
+        It 'breaking increments x and resets y,z' {
+            Get-NextVersion -currentVersion '1.2.3' -ChangeType 'breaking' | Should -Be '2.0.0'
+            Get-NextVersion -currentVersion '9.0.0' -ChangeType 'breaking' | Should -Be '10.0.0'
         }
-        It 'minor bumps y and resets z' {
-            Get-NextVersion -currentVersion '1.2.3' -bump 'minor' | Should -Be '1.3.0'
-            Get-NextVersion -currentVersion '1.9.99' -bump 'minor' | Should -Be '1.10.0'
+        It 'non-breaking increments y and resets z' {
+            Get-NextVersion -currentVersion '1.2.3' -ChangeType 'non-breaking' | Should -Be '1.3.0'
+            Get-NextVersion -currentVersion '1.9.99' -ChangeType 'non-breaking' | Should -Be '1.10.0'
         }
-        It 'patch bumps z' {
-            Get-NextVersion -currentVersion '1.2.3' -bump 'patch' | Should -Be '1.2.4'
+        It 'patch increments z' {
+            Get-NextVersion -currentVersion '1.2.3' -ChangeType 'patch' | Should -Be '1.2.4'
         }
     }
 
     Context '0.x.y (x >= 1) — Cargo SemVer rules' {
-        It 'major bumps x and resets y' {
-            Get-NextVersion -currentVersion '0.1.5' -bump 'major' | Should -Be '0.2.0'
-            Get-NextVersion -currentVersion '0.9.99' -bump 'major' | Should -Be '0.10.0'
+        It 'breaking increments x and resets y' {
+            Get-NextVersion -currentVersion '0.1.5' -ChangeType 'breaking' | Should -Be '0.2.0'
+            Get-NextVersion -currentVersion '0.9.99' -ChangeType 'breaking' | Should -Be '0.10.0'
         }
-        It 'minor maps to patch in Cargo''s 0.x.y rules' {
-            Get-NextVersion -currentVersion '0.1.5' -bump 'minor' | Should -Be '0.1.6'
+        It 'non-breaking maps to patch in Cargo''s 0.x.y rules' {
+            Get-NextVersion -currentVersion '0.1.5' -ChangeType 'non-breaking' | Should -Be '0.1.6'
         }
-        It 'patch bumps y' {
-            Get-NextVersion -currentVersion '0.1.5' -bump 'patch' | Should -Be '0.1.6'
+        It 'patch increments y' {
+            Get-NextVersion -currentVersion '0.1.5' -ChangeType 'patch' | Should -Be '0.1.6'
         }
     }
 
     Context '0.0.z — every change is breaking' {
-        It 'every bump kind bumps z' {
-            Get-NextVersion -currentVersion '0.0.3' -bump 'major' | Should -Be '0.0.4'
-            Get-NextVersion -currentVersion '0.0.3' -bump 'minor' | Should -Be '0.0.4'
-            Get-NextVersion -currentVersion '0.0.3' -bump 'patch' | Should -Be '0.0.4'
+        It 'every change type increments z' {
+            Get-NextVersion -currentVersion '0.0.3' -ChangeType 'breaking' | Should -Be '0.0.4'
+            Get-NextVersion -currentVersion '0.0.3' -ChangeType 'non-breaking' | Should -Be '0.0.4'
+            Get-NextVersion -currentVersion '0.0.3' -ChangeType 'patch' | Should -Be '0.0.4'
         }
     }
 
     Context 'short-form inputs (pads to three segments)' {
         It 'handles two-segment inputs' {
-            Get-NextVersion -currentVersion '1.2' -bump 'patch' | Should -Be '1.2.1'
-            Get-NextVersion -currentVersion '0.1' -bump 'patch' | Should -Be '0.1.1'
+            Get-NextVersion -currentVersion '1.2' -ChangeType 'patch' | Should -Be '1.2.1'
+            Get-NextVersion -currentVersion '0.1' -ChangeType 'patch' | Should -Be '0.1.1'
         }
         It 'handles single-segment inputs (was a latent infinite loop)' {
-            Get-NextVersion -currentVersion '1' -bump 'patch' | Should -Be '1.0.1'
-            Get-NextVersion -currentVersion '2' -bump 'major' | Should -Be '3.0.0'
+            Get-NextVersion -currentVersion '1' -ChangeType 'patch' | Should -Be '1.0.1'
+            Get-NextVersion -currentVersion '2' -ChangeType 'breaking' | Should -Be '3.0.0'
         }
     }
 }
 
-Describe 'Get-BumpKindFromVersions' {
+Describe 'Get-ChangeTypeFromVersions' {
     Context 'x.y.z (x >= 1)' {
-        It 'detects major' { Get-BumpKindFromVersions -oldVersion '1.2.3' -newVersion '2.0.0' | Should -Be 'major' }
-        It 'detects minor' { Get-BumpKindFromVersions -oldVersion '1.2.3' -newVersion '1.3.0' | Should -Be 'minor' }
-        It 'detects patch' { Get-BumpKindFromVersions -oldVersion '1.2.3' -newVersion '1.2.4' | Should -Be 'patch' }
+        It 'detects breaking' { Get-ChangeTypeFromVersions -oldVersion '1.2.3' -newVersion '2.0.0' | Should -Be 'breaking' }
+        It 'detects non-breaking' { Get-ChangeTypeFromVersions -oldVersion '1.2.3' -newVersion '1.3.0' | Should -Be 'non-breaking' }
+        It 'detects patch' { Get-ChangeTypeFromVersions -oldVersion '1.2.3' -newVersion '1.2.4' | Should -Be 'patch' }
     }
     Context '0.x.y (x >= 1)' {
-        It 'detects 0.x bump as major' { Get-BumpKindFromVersions -oldVersion '0.1.0' -newVersion '0.2.0' | Should -Be 'major' }
-        It 'detects 0.x.y bump as patch' { Get-BumpKindFromVersions -oldVersion '0.1.0' -newVersion '0.1.1' | Should -Be 'patch' }
+        It 'detects 0.x change as breaking' { Get-ChangeTypeFromVersions -oldVersion '0.1.0' -newVersion '0.2.0' | Should -Be 'breaking' }
+        It 'detects 0.x.y change as patch' { Get-ChangeTypeFromVersions -oldVersion '0.1.0' -newVersion '0.1.1' | Should -Be 'patch' }
     }
     Context '0.0.z' {
-        It 'reports every change as major' { Get-BumpKindFromVersions -oldVersion '0.0.1' -newVersion '0.0.2' | Should -Be 'major' }
+        It 'reports every change as breaking' { Get-ChangeTypeFromVersions -oldVersion '0.0.1' -newVersion '0.0.2' | Should -Be 'breaking' }
     }
     Context 'short-form inputs (pads to three segments)' {
         It 'handles single-segment inputs (was a latent infinite loop)' {
-            Get-BumpKindFromVersions -oldVersion '1' -newVersion '1.0.1' | Should -Be 'patch'
-            Get-BumpKindFromVersions -oldVersion '1' -newVersion '2.0.0' | Should -Be 'major'
+            Get-ChangeTypeFromVersions -oldVersion '1' -newVersion '1.0.1' | Should -Be 'patch'
+            Get-ChangeTypeFromVersions -oldVersion '1' -newVersion '2.0.0' | Should -Be 'breaking'
         }
     }
 }
 
 Describe 'Test-IsBreakingChange' {
     Context 'x.y.z (x >= 1)' {
-        It 'major is breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -bump 'major' | Should -BeTrue }
-        It 'minor is not breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -bump 'minor' | Should -BeFalse }
-        It 'patch is not breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -bump 'patch' | Should -BeFalse }
+        It 'breaking is breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -ChangeType 'breaking' | Should -BeTrue }
+        It 'non-breaking is not breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -ChangeType 'non-breaking' | Should -BeFalse }
+        It 'patch is not breaking' { Test-IsBreakingChange -oldVersion '1.0.0' -ChangeType 'patch' | Should -BeFalse }
     }
     Context '0.x.y (x >= 1)' {
-        It 'major is breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -bump 'major' | Should -BeTrue }
-        It 'minor is not breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -bump 'minor' | Should -BeFalse }
-        It 'patch is not breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -bump 'patch' | Should -BeFalse }
+        It 'breaking is breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -ChangeType 'breaking' | Should -BeTrue }
+        It 'non-breaking is not breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -ChangeType 'non-breaking' | Should -BeFalse }
+        It 'patch is not breaking' { Test-IsBreakingChange -oldVersion '0.1.0' -ChangeType 'patch' | Should -BeFalse }
     }
     Context '0.0.z' {
-        It 'every bump is breaking' {
-            Test-IsBreakingChange -oldVersion '0.0.1' -bump 'patch' | Should -BeTrue
-            Test-IsBreakingChange -oldVersion '0.0.1' -bump 'minor' | Should -BeTrue
-            Test-IsBreakingChange -oldVersion '0.0.1' -bump 'major' | Should -BeTrue
+        It 'every change type is breaking' {
+            Test-IsBreakingChange -oldVersion '0.0.1' -ChangeType 'patch' | Should -BeTrue
+            Test-IsBreakingChange -oldVersion '0.0.1' -ChangeType 'non-breaking' | Should -BeTrue
+            Test-IsBreakingChange -oldVersion '0.0.1' -ChangeType 'breaking' | Should -BeTrue
         }
     }
     Context 'short-form inputs (pads to three segments)' {
         It 'handles single-segment inputs (was a latent infinite loop)' {
-            Test-IsBreakingChange -oldVersion '1' -bump 'major' | Should -BeTrue
-            Test-IsBreakingChange -oldVersion '1' -bump 'minor' | Should -BeFalse
+            Test-IsBreakingChange -oldVersion '1' -ChangeType 'breaking' | Should -BeTrue
+            Test-IsBreakingChange -oldVersion '1' -ChangeType 'non-breaking' | Should -BeFalse
         }
     }
 }

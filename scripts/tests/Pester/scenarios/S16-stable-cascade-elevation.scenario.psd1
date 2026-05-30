@@ -1,6 +1,6 @@
 @{
     Name        = 'S16-stable-cascade-elevation'
-    Description = 'Stable 1.x topology exercising Invariant B end-to-end. Three-package chain ''top -> middle -> bottom'' where ''middle'' has pre-existing source modifications. User releases ''bottom'' as patch. Cascade pulls ''middle'' (1.0.0 -> 1.0.1) and ''top'' (1.0.0 -> 1.0.1) as patch bumps. Because ''middle'' is ALSO modified and its cascade-applied bump is below breaking, the post-release scan surfaces ''middle'' (reached via ''top.Deps = [middle]''). User picks option 4 (non-breaking) → ''middle'' escalates from cascade-applied 1.0.1 to 1.1.0, and the re-cascade lifts ''top'' to 1.1.0 too (exposing-dependent minor cascade).
+    Description = 'Stable 1.x topology exercising Invariant B end-to-end. Three-package chain ''top -> middle -> bottom'' where ''middle'' has pre-existing source modifications. User releases ''bottom'' as patch. Cascade pulls ''middle'' (1.0.0 -> 1.0.1) and ''top'' (1.0.0 -> 1.0.1) as patch changes. Because ''middle'' is ALSO modified and its cascade-applied change type is below breaking, the post-release scan surfaces ''middle'' (reached via ''top.Deps = [middle]''). User picks option 4 (non-breaking) → ''middle'' escalates from cascade-applied 1.0.1 to 1.1.0, and the re-cascade lifts ''top'' to 1.1.0 too (exposing-dependent minor cascade).
 
 This is the stable-version companion to S06 (the same flow on 0.x.y). Validates that Invariant B elevation works correctly through Invoke-ReleaseFlow''s ``$isPendingPrimary`` branch on >=1.x packages.'
 
@@ -24,7 +24,7 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
         Change    = 'Patch'
         BaseRef   = 'HEAD~1'
         Answers   = @(
-            # Invariant B: middle was cascade-pulled with a patch bump
+            # Invariant B: middle was cascade-pulled with a patch change
             # AND has pre-existing modifications. User elevates to
             # non-breaking (option 4 = minor on 1.x).
             @{ Match = "Choose option for 'middle'"; Reply = '4' }
@@ -33,11 +33,11 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
 
     Expect = @{
         # bottom: 1.0.0 -> 1.0.1 (user-requested patch).
-        # middle: cascade-bumped to 1.0.1, then escalated to 1.1.0 by the
+        # middle: cascade-released to 1.0.1, then escalated to 1.1.0 by the
         #         post-release scan accepting it as non-breaking.
-        # top:    cascade-bumped to 1.0.1 originally, then re-cascade-pulled
+        # top:    cascade-released to 1.0.1 originally, then re-cascade-pulled
         #         to 1.1.0 because the exposing-cascade rule lifts dependents
-        #         in lock-step with middle's minor bump.
+        #         in lock-step with middle's non-breaking change.
         Released = @(
             @{ Package = 'bottom'; To = '1.0.1' }
             @{ Package = 'middle'; To = '1.1.0' }

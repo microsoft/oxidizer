@@ -1,6 +1,6 @@
 @{
     Name        = 'S11-stable-version-minor-distinct'
-    Description = 'Companion to S10: same stable workspace, but the user picks option 4 (non-breaking) on upstream. Verifies upstream ends at 1.3.0 (a minor bump), confirming that on >=1.x.y packages options 4 and 5 resolve to genuinely different on-disk versions.'
+    Description = 'Companion to S10: same stable workspace, but the user picks option 4 (non-breaking) on upstream. Verifies upstream ends at 1.3.0 (a non-breaking change), confirming that on >=1.x.y packages options 4 and 5 resolve to genuinely different on-disk versions.'
 
     Workspace = @{
         Spec = @{
@@ -29,12 +29,13 @@
 
     Expect = @{
         # downstream: 1.0.0 -> 1.1.0. The user requested -Change Patch, but the
-        # post-release scan accepts upstream as a *minor* bump (1.2.3 -> 1.3.0).
-        # The cascade then escalates downstream to a minor bump too — on stable
-        # >=1.x.y, a non-breaking-but-minor-class change in an upstream propagates
-        # as minor in dependents (see Test-IsBreakingChange + the exposing-cascade
-        # logic in Invoke-ReleaseFlow).
-        # upstream: 1.2.3 -> 1.3.0 (minor; option 5 would have given 1.2.4).
+        # post-release scan accepts upstream as a *non-breaking* change
+        # (1.2.3 -> 1.3.0). The cascade then escalates downstream to a
+        # non-breaking change too — on stable >=1.x.y, a non-breaking change
+        # in an upstream propagates as non-breaking in dependents (see
+        # Test-IsBreakingChange + the exposing-cascade logic in
+        # Invoke-ReleaseFlow).
+        # upstream: 1.2.3 -> 1.3.0 (non-breaking; option 5 would have given 1.2.4).
         Released = @(
             @{ Package = 'downstream'; To = '1.1.0' }
             @{ Package = 'upstream';   To = '1.3.0' }

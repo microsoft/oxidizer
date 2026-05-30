@@ -7,27 +7,27 @@
 
 .DESCRIPTION
     This script automates the full release of a Rust package in a workspace repository:
-    1. Version Update: Either bump the version according to the kind of change being released
+    1. Version Update: Either increment the version according to the kind of change being released
        (Breaking / NonBreaking / Patch), graduate a 0.x package to its first stable 1.0.0, or set
        a specific version explicitly. Cargo's 0.x.y SemVer rules are honored — for `0.x.y` packages
-       a Breaking change becomes `0.(x+1).0` and both NonBreaking and Patch map to bumping `y`.
+       a Breaking change becomes `0.(x+1).0` and both NonBreaking and Patch map to incrementing `y`.
     2. Cascade: Every workspace package that depends on the target via `[dependencies]` or
-       `[build-dependencies]` (transitively) is also bumped. The kind of change applied to each
+       `[build-dependencies]` (transitively) is also released. The kind of change applied to each
        dependent is informed by `[package.metadata.cargo_check_external_types]` AND by whether
        the target's change is SemVer-incompatible under Cargo's rules:
-         * If the dependent exposes any type rooted at the bumped package in its public API
-           (or does not declare allowed_external_types at all), the dependent gets a major
-           bump when the target's change is breaking (e.g. `0.0.x → 0.0.(x+1)`, `0.x.y → 0.(x+1).0`,
+         * If the dependent exposes any type rooted at the released package in its public API
+           (or does not declare allowed_external_types at all), the dependent gets a breaking
+           change when the target's change is breaking (e.g. `0.0.x → 0.0.(x+1)`, `0.x.y → 0.(x+1).0`,
            `1.x → 2.0`); otherwise the same kind as the target. This ensures the dependent's
            own version increment reflects the breaking change in its public API surface.
-         * Otherwise, the dependent only uses the bumped package internally, and a patch bump
-           is applied: enough to refresh the workspace-pinned version, but without overstating
-           the change to downstream consumers.
+         * Otherwise, the dependent only uses the released package internally, and a patch
+           change is applied: enough to refresh the workspace-pinned version, but without
+           overstating the change to downstream consumers.
        Dev-only dependents are skipped — they automatically pick up the new workspace version.
     3. Changelog Generation: A CHANGELOG.md entry is generated for the target and every cascaded
        dependent. Cascaded packages that have no other commits since their last release get a single
        `Now requires <new-version> of \`<target>\`` entry under `🔧 Maintenance` (or `⚠️ Breaking`
-       for major bumps).
+       for breaking changes).
 
     By default, if neither --version nor --change is specified, the script performs a NonBreaking
     release of the target package (e.g., 1.2.3 -> 1.3.0, or 0.3.3 -> 0.3.4 for `0.x.y` packages).

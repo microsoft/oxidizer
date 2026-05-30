@@ -97,9 +97,9 @@ Describe 'Get-PackageVersionFromRef' {
     BeforeAll {
         Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionfromref')
-        # Bump 'b' on a follow-up commit so we have two distinct versions in history.
-        $script:Ws.BumpVersion('b', '0.2.1')
-        $script:Ws.AddCommit('bump b')
+        # Change version of 'b' on a follow-up commit so we have two distinct versions in history.
+        $script:Ws.SetVersion('b', '0.2.1')
+        $script:Ws.AddCommit('change b')
     }
 
     It 'reads the version at HEAD' {
@@ -120,14 +120,14 @@ Describe 'Get-PackageLastReleaseBaseline' {
         Reset-ReleaseScriptCaches
     $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'baseline')
         # Initial commit (call it C0). Now make a source-only edit (C1), then a
-        # version-bumping commit (C2), then another source edit (C3). Baseline
+        # version-changing commit (C2), then another source edit (C3). Baseline
         # for 'b' must be C2.
         $script:Ws.ModifySource('b')
         $script:Ws.AddCommit('source edit to b')
         $script:Sha_C1 = $script:Ws.GitSha('HEAD')
 
-        $script:Ws.BumpVersion('b', '0.2.1')
-        $script:Ws.AddCommit('bump b to 0.2.1')
+        $script:Ws.SetVersion('b', '0.2.1')
+        $script:Ws.AddCommit('change b to 0.2.1')
         $script:Sha_C2 = $script:Ws.GitSha('HEAD')
 
         $script:Ws.ModifySource('b')
@@ -244,27 +244,27 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
     }
 }
 
-Describe 'Get-PackagesWithVersionBumps' {
+Describe 'Get-PackagesWithVersionChanges' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionbumps')
-        # Bump 'a' relative to HEAD~ baseline.
-        $script:Ws.BumpVersion('a', '0.1.1')
-        $script:Ws.AddCommit('bump a')
+    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionchanges')
+        # Change version of 'a' relative to HEAD~ baseline.
+        $script:Ws.SetVersion('a', '0.1.1')
+        $script:Ws.AddCommit('change a')
     }
 
     It 'reports a package whose version differs vs the base ref' {
-        $bumped = Get-PackagesWithVersionBumps -RepoRoot $script:Ws.Path -BaseRef 'HEAD~1'
-        $bumped.Contains('a') | Should -BeTrue
-        $bumped.Contains('b') | Should -BeFalse
-        $bumped.Contains('c') | Should -BeFalse
+        $changedSet = Get-PackagesWithVersionChanges -RepoRoot $script:Ws.Path -BaseRef 'HEAD~1'
+        $changedSet.Contains('a') | Should -BeTrue
+        $changedSet.Contains('b') | Should -BeFalse
+        $changedSet.Contains('c') | Should -BeFalse
     }
 
     It 'returns an empty set when the working tree matches the base ref' {
         Reset-ReleaseScriptCaches
-        $w2 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionbumps-empty')
-        $bumped = Get-PackagesWithVersionBumps -RepoRoot $w2.Path -BaseRef 'HEAD'
-        $bumped.Count | Should -Be 0
+        $w2 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionchanges-empty')
+        $changedSet = Get-PackagesWithVersionChanges -RepoRoot $w2.Path -BaseRef 'HEAD'
+        $changedSet.Count | Should -Be 0
     }
 }
 
@@ -281,8 +281,8 @@ Describe 'Get-PendingReleases' {
 
     It 'reports one record per pending package with Folder/Name/BaseVersion/CurrentVersion' {
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-single-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Bump 'b' on top of HEAD baseline (uncommitted — that's the "pending" state).
-        $ws.BumpVersion('b', '0.2.2')
+        # Change version of 'b' on top of HEAD baseline (uncommitted — that's the "pending" state).
+        $ws.SetVersion('b', '0.2.2')
 
         $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
         $pending.Count             | Should -Be 1
@@ -294,10 +294,10 @@ Describe 'Get-PendingReleases' {
 
     It 'sorts pending records by Folder ascending so the announcement is deterministic' {
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-sort-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Bump in reverse Folder order — the helper must still emit them in alphabetical order.
-        $ws.BumpVersion('c', '0.3.1')
-        $ws.BumpVersion('a', '0.1.1')
-        $ws.BumpVersion('b', '0.2.1')
+        # Change versions in reverse Folder order — the helper must still emit them in alphabetical order.
+        $ws.SetVersion('c', '0.3.1')
+        $ws.SetVersion('a', '0.1.1')
+        $ws.SetVersion('b', '0.2.1')
 
         $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef 'HEAD')
         ($pending | ForEach-Object { $_.Folder }) -join ',' | Should -Be 'a,b,c'
@@ -305,8 +305,8 @@ Describe 'Get-PendingReleases' {
 
     It 'skips new-at-base packages (no base version to compare against)' {
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-new-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Bump existing 'a' so we have at least one genuinely-pending entry to compare against.
-        $ws.BumpVersion('a', '0.1.1')
+        # Change version of existing 'a' so we have at least one genuinely-pending entry to compare against.
+        $ws.SetVersion('a', '0.1.1')
 
         # Manually scaffold a brand-new package that doesn't exist at HEAD (no add+commit).
         $newPackage = Join-Path $ws.Path 'crates\brandnew'
@@ -326,7 +326,7 @@ edition = "2021"
 
     It 'returns an empty array when BaseRef is empty (no base to compare against)' {
         $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive ('pend-norefs-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        $ws.BumpVersion('a', '0.1.1')
+        $ws.SetVersion('a', '0.1.1')
 
         $pending = @(Get-PendingReleases -RepoRoot $ws.Path -BaseRef '')
         $pending.Count | Should -Be 0
@@ -552,9 +552,9 @@ Describe 'Add-CascadeBulletToVersionSection' {
 }
 
 # ---------------------------------------------------------------------------
-# Update-PendingReleaseVersion — in-place re-stamp of a partially-bumped
+# Update-PendingReleaseVersion — in-place re-stamp of a partially-released
 # pending release. Used by Invoke-CascadeStep when an upstream cascade
-# escalates a downstream that's already been bumped in this PR: we must
+# escalates a downstream that's already been version-changed in this PR: we must
 # rewrite the Cargo.toml + workspace dep + CHANGELOG header in place to
 # avoid leaving two stale `## [old]` / `## [new]` sections side by side.
 # ---------------------------------------------------------------------------
@@ -567,7 +567,7 @@ Describe 'Update-PendingReleaseVersion' {
     BeforeEach {
         Reset-ReleaseScriptCaches
         $script:UprvWs = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ('uprv-' + [guid]::NewGuid().Guid.Substring(0,8)))
-        # Pre-bump downstream to 0.1.1 so there's a pending release for us to
+        # Pre-release downstream to 0.1.1 so there's a pending release for us to
         # re-stamp. Also seed a CHANGELOG with the matching pending section so
         # we exercise the header-rewrite branch.
         $script:UprvPackageFolder = Join-Path $script:UprvWs.Path 'crates\downstream'
@@ -575,7 +575,7 @@ Describe 'Update-PendingReleaseVersion' {
         $script:UprvChangelog   = Join-Path $script:UprvPackageFolder 'CHANGELOG.md'
         $script:UprvRootCargo   = Join-Path $script:UprvWs.Path 'Cargo.toml'
 
-        $script:UprvWs.BumpVersion('downstream', '0.1.1')
+        $script:UprvWs.SetVersion('downstream', '0.1.1')
         # Manually re-stamp the workspace entry too so the fixture matches what
         # release-crate.ps1 would have written when first releasing downstream.
         $rootContent = Get-Content $script:UprvRootCargo -Raw
@@ -612,7 +612,7 @@ Describe 'Update-PendingReleaseVersion' {
     }
 
     It 'leaves OTHER workspace dep entries untouched' {
-        # Bump downstream's pending version; upstream's workspace entry must
+        # Change downstream's pending version; upstream's workspace entry must
         # remain at its declared 0.2.0.
         Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
@@ -701,11 +701,11 @@ Describe 'Session-scoped git caches' {
         # Build a 3-commit history so the per-package baseline and committed
         # diff are both well-defined and distinct from HEAD:
         #   HEAD~2 → initial Linear3 (b at 0.2.0)
-        #   HEAD~1 → version bump for b to 0.2.1 (this is the baseline commit)
+        #   HEAD~1 → version change for b to 0.2.1 (this is the baseline commit)
         #   HEAD   → source edit for b (an unreleased change visible to
         #            Get-PackageCommittedChanges)
-        $script:CacheWs.BumpVersion('b', '0.2.1')
-        $script:CacheWs.AddCommit('bump b')
+        $script:CacheWs.SetVersion('b', '0.2.1')
+        $script:CacheWs.AddCommit('change b')
         $script:CacheWs.ModifySource('b', '// post-baseline edit')
         $script:CacheWs.AddCommit('edit b after baseline')
     }
@@ -736,7 +736,7 @@ Describe 'Session-scoped git caches' {
             # Populate cache for HEAD only.
             (Get-PackageVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD' -PackageFolder 'b') | Should -Be '0.2.1'
             # HEAD~2 must still hit git (different cache key) and return the original version
-            # (HEAD~1 is the bump commit, also at 0.2.1; HEAD~2 is the initial Linear3 state).
+            # (HEAD~1 is the version-change commit, also at 0.2.1; HEAD~2 is the initial Linear3 state).
             (Get-PackageVersionFromRef -RepoRoot $script:CacheWs.Path -BaseRef 'HEAD~2' -PackageFolder 'b') | Should -Be '0.2.0'
         }
     }
@@ -754,7 +754,7 @@ Describe 'Session-scoped git caches' {
     Context 'Get-PackageCommittedChanges' {
         It 'returns the same array on the second call (no git spawn)' {
             $files1 = Get-PackageCommittedChanges -RepoRoot $script:CacheWs.Path -PackageFolder 'b'
-            # 'b' has had its version bumped after its baseline (Cargo.toml + maybe changelog),
+            # 'b' has had its version changed after its baseline (Cargo.toml + maybe changelog),
             # but at minimum the Cargo.toml change must show up.
             $files1.Count | Should -BeGreaterOrEqual 1
             Mock -CommandName Invoke-Git -MockWith { throw "Invoke-Git called when cache should have served the request" }

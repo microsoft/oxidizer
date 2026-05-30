@@ -38,17 +38,18 @@ in `scripts/lib/`), keep two vocabularies strictly separate:
 - **Version components** are *positions* in the SemVer string
   `major.minor.patch` (the three integers in `x.y.z`). These names are
   positional, not semantic. Do not call a `0.4.1 -> 0.5.0` increment a
-  "major version bump" — the value of the *major component* (0) did not
+  "major version change" — the value of the *major component* (0) did not
   change, even though the change is breaking under Cargo's 0.x semver rules.
 
-The internal `$bump` parameter on `Get-NextVersion` / `Update-PackageVersion`
-/ `Invoke-ReleaseFlow` uses the string values `'major' | 'minor' | 'patch'`
-for historical reasons, but it is a CHANGE-TYPE enum, NOT a
-version-component selector. The mapping from change-type to which version
+The internal `$ChangeType` parameter on `Get-NextVersion` /
+`Update-PackageVersion` / `Invoke-ReleaseFlow` uses the string values
+`'breaking' | 'non-breaking' | 'patch'`. These are CHANGE-TYPE values, NOT
+version-component names. The mapping from change-type to which version
 component actually increments depends on whether the current version is
 `1.x.y`, `0.x.y` (x >= 1), or `0.0.x`. Always translate to change-type
-vocabulary via `Get-ChangeLabelFromBumpKind` before emitting user-facing
-output.
+vocabulary via `Get-ChangeTypeLabel` before emitting user-facing output;
+never present a version-component name (`major`/`minor`/`patch`) as a
+stand-in for the change type.
 
 ## Release Dependency Scan
 
@@ -58,19 +59,20 @@ two invariants — keep them intact when editing the relevant code in
 `scripts/lib/release-flow.ps1` and `scripts/lib/releasing.ps1`:
 
 1. **Upstream cascades never introduce items to the user-review queue.** A
-   package that received only a cascade bump (no pre-existing developer
-   modifications) requires no user review — its version bump is mechanical and
-   follows directly from the released dependency. Such packages must not
-   surface in the dep-scan prompt. The implementation upholds this by
+   package that received only a cascade-applied version change (no pre-existing
+   developer modifications) requires no user review — its version change is
+   mechanical and follows directly from the released dependency. Such packages
+   must not surface in the dep-scan prompt. The implementation upholds this by
    snapshotting the "has unreleased modifications" set BEFORE the primary
    release / cascade runs so the snapshot reflects pre-cascade reality.
 2. **A release-set member is removed from the user-review queue only when its
-   bump is already at the semantic maximum (breaking).** If a release-set
-   member has pre-existing developer modifications AND its cascade-applied
-   bump is less than breaking (non-breaking or patch), the user must still be
-   prompted because they may want to escalate the bump after reviewing the
-   changes. Only when the bump is already breaking (no higher bump exists)
-   can the member safely drop from the queue.
+   cascade-applied change type is already at the semantic maximum (breaking).**
+   If a release-set member has pre-existing developer modifications AND its
+   cascade-applied change type is less than breaking (non-breaking or patch),
+   the user must still be prompted because they may want to escalate the change
+   type after reviewing the changes. Only when the change type is already
+   breaking (no higher change type exists) can the member safely drop from the
+   queue.
 
 ## Pull Requests
 

@@ -128,7 +128,7 @@ Describe 'Format-PackageMenu' {
         $lines | Should -Contain '  5. Release as patch (1.2.3 -> 1.2.4)'
     }
 
-    It 'hides option 5 on 0.x.y packages because non-breaking and patch collapse to the same numeric bump' {
+    It 'hides option 5 on 0.x.y packages because non-breaking and patch collapse to the same numeric increment' {
         $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (0.1.2 -> 0.2.0)'
@@ -149,7 +149,7 @@ Describe 'Format-PackageMenu' {
         $out | Should -Not -Match 'Release as patch'
     }
 
-    It 'falls back to "(major version)" / "(minor version)" / "(patch version)" hints when CurrentVersion is missing or blank' {
+    It 'falls back to "(breaking)" / "(non-breaking)" / "(patch)" hints when CurrentVersion is missing or blank' {
         # Defensive: hand-rolled findings without CurrentVersion should still render the menu, not crash.
         $finding = [pscustomobject]@{
             Folder           = 'ohno'
@@ -159,9 +159,9 @@ Describe 'Format-PackageMenu' {
         }
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
         $lines = $out -split "`r?`n"
-        $lines | Should -Contain '  3. Release as breaking change (major version)'
-        $lines | Should -Contain '  4. Release as non-breaking change (minor version)'
-        $lines | Should -Contain '  5. Release as patch (patch version)'
+        $lines | Should -Contain '  3. Release as breaking change (breaking)'
+        $lines | Should -Contain '  4. Release as non-breaking change (non-breaking)'
+        $lines | Should -Contain '  5. Release as patch (patch)'
     }
 
     It 'does NOT include any "files changed" / numeric file-count metric' {
@@ -191,7 +191,7 @@ Describe 'Test-IsPatchOptionRedundant' {
         Test-IsPatchOptionRedundant -CurrentVersion '0.4.7' | Should -BeTrue
     }
 
-    It 'returns $true for 0.0.x versions (every bump collapses to patch)' {
+    It 'returns $true for 0.0.x versions (every change collapses to patch)' {
         Test-IsPatchOptionRedundant -CurrentVersion '0.0.1' | Should -BeTrue
         Test-IsPatchOptionRedundant -CurrentVersion '0.0.42' | Should -BeTrue
     }
@@ -253,15 +253,15 @@ Describe 'Get-PackageReleaseDecision' {
             $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
             $r.Action | Should -Be 'ignore'
         }
-        It "returns 'major' for input '3'" {
+        It "returns 'breaking' for input '3'" {
             SetReadHostQueue -Answers @('3')
             $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'major'
+            $r.Action | Should -Be 'breaking'
         }
-        It "returns 'minor' for input '4'" {
+        It "returns 'non-breaking' for input '4'" {
             SetReadHostQueue -Answers @('4')
             $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'minor'
+            $r.Action | Should -Be 'non-breaking'
         }
         It "returns 'patch' for input '5'" {
             SetReadHostQueue -Answers @('5')
@@ -339,7 +339,7 @@ Describe 'Get-PackageReleaseDecision' {
         It "calls Show-PackageDiff once when the user picks '1' then '4', menu rendered only once" {
             SetReadHostQueue -Answers @('1', '4')
             $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 0 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'minor'
+            $r.Action | Should -Be 'non-breaking'
             Should -Invoke -CommandName Show-PackageDiff -Times 1 -Exactly -ParameterFilter { $Folder -eq 'b' }
             # Menu rendered: 1 initial only — diff selection does NOT re-render
             # the menu (the options are still visible in scrollback above).
@@ -352,7 +352,7 @@ Describe 'Get-PackageReleaseDecision' {
         It "calls Show-PackageDiff twice when the user picks '1', '1', '4', menu still rendered only once" {
             SetReadHostQueue -Answers @('1', '1', '4')
             $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 2 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'minor'
+            $r.Action | Should -Be 'non-breaking'
             Should -Invoke -CommandName Show-PackageDiff -Times 2 -Exactly
             Should -Invoke -CommandName Show-PackageMenu -Times 1 -Exactly
             $script:RH_PromptsObserved.Count | Should -Be 3
@@ -386,7 +386,7 @@ Describe 'Get-PackageReleaseDecision' {
             $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
             $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
             $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
-            $actionItem.Action | Should -Be 'minor'
+            $actionItem.Action | Should -Be 'non-breaking'
             $script:RH_PromptsObserved.Count | Should -Be 2
             ($out | Out-String) | Should -Match "Invalid choice '5'"
             ($out | Out-String) | Should -Match 'from 1 to 4'
@@ -396,14 +396,14 @@ Describe 'Get-PackageReleaseDecision' {
             SetReadHostQueue -Answers @('4')
             $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
             $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'minor'
+            $r.Action | Should -Be 'non-breaking'
         }
 
         It "still accepts '3' (breaking) on a 0.x.y package" {
             SetReadHostQueue -Answers @('3')
             $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
             $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
-            $r.Action | Should -Be 'major'
+            $r.Action | Should -Be 'breaking'
         }
     }
 }
@@ -744,8 +744,8 @@ Describe 'Invoke-PostReleaseDepScan: ignore-shortcut avoids BFS recompute' {
 
 # ---------------------------------------------------------------------------
 # Invoke-PostReleaseDepScan — release-set elevation review flow (Invariant B).
-# Release-set members (InReleaseSet = $true) whose cascade-applied bump is
-# below "breaking" must surface as elevation candidates. Once the user
+# Release-set members (InReleaseSet = $true) whose cascade-applied change type
+# is below "breaking" must surface as elevation candidates. Once the user
 # decides — either by elevating (release) or ignoring — they must NOT
 # re-appear in subsequent iterations even though they remain present in
 # the BFS findings (because the on-disk cargo state did not change).
@@ -876,11 +876,11 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         $script:readHostCalls | Should -Be 0
     }
 
-    It 'surfaces a cascade-bumped release-set member with modifications when it is NOT in PreReviewedFolders (Invariant B)' {
+    It 'surfaces a cascade-released release-set member with modifications when it is NOT in PreReviewedFolders (Invariant B)' {
         # 'a' was added to the release set by a cascade from 'b'. The user
         # explicitly decided about 'b' (so 'b' is in PreReviewedFolders), but
         # NOT about 'a'. 'a' is also modified (InReleaseSet=$true, non-breaking
-        # bump). Per Invariant B, the BFS surfaces 'a' as an elevation
+        # change). Per Invariant B, the BFS surfaces 'a' as an elevation
         # candidate and the loop MUST prompt for it.
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
             [pscustomobject]@{
@@ -895,7 +895,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         $script:readHostCalls = 0
         Mock -CommandName Read-Host -MockWith {
             $script:readHostCalls++
-            return '2'   # ignore — keep the cascade-applied bump
+            return '2'   # ignore — keep the cascade-applied change type
         }
 
         $releases = @(
@@ -911,8 +911,8 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         $script:readHostCalls | Should -Be 1
     }
 
-    It 'does NOT pre-mark cascade-bumped release-set members from $ReleasesRef as reviewed' {
-        # Initial $releases contains both 'b' (primary) and 'a' (cascade-bumped).
+    It 'does NOT pre-mark cascade-released release-set members from $ReleasesRef as reviewed' {
+        # Initial $releases contains both 'b' (primary) and 'a' (cascade-released).
         # PreReviewedFolders only contains 'b'. The BFS surfaces 'a' as
         # elevation candidate (modified + InReleaseSet + non-breaking).
         # The loop MUST prompt for 'a' — proving that the old "pre-mark every
@@ -947,12 +947,12 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         $script:promptForA | Should -BeTrue
     }
 
-    It 'after user accepts a release, cascade-bumped modified dependents from the SAME release flow are NOT pre-filtered (re-surface for Invariant B review)' {
+    It 'after user accepts a release, cascade-released modified dependents from the SAME release flow are NOT pre-filtered (re-surface for Invariant B review)' {
         # Setup: $releases starts as empty (we exercise the scan loop directly).
         # BFS iter 1 surfaces 'b' as a fresh finding (NOT in release set,
         # modified). User accepts 'b' as non-breaking. Invoke-ReleaseFlow for
         # 'b' is mocked to cascade-pull 'a' (alongside 'b' itself) into the
-        # release set with a non-breaking bump. 'a' is ALSO modified.
+        # release set with a non-breaking change. 'a' is ALSO modified.
         #
         # Bug 2 (now fixed) was: blanket-marking ALL of [b, a] as reviewed
         # after acceptance, so 'a' was filtered from the next BFS iter even
@@ -987,7 +987,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
                 }
             } elseif ($script:bfsCallCount -eq 2) {
                 # After accepting 'b': cascade pulled 'a' into release set
-                # with non-breaking bump. 'a' is modified too → Invariant B
+                # with non-breaking change. 'a' is modified too → Invariant B
                 # candidate. Per fix, 'a' must NOT be pre-filtered.
                 [pscustomobject]@{
                     Folder           = 'a'
@@ -1005,7 +1005,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
 
         # Mock Invoke-ReleaseFlow to simulate cascade pulling in 'a' alongside 'b'.
         Mock -CommandName Invoke-ReleaseFlow -MockWith {
-            param($PackageName, $Bump)
+            param($PackageName, $ChangeType)
             return @(
                 [pscustomobject]@{ Package = $PackageName; OldVersion = '0.4.0'; NewVersion = '0.4.1' }
                 [pscustomobject]@{ Package = 'a';        OldVersion = '0.3.0'; NewVersion = '0.3.1' }
@@ -1082,7 +1082,7 @@ Describe 'Invoke-PostReleaseDepScan: release-set elevation review flow (Invarian
         # Each group's header must be emitted (proving both InReleaseSet and
         # non-InReleaseSet findings reached their respective branches).
         $text | Should -Match 'are NOT part of this release'
-        $text | Should -Match 'cascade-applied version bump'
+        $text | Should -Match 'cascade-applied version change'
     }
 }
 
@@ -1165,83 +1165,83 @@ Describe 'Show-FinalMessage' {
 }
 
 # ---------------------------------------------------------------------------
-# Cascade-message helpers (Get-ChangeLabelFromBumpKind,
-# Get-ShortChangeLabelFromBumpKind, Format-CascadeAnnouncement). These
-# back the "🔗 Cascading release to N dependent package(s) as <label> [...]"
-# line printed by Invoke-ReleaseFlow before each cascade. Pure functions so
-# they're driven directly here without staging a workspace.
+# Cascade-message helpers (Get-ChangeTypeLabel, Get-ShortChangeTypeLabel,
+# Format-CascadeAnnouncement). These back the "🔗 Cascading release to N
+# dependent package(s) as <label> [...]" line printed by Invoke-ReleaseFlow
+# before each cascade. Pure functions so they're driven directly here without
+# staging a workspace.
 # ---------------------------------------------------------------------------
 
-Describe 'Get-ChangeLabelFromBumpKind' {
-    It "maps 'major' to 'breaking change'" {
-        Get-ChangeLabelFromBumpKind -BumpKind 'major' | Should -Be 'breaking change'
+Describe 'Get-ChangeTypeLabel' {
+    It "maps 'breaking' to 'breaking change'" {
+        Get-ChangeTypeLabel -ChangeType 'breaking' | Should -Be 'breaking change'
     }
 
-    It "maps 'minor' to 'non-breaking change'" {
-        Get-ChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking change'
+    It "maps 'non-breaking' to 'non-breaking change'" {
+        Get-ChangeTypeLabel -ChangeType 'non-breaking' | Should -Be 'non-breaking change'
     }
 
     It "maps 'patch' to 'patch'" {
-        Get-ChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'patch'
+        Get-ChangeTypeLabel -ChangeType 'patch' | Should -Be 'patch'
     }
 }
 
-Describe 'Get-ShortChangeLabelFromBumpKind' {
-    It "maps 'major' to 'breaking' (no trailing 'change' noun)" {
-        Get-ShortChangeLabelFromBumpKind -BumpKind 'major' | Should -Be 'breaking'
+Describe 'Get-ShortChangeTypeLabel' {
+    It "maps 'breaking' to 'breaking' (no trailing 'change' noun)" {
+        Get-ShortChangeTypeLabel -ChangeType 'breaking' | Should -Be 'breaking'
     }
 
-    It "maps 'minor' to 'non-breaking'" {
-        Get-ShortChangeLabelFromBumpKind -BumpKind 'minor' | Should -Be 'non-breaking'
+    It "maps 'non-breaking' to 'non-breaking'" {
+        Get-ShortChangeTypeLabel -ChangeType 'non-breaking' | Should -Be 'non-breaking'
     }
 
     It "maps 'patch' to 'patch'" {
-        Get-ShortChangeLabelFromBumpKind -BumpKind 'patch' | Should -Be 'patch'
+        Get-ShortChangeTypeLabel -ChangeType 'patch' | Should -Be 'patch'
     }
 }
 
 Describe 'Format-CascadeAnnouncement' {
 
-    Context 'headline label reflects the EXPOSING bump kind' {
-        # The exposing bump is the kind that's applied to dependents that
+    Context 'headline label reflects the EXPOSING change type' {
+        # The exposing change type is the one that's applied to dependents that
         # re-export the target's types in their public API. Test-IsBreakingChange
         # is consulted at the call site to derive this — here we just assert that
-        # whatever value lands in -ExposingBump is what shows up as the headline.
+        # whatever value lands in -ExposingChangeType is what shows up as the headline.
 
-        It 'reads "as breaking change" when -ExposingBump is major' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+        It 'reads "as breaking change" when -ExposingChangeType is breaking' {
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match 'as breaking change'
         }
 
-        It 'reads "as non-breaking change" when -ExposingBump is minor' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+        It 'reads "as non-breaking change" when -ExposingChangeType is non-breaking' {
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'non-breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match 'as non-breaking change'
         }
 
-        It 'reads "as patch" when -ExposingBump is patch (and parenthetical is suppressed — see other tests)' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+        It 'reads "as patch" when -ExposingChangeType is patch (and parenthetical is suppressed — see other tests)' {
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'patch' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper')
             $out | Should -Match 'as patch'
         }
     }
 
     Context 'parenthetical clause for non-exposing dependents' {
-        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=major and non-exposing=patch' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=breaking and non-exposing=patch' {
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
-        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=minor and non-exposing=patch' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+        It 'appends "(or patch if no API exposure of `<target>`)" when exposing=non-breaking and non-exposing=patch' {
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'non-breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Match '\(or patch if no API exposure of `http_extensions`\)'
         }
 
         It 'omits the parenthetical entirely when exposing and non-exposing are both patch (no downgrade possible)' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'patch' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'http_extensions' -DependentNames @('fetch_hyper', 'seatbelt_http')
             $out | Should -Not -Match '\(or .+ if no API exposure'
             # Ensure the colon still lands directly after the headline label.
@@ -1249,7 +1249,7 @@ Describe 'Format-CascadeAnnouncement' {
         }
 
         It 'preserves backticks around the target package name (markdown-style code formatting in CLI output)' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'my-package' -DependentNames @('a', 'b')
             $out | Should -Match '`my-package`'
         }
@@ -1257,75 +1257,75 @@ Describe 'Format-CascadeAnnouncement' {
 
     Context 'singular vs plural "dependent package(s)" noun' {
         It 'uses singular "dependent package" when there is exactly one dependent' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'foo' -DependentNames @('bar')
             $out | Should -Match '1 dependent package as'
             $out | Should -Not -Match '1 dependent packages'
         }
 
         It 'uses plural "dependent packages" when there are multiple dependents' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'foo' -DependentNames @('bar', 'baz', 'qux')
             $out | Should -Match '3 dependent packages as'
         }
     }
 
-    Context 'full-shape rendering across all original bump kinds (target is 1.x.y conceptually)' {
+    Context 'full-shape rendering across all change types (target is 1.x.y conceptually)' {
         # 1.x.y / 0.x.y / 0.0.x distinctions are made by the CALLER (via
-        # Test-IsBreakingChange, which feeds into ExposingBump). The formatter
+        # Test-IsBreakingChange, which feeds into ExposingChangeType). The formatter
         # is agnostic to the underlying semver shape — it just gets the
-        # already-resolved bump kinds. These tests pin the exact rendered
+        # already-resolved change types. These tests pin the exact rendered
         # shape for each combination the caller can hand in.
 
         It 'breaking + non-exposing patch: "as breaking change (or patch if no API exposure of `target`)"' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'major' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
         It 'non-breaking + non-exposing patch: "as non-breaking change (or patch if no API exposure of `target`)"' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'minor' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'non-breaking' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as non-breaking change (or patch if no API exposure of ``target``): a, b"
         }
 
         It 'patch + non-exposing patch: "as patch" (parenthetical suppressed, no downgrade possible)' {
-            $out = Format-CascadeAnnouncement -ExposingBump 'patch' -NonExposingBump 'patch' `
+            $out = Format-CascadeAnnouncement -ExposingChangeType 'patch' -NonExposingChangeType 'patch' `
                 -TargetPackageName 'target' -DependentNames @('a', 'b')
             $out | Should -Be "🔗 Cascading release to 2 dependent packages as patch: a, b"
         }
     }
 
-    Context 'caller-level integration: cascade for 0.x.y targets where Test-IsBreakingChange promotes to major' {
+    Context 'caller-level integration: cascade for 0.x.y targets where Test-IsBreakingChange promotes to breaking' {
         # When the target is 0.x.y (x>=1) and the user picks "non-breaking",
-        # Test-IsBreakingChange returns $false so $exposingCascadeBump stays
-        # 'minor' (no promotion). This is just a sanity check that the
+        # Test-IsBreakingChange returns $false so $exposingCascadeChangeType stays
+        # 'non-breaking' (no promotion). This is just a sanity check that the
         # caller's pre-formatter math (in Invoke-ReleaseFlow) lines up with
         # the formatter's expectations for the 0.x.y case.
-        It '0.x.y target + user picks breaking (major): the caller promotes exposing to major; formatter reads "breaking change"' {
-            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -bump 'major'
+        It '0.x.y target + user picks breaking: the caller promotes exposing to breaking; formatter reads "breaking change"' {
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -ChangeType 'breaking'
             $isBreaking | Should -BeTrue
-            $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
-            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+            $exposingChangeType = if ($isBreaking) { 'breaking' } else { 'non-breaking' }
+            $out = Format-CascadeAnnouncement -ExposingChangeType $exposingChangeType -NonExposingChangeType 'patch' `
                 -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
 
-        It '0.x.y target + user picks non-breaking (minor): caller keeps exposing as minor; formatter reads "non-breaking change"' {
-            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -bump 'minor'
+        It '0.x.y target + user picks non-breaking: caller keeps exposing as non-breaking; formatter reads "non-breaking change"' {
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.5.2' -ChangeType 'non-breaking'
             $isBreaking | Should -BeFalse
-            $exposingBump = if ($isBreaking) { 'major' } else { 'minor' }
-            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+            $exposingChangeType = if ($isBreaking) { 'breaking' } else { 'non-breaking' }
+            $out = Format-CascadeAnnouncement -ExposingChangeType $exposingChangeType -NonExposingChangeType 'patch' `
                 -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as non-breaking change \(or patch if no API exposure of `t`\)'
         }
 
         It '0.0.x target (always breaking under Cargo semver): caller marks breaking, formatter reads "breaking change"' {
-            $isBreaking = Test-IsBreakingChange -oldVersion '0.0.5' -bump 'patch'
+            $isBreaking = Test-IsBreakingChange -oldVersion '0.0.5' -ChangeType 'patch'
             $isBreaking | Should -BeTrue
-            # Caller's $exposingCascadeBump = if($targetIsBreaking) {'major'} else {$cascadeBump}
-            $exposingBump = if ($isBreaking) { 'major' } else { 'patch' }
-            $out = Format-CascadeAnnouncement -ExposingBump $exposingBump -NonExposingBump 'patch' `
+            # Caller's $exposingCascadeChangeType = if($targetIsBreaking) {'breaking'} else {$cascadeChangeType}
+            $exposingChangeType = if ($isBreaking) { 'breaking' } else { 'patch' }
+            $out = Format-CascadeAnnouncement -ExposingChangeType $exposingChangeType -NonExposingChangeType 'patch' `
                 -TargetPackageName 't' -DependentNames @('d')
             $out | Should -Match 'as breaking change \(or patch if no API exposure of `t`\)'
         }
@@ -1334,108 +1334,110 @@ Describe 'Format-CascadeAnnouncement' {
 
 Describe 'Format-CascadeDependentLine' {
 
-    Context 'bump label uses the SHORT semantic vocabulary (not internal Cargo bump kinds)' {
-        It "renders 'breaking' for major (exposing dependent)" {
-            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'major' -ExposesTarget $true |
+    Context 'change-type label uses the SHORT semantic vocabulary' {
+        It "renders 'breaking' (exposing dependent)" {
+            Format-CascadeDependentLine -DependentName 'd' -ChangeType 'breaking' -ExposesTarget $true |
                 Should -Be '  • d -> breaking (exposes target in public API)'
         }
 
-        It "renders 'non-breaking' for minor (exposing dependent)" {
-            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'minor' -ExposesTarget $true |
+        It "renders 'non-breaking' (exposing dependent)" {
+            Format-CascadeDependentLine -DependentName 'd' -ChangeType 'non-breaking' -ExposesTarget $true |
                 Should -Be '  • d -> non-breaking (exposes target in public API)'
         }
 
-        It "renders 'patch' for patch (exposing dependent — uncommon but possible if the target itself is a patch)" {
-            Format-CascadeDependentLine -DependentName 'd' -BumpKind 'patch' -ExposesTarget $true |
+        It "renders 'patch' (exposing dependent — uncommon but possible if the target itself is a patch)" {
+            Format-CascadeDependentLine -DependentName 'd' -ChangeType 'patch' -ExposesTarget $true |
                 Should -Be '  • d -> patch (exposes target in public API)'
         }
     }
 
     Context 'why-clause reflects the ExposesTarget flag' {
         It "uses 'exposes target in public API' when ExposesTarget = `$true" {
-            $out = Format-CascadeDependentLine -DependentName 'fetch_hyper' -BumpKind 'minor' -ExposesTarget $true
+            $out = Format-CascadeDependentLine -DependentName 'fetch_hyper' -ChangeType 'non-breaking' -ExposesTarget $true
             $out | Should -Match '\(exposes target in public API\)$'
         }
 
         It "uses 'internal use only' when ExposesTarget = `$false (the non-exposing downgrade case)" {
-            $out = Format-CascadeDependentLine -DependentName 'seatbelt_http' -BumpKind 'patch' -ExposesTarget $false
+            $out = Format-CascadeDependentLine -DependentName 'seatbelt_http' -ChangeType 'patch' -ExposesTarget $false
             $out | Should -Match '\(internal use only\)$'
-            # The bump label should still be the SHORT semantic form ('patch'), not the internal kind.
+            # The label should still be the SHORT semantic form ('patch').
             $out | Should -Match '-> patch '
         }
     }
 
-    Context 'never leaks the internal Cargo bump vocabulary' {
-        # Pin the rename: the line must never contain the words 'major' / 'minor' / 'patch'
-        # except where 'patch' is the legitimate semantic label. This protects against a
-        # regression where someone wires $depBump back into the rendered string.
-        It "does not render the word 'major' anywhere when BumpKind is major" {
-            $out = Format-CascadeDependentLine -DependentName 'd' -BumpKind 'major' -ExposesTarget $true
+    Context 'never leaks numeric version-component vocabulary' {
+        # Pin the rename: the line must never contain the numeric version-component
+        # words 'major' / 'minor' (where they would imply a numeric version-component
+        # name). This
+        # protects against a regression where someone wires a numeric kind back into
+        # the rendered string.
+        It "does not render the word 'major' when ChangeType is breaking" {
+            $out = Format-CascadeDependentLine -DependentName 'd' -ChangeType 'breaking' -ExposesTarget $true
             $out | Should -Not -Match '\bmajor\b'
         }
 
-        It "does not render the word 'minor' anywhere when BumpKind is minor" {
-            $out = Format-CascadeDependentLine -DependentName 'd' -BumpKind 'minor' -ExposesTarget $true
+        It "does not render the word 'minor' when ChangeType is non-breaking" {
+            $out = Format-CascadeDependentLine -DependentName 'd' -ChangeType 'non-breaking' -ExposesTarget $true
             $out | Should -Not -Match '\bminor\b'
         }
     }
 }
 
 # ---------------------------------------------------------------------------
-# Resolve-ReleaseSpecFromChange (CLI -Change → internal Bump/Version
+# Resolve-ReleaseSpecFromChange (CLI -Change → internal ChangeType/Version
 # translation). Pure function with one dependency: the package's current
 # version string (which the caller reads from Cargo.toml and passes in).
 # ---------------------------------------------------------------------------
 
 Describe 'Resolve-ReleaseSpecFromChange' {
 
-    Context 'Breaking maps to a major bump (no explicit Version)' {
-        It 'returns Bump=major and empty Version for a 1.x.y current version' {
+    Context 'Breaking maps to ChangeType=breaking (no explicit Version)' {
+        It 'returns ChangeType=breaking and empty Version for a 1.x.y current version' {
             $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '1.2.3'
-            $spec.Bump    | Should -Be 'major'
-            $spec.Version | Should -Be ''
+            $spec.ChangeType | Should -Be 'breaking'
+            $spec.Version    | Should -Be ''
         }
 
-        It 'returns Bump=major and empty Version for a 0.x.y current version (caller handles Cargo semver carve-out)' {
+        It 'returns ChangeType=breaking and empty Version for a 0.x.y current version (caller handles Cargo semver carve-out)' {
             $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '0.5.2'
-            $spec.Bump    | Should -Be 'major'
-            $spec.Version | Should -Be ''
+            $spec.ChangeType | Should -Be 'breaking'
+            $spec.Version    | Should -Be ''
         }
 
-        It 'returns Bump=major for 0.0.x as well (every change is breaking under Cargo semver — encoded downstream)' {
+        It 'returns ChangeType=breaking for 0.0.x as well (every change is breaking under Cargo semver — encoded downstream)' {
             $spec = Resolve-ReleaseSpecFromChange -Change 'Breaking' -CurrentVersion '0.0.5'
-            $spec.Bump    | Should -Be 'major'
-            $spec.Version | Should -Be ''
+            $spec.ChangeType | Should -Be 'breaking'
+            $spec.Version    | Should -Be ''
         }
     }
 
-    Context 'NonBreaking maps to a minor bump' {
-        It 'returns Bump=minor and empty Version regardless of current version shape' {
-            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '1.2.3').Bump | Should -Be 'minor'
-            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.5.2').Bump | Should -Be 'minor'
-            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.0.5').Bump | Should -Be 'minor'
+    Context 'NonBreaking maps to ChangeType=non-breaking' {
+        It 'returns ChangeType=non-breaking and empty Version regardless of current version shape' {
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '1.2.3').ChangeType | Should -Be 'non-breaking'
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.5.2').ChangeType | Should -Be 'non-breaking'
+            (Resolve-ReleaseSpecFromChange -Change 'NonBreaking' -CurrentVersion '0.0.5').ChangeType | Should -Be 'non-breaking'
         }
     }
 
-    Context 'Patch maps to a patch bump' {
-        It 'returns Bump=patch and empty Version regardless of current version shape' {
-            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '1.2.3').Bump | Should -Be 'patch'
-            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.5.2').Bump | Should -Be 'patch'
-            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.0.5').Bump | Should -Be 'patch'
+    Context 'Patch maps to ChangeType=patch' {
+        It 'returns ChangeType=patch and empty Version regardless of current version shape' {
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '1.2.3').ChangeType | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.5.2').ChangeType | Should -Be 'patch'
+            (Resolve-ReleaseSpecFromChange -Change 'Patch' -CurrentVersion '0.0.5').ChangeType | Should -Be 'patch'
         }
     }
 
     Context "'1.0' graduates a 0.x package to its first stable 1.0.0" {
-        It 'returns Version=1.0.0 (and empty Bump) for 0.x.y' {
+        It 'returns Version=1.0.0 (and empty ChangeType) for 0.x.y' {
             $spec = Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '0.5.2'
-            $spec.Bump    | Should -Be ''
-            $spec.Version | Should -Be '1.0.0'
+            $spec.ChangeType | Should -Be ''
+            $spec.Version    | Should -Be '1.0.0'
         }
 
         It 'returns Version=1.0.0 for 0.0.x as well' {
             $spec = Resolve-ReleaseSpecFromChange -Change '1.0' -CurrentVersion '0.0.7'
-            $spec.Bump    | Should -Be ''
-            $spec.Version | Should -Be '1.0.0'
+            $spec.ChangeType | Should -Be ''
+            $spec.Version    | Should -Be '1.0.0'
         }
 
         It 'throws a clear, actionable error when invoked on a 1.x package' {

@@ -14,6 +14,6 @@ Describe 'Smoke: shared library loads' {
     }
 
     It 'has Get-NextVersion available' {
-        Get-NextVersion -currentVersion '1.2.3' -bump 'minor' | Should -Be '1.3.0'
+        Get-NextVersion -currentVersion '1.2.3' -ChangeType 'non-breaking' | Should -Be '1.3.0'
     }
 }

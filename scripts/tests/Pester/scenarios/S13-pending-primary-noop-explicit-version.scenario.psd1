@@ -3,7 +3,7 @@
     Description = 'Idempotent re-invocation with the same explicit -Version equal to the pending current version. Equal is a no-op (the prior run already produced this version). Counterpart to S14 which uses -Change instead of -Version.'
 
     # Stable 1.x topology so -Version semantics are unambiguous (0.x.y collapses
-    # several bump kinds onto the same numeric increment).
+    # several change types onto the same numeric increment).
     Workspace = @{
         Spec = @{
             Packages = @(
@@ -15,7 +15,7 @@
 
     History = @(
         # Prior `release-crate.ps1 -Version 1.2.4` left upstream pending.
-        @{ Op = 'BumpVersion'; Package = 'upstream'; To = '1.2.4' }
+        @{ Op = 'SetVersion'; Package = 'upstream'; To = '1.2.4' }
     )
 
     Run = @{
@@ -28,8 +28,8 @@
 
     Expect = @{
         # upstream stays at 1.2.4 (no-op). downstream cascades from the EFFECTIVE
-        # base→current bump (patch on 1.2.3 → 1.2.4) and itself doesn't expose
-        # upstream, so its cascade bump is patch → 1.0.1.
+        # base→current change type (patch on 1.2.3 → 1.2.4) and itself doesn't
+        # expose upstream, so its cascade-applied change type is patch → 1.0.1.
         Released = @(
             @{ Package = 'upstream';   To = '1.2.4' }
             @{ Package = 'downstream'; To = '1.0.1' }
