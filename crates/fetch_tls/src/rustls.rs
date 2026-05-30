@@ -195,7 +195,8 @@ impl Debug for ServerCertVerifierFactory {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use rustls::crypto::aws_lc_rs;
+    use insta::assert_debug_snapshot;
+use rustls::crypto::aws_lc_rs;
 
     use super::*;
     use crate::backend::RustlsDefaults;
@@ -368,6 +369,22 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
+    fn tls_options_from_arc_client_config_wraps_as_preconfigured() {
+        let config = Arc::new(
+            rustls::ClientConfig::builder_with_provider(provider())
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AcceptAll))
+                .with_no_client_auth(),
+        );
+        let tls = TlsOptions::from(Arc::clone(&config));
+        assert!(matches!(tls.inner, TlsOptionsKind::PreConfigured(_)));
+        assert!(tls.shared.client_identity.is_none());
+    }
+
+    #[test]
     fn client_identity_resolver_stores_resolver() {
         let builder = TlsOptions::builder_rustls().client_identity_resolver(Arc::new(StubResolver));
         assert!(builder.backend.client_identity_resolver.is_some());
@@ -397,5 +414,13 @@ mod tests {
             client_identity_resolver: Some(Arc::new(StubResolver)),
         };
         rustls_backend.build(Some(&defaults()), &shared_with(Some(identity))).unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn debug_for_server_cert_verifier_factory() {
+        let factory = ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll));
+
+        assert_debug_snapshot!(factory);
     }
 }

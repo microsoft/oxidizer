@@ -39,8 +39,9 @@ impl NativeTlsOptions {
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
 
         if let Some(identity) = shared.client_identity.as_ref() {
-            let native_identity = identity.build_native_identity().map_err(BackendError::caused_by)?;
-            builder.identity(native_identity);
+            identity.build_native_identity()
+                .map(|i| { builder.identity(i); })
+                .map_err(BackendError::caused_by)?;
         }
 
         builder.build().map_err(BackendError::caused_by)
