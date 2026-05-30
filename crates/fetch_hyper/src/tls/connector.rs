@@ -70,6 +70,7 @@ where
             ),
             #[cfg(any(feature = "native-tls", test))]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
+            #[cfg_attr(coverage_nightly, coverage(off))]
             _ => unreachable!("make doc tests happy"),
         }
     }

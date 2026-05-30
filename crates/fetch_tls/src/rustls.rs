@@ -196,7 +196,7 @@ impl Debug for ServerCertVerifierFactory {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use insta::assert_debug_snapshot;
-use rustls::crypto::aws_lc_rs;
+    use rustls::crypto::aws_lc_rs;
 
     use super::*;
     use crate::backend::RustlsDefaults;
