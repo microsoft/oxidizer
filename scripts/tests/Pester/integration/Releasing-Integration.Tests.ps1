@@ -512,4 +512,30 @@ publish = true
         $content | Should -Match 'rust-version\s*=\s*"1\.88"' -Because 'rust-version must be left alone.'
         $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
     }
+
+    It 'does not rewrite the inline version of a sibling crate whose name has the target as a suffix' {
+        # The root-Cargo.toml rewrite previously used an un-anchored lookbehind:
+        # `(?<=NAME\s*=\s*\{[^\}]*?version\s*=\s*")`. Releasing e.g. `bar` would
+        # also match `foo_bar = { ..., version = "..." }` because the regex
+        # engine can satisfy the lookbehind by matching `bar` as a suffix of
+        # `foo_bar`. The fix anchors the lookbehind to the start of a line
+        # under (?m). This test pins the corrected behaviour by constructing
+        # an ad-hoc workspace with a deliberately colliding pair.
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'bar';     Version = '0.1.0' }
+                @{ Name = 'foo_bar'; Version = '0.2.0' }
+            )
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'uvc-suffix')
+
+        $packageCargo = Join-Path $ws.Path 'crates\bar\Cargo.toml'
+        $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
+        Update-PackageVersion -packageName 'bar' -version '0.1.1' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
+
+        $rootContent = Get-Content $rootCargo -Raw
+        $rootContent | Should -Match '(?m)^bar\s*=\s*\{[^}]*version\s*=\s*"0\.1\.1"' -Because 'The target crate''s inline version must be updated.'
+        $rootContent | Should -Match '(?m)^foo_bar\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"' -Because 'A sibling crate whose name ends in the target name must not be rewritten.'
+    }
 }

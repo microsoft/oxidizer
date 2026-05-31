@@ -587,7 +587,15 @@ function Update-PackageVersion {
 
     $escapedPackageName = Get-EscapedRegexSpecialChars($packageName)
     $packageNamePattern = $escapedPackageName.Replace('_', '[-_]')
-    $regex = '(?<=' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
+    # Anchor the lookbehind to the start of a line (multiline mode) so the
+    # package name cannot match as a suffix of another crate's name. Without
+    # `^`, releasing e.g. `bar` would also rewrite `foo_bar = { ..., version
+    # = "..." }` because the regex engine can satisfy the lookbehind by
+    # matching `bar` against the trailing 3 chars of `foo_bar`. Workspace
+    # dependency declarations in the root Cargo.toml are conventionally one
+    # per line and flush-left, matching the layout produced by the test
+    # fixture's `Write-RootCargoToml`.
+    $regex = '(?m)(?<=^' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
     (Get-Content $rootCargoToml -Raw) -replace $regex, $version | Set-Content $rootCargoToml -NoNewline
 
     return $version
