@@ -7,13 +7,13 @@
 
 .DESCRIPTION
     Loads a PSD1 scenario descriptor, builds a synthetic Cargo workspace,
-    replays a history of operations, then invokes Invoke-ReleaseMain
+    replays a history of operations, then invokes Invoke-ReleasePackagesMain
     in-process with mocked Read-Host / Invoke-WorkspaceCheck /
     Test-InteractiveSession. Returns a result object the test can assert on.
 
     The runner is invoked from Pester It blocks so Mock works correctly.
     The caller is responsible for dot-sourcing scripts/lib/release-flow.ps1
-    in a BeforeAll so this runner can refer to Invoke-ReleaseMain and
+    in a BeforeAll so this runner can refer to Invoke-ReleasePackagesMain and
     Read-Host as known commands.
 
 .PARAMETER ScenarioFile
@@ -87,17 +87,39 @@ function Invoke-Scenario {
     # point and capture the release records + any thrown exception.
     Push-Location $ws.Path
     try {
-        $runArgs = @{
-            PackageName = $scenario.Run.PackageName
-            BaseRef   = $(if ($scenario.Run.BaseRef) { $scenario.Run.BaseRef } else { 'HEAD~1' })
+        # New-style scenarios provide Run.Packages directly (a string[] of
+        # '<name>@<change-spec>' tokens). Legacy scenarios provided
+        # Run.PackageName + Run.Change/Run.Version + Run.BaseRef; translate
+        # them on the fly so the scenario PSD1s can migrate independently.
+        $packageTokens = $null
+        if ($null -ne $scenario.Run.Packages -and @($scenario.Run.Packages).Count -gt 0) {
+            $packageTokens = @($scenario.Run.Packages)
+        } else {
+            if (-not $scenario.Run.PackageName) {
+                throw "Scenario '$($scenario.Name)' must provide either Run.Packages or Run.PackageName."
+            }
+            $changeSpec = if ($scenario.Run.Version) {
+                $scenario.Run.Version
+            } elseif ($scenario.Run.Change) {
+                switch ($scenario.Run.Change) {
+                    'Breaking'    { 'breaking' }
+                    'NonBreaking' { 'nonbreaking' }
+                    'Patch'       { 'patch' }
+                    '1.0'         { '1.0.0' }
+                    default { throw "Scenario '$($scenario.Name)' has unrecognised Run.Change '$($scenario.Run.Change)'." }
+                }
+            } else {
+                # Default change type for bare invocations matches the prior
+                # Invoke-ReleaseMain semantics.
+                'nonbreaking'
+            }
+            $packageTokens = @("$($scenario.Run.PackageName)@$changeSpec")
         }
-        if ($scenario.Run.Change)         { $runArgs.Change  = $scenario.Run.Change }
-        if ($scenario.Run.Version)        { $runArgs.Version = $scenario.Run.Version }
 
         $error.Clear()
         $caught = $null
         try {
-            $releases = Invoke-ReleaseMain @runArgs 6> $null
+            $releases = Invoke-ReleasePackagesMain -Packages $packageTokens 6> $null
         } catch {
             $caught = $_
             $releases = @()

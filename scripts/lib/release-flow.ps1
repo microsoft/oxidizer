@@ -2434,7 +2434,9 @@ function Invoke-ResolvedRelease {
         }
 
         $cascadeReasons = if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
-            @($entry.CascadeReasons)
+            # .ToArray() instead of @(...) — PowerShell's array sub-expression
+            # operator can't iterate a List[object] held in a property accessor.
+            $entry.CascadeReasons.ToArray()
         } else {
             $null
         }
@@ -2455,7 +2457,7 @@ function Invoke-ResolvedRelease {
     # must observe the new state.
     Invalidate-WorkspaceMetadataCache
 
-    return @($records)
+    return $records.ToArray()
 }
 
 # Pretty-prints the resolved release plan before execution so the user can
