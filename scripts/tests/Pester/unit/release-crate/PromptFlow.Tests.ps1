@@ -610,3 +610,105 @@ Describe 'Open-PathWithPreferredEditor' {
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Invoke-PlanReview (iteration-cap regression)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PlanReview iteration-cap behaviour' {
+
+    BeforeEach {
+        # Silence the chatty interactive output; we only need the final return
+        # value and the Write-Warning emitted on the cap path.
+        Mock -CommandName Write-Host -MockWith { } -ModuleName $null
+        Mock -CommandName Test-InteractiveSession -MockWith { $true }
+
+        # 1 published package in the synthetic workspace => $maxIterations = 1.
+        # The exact baseline is irrelevant because Resolve-ReleaseSet is mocked,
+        # so anything that satisfies the Published filter works.
+        Mock -CommandName Get-WorkspacePackages -MockWith {
+            [pscustomobject]@{
+                Name      = 'p1'
+                Folder    = 'p1'
+                Version   = '1.0.0'
+                Published = $true
+                Deps      = @()
+            }
+        }
+
+        # Always surface a single finding for a package not in the initial plan.
+        # Returned as a stream (not a wrapped array) per the file-level mock
+        # pitfall note.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            [pscustomobject]@{
+                Folder           = 'extra'
+                PackageName      = 'extra'
+                CurrentVersion   = '1.0.0'
+                ChangedFileCount = 1
+                DependencyChains = @(, @('p1', 'extra'))
+                InReleaseSet     = $false
+            }
+        }
+
+        # Always accept as non-breaking. Combined with maxIterations = 1, the
+        # loop exits via the cap return path with an unflushed token append
+        # to $userTokens — exactly the bug-trigger scenario.
+        Mock -CommandName Get-PackageReleaseDecision -MockWith {
+            @{ Action = 'non-breaking' }
+        }
+    }
+
+    It 'returns a plan that includes the token accepted on the final (cap-bound) iteration' {
+        # State-aware Resolve-ReleaseSet: reflects the size of $ParsedTokens so
+        # the post-cap re-resolve picks up the extra token added inside the loop.
+        Mock -CommandName Resolve-ReleaseSet -MockWith {
+            $entries = @()
+            foreach ($t in $ParsedTokens) {
+                $entries += [pscustomobject]@{
+                    Folder                 = $t.Name
+                    Name                   = $t.Name
+                    CurrentVersion         = '1.0.0'
+                    EffectiveChangeType    = 'non-breaking'
+                    EffectiveTargetVersion = '1.1.0'
+                    Source                 = 'user'
+                    AutoUpgraded           = $false
+                    CascadeReasons         = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken               = $t.RawToken
+                }
+            }
+            $entries
+        }
+
+        Mock -CommandName Write-Warning -MockWith { }
+
+        $initialToken = [pscustomobject]@{
+            Name                   = 'p1'
+            RequestedChangeType    = 'non-breaking'
+            RequestedTargetVersion = $null
+            IsGraduation           = $false
+            RawToken               = 'p1@nonbreaking'
+        }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @($initialToken) `
+            -WorkspaceBaseline @()
+
+        # The cap-return warning fired exactly once, proving we exited via the
+        # cap path (not the queue-drained path).
+        Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter {
+            $Message -match 'iteration cap'
+        }
+
+        # Resolve-ReleaseSet was called at the start of iter 0 AND again before
+        # the cap return — that second call is the regression fix.
+        Should -Invoke -CommandName Resolve-ReleaseSet -Times 2 -Exactly
+
+        # The returned plan reflects the final acceptance: both the initial
+        # user-token and the cap-iteration acceptance are present.
+        $plan | Should -Not -BeNullOrEmpty
+        $plan.ContainsKey('p1')    | Should -BeTrue
+        $plan.ContainsKey('extra') | Should -BeTrue
+        $plan['extra'].EffectiveChangeType | Should -Be 'non-breaking'
+    }
+}

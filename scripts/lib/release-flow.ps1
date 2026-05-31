@@ -1405,6 +1405,13 @@ function Invoke-PlanReview {
         }
 
         Write-Warning "Plan review reached its iteration cap ($maxIterations); aborting further prompts."
+        # Re-resolve before returning so the final acceptance of the last
+        # iteration (if any) is reflected in the plan handed back to the
+        # caller. Without this, callers see the resolved set from the START
+        # of the final iteration, missing the token just appended.
+        $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+        $resolvedHash = @{}
+        foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
         return $resolvedHash
     } finally {
         foreach ($p in $script:TempPackageDiffPaths) {
