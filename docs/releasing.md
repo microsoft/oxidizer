@@ -301,9 +301,11 @@ state first, then re-run with the corrected `-Packages` argument.
 
 ## How `check-unreleased-dependencies.ps1` works
 
-The check script runs in CI on every PR that touches `crates/` or
-`scripts/`. It computes the same dep-scan analysis as the interactive
-loop and posts a PR comment with two tables:
+The check script runs in CI on every pull request (the `release-deps`
+job in `.github/workflows/main.yml` has no path filter — every PR pays
+the cost of one dep-scan analysis). It computes the same dep-scan
+analysis as the interactive loop and posts a PR comment with two
+tables:
 
 - **Modifications not part of this release** — packages with unreleased
   modifications transitively pulled in by something in the release set
