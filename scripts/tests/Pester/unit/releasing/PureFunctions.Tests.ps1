@@ -232,7 +232,7 @@ Describe 'Get-PackageFolderForPath' {
     }
 
     It 'returns null for paths outside crates/' {
-        Get-PackageFolderForPath -Path 'scripts/release-crate.ps1' | Should -BeNullOrEmpty
+        Get-PackageFolderForPath -Path 'scripts/release-packages.ps1' | Should -BeNullOrEmpty
         Get-PackageFolderForPath -Path 'Cargo.toml' | Should -BeNullOrEmpty
         Get-PackageFolderForPath -Path 'README.md' | Should -BeNullOrEmpty
     }

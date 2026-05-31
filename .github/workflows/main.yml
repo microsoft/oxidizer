@@ -505,7 +505,7 @@ jobs:
 
   script-tests:
     # Pester test suite for the release-related PowerShell scripts
-    # (release-crate.ps1, lib/releasing.ps1, check-unreleased-dependencies.ps1).
+    # (release-packages.ps1, lib/releasing.ps1, check-unreleased-dependencies.ps1).
     # Always runs (no delta gate) because script-level changes don't move any
     # Rust crates so delta would mark the PR skippable, but the scripts
     # themselves may still need validation. Cross-platform matrix mirrors the

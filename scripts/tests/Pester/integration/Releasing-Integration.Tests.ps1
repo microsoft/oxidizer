@@ -427,7 +427,7 @@ Describe 'Update-PackageVersion' {
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-basic')
         $packageCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
-        $new = Update-PackageVersion -packageName 'downstream' -version '0.1.1' -ChangeType '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo
+        $new = Update-PackageVersion -packageName 'downstream' -version '0.1.1' -packageCargoToml $packageCargo -rootCargoToml $rootCargo
         $new | Should -Be '0.1.1'
         (Get-Content $packageCargo -Raw) | Should -Match 'version\s*=\s*"0\.1\.1"'
     }
@@ -437,7 +437,7 @@ Describe 'Update-PackageVersion' {
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'uvc-root')
         $packageCargo = Join-Path $ws.Path 'crates\upstream\Cargo.toml'
         $rootCargo  = Join-Path $ws.Path 'Cargo.toml'
-        Update-PackageVersion -packageName 'upstream' -version '0.2.1' -ChangeType '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'upstream' -version '0.2.1' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
         $rootContent = Get-Content $rootCargo -Raw
         $rootContent | Should -Match 'upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.1"'
         # And downstream's version line in the same root table is unchanged.
@@ -471,7 +471,7 @@ upstream = { path = "../upstream", version = "0.2.0" }
 "@ -NoNewline
 
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -ChangeType '' -packageCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -packageCargoToml $downstreamCargo -rootCargoToml $rootCargo | Out-Null
 
         $content = Get-Content $downstreamCargo -Raw
         # [package] version was updated.
@@ -506,267 +506,10 @@ publish = true
 "@
 
         $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -ChangeType '' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
+        Update-PackageVersion -packageName 'downstream' -version '0.1.1' -packageCargoToml $packageCargo -rootCargoToml $rootCargo | Out-Null
 
         $content = Get-Content $packageCargo -Raw
         $content | Should -Match 'rust-version\s*=\s*"1\.88"' -Because 'rust-version must be left alone.'
         $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.1\.1"'
-    }
-}
-
-# --------------------------------------------------------------------------
-# Update-PackageVersion — user-visible "Releasing <change-type>:" announcement.
-# --------------------------------------------------------------------------
-#
-# Regression guard for a UX bug where the function emitted
-# "✅ Incrementing $kind version from <old> to <new>." with $kind set
-# to the internal change-type enum (originally 'major'/'minor'/'patch'; now
-# 'breaking'/'non-breaking'/'patch'). On 0.x.y packages a 'breaking' change
-# moves the MINOR version component (e.g. 0.4.1 -> 0.5.0), so labeling it a
-# "major version" increment was wrong on two counts: (1) the *major
-# component* (the leading 0) did not change, and (2) change-type labels
-# ('breaking') and version-component names ('major') are distinct concepts
-# per AGENTS.md "Release Versioning Vocabulary".
-#
-# Per AGENTS.md "Release Versioning Vocabulary", user-visible output must use
-# change-type vocabulary (breaking change / non-breaking change / patch) and
-# never leak version-component names ('major'/'minor'/'patch') as a stand-in
-# for change-type vocabulary.
-
-Describe 'Update-PackageVersion: user-visible change-type vocabulary' {
-    BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
-    }
-
-    BeforeEach {
-        Reset-ReleaseScriptCaches
-    }
-
-    # Helper: seed a synthetic Linear2 workspace and force `downstream` to a
-    # specific starting version so we can exercise both 0.x and 1.x rules.
-    function script:NewVersionFixture {
-        param([string]$Path, [string]$StartVersion)
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path $Path
-        $packageCargo = Join-Path $ws.Path 'crates\downstream\Cargo.toml'
-        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        # Seed `downstream` to the requested starting version. Force-write
-        # via Update-PackageVersion so root Cargo.toml stays in sync.
-        Update-PackageVersion -packageName 'downstream' -version $StartVersion -ChangeType '' `
-            -packageCargoToml $packageCargo -rootCargoToml $rootCargo 6>$null | Out-Null
-        return [pscustomobject]@{
-            PackageCargo = $packageCargo
-            RootCargo    = $rootCargo
-        }
-    }
-
-    Context "internal change type 'breaking'" {
-        It 'on a 0.x.y package: announces a breaking change with the MINOR component moved (regression guard)' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-major-0x') -StartVersion '0.4.1'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'breaking' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            # Numeric transition: 0.4.1 -> 0.5.0 (minor component moves on 0.x breaking change).
-            $script:new | Should -Be '0.5.0'
-            $text | Should -Match 'Releasing breaking change: 0\.4\.1 -> 0\.5\.0'
-            # Regression: the internal enum must not leak as "major version".
-            $text | Should -Not -Match 'major version'
-            $text | Should -Not -Match 'Incrementing'
-        }
-
-        It 'on a 1.x.y package: announces a breaking change with the MAJOR component moved' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-major-1x') -StartVersion '1.2.3'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'breaking' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '2.0.0'
-            $text | Should -Match 'Releasing breaking change: 1\.2\.3 -> 2\.0\.0'
-            $text | Should -Not -Match 'major version'
-        }
-    }
-
-    Context "internal change type 'non-breaking'" {
-        It 'on a 0.x.y package: announces a non-breaking change with the PATCH component moved' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-minor-0x') -StartVersion '0.4.1'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'non-breaking' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '0.4.2'
-            $text | Should -Match 'Releasing non-breaking change: 0\.4\.1 -> 0\.4\.2'
-            $text | Should -Not -Match 'minor version'
-        }
-
-        It 'on a 1.x.y package: announces a non-breaking change with the MINOR component moved' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-minor-1x') -StartVersion '1.2.3'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'non-breaking' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '1.3.0'
-            $text | Should -Match 'Releasing non-breaking change: 1\.2\.3 -> 1\.3\.0'
-            $text | Should -Not -Match 'minor version'
-        }
-    }
-
-    Context "internal change type 'patch'" {
-        It 'on a 0.x.y package: announces a patch with the PATCH component moved' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-patch-0x') -StartVersion '0.4.1'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'patch' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '0.4.2'
-            $text | Should -Match 'Releasing patch: 0\.4\.1 -> 0\.4\.2'
-            $text | Should -Not -Match 'patch version'
-        }
-
-        It 'on a 1.x.y package: announces a patch with the PATCH component moved' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-patch-1x') -StartVersion '1.2.3'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType 'patch' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '1.2.4'
-            $text | Should -Match 'Releasing patch: 1\.2\.3 -> 1\.2\.4'
-            $text | Should -Not -Match 'patch version'
-        }
-    }
-
-    Context 'implicit default change type (neither -version nor -ChangeType supplied)' {
-        It "defaults to non-breaking change vocabulary (internal default is ChangeType='non-breaking')" {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-default') -StartVersion '1.2.3'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '' -ChangeType '' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '1.3.0'
-            $text | Should -Match 'Releasing non-breaking change: 1\.2\.3 -> 1\.3\.0'
-        }
-    }
-
-    Context 'explicit -version (caller supplies the new version verbatim)' {
-        It 'uses the "Using specified version:" wording and skips the change-type label' {
-            $fx = NewVersionFixture -Path (Join-Path $TestDrive 'uvc-cv-explicit') -StartVersion '0.4.1'
-            $new = $null
-            $out = & {
-                $script:new = Update-PackageVersion -packageName 'downstream' -version '9.9.9' -ChangeType '' `
-                    -packageCargoToml $fx.PackageCargo -rootCargoToml $fx.RootCargo
-            } 6>&1
-            $text = ($out | Out-String)
-
-            $script:new | Should -Be '9.9.9'
-            $text | Should -Match 'Using specified version: 9\.9\.9'
-            # When the version is explicit there is no change-type to announce.
-            $text | Should -Not -Match 'Releasing (breaking|non-breaking|patch)'
-        }
-    }
-}
-
-# --------------------------------------------------------------------------
-# Invoke-CascadeStep — re-entrant-safe behavior in isolation.
-# --------------------------------------------------------------------------
-
-Describe 'Invoke-CascadeStep' {
-    BeforeAll {
-        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
-    }
-
-    It 'releases a dependent from the base version when not yet pre-released' {
-        Reset-ReleaseScriptCaches
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-fresh')
-        # Initial commit is the base; downstream starts at 0.1.0.
-        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Push-Location $ws.Path
-        try {
-            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DependentChangeType 'patch' -BaseRef 'HEAD'
-        } finally {
-            Pop-Location
-        }
-
-        $result | Should -Not -BeNullOrEmpty
-        $result.Package      | Should -Be 'downstream'
-        $result.OldVersion | Should -Be '0.1.0'
-        $result.NewVersion | Should -Be '0.1.1'
-    }
-
-    It 'skips re-releasing when the dependent was already pre-released to a sufficient version' {
-        Reset-ReleaseScriptCaches
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-skip')
-        # Pre-change downstream from 0.1.0 to 0.2.0 (larger than any patch cascade).
-        $ws.SetVersion('downstream', '0.2.0')
-        $ws.AddCommit('pre-release downstream')
-        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Push-Location $ws.Path
-        try {
-            # BaseRef = HEAD~1 → downstream's "base" version is 0.1.0; required = 0.1.1; current = 0.2.0.
-            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DependentChangeType 'patch' -BaseRef 'HEAD~1'
-        } finally {
-            Pop-Location
-        }
-
-        $result.OldVersion | Should -Be '0.2.0'
-        $result.NewVersion | Should -Be '0.2.0'
-    }
-
-    It 'upgrades a pre-released dependent when the cascade requires a larger version' {
-        Reset-ReleaseScriptCaches
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-upgrade')
-        # Pre-change downstream to 0.1.1 (patch). Then cascade demands major (0.x → 0.2.0).
-        $ws.SetVersion('downstream', '0.1.1')
-        $ws.AddCommit('pre-release downstream patch')
-        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        Push-Location $ws.Path
-        try {
-            # Base ref = HEAD~1; base version = 0.1.0; required = Get-NextVersion(0.1.0, major) = 0.2.0.
-            $result = Invoke-CascadeStep -Dependent 'downstream' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DependentChangeType 'breaking' -BaseRef 'HEAD~1'
-        } finally {
-            Pop-Location
-        }
-
-        $result.OldVersion | Should -Be '0.1.1'
-        $result.NewVersion | Should -Be '0.2.0'
-    }
-
-    It 'returns null and warns when the dependent package is missing' {
-        Reset-ReleaseScriptCaches
-        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'cs-missing')
-        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
-        $warnings = @()
-        Push-Location $ws.Path
-        try {
-            $result = Invoke-CascadeStep -Dependent 'nonexistent' -RepoRoot $ws.Path -RootCargoToml $rootCargo `
-                -PrBaseUrl '' -TargetPackageName 'upstream' -TargetNewVersion '0.3.0' -DependentChangeType 'patch' -BaseRef 'HEAD' `
-                -WarningVariable warnings -WarningAction SilentlyContinue
-        } finally {
-            Pop-Location
-        }
-        $result | Should -BeNullOrEmpty
-        $warnings.Count | Should -BeGreaterOrEqual 1
     }
 }

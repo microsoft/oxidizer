@@ -1,15 +1,21 @@
-# Releasing Oxidizer Crates
+# Releasing Oxidizer Packages
 
 This document is the reference for the human-driven release tooling in
 `scripts/`:
 
-- `scripts/release-crate.ps1` — interactive release driver for a single
-  workspace package.
+- `scripts/release-packages.ps1` — interactive release driver. The caller
+  supplies the full release plan up-front via `-Packages` (a list of
+  `name@change-spec` tokens); the script resolves the plan into a release
+  set, surfaces any direct or transitive dependencies that have unreleased
+  modifications for the caller to review, and applies the resulting
+  version-number increments, changelog updates, and dependent cascade in
+  one shot.
 - `scripts/check-unreleased-dependencies.ps1` — CI helper that flags for
   reviewer attention any workspace packages with unreleased modifications
   that are transitively pulled in by a package this PR is releasing.
-- `scripts/lib/releasing.ps1`, `scripts/lib/release-flow.ps1` — library
-  helpers dot-sourced by the entry-point scripts. Not direct entry points.
+- `scripts/lib/releasing.ps1`, `scripts/lib/release-flow.ps1`,
+  `scripts/lib/check-unreleased-deps.ps1` — library helpers dot-sourced by
+  the entry-point scripts. Not direct entry points.
 
 Maintainers SHOULD read the **Glossary** below before making changes to
 the release tooling; the rest of the codebase, the PR comments, the
@@ -44,18 +50,29 @@ meanings defined here.
 - **Cascade toward dependents** — the automatic version-number-increment
   propagation that happens when a released package's transitive
   dependents need to also be released because they (transitively) consume
-  it. This is what `Invoke-CascadeStep` performs after the primary
-  release.
+  it. `Resolve-ReleaseSet` walks the user-supplied release plan, computes
+  the transitive dependents of each user-source release, and adds
+  cascade-source entries to the plan so the dependents are also released.
 
-- **Cascade toward dependencies** — the inverse: re-running
-  `release-crate.ps1` on a package whose direct dependencies still have
-  unreleased modifications causes the user to be prompted, and may
-  trigger releases on those dependencies.
+- **Cascade toward dependencies** — the inverse: when a package being
+  released has direct dependencies with unreleased modifications, the
+  release plan does NOT automatically pull them in. Instead the planner
+  surfaces them to the caller during the review step, who decides whether
+  to add them to the `-Packages` list or leave them out.
 
 - **Change type** — the *semantic intent* of a release:
-  `breaking` / `non-breaking` / `patch`. This is what releasers reason
-  about and what the `release-crate.ps1 -Change` parameter accepts (as
-  `Breaking|NonBreaking|Patch|1.0`).
+  `breaking` / `nonbreaking` / `patch`. This is what releasers reason
+  about. In the `-Packages` tokens it appears as the part after `@`, e.g.
+  `bytesbuf@breaking`.
+
+- **Change spec** — the value of the part after `@` in a `-Packages`
+  token. A change spec is either a change type (`breaking`,
+  `nonbreaking`, `patch`), the literal graduation marker `1.0.0`, or an
+  explicit semver version like `2.5.0`. The planner translates change
+  types into concrete versions via `Get-NextVersion`; explicit versions
+  pass through verbatim. The graduation marker is shorthand for the
+  one-time `0.x.y → 1.0.0` lifecycle event and is rejected if the
+  package is already at `>= 1.0.0`.
 
 - **Version component** — a *position* in the SemVer string
   `major.minor.patch` (the three integers in `x.y.z`). These names are
@@ -63,75 +80,148 @@ meanings defined here.
   version components depending on the current version (see
   `Get-NextVersion` in `scripts/lib/releasing.ps1`):
 
-  | Current   | Breaking      | NonBreaking      | Patch            |
+  | Current   | breaking      | nonbreaking      | patch            |
   |-----------|---------------|------------------|------------------|
   | `x.y.z`, x≥1 | `(x+1).0.0` | `x.(y+1).0`     | `x.y.(z+1)`      |
   | `0.y.z`, y≥1 | `0.(y+1).0` | `0.y.(z+1)`     | `0.y.(z+1)`†     |
   | `0.0.z`      | `0.0.(z+1)` | `0.0.(z+1)`     | `0.0.(z+1)`      |
 
-  † On `0.x.y` the menu hides the Patch option because it would produce
-  the same numeric outcome as NonBreaking.
+  † On `0.x.y` a `patch` change spec produces the same numeric outcome
+  as `nonbreaking`. The planner does not reject this — the user may
+  still record the intent as `patch` so it shows up that way in the
+  release plan and commit message.
 
   Do not call a `0.4.1 → 0.5.0` increment a "major version change" — the
   value of the *major component* (0) did not change, even though the
-  change is breaking under Cargo's 0.x SemVer rules. Always translate
-  change-type values to a user-friendly noun phrase via
-  `Get-ChangeTypeLabel` before emitting user-facing output.
+  change is breaking under Cargo's 0.x SemVer rules.
 
 - **Release set** — the set of workspace packages whose on-disk
   `version =` differs from the value in the base ref. This is the
   same set returned by `Get-PackagesWithVersionChanges`. A package is
-  in the release set whether the version change is uncommitted,
+  in the release set whether the version-number increment is uncommitted,
   committed-but-not-yet-pushed, committed-and-pushed, or arrived via a
   cascade-applied edit — *anything* not yet merged to the base ref
   counts. The release set is the unit the release tooling promises to
   publish to crates.io when the PR merges.
 
-- **Pending release** — a member of the release set whose version
-  increment has not yet been merged to the base ref. Committed-vs-
-  uncommitted is irrelevant: the release tooling treats both the same.
+- **Pending release** — a member of the release set whose
+  version-number increment has not yet been merged to the base ref.
+  Committed-vs-uncommitted is irrelevant: the release tooling treats both
+  the same.
 
-- **Elevation** — running `release-crate.ps1` again on a package that is
-  already a pending release, with a stronger change type. The same
-  package may have multiple invocations on a branch; only the final
-  on-disk state matters. Use elevation when:
+- **Resolved release set** — the per-invocation, in-memory result of
+  `Resolve-ReleaseSet`. It is a hashtable keyed by package folder where
+  each entry records the package's source (`user` or `cascade`), the
+  effective change type (after cascade-driven upgrade), the
+  effective target version, and the list of `CascadeReasons` (which
+  user-source releases caused the cascade). The resolved release set is
+  the planner's source of truth for the rest of the run.
 
-  1. A cascade applied a non-breaking or patch change type, but on
-     review the package's own pre-existing modifications warrant a
-     breaking release.
-  2. You initially released a package as a patch, then later realised
-     you should have released it as a breaking change.
+- **User-source release** — a release plan entry derived directly from a
+  `-Packages` token. The caller asked for this release explicitly.
 
-  Elevation works the same way whether the prior version increment is
-  committed or uncommitted on the branch — the script reads the base
-  ref's version (not the on-disk version) to compute the new increment,
-  so you cannot accidentally double-bump or get stuck.
+- **Cascade-source release** — a release plan entry added by
+  `Resolve-ReleaseSet`'s cascade-toward-dependents walk. The caller did
+  not list this package in `-Packages`; it was added because it is a
+  transitive dependent of a user-source release.
 
-  See `Update-ReleaseVersionInPlace` in `scripts/lib/release-flow.ps1`
-  for the implementation. It re-stamps the package's `Cargo.toml`, the
-  workspace `Cargo.toml`'s `[workspace.dependencies]` entry, and the
-  CHANGELOG section header in place — it does NOT create a second
-  changelog section.
+---
+
+## Bundled-input release model
+
+Every invocation of `release-packages.ps1` describes a *complete release
+plan*. The planner reads the entire plan up-front, resolves the cascade
+toward dependents, surfaces any modified-but-unreleased dependencies for
+review, and then applies all version-number increments, changelog
+updates, and `Cargo.toml` rewrites in one shot. A second invocation is
+treated as a fresh, independent release plan — there is no notion of
+"adding to a previous run".
+
+If you need to re-plan (for example because you accepted a release
+during review that you now want to remove), use `git reset` /
+`git restore` to revert the on-disk state and re-run the script with
+the corrected `-Packages` argument.
+
+The base ref (defaults to `origin/main`, overridable with `-BaseRef`)
+identifies the state where already-released packages live. Anything
+between the base ref and the current state — committed or uncommitted —
+is considered pending and is folded into the analysis.
+
+### `-Packages` token syntax
+
+Each token has the form `<name>@<change-spec>`:
+
+- `<name>` is the package name as it appears in `crates/<name>/Cargo.toml`.
+- `<change-spec>` is one of:
+  - `breaking`, `nonbreaking`, `patch` — the change type. The planner
+    computes the target version via `Get-NextVersion` based on the
+    package's current version on disk.
+  - `1.0.0` — the graduation marker. Only valid for packages currently
+    at `0.x.y`; rejected for packages already at `>= 1.0.0`.
+  - An explicit semver (e.g. `2.5.0`, `0.10.0`) — used verbatim. Must
+    be strictly greater than the current on-disk version.
+
+Examples:
+
+```powershell
+# Single package, non-breaking change.
+./scripts/release-packages.ps1 -Packages 'bytesbuf@nonbreaking'
+
+# Two packages: one breaking, one patch.
+./scripts/release-packages.ps1 -Packages 'bytesbuf@breaking','bytesbuf_io@patch'
+
+# Graduate to 1.0.0 and use an explicit version for a sibling.
+./scripts/release-packages.ps1 -Packages 'foo@1.0.0','bar@2.5.0'
+```
+
+### Cascade-toward-dependents and topological consistency
+
+After parsing the tokens, `Resolve-ReleaseSet` walks the workspace
+dependency graph forward from every user-source release and adds each
+transitive published dependent as a cascade-source release. The cascade's
+change type for each dependent is derived from whether the user-source
+release exposes (in its public API) the cascaded-from package — exposing
+cascades propagate the source's change type, non-exposing cascades drop
+to `patch`.
+
+The planner enforces **topological consistency**: if a user-supplied
+change type for a package is *weaker* than the cascade would compute,
+the planner auto-upgrades it and notes the upgrade in the review output.
+The caller's `-Packages` token is therefore a *lower bound*, not a
+guarantee — the user can always elevate further on the next iteration
+of the review, but cannot suppress a cascade-imposed change type.
+
+### Errors the planner rejects
+
+- A `1.0.0` change spec for a package already at `>= 1.0.0`.
+- An explicit semver that is not strictly greater than the package's
+  current on-disk version.
+- A user-supplied change type that pins the package *below* what the
+  cascade computes for it. (The planner can auto-upgrade ordinary
+  change-type tokens, but treats an explicit semver token as a hard
+  pin — if the explicit version is below what the cascade requires the
+  planner errors instead of silently overriding the caller.)
 
 ---
 
 ## Cascade Organisation Invariants
 
-`scripts/release-crate.ps1`'s post-release dependency-scan loop (which
-surfaces modified-but-unreleased workspace packages for the user to
-review) operates on two invariants. Keep them intact when editing
-`scripts/lib/release-flow.ps1` and `scripts/lib/releasing.ps1`:
+The dependency-scan loop (which surfaces modified-but-unreleased
+workspace packages for the user to review) operates on two invariants.
+Keep them intact when editing `scripts/lib/release-flow.ps1` and
+`scripts/lib/releasing.ps1`:
 
 ### Invariant A — A cascade toward dependents never introduces items to the user-review queue.
 
-A package that received only a cascade-applied version change (no
+A package that received only a cascade-applied version-number change (no
 pre-existing developer modifications) requires no user review — its
-version change is mechanical and follows directly from the released
-dependency. Such packages must not surface in the dep-scan prompt.
+version-number increment is mechanical and follows directly from the
+released dependency. Such packages must not surface in the dep-scan
+prompt.
 
-The implementation upholds this by snapshotting the
-"has unreleased modifications" set BEFORE the primary release / cascade
-runs, so the snapshot reflects pre-cascade reality.
+The implementation upholds this by snapshotting the "has unreleased
+modifications" set BEFORE the cascade runs, so the snapshot reflects
+pre-cascade reality.
 
 ### Invariant B — A release-set member drops from the user-review queue only when its cascade-applied change type is already at the semantic maximum (breaking).
 
@@ -153,40 +243,53 @@ The user-review queue therefore contains two categories of finding:
 
 ---
 
-## How to release a crate
+## How to release one or more packages
 
-Run `scripts/release-crate.ps1 -Name <pkg> -Change <Breaking|NonBreaking|Patch|1.0>`
-locally. The script will:
+1. Decide which packages you want to release and the change type for each.
+   This is the caller's judgment. There is no algorithmic "correct"
+   answer — review the cumulative diff being released (source + dependency
+   edits) and decide whether each package's change is breaking,
+   backward-compatible, a pure internal patch, or a graduation to 1.0.0.
+   Picking too weak a change type causes downstream consumers to silently
+   get incompatible behaviour after `cargo update`; picking too strong a
+   change type is harmless except it forces direct dependents to bump as
+   well.
 
-1. Compute the new version from the change type and the base ref's
-   version.
-2. Update the package's `Cargo.toml`, `Cargo.lock`, `README.md`, the
-   workspace `Cargo.toml`'s `[workspace.dependencies]` entry, and the
-   `CHANGELOG.md`.
-3. Run the cascade toward dependents to bump any transitive dependent
-   whose API surface is affected (`Test-PackageExposesTarget`).
-4. Run the post-release dependency scan, which prompts you about each
-   workspace package with unreleased modifications that is transitively
-   pulled in by something in the release set. For each finding you can:
-   - View the per-package diff before deciding.
-   - Ignore (leave unreleased — the reviewer will see it flagged in
-     `check-unreleased-dependencies.ps1`'s comment).
-   - Release as breaking / non-breaking / patch (which itself triggers
-     a sub-cascade and may add more findings to the next iteration).
+2. Run:
 
-The `-Change` value is the caller's judgment. There is no algorithmic
-"correct" answer — the author must review the actual diff being
-released (source + dependency edits) and decide whether the cumulative
-change is a breaking SemVer change, a backward-compatible addition, a
-pure internal patch, or the one-time `0.x → 1.0` graduation. Picking too
-weak a change type causes downstream consumers to silently get
-incompatible behaviour after `cargo update`; picking too strong a change
-type is harmless except it forces direct dependents to bump as well.
+   ```powershell
+   ./scripts/release-packages.ps1 -Packages 'pkg1@<change-spec>','pkg2@<change-spec>'
+   ```
 
-You may run `release-crate.ps1` multiple times on the same branch — each
-invocation reads the base ref's version (not the on-disk version) to
-compute the new increment, so elevation and additional package releases
-both work cleanly whether prior version increments are committed or not.
+   The script will:
+   - Parse the tokens and compute the resolved release set, including
+     the cascade toward dependents.
+   - Show the release plan.
+   - For each workspace package with unreleased modifications that is
+     transitively pulled in by something in the release set (and is not
+     itself in the release set with a cascade-applied change type of
+     `breaking`), show a per-package menu where you can view the diff and
+     decide whether to include the package, elevate its change type, or
+     leave it out.
+   - After review, apply all version-number increments, changelog
+     updates, README regeneration, `Cargo.toml` rewrites, and workspace
+     `[workspace.dependencies]` updates in one shot.
+
+3. Commit the resulting changes and open a PR.
+
+Once your PR is merged, automation tags the commit and pushes each
+released crate to crates.io.
+
+### Re-running on the same branch
+
+You may run `release-packages.ps1` multiple times on the same branch.
+Each invocation reads the base ref's version (not the on-disk version)
+to compute new increments, so a second run plans a fresh release based
+on what would be released *cumulatively* relative to the base ref.
+
+If a previous run produced changes you want to discard before re-planning,
+use `git reset` / `git restore` to revert the on-disk state first, then
+re-run with the corrected `-Packages` argument.
 
 ---
 
@@ -205,34 +308,32 @@ loop and posts a PR comment with two tables:
   modifications whose cascade-applied change type is less than breaking.
   Reviewers should confirm the cascade-applied change type is adequate.
 
-To act on a finding, re-run `release-crate.ps1 -Name <pkg> -Change <...>`
-locally. This works for both:
+To act on a finding, re-run `release-packages.ps1` locally with an
+updated `-Packages` argument that:
 
-- **Releasing a previously-skipped package** — the new version increment
-  is added to the release set on top of any existing cascade-applied
-  changes.
-- **Elevating an existing release-set member** — the cascade-applied
-  version is re-stamped to the elevated change type via
-  `Update-ReleaseVersionInPlace`.
+- Adds any previously-skipped package as a new token (the planner will
+  fold it into the release set on top of any cascade-applied changes).
+- Strengthens the change type for any elevation candidate (the planner
+  re-stamps the cascade-applied version to match the elevated change
+  type).
 
-Both cases work whether the prior cascade-applied version increment is
-committed or uncommitted on the branch.
+Both cases work whether the prior cascade-applied version-number
+increment is committed or uncommitted on the branch — the planner reads
+the base ref's version (not the on-disk version) to compute the new
+increment.
 
 ---
 
 ## Why crate-vs-package nomenclature is mixed
 
 Cargo's official term for a workspace member is "package". The release
-tooling uses "package" throughout the PowerShell API surface (`-Name`,
-`-PackageName`, `Invoke-PackageRelease`, `Get-PackagesWithVersionChanges`,
-etc.) and in all human-readable output.
+tooling uses "package" throughout the PowerShell API surface (`-Packages`,
+`-PackageName`, `Get-PackagesWithVersionChanges`, etc.) and in all
+human-readable output.
 
 The tokens "crate" / "crates" survive only where they are part of an
 external identifier we cannot change:
 
 - The filesystem directory `crates/`.
-- The script filename `release-crate.ps1` (kept for muscle-memory; the
-  parameter is `-Name`).
 - `[workspace.dependencies]`, `Cargo.toml`, `cargo metadata`, etc.
 - `crates.io`.
-- The `-CrateName` alias on `-Name` (for muscle memory).

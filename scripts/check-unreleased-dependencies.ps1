@@ -9,7 +9,7 @@
     skipped releasing those packages because the modifications are immaterial.
 
 .DESCRIPTION
-    Companion CI check to the interactive analysis performed by `release-crate.ps1`.
+    Companion CI check to the interactive analysis performed by `release-packages.ps1`.
 
     The "release set" is computed from `$BaseRef`: every package whose `version =`
     in `Cargo.toml` differs between `$BaseRef` and HEAD. For each package in that

@@ -8,7 +8,7 @@
 .DESCRIPTION
     Loads every *.scenario.psd1 under scripts/tests/Pester/scenarios/ and
     runs each one via Invoke-Scenario. Each scenario builds a synthetic
-    workspace, replays history, invokes Invoke-ReleaseMain in-process
+    workspace, replays history, invokes Invoke-ReleasePackagesMain in-process
     (with mocked Read-Host / Invoke-WorkspaceCheck / Test-InteractiveSession),
     then asserts on the resulting release records and raised prompts.
 #>

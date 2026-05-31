@@ -162,8 +162,9 @@ function Compare-SemanticVersions {
 # IMPORTANT VOCABULARY (also documented in AGENTS.md "Release Versioning Vocabulary"):
 #
 #   * CHANGE TYPE — the semantic intent of a release: 'breaking' /
-#     'non-breaking' / 'patch'. This is what the user thinks about and what the
-#     CLI accepts via `release-crate.ps1 -Change Breaking|NonBreaking|Patch|1.0`.
+#     'non-breaking' / 'patch'. This is what the user thinks about; the change
+#     type for each released package is supplied in the `-Packages` argument
+#     to `release-packages.ps1` (e.g. `mypkg@breaking`, `mypkg@nonbreaking`).
 #     Internally the same vocabulary is used for the `$changeType` enum (and
 #     for `-ChangeType` parameters throughout the release tooling).
 #
@@ -287,8 +288,8 @@ function Get-CurrentVersion {
 # Cached for the lifetime of the script run: $BaseRef is fixed by the caller
 # for the entire run and the script never makes git commits, so the result
 # for a given (BaseRef, PackageFolder) pair is invariant. Saves N×`git show`
-# spawns per `Invoke-PostReleaseDepScan` loop iteration (the dominant cost
-# of the "Analyzing packages..." pause on Windows).
+# spawns per `Invoke-PlanReview` loop iteration (the dominant cost of the
+# "Analyzing packages..." pause on Windows).
 function Get-PackageVersionFromRef {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -324,7 +325,7 @@ function Get-PackageVersionFromRef {
 $script:CachedWorkspaceMetadata = $null
 
 # Caches for git-derived data that is invariant for the entire script run.
-# These are valid for the whole release-crate.ps1 invocation because:
+# These are valid for the whole release-packages.ps1 invocation because:
 #   - $BaseRef is fixed by the caller for the entire run, and
 #   - the script never makes git commits (HEAD does not move).
 # Therefore the per-package baseline commit, the per-package committed-changes
@@ -750,12 +751,11 @@ function Get-PendingReleases {
 # Builds a ResolvedReleaseSet (folder -> resolved entry) from base-ref vs disk
 # version diffing. Used by callers that have no explicit user-input release
 # plan to feed Get-UnreleasedModifiedDependencies — currently
-# scripts/check-unreleased-dependencies.ps1 (CI scan, no user input) and the
-# legacy release-crate.ps1 entry path.
+# scripts/check-unreleased-dependencies.ps1 (CI scan, no user input).
 #
 # Every member is marked Source='cascade' so the elevation-surface predicate
 # in Get-UnreleasedModifiedDependencies treats every release-set member as
-# potentially-elevatable. This matches the pre-bundled-input semantics: in
+# potentially-elevatable. This matches the bundled-input semantics: in
 # the absence of explicit user intent, every below-breaking release-set
 # member is surfaced for review.
 #

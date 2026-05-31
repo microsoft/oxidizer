@@ -72,7 +72,7 @@ The `add-crate` script does the following:
   `cargo-doc2readme`](https://crates.io/crates/cargo-doc2readme)
   with a set of appropriate CI badges.
 
-- Creates an empty `CHANGELOG.md` file for the crate, which will later get populated by the `scripts\release-crate.ps1`
+- Creates an empty `CHANGELOG.md` file for the crate, which will later get populated by the `scripts\release-packages.ps1`
   script.
 
 - Creates placeholder `logo.png` and `favicon.ico` files for the crate, which you're expected to replace with legit
@@ -89,9 +89,10 @@ this simple process:
 
 2. Create a branch off of main.
 
-3. Run `./scripts/release-crate.ps1 <crate_name> [new_version]` to bump a crate's version and update the crate's
-   `CHANGELOG.md` file.
-   Run the script many times if you want to release several crates in the same PR.
+3. Run `./scripts/release-packages.ps1 -Packages '<crate_name>@<change_type>'` to update versions and changelogs.
+   The change type for each package is one of `breaking`, `nonbreaking`, `patch`, or an explicit version like
+   `1.0.0`. To release several crates together, list them all in the same `-Packages` argument
+   (for example, `'foo@nonbreaking','bar@patch'`); the script plans the entire release up-front.
 
 4. Create a PR like normal to push changes out.
 
@@ -110,7 +111,7 @@ automation processes:
   always reflects the latest crate documentation.
 
 - The `CHANGELOG.md` file in each crate's directory is auto-generated from the commits to a crate's directory by the
-  `scripts/release-crate.ps1` script.
+  `scripts/release-packages.ps1` script.
 
 To generate documentation locally with all features enabled (including feature-gated items), run:
 

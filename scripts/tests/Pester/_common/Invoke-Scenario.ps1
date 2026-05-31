@@ -109,8 +109,7 @@ function Invoke-Scenario {
                     default { throw "Scenario '$($scenario.Name)' has unrecognised Run.Change '$($scenario.Run.Change)'." }
                 }
             } else {
-                # Default change type for bare invocations matches the prior
-                # Invoke-ReleaseMain semantics.
+                # Default change type for bare invocations.
                 'nonbreaking'
             }
             $packageTokens = @("$($scenario.Run.PackageName)@$changeSpec")

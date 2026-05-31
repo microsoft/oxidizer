@@ -130,7 +130,7 @@ function Format-UnreleasedDependenciesReport {
     $lines.Add('') | Out-Null
     $lines.Add('Locally, the released packages build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('- If the unreleased changes are **material** to the released package''s behavior or public API, you should release the dependency too (re-run ``scripts/release-crate.ps1`` for it).') | Out-Null
+    $lines.Add('- If the unreleased changes are **material** to the released package''s behavior or public API, you should release the dependency too (add it to the `-Packages` list when re-running ``scripts/release-packages.ps1``).') | Out-Null
     $lines.Add('- If the changes are **immaterial** (formatting, doc tweaks, internal-only refactors), this comment can be ignored.') | Out-Null
     $lines.Add('- For packages **already part of this release** that contain extra modifications, confirm that the change type chosen at release time (non-breaking / patch) is appropriate for the cumulative change set.') | Out-Null
     $lines.Add('') | Out-Null

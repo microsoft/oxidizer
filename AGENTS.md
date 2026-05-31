@@ -22,7 +22,7 @@ The spell checker dictionary is in the `.spelling` file, one word per line in ar
 
 ## Changelogs
 
-The changelogs are updated by `scripts/release-crate.ps1` at release time, based on Git history. It is not necessary to make manual edits
+The changelogs are updated by `scripts/release-packages.ps1` at release time, based on Git history. It is not necessary to make manual edits
 to the changelogs, though you are permitted to do so if explicitly instructed.
 
 ## Releasing Packages
@@ -31,7 +31,7 @@ See [docs/releasing.md](docs/releasing.md) for the release tooling
 reference: glossary (direct/transitive dependent vs dependency, cascade
 direction, change type vs version component, release set, pending
 release, elevation), the cascade-organisation invariants, and the
-workflow for `scripts/release-crate.ps1` and
+workflow for `scripts/release-packages.ps1` and
 `scripts/check-unreleased-dependencies.ps1`.
 
 ## Pull Requests
