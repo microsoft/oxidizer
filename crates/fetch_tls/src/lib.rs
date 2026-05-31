@@ -64,10 +64,10 @@
 //! With neither feature enabled, [`TlsOptions::default`] still constructs
 //! but [`TlsOptions::build_backend`] returns a [`BackendError`].
 
-mod backend;
-mod options;
 #[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod alpn;
+mod backend;
+mod options;
 
 pub use backend::{BackendError, TlsBackend, TlsBackendDefaults};
 pub use options::{TlsOptions, TlsOptionsBuilder};

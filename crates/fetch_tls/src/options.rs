@@ -81,11 +81,6 @@ pub(crate) enum TlsOptionsKind {
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct TlsOptions {
-    #[allow(
-        clippy::allow_attributes,
-        dead_code,
-        reason = "consumed by downstream HTTP client crates that materialize a TlsBackend from TlsOptions"
-    )]
     pub(crate) inner: TlsOptionsKind,
     pub(crate) shared: SharedOptions,
 }
@@ -106,13 +101,6 @@ impl Default for SharedOptions {
 }
 
 impl TlsOptions {
-    /// HTTP versions the caller intends to negotiate. Backends use this list
-    /// to compute the `ALPN` protocols offered during the TLS handshake.
-    #[must_use]
-    pub fn supported_http_versions(&self) -> &[Version] {
-        &self.shared.supported_http_versions
-    }
-
     /// Materializes these options into a [`TlsBackend`] using `defaults`.
     ///
     /// - auto — selected by [`TlsOptions::default`]; the backend is chosen
@@ -253,6 +241,14 @@ mod tests {
     }
 
     #[test]
+    fn supported_http_versions_panics_when_empty() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = TlsOptions::builder_rustls().supported_http_versions(&[]);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore)]
     fn auto_without_default_backend_returns_error() {
         let defaults = TlsBackendDefaults::new();
@@ -260,14 +256,6 @@ mod tests {
         let err = TlsOptions::default().build_backend(&defaults).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("no default TLS backend"), "unexpected error: {msg}");
-    }
-
-    #[test]
-    fn supported_http_versions_round_trips() {
-        let tls = TlsOptions::builder_rustls()
-            .supported_http_versions(&[Version::HTTP_11, Version::HTTP_2])
-            .build();
-        assert_eq!(tls.supported_http_versions(), &[Version::HTTP_11, Version::HTTP_2]);
     }
 
     fn rustls_defaults() -> TlsBackendDefaults {
