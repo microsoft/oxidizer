@@ -2057,6 +2057,585 @@ function Invoke-WorkspaceCheck {
     }
 }
 
+# --- BUNDLED-INPUT RELEASE FLOW ---
+#
+# The bundled-input flow takes the entire release plan up front (via
+# release-packages.ps1's -Packages parameter). The user reviews and decides
+# every release in one transaction; the script then writes everything to
+# disk atomically. This replaces the iterative single-package model where
+# the user had to call the script repeatedly and reconcile on-disk state
+# across invocations.
+#
+# Top-level shape:
+#
+#   Parse-ReleaseTokens          (-Packages -> parsed token objects)
+#   |
+#   v
+#   Workspace baseline snapshot  (Get-WorkspacePackages, immutable for the run)
+#   Modified-on-disk snapshot    (Get-PackagesWithUnreleasedChanges, immutable)
+#   |
+#   v
+#   Invoke-PlanReview            (interactive elevation loop — pure planning,
+#                                 no disk writes; loops until findings are
+#                                 empty or all reviewed; produces final
+#                                 ResolvedReleaseSet hashtable)
+#   |
+#   v
+#   Show-ReleasePlan             (display the final plan to the user)
+#   |
+#   v
+#   Invoke-ResolvedRelease       (execute the plan in topo order — writes
+#                                 Cargo.toml / CHANGELOG.md / README.md for
+#                                 every release-set member; produces release
+#                                 records for the summary)
+#   |
+#   v
+#   Show-ReleaseSummary + Show-FinalMessage
+#
+
+# Pre-release interactive elevation review loop. Operates entirely on in-memory
+# state (a working list of parse-tokens, a $declined hashset of NON-release-set
+# folders the user said "no" to, and a $reviewedCascadeAsIs hashset of
+# release-set cascade-source folders the user explicitly said "this cascade
+# change type is fine, don't elevate"). On each loop:
+#
+#   1. Re-resolve the release set from the current $userTokens via
+#      Resolve-ReleaseSet (cheap — operates on the immutable workspace
+#      baseline, no I/O).
+#   2. If a previously-declined folder is now in the resolved release set
+#      (because a later acceptance pulled it in via cascade-toward-dependents),
+#      emit a one-line notice and clear it from $declined. The next iteration
+#      gives the user a chance to elevate the cascade-applied change type
+#      after the fact.
+#   3. Compute findings via Get-UnreleasedModifiedDependencies against the
+#      fresh release set + immutable modifications snapshot. Filter out
+#      $declined (still-not-in-release-set folders the user declined) and
+#      $reviewedCascadeAsIs (release-set cascade-source folders the user
+#      already accepted as-is).
+#   4. If empty: review complete — return the resolved release set.
+#   5. Non-interactive: emit a warning summary listing both buckets
+#      (not-in-release-set vs in-release-set-with-cascade-below-breaking)
+#      and return the current resolved set unchanged. The CI scan in
+#      check-unreleased-dependencies.ps1 will flag the same findings.
+#   6. Interactive: prompt the user for the first finding via
+#      Get-PackageReleaseDecision. On 'ignore' add to the appropriate
+#      hashset; on accept ('breaking'/'non-breaking'/'patch') append a
+#      synthetic '<folder>@<change>' token to $userTokens and loop. The
+#      menu's "view diff" option is owned by Get-PackageReleaseDecision
+#      and never returns control here.
+#
+# Returns: hashtable (folder -> resolved entry) representing the final plan.
+#
+# Iteration bound: number of published workspace packages. Each iteration
+# either grows ($declined ∪ $reviewedCascadeAsIs ∪ release-set)
+# monotonically or terminates, so the loop is provably bounded.
+function Invoke-PlanReview {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
+    )
+
+    $isInteractive = Test-InteractiveSession
+
+    # Working token list, mutable. Each accepted finding appends a new token.
+    $userTokens = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($t in $ParsedTokens) { $userTokens.Add($t) }
+
+    $declined = [System.Collections.Generic.HashSet[string]]::new()
+    # folder -> EffectiveChangeType-at-review-time. Suppresses re-prompting only
+    # while the underlying cascade level is unchanged. If a later acceptance
+    # strengthens the cascade requirement (e.g. patch -> non-breaking), the
+    # entry is re-surfaced so the user can re-evaluate against the new level.
+    $reviewedCascadeAsIs = @{}
+
+    $maxIterations = @(Get-WorkspacePackages -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
+    if ($maxIterations -lt 1) { $maxIterations = 1 }
+
+    # Save/restore the temp-diff-paths tracking list (used by Show-PackageDiff)
+    # to match the lifecycle of this review loop.
+    $prevTempPaths = $script:TempPackageDiffPaths
+    $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
+
+    $resolvedHash = $null
+
+    try {
+        for ($iter = 0; $iter -lt $maxIterations; $iter++) {
+            # Re-resolve the release set from the current token list. Pure
+            # in-memory operation; no caching/snapshot invalidation needed.
+            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+            $resolvedHash = @{}
+            foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
+
+            # Handoff: a previously-declined folder may now be in the release
+            # set because a later acceptance cascade-pulled it in. Surface the
+            # transition and clear from $declined so the next iteration's
+            # findings query can re-surface it (now as a release-set cascade
+            # candidate, subject to Invariant B elevation review).
+            $reclaimed = @()
+            foreach ($folder in @($declined)) {
+                if ($resolvedHash.ContainsKey($folder)) {
+                    $reclaimed += $folder
+                }
+            }
+            foreach ($folder in $reclaimed) {
+                [void]$declined.Remove($folder)
+                if ($isInteractive) {
+                    $entry = $resolvedHash[$folder]
+                    $reasonNames = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+                    Write-Host "ℹ️  Previously ignored package '$folder' was cascade-released because of changes in: $reasonNames." -ForegroundColor DarkCyan
+                }
+            }
+
+            if ($isInteractive) {
+                Write-Host ''
+                Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
+            }
+
+            $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot)
+
+            # Drop reviewed-as-is entries only while the cascade level matches
+            # the level the user originally approved. A strengthening cascade
+            # (e.g. patch -> non-breaking) clears the approval and re-surfaces
+            # the finding for a fresh decision.
+            $resurfaced = @()
+            foreach ($folder in @($reviewedCascadeAsIs.Keys)) {
+                $entry = $resolvedHash[$folder]
+                if ($null -eq $entry -or $entry.EffectiveChangeType -ne $reviewedCascadeAsIs[$folder]) {
+                    $resurfaced += $folder
+                }
+            }
+            foreach ($folder in $resurfaced) {
+                $reviewedCascadeAsIs.Remove($folder)
+                if ($null -ne $resolvedHash[$folder]) {
+                    Write-Host "ℹ️  Re-surfacing '$folder' for review: cascade level strengthened to $($resolvedHash[$folder].EffectiveChangeType)." -ForegroundColor DarkCyan
+                }
+            }
+
+            $queue = @(
+                $allFindings | Where-Object {
+                    -not $declined.Contains($_.Folder) -and
+                    -not $reviewedCascadeAsIs.ContainsKey($_.Folder)
+                }
+            )
+
+            if ($queue.Count -eq 0) {
+                if ($isInteractive) {
+                    Write-Host ''
+                    Write-Host '✅ No further unreleased modifications detected; release plan finalised.' -ForegroundColor Green
+                }
+                return $resolvedHash
+            }
+
+            if (-not $isInteractive) {
+                $notInReleaseSet = @($queue | Where-Object { -not $_.InReleaseSet })
+                $inReleaseSet    = @($queue | Where-Object { $_.InReleaseSet })
+
+                Write-Host ''
+                if ($notInReleaseSet.Count -gt 0) {
+                    Write-Host '⚠️  The following workspace packages have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
+                    foreach ($finding in $notInReleaseSet) {
+                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                        Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
+                        foreach ($chain in $finding.DependencyChains) {
+                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                if ($inReleaseSet.Count -gt 0) {
+                    Write-Host '⚠️  The following workspace packages are being released with a non-breaking cascade-applied version change, BUT also have pre-existing modifications that may warrant a more impactful change type (e.g. breaking). A reviewer should confirm the cascade-applied change type is sufficient:' -ForegroundColor Yellow
+                    foreach ($finding in $inReleaseSet) {
+                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
+                        Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
+                        foreach ($chain in $finding.DependencyChains) {
+                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                Write-Warning 'Non-interactive session: leaving the above packages as-is. Reviewer should confirm the choices are appropriate.'
+                return $resolvedHash
+            }
+
+            $next      = $queue[0]
+            $remaining = $queue.Count - 1
+            $decision  = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
+
+            if ($decision.Action -eq 'ignore') {
+                if ($next.InReleaseSet) {
+                    $cascadeLevel = $resolvedHash[$next.Folder].EffectiveChangeType
+                    Write-Host "  Keeping '$($next.Folder)' at its cascade-applied $cascadeLevel level; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
+                    $reviewedCascadeAsIs[$next.Folder] = $cascadeLevel
+                } else {
+                    Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
+                    [void]$declined.Add($next.Folder)
+                }
+                continue
+            }
+
+            # Accept: synthesise a token. The decision action vocabulary
+            # ('breaking'/'non-breaking'/'patch') maps to the parse-token
+            # change-spec vocabulary ('breaking'/'nonbreaking'/'patch').
+            #
+            # For both new and elevation cases we craft the parsed-token object
+            # directly rather than going through Parse-ReleaseTokens. That's
+            # safe because Resolve-ReleaseSet's duplicate-folder check only
+            # fires against other user-source tokens — and the only re-surfaced
+            # findings are cascade-source entries (user-source members are never
+            # re-surfaced, per Get-UnreleasedModifiedDependencies's predicate).
+            $changeSpec = switch ($decision.Action) {
+                'breaking'     { 'breaking' }
+                'non-breaking' { 'nonbreaking' }
+                'patch'        { 'patch' }
+                default        { throw "Internal error: Get-PackageReleaseDecision returned unexpected action '$($decision.Action)'." }
+            }
+            $newToken = "$($next.Folder)@$changeSpec"
+            $userTokens.Add(([pscustomobject]@{
+                Name                   = $next.Folder
+                RequestedChangeType    = $decision.Action
+                RequestedTargetVersion = $null
+                IsGraduation           = $false
+                RawToken               = $newToken
+            }))
+        }
+
+        Write-Warning "Plan review reached its iteration cap ($maxIterations); aborting further prompts."
+        return $resolvedHash
+    } finally {
+        foreach ($p in $script:TempPackageDiffPaths) {
+            try {
+                if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction Stop }
+            } catch {
+                Write-Warning "Could not delete temp diff file '$p': $_"
+            }
+        }
+        $script:TempPackageDiffPaths = $prevTempPaths
+    }
+}
+
+# Topological sort of a resolved release set: dependencies first, dependents
+# last. Uses Kahn's algorithm against the workspace baseline so the order is
+# deterministic and unaffected by hashtable enumeration order.
+#
+# Folders with no in-set dependencies come first (the "leaves" of the
+# release-set sub-DAG). Among equal-rank candidates, ties are broken by
+# folder name so output is reproducible across runs.
+function Get-TopoOrderedReleaseFolders {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+    )
+
+    if ($ResolvedReleaseSet.Count -eq 0) { return @() }
+
+    $folders = @($ResolvedReleaseSet.Keys)
+    $byFolder = @{}
+    $byCargo  = @{}
+    foreach ($pkg in $WorkspaceBaseline) {
+        $byFolder[$pkg.Folder] = $pkg
+        $byCargo[$pkg.Name.Replace('-', '_')] = $pkg
+    }
+
+    # Build adjacency: for each release-set folder, the in-set folders it
+    # depends on (its deps that are also in the release set).
+    $inSetDeps = @{}
+    $inDegree  = @{}
+    foreach ($folder in $folders) {
+        $pkg = $byFolder[$folder]
+        $deps = New-Object 'System.Collections.Generic.HashSet[string]'
+        if ($null -ne $pkg) {
+            foreach ($depCargo in $pkg.Deps) {
+                $depPkg = $byCargo[$depCargo]
+                if ($null -ne $depPkg -and $ResolvedReleaseSet.ContainsKey($depPkg.Folder)) {
+                    [void]$deps.Add($depPkg.Folder)
+                }
+            }
+        }
+        $inSetDeps[$folder] = $deps
+        $inDegree[$folder] = $deps.Count
+    }
+
+    $ready = [System.Collections.Generic.List[string]]::new()
+    foreach ($f in $folders) {
+        if ($inDegree[$f] -eq 0) { $ready.Add($f) }
+    }
+
+    $result = [System.Collections.Generic.List[string]]::new()
+    while ($ready.Count -gt 0) {
+        $sortedReady = @($ready | Sort-Object)
+        $next = $sortedReady[0]
+        [void]$ready.Remove($next)
+        $result.Add($next)
+
+        foreach ($f in $folders) {
+            if ($inSetDeps[$f].Contains($next)) {
+                $inDegree[$f] = $inDegree[$f] - 1
+                if ($inDegree[$f] -eq 0) { $ready.Add($f) }
+            }
+        }
+    }
+
+    if ($result.Count -ne $folders.Count) {
+        # Cycle in dependencies among release-set members — the workspace
+        # itself would already be broken; surface it loudly.
+        throw "Get-TopoOrderedReleaseFolders: dependency cycle detected among release-set members; cannot determine release order."
+    }
+
+    return $result.ToArray()
+}
+
+# Executes a finalised release plan. For each release-set entry, in topo order
+# (dependencies first), writes Cargo.toml + workspace Cargo.toml + CHANGELOG +
+# README. No cascade logic, no user prompts — every release decision was
+# already made in Invoke-PlanReview.
+#
+# Returns release records: @(@{Package; OldVersion; NewVersion}, ...) in
+# release order.
+#
+# The function is plan-driven: it never re-reads the on-disk Cargo.toml to
+# determine the next version. The plan's EffectiveTargetVersion is the source
+# of truth. This makes Invoke-ResolvedRelease provably independent of any
+# mid-execution disk state observation.
+function Invoke-ResolvedRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$RootCargoToml,
+        [Parameter(Mandatory = $false)][string]$PrBaseUrl,
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+    )
+
+    if ($ResolvedReleaseSet.Count -eq 0) { return @() }
+
+    $orderedFolders = Get-TopoOrderedReleaseFolders -ResolvedReleaseSet $ResolvedReleaseSet -WorkspaceBaseline $WorkspaceBaseline
+
+    $records = New-Object 'System.Collections.Generic.List[object]'
+
+    foreach ($folder in $orderedFolders) {
+        $entry            = $ResolvedReleaseSet[$folder]
+        $packageFolder    = Join-Path $RepoRoot 'crates' $folder
+        $packageCargoToml = Join-Path $packageFolder 'Cargo.toml'
+        $changelogFile    = Join-Path $packageFolder 'CHANGELOG.md'
+
+        $oldVersion = $entry.CurrentVersion
+        $newVersion = $entry.EffectiveTargetVersion
+
+        Write-Host ''
+        $sourceLabel = if ($entry.Source -eq 'user') { 'user-requested' } else { 'cascade-from-dependency' }
+        Write-Host "🚀 Releasing '$folder' ($sourceLabel): $oldVersion -> $newVersion" -ForegroundColor Cyan
+
+        # Use Update-PackageVersion with -version (not -ChangeType) so the
+        # plan's EffectiveTargetVersion is taken verbatim. This keeps the
+        # executor plan-driven.
+        $written = Update-PackageVersion -packageName $entry.Name -version $newVersion -ChangeType '' `
+            -packageCargoToml $packageCargoToml -rootCargoToml $RootCargoToml
+        if ($null -eq $written) {
+            Write-Error "Failed to update version for package '$folder'." -ErrorAction Stop
+        }
+
+        $cascadeReasons = if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
+            @($entry.CascadeReasons)
+        } else {
+            $null
+        }
+        Write-Changelog -packageName $entry.Name -newVersion $newVersion -packageFolder $packageFolder `
+            -changelogFile $changelogFile -prBaseUrl $PrBaseUrl -cascadeReasons $cascadeReasons
+
+        Update-Readme -packageName $entry.Name -packageFolder $packageFolder
+
+        $records.Add([pscustomobject]@{
+            Package    = $folder
+            OldVersion = $oldVersion
+            NewVersion = $newVersion
+        })
+    }
+
+    # The on-disk workspace metadata is now stale (we just rewrote Cargo.tomls);
+    # downstream operations that rely on cargo metadata (e.g. Invoke-WorkspaceCheck)
+    # must observe the new state.
+    Invalidate-WorkspaceMetadataCache
+
+    return @($records)
+}
+
+# Pretty-prints the resolved release plan before execution so the user can
+# eyeball the final state. Lists user-source members first (in token order),
+# then cascade-source members (sorted by folder for determinism). For each
+# entry, shows the version transition, the source, the effective change
+# type, and any cascade reasons. AutoUpgraded user-source entries are
+# flagged so the user notices when cascade strengthened their request.
+function Show-ReleasePlan {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet
+    )
+
+    if ($ResolvedReleaseSet.Count -eq 0) {
+        Write-Host ''
+        Write-Host '📋 Release plan: (empty)' -ForegroundColor Yellow
+        return
+    }
+
+    $userEntries    = @($ResolvedReleaseSet.Values | Where-Object { $_.Source -eq 'user' })
+    $cascadeEntries = @($ResolvedReleaseSet.Values | Where-Object { $_.Source -eq 'cascade' } | Sort-Object -Property Folder)
+
+    $total = $ResolvedReleaseSet.Count
+    $packageNoun = if ($total -eq 1) { 'package' } else { 'packages' }
+
+    Write-Host ''
+    Write-Host "📋 Final release plan ($total $packageNoun):" -ForegroundColor Cyan
+
+    foreach ($entry in $userEntries) {
+        $tag = if ($entry.AutoUpgraded) {
+            "user-requested (auto-upgraded by cascade to $($entry.EffectiveChangeType))"
+        } else {
+            "user-requested ($($entry.EffectiveChangeType))"
+        }
+        Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [$tag]" -ForegroundColor Green
+        if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
+            $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+            Write-Host "      strengthened by cascade from: $names" -ForegroundColor DarkGray
+        }
+    }
+
+    foreach ($entry in $cascadeEntries) {
+        Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [cascade ($($entry.EffectiveChangeType))]" -ForegroundColor DarkCyan
+        $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+        Write-Host "      cascaded from: $names" -ForegroundColor DarkGray
+    }
+}
+
+# Bundled-input variant of Show-FinalMessage. Picks the alphabetically-first
+# user-source folder as the "primary" for the conventional-commits scope
+# (best-effort heuristic; the multi-package wording supersedes it when more
+# than one package is released).
+function Show-FinalMessageForBundle {
+    param(
+        [Parameter(Mandatory = $true)][array]$Releases,
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet
+    )
+
+    if ($Releases.Count -eq 0) {
+        Write-Host '---' -ForegroundColor Green
+        Write-Host 'ℹ️  No releases produced; nothing to commit.' -ForegroundColor Green
+        Write-Host '---' -ForegroundColor Green
+        return
+    }
+
+    # Identify the primary by taking the first user-source folder in the plan
+    # (alphabetic order; matches the topo-sort tie-breaker for stability).
+    $userFolders = @($ResolvedReleaseSet.Values | Where-Object { $_.Source -eq 'user' } | ForEach-Object { $_.Folder } | Sort-Object)
+    $primaryFolder = if ($userFolders.Count -gt 0) { $userFolders[0] } else { $Releases[0].Package }
+    $primary = $Releases | Where-Object { $_.Package -eq $primaryFolder } | Select-Object -First 1
+    if ($null -eq $primary) { $primary = $Releases[0] }
+
+    $primaryName    = $primary.Package
+    $primaryVersion = $primary.NewVersion
+
+    $extraCount = @($Releases).Count - 1
+    if ($extraCount -le 0) {
+        $commitMessage = "feat($primaryName): release v$primaryVersion"
+    } else {
+        $extraNoun = if ($extraCount -eq 1) { 'additional package' } else { 'additional packages' }
+        $commitMessage = "feat: release $primaryName v$primaryVersion and $extraCount $extraNoun"
+    }
+
+    Write-Host '---' -ForegroundColor Green
+    Write-Host '🎉 Success! Next steps:' -ForegroundColor Green
+    Write-Host '1. Review the changes in the updated files.' -ForegroundColor Green
+    Write-Host '2. Commit the changes and push the changes:' -ForegroundColor Green
+    Write-Host '   git add .' -ForegroundColor DarkGray
+    Write-Host "   git commit -m `"$commitMessage`"" -ForegroundColor DarkGray
+    Write-Host '   git push' -ForegroundColor DarkGray
+    Write-Host '3. Once the commit is merged to main, automation will tag the commit and release to crates.io' -ForegroundColor Green
+    Write-Host '---' -ForegroundColor Green
+}
+
+# Top-level entry point for the bundled-input release flow. Parses the
+# -Packages token list, captures immutable baselines (workspace + modifications),
+# runs the pre-release interactive elevation review, prints the final plan,
+# executes the plan atomically, then runs the workspace cargo check and
+# prints the summary + final message.
+#
+# Returns the array of release records (so Pester scenarios can assert on
+# them). Errors during input validation / pre-flight checks call Exit 1 to
+# match the existing script CLI contract.
+function Invoke-ReleasePackagesMain {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNull()]
+        [string[]]$Packages
+    )
+
+    # 1. PRE-FLIGHT
+    if (-not (Test-CommandExists -command 'git')) {
+        Write-Error 'Git is not installed or not found in your PATH.'
+        Exit 1
+    }
+
+    $repoRoot = Get-Location
+    if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
+        Write-Error 'This script must be run from the root of a Git repository.'
+        Exit 1
+    }
+    $rootCargoToml = Join-Path $repoRoot 'Cargo.toml'
+    if (-not (Test-Path $rootCargoToml)) {
+        Write-Error "Could not find root Cargo.toml at '$rootCargoToml'."
+        Exit 1
+    }
+
+    # 2. PARSE TOKENS
+    try {
+        $parsedTokens = Parse-ReleaseTokens -Tokens $Packages
+    } catch {
+        Write-Error $_.Exception.Message
+        Exit 1
+    }
+
+    # 3. DETERMINE GITHUB REPO URL
+    $prBaseUrl = $null
+    $remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path -AllowFailure
+    if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
+        $repoIdentifier = $matches[1] -replace '\.git$', ''
+        $prBaseUrl = "https://github.com/$repoIdentifier/pull"
+    } else {
+        Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
+    }
+
+    # 4. SNAPSHOT WORKSPACE + MODIFICATIONS (immutable for the run)
+    $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $repoRoot.Path)
+    $modifiedSnapshot  = Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
+
+    # 5. PRE-RELEASE REVIEW (interactive loop; no disk writes)
+    try {
+        $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
+            -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
+            -ModifiedSnapshot $modifiedSnapshot
+    } catch {
+        Write-Error $_.Exception.Message
+        Exit 1
+    }
+
+    # 6. SHOW PLAN
+    Show-ReleasePlan -ResolvedReleaseSet $resolvedHash
+
+    # 7. EXECUTE PLAN (atomic — all writes happen here)
+    try {
+        $releases = @(Invoke-ResolvedRelease -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml `
+            -PrBaseUrl $prBaseUrl -ResolvedReleaseSet $resolvedHash -WorkspaceBaseline $workspaceBaseline)
+    } catch {
+        Write-Error "Release execution failed: $_"
+        Exit 1
+    }
+
+    Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
+
+    Show-ReleaseSummary -releases $releases
+    Show-FinalMessageForBundle -Releases $releases -ResolvedReleaseSet $resolvedHash
+
+    return ,$releases
+}
+
 # Translates a semantic -Change value into the internal (ChangeType, Version)
 # tuple the rest of the release flow expects. The script's user-facing
 # vocabulary is intent-based (Breaking / NonBreaking / Patch / 1.0) because
