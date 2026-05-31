@@ -169,7 +169,7 @@ function Invoke-CheckUnreleasedDependencies {
             return
         }
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $repoRoot -BaseRef $BaseRef)
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $repoRoot -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $repoRoot -BaseRef $BaseRef))
 
         if ($findings.Count -eq 0) {
             Write-Host "No modified-but-unreleased workspace dependencies detected."

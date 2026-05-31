@@ -20,7 +20,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('downstream', '0.1.1')
             $ws.AddCommit('change downstream')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings | Should -HaveCount 1
             $findings[0].Folder | Should -Be 'upstream'
             $findings[0].DependencyChains | Should -HaveCount 1
@@ -36,7 +36,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('a', '0.1.1')
             $ws.AddCommit('change a')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings.Folder | Should -Be 'c'
             $findings[0].DependencyChains[0] -join ',' | Should -Be 'a,b,c'
         }
@@ -50,7 +50,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('a', '0.1.1')
             $ws.AddCommit('change a')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings.Folder | Should -Be 'd'
             $findings[0].DependencyChains[0] -join ',' | Should -Be 'a,b,c,d'
         }
@@ -64,7 +64,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('top', '0.1.1')
             $ws.AddCommit('change top')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings.Folder | Should -Be 'bottom'
             $findings[0].DependencyChains.Count | Should -BeGreaterOrEqual 1
         }
@@ -78,7 +78,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('user', '0.1.1')
             $ws.AddCommit('change user')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings.Folder | Should -Be 'macros_impl'
             $findings[0].DependencyChains[0] -join ',' | Should -Be 'user,macros,macros_impl'
         }
@@ -94,7 +94,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('user3', '0.3.1')
             $ws.AddCommit('change users')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $findings.Folder | Should -Be 'shared_upstream'
             $findings.DependencyChains.Count | Should -BeGreaterOrEqual 3
         }
@@ -109,7 +109,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('target', '0.3.1')
             $ws.AddCommit('change target')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             @($findings).Count | Should -Be 2
             ($findings | ForEach-Object Folder | Sort-Object) -join ',' | Should -Be 'upstream_a,upstream_b'
 
@@ -128,7 +128,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('target', '0.1.1')
             $ws.AddCommit('change target')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             ($findings | ForEach-Object Folder) | Should -Be 'upstream_b'
         }
     }
@@ -141,7 +141,7 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('alpha', '0.1.1')
             $ws.AddCommit('change alpha')
 
-            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2'
+            $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             @($findings).Count | Should -Be 0
         }
     }

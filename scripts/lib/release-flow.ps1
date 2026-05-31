@@ -1887,7 +1887,7 @@ function Invoke-PostReleaseDepScan {
                 }
 
                 $queue = @(
-                    @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -BaseRef $BaseRef -ModifiedSnapshot $ModifiedSnapshot) |
+                    @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $RepoRoot -BaseRef $BaseRef) -ModifiedSnapshot $ModifiedSnapshot) |
                         Where-Object {
                             -not $declined.Contains($_.Folder) -and
                             -not $reviewedReleaseSet.Contains($_.Folder)

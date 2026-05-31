@@ -28,7 +28,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('PR commit')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Count | Should -Be 1
         $findings[0].Folder | Should -Be 'upstream'
         $findings[0].DependencyChains[0] | Should -Be @('downstream', 'upstream')
@@ -47,7 +47,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('current PR: downstream version change')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
     }
 
@@ -61,7 +61,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('release downstream 0.1.1')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Count | Should -Be 0
     }
 
@@ -78,7 +78,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('release downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
     }
 
@@ -92,7 +92,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('a', '0.1.1')
         $ws.AddCommit('current PR: change a')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'c'
         $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
         $cFinding.DependencyChains[0] | Should -Be @('a', 'b', 'c')
@@ -107,7 +107,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('current PR: change downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
     }
 
@@ -136,7 +136,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('release downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         # No findings: per-package baseline for upstream is the publish-flip commit,
         # newer than the pre-flip edit, so no unreleased changes.
         $findings.Count | Should -Be 0
@@ -151,7 +151,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # Uncommitted: tweak upstream source.
         $ws.ModifySource('upstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
     }
 
@@ -162,7 +162,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.AddCommit('change downstream')
         Set-Content -Path (Join-Path $ws.Path 'crates\upstream\src\extra.rs') -Value '// new'
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
     }
 
@@ -175,7 +175,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('target', '0.1.1')
         $ws.AddCommit('change target')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Not -Contain 'upstream_a'
     }
 
@@ -188,7 +188,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream_y', '0.5.1')
         $ws.AddCommit('change downstream_y')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Not -Contain 'utility'
     }
 
@@ -203,7 +203,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('right', '0.3.1')
         $ws.AddCommit('current PR: change left + right')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $bottom = $findings | Where-Object { $_.Folder -eq 'bottom' }
         $bottom | Should -Not -BeNullOrEmpty
         @($bottom.DependencyChains).Count | Should -Be 2
@@ -219,7 +219,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('alpha', '0.1.1')
         $ws.AddCommit('change alpha')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Not -Contain 'gamma'
         $findings.Folder | Should -Not -Contain 'delta'
     }
@@ -235,7 +235,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('b', '0.2.1')
         $ws.AddCommit('current PR: change a + b')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Be 'c'
         $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
         @($cFinding.DependencyChains).Count | Should -Be 1
@@ -249,7 +249,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('mod upstream + change downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
         $u.InReleaseSet | Should -BeFalse
@@ -294,7 +294,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         # upstream goes 0.2.0 → 0.2.1 (patch); per Test-IsBreakingChange this
         # is non-breaking, so the user should be prompted to elevate.
         $ws = NewElevationWorkspace -Path (Join-Path $TestDrive 'irs-patch') -UpstreamPending '0.2.1'
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2'))
         $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
         $u.InReleaseSet | Should -BeTrue
@@ -307,7 +307,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         # Test-IsBreakingChange) — no further elevation is possible, so the
         # user should not be prompted.
         $ws = NewElevationWorkspace -Path (Join-Path $TestDrive 'irs-major0x') -UpstreamPending '0.3.0'
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2'))
         $findings | Where-Object { $_.Folder -eq 'upstream' } | Should -BeNullOrEmpty
     }
 
@@ -328,7 +328,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         $ws.SetVersion('downstream', '1.0.1')
         $ws.AddCommit('mod upstream + change downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2'))
         $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
         $u.InReleaseSet   | Should -BeTrue
@@ -350,7 +350,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         $ws.SetVersion('downstream', '1.0.1')
         $ws.AddCommit('mod upstream + change downstream')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2'))
         $findings | Where-Object { $_.Folder -eq 'upstream' } | Should -BeNullOrEmpty
     }
 
@@ -364,7 +364,7 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
         # Uncommitted source edit on upstream — past its per-package baseline.
         $ws.ModifySource('upstream', '// uncommitted further edit')
 
-        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~2')
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2'))
         $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
         $u.InReleaseSet | Should -BeTrue
@@ -382,13 +382,13 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
         $ws.AddCommit('pending downstream change')
 
         # Without a snapshot: the live query finds nothing on upstream.
-        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $live.Folder | Should -Not -Contain 'upstream'
 
         # With a synthetic snapshot claiming upstream IS modified, the BFS
         # surfaces it as a classic (non-release-set) finding.
         $snap = @{ 'upstream' = 3 }
-        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1' -ModifiedSnapshot $snap)
+        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1') -ModifiedSnapshot $snap)
         $u = $with | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
         $u.InReleaseSet     | Should -BeFalse
@@ -404,11 +404,11 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
         $ws.AddCommit('mod upstream + change downstream')
 
         # Sanity check that the live query DOES find it.
-        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1')
+        $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $live.Folder | Should -Contain 'upstream'
 
         # With an empty snapshot, the BFS surfaces nothing.
-        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -BaseRef 'HEAD~1' -ModifiedSnapshot @{})
+        $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1') -ModifiedSnapshot @{})
         $with.Count | Should -Be 0
     }
 }

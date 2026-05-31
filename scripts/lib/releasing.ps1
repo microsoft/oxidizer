@@ -747,31 +747,88 @@ function Get-PendingReleases {
     return @($pending | Sort-Object -Property Folder)
 }
 
+# Builds a ResolvedReleaseSet (folder -> resolved entry) from base-ref vs disk
+# version diffing. Used by callers that have no explicit user-input release
+# plan to feed Get-UnreleasedModifiedDependencies — currently
+# scripts/check-unreleased-dependencies.ps1 (CI scan, no user input) and the
+# legacy release-crate.ps1 entry path.
+#
+# Every member is marked Source='cascade' so the elevation-surface predicate
+# in Get-UnreleasedModifiedDependencies treats every release-set member as
+# potentially-elevatable. This matches the pre-bundled-input semantics: in
+# the absence of explicit user intent, every below-breaking release-set
+# member is surfaced for review.
+#
+# New packages (no version at $BaseRef) are tagged 'breaking' so the
+# elevation predicate skips them — they have no prior version transition to
+# elevate. This matches the pre-refactor null-base-version guard behavior.
+function New-ResolvedReleaseSetFromBaseRef {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$BaseRef
+    )
+
+    $resolved = @{}
+    $folders = Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef
+    if ($null -eq $folders -or $folders.Count -eq 0) { return $resolved }
+
+    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
+    $pkgByFolder = @{}
+    foreach ($p in $packages) { $pkgByFolder[$p.Folder] = $p }
+
+    foreach ($folder in $folders) {
+        if (-not $pkgByFolder.ContainsKey($folder)) { continue }
+        $pkg = $pkgByFolder[$folder]
+        $baseVersion = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $folder
+        $changeType = if ($null -eq $baseVersion) {
+            # New package: no semantically-meaningful prior version to elevate from.
+            'breaking'
+        } else {
+            Get-ChangeTypeFromVersions -oldVersion $baseVersion -newVersion $pkg.Version
+        }
+        $resolved[$folder] = [pscustomobject]@{
+            Folder                  = $folder
+            Name                    = $pkg.Name
+            CurrentVersion          = $baseVersion
+            EffectiveChangeType     = $changeType
+            EffectiveTargetVersion  = $pkg.Version
+            Source                  = 'cascade'
+            AutoUpgraded            = $false
+            CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
+        }
+    }
+
+    return $resolved
+}
+
 # --- CORE ANALYSIS ---
 #
 # Upholds the CASCADE-ORGANIZATION INVARIANTS documented in docs/releasing.md
 # under "Cascade Organisation Invariants":
 #   (A) A cascade toward dependents never introduces items to the user-review
 #       queue. Honored via the optional -ModifiedSnapshot parameter: when
-#       callers (notably Invoke-PostReleaseDepScan via Invoke-ReleaseMain)
-#       capture the modifications set BEFORE the primary release runs and
-#       pass it in, cascade-only targets (those whose only modification is
-#       the cascade-written Cargo.toml / CHANGELOG.md) never enter the
-#       snapshot and so cannot surface as findings on later iterations.
-#   (B) A release-set member is removed only when its cascade-applied change
-#       type is already breaking (semantic maximum). Members whose change
-#       type is non-breaking or patch and which have pre-existing
-#       modifications are reported so the user can still elevate the change
-#       type after reviewing the changes.
+#       callers capture the modifications set BEFORE the primary release
+#       runs and pass it in, cascade-only targets (those whose only
+#       modification is the cascade-written Cargo.toml / CHANGELOG.md) never
+#       enter the snapshot and so cannot surface as findings on later
+#       iterations.
+#   (B) A release-set member whose cascade-applied change type is below the
+#       semantic maximum (breaking) and which has pre-existing modifications
+#       is reported so the user can still elevate the change type after
+#       reviewing the changes. User-source members (Source='user' in the
+#       resolved set) carry an explicit decision and are NOT re-prompted —
+#       elevation review applies only to cascade-source members.
 #
-# For each package in the "release set" (packages with version changes vs base), walk its
-# transitive normal/build workspace dependencies. Report any workspace dependency that
+# For each package in the "resolved release set" (passed in by the caller as a
+# folder -> resolved-entry hashtable produced by Resolve-ReleaseSet, or by
+# tests via the New-ResolvedReleaseSetFromBaseRef helper), walk its transitive
+# normal/build workspace dependencies. Report any workspace dependency that
 #
 #   1. has source modifications since its own last release baseline (i.e. since the
 #      most recent commit that touched its `version =` or `publish =` line — see
 #      Get-PackageLastReleaseBaseline), and
 #   2. is either (a) NOT itself in the release set, OR (b) IS in the release set
-#      but its cascade-applied change type (current vs base) is below "breaking"
+#      as a cascade-source member whose EffectiveChangeType is below "breaking"
 #      (so the user might still want to elevate it after reviewing the changes), and
 #   3. is published (publish != false),
 #
@@ -787,10 +844,10 @@ function Get-PendingReleases {
 #   PackageName       - cargo package name
 #   CurrentVersion    - package's current version (Cargo.toml [package].version)
 #   InReleaseSet      - $true when the finding is also a release-set member
-#                       (its cascade-applied change type was below breaking);
-#                       $false otherwise. The caller uses this to distinguish
-#                       "needs review for elevation" from "needs review for
-#                       primary release".
+#                       surfaced for cascade elevation review (Source='cascade'
+#                       with below-breaking change type); $false otherwise.
+#                       The caller uses this to distinguish "needs review for
+#                       elevation" from "needs review for primary release".
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
 #
@@ -803,12 +860,11 @@ function Get-PendingReleases {
 function Get-UnreleasedModifiedDependencies {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$BaseRef,
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
         [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
     )
 
-    $packages      = Get-WorkspacePackages -repoRoot $RepoRoot
-    $releaseSet  = Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef
+    $packages = Get-WorkspacePackages -repoRoot $RepoRoot
     # Use the caller-provided snapshot when present so Invariant A holds across
     # cascade writes (which would otherwise pollute Get-PackagesWithUnreleasedChanges's
     # working-tree query and surface cascade-only targets as findings).
@@ -818,7 +874,7 @@ function Get-UnreleasedModifiedDependencies {
         Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
     }
 
-    if ($releaseSet.Count -eq 0) { return @() }
+    if ($ResolvedReleaseSet.Count -eq 0) { return @() }
 
     # Build folder -> package lookup and normalized-name -> folder lookup.
     $byFolder = @{}
@@ -834,7 +890,7 @@ function Get-UnreleasedModifiedDependencies {
     # makes the UX flaky and tests unreliable.
     $findings = [ordered]@{}
 
-    foreach ($releasedFolder in @($releaseSet | Sort-Object)) {
+    foreach ($releasedFolder in @($ResolvedReleaseSet.Keys | Sort-Object)) {
         if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
 
         # BFS forward over normal+build deps. Track shortest path to each visited
@@ -862,29 +918,21 @@ function Get-UnreleasedModifiedDependencies {
                 # Decide whether to record this dep as a finding.
                 # Surface when (modified + published) AND either:
                 #   - not a release-set member (classic case), OR
-                #   - a release-set member whose cascade-applied change type
-                #     is below "breaking" — the user may still want to elevate
-                #     after reviewing the changes (Invariant B).
+                #   - a release-set member with Source='cascade' whose
+                #     EffectiveChangeType is below "breaking" — the user may
+                #     still want to elevate after reviewing the changes
+                #     (Invariant B). Source='user' members carry an explicit
+                #     decision from the CLI input and are NOT re-prompted.
                 $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depPackage.Published
-                $isInReleaseSet = $releaseSet.Contains($depFolder)
+                $depEntry = $ResolvedReleaseSet[$depFolder]
+                $isInReleaseSet = $null -ne $depEntry
 
                 $surface = $false
                 if ($modifiedHere) {
                     if (-not $isInReleaseSet) {
                         $surface = $true
-                    } else {
-                        # Release-set member: compute the cascade-applied
-                        # change type (base → current) and surface only when
-                        # below "breaking". New packages (no base version)
-                        # are never surfaced — they have no semantically-
-                        # meaningful change type to elevate.
-                        $depBase = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $depFolder
-                        if ($null -ne $depBase -and $depBase -ne $depPackage.Version) {
-                            $depChangeType = Get-ChangeTypeFromVersions -oldVersion $depBase -newVersion $depPackage.Version
-                            if (-not (Test-IsBreakingChange -oldVersion $depBase -ChangeType $depChangeType)) {
-                                $surface = $true
-                            }
-                        }
+                    } elseif ($depEntry.Source -eq 'cascade' -and $depEntry.EffectiveChangeType -ne 'breaking') {
+                        $surface = $true
                     }
                 }
 
