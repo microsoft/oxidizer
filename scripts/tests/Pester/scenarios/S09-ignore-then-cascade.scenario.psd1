@@ -11,9 +11,7 @@
     )
 
     Run = @{
-        PackageName = 'a'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('a@patch')
         Answers   = @(
             # Iter 0 of the scan: ignore b.
             @{ Match = "Choose option for 'b'"; Reply = '2' }

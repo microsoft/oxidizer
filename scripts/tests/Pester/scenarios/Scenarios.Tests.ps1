@@ -53,7 +53,12 @@ Describe 'End-to-end release scenarios' {
         $result = Invoke-Scenario -ScenarioFile $File
         $expect = $result.Scenario.Expect
 
-        if ($result.Error) {
+        if ($expect.Throws) {
+            $result.Error | Should -Not -BeNullOrEmpty -Because "scenario expected an exception"
+            if ($expect.ThrowsMatches) {
+                $result.Error.Exception.Message | Should -Match ([regex]::Escape($expect.ThrowsMatches)) -Because "exception message did not contain the expected substring"
+            }
+        } elseif ($result.Error) {
             throw "Scenario '$Name' threw: $($result.Error)"
         }
 

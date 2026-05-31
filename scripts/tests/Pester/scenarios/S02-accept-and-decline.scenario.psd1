@@ -11,9 +11,7 @@
     )
 
     Run = @{
-        PackageName = 'a'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('a@patch')
         Answers   = @(
             @{ Match = "Choose option for 'b'"; Reply = '4' }
             @{ Match = "Choose option for 'c'"; Reply = '2' }

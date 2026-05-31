@@ -7,9 +7,7 @@
     History = @()
 
     Run = @{
-        PackageName = 'a'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD'
+        Packages = @('a@patch')
         Answers   = @()
     }
 

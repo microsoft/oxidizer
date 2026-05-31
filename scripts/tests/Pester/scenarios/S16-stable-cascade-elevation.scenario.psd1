@@ -20,9 +20,7 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
     )
 
     Run = @{
-        PackageName = 'bottom'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('bottom@patch')
         Answers   = @(
             # Invariant B: middle was cascade-pulled with a patch change
             # AND has pre-existing modifications. User elevates to

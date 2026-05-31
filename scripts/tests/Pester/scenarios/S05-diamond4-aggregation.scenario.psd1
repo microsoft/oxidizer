@@ -10,9 +10,7 @@
     )
 
     Run = @{
-        PackageName = 'top'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('top@patch')
         Answers   = @(
             # On 0.x.y the menu hides option 5 (patch) because it would be numerically
             # identical to option 4 (non-breaking change), so we pick '4' to drive

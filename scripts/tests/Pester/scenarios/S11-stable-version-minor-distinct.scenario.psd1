@@ -17,9 +17,7 @@
     )
 
     Run = @{
-        PackageName = 'downstream'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('downstream@patch')
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '4' selects the
             # minor (non-breaking) path, distinct from the patch path of option 5.

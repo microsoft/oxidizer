@@ -10,9 +10,7 @@
     )
 
     Run = @{
-        PackageName = 'downstream'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('downstream@patch')
         Answers   = @(
             # "12" starts with valid digit but is a multi-character non-option — must be rejected as a whole.
             @{ Match = "Choose option for 'upstream'"; Reply = '12' }

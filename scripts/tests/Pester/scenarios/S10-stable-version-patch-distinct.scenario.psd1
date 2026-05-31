@@ -20,9 +20,7 @@
     )
 
     Run = @{
-        PackageName = 'downstream'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('downstream@patch')
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '5' selects the
             # patch path (Action='patch'), which is numerically distinct from

@@ -10,9 +10,7 @@
 
     Run = @{
         # 'downstream' has no dependents, so no cascade. Upstream is clean.
-        PackageName = 'downstream'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD'
+        Packages = @('downstream@patch')
         Answers   = @()
     }
 

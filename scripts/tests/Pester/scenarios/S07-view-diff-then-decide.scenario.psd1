@@ -11,9 +11,7 @@
     )
 
     Run = @{
-        PackageName = 'a'
-        Change    = 'Patch'
-        BaseRef   = 'HEAD~1'
+        Packages = @('a@patch')
         Answers   = @(
             # First prompt for b: view the diff.
             @{ Match = "Choose option for 'b'"; Reply = '1' }
