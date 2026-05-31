@@ -107,7 +107,7 @@ meanings defined here.
   ref's version (not the on-disk version) to compute the new increment,
   so you cannot accidentally double-bump or get stuck.
 
-  See `Update-PendingReleaseVersion` in `scripts/lib/release-flow.ps1`
+  See `Update-ReleaseVersionInPlace` in `scripts/lib/release-flow.ps1`
   for the implementation. It re-stamps the package's `Cargo.toml`, the
   workspace `Cargo.toml`'s `[workspace.dependencies]` entry, and the
   CHANGELOG section header in place — it does NOT create a second
@@ -213,7 +213,7 @@ locally. This works for both:
   changes.
 - **Elevating an existing release-set member** — the cascade-applied
   version is re-stamped to the elevated change type via
-  `Update-PendingReleaseVersion`.
+  `Update-ReleaseVersionInPlace`.
 
 Both cases work whether the prior cascade-applied version increment is
 committed or uncommitted on the branch.

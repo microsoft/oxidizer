@@ -592,14 +592,14 @@ Describe 'Add-CascadeBulletToVersionSection' {
 }
 
 # ---------------------------------------------------------------------------
-# Update-PendingReleaseVersion — in-place re-stamp of a partially-released
-# pending release. Used by Invoke-CascadeStep when an upstream cascade
-# escalates a downstream that's already been version-changed in this PR: we must
-# rewrite the Cargo.toml + workspace dep + CHANGELOG header in place to
-# avoid leaving two stale `## [old]` / `## [new]` sections side by side.
+# Update-ReleaseVersionInPlace — in-place re-stamp of a release-in-progress.
+# Used during cascade processing when an already-incremented package needs to
+# be elevated to a higher version: we must rewrite the Cargo.toml + workspace
+# dep + CHANGELOG header in place to avoid leaving two stale
+# `## [old]` / `## [new]` sections side by side.
 # ---------------------------------------------------------------------------
 
-Describe 'Update-PendingReleaseVersion' {
+Describe 'Update-ReleaseVersionInPlace' {
     BeforeAll {
         . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
     }
@@ -635,7 +635,7 @@ Describe 'Update-PendingReleaseVersion' {
     }
 
     It 'rewrites the [package].version in the package Cargo.toml' {
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
         $content = Get-Content $script:UprvCargoToml -Raw
         $content | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.2\.0"'
@@ -643,7 +643,7 @@ Describe 'Update-PendingReleaseVersion' {
     }
 
     It 'rewrites the [workspace.dependencies] entry for the package in the root Cargo.toml' {
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
         $root = Get-Content $script:UprvRootCargo -Raw
         $root | Should -Match 'downstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
@@ -654,14 +654,14 @@ Describe 'Update-PendingReleaseVersion' {
     It 'leaves OTHER workspace dep entries untouched' {
         # Change downstream's pending version; upstream's workspace entry must
         # remain at its declared 0.2.0.
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
         $root = Get-Content $script:UprvRootCargo -Raw
         $root | Should -Match 'upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
     }
 
     It 'rewrites the matching CHANGELOG section header from [old] to [new]' {
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' | Out-Null
         $log = Get-Content $script:UprvChangelog -Raw
         $log | Should -Match '## \[0\.2\.0\]'
@@ -674,7 +674,7 @@ Describe 'Update-PendingReleaseVersion' {
         $before = Get-Content $script:UprvCargoToml -Raw
         $beforeRoot = Get-Content $script:UprvRootCargo -Raw
         $beforeLog  = Get-Content $script:UprvChangelog -Raw
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.1.1' | Out-Null
         (Get-Content $script:UprvCargoToml -Raw) | Should -Be $before
         (Get-Content $script:UprvRootCargo -Raw) | Should -Be $beforeRoot
@@ -684,7 +684,7 @@ Describe 'Update-PendingReleaseVersion' {
     It 'still rewrites Cargo.toml + root when the changelog is missing (warning emitted)' {
         Remove-Item -LiteralPath $script:UprvChangelog -Force
         $warnings = @()
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' `
             -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
         (Get-Content $script:UprvCargoToml -Raw) | Should -Match '(?m)^[ \t]*version\s*=\s*"0\.2\.0"'
@@ -705,7 +705,7 @@ Describe 'Update-PendingReleaseVersion' {
 
 "@
         $warnings = @()
-        Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0' `
             -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
         $warnings.Count | Should -BeGreaterOrEqual 1
@@ -717,13 +717,13 @@ Describe 'Update-PendingReleaseVersion' {
     It 'throws when the package Cargo.toml does not exist' {
         $bogusFolder = Join-Path $script:UprvWs.Path 'crates\nope'
         {
-            Update-PendingReleaseVersion -PackageName 'nope' -PackageFolder $bogusFolder `
+            Update-ReleaseVersionInPlace -PackageName 'nope' -PackageFolder $bogusFolder `
                 -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0'
         } | Should -Throw
     }
 
     It 'returns the NewVersion string' {
-        $r = Update-PendingReleaseVersion -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
+        $r = Update-ReleaseVersionInPlace -PackageName 'downstream' -PackageFolder $script:UprvPackageFolder `
             -RootCargoToml $script:UprvRootCargo -OldVersion '0.1.1' -NewVersion '0.2.0'
         $r | Should -Be '0.2.0'
     }

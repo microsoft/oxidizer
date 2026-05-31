@@ -607,23 +607,22 @@ function Update-PackageVersion {
     return $newVersion
 }
 
-# Re-stamps an already-pending release with a different version: the package's
+# Re-stamps a release-in-progress with a different version: the package's
 # Cargo.toml, the workspace Cargo.toml's [workspace.dependencies] entry, and
 # the CHANGELOG.md "## [oldVersion] - YYYY-MM-DD" section header are rewritten
 # in place, preserving the existing changelog body (which was generated from
 # the same commit/cascade history the user already reviewed).
 #
-# Used for in-place escalation when a cascade toward dependents or a subsequent
-# Invoke-ReleaseFlow re-invocation needs to lift an already-incremented package
-# to a higher version. The alternative — calling Invoke-PackageRelease again —
-# would create a second `## [<new>]` changelog section while leaving the stale
-# `## [<old>]` section in place, breaking the convention of one section per
-# released version.
+# Used for in-place escalation when a cascade toward dependents needs to lift
+# an already-incremented package to a higher version. The alternative —
+# calling Invoke-PackageRelease again — would create a second `## [<new>]`
+# changelog section while leaving the stale `## [<old>]` section in place,
+# breaking the convention of one section per released version.
 #
 # Returns the new version string. No cargo metadata invalidation here — caller
 # is responsible for calling Reset-ReleaseScriptCaches / Invalidate-WorkspaceMetadataCache
 # (the wider cascade plumbing already does so where it matters).
-function Update-PendingReleaseVersion {
+function Update-ReleaseVersionInPlace {
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
         [Parameter(Mandatory = $true)][string]$PackageFolder,
@@ -638,13 +637,13 @@ function Update-PendingReleaseVersion {
     $changelogFile  = Join-Path $PackageFolder 'CHANGELOG.md'
 
     if (-not (Test-Path -LiteralPath $packageCargoToml)) {
-        Write-Error "Update-PendingReleaseVersion: Cargo.toml not found at '$packageCargoToml'." -ErrorAction Stop
+        Write-Error "Update-ReleaseVersionInPlace: Cargo.toml not found at '$packageCargoToml'." -ErrorAction Stop
     }
 
     Write-Host "📝 Re-stamping '$packageCargoToml' from $OldVersion to $NewVersion..."
     $packageContent = Get-Content -LiteralPath $packageCargoToml -Raw
     if (-not $script:CargoPackageVersionRegex.IsMatch($packageContent)) {
-        Write-Error "Update-PendingReleaseVersion: no [package] version line in '$packageCargoToml'." -ErrorAction Stop
+        Write-Error "Update-ReleaseVersionInPlace: no [package] version line in '$packageCargoToml'." -ErrorAction Stop
     }
     # Replace exactly one occurrence (the [package].version), preserving the
     # captured prefix via $1 so the surrounding whitespace / `version = "` is
@@ -674,7 +673,7 @@ function Update-PendingReleaseVersion {
         # mentions the version.
         $headerRegex = [regex]"## \[$escapedOld\]"
         if (-not $headerRegex.IsMatch($existing)) {
-            Write-Warning "Update-PendingReleaseVersion: no '## [$OldVersion]' section in '$changelogFile'; leaving changelog alone."
+            Write-Warning "Update-ReleaseVersionInPlace: no '## [$OldVersion]' section in '$changelogFile'; leaving changelog alone."
         } else {
             $rewritten = $headerRegex.Replace($existing, "## [$NewVersion]", 1)
             # Re-normalize line endings: the regex replace doesn't change line
@@ -687,7 +686,7 @@ function Update-PendingReleaseVersion {
             Set-Content -LiteralPath $changelogFile -Value $rewritten -NoNewline -Encoding utf8
         }
     } else {
-        Write-Warning "Update-PendingReleaseVersion: changelog '$changelogFile' not found; skipping header rewrite."
+        Write-Warning "Update-ReleaseVersionInPlace: changelog '$changelogFile' not found; skipping header rewrite."
     }
 
     return $NewVersion
@@ -1146,7 +1145,7 @@ function Invoke-CascadeStep {
     # while leaving the stale `## [$depCurrent]` section behind. Update the
     # version in Cargo.toml + workspace Cargo.toml + the existing CHANGELOG
     # header, then append the new cascade bullet under the now-renamed section.
-    Update-PendingReleaseVersion -PackageName $Dependent -PackageFolder $depFolder `
+    Update-ReleaseVersionInPlace -PackageName $Dependent -PackageFolder $depFolder `
         -RootCargoToml $RootCargoToml -OldVersion $depCurrent -NewVersion $required | Out-Null
     Add-CascadeBulletToVersionSection -ChangelogFile $depChange -Version $required -CascadeReason $depCascadeReason
     Invalidate-WorkspaceMetadataCache
@@ -1352,7 +1351,7 @@ function Invoke-ReleaseFlow {
             # because the only thing that changed is the user's change-type
             # intent.
             Write-Host "⬆️  Escalating pending release of '$PackageName' from v$currentVersion to v$requiredVersion (base v$baseVersion)." -ForegroundColor Yellow
-            Update-PendingReleaseVersion -PackageName $PackageName -PackageFolder $packageFolder `
+            Update-ReleaseVersionInPlace -PackageName $PackageName -PackageFolder $packageFolder `
                 -RootCargoToml $RootCargoToml -OldVersion $currentVersion -NewVersion $requiredVersion | Out-Null
             Invalidate-WorkspaceMetadataCache
 
