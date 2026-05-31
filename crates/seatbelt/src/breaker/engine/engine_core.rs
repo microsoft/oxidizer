@@ -666,11 +666,7 @@ mod tests {
             break_duration: Duration::from_secs(5),
             health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
             // Use a HealthProbe with long sampling duration so it returns Pending
-            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
-                Duration::from_secs(60),
-                0.2,
-                1.0,
-            ))]),
+            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(Duration::from_mins(1), 0.2, 1.0))]),
         };
         let control = ClockControl::new();
         let clock = control.to_clock();

@@ -132,9 +132,9 @@ mod tests {
 
     #[test]
     fn new_records_initial_state() {
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 3, Some(Duration::from_secs(60)));
+        let info = ConnectionInfo::new(&Clock::new_frozen(), 3, Some(Duration::from_mins(1)));
         assert_eq!(info.pool_index(), 3);
-        assert_eq!(info.max_age(), Some(Duration::from_secs(60)));
+        assert_eq!(info.max_age(), Some(Duration::from_mins(1)));
         assert!(!info.poisoned());
     }
 

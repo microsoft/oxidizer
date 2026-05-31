@@ -64,7 +64,7 @@ async fn main() {
     // L1: only promote NotFound (negative cache)
     let cache = Cache::builder::<String, UserData>(clock)
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .insert_policy(InsertPolicy::when(|e: &CacheEntry<UserData>| {
             matches!(e.value(), UserData::NotFound)
         }))

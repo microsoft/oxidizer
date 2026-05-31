@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn json_roundtrip() {
-        let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_millis(10_123_000));
+        let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_secs(10123));
 
         let dates = Dates {
             iso: clock.system_time_as::<Iso8601>(),

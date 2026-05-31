@@ -40,14 +40,14 @@ async fn main() {
     // L2: uses simple String keys and String values.
     let l2 = Cache::builder::<String, String>(clock.clone())
         .storage(MockCache::new())
-        .ttl(Duration::from_secs(300));
+        .ttl(Duration::from_mins(5));
 
     // Build the cache with a type-mapping boundary:
     //   L1 uses CacheKey → String
     //   L2 uses String → String (after transform)
     let cache = Cache::builder::<CacheKey, String>(clock)
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .transform(
             // Key: CacheKey → String (flatten composite key)
             TransformEncoder::infallible(|k: &CacheKey| k.to_flat_key()),

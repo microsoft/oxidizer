@@ -687,9 +687,9 @@ mod tests {
 
         assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(1650));
 
-        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_secs(2));
 
-        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_millis(2000));
+        assert_eq!(clock.system_time().duration_since(anchor).unwrap(), Duration::from_secs(2));
     }
 
     #[test]
