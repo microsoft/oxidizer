@@ -34,8 +34,9 @@ fn supports_http2(versions: &[Version]) -> bool {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
     use rstest::rstest;
+
+    use super::*;
 
     #[rstest]
     #[case(&[Version::HTTP_11, Version::HTTP_2], &["h2", "http/1.1"])]
