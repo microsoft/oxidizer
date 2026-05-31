@@ -138,6 +138,7 @@ impl TlsOptions {
     #[allow(
         clippy::allow_attributes,
         clippy::unused_self,
+        clippy::no_effect_underscore_binding,
         reason = "self.shared is used by feature-gated arms; with neither rustls nor native-tls enabled only Unselected is reachable"
     )]
     fn build_auto_backend(self, defaults: &TlsBackendDefaults) -> Result<TlsBackend, BackendError> {
@@ -152,9 +153,14 @@ impl TlsOptions {
                 let connector = super::native_tls::NativeTlsOptions::new().build(&self.shared)?;
                 Ok(TlsBackend::NativeTls(connector))
             }
-            DefaultBackend::Unselected => Err(BackendError::caused_by(
-                "no default TLS backend is configured on TlsBackendDefaults; call defaults_to_rustls() / defaults_to_native_tls() (or configure_rustls(), which implies rustls), or construct TlsOptions via one of its builders",
-            )),
+            DefaultBackend::Unselected => {
+                // use the shared options
+                let _shared = self.shared;
+
+                Err(BackendError::caused_by(
+                    "no default TLS backend is configured on TlsBackendDefaults; call defaults_to_rustls() / defaults_to_native_tls() (or configure_rustls(), which implies rustls), or construct TlsOptions via one of its builders",
+                ))
+            }
         }
     }
 }
