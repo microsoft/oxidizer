@@ -200,8 +200,16 @@ where
     }
 
     /// Sets the negotiable HTTP versions for outgoing requests.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `versions` is empty.
     #[must_use]
     pub fn supported_http_versions(mut self, versions: &[Version]) -> Self {
+        assert!(
+            !versions.is_empty(),
+            "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
+        );
         self.supported_http_versions = versions.to_vec();
         self
     }

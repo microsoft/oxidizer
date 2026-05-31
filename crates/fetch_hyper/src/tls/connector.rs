@@ -83,7 +83,7 @@ where
 #[cfg(any(feature = "rustls", test))]
 #[cfg_attr(test, mutants::skip)]
 fn build_rustls_connector<C, S>(
-    config: rustls::ClientConfig,
+    mut config: rustls::ClientConfig,
     connector: C,
     request_filter: RequestFilter,
     supported_versions: &[Version],
@@ -92,6 +92,8 @@ where
     C: Connect<S>,
     S: HyperIo,
 {
+    // hyper-rustls expects ALPN to be configured via enable_http1/enable_http2.
+    config.alpn_protocols.clear();
     let builder = hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(config);
 
     let builder = match request_filter {

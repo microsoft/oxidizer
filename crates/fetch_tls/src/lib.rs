@@ -66,6 +66,8 @@
 
 mod backend;
 mod options;
+#[cfg(any(feature = "native-tls", feature = "rustls", test))]
+mod alpn;
 
 pub use backend::{BackendError, TlsBackend, TlsBackendDefaults};
 pub use options::{TlsOptions, TlsOptionsBuilder};

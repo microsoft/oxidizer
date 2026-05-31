@@ -1084,6 +1084,7 @@ dependencies = [
  "mutants",
  "native-tls",
  "ohno 0.3.2",
+ "rstest",
  "rustls",
  "rustls-pki-types",
 ]

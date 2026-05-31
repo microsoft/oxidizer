@@ -11,6 +11,7 @@ use rustls::client::ResolvesClientCert;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::crypto::CryptoProvider;
 
+use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
 
@@ -60,13 +61,18 @@ impl RustlsOptions {
             .dangerous()
             .with_custom_certificate_verifier(verifier);
 
-        match (self.client_identity_resolver, shared.client_identity.as_ref()) {
+        let mut config = match (self.client_identity_resolver, shared.client_identity.as_ref()) {
             (Some(resolver), _) => Ok(builder.with_client_cert_resolver(resolver)),
             (None, Some(identity)) => builder
                 .with_client_auth_cert(identity.cert_chain().to_vec(), identity.private_key().clone_key())
                 .map_err(BackendError::caused_by),
             (None, None) => Ok(builder.with_no_client_auth()),
-        }
+        }?;
+        config.alpn_protocols = map_to_alpn(&shared.supported_http_versions)
+            .iter()
+            .map(|version| version.as_bytes().to_vec())
+            .collect();
+        Ok(config)
     }
 }
 
@@ -300,7 +306,24 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
-        rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
+        let config = rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
+        assert_eq!(config.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn build_sets_alpn_from_supported_versions() {
+        let rustls_backend = RustlsOptions {
+            crypto_provider: None,
+            verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
+            client_identity_resolver: None,
+        };
+        let shared = SharedOptions {
+            supported_http_versions: vec![http::Version::HTTP_11],
+            client_identity: None,
+        };
+        let config = rustls_backend.build(Some(&defaults()), &shared).unwrap();
+        assert_eq!(config.alpn_protocols, vec![b"http/1.1".to_vec()]);
     }
 
     #[test]

@@ -3,16 +3,11 @@
 
 //! Platform native TLS backend configuration and builder integration.
 
-use http::Version;
 use native_tls::TlsConnector;
 
+use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
-
-// Application-Layer Protocol Negotiation identifiers; see
-// <https://en.wikipedia.org/wiki/Application-Layer_Protocol_Negotiation>.
-const HTTP_11_ALPN: &str = "http/1.1";
-const HTTP_2_ALPN: &str = "h2";
 
 /// Platform native TLS backend.
 #[derive(Clone)]
@@ -48,20 +43,6 @@ impl NativeTlsOptions {
         }
 
         builder.build().map_err(BackendError::caused_by)
-    }
-}
-
-fn map_to_alpn(versions: &[Version]) -> &[&str] {
-    let http1 = versions.contains(&Version::HTTP_11) || versions.contains(&Version::HTTP_10);
-    let http2 = versions.contains(&Version::HTTP_2);
-    if http2 && http1 {
-        &[HTTP_2_ALPN, HTTP_11_ALPN]
-    } else if http2 {
-        &[HTTP_2_ALPN]
-    } else if http1 {
-        &[HTTP_11_ALPN]
-    } else {
-        &[]
     }
 }
 
@@ -151,43 +132,6 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn build_produces_tls_connector() {
         NativeTlsOptions::new().build(&SharedOptions::default()).unwrap();
-    }
-
-    #[test]
-    fn map_to_alpn_http1_and_http2() {
-        assert_eq!(map_to_alpn(&[Version::HTTP_11, Version::HTTP_2]), &["h2", "http/1.1"]);
-    }
-
-    #[test]
-    fn map_to_alpn_http2_only() {
-        assert_eq!(map_to_alpn(&[Version::HTTP_2]), &["h2"]);
-    }
-
-    #[test]
-    fn map_to_alpn_http11_only() {
-        assert_eq!(map_to_alpn(&[Version::HTTP_11]), &["http/1.1"]);
-    }
-
-    #[test]
-    fn map_to_alpn_http10_aliases_to_http1() {
-        assert_eq!(map_to_alpn(&[Version::HTTP_10]), &["http/1.1"]);
-    }
-
-    #[test]
-    fn map_to_alpn_empty() {
-        let empty: &[&str] = &[];
-        assert_eq!(map_to_alpn(&[]), empty);
-    }
-
-    #[test]
-    fn map_to_alpn_http3_only_is_empty() {
-        let empty: &[&str] = &[];
-        assert_eq!(map_to_alpn(&[Version::HTTP_3]), empty);
-    }
-
-    #[test]
-    fn map_to_alpn_http10_and_http2() {
-        assert_eq!(map_to_alpn(&[Version::HTTP_10, Version::HTTP_2]), &["h2", "http/1.1"]);
     }
 
     #[test]
