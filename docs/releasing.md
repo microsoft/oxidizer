@@ -95,19 +95,20 @@ meanings defined here.
   value of the *major component* (0) did not change, even though the
   change is breaking under Cargo's 0.x SemVer rules.
 
-- **Release set** — the set of workspace packages whose on-disk
-  `version =` differs from the value in the base ref. This is the
-  same set returned by `Get-PackagesWithVersionChanges`. A package is
-  in the release set whether the version-number increment is uncommitted,
-  committed-but-not-yet-pushed, committed-and-pushed, or arrived via a
-  cascade-applied edit — *anything* not yet merged to the base ref
-  counts. The release set is the unit the release tooling promises to
-  publish to crates.io when the PR merges.
+- **Release set** — the set of workspace packages a single release will
+  publish to crates.io. The local driver (`release-packages.ps1`)
+  materialises it as the **resolved release set** (`Resolve-ReleaseSet`):
+  the user's `-Packages` tokens plus everything pulled in by the cascade
+  toward dependents. The CI helper
+  (`check-unreleased-dependencies.ps1`) has no `-Packages` input, so it
+  derives the same conceptual set from the diff against the base ref via
+  `Get-PackagesWithVersionChanges`.
 
-- **Pending release** — a member of the release set whose
-  version-number increment has not yet been merged to the base ref.
-  Committed-vs-uncommitted is irrelevant: the release tooling treats both
-  the same.
+- **Pending release** — a member of the release set that has not yet
+  reached crates.io. Committed-vs-uncommitted is irrelevant: a
+  version-number increment sitting in your working tree, a
+  committed-but-unpushed increment, and a merged-but-untagged increment
+  all count the same.
 
 - **Resolved release set** — the per-invocation, in-memory result of
   `Resolve-ReleaseSet`. It is a hashtable keyed by package folder where
@@ -130,22 +131,25 @@ meanings defined here.
 ## Bundled-input release model
 
 Every invocation of `release-packages.ps1` describes a *complete release
-plan*. The planner reads the entire plan up-front, resolves the cascade
-toward dependents, surfaces any modified-but-unreleased dependencies for
-review, and then applies all version-number increments, changelog
-updates, and `Cargo.toml` rewrites in one shot. A second invocation is
-treated as a fresh, independent release plan — there is no notion of
-"adding to a previous run".
+plan*. The planner reads the entire plan up-front (the `-Packages`
+argument is the entire input — there is no base ref), resolves the
+cascade toward dependents, surfaces any modified-but-unreleased
+dependencies for review, and then applies all version-number increments,
+changelog updates, and `Cargo.toml` rewrites in one shot. A second
+invocation is treated as a fresh, independent release plan — there is
+no notion of "adding to a previous run".
+
+Version arithmetic anchors on what is currently in each `Cargo.toml` on
+disk. The planner does not consult `git` for prior versions; it
+increments from the value it reads right now. Consequently, if you
+re-run on the same branch after a prior run already increased a version,
+the new run will increment *on top of* that change — see
+[Re-running on the same branch](#re-running-on-the-same-branch).
 
 If you need to re-plan (for example because you accepted a release
 during review that you now want to remove), use `git reset` /
 `git restore` to revert the on-disk state and re-run the script with
 the corrected `-Packages` argument.
-
-The base ref (defaults to `origin/main`, overridable with `-BaseRef`)
-identifies the state where already-released packages live. Anything
-between the base ref and the current state — committed or uncommitted —
-is considered pending and is folded into the analysis.
 
 ### `-Packages` token syntax
 
@@ -282,14 +286,16 @@ released crate to crates.io.
 
 ### Re-running on the same branch
 
-You may run `release-packages.ps1` multiple times on the same branch.
-Each invocation reads the base ref's version (not the on-disk version)
-to compute new increments, so a second run plans a fresh release based
-on what would be released *cumulatively* relative to the base ref.
+You may run `release-packages.ps1` multiple times on the same branch,
+but each invocation reads the *on-disk* version of every package
+(`Resolve-ReleaseSet` uses the version it finds in `Cargo.toml`, not the
+version in any base ref). A second run therefore plans increments *on
+top of* whatever the first run already wrote — typically not what you
+want when re-planning the same release.
 
-If a previous run produced changes you want to discard before re-planning,
-use `git reset` / `git restore` to revert the on-disk state first, then
-re-run with the corrected `-Packages` argument.
+If a previous run produced changes you want to discard before
+re-planning, use `git reset` / `git restore` to revert the on-disk
+state first, then re-run with the corrected `-Packages` argument.
 
 ---
 
@@ -308,8 +314,8 @@ loop and posts a PR comment with two tables:
   modifications whose cascade-applied change type is less than breaking.
   Reviewers should confirm the cascade-applied change type is adequate.
 
-To act on a finding, re-run `release-packages.ps1` locally with an
-updated `-Packages` argument that:
+To act on a finding, re-run `release-packages.ps1` locally with a
+corrected `-Packages` argument that:
 
 - Adds any previously-skipped package as a new token (the planner will
   fold it into the release set on top of any cascade-applied changes).
@@ -317,10 +323,12 @@ updated `-Packages` argument that:
   re-stamps the cascade-applied version to match the elevated change
   type).
 
-Both cases work whether the prior cascade-applied version-number
-increment is committed or uncommitted on the branch — the planner reads
-the base ref's version (not the on-disk version) to compute the new
-increment.
+Because the planner reads on-disk state, you typically want to discard
+the prior run's changes first via `git reset` / `git restore` and then
+re-invoke from a clean tree. Re-running on top of existing on-disk
+increments would compound version-number increments rather than replace
+them — see
+[Re-running on the same branch](#re-running-on-the-same-branch).
 
 ---
 
