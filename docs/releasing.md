@@ -342,9 +342,16 @@ package that depends on every changed workspace package and running
 `release-packages.ps1` to cascade releases from `*` outward. There is no
 real `*` token; the review loop seeds its dependency BFS with every
 changed package as an additional root, so per-package chains between
-changed packages (e.g. `bytesbuf_io → bytesbuf`) emerge naturally in the
-review menu. A changed package that no other in-release-set package
-depends on is shown with the hint "No dependents in release set".
+changed packages emerge naturally during planning.
+
+For each surfaced package the menu lists **every in-workspace dependency
+chain** ending at that package — not only the chains rooted at the
+current release set. This gives the reviewer a release-set-independent
+big-picture view of what releasing the package could ripple through
+(cascading may pull more dependents into the release set after the
+prompt, so a release-set-rooted listing would be misleadingly narrow).
+A package with no in-workspace dependents is shown with the hint
+"no in-workspace dependents".
 
 `release-changed-packages.ps1` is **interactive-only**. For
 scripted / CI use, invoke `release-packages.ps1` with an explicit

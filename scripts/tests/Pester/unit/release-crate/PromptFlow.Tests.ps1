@@ -63,11 +63,16 @@ Describe 'Format-PackageMenu' {
                 [string]$CurrentVersion = '1.2.3'
             )
             return [pscustomobject]@{
-                Folder           = $Folder
-                PackageName      = $Folder
-                CurrentVersion   = $CurrentVersion
-                ChangedFileCount = 1
-                DependencyChains = $Chains
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 1
+                # DependencyChains stays release-set-rooted for the PR comment
+                # and non-interactive bail-out paths; the menu reads only
+                # WorkspaceDependencyChains. Populate both fields on test
+                # findings so other consumers still get sensible data.
+                DependencyChains          = $Chains
+                WorkspaceDependencyChains = $Chains
             }
         }
     }
@@ -93,17 +98,18 @@ Describe 'Format-PackageMenu' {
         $out | Should -Match '\(\+3 packages queued\)'
     }
 
-    It 'renders a "potentially affected dependency chains:" header followed by one indented line per chain' {
+    It 'renders an "in-workspace dependents:" header followed by one indented line per chain' {
         $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('a', 'c', 'd'))
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
 
         # Single header line, regardless of how many chains.
-        ([regex]::Matches($out, 'potentially affected dependency chains:')).Count | Should -Be 1
+        ([regex]::Matches($out, 'in-workspace dependents:')).Count | Should -Be 1
 
         # Split into raw lines so trailing `\r` (from StringBuilder.AppendLine on Windows)
         # doesn't trip up `$` anchors.
         $lines = $out -split "`r?`n"
         $out | Should -Not -Match 'pulled in by:'
+        $out | Should -Not -Match 'potentially affected dependency chains'
         $lines | Should -Contain '    a -> b -> d'
         $lines | Should -Contain '    a -> c -> d'
     }
@@ -113,7 +119,7 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
         $lines.Count | Should -Be 5
         $lines[0] | Should -Match '^\s*1\. View diff$'
-        $lines[1] | Should -Match '^\s*2\. Ignore package - the changes are immaterial to published functionality$'
+        $lines[1] | Should -Match '^\s*2\. Ignore package - the changes are immaterial$'
         # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
         $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
         $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
@@ -152,10 +158,11 @@ Describe 'Format-PackageMenu' {
     It 'falls back to "(breaking)" / "(non-breaking)" / "(patch)" hints when CurrentVersion is missing or blank' {
         # Defensive: hand-rolled findings without CurrentVersion should still render the menu, not crash.
         $finding = [pscustomobject]@{
-            Folder           = 'ohno'
-            PackageName      = 'ohno'
-            ChangedFileCount = 1
-            DependencyChains = @(, @('a', 'ohno'))
+            Folder                    = 'ohno'
+            PackageName               = 'ohno'
+            ChangedFileCount          = 1
+            DependencyChains          = @(, @('a', 'ohno'))
+            WorkspaceDependencyChains = @(, @('a', 'ohno'))
         }
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
         $lines = $out -split "`r?`n"
@@ -174,68 +181,58 @@ Describe 'Format-PackageMenu' {
         $out | Should -Not -Match '\b42\b'
     }
 
-    Context 'empty DependencyChains' {
+    Context 'empty WorkspaceDependencyChains' {
 
-        # Stub findings with no chains are produced by Get-UnreleasedModifiedDependencies
-        # in -IncludeAllModifiedAsRoots mode for changed packages no other root reached.
-        # This is the menu side of the "imaginary `*` package depends on every changed
-        # package" UX from release-changed-packages.ps1.
+        # WorkspaceDependencyChains is empty when no other workspace package
+        # transitively depends on the package under review. The menu reports
+        # that absence plainly so the reviewer knows the release blast radius
+        # is limited to this package alone (modulo external consumers).
 
-        It 'omits the "potentially affected dependency chains:" header when DependencyChains is empty' {
+        It 'replaces the chains header with "no in-workspace dependents" when the workspace list is empty' {
             $finding = [pscustomobject]@{
-                Folder           = 'lonely'
-                PackageName      = 'lonely'
-                CurrentVersion   = '0.1.0'
-                InReleaseSet     = $false
-                ChangedFileCount = 1
-                DependencyChains = @()
+                Folder                    = 'lonely'
+                PackageName               = 'lonely'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Not -Match 'potentially affected dependency chains'
+            $out | Should -Not -Match 'in-workspace dependents:'
+            $out | Should -Match 'no in-workspace dependents'
         }
 
-        It 'renders "No dependents in release set" for stub findings NOT in the release set' {
+        It 'renders workspace chains even when DependencyChains (release-set rooted) is empty' {
+            # Stub findings produced by Get-UnreleasedModifiedDependencies in
+            # -IncludeAllModifiedAsRoots mode have DependencyChains = @() but
+            # may still have workspace-rooted chains via the reverse-dep walk.
             $finding = [pscustomobject]@{
-                Folder           = 'lonely'
-                PackageName      = 'lonely'
-                CurrentVersion   = '0.1.0'
-                InReleaseSet     = $false
-                ChangedFileCount = 1
-                DependencyChains = @()
+                Folder                    = 'd'
+                PackageName               = 'd'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @(, @('a', 'd'))
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Match 'No dependents in release set'
+            $out | Should -Match 'in-workspace dependents:'
+            $out | Should -Not -Match 'no in-workspace dependents'
         }
 
-        It 'renders the cascade-included hint for stub findings IN the release set' {
-            # A cascade-source release-set member with pre-existing modifications
-            # surfaces for elevation review (Invariant B). In all-changed mode it
-            # can do so without any other in-release-set package depending on it.
+        It 'ignores DependencyChains entirely when WorkspaceDependencyChains is populated (regression: menu reads only the workspace view)' {
             $finding = [pscustomobject]@{
-                Folder           = 'casc'
-                PackageName      = 'casc'
-                CurrentVersion   = '0.1.0'
-                InReleaseSet     = $true
-                ChangedFileCount = 1
-                DependencyChains = @()
+                Folder                    = 'd'
+                PackageName               = 'd'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                # Deliberately distinct chains to confirm the menu reads only WorkspaceDependencyChains.
+                DependencyChains          = @(, @('release_set_root', 'd'))
+                WorkspaceDependencyChains = @(, @('a', 'b', 'd'))
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Match 'cascade-included; no other in-release-set packages depend on this'
-            $out | Should -Not -Match 'No dependents in release set'
-        }
-
-        It 'still renders the chains header when DependencyChains is non-empty (regression)' {
-            $finding = [pscustomobject]@{
-                Folder           = 'd'
-                PackageName      = 'd'
-                CurrentVersion   = '0.1.0'
-                InReleaseSet     = $false
-                ChangedFileCount = 1
-                DependencyChains = @(, @('a', 'd'))
-            }
-            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Match 'potentially affected dependency chains'
-            $out | Should -Not -Match 'No dependents in release set'
+            $lines = $out -split "`r?`n"
+            $lines | Should -Contain '    a -> b -> d'
+            $lines | Should -Not -Contain '    release_set_root -> d'
         }
     }
 }
@@ -281,11 +278,12 @@ Describe 'Get-PackageReleaseDecision' {
                 [AllowEmptyString()][AllowNull()][string]$CurrentVersion
             )
             return [pscustomobject]@{
-                Folder           = $Folder
-                PackageName      = $Folder
-                CurrentVersion   = $CurrentVersion
-                ChangedFileCount = 1
-                DependencyChains = @(, @('a', $Folder))
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 1
+                DependencyChains          = @(, @('a', $Folder))
+                WorkspaceDependencyChains = @(, @('a', $Folder))
             }
         }
 

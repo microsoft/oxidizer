@@ -882,25 +882,26 @@ function Format-PackageMenu {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
-    # Render the chains section only when there's something to show. In the
-    # guided changed-packages (all-changed) workflow a package may surface as
-    # a stub finding with no chains — every changed package is implicitly a
-    # dependency of an imaginary `*` package, and the menu hides that
-    # bookkeeping. Print a tailored hint instead.
-    $chains = @($Finding.DependencyChains)
+    # Show every in-workspace dependency chain ending at this package, NOT
+    # just the chains the current release plan reaches. The release set can
+    # grow during this review loop (each accepted release may cascade to
+    # additional dependents), so the "big picture" workspace view gives the
+    # reviewer a stable, release-set-independent answer to "what could be
+    # affected by releasing this package?". When the package has no
+    # in-workspace dependents we say so plainly rather than dropping the
+    # section entirely - the absence is itself useful signal.
+    $chains = @($Finding.WorkspaceDependencyChains)
     if ($chains.Count -gt 0) {
-        [void]$sb.AppendLine('  potentially affected dependency chains:')
+        [void]$sb.AppendLine('  in-workspace dependents:')
         foreach ($chain in $chains) {
             [void]$sb.AppendLine("    $($chain -join ' -> ')")
         }
-    } elseif ($Finding.InReleaseSet) {
-        [void]$sb.AppendLine('  cascade-included; no other in-release-set packages depend on this')
     } else {
-        [void]$sb.AppendLine('  No dependents in release set')
+        [void]$sb.AppendLine('  no in-workspace dependents')
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('  1. View diff')
-    [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial to published functionality')
+    [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial')
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
     if (-not $hidePatch) {

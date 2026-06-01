@@ -850,6 +850,18 @@ function New-ResolvedReleaseSetFromBaseRef {
 #                       elevation" from "needs review for primary release".
 #   ChangedFileCount  - number of files changed under crates/<folder>/ since baseline
 #   DependencyChains  - @( @('released_package', 'mid_package', 'this_dep'), ... )
+#                       - chains rooted in release-set members (or, in
+#                       -IncludeAllModifiedAsRoots mode, also in other
+#                       modified-published packages) that transitively reach
+#                       `this_dep`. Used by the non-interactive bail-out
+#                       printer and the PR sticky comment to highlight what is
+#                       at risk in the current release plan specifically.
+#   WorkspaceDependencyChains  - @( @('top_dependent', ..., 'this_dep'), ... )
+#                       - every path in the workspace dep graph ending at
+#                       `this_dep`, irrespective of release-set membership.
+#                       Used by the interactive per-package menu to give the
+#                       reviewer a release-set-independent "big picture" view
+#                       of what could be affected by releasing this package.
 #
 # The BFS traverses past every node (including release-set members) so a chain
 # like 'foo -> bar -> baz' is recorded even when 'bar' is itself being
@@ -1025,6 +1037,21 @@ function Get-UnreleasedModifiedDependencies {
         }
     }
 
+    # Populate WorkspaceDependencyChains: every path in the workspace dep graph
+    # of the form `[root, ..., target]` ending at this finding's folder. Used
+    # by the interactive menu to give the user a release-set-independent
+    # picture of what could be affected by releasing the package under review
+    # (cascading can pull more dependents into the release set after the
+    # review prompt, so the release-set-rooted DependencyChains list would
+    # otherwise be misleadingly narrow). Computed here (not at menu render
+    # time) so $packages is reused and no extra cargo metadata invocations
+    # happen per prompt.
+    foreach ($f in $findings.Values) {
+        $f | Add-Member -NotePropertyName WorkspaceDependencyChains -NotePropertyValue (
+            Get-InWorkspaceDependencyChains -Packages $packages -TargetFolder $f.Folder
+        ) -Force
+    }
+
     return @($findings.Values)
 }
 
@@ -1081,4 +1108,112 @@ function Reduce-DependencyChains {
     # one chain survives reduction (caller would see a flat string array
     # instead of an array containing one chain).
     return ,$finalSorted
+}
+
+# Computes the set of in-workspace dependency chains that end at $TargetFolder
+# - i.e. every path through the workspace package dep graph of the form
+# `[root, ..., target]` where `root` is some workspace package that
+# transitively depends on `target` and `root` itself has no in-workspace
+# dependent (the chain reaches as far up the dependency tree as possible).
+# Used by `Format-PackageMenu` to give the user a "big picture" view of what
+# could be affected by releasing the package under review - independent of
+# which packages are in the current release set, since cascading can bring
+# in more dependents after the review prompt is shown.
+#
+# `$Packages` is the already-loaded workspace package list (output of
+# `Get-WorkspacePackages`); pass it in to avoid re-running `cargo metadata`
+# when the caller already has it.
+#
+# Returns @() when $TargetFolder is unknown, or when no other workspace
+# package transitively depends on it. Otherwise returns chains reduced via
+# `Reduce-DependencyChains` (suffix-subsumed shorter chains dropped). Dev
+# dependencies and non-`crates/` workspace members are NOT included, since
+# `Get-WorkspacePackages` already filters them out - this matches the
+# release-impact semantics we care about (dev-dep changes don't affect a
+# package's published-API consumers).
+function Get-InWorkspaceDependencyChains {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Packages,
+        [Parameter(Mandatory = $true)][string]$TargetFolder
+    )
+
+    # PowerShell unwraps a bare `return @()` to $null at the function
+    # boundary (the empty array contributes 0 items to the output stream).
+    # Prefix returns with `,` to force an array-preserving single-item
+    # output - the receiver sees the array (possibly empty), not $null.
+    if ($null -eq $Packages -or $Packages.Count -eq 0) { return ,@() }
+
+    # Build folder -> package and normalized-name -> folder lookups (same shape
+    # the BFS in Get-UnreleasedModifiedDependencies builds for forward edges).
+    $byFolder = @{}
+    $folderByNormName = @{}
+    foreach ($p in $Packages) {
+        $byFolder[$p.Folder] = $p
+        $folderByNormName[$p.Name.Replace('-', '_')] = $p.Folder
+    }
+    if (-not $byFolder.ContainsKey($TargetFolder)) { return ,@() }
+
+    # Reverse adjacency: depFolder -> list of folders that depend on depFolder.
+    $reverse = @{}
+    foreach ($p in $Packages) {
+        foreach ($depNorm in $p.Deps) {
+            if (-not $folderByNormName.ContainsKey($depNorm)) { continue } # external
+            $depFolder = $folderByNormName[$depNorm]
+            if (-not $reverse.ContainsKey($depFolder)) {
+                $reverse[$depFolder] = New-Object 'System.Collections.Generic.List[string]'
+            }
+            [void]$reverse[$depFolder].Add($p.Folder)
+        }
+    }
+
+    # Iterative DFS over reverse edges starting at $TargetFolder. Each stack
+    # entry carries the path-so-far in REVERSE order (target first, current
+    # frontier last) so cycle detection is a quick membership check. When a
+    # frontier has no further dependents (workspace root reached), we emit the
+    # reversed path as a chain `[root, ..., target]`. Cycles can't exist in a
+    # valid Cargo workspace, but defensive `notcontains` keeps the loop safe
+    # if metadata ever yields one.
+    $chains = New-Object 'System.Collections.Generic.List[object]'
+    $stack = [System.Collections.Generic.Stack[object]]::new()
+    $stack.Push([pscustomobject]@{
+        Folder       = $TargetFolder
+        ReversedPath = @($TargetFolder)
+    })
+
+    while ($stack.Count -gt 0) {
+        $node = $stack.Pop()
+        $candidates = @()
+        if ($reverse.ContainsKey($node.Folder)) {
+            foreach ($d in $reverse[$node.Folder]) {
+                if ($node.ReversedPath -notcontains $d) { $candidates += $d }
+            }
+        }
+
+        if ($candidates.Count -eq 0) {
+            # Reached a top-level dependent (or all further dependents would
+            # cycle). Skip the trivial single-element [target] "chain" - there
+            # is nothing to display when target has no in-workspace dependents.
+            if ($node.ReversedPath.Length -gt 1) {
+                $chain = New-Object 'System.Collections.Generic.List[string]'
+                for ($i = $node.ReversedPath.Length - 1; $i -ge 0; $i--) {
+                    [void]$chain.Add($node.ReversedPath[$i])
+                }
+                [void]$chains.Add(@($chain))
+            }
+        } else {
+            foreach ($d in $candidates) {
+                $stack.Push([pscustomobject]@{
+                    Folder       = $d
+                    ReversedPath = $node.ReversedPath + $d
+                })
+            }
+        }
+    }
+
+    if ($chains.Count -eq 0) { return ,@() }
+    # Reduce-DependencyChains already returns ,$finalSorted, so its non-empty
+    # array structure survives this forward.
+    return Reduce-DependencyChains -Chains $chains
 }

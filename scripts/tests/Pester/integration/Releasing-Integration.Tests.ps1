@@ -563,6 +563,107 @@ Describe 'Get-UnreleasedModifiedDependencies: -IncludeAllModifiedAsRoots' {
 }
 
 # --------------------------------------------------------------------------
+# WorkspaceDependencyChains — populated on every finding from
+# Get-UnreleasedModifiedDependencies. Records EVERY in-workspace dependency
+# chain ending at the finding's folder, irrespective of release-set
+# membership. Used by the per-package menu to give the reviewer a
+# "big picture" view of what releasing this package could ripple through —
+# cascading may pull more dependents into the release set after the prompt,
+# so the release-set-rooted DependencyChains would otherwise be misleadingly
+# narrow.
+# --------------------------------------------------------------------------
+
+Describe 'WorkspaceDependencyChains on findings' {
+
+    It 'records every workspace dependency chain ending at the target (linear)' {
+        Reset-ReleaseScriptCaches
+        # Linear3: a → b → c. Modify c in an earlier PR; change a only.
+        # WorkspaceDependencyChains for c should be the single chain [a,b,c]
+        # (the only path in the workspace ending at c).
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'wdc-linear')
+        $ws.ModifySource('c')
+        $ws.AddCommit('previous PR: c edit')
+        $ws.SetVersion('a', '0.1.1')
+        $ws.AddCommit('current PR: change a')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
+        $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
+        $cFinding | Should -Not -BeNullOrEmpty
+        @($cFinding.WorkspaceDependencyChains).Count | Should -Be 1
+        $cFinding.WorkspaceDependencyChains[0] | Should -Be @('a', 'b', 'c')
+    }
+
+    It 'records both paths in a diamond topology' {
+        Reset-ReleaseScriptCaches
+        # Diamond4: top → {left, right}; left → bottom; right → bottom.
+        # Modify bottom (earlier PR); change top (current PR) so bottom
+        # surfaces as a finding. WorkspaceDependencyChains for bottom should
+        # contain BOTH paths through the diamond:
+        #   top → left → bottom
+        #   top → right → bottom
+        # — irrespective of which packages are in the release set.
+        $ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'wdc-diamond')
+        $ws.ModifySource('bottom')
+        $ws.AddCommit('previous PR: bottom edit')
+        $ws.SetVersion('top', '0.1.1')
+        $ws.AddCommit('current PR: change top')
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
+        $bottom = $findings | Where-Object { $_.Folder -eq 'bottom' }
+        $bottom | Should -Not -BeNullOrEmpty
+        @($bottom.WorkspaceDependencyChains).Count | Should -Be 2
+        $rendered = @($bottom.WorkspaceDependencyChains | ForEach-Object { $_ -join ',' } | Sort-Object)
+        $rendered | Should -Be @('top,left,bottom', 'top,right,bottom')
+    }
+
+    It 'is empty for a leaf package with no in-workspace dependents (regression for "no in-workspace dependents" menu hint)' {
+        Reset-ReleaseScriptCaches
+        # Linear2: downstream → upstream. With -IncludeAllModifiedAsRoots the
+        # changed downstream surfaces as a stub finding. Nothing else in the
+        # workspace depends on downstream, so WorkspaceDependencyChains is @().
+        # The menu will render "no in-workspace dependents" for it.
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'wdc-leaf')
+        $snap = @{ downstream = 1 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Count | Should -Be 1
+        $findings[0].Folder | Should -Be 'downstream'
+        @($findings[0].WorkspaceDependencyChains).Count | Should -Be 0
+    }
+
+    It 'is independent of release-set membership: same chain whether or not the dependent is in the release set' {
+        Reset-ReleaseScriptCaches
+        # Linear2: downstream → upstream. Modify upstream in earlier PR; do
+        # NOT change downstream (i.e. downstream is NOT in the release set
+        # via the BaseRef helper). With -IncludeAllModifiedAsRoots upstream
+        # surfaces as a stub (DependencyChains is empty because no release
+        # set member depends on it), but WorkspaceDependencyChains must still
+        # list [downstream, upstream] — the big-picture view ignores
+        # release-set membership.
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'wdc-rs-independent')
+        $ws.ModifySource('upstream')
+        $ws.AddCommit('earlier PR: upstream edit')
+
+        $snap = @{ upstream = 1 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Count | Should -Be 1
+        $up = $findings[0]
+        $up.Folder | Should -Be 'upstream'
+        # Release-set-rooted DependencyChains is empty (no release-set member
+        # depends on upstream — release set is empty here).
+        @($up.DependencyChains).Count | Should -Be 0
+        # Workspace-wide chains list the full graph path regardless.
+        @($up.WorkspaceDependencyChains).Count | Should -Be 1
+        $up.WorkspaceDependencyChains[0] | Should -Be @('downstream', 'upstream')
+    }
+}
+
+# --------------------------------------------------------------------------
 # Update-PackageVersion — exercise the [package]-scoped replacement.
 # --------------------------------------------------------------------------
 
