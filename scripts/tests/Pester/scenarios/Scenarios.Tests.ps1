@@ -18,11 +18,14 @@ BeforeAll {
     . (Join-Path $env:OXI_TEST_COMMON 'New-SyntheticWorkspace.ps1')
     . (Join-Path $env:OXI_TEST_COMMON 'Invoke-Scenario.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
-
-    # Discover all scenarios.
-    $script:ScenarioFiles = Get-ChildItem -Path (Join-Path $PSScriptRoot '..\scenarios') -Filter '*.scenario.psd1' |
-        ForEach-Object { @{ File = $_.FullName; Name = $_.BaseName -replace '\.scenario$', '' } }
 }
+
+# Discover all scenarios at top-level (Discovery phase) so the cached list is
+# available to both `BeforeAll` (Run phase) and the `It -ForEach` parameter
+# (also evaluated at Discovery time). Computing it once here keeps the source
+# of truth in a single place.
+$script:ScenarioFiles = Get-ChildItem -Path (Join-Path $PSScriptRoot '..\scenarios') -Filter '*.scenario.psd1' |
+    ForEach-Object { @{ File = $_.FullName; Name = $_.BaseName -replace '\.scenario$', '' } }
 
 Describe 'End-to-end release scenarios' {
 
@@ -46,10 +49,7 @@ Describe 'End-to-end release scenarios' {
         } -Verifiable:$false
     }
 
-    It '<Name>' -ForEach @(
-        Get-ChildItem -Path (Join-Path $PSScriptRoot '..\scenarios') -Filter '*.scenario.psd1' |
-            ForEach-Object { @{ File = $_.FullName; Name = $_.BaseName -replace '\.scenario$', '' } }
-    ) {
+    It '<Name>' -ForEach $script:ScenarioFiles {
         $result = Invoke-Scenario -ScenarioFile $File
         $expect = $result.Scenario.Expect
 

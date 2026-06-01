@@ -15,7 +15,7 @@ BeforeAll {
 Describe 'Test-GitRef' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'gitref')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'gitref')
     }
 
     It 'returns true for an existing branch' {
@@ -40,7 +40,7 @@ Describe 'Test-GitRef' {
 Describe 'Get-CurrentVersion' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'currentversion')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'currentversion')
     }
 
     It 'reads the version from a package Cargo.toml' {
@@ -96,7 +96,7 @@ version = "0.4.0"
 Describe 'Get-PackageVersionFromRef' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionfromref')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionfromref')
         # Change version of 'b' on a follow-up commit so we have two distinct versions in history.
         $script:Ws.SetVersion('b', '0.2.1')
         $script:Ws.AddCommit('change b')
@@ -118,7 +118,7 @@ Describe 'Get-PackageVersionFromRef' {
 Describe 'Get-PackageLastReleaseBaseline' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'baseline')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'baseline')
         # Initial commit (call it C0). Now make a source-only edit (C1), then a
         # version-changing commit (C2), then another source edit (C3). Baseline
         # for 'b' must be C2.
@@ -148,7 +148,7 @@ Describe 'Get-PackageLastReleaseBaseline' {
 Describe 'Get-WorkspacePackages' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'wscrates')
+        $script:Ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'wscrates')
     }
 
     It 'returns one entry per workspace package' {
@@ -176,7 +176,7 @@ Describe 'Get-WorkspacePackages' {
 Describe 'Get-AllTransitiveDependents' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'transitive-diamond')
+        $script:Ws = New-SyntheticWorkspace -Preset Diamond4 -Path (Join-Path $TestDrive 'transitive-diamond')
         # Diamond4: top -> {left, right}; left -> bottom; right -> bottom. Dependents of bottom are {left, right, top}.
     }
 
@@ -204,7 +204,7 @@ Describe 'Get-AllTransitiveDependents' {
 Describe 'Get-PackagesWithUnreleasedChanges' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedchanges')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'unreleasedchanges')
         # Edit package b after initial commit and commit it.
         $script:Ws.ModifySource('b')
         $script:Ws.AddCommit('b edit')
@@ -247,7 +247,7 @@ Describe 'Get-PackagesWithUnreleasedChanges' {
 Describe 'Get-PackagesWithVersionChanges' {
     BeforeAll {
         Reset-ReleaseScriptCaches
-    $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionchanges')
+        $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'versionchanges')
         # Change version of 'a' relative to HEAD~ baseline.
         $script:Ws.SetVersion('a', '0.1.1')
         $script:Ws.AddCommit('change a')

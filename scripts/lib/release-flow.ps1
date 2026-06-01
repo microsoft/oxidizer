@@ -588,7 +588,7 @@ function Update-PackageVersion {
         Write-Error "Could not find [package] version line in '$packageCargoToml'." -ErrorAction Stop
     }
     $packageContent = $script:CargoPackageVersionRegex.Replace($packageContent, ('${1}' + $version), 1)
-    Set-Content $packageCargoToml -Value $packageContent -NoNewline
+    Set-Content -LiteralPath $packageCargoToml -Value $packageContent -NoNewline -Encoding utf8
 
     Write-Host "📝 Updating '$rootCargoToml'..."
 
@@ -612,7 +612,7 @@ function Update-PackageVersion {
     # per line and flush-left, matching the layout produced by the test
     # fixture's `Write-RootCargoToml`.
     $regex = '(?m)(?<=^' + $packageNamePattern + '\s*=\s*\{[^\}]*?version\s*=\s*")[^"]+'
-    (Get-Content $rootCargoToml -Raw) -replace $regex, $version | Set-Content $rootCargoToml -NoNewline
+    (Get-Content -LiteralPath $rootCargoToml -Raw) -replace $regex, $version | Set-Content -LiteralPath $rootCargoToml -NoNewline -Encoding utf8
 
     return $version
 }
