@@ -1,6 +1,6 @@
 @{
-    Name        = 'S17-graduation-token'
-    Description = 'Bundled-input version-graduation contract: user uses the explicit ''1.0.0'' graduation token on a 0.x.y package. Resolve-ReleaseSet treats this as a pinned target version and accepts it because the package is currently in 0.x.y range. This is the standard "drop the leading zero" lifecycle event done exactly once per package.'
+    Name        = 'S17-explicit-version-pin'
+    Description = 'Bundled-input explicit-pin contract: user supplies an explicit ''1.0.0'' semver pin on a 0.x.y package. The planner accepts the pin because the package is currently below 1.0.0 (pin must be strictly greater than the current version). 1.0.0 has no special handling — it is treated like any other explicit pin.'
 
     Workspace = @{
         Spec = @{

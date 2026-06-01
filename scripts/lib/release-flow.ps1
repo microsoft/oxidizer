@@ -99,24 +99,22 @@ function Sort-KeysByPreferredOrder {
 # where <change> is one of:
 #
 #   - breaking, nonbreaking, patch  (case-insensitive change-type keywords)
-#   - 1.0.0                         (the one-time 0.x → 1.0.0 graduation token)
 #   - x.y.z                         (explicit semver pin — exactly three dotted
-#                                    non-negative integers)
+#                                    non-negative integers; e.g. '1.0.0' or
+#                                    '2.5.0')
 #
 # Returns an array of pscustomobject entries, one per token:
 #
 #   @{
 #     Name                   = '<as-typed>'             # case preserved
 #     RequestedChangeType    = 'breaking'|'non-breaking'|'patch'|$null
-#     RequestedTargetVersion = '1.2.3'|$null
-#     IsGraduation           = $true|$false             # exactly '1.0.0' token
+#     RequestedTargetVersion = '1.2.3'|$null            # set only for explicit semver pin
 #     RawToken               = '<original token>'
 #   }
 #
-# For the graduation keyword '1.0.0', the entry has both fields populated:
-# RequestedChangeType='breaking', RequestedTargetVersion='1.0.0',
-# IsGraduation=$true. The resolver later treats it as a breaking change with a
-# pinned target version, and errors if the package is already at >=1.0.0.
+# Explicit semver pins (including '1.0.0') are passed through verbatim as
+# RequestedTargetVersion; the resolver later rejects pins that are not
+# strictly greater than the package's current version.
 #
 # Validation:
 #   - The -Packages array must contain at least one token.
@@ -172,7 +170,6 @@ function Parse-ReleaseTokens {
 
         $requestedChangeType    = $null
         $requestedTargetVersion = $null
-        $isGraduation           = $false
 
         switch -CaseSensitive ($changeSpec.ToLowerInvariant()) {
             'breaking'    { $requestedChangeType = 'breaking';     break }
@@ -180,15 +177,9 @@ function Parse-ReleaseTokens {
             'patch'       { $requestedChangeType = 'patch';        break }
             default {
                 if ($changeSpec -match '^\d+\.\d+\.\d+$') {
-                    if ($changeSpec -eq '1.0.0') {
-                        $isGraduation           = $true
-                        $requestedChangeType    = 'breaking'
-                        $requestedTargetVersion = '1.0.0'
-                    } else {
-                        $requestedTargetVersion = $changeSpec
-                    }
+                    $requestedTargetVersion = $changeSpec
                 } else {
-                    throw "Invalid change specifier '$changeSpec' in token '$raw'. Expected one of: 'breaking', 'nonbreaking', 'patch', '1.0.0' (one-time 0.x→1.0.0 graduation), or an explicit semantic version 'x.y.z'."
+                    throw "Invalid change specifier '$changeSpec' in token '$raw'. Expected one of: 'breaking', 'nonbreaking', 'patch', or an explicit semantic version 'x.y.z' (e.g. '1.0.0', '2.5.0')."
                 }
             }
         }
@@ -197,7 +188,6 @@ function Parse-ReleaseTokens {
             Name                   = $name
             RequestedChangeType    = $requestedChangeType
             RequestedTargetVersion = $requestedTargetVersion
-            IsGraduation           = $isGraduation
             RawToken               = $raw
         })
     }
@@ -264,7 +254,6 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #     CurrentVersion          = '<baseline version>'
 #     RequestedChangeType     = 'breaking'|'non-breaking'|'patch'|$null   # null for cascade-source
 #     RequestedTargetVersion  = '<pin>'|$null                              # null when not pinned
-#     IsGraduation            = $true|$false
 #     EffectiveChangeType     = 'breaking'|'non-breaking'|'patch'         # after cascade resolution
 #     EffectiveTargetVersion  = '<version>'                                # after cascade resolution
 #     Source                  = 'user'|'cascade'
@@ -278,7 +267,6 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #        - tokens for non-workspace packages
 #        - tokens for unpublished workspace packages
 #        - explicit version pins not strictly greater than the current version
-#        - graduation '1.0.0' applied to a package already at >= 1.0.0
 #   2. For each user-source entry, BFS via
 #      Get-TransitivePublishedDependentsFromBaseline to collect all published
 #      transitive dependents. For each dependent compute the cascade-applied
@@ -357,12 +345,6 @@ function Resolve-ReleaseSet {
             if ($cmp -le 0) {
                 throw "Cannot release '$($pkg.Folder)' as v$($target): package is already at v$currentVersion. Explicit version pins must be strictly greater than the current version. Token: '$($req.RawToken)'."
             }
-            if ($req.IsGraduation) {
-                $currentMajor = [int]($currentVersion.Split('.')[0])
-                if ($currentMajor -ge 1) {
-                    throw "Cannot graduate '$($pkg.Folder)' to 1.0.0: package is already at v$currentVersion (>= 1.0.0). The '1.0.0' graduation token is only valid for packages whose current version is in the 0.x.y range. Token: '$($req.RawToken)'."
-                }
-            }
             $effectiveChangeType    = Get-ChangeTypeFromVersions -oldVersion $currentVersion -newVersion $target
             $effectiveTargetVersion = $target
         } else {
@@ -376,7 +358,6 @@ function Resolve-ReleaseSet {
             CurrentVersion          = $currentVersion
             RequestedChangeType     = $req.RequestedChangeType
             RequestedTargetVersion  = $req.RequestedTargetVersion
-            IsGraduation            = $req.IsGraduation
             EffectiveChangeType     = $effectiveChangeType
             EffectiveTargetVersion  = $effectiveTargetVersion
             Source                  = 'user'
@@ -467,7 +448,6 @@ function Resolve-ReleaseSet {
                     CurrentVersion          = $depPkg.Version
                     RequestedChangeType     = $null
                     RequestedTargetVersion  = $null
-                    IsGraduation            = $false
                     EffectiveChangeType     = $dependentChangeType
                     EffectiveTargetVersion  = Get-NextVersion -currentVersion $depPkg.Version -ChangeType $dependentChangeType
                     Source                  = 'cascade'
@@ -961,6 +941,24 @@ function Test-IsPatchOptionRedundant {
     return ($nonBreakingNext -eq $patchNext)
 }
 
+# Returns $true when option 4 (Release as non-breaking change) would be
+# numerically indistinguishable from option 3 (Release as breaking change) for
+# the given current version. Under Cargo's 0.0.x semver carve-out every change
+# type (breaking, non-breaking, patch) collapses to the same 0.0.(x+1)
+# increment, so there is no point offering the non-breaking option — and the
+# user should be told that all releases at this version range are considered
+# breaking changes by Cargo. Returns $false for 0.x.y (y >= 1) where breaking
+# (0.(y+1).0) still differs from non-breaking (0.y.(z+1)). When CurrentVersion
+# is unknown we conservatively return $false so all options remain visible.
+function Test-IsNonBreakingOptionRedundant {
+    param([Parameter(Mandatory = $true)][AllowNull()][AllowEmptyString()][string]$CurrentVersion)
+
+    if ([string]::IsNullOrWhiteSpace($CurrentVersion)) { return $false }
+    $nonBreakingNext = Get-NextVersion -currentVersion $CurrentVersion -ChangeType 'non-breaking'
+    $breakingNext = Get-NextVersion -currentVersion $CurrentVersion -ChangeType 'breaking'
+    return ($nonBreakingNext -eq $breakingNext)
+}
+
 # Pure formatter for the per-package menu. Returns a multi-line string ready
 # for Write-Host. Returning a string (not host-writing directly) keeps the
 # function unit-testable without redirecting Information / Host streams.
@@ -975,6 +973,13 @@ function Test-IsPatchOptionRedundant {
 # increment as option 4 (Release as non-breaking change) — see
 # Test-IsPatchOptionRedundant. This avoids presenting two indistinguishable
 # choices on Cargo 0.x.y packages.
+#
+# Option 4 (Release as non-breaking change) is hidden when it would produce
+# the same numeric increment as option 3 (Release as breaking change) — see
+# Test-IsNonBreakingOptionRedundant. This is the case for 0.0.x packages,
+# where Cargo treats every version bump as breaking; we append a one-line
+# hint explaining why so the user is not left wondering what happened to the
+# missing options.
 function Format-PackageMenu {
     param(
         [Parameter(Mandatory = $true)][object]$Finding,
@@ -1005,7 +1010,8 @@ function Format-PackageMenu {
         }
     }
 
-    $hidePatch = Test-IsPatchOptionRedundant -CurrentVersion $current
+    $hideNonBreaking = Test-IsNonBreakingOptionRedundant -CurrentVersion $current
+    $hidePatch = $hideNonBreaking -or (Test-IsPatchOptionRedundant -CurrentVersion $current)
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
@@ -1031,9 +1037,17 @@ function Format-PackageMenu {
     [void]$sb.AppendLine('  1. View diff')
     [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial')
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
-    [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
+    if (-not $hideNonBreaking) {
+        [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
+    }
     if (-not $hidePatch) {
         [void]$sb.AppendLine("  5. Release as patch $($changeTypeHints['patch'])")
+    }
+    if ($hideNonBreaking) {
+        [void]$sb.AppendLine('')
+        # Single-quoted to preserve the literal backticks around `0.0.` verbatim
+        # (backticks are PowerShell's escape character in double-quoted strings).
+        [void]$sb.AppendLine('  Note: all releases are considered breaking changes for package versions starting with `0.0.`')
     }
     return $sb.ToString()
 }
@@ -1259,7 +1273,10 @@ function Show-PackageDiff {
 #
 # When option 5 is suppressed (because it would be numerically identical to
 # option 4 — see Test-IsPatchOptionRedundant), the prompt range tightens to
-# [1-4] and "5" is treated as an invalid choice. This keeps the prompt
+# [1-4] and "5" is treated as an invalid choice. When option 4 is also
+# suppressed (because on 0.0.x packages every release is breaking — see
+# Test-IsNonBreakingOptionRedundant), the prompt range tightens to [1-3]
+# and both "4" and "5" are treated as invalid. This keeps the prompt
 # honest with what the menu shows.
 function Get-PackageReleaseDecision {
     param(
@@ -1268,8 +1285,10 @@ function Get-PackageReleaseDecision {
         [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
-    $hidePatch = Test-IsPatchOptionRedundant -CurrentVersion ([string]$Finding.CurrentVersion)
-    $maxChoice = if ($hidePatch) { 4 } else { 5 }
+    $current = [string]$Finding.CurrentVersion
+    $hideNonBreaking = Test-IsNonBreakingOptionRedundant -CurrentVersion $current
+    $hidePatch = $hideNonBreaking -or (Test-IsPatchOptionRedundant -CurrentVersion $current)
+    $maxChoice = if ($hideNonBreaking) { 3 } elseif ($hidePatch) { 4 } else { 5 }
 
     Show-PackageMenu -Finding $Finding -RemainingCount $RemainingCount
     while ($true) {
@@ -1283,7 +1302,7 @@ function Get-PackageReleaseDecision {
         }
         if ($choice -eq '2') { return @{ Action = 'ignore' } }
         if ($choice -eq '3') { return @{ Action = 'breaking' } }
-        if ($choice -eq '4') { return @{ Action = 'non-breaking' } }
+        if ($choice -eq '4' -and -not $hideNonBreaking) { return @{ Action = 'non-breaking' } }
         if ($choice -eq '5' -and -not $hidePatch) { return @{ Action = 'patch' } }
 
         Write-Host "Invalid choice '$choice'. Enter a number from 1 to $maxChoice." -ForegroundColor Yellow
@@ -1580,7 +1599,6 @@ function Invoke-PlanReview {
                 Name                   = $next.Folder
                 RequestedChangeType    = $decision.Action
                 RequestedTargetVersion = $null
-                IsGraduation           = $false
                 RawToken               = $newToken
             }))
         }

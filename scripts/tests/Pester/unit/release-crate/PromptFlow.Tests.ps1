@@ -146,13 +146,33 @@ Describe 'Format-PackageMenu' {
         $out | Should -Not -Match 'Release as patch'
     }
 
-    It 'hides option 5 on 0.0.x packages (where minor and patch also collapse)' {
+    It 'hides options 4 AND 5 on 0.0.x packages and emits a "starts with 0.0." hint' {
+        # On 0.0.x every change type collapses to the same 0.0.(x+1) numeric
+        # increment, so non-breaking and patch are both indistinguishable from
+        # breaking — Cargo treats every release at this version range as a
+        # breaking change. The menu reflects that by hiding both choices.
         $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.0.5') -RemainingCount 0
         $lines = $out -split "`r?`n"
         $lines | Should -Contain '  3. Release as breaking change (0.0.5 -> 0.0.6)'
-        $lines | Should -Contain '  4. Release as non-breaking change (0.0.5 -> 0.0.6)'
+        $out | Should -Not -Match '^\s*4\. '
+        $out | Should -Not -Match 'Release as non-breaking'
         $out | Should -Not -Match '^\s*5\. '
         $out | Should -Not -Match 'Release as patch'
+        $out | Should -Match 'all releases are considered breaking changes for package versions starting with `0\.0\.`'
+    }
+
+    It 'does NOT emit the "0.0." hint on 0.x.y (y >= 1) packages' {
+        # 0.1.2 still has a meaningful non-breaking option (0.1.3), so the
+        # hint would be misleading.
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
+        $out | Should -Not -Match 'starts with `0\.0\.`'
+        $out | Should -Not -Match 'all releases are considered breaking'
+    }
+
+    It 'does NOT emit the "0.0." hint on stable >= 1.x.y packages' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '1.2.3') -RemainingCount 0
+        $out | Should -Not -Match 'starts with `0\.0\.`'
+        $out | Should -Not -Match 'all releases are considered breaking'
     }
 
     It 'falls back to "(breaking)" / "(non-breaking)" / "(patch)" hints when CurrentVersion is missing or blank' {
@@ -262,6 +282,34 @@ Describe 'Test-IsPatchOptionRedundant' {
         Test-IsPatchOptionRedundant -CurrentVersion '' | Should -BeFalse
         Test-IsPatchOptionRedundant -CurrentVersion $null | Should -BeFalse
         Test-IsPatchOptionRedundant -CurrentVersion '   ' | Should -BeFalse
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test-IsNonBreakingOptionRedundant (pure semver-rule helper)
+# ---------------------------------------------------------------------------
+
+Describe 'Test-IsNonBreakingOptionRedundant' {
+    It 'returns $false for stable >=1.x.y versions (non-breaking and breaking differ)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '1.0.0' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '1.2.3' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '42.7.0' | Should -BeFalse
+    }
+
+    It 'returns $false for 0.x.y (y >= 1) versions (breaking bumps minor, non-breaking bumps patch)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.1.0' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.4.7' | Should -BeFalse
+    }
+
+    It 'returns $true for 0.0.x versions (every change collapses to the same patch bump)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.0.1' | Should -BeTrue
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.0.42' | Should -BeTrue
+    }
+
+    It 'returns $false (conservative default) when the version is missing, null, or whitespace' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion $null | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '   ' | Should -BeFalse
     }
 }
 
@@ -441,6 +489,13 @@ Describe 'Get-PackageReleaseDecision' {
             Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
             $script:RH_PromptsObserved[0] | Should -Match '\[1-4\]'
         }
+
+        It "advertises the narrowest [1-3] range when options 4 AND 5 are hidden (0.0.x package)" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'mypkg' -CurrentVersion '0.0.5'
+            Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-3\]'
+        }
     }
 
     Context 'option 5 is rejected when hidden (0.x.y package)' {
@@ -467,6 +522,44 @@ Describe 'Get-PackageReleaseDecision' {
             $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
             $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
             $r.Action | Should -Be 'breaking'
+        }
+    }
+
+    Context 'options 4 AND 5 are rejected when hidden (0.0.x package)' {
+        It "treats '4' as invalid and re-prompts, message references the narrowest range" {
+            SetReadHostQueue -Answers @('4', '3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'breaking'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '4'"
+            ($out | Out-String) | Should -Match 'from 1 to 3'
+        }
+
+        It "treats '5' as invalid and re-prompts on a 0.0.x package" {
+            SetReadHostQueue -Answers @('5', '3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'breaking'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '5'"
+            ($out | Out-String) | Should -Match 'from 1 to 3'
+        }
+
+        It "still accepts '3' (breaking) on a 0.0.x package" {
+            SetReadHostQueue -Answers @('3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'breaking'
+        }
+
+        It "still accepts '2' (ignore) on a 0.0.x package" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'ignore'
         }
     }
 }
@@ -750,7 +843,6 @@ Describe 'Invoke-PlanReview iteration-cap behaviour' {
             Name                   = 'p1'
             RequestedChangeType    = 'non-breaking'
             RequestedTargetVersion = $null
-            IsGraduation           = $false
             RawToken               = 'p1@nonbreaking'
         }
 
@@ -919,7 +1011,6 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
             Name                   = 'p1'
             RequestedChangeType    = 'non-breaking'
             RequestedTargetVersion = $null
-            IsGraduation           = $false
             RawToken               = 'p1@nonbreaking'
         }
         Invoke-PlanReview `

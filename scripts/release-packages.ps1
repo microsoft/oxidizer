@@ -51,9 +51,9 @@
     - `patch`            : SemVer-compatible internal change. 1.2.3 -> 1.2.4;
                            0.4.1 -> 0.4.2 (numerically equal to nonbreaking
                            on 0.x.y packages).
-    - `<major>.<minor>.<patch>` : explicit version pin, e.g. `1.0.0` (also
-                           used for the one-time 0.x -> 1.0.0 graduation
-                           event).
+    - `<major>.<minor>.<patch>` : explicit version pin, e.g. `1.0.0` or
+                           `2.5.0`. Must be strictly greater than the
+                           package's current on-disk version.
 
     Each release decision is a judgment call: the author must review the
     actual diff being released (source + dependency edits) and decide
@@ -74,7 +74,7 @@
     .\release-packages.ps1 -Packages 'bytesbuf@breaking','http_extensions@nonbreaking'
 
 .EXAMPLE
-    # Pin a specific version (e.g. graduate 'my-package' from 0.x to 1.0.0)
+    # Pin a specific version, e.g. release 'my-package' as 1.0.0.
     .\release-packages.ps1 -Packages 'my-package@1.0.0'
 #>
 [CmdletBinding()]

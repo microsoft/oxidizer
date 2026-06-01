@@ -16,7 +16,6 @@ Describe 'Parse-ReleaseTokens' {
             $parsed[0].Name | Should -Be 'a'
             $parsed[0].RequestedChangeType | Should -Be 'breaking'
             $parsed[0].RequestedTargetVersion | Should -BeNullOrEmpty
-            $parsed[0].IsGraduation | Should -BeFalse
             $parsed[0].RawToken | Should -Be 'a@breaking'
 
             $parsed[1].RequestedChangeType | Should -Be 'non-breaking'
@@ -37,19 +36,15 @@ Describe 'Parse-ReleaseTokens' {
         }
     }
 
-    Context 'graduation keyword 1.0.0' {
-        It 'sets IsGraduation and populates both RequestedChangeType=breaking and RequestedTargetVersion=1.0.0' {
+    Context 'explicit version pins' {
+        It 'treats 1.0.0 as an ordinary explicit pin (no special graduation handling)' {
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.0.0')
-            $parsed[0].IsGraduation | Should -BeTrue
-            $parsed[0].RequestedChangeType | Should -Be 'breaking'
+            $parsed[0].RequestedChangeType | Should -BeNullOrEmpty
             $parsed[0].RequestedTargetVersion | Should -Be '1.0.0'
         }
-    }
 
-    Context 'explicit version pins' {
         It 'accepts an arbitrary semver pin and leaves RequestedChangeType null' {
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.2.3')
-            $parsed[0].IsGraduation | Should -BeFalse
             $parsed[0].RequestedChangeType | Should -BeNullOrEmpty
             $parsed[0].RequestedTargetVersion | Should -Be '1.2.3'
         }

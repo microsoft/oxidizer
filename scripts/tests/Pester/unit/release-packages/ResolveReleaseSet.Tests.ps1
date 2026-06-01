@@ -141,28 +141,23 @@ Describe 'Resolve-ReleaseSet' {
         }
     }
 
-    Context 'graduation @1.0.0' {
-        It 'accepts graduation on a 0.x.y package and pins the target version to 1.0.0' {
+    Context 'explicit version pin to 1.0.0' {
+        It 'accepts an explicit 1.0.0 pin on a 0.x.y package' {
             $baseline = @((New-BaselinePackage -Folder 'pkg' -Version '0.4.1'))
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.0.0')
             $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
-            $resolved[0].IsGraduation           | Should -BeTrue
             $resolved[0].EffectiveTargetVersion | Should -Be '1.0.0'
             $resolved[0].EffectiveChangeType    | Should -Be 'breaking'
         }
 
-        It 'rejects graduation when the package is already at >= 1.0.0 (caught by pin-validation)' {
-            # The pin (1.0.0) equals the current (1.0.0), so the
-            # already-at-version pin validator fires first. That is acceptable
-            # — the message is clear enough; we just lock in the surface
-            # behaviour here.
+        It 'rejects an explicit 1.0.0 pin when the package is already at 1.0.0 (pin-validation: pin must be > current)' {
             $baseline = @((New-BaselinePackage -Folder 'pkg' -Version '1.0.0'))
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.0.0')
             { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
                 Should -Throw -ExpectedMessage "*'pkg'*already at v1.0.0*"
         }
 
-        It 'rejects graduation when the package is already at a higher 1.x version' {
+        It 'rejects an explicit 1.0.0 pin when the package is already at a higher 1.x version' {
             $baseline = @((New-BaselinePackage -Folder 'pkg' -Version '1.2.0'))
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.0.0')
             { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
