@@ -159,9 +159,8 @@ impl TryFrom<String> for PathAndQuery {
 
     /// Parses an owned string into a [`PathAndQuery`], reusing its buffer.
     ///
-    /// Prefer this over [`TryFrom<&str>`](#impl-TryFrom<%26str>-for-PathAndQuery) when
-    /// the string is already owned: the underlying [`http::uri::PathAndQuery`] takes
-    /// the buffer without copying.
+    /// Prefer this over the `&str` overload when the string is already owned: the
+    /// underlying [`http::uri::PathAndQuery`] takes the buffer without copying.
     ///
     /// # Errors
     ///
