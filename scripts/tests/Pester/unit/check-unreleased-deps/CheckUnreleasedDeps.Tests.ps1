@@ -339,7 +339,7 @@ Describe 'Invoke-CheckUnreleasedDependencies' {
             # modified-but-unreleased dependency reached via downstream.
             $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive ("findings-" + [guid]::NewGuid().ToString('N')))
             $ws.SetVersion('downstream', '0.2.0')            # enters release set
-            $ws.ModifySource('upstream', 'src/lib.rs', "// extra change`n")
+            $ws.ModifySource('upstream', "// extra change`n")
             $ws.AddCommit('Modify upstream source, bump downstream version')
 
             Reset-ReleaseScriptCaches
