@@ -150,8 +150,7 @@ impl TryFrom<&str> for PathAndQuery {
     /// Returns a [`UriError`] if the string does not start with `/` or is not a valid
     /// path-and-query.
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let parsed = HttpPathAndQuery::try_from(value).map_err(|e| UriError::invalid_uri(e.to_string()))?;
-        Ok(Self::from(parsed))
+        Ok(Self::from(HttpPathAndQuery::try_from(value)?))
     }
 }
 
@@ -247,6 +246,11 @@ mod tests {
 
     #[test]
     fn try_from_str_invalid_errors() {
-        let _ = PathAndQuery::try_from("not a valid path\0").unwrap_err();
+        let _ = PathAndQuery::try_from("/invalid path\0").unwrap_err();
+    }
+
+    #[test]
+    fn try_from_str_without_leading_slash_errors() {
+        let _ = PathAndQuery::try_from("api/v1/users").unwrap_err();
     }
 }
