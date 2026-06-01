@@ -18,7 +18,7 @@ fn new_creates_entry_without_timestamp() {
 
 #[test]
 fn expires_after_creates_entry_with_ttl() {
-    let ttl = Duration::from_secs(300);
+    let ttl = Duration::from_mins(5);
     let entry = CacheEntry::expires_after("value", ttl);
     assert_eq!(*entry.value(), "value");
     assert_eq!(entry.ttl(), Some(ttl));
@@ -28,7 +28,7 @@ fn expires_after_creates_entry_with_ttl() {
 #[test]
 fn expires_at_creates_entry_with_ttl_and_timestamp() {
     let now = Clock::new_frozen().system_time();
-    let ttl = Duration::from_secs(300);
+    let ttl = Duration::from_mins(5);
     let entry = CacheEntry::expires_at("value", ttl, now);
     assert_eq!(*entry.value(), "value");
     assert_eq!(entry.cached_at(), Some(now));
@@ -40,7 +40,7 @@ fn set_ttl_updates_ttl() {
     let mut entry = CacheEntry::new("value");
     assert!(entry.ttl().is_none());
 
-    let ttl = Duration::from_secs(60);
+    let ttl = Duration::from_mins(1);
     entry.set_ttl(ttl);
     assert_eq!(entry.ttl(), Some(ttl));
 }
@@ -86,7 +86,7 @@ fn ensure_cached_at_sets_timestamp_when_none() {
 fn ensure_cached_at_preserves_existing_timestamp() {
     let original = Clock::new_frozen().system_time();
     let later = original + Duration::from_secs(100);
-    let mut entry = CacheEntry::expires_at(42, Duration::from_secs(60), original);
+    let mut entry = CacheEntry::expires_at(42, Duration::from_mins(1), original);
     assert_eq!(entry.cached_at(), Some(original));
 
     // Should NOT overwrite the existing timestamp

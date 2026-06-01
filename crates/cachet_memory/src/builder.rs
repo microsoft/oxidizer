@@ -447,14 +447,14 @@ mod tests {
 
     #[test]
     fn time_to_live_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(Duration::from_secs(300));
-        assert_eq!(builder.time_to_live, Some(Duration::from_secs(300)));
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(Duration::from_mins(5));
+        assert_eq!(builder.time_to_live, Some(Duration::from_mins(5)));
     }
 
     #[test]
     fn time_to_idle_stores_value() {
-        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(Duration::from_secs(60));
-        assert_eq!(builder.time_to_idle, Some(Duration::from_secs(60)));
+        let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(Duration::from_mins(1));
+        assert_eq!(builder.time_to_idle, Some(Duration::from_mins(1)));
     }
 
     #[test]
@@ -520,7 +520,7 @@ mod tests {
         let builder = InMemoryCacheBuilder::<String, i32>::new()
             .max_capacity(100)
             .initial_capacity(10)
-            .time_to_live(Duration::from_secs(60))
+            .time_to_live(Duration::from_mins(1))
             .time_to_idle(Duration::from_secs(30))
             .name("my_cache")
             .with_eviction_telemetry()
@@ -561,8 +561,8 @@ mod tests {
     #[test]
     fn build_ttl_less_than_tti_returns_validation_error() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
-            .time_to_live(Duration::from_secs(60))
-            .time_to_idle(Duration::from_secs(120))
+            .time_to_live(Duration::from_mins(1))
+            .time_to_idle(Duration::from_mins(2))
             .build();
         ohno::assert_error_message!(
             result.unwrap_err(),
@@ -574,8 +574,8 @@ mod tests {
     #[test]
     fn build_ttl_eq_tti_succeeds() {
         let result = InMemoryCacheBuilder::<String, i32>::new()
-            .time_to_live(Duration::from_secs(60))
-            .time_to_idle(Duration::from_secs(60))
+            .time_to_live(Duration::from_mins(1))
+            .time_to_idle(Duration::from_mins(1))
             .build();
         result.unwrap();
     }

@@ -1544,7 +1544,7 @@ mod tests {
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api")
-            .body_timeout(Duration::from_secs(60))
+            .body_timeout(Duration::from_mins(1))
             .build()
             .unwrap();
 
@@ -1552,7 +1552,7 @@ mod tests {
             .extensions()
             .get::<BodyTimeout>()
             .expect("body timeout extension should be present");
-        assert_eq!(timeout.duration(), Duration::from_secs(60));
+        assert_eq!(timeout.duration(), Duration::from_mins(1));
     }
 
     #[test]
