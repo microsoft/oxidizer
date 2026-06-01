@@ -11,17 +11,15 @@
 
   - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
 
-## Unreleased
-
-- ✨ Features
-
-  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics.
-
 ## [0.2.0] - 2026-05-11
 
 - ⚠️ Breaking
 
   - API review and overall cleanup ([#391](https://github.com/microsoft/oxidizer/pull/391))
+
+- ✨ Features
+
+  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics. ([#408](https://github.com/microsoft/oxidizer/pull/408))
 
 ## [0.1.1] - 2026-04-16
 

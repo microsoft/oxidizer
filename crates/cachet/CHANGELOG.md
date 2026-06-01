@@ -5,7 +5,7 @@
 - ⚠️ Breaking
 
   - Now requires `0.5.1` of `anyspawn`
-  - Now requires `0.1.1` of `cachet_service`
+  - Now requires `0.2.0` of `cachet_service`
   - Now requires `0.2.0` of `cachet_tier`
   - Now requires `0.3.1` of `layered`
   - Now requires `0.3.3` of `ohno`

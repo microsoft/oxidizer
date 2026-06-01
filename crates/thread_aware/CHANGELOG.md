@@ -11,7 +11,7 @@
   - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
   - enforce nightly formatting ([#407](https://github.com/microsoft/oxidizer/pull/407))
 
-## Unreleased
+## [0.7.0] - 2026-05-07
 
 - ⚠️ Breaking Changes
 

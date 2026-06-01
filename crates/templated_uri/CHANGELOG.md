@@ -27,13 +27,11 @@
 
   - add effective_port and make port return explicit port ([#438](https://github.com/microsoft/oxidizer/pull/438))
 
-## Unreleased
+## [0.2.0] - 2026-05-11
 
 - ✨ Features
 
-  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics. When a field is `None`, it is omitted from the rendered URI, including any associated prefix or separator.
-
-## [0.2.0] - 2026-05-11
+  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics. When a field is `None`, it is omitted from the rendered URI, including any associated prefix or separator. ([#408](https://github.com/microsoft/oxidizer/pull/408))
 
 - ⚠️ Breaking
 

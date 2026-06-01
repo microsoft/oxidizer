@@ -16,7 +16,7 @@
 
 - ⚡ Performance
 
-  - split allocator hot paths from cold refill/oversizedΓÇª ([#442](https://github.com/microsoft/oxidizer/pull/442))
+  - split allocator hot paths from cold refill/oversized… ([#442](https://github.com/microsoft/oxidizer/pull/442))
 
 - ✔️ Tasks
 
@@ -27,7 +27,8 @@
 
   - consolidate unsafe idioms behind shared helpers ([#447](https://github.com/microsoft/oxidizer/pull/447))
 
-## Unreleased
+## [0.1.0] - 2026-05-21
 
-### Added
-- Initial release of the `multitude` arena allocator.
+- ✨ Features
+
+  - Initial release of the `multitude` arena allocator.
