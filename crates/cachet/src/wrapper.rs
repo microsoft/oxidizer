@@ -214,7 +214,7 @@ mod tests {
             "test",
             inner,
             clock,
-            Some(Duration::from_secs(60)),
+            Some(Duration::from_mins(1)),
             telemetry,
             InsertPolicy::default(),
         );
@@ -231,7 +231,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         let inner_check = inner.clone();
         let telemetry = CacheTelemetry::new();
-        let tier_ttl = Duration::from_secs(60);
+        let tier_ttl = Duration::from_mins(1);
         let entry_ttl = Duration::from_secs(30);
         let wrapper: CacheWrapper<String, i32, _> =
             CacheWrapper::new("test", inner, clock.clone(), Some(tier_ttl), telemetry, InsertPolicy::default());
@@ -267,7 +267,7 @@ mod tests {
         let inner = MockCache::<String, i32>::new();
         let inner_check = inner.clone();
         let telemetry = CacheTelemetry::new();
-        let tier_ttl = Duration::from_secs(60);
+        let tier_ttl = Duration::from_mins(1);
         let wrapper: CacheWrapper<String, i32, _> =
             CacheWrapper::new("test", inner, clock, Some(tier_ttl), telemetry, InsertPolicy::default());
 
@@ -287,13 +287,13 @@ mod tests {
             "test",
             inner,
             clock.clone(),
-            Some(Duration::from_secs(60)),
+            Some(Duration::from_mins(1)),
             telemetry,
             InsertPolicy::default(),
         );
 
         // Entry with cached_at in the future simulates clock going backward
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(60), clock.system_time() + Duration::from_hours(1));
+        let entry = CacheEntry::expires_at(42, Duration::from_mins(1), clock.system_time() + Duration::from_hours(1));
         assert!(wrapper.is_expired(&entry));
     }
 
@@ -302,7 +302,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let inner = MockCache::<String, i32>::new();
         let telemetry = CacheTelemetry::new();
-        let ttl = Duration::from_secs(60);
+        let ttl = Duration::from_mins(1);
         let wrapper: CacheWrapper<String, i32, _> =
             CacheWrapper::new("test", inner, clock.clone(), Some(ttl), telemetry, InsertPolicy::default());
 
@@ -339,7 +339,7 @@ mod tests {
             "test",
             inner,
             clock,
-            Some(Duration::from_secs(60)),
+            Some(Duration::from_mins(1)),
             telemetry,
             InsertPolicy::default(),
         );

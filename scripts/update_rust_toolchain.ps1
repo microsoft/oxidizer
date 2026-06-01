@@ -4,19 +4,16 @@
 
 <#
 .SYNOPSIS
-    Updates Rust toolchain versions in rust-toolchain.toml and constants.env.
+    Updates Rust toolchain versions in constants.env.
 
 .DESCRIPTION
     This script automatically updates the Rust toolchain configuration to the latest versions:
-    - Queries the latest stable Rust version and updates rust-toolchain.toml and RUST_LATEST in constants.env
+    - Queries the latest stable Rust version and updates RUST_LATEST in constants.env
     - Calculates yesterday's nightly build date and updates RUST_NIGHTLY in constants.env
     - Fetches the latest cargo-check-external-types release to determine the tested nightly version for RUST_NIGHTLY_EXTERNAL_TYPES
 
 .PARAMETER ConstantsFile
     Path to the constants.env file. Defaults to ../constants.env relative to script location.
-
-.PARAMETER ToolchainFile
-    Path to the rust-toolchain.toml file. Defaults to ../rust-toolchain.toml relative to script location.
 
 .PARAMETER DryRun
     If specified, shows what would be updated without actually modifying the files.
@@ -30,7 +27,6 @@
 
 param(
     [string]$ConstantsFile = (Join-Path $PSScriptRoot ".." "constants.env"),
-    [string]$ToolchainFile = (Join-Path $PSScriptRoot ".." "rust-toolchain.toml"),
     [switch]$DryRun
 )
 
@@ -134,20 +130,6 @@ function Get-ExternalTypesTestedNightly {
     }
 }
 
-function Update-RustToolchainToml {
-    param(
-        [string]$FilePath,
-        [string]$NewVersion
-    )
-
-    $content = Get-Content $FilePath -Raw
-
-    # Update the channel line
-    $updatedContent = $content -replace '(?m)^channel = "[\d.]+"', "channel = `"$NewVersion`""
-
-    return $updatedContent
-}
-
 function Update-ConstantsEnv {
     param(
         [string]$FilePath,
@@ -176,19 +158,12 @@ if (-not (Test-Path $ConstantsFile)) {
     exit 1
 }
 
-if (-not (Test-Path $ToolchainFile)) {
-    Write-Host "Error: Toolchain file not found at '$ToolchainFile'"
-    exit 1
-}
-
 # Get current versions
 $constantsContent = Get-Content $ConstantsFile
-$toolchainContent = Get-Content $ToolchainFile -Raw
 
 $currentRustLatest = ($constantsContent | Select-String '^RUST_LATEST=(.+)$').Matches.Groups[1].Value
 $currentRustNightly = ($constantsContent | Select-String '^RUST_NIGHTLY=(.+)$').Matches.Groups[1].Value
 $currentRustNightlyExternal = ($constantsContent | Select-String '^RUST_NIGHTLY_EXTERNAL_TYPES=(.+)$').Matches.Groups[1].Value
-$currentToolchainVersion = if ($toolchainContent -match '(?m)^channel = "(.+)"') { $Matches[1] } else { "unknown" }
 
 # Fetch new versions
 $stableResult = Get-LatestStableRustVersion
@@ -223,12 +198,7 @@ else {
 Write-Host ""
 
 # Determine what needs updating
-$toolchainNeedsUpdate = $false
 $constantsUpdates = @{}
-
-if ($currentToolchainVersion -ne $newStableVersion) {
-    $toolchainNeedsUpdate = $true
-}
 
 if ($currentRustLatest -ne $newStableVersion) {
     $constantsUpdates["RUST_LATEST"] = $newStableVersion
@@ -242,7 +212,7 @@ if ($externalTypesResult.Success -and $currentRustNightlyExternal -ne $externalT
     $constantsUpdates["RUST_NIGHTLY_EXTERNAL_TYPES"] = $externalTypesResult.Version
 }
 
-if (-not $toolchainNeedsUpdate -and $constantsUpdates.Count -eq 0) {
+if ($constantsUpdates.Count -eq 0) {
     exit 0
 }
 
@@ -251,11 +221,6 @@ if ($DryRun) {
 }
 
 # Apply updates
-if ($toolchainNeedsUpdate) {
-    $newToolchainContent = Update-RustToolchainToml -FilePath $ToolchainFile -NewVersion $newStableVersion
-    Set-Content -Path $ToolchainFile -Value $newToolchainContent -NoNewline
-}
-
 if ($constantsUpdates.Count -gt 0) {
     $newConstantsContent = Update-ConstantsEnv -FilePath $ConstantsFile -Updates $constantsUpdates
     Set-Content -Path $ConstantsFile -Value $newConstantsContent -NoNewline

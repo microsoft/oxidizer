@@ -223,7 +223,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 We pin the version of the tools we use in CI to ensure hermetic builds as much as possible. We routinely update
 the versions of everything to stay up to date using three scripts:
 
-- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file and in `rust-toolchain.toml`.
+- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file.
 - `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
 - `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
 
