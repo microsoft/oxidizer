@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.3.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `fundle_macros`
+  - Now requires `0.3.1` of `fundle_macros_impl`
+
+- ✨ Features
+
+  - Introduce the thread_aware crate ([#72](https://github.com/microsoft/oxidizer/pull/72))
+  - Improve builder UX. ([#57](https://github.com/microsoft/oxidizer/pull/57))
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+  - A few doc-related fixes ([#80](https://github.com/microsoft/oxidizer/pull/80))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - switch to cargo-heather ([#440](https://github.com/microsoft/oxidizer/pull/440))
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+  - Enable the missing_docs compiler lint. ([#102](https://github.com/microsoft/oxidizer/pull/102))
+
+- 🔄 Continuous Integration
+
+  - Linting for Cargo.toml files ([#110](https://github.com/microsoft/oxidizer/pull/110))
+  - Add license check for dependencies ([#105](https://github.com/microsoft/oxidizer/pull/105))
+
+- 🧩 Miscellaneous
+
+  - Enable the allow_attribute lint and fix warnings. ([#111](https://github.com/microsoft/oxidizer/pull/111))
+
 ## [0.3.0] - 2025-11-20
 
 - 🧩 Miscellaneous
