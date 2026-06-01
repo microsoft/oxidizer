@@ -882,9 +882,21 @@ function Format-PackageMenu {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
-    [void]$sb.AppendLine('  potentially affected dependency chains:')
-    foreach ($chain in @($Finding.DependencyChains)) {
-        [void]$sb.AppendLine("    $($chain -join ' -> ')")
+    # Render the chains section only when there's something to show. In the
+    # guided changed-packages (all-changed) workflow a package may surface as
+    # a stub finding with no chains — every changed package is implicitly a
+    # dependency of an imaginary `*` package, and the menu hides that
+    # bookkeeping. Print a tailored hint instead.
+    $chains = @($Finding.DependencyChains)
+    if ($chains.Count -gt 0) {
+        [void]$sb.AppendLine('  potentially affected dependency chains:')
+        foreach ($chain in $chains) {
+            [void]$sb.AppendLine("    $($chain -join ' -> ')")
+        }
+    } elseif ($Finding.InReleaseSet) {
+        [void]$sb.AppendLine('  cascade-included; no other in-release-set packages depend on this')
+    } else {
+        [void]$sb.AppendLine('  No dependents in release set')
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('  1. View diff')
@@ -1214,57 +1226,83 @@ function Invoke-WorkspaceCheck {
 #
 #   1. Re-resolve the release set from the current $userTokens via
 #      Resolve-ReleaseSet (cheap — operates on the immutable workspace
-#      baseline, no I/O).
-#   2. If a previously-declined folder is now in the resolved release set
-#      (because a later acceptance pulled it in via cascade-toward-dependents),
-#      emit a one-line notice and clear it from $declined. The next iteration
-#      gives the user a chance to elevate the cascade-applied change type
-#      after the fact.
-#   3. Compute findings via Get-UnreleasedModifiedDependencies against the
-#      fresh release set + immutable modifications snapshot. Filter out
+#      baseline, no I/O). In -Mode 'all-changed' with no user tokens yet
+#      this resolves to an empty set without invoking Resolve-ReleaseSet
+#      (which throws on empty input).
+#   2. Compute findings via Get-UnreleasedModifiedDependencies against the
+#      fresh release set + immutable modifications snapshot. In -Mode
+#      'all-changed' the call passes -IncludeAllModifiedAsRoots so every
+#      changed published package surfaces from iteration 1. Filter out
 #      $declined (still-not-in-release-set folders the user declined) and
 #      $reviewedCascadeAsIs (release-set cascade-source folders the user
 #      already accepted as-is).
-#   4. If empty: review complete — return the resolved release set.
-#   5. Non-interactive: emit a warning summary listing both buckets
+#   3. If empty: review complete — return the resolved release set.
+#   4. Non-interactive: emit a warning summary listing both buckets
 #      (not-in-release-set vs in-release-set-with-cascade-below-breaking)
 #      and return the current resolved set unchanged. The CI scan in
 #      check-unreleased-dependencies.ps1 will flag the same findings.
-#   6. Interactive: prompt the user for the first finding via
+#      -Mode 'all-changed' is rejected non-interactively up-front because
+#      its entire purpose is interactive triage.
+#   5. Interactive: prompt the user for the first finding via
 #      Get-PackageReleaseDecision. On 'ignore' add to the appropriate
 #      hashset; on accept ('breaking'/'non-breaking'/'patch') append a
 #      synthetic '<folder>@<change>' token to $userTokens and loop. The
 #      menu's "view diff" option is owned by Get-PackageReleaseDecision
 #      and never returns control here.
 #
+# Decisions are FINAL. If a previously-declined package is later cascade-pulled
+# into the release set, or a previously-reviewed-as-is package has its cascade
+# level strengthened by a subsequent acceptance, the user is NOT re-prompted.
+# Their "ignore" decision is interpreted as "accept whatever cascade level the
+# planner decides; don't bother me about elevation" — a preference invariant
+# under cascade-level changes. Cascade reasons for each released package are
+# surfaced by Show-ReleasePlan's output for transparency.
+#
 # Returns: hashtable (folder -> resolved entry) representing the final plan.
 #
-# Iteration bound: number of published workspace packages. Each iteration
-# either grows ($declined ∪ $reviewedCascadeAsIs ∪ release-set)
-# monotonically or terminates, so the loop is provably bounded.
+# Termination: each iteration must change state (adds to $userTokens via
+# accept, OR to $declined / $reviewedCascadeAsIs via ignore). Verified by a
+# state-signature comparison at the top of each iteration — if two consecutive
+# iterations produce the same signature we throw a "no progress" diagnostic
+# rather than infinite-loop. A soft runaway cap (10 * published-package count)
+# bounds total prompts as a defence-in-depth safety net; the real bound is
+# one prompt per published package (the first time it surfaces).
 function Invoke-PlanReview {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
-        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
+        [Parameter(Mandatory = $false)][ValidateSet('targeted', 'all-changed')][string]$Mode = 'targeted'
     )
 
     $isInteractive = Test-InteractiveSession
+
+    # all-changed mode is the back-end for release-changed-packages.ps1, whose
+    # entire UX is "prompt the user for each modified package". Refuse early
+    # in non-interactive contexts (CI, redirected stdin) so the caller sees
+    # a clear error instead of a noisy warning + empty result.
+    if ($Mode -eq 'all-changed' -and -not $isInteractive) {
+        throw 'Invoke-PlanReview -Mode ''all-changed'' requires an interactive session. Use release-packages.ps1 for scripted/CI releases.'
+    }
 
     # Working token list, mutable. Each accepted finding appends a new token.
     $userTokens = New-Object 'System.Collections.Generic.List[object]'
     foreach ($t in $ParsedTokens) { $userTokens.Add($t) }
 
     $declined = [System.Collections.Generic.HashSet[string]]::new()
-    # folder -> EffectiveChangeType-at-review-time. Suppresses re-prompting only
-    # while the underlying cascade level is unchanged. If a later acceptance
-    # strengthens the cascade requirement (e.g. patch -> non-breaking), the
-    # entry is re-surfaced so the user can re-evaluate against the new level.
-    $reviewedCascadeAsIs = @{}
+    # Set of release-set cascade-source folders the user said "keep cascade-
+    # applied level, don't elevate". Entries are never removed: the decision
+    # stands even if cascade strengthens the level on a later iteration.
+    $reviewedCascadeAsIs = [System.Collections.Generic.HashSet[string]]::new()
 
-    $maxIterations = @(Get-WorkspacePackages -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
-    if ($maxIterations -lt 1) { $maxIterations = 1 }
+    # Runaway cap is a defence-in-depth safety net; the real termination
+    # guarantee comes from the state-signature progress check below. Each
+    # published package is reviewed at most once (decisions are final), so
+    # 10x the published count is comfortably above the worst case.
+    $publishedCount = @(Get-WorkspacePackages -repoRoot $RepoRoot | Where-Object { $_.Published }).Count
+    if ($publishedCount -lt 1) { $publishedCount = 1 }
+    $runawayCap = 10 * $publishedCount
 
     # Save/restore the temp-diff-paths tracking list (used by Show-PackageDiff)
     # to match the lifecycle of this review loop.
@@ -1272,64 +1310,60 @@ function Invoke-PlanReview {
     $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
 
     $resolvedHash = $null
+    $previousSignature = $null
 
     try {
-        for ($iter = 0; $iter -lt $maxIterations; $iter++) {
+        for ($iter = 0; $iter -lt $runawayCap; $iter++) {
+            # State signature: every iteration must mutate at least one of
+            # {userTokens, declined, reviewedCascadeAsIs}. If a full iteration
+            # body completes without changing state, the next iteration would
+            # take the same path forever — abort with a diagnostic rather than
+            # spinning silently.
+            $tokenSig    = (@($userTokens.ToArray()) | ForEach-Object { $_.RawToken }) -join '|'
+            $declinedSig = (@($declined) | Sort-Object) -join ','
+            $reviewedSig = (@($reviewedCascadeAsIs) | Sort-Object) -join ','
+            $signature   = "tokens=[$tokenSig];declined=[$declinedSig];reviewed=[$reviewedSig]"
+            if ($iter -gt 0 -and $signature -eq $previousSignature) {
+                throw "Plan review made no progress on iteration $iter (state signature unchanged). This indicates a logic bug; please report. Signature: $signature"
+            }
+            $previousSignature = $signature
+
             # Re-resolve the release set from the current token list. Pure
             # in-memory operation; no caching/snapshot invalidation needed.
-            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
-            $resolvedHash = @{}
-            foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
+            # In all-changed mode the user may have accepted nothing yet, in
+            # which case Resolve-ReleaseSet throws on empty input — handle
+            # that here rather than relaxing the upstream guard, which would
+            # weaken targeted-mode validation.
+            if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
+                $resolvedHash = @{}
+            } else {
+                $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+                $resolvedHash = @{}
+                foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
+            }
 
-            # Handoff: a previously-declined folder may now be in the release
-            # set because a later acceptance cascade-pulled it in. Surface the
-            # transition and clear from $declined so the next iteration's
-            # findings query can re-surface it (now as a release-set cascade
-            # candidate, subject to Invariant B elevation review).
-            $reclaimed = @()
-            foreach ($folder in @($declined)) {
-                if ($resolvedHash.ContainsKey($folder)) {
-                    $reclaimed += $folder
-                }
-            }
-            foreach ($folder in $reclaimed) {
-                [void]$declined.Remove($folder)
-                if ($isInteractive) {
-                    $entry = $resolvedHash[$folder]
-                    $reasonNames = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                    Write-Host "ℹ️  Previously ignored package '$folder' was cascade-released because of changes in: $reasonNames." -ForegroundColor DarkCyan
-                }
-            }
+            # Handoff: a previously-declined or previously-reviewed-as-is folder
+            # may now have a different cascade story (cascade pulled it into the
+            # release set, or strengthened its level). Decisions are final, so we
+            # do NOT re-prompt — the user's earlier "ignore" stands and the
+            # cascade-applied level is silently accepted. Show-ReleasePlan's
+            # output records the cascade reasons for transparency.
 
             if ($isInteractive) {
                 Write-Host ''
                 Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
             }
 
-            $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot)
-
-            # Drop reviewed-as-is entries only while the cascade level matches
-            # the level the user originally approved. A strengthening cascade
-            # (e.g. patch -> non-breaking) clears the approval and re-surfaces
-            # the finding for a fresh decision.
-            $resurfaced = @()
-            foreach ($folder in @($reviewedCascadeAsIs.Keys)) {
-                $entry = $resolvedHash[$folder]
-                if ($null -eq $entry -or $entry.EffectiveChangeType -ne $reviewedCascadeAsIs[$folder]) {
-                    $resurfaced += $folder
-                }
-            }
-            foreach ($folder in $resurfaced) {
-                $reviewedCascadeAsIs.Remove($folder)
-                if ($null -ne $resolvedHash[$folder]) {
-                    Write-Host "ℹ️  Re-surfacing '$folder' for review: cascade level strengthened to $($resolvedHash[$folder].EffectiveChangeType)." -ForegroundColor DarkCyan
-                }
+            if ($Mode -eq 'all-changed') {
+                $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot -IncludeAllModifiedAsRoots)
+            } else {
+                $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot)
             }
 
             $queue = @(
                 $allFindings | Where-Object {
                     -not $declined.Contains($_.Folder) -and
-                    -not $reviewedCascadeAsIs.ContainsKey($_.Folder)
+                    -not $reviewedCascadeAsIs.Contains($_.Folder)
                 }
             )
 
@@ -1350,9 +1384,14 @@ function Invoke-PlanReview {
                     Write-Host '⚠️  The following workspace packages have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
                     foreach ($finding in $notInReleaseSet) {
                         Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
-                        Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
-                        foreach ($chain in $finding.DependencyChains) {
-                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        $chains = @($finding.DependencyChains)
+                        if ($chains.Count -gt 0) {
+                            Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
+                            foreach ($chain in $chains) {
+                                Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                            }
+                        } else {
+                            Write-Host '      no dependents in release set' -ForegroundColor DarkGray
                         }
                     }
                 }
@@ -1360,9 +1399,14 @@ function Invoke-PlanReview {
                     Write-Host '⚠️  The following workspace packages are being released with a non-breaking cascade-applied version change, BUT also have pre-existing modifications that may warrant a more impactful change type (e.g. breaking). A reviewer should confirm the cascade-applied change type is sufficient:' -ForegroundColor Yellow
                     foreach ($finding in $inReleaseSet) {
                         Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
-                        Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
-                        foreach ($chain in $finding.DependencyChains) {
-                            Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                        $chains = @($finding.DependencyChains)
+                        if ($chains.Count -gt 0) {
+                            Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
+                            foreach ($chain in $chains) {
+                                Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
+                            }
+                        } else {
+                            Write-Host '      cascade-included; no other in-release-set packages depend on this' -ForegroundColor DarkGray
                         }
                     }
                 }
@@ -1378,7 +1422,7 @@ function Invoke-PlanReview {
                 if ($next.InReleaseSet) {
                     $cascadeLevel = $resolvedHash[$next.Folder].EffectiveChangeType
                     Write-Host "  Keeping '$($next.Folder)' at its cascade-applied $cascadeLevel level; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
-                    $reviewedCascadeAsIs[$next.Folder] = $cascadeLevel
+                    [void]$reviewedCascadeAsIs.Add($next.Folder)
                 } else {
                     Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
                     [void]$declined.Add($next.Folder)
@@ -1412,14 +1456,18 @@ function Invoke-PlanReview {
             }))
         }
 
-        Write-Warning "Plan review reached its iteration cap ($maxIterations); aborting further prompts."
+        Write-Warning "Plan review reached its runaway-cap of $runawayCap iterations; aborting further prompts. This is a defence-in-depth safety net — the state-signature check above should have caught any logic loop earlier; if you see this, please report."
         # Re-resolve before returning so the final acceptance of the last
         # iteration (if any) is reflected in the plan handed back to the
         # caller. Without this, callers see the resolved set from the START
         # of the final iteration, missing the token just appended.
-        $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
-        $resolvedHash = @{}
-        foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
+        if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
+            $resolvedHash = @{}
+        } else {
+            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+            $resolvedHash = @{}
+            foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
+        }
         return $resolvedHash
     } finally {
         foreach ($p in $script:TempPackageDiffPaths) {
@@ -1741,6 +1789,109 @@ function Invoke-ReleasePackagesMain {
     Show-ReleasePlan -ResolvedReleaseSet $resolvedHash
 
     # 7. EXECUTE PLAN (atomic — all writes happen here)
+    try {
+        $releases = @(Invoke-ResolvedRelease -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml `
+            -PrBaseUrl $prBaseUrl -ResolvedReleaseSet $resolvedHash -WorkspaceBaseline $workspaceBaseline)
+    } catch {
+        Write-Error "Release execution failed: $_"
+        Exit 1
+    }
+
+    Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
+
+    Show-ReleaseSummary -releases $releases
+    Show-FinalMessageForBundle -Releases $releases -ResolvedReleaseSet $resolvedHash
+
+    return ,$releases
+}
+
+
+# Entry point for `scripts/release-changed-packages.ps1` — the guided counterpart
+# to `Invoke-ReleasePackagesMain`. Mirrors that function's pre-flight + execute
+# sequence, but seeds the review loop with NO explicit user tokens. Instead it
+# asks `Invoke-PlanReview -Mode 'all-changed'` to surface every workspace
+# package with unreleased modifications and walk the user through each one.
+#
+# Interactive-only by design: non-interactive callers must use the token-driven
+# `Invoke-ReleasePackagesMain` so the choices are explicit and auditable.
+function Invoke-ReleaseChangedPackagesMain {
+    [CmdletBinding()]
+    param()
+
+    # 1. PRE-FLIGHT
+    if (-not (Test-CommandExists -command 'git')) {
+        Write-Error 'Git is not installed or not found in your PATH.'
+        Exit 1
+    }
+
+    $repoRoot = Get-Location
+    if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
+        Write-Error 'This script must be run from the root of a Git repository.'
+        Exit 1
+    }
+    $rootCargoToml = Join-Path $repoRoot 'Cargo.toml'
+    if (-not (Test-Path $rootCargoToml)) {
+        Write-Error "Could not find root Cargo.toml at '$rootCargoToml'."
+        Exit 1
+    }
+
+    # Fail fast for non-interactive sessions BEFORE doing any workspace scan
+    # work — Invoke-PlanReview will refuse anyway, but reporting the precise
+    # remediation here saves the user a slow scan first.
+    if (-not (Test-InteractiveSession)) {
+        Write-Error 'release-changed-packages.ps1 is an interactive-only workflow. For non-interactive (scripted/CI) use, invoke release-packages.ps1 with an explicit package list.'
+        Exit 1
+    }
+
+    # 2. DETERMINE GITHUB REPO URL
+    $prBaseUrl = $null
+    $remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path -AllowFailure
+    if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
+        $repoIdentifier = $matches[1] -replace '\.git$', ''
+        $prBaseUrl = "https://github.com/$repoIdentifier/pull"
+    } else {
+        Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
+    }
+
+    # 3. SNAPSHOT WORKSPACE + MODIFICATIONS (immutable for the run)
+    $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $repoRoot.Path)
+    $modifiedSnapshot  = Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
+
+    # 4. EARLY EXIT IF NO CHANGES — saves the user from an empty prompt loop.
+    if ($modifiedSnapshot.Count -eq 0) {
+        Write-Host ''
+        Write-Host '✅ No workspace packages have unreleased modifications. Nothing to release.' -ForegroundColor Green
+        return ,@()
+    }
+
+    # 5. PRE-RELEASE REVIEW (interactive loop; no disk writes).
+    # No user tokens: the all-changed mode lets the review loop add every
+    # changed published package as a BFS root, surfacing them one-by-one for
+    # decision. Acceptances become tokens inside the loop and feed
+    # Resolve-ReleaseSet on the next iteration just like the targeted flow.
+    try {
+        $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
+            -ParsedTokens @() -WorkspaceBaseline $workspaceBaseline `
+            -ModifiedSnapshot $modifiedSnapshot -Mode 'all-changed'
+    } catch {
+        Write-Error $_.Exception.Message
+        Exit 1
+    }
+
+    # 6. EARLY EXIT IF USER IGNORED EVERYTHING — skip Show-ReleasePlan /
+    # Invoke-ResolvedRelease / Invoke-WorkspaceCheck. They handle empty input
+    # gracefully but we'd waste a `cargo check` run and the user already
+    # knows nothing will happen.
+    if ($null -eq $resolvedHash -or $resolvedHash.Count -eq 0) {
+        Write-Host ''
+        Write-Host '✅ No packages selected for release.' -ForegroundColor Green
+        return ,@()
+    }
+
+    # 7. SHOW PLAN
+    Show-ReleasePlan -ResolvedReleaseSet $resolvedHash
+
+    # 8. EXECUTE PLAN (atomic — all writes happen here)
     try {
         $releases = @(Invoke-ResolvedRelease -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml `
             -PrBaseUrl $prBaseUrl -ResolvedReleaseSet $resolvedHash -WorkspaceBaseline $workspaceBaseline)

@@ -414,6 +414,155 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
 }
 
 # --------------------------------------------------------------------------
+# Get-UnreleasedModifiedDependencies — -IncludeAllModifiedAsRoots switch.
+# Models the "imaginary `*` package depends on every changed package" UX
+# without a sentinel: every modified-published package is either reached as
+# a dep (real chain recorded) or added as a stub finding with empty chains
+# (rendered as "No dependents in release set" by the menu).
+# --------------------------------------------------------------------------
+
+Describe 'Get-UnreleasedModifiedDependencies: -IncludeAllModifiedAsRoots' {
+
+    It 'surfaces both changed packages with a real chain when one depends on the other' {
+        Reset-ReleaseScriptCaches
+        # downstream → upstream. Both modified, no release set yet (iteration 1
+        # of all-changed mode). Expect: 2 findings; upstream has chain
+        # [downstream, upstream]; downstream has empty chains (no other root
+        # reaches it).
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-inter-dep')
+        $snap = @{ upstream = 1; downstream = 2 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Count | Should -Be 2
+        $up = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $up | Should -Not -BeNullOrEmpty
+        $up.InReleaseSet | Should -BeFalse
+        @($up.DependencyChains).Count | Should -Be 1
+        $up.DependencyChains[0] | Should -Be @('downstream', 'upstream')
+
+        $dn = $findings | Where-Object { $_.Folder -eq 'downstream' }
+        $dn | Should -Not -BeNullOrEmpty
+        $dn.InReleaseSet | Should -BeFalse
+        @($dn.DependencyChains).Count | Should -Be 0
+    }
+
+    It 'surfaces both changed packages as stubs when they have no inter-dependency' {
+        Reset-ReleaseScriptCaches
+        # Detached preset: alpha → beta, gamma → delta. Modify only beta and
+        # delta (the leaves of each disjoint chain). Neither depends on the
+        # other, no release set. Expect: 2 stub findings, both with empty
+        # chains.
+        $ws = New-SyntheticWorkspace -Preset Detached -Path (Join-Path $TestDrive 'iamar-no-inter')
+        $snap = @{ beta = 1; delta = 1 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Count | Should -Be 2
+        $findings.Folder | Sort-Object | Should -Be @('beta', 'delta')
+        foreach ($f in $findings) {
+            $f.InReleaseSet | Should -BeFalse
+            @($f.DependencyChains).Count | Should -Be 0
+        }
+    }
+
+    It 'surfaces a single changed package as a stub when its dependents are unchanged' {
+        Reset-ReleaseScriptCaches
+        # Linear2: downstream → upstream. Only upstream is changed; downstream
+        # is unchanged (and not in release set). With -IncludeAllModifiedAsRoots
+        # and empty release set, only upstream is a BFS root. It has no deps
+        # of its own, so no chain is recorded — Phase B adds it as a stub.
+        # downstream is NOT a finding because it isn't modified.
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-lone-changed')
+        $snap = @{ upstream = 1 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Count | Should -Be 1
+        $findings[0].Folder | Should -Be 'upstream'
+        $findings[0].InReleaseSet | Should -BeFalse
+        @($findings[0].DependencyChains).Count | Should -Be 0
+    }
+
+    It 'does NOT add stubs for modified-published packages that are user-source release-set members' {
+        Reset-ReleaseScriptCaches
+        # Linear2: downstream → upstream. Both modified. Release set contains
+        # downstream as user-source (the user has already decided to release
+        # it). Expect: upstream surfaces as a finding via BFS from downstream;
+        # downstream does NOT surface as a stub (user-source members are
+        # excluded by the surfacing predicate — the user has already decided).
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-usersrc')
+        $rs = @{
+            downstream = [pscustomobject]@{
+                Folder                = 'downstream'
+                Source                = 'user'
+                EffectiveChangeType   = 'patch'
+                EffectiveTargetVersion = '0.1.1'
+                CurrentVersion        = '0.1.0'
+                AutoUpgraded          = $false
+                CascadeReasons        = @()
+            }
+        }
+        $snap = @{ upstream = 1; downstream = 2 }
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet $rs `
+            -ModifiedSnapshot $snap -IncludeAllModifiedAsRoots)
+
+        $findings.Folder | Should -Contain 'upstream'
+        $findings.Folder | Should -Not -Contain 'downstream'
+        $up = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $up.DependencyChains[0] | Should -Be @('downstream', 'upstream')
+    }
+
+    It 'returns no findings when both the release set and modified map are empty (regression for early-return)' {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-empty')
+        $findings = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet @{} `
+            -ModifiedSnapshot @{} -IncludeAllModifiedAsRoots)
+        $findings.Count | Should -Be 0
+    }
+
+    It 'behaves identically with or without the switch when no extra changed packages exist beyond the release set' {
+        Reset-ReleaseScriptCaches
+        # Linear2: only upstream changed; downstream is a release-set member
+        # (cascade-source patch) by hand. Without the switch, upstream surfaces
+        # via downstream's BFS. With the switch, upstream is also a BFS root
+        # (no deps, no extra chains) and Phase B skips it (already a finding).
+        # Both calls should produce the same single finding with the same
+        # chain.
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-regression')
+        $rs = @{
+            downstream = [pscustomobject]@{
+                Folder                = 'downstream'
+                Source                = 'cascade'
+                EffectiveChangeType   = 'patch'
+                EffectiveTargetVersion = '0.1.1'
+                CurrentVersion        = '0.1.0'
+                AutoUpgraded          = $false
+                CascadeReasons        = @()
+            }
+        }
+        $snap = @{ upstream = 1 }
+        $without = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet $rs -ModifiedSnapshot $snap)
+        $with = @(Get-UnreleasedModifiedDependencies `
+            -RepoRoot $ws.Path -ResolvedReleaseSet $rs -ModifiedSnapshot $snap `
+            -IncludeAllModifiedAsRoots)
+
+        $without.Count | Should -Be 1
+        $with.Count    | Should -Be 1
+        $without[0].Folder | Should -Be 'upstream'
+        $with[0].Folder    | Should -Be 'upstream'
+        $without[0].DependencyChains[0] | Should -Be @('downstream', 'upstream')
+        $with[0].DependencyChains[0]    | Should -Be @('downstream', 'upstream')
+    }
+}
+
+# --------------------------------------------------------------------------
 # Update-PackageVersion — exercise the [package]-scoped replacement.
 # --------------------------------------------------------------------------
 

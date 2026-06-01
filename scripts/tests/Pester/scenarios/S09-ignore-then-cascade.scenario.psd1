@@ -1,6 +1,6 @@
 @{
     Name        = 'S09-ignore-then-cascade'
-    Description = 'User declines b, then accepts c. Releasing c cascade-releases b into the release set. The scan reports the override via the "Previously ignored package was cascade-released" notice and removes b from the declined set. Per Invariant B, b (now in the release set with a non-breaking cascade-applied change type AND modifications from earlier commits) is RE-SURFACED for elevation review on the next iteration — accepting c does NOT pre-mark b as reviewed. User confirms the cascade-applied change type is sufficient by picking ignore again.'
+    Description = 'User declines b, then accepts c. Releasing c cascade-releases b into the release set at a non-breaking level. Because decisions are final, the planner silently accepts the cascade-applied level for b without re-prompting — the user already expressed their preference not to elevate. The cascade reason for b is surfaced in the final Show-ReleasePlan output for transparency. Confirms the simplified semantics: each package is prompted at most once.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -17,13 +17,10 @@
             @{ Match = "Choose option for 'b'"; Reply = '2' }
             # Iter 1: accept c via option 4 (non-breaking). Option 5 (patch) is hidden
             # on 0.x.y because it would produce the same numeric increment.
+            # c's cascade then pulls b into the release set at non-breaking
+            # (0.2.0 → 0.2.1). Because b was previously declined, the planner
+            # silently accepts the cascade-applied level and does NOT re-prompt.
             @{ Match = "Choose option for 'c'"; Reply = '4' }
-            # Iter 2: c's cascade pulled b into the release set with a
-            # non-breaking change (0.2.0 → 0.2.1). Because b also has
-            # pre-existing modifications, Invariant B re-surfaces it for
-            # elevation review. User picks ignore — the cascade-applied
-            # change is fine.
-            @{ Match = "Choose option for 'b'"; Reply = '2' }
         )
     }
 
@@ -40,7 +37,6 @@
         PromptsRaised = @(
             "Choose option for 'b'"
             "Choose option for 'c'"
-            "Choose option for 'b'"
         )
         UnconsumedAnswers = @()
     }

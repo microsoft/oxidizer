@@ -10,6 +10,13 @@ This document is the reference for the human-driven release tooling in
   modifications for the caller to review, and applies the resulting
   version-number increments, changelog updates, and dependent cascade in
   one shot.
+- `scripts/release-changed-packages.ps1` — guided counterpart to
+  `release-packages.ps1` for when you do not yet know which packages to
+  release. The script walks you through *every* workspace package with
+  unreleased modifications, one prompt at a time, and lets you ignore
+  each one or release it as breaking / non-breaking / patch. Each
+  acceptance feeds into the same plan resolver and cascade-toward-dependents
+  logic as the token-based flow. Interactive-only.
 - `scripts/check-unreleased-dependencies.ps1` — CI helper that flags for
   reviewer attention any workspace packages with unreleased modifications
   that are transitively pulled in by a package this PR is releasing.
@@ -296,6 +303,56 @@ want when re-planning the same release.
 If a previous run produced changes you want to discard before
 re-planning, use `git reset` / `git restore` to revert the on-disk
 state first, then re-run with the corrected `-Packages` argument.
+
+---
+
+## Guided changed-packages workflow
+
+When you know "something changed and probably needs releasing" but do not
+yet have the full `-Packages` list ready, use the guided alternative:
+
+```powershell
+./scripts/release-changed-packages.ps1
+```
+
+The script takes no arguments. It scans the workspace for every package
+with unreleased modifications and walks you through them one at a time.
+For each surfaced package the menu is the same as the per-package review
+menu used by `release-packages.ps1`:
+
+- **View the diff** since the last release commit.
+- **Ignore** the package (leave it unreleased; treat the change as
+  immaterial or not yet ready).
+- **Release as breaking / non-breaking / patch** — synthesises a release
+  token for the package internally and feeds it back into the planner.
+
+Acceptances behave exactly as if you had passed the corresponding
+`-Packages` token to `release-packages.ps1`: the planner re-resolves the
+release set, computes the cascade toward dependents, and the next
+iteration surfaces any newly-relevant elevation candidates. Decisions
+are final — each package is prompted at most once. If a later
+acceptance cascade-pulls a previously-ignored package into the release
+set, or strengthens an already-reviewed package's cascade level, the
+planner silently accepts the cascade-applied level (reflecting the
+user's earlier decision not to elevate). The final release plan summary
+records the cascade reasons for every released package.
+
+Conceptually, the workflow is equivalent to imagining a virtual `*`
+package that depends on every changed workspace package and running
+`release-packages.ps1` to cascade releases from `*` outward. There is no
+real `*` token; the review loop seeds its dependency BFS with every
+changed package as an additional root, so per-package chains between
+changed packages (e.g. `bytesbuf_io → bytesbuf`) emerge naturally in the
+review menu. A changed package that no other in-release-set package
+depends on is shown with the hint "No dependents in release set".
+
+`release-changed-packages.ps1` is **interactive-only**. For
+scripted / CI use, invoke `release-packages.ps1` with an explicit
+`-Packages` list so the choices are explicit and auditable.
+
+If the scan finds no packages with unreleased modifications, the script
+prints a confirmation and exits without prompting. If you ignore every
+prompt, the script exits without writing any files.
 
 ---
 

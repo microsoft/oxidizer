@@ -861,7 +861,14 @@ function Get-UnreleasedModifiedDependencies {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
-        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot
+        [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
+        # When set, treats every modified-published package as an additional BFS
+        # root (in addition to ResolvedReleaseSet members) so chains BETWEEN
+        # changed packages surface naturally, AND sweeps any modified-published
+        # package the surfacing predicate accepts but no BFS run reached as a
+        # dep, adding it as a "stub" finding (DependencyChains = @()). Used by
+        # the guided changed-packages workflow (release-changed-packages.ps1).
+        [switch]$IncludeAllModifiedAsRoots
     )
 
     $packages = Get-WorkspacePackages -repoRoot $RepoRoot
@@ -874,7 +881,11 @@ function Get-UnreleasedModifiedDependencies {
         Get-PackagesWithUnreleasedChanges -RepoRoot $RepoRoot
     }
 
-    if ($ResolvedReleaseSet.Count -eq 0) { return @() }
+    if ($IncludeAllModifiedAsRoots) {
+        if ($ResolvedReleaseSet.Count -eq 0 -and $modifiedMap.Count -eq 0) { return @() }
+    } else {
+        if ($ResolvedReleaseSet.Count -eq 0) { return @() }
+    }
 
     # Build folder -> package lookup and normalized-name -> folder lookup.
     $byFolder = @{}
@@ -884,13 +895,50 @@ function Get-UnreleasedModifiedDependencies {
         $folderByNormName[$c.Name.Replace('-', '_')] = $c.Folder
     }
 
+    # Local closure: decide whether a modified-published package should surface
+    # as a finding given its release-set membership. Centralised so the BFS
+    # body (which checks a *visited dep*) and the Phase B sweep (which checks
+    # a *root*) share the same predicate. Surface when (modified + published)
+    # AND either:
+    #   - not a release-set member (classic case), OR
+    #   - a release-set member with Source='cascade' whose EffectiveChangeType
+    #     is below "breaking" (Invariant B — elevation review). Source='user'
+    #     members carry an explicit decision from the CLI input and are NOT
+    #     re-prompted.
+    $shouldSurface = {
+        param([string]$folder)
+        $pkg = $byFolder[$folder]
+        if ($null -eq $pkg) { return $false }
+        if (-not ($modifiedMap.ContainsKey($folder) -and $pkg.Published)) { return $false }
+        $entry = $ResolvedReleaseSet[$folder]
+        if ($null -eq $entry) { return $true }
+        return ($entry.Source -eq 'cascade' -and $entry.EffectiveChangeType -ne 'breaking')
+    }.GetNewClosure()
+
     # Aggregate findings: folder -> { Folder; PackageName; ChangedFileCount; DependencyChains }.
     # Ordered so the BFS insertion order is preserved when iterating .Values; matters because
     # the post-release scan prompts the user in this order and a non-deterministic order
     # makes the UX flaky and tests unreliable.
     $findings = [ordered]@{}
 
-    foreach ($releasedFolder in @($ResolvedReleaseSet.Keys | Sort-Object)) {
+    # Compute BFS roots. In the default (targeted) mode they're the
+    # release-set members. When -IncludeAllModifiedAsRoots is set we also add
+    # every modified-published package so chains between changed packages can
+    # be recorded (e.g. 'bytesbuf_io -> bytesbuf' when both are changed and
+    # bytesbuf_io depends on bytesbuf). Sorted for deterministic prompt order.
+    $rootFolders = if ($IncludeAllModifiedAsRoots) {
+        $set = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($k in $ResolvedReleaseSet.Keys) { [void]$set.Add($k) }
+        foreach ($k in $modifiedMap.Keys) {
+            $pkg = $byFolder[$k]
+            if ($null -ne $pkg -and $pkg.Published) { [void]$set.Add($k) }
+        }
+        @($set | Sort-Object)
+    } else {
+        @($ResolvedReleaseSet.Keys | Sort-Object)
+    }
+
+    foreach ($releasedFolder in $rootFolders) {
         if (-not $byFolder.ContainsKey($releasedFolder)) { continue }
 
         # BFS forward over normal+build deps. Track shortest path to each visited
@@ -915,28 +963,9 @@ function Get-UnreleasedModifiedDependencies {
                 $depPackage = $byFolder[$depFolder]
                 $depChain = $node.Chain + $depFolder
 
-                # Decide whether to record this dep as a finding.
-                # Surface when (modified + published) AND either:
-                #   - not a release-set member (classic case), OR
-                #   - a release-set member with Source='cascade' whose
-                #     EffectiveChangeType is below "breaking" — the user may
-                #     still want to elevate after reviewing the changes
-                #     (Invariant B). Source='user' members carry an explicit
-                #     decision from the CLI input and are NOT re-prompted.
-                $modifiedHere = $modifiedMap.ContainsKey($depFolder) -and $depPackage.Published
-                $depEntry = $ResolvedReleaseSet[$depFolder]
-                $isInReleaseSet = $null -ne $depEntry
-
-                $surface = $false
-                if ($modifiedHere) {
-                    if (-not $isInReleaseSet) {
-                        $surface = $true
-                    } elseif ($depEntry.Source -eq 'cascade' -and $depEntry.EffectiveChangeType -ne 'breaking') {
-                        $surface = $true
-                    }
-                }
-
-                if ($surface) {
+                if (& $shouldSurface $depFolder) {
+                    $depEntry = $ResolvedReleaseSet[$depFolder]
+                    $isInReleaseSet = $null -ne $depEntry
                     if (-not $findings.Contains($depFolder)) {
                         $findings[$depFolder] = [pscustomobject]@{
                             Folder           = $depFolder
@@ -963,13 +992,37 @@ function Get-UnreleasedModifiedDependencies {
         }
     }
 
+    # Phase B sweep (all-changed mode only): every modified-published package
+    # the surfacing predicate accepts but no BFS run reached as a dep gets
+    # added as a stub finding (empty chains). This is what implements the
+    # "imaginary `*` package depends on every changed package" UX without
+    # introducing a sentinel: a stub-with-empty-chains finding renders as
+    # "No dependents in release set" in the menu.
+    if ($IncludeAllModifiedAsRoots) {
+        foreach ($folder in @($modifiedMap.Keys | Sort-Object)) {
+            if ($findings.Contains($folder)) { continue }
+            if (-not (& $shouldSurface $folder)) { continue }
+            $pkg = $byFolder[$folder]
+            $findings[$folder] = [pscustomobject]@{
+                Folder           = $folder
+                PackageName      = $pkg.Name
+                CurrentVersion   = $pkg.Version
+                InReleaseSet     = $ResolvedReleaseSet.ContainsKey($folder)
+                ChangedFileCount = $modifiedMap[$folder]
+                DependencyChains = @()
+            }
+        }
+    }
+
     if ($findings.Count -eq 0) { return @() }
 
     # Reduce each finding's chains: drop duplicates and shorter chains that are
     # strict suffixes of a longer chain, so the user sees only the longest
     # caller-rooted path through each branch.
     foreach ($f in $findings.Values) {
-        $f.DependencyChains = Reduce-DependencyChains -Chains $f.DependencyChains
+        if ($null -ne $f.DependencyChains -and @($f.DependencyChains).Count -gt 0) {
+            $f.DependencyChains = Reduce-DependencyChains -Chains $f.DependencyChains
+        }
     }
 
     return @($findings.Values)
