@@ -638,6 +638,67 @@ function Update-PackageVersion {
 }
 
 
+# Locates a `## Unreleased` (or `## [Unreleased]`, case-insensitive) Markdown
+# section in a changelog string and extracts its body lines, returning content
+# with the section removed. Used by Write-Changelog to fold a manually-curated
+# Unreleased section's contents into the new version section being created.
+#
+# Inputs:
+#   -Content : full changelog text (the kind returned by Get-Content -Raw).
+#
+# Returns:
+#   $null if no Unreleased section is present.
+#   Otherwise a [pscustomobject] with:
+#     BodyLines             - string[] (always an array; possibly empty) — the
+#                             section's body split into lines, with leading
+#                             and trailing blank lines stripped. Internal blank
+#                             lines are preserved.
+#     ContentWithoutSection - string — original content with the matched
+#                             section (header + body) removed.
+#
+# Match semantics:
+#   - Header line matches `## Unreleased` or `## [Unreleased]`, with optional
+#     trailing whitespace. Case-insensitive on the word `Unreleased`.
+#   - Body spans from the line after the header up to (but not including) the
+#     next `## ` line at column 0, or end-of-input.
+#   - Only the FIRST Unreleased section is extracted (it is unconventional for
+#     a changelog to contain more than one).
+function Extract-UnreleasedSection {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content
+    )
+
+    if ([string]::IsNullOrEmpty($Content)) {
+        return $null
+    }
+
+    # (?ims) — Multiline (^ matches line starts) + Singleline (. matches
+    # newlines, so the non-greedy body can span lines) + IgnoreCase.
+    $pattern = '(?ims)^##[ \t]+(?:\[Unreleased\]|Unreleased)[ \t]*\r?\n(?<body>.*?)(?=^##[ \t]|\z)'
+    $match = [regex]::Match($Content, $pattern)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $body = $match.Groups['body'].Value
+    $lines = @($body -split "`r?`n")
+
+    # Strip trailing blank lines.
+    while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[-1])) {
+        $lines = if ($lines.Count -eq 1) { @() } else { @($lines[0..($lines.Count - 2)]) }
+    }
+    # Strip leading blank lines.
+    while ($lines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($lines[0])) {
+        $lines = if ($lines.Count -eq 1) { @() } else { @($lines[1..($lines.Count - 1)]) }
+    }
+
+    return [pscustomobject]@{
+        BodyLines             = [string[]]$lines
+        ContentWithoutSection = $Content.Remove($match.Index, $match.Length)
+    }
+}
+
+
 function Write-Changelog {
     param(
         [string]$packageName,
@@ -657,6 +718,29 @@ function Write-Changelog {
     )
 
     $hasCascade = ($null -ne $cascadeReasons) -and ($cascadeReasons.Count -gt 0)
+
+    # Read the existing changelog up front and extract any `## Unreleased`
+    # section. The body of that section will be folded into the new version
+    # section we're about to create — leaving it behind would orphan
+    # manually-curated release notes below the freshly-inserted version
+    # heading. Unreleased presence alone is enough reason to write a new
+    # section, so we check it in the no-content guard below.
+    $existingContent          = $null
+    $existingHadContent       = $false
+    $unreleasedLines          = @()
+    if (Test-Path $changelogFile) {
+        $existingContent = Get-Content $changelogFile -Raw
+        if ($existingContent) {
+            $existingHadContent = $true
+            $extracted = Extract-UnreleasedSection -Content $existingContent
+            if ($null -ne $extracted) {
+                $unreleasedLines  = $extracted.BodyLines
+                $existingContent  = $extracted.ContentWithoutSection
+            }
+        }
+    }
+
+    $hasUnreleased = $unreleasedLines.Count -gt 0
 
     $tags = Invoke-Git -Arguments @('tag', '--list', "$packageName-v*")
     $latestTag = $null
@@ -688,7 +772,7 @@ function Write-Changelog {
         $formattedCommits = Format-ConventionalCommits -rawCommitMessages $rawCommits -prBaseUrl $prBaseUrl
     }
 
-    if ($formattedCommits.Count -eq 0 -and -not $hasCascade) {
+    if ($formattedCommits.Count -eq 0 -and -not $hasCascade -and -not $hasUnreleased) {
         if ($rawCommits.Count -eq 0) {
             Write-Warning "No unreleased commits found to add to the changelog."
         } else {
@@ -752,31 +836,39 @@ function Write-Changelog {
         }
     }
 
-    # Build the new version section
+    # Build the new version section. User-curated `## Unreleased` body lines
+    # (if any) lead the section so the manually-authored narrative appears
+    # first; cascade bullets + commit-derived bullets follow as supplementary
+    # detail. A blank line separates the two groups when both are present.
     $newVersionSection = @("## [$newVersion] - $currentDate", "")
+    if ($hasUnreleased) {
+        $newVersionSection += $unreleasedLines
+        if ($formattedCommits.Count -gt 0) {
+            $newVersionSection += ""
+        }
+    }
     $newVersionSection += $formattedCommits
     $newVersionSection += ""
 
-    # Check if changelog file exists and has content
-    if (Test-Path $changelogFile) {
-        $existingContent = Get-Content $changelogFile -Raw
-        if ($existingContent) {
-            # Find the position after "# Changelog" header and any blank lines
-            # Insert the new version section there
-            $headerPattern = '^# Changelog\s*\r?\n(\r?\n)*'
-            if ($existingContent -match $headerPattern) {
-                # Match the existing file's line-ending convention so we don't introduce
-                # mixed endings (e.g. CRLF body + LF for the new section).
-                $eol = Get-FileLineEnding -Path $changelogFile
-                $headerMatch = [regex]::Match($existingContent, $headerPattern)
-                $insertPosition = $headerMatch.Index + $headerMatch.Length
-                $newContent = $existingContent.Substring(0, $insertPosition) +
-                              ($newVersionSection -join $eol) + $eol +
-                              $existingContent.Substring($insertPosition)
-                Set-Content -LiteralPath $changelogFile -Value $newContent -NoNewline -Encoding utf8
-                Write-Host "✅ Changelog updated at '$changelogFile'."
-                return
-            }
+    # Insert the new version section into the existing changelog, using the
+    # Unreleased-stripped content as the base (so the orphaned `## Unreleased`
+    # heading is no longer present in the output).
+    if ($existingHadContent) {
+        # Find the position after "# Changelog" header and any blank lines
+        # Insert the new version section there
+        $headerPattern = '^# Changelog\s*\r?\n(\r?\n)*'
+        if ($existingContent -match $headerPattern) {
+            # Match the existing file's line-ending convention so we don't introduce
+            # mixed endings (e.g. CRLF body + LF for the new section).
+            $eol = Get-FileLineEnding -Path $changelogFile
+            $headerMatch = [regex]::Match($existingContent, $headerPattern)
+            $insertPosition = $headerMatch.Index + $headerMatch.Length
+            $newContent = $existingContent.Substring(0, $insertPosition) +
+                          ($newVersionSection -join $eol) + $eol +
+                          $existingContent.Substring($insertPosition)
+            Set-Content -LiteralPath $changelogFile -Value $newContent -NoNewline -Encoding utf8
+            Write-Host "✅ Changelog updated at '$changelogFile'."
+            return
         }
     }
 

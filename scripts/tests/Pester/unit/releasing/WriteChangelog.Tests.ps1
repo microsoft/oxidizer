@@ -180,4 +180,194 @@ Describe 'Write-Changelog cascade emission' {
             $after | Should -Be $before
         }
     }
+
+    Context 'unreleased section folding' {
+        # Each test re-seeds the changelog with a different starting layout
+        # before invoking Write-Changelog. The body-fold behaviour is asserted
+        # via string-content checks on the resulting file.
+
+        It 'folds a top-of-file `## Unreleased` body into the new version section and drops the orphan heading' {
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## Unreleased
+
+### Added
+- New feature one
+- New feature two
+
+## [0.1.0] - 2024-01-01
+
+- ✨ Features
+  - earlier feature
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            $content | Should -Match '## \[0\.2\.0\] - 2026-06-15'
+            $content | Should -Match '### Added'
+            $content | Should -Match 'New feature one'
+            $content | Should -Match 'New feature two'
+            # Earlier release section is preserved.
+            $content | Should -Match '## \[0\.1\.0\] - 2024-01-01'
+            # The orphan `## Unreleased` heading is gone (only the new
+            # version's `## [` headings remain).
+            $content | Should -Not -Match '(?im)^##[ \t]+\[?Unreleased\]?'
+        }
+
+        It 'accepts the `## [Unreleased]` bracketed header form (case-insensitive)' {
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## [unreleased]
+
+- ✨ Features
+  - curated bullet
+
+## [1.0.0] - 2024-01-01
+
+initial release
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '1.0.1' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            $content | Should -Match 'curated bullet'
+            $content | Should -Not -Match '(?im)^##[ \t]+\[?unreleased\]?'
+        }
+
+        It 'hoists a mid-file `## Unreleased` body into the new (top) version section' {
+            # Mirrors the templated_uri pattern: a previously-released version
+            # sits above an orphaned Unreleased section. The fold should still
+            # work — the section is removed from its mid-file position and its
+            # body is folded into the new top section.
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## [0.2.1] - 2026-05-25
+
+- ✨ Features
+  - older entry
+
+## Unreleased
+
+- ✨ Features
+  - mid-file curated content
+
+## [0.2.0] - 2026-05-11
+
+- ⚠️ Breaking
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '0.3.0' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            $content | Should -Match '## \[0\.3\.0\] - 2026-06-15'
+            $content | Should -Match 'mid-file curated content'
+
+            # New section comes first, then the previously-released entries
+            # in their original order.
+            $newIdx     = $content.IndexOf('## [0.3.0]')
+            $v021Idx    = $content.IndexOf('## [0.2.1]')
+            $v020Idx    = $content.IndexOf('## [0.2.0]')
+            $newIdx | Should -BeLessThan $v021Idx
+            $v021Idx | Should -BeLessThan $v020Idx
+
+            # The orphan heading is gone.
+            $content | Should -Not -Match '(?im)^##[ \t]+\[?Unreleased\]?'
+        }
+
+        It 'merges Unreleased body BEFORE cascade bullets when both are present' {
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## Unreleased
+
+- ✨ Features
+  - manually-curated feature
+
+## [1.0.0] - 2024-01-01
+
+initial
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '1.0.1' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -cascadeReasons @(@{ Target = 'bar'; Version = '2.0.0'; Breaking = $false }) `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            $curatedIdx  = $content.IndexOf('manually-curated feature')
+            $cascadeIdx  = $content.IndexOf('Now requires `2.0.0` of `bar`')
+
+            $curatedIdx | Should -BeGreaterThan -1
+            $cascadeIdx | Should -BeGreaterThan -1
+            $curatedIdx | Should -BeLessThan $cascadeIdx -Because 'user-curated Unreleased content leads the section; auto-generated bullets follow'
+        }
+
+        It 'removes an empty `## Unreleased` section without adding empty content' {
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## Unreleased
+
+## [1.0.0] - 2024-01-01
+
+initial
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '1.0.1' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -cascadeReasons @(@{ Target = 'dep'; Version = '2.0.0'; Breaking = $false }) `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            # New section emitted normally; cascade bullet present.
+            $content | Should -Match '## \[1\.0\.1\] - 2026-06-15'
+            $content | Should -Match 'Now requires `2\.0\.0` of `dep`'
+            # Orphan Unreleased heading is gone.
+            $content | Should -Not -Match '(?im)^##[ \t]+\[?Unreleased\]?'
+            # No stray "## []" or empty-version artefacts.
+            $content | Should -Not -Match '##[ \t]+\[\]'
+        }
+
+        It 'writes a new release section when Unreleased is the ONLY source of content (no commits, no cascade)' {
+            Set-Content -LiteralPath $script:ChangelogPath -Encoding utf8 -NoNewline -Value @"
+# Changelog
+
+## Unreleased
+
+- ✨ Features
+  - just curated content
+"@
+
+            Write-Changelog -packageName 'pkg' -newVersion '0.1.0' `
+                -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+                -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+                -WarningAction SilentlyContinue
+
+            $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+            $content | Should -Match '## \[0\.1\.0\] - 2026-06-15'
+            $content | Should -Match 'just curated content'
+            $content | Should -Not -Match '(?im)^##[ \t]+\[?Unreleased\]?'
+        }
+    }
 }
