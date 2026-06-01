@@ -246,11 +246,15 @@ mod tests {
 
     #[test]
     fn try_from_str_invalid_errors() {
-        let _ = PathAndQuery::try_from("/invalid path\0").unwrap_err();
+        use ohno::Labeled;
+        let err = PathAndQuery::try_from("/invalid path\0").unwrap_err();
+        assert_eq!(err.label(), "uri_invalid");
     }
 
     #[test]
     fn try_from_str_without_leading_slash_errors() {
-        let _ = PathAndQuery::try_from("api/v1/users").unwrap_err();
+        use ohno::Labeled;
+        let err = PathAndQuery::try_from("api/v1/users").unwrap_err();
+        assert_eq!(err.label(), "uri_invalid");
     }
 }
