@@ -161,7 +161,7 @@ mod tests {
 
         use crate::infallible;
 
-        let ttl = Duration::from_secs(300);
+        let ttl = Duration::from_mins(5);
         let cached_at = SystemTime::now();
         let mut entry = CacheEntry::new(42);
         entry.set_ttl(ttl);

@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn progressive_mode_with_default_duration() {
         let mode = HalfOpenMode::progressive(None);
-        let default = Duration::from_secs(60);
+        let default = Duration::from_mins(1);
         let options = mode.to_options(default, 0.1);
         let probes: Vec<_> = options.probes().collect();
 
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn serde_deserialize_verbose_duration() {
         let deserialized: HalfOpenMode = serde_json::from_str(r#"{"Progressive":"1 hour, 30 minutes"}"#).unwrap();
-        assert_eq!(deserialized, HalfOpenMode::progressive(Duration::from_secs(5400)));
+        assert_eq!(deserialized, HalfOpenMode::progressive(Duration::from_mins(90)));
     }
 
     #[test]

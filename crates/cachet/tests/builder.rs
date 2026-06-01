@@ -107,7 +107,7 @@ fn fallback_builder_basic() {
 
     let cache = Cache::builder::<String, i32>(clock)
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .fallback(fallback)
         .build();
 

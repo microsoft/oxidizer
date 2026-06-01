@@ -79,11 +79,11 @@ mod tests {
 
     #[test]
     fn body_options_with_timeout() {
-        let options = HttpBodyOptions::default().timeout(Duration::from_secs(60));
+        let options = HttpBodyOptions::default().timeout(Duration::from_mins(1));
         assert_eq!(
             options,
             HttpBodyOptions {
-                timeout: Some(Duration::from_secs(60)),
+                timeout: Some(Duration::from_mins(1)),
                 buffer_limit: None,
             }
         );

@@ -14,14 +14,12 @@ async fn main() {
     let clock = Clock::new_tokio();
 
     // L2: fallback cache (longer TTL)
-    let l2 = Cache::builder::<String, String>(clock.clone())
-        .memory()
-        .ttl(Duration::from_secs(300));
+    let l2 = Cache::builder::<String, String>(clock.clone()).memory().ttl(Duration::from_mins(5));
 
     // L1: primary cache (shorter TTL) with L2 fallback
     let cache = Cache::builder::<String, String>(clock)
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .fallback(l2)
         .build();
 

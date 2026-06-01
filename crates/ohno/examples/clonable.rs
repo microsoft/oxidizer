@@ -16,6 +16,6 @@ fn main() {
     let err = ClonableError::caused_by("example string", 42, io_err);
     let cloned_err = err.clone();
 
-    println!("Original Error: {err}",);
+    println!("Original Error: {err}");
     println!("Cloned Error: {cloned_err}");
 }
