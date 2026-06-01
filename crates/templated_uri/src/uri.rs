@@ -421,27 +421,18 @@ mod tests {
     fn test_uri_into_http_uri() {
         let base_uri = BaseUri::from_static("https://example.com/");
         let path_with_slash = HttpPathAndQuery::from_static("/path?query=1");
-        let path_without_slash = HttpPathAndQuery::from_static("path?query=1");
 
         let uri: Uri = Uri::default().with_base(base_uri).with_path_and_query(path_with_slash.clone());
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
         assert_eq!(http_uri.to_string(), "https://example.com/path?query=1");
 
         let base_uri = BaseUri::from_static("https://example.com/foo/");
-        let uri: Uri = Uri::default().with_base(base_uri.clone()).with_path_and_query(path_with_slash);
+        let uri: Uri = Uri::default().with_base(base_uri).with_path_and_query(path_with_slash);
         let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
         assert_eq!(
             http_uri.to_string(),
             "https://example.com/foo/path?query=1",
             "prefix works correctly with trailing slash"
-        );
-
-        let uri: Uri = Uri::default().with_base(base_uri).with_path_and_query(path_without_slash);
-        let http_uri: http::Uri = uri.try_into().expect("Failed to convert Uri to http::Uri");
-        assert_eq!(
-            http_uri.to_string(),
-            "https://example.com/foo/path?query=1",
-            "prefix works correctly without trailing slash"
         );
     }
 
@@ -497,17 +488,7 @@ mod tests {
 
         let redaction_engine = RedactionEngine::builder().build();
         let paq_with_trailing_slash = insensitive_paq("/sensitive/path?query=secret");
-        let paq_without_trailing_slash = insensitive_paq("sensitive/path?query=secret");
         let base_uri = BaseUri::from_static("https://example.com/api/v1/");
-
-        let redacted_uri = Uri::default()
-            .with_base(base_uri.clone())
-            .with_path_and_query(paq_without_trailing_slash.clone())
-            .to_redacted_string(&redaction_engine);
-        assert_eq!(
-            redacted_uri, "https://example.com/api/v1/",
-            "redaction should erase the entire path and query"
-        );
 
         let redacted_uri = Uri::default()
             .with_base(base_uri)
@@ -517,11 +498,6 @@ mod tests {
             redacted_uri, "https://example.com/api/v1/",
             "redaction should erase the entire path and query and avoid double slashes"
         );
-
-        let redacted_uri = Uri::default()
-            .with_path_and_query(paq_without_trailing_slash)
-            .to_redacted_string(&redaction_engine);
-        assert_eq!(redacted_uri, "");
 
         let redacted_uri = Uri::default()
             .with_path_and_query(paq_with_trailing_slash)
@@ -570,19 +546,6 @@ mod tests {
         let mut redacted_debug = String::new();
         redaction_engine.redacted_debug(&empty_uri, &mut redacted_debug).unwrap();
         assert_eq!(redacted_debug, "", "RedactedDebug should return empty string for empty URI");
-
-        // Test with path that doesn't have leading slash
-        let paq_no_slash = insensitive_paq("sensitive/path");
-        let uri_no_slash = Uri::default()
-            .with_base(BaseUri::from_static("https://example.com/api/"))
-            .with_path_and_query(paq_no_slash);
-
-        let mut redacted_debug = String::new();
-        redaction_engine.redacted_debug(&uri_no_slash, &mut redacted_debug).unwrap();
-        assert_eq!(
-            redacted_debug, "https://example.com/api/",
-            "RedactedDebug should handle paths without leading slash and avoid double slashes"
-        );
     }
 
     #[test]

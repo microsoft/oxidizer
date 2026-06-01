@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+## [0.5.0] - 2026-05-18
+
+- ⚠️ Breaking
+
+  - update asynchronous I/O byte buffer types to `bytesbuf` 0.5
+
 ## [0.3.0] - 2026-02-16
 
 - ✔️ Tasks
@@ -29,4 +48,3 @@
 - 🧩 Miscellaneous
 
   - Reduce keyword count in bytesbuf_io to 5 so crates.io will accept it ([#185](https://github.com/microsoft/oxidizer/pull/185))
-

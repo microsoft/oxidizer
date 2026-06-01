@@ -50,17 +50,35 @@ assert_eq!(*value.unwrap().value(), 42);
 * **TTL/TTI**: Configure time-to-live and time-to-idle expiration
 * **Per-entry TTL**: Honors [`CacheEntry::expires_after`][__link3]
   for per-entry expiration
+* **Eviction notifications**: Observe removals via
+  [`InMemoryCacheBuilder::on_eviction`][__link4] or opt into host-side telemetry with
+  [`InMemoryCacheBuilder::with_eviction_telemetry`][__link5]
 * **Thread-safe**: Safe for concurrent access from multiple tasks
 * **Zero external types**: Builder API keeps implementation details private
+
+## Eviction Notifications
+
+Two complementary hooks are available for observing entry removals:
+
+* [`InMemoryCacheBuilder::on_eviction`][__link6] takes a closure invoked with a
+  [`RemovalCause`][__link7] for every removal (capacity, expiry, explicit, or replace).
+  Use this for custom side effects.
+* [`InMemoryCacheBuilder::with_eviction_telemetry`][__link8] is a marker that the host
+  crate (`cachet`) recognizes via `CacheBuilder::memory_with` and uses to
+  install a built-in listener that emits `cache.eviction` for capacity
+  removals and `cache.expired` for background TTL/TTI expiry. Explicit and
+  replaced removals are intentionally not surfaced — they are already covered
+  by the host’s `cache.invalidated` and `cache.inserted` events. The marker
+  has no effect when [`InMemoryCache`][__link9] is built directly without a host.
 
 ## Expiration Behavior
 
 This tier supports three independent expiration mechanisms. When multiple are
 active, the **shortest duration wins** - an entry is evicted at the earliest of:
 
-1. The per-entry TTL from [`CacheEntry::expires_after`][__link4]
-1. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`][__link5]
-1. The cache-wide TTI from [`InMemoryCacheBuilder::time_to_idle`][__link6]
+1. The per-entry TTL from [`CacheEntry::expires_after`][__link10]
+1. The cache-wide TTL from [`InMemoryCacheBuilder::time_to_live`][__link11]
+1. The cache-wide TTI from [`InMemoryCacheBuilder::time_to_idle`][__link12]
 
 This means the builder-level TTL/TTI acts as an **upper bound** on per-entry
 TTL. A per-entry TTL longer than the builder TTL will be silently clamped to the
@@ -73,11 +91,17 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGx97UkpE8tyEG0w3jevrQF8SG5D28UVlbZVEG3A-UY200y_0YWSCgm1jYWNoZXRfbWVtb3J5ZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMA
- [__link0]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCache
- [__link1]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder
- [__link2]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=policy::EvictionPolicy
- [__link3]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after
- [__link4]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheEntry::expires_after
- [__link5]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_live
- [__link6]: https://docs.rs/cachet_memory/0.1.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_idle
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbN0kpRlU_G9QbWC713oa4KjsbRG6BIsW3BU8bzI21NivEBVphZIKCbWNhY2hldF9tZW1vcnllMC4zLjCCa2NhY2hldF90aWVyZTAuMi4w
+ [__link0]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCache
+ [__link1]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder
+ [__link10]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheEntry::expires_after
+ [__link11]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_live
+ [__link12]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::time_to_idle
+ [__link2]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=policy::EvictionPolicy
+ [__link3]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheEntry::expires_after
+ [__link4]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
+ [__link5]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
+ [__link6]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
+ [__link7]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=notification::RemovalCause
+ [__link8]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
+ [__link9]: https://docs.rs/cachet_memory/0.3.0/cachet_memory/?search=InMemoryCache

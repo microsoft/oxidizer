@@ -1,16 +1,25 @@
 # Changelog
 
-## Unreleased
+## [0.2.1] - 2026-06-01
 
-- ✨ Features
+- 🔧 Maintenance
 
-  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics.
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
 
 ## [0.2.0] - 2026-05-11
 
 - ⚠️ Breaking
 
   - API review and overall cleanup ([#391](https://github.com/microsoft/oxidizer/pull/391))
+
+- ✨ Features
+
+  - Support `Option<T>` fields in `#[templated]` structs for RFC 6570 undefined variable semantics. ([#408](https://github.com/microsoft/oxidizer/pull/408))
 
 ## [0.1.1] - 2026-04-16
 

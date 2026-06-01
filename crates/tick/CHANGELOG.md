@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- 🐛 Bug Fixes
+
+  - examples collision ([#455](https://github.com/microsoft/oxidizer/pull/455))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.3.0] - 2026-05-11
 
 - ⚠️ Breaking

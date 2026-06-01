@@ -17,7 +17,7 @@ pub trait SystemTimeExt: sealed::Sealed {
     ///
     /// use tick::SystemTimeExt;
     ///
-    /// let time = SystemTime::UNIX_EPOCH + Duration::from_secs(3600);
+    /// let time = SystemTime::UNIX_EPOCH + Duration::from_hours(1);
     /// assert_eq!(time.display_iso_8601().to_string(), "1970-01-01T01:00:00Z");
     /// ```
     #[cfg(any(feature = "fmt", test))]
@@ -68,7 +68,7 @@ mod tests {
         assert_eq!(SystemTime::UNIX_EPOCH.display_iso_8601().to_string(), "1970-01-01T00:00:00Z");
 
         assert_eq!(
-            (SystemTime::UNIX_EPOCH + Duration::from_secs(3600)).display_iso_8601().to_string(),
+            (SystemTime::UNIX_EPOCH + Duration::from_hours(1)).display_iso_8601().to_string(),
             "1970-01-01T01:00:00Z"
         );
     }

@@ -29,17 +29,20 @@ These are the primary crates built out of this repo:
 - [`anyspawn`](./crates/anyspawn/README.md) - A generic task spawner compatible with any async runtime.
 - [`bytesbuf`](./crates/bytesbuf/README.md) - Types for creating and manipulating byte sequences.
 - [`bytesbuf_io`](./crates/bytesbuf_io/README.md) - Asynchronous I/O abstractions expressed via `bytesbuf` types.
-- [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`cachet`](./crates/cachet/README.md) - A composable, customizable multi-tier caching library with rich feature support.
 - [`cachet_memory`](./crates/cachet_memory/README.md) - In-memory cache tier backed by Moka for the cachet caching library.
 - [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
+- [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
+- [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
+- [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
+- [`seatbelt_http`](./crates/seatbelt_http/README.md) - HTTP-specific extensions for the seatbelt crate.
 - [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification
 - [`thread_aware`](./crates/thread_aware/README.md) - Facilities to support thread-isolated state.
 - [`tick`](./crates/tick/README.md) - Provides primitives to interact with and manipulate machine time.
@@ -159,7 +162,19 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   files in a consistent format and layout.
 
 - **Unsafe Verification**. We use Miri and [`cargo-careful`](https://crates.io/crates/cargo-careful) to verify that our
-  unsafe code doesn't induce undefined behaviors.
+  unsafe code doesn't induce undefined behaviors. Miri is run with multiple aliasing models — Stacked Borrows,
+  [Tree Borrows](https://perso.crans.org/vanille/treebor/), strict provenance, and a many-seeds sweep — because each
+  variant rejects a different class of UB.
+
+- **Concurrency Verification**. Crates with concurrent unsafe code can opt in to model-checking with
+  [`loom`](https://crates.io/crates/loom). Loom exhaustively explores legal interleavings of atomic operations
+  to surface memory-ordering bugs that hardware-stressing won't reproduce reliably. Run locally via `just loom`;
+  any crate with a `[target.'cfg(loom)'.dependencies]` section in its `Cargo.toml` is auto-discovered.
+
+- **Property-Based Fuzzing**. Crates can opt in to coverage-guided property tests with
+  [`bolero`](https://crates.io/crates/bolero) by adding `tests/bolero_*.rs` files. The CI fuzzing job runs each
+  target under libfuzzer for a bounded duration on every PR. Run locally via `just bolero` (override the time
+  budget with `just bolero 10m`).
 
 - **External Type Exposure**. We use [`cargo-check-external-types`](https://crates.io/crates/cargo-check-external-types) to track
   which external types our crates depend on. Exposing a 3P type from a crate creates a coupling between the crate and
@@ -195,8 +210,8 @@ We strive to deliver high-quality code and as such, we've put in place a number 
   the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
   specification. We use these PR titles as part of our automatic change log generation logic.
 
-- **License Headers**. We ensure all source files have the requisite license header. The headers are described in
-  the `.github\license-check` directory.
+- **License Headers**. We ensure all source files have the requisite license header using
+  [cargo-heather](https://crates.io/crates/cargo-heather). Run `just license-check` to check or `just license` to auto-apply.
 
 - **Spell Checking**. We use [cargo-spellcheck](https://crates.io/crates/cargo-spellcheck) to help our docs have fewer typos.
 
@@ -208,7 +223,7 @@ We strive to deliver high-quality code and as such, we've put in place a number 
 We pin the version of the tools we use in CI to ensure hermetic builds as much as possible. We routinely update
 the versions of everything to stay up to date using three scripts:
 
-- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file and in `rust-toolchain.toml`.
+- `scripts/update_rust_toolchain.ps1` which updates the version of the Rust toolchain in the `constants.env` file.
 - `scripts/update_tool_versions.ps1` which updates the version of tools in the `constants.env` file.
 - `scripts/update_action_versions.ps1` which updates the version of GitHub actions in the various files in `.github/workflows`.
 

@@ -145,7 +145,7 @@ async fn cancel() {
     // the first executer is slow but not dropped, so the result will be the first ones.
     let begin = tokio::time::Instant::now();
     let fut_1 = group.execute("key", || async {
-        tokio::time::sleep(Duration::from_millis(2000)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
         "Result1".to_string()
     });
     let fut_2 = group.execute(&"key".to_string(), unreachable_future);

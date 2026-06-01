@@ -103,7 +103,7 @@ async fn timeout(#[case] use_tower: bool) {
 async fn timeout_override_ensure_respected(#[case] use_tower: bool) {
     let clock = ClockControl::default()
         .auto_advance(Duration::from_millis(200))
-        .auto_advance_limit(Duration::from_millis(5000))
+        .auto_advance_limit(Duration::from_secs(5))
         .to_clock();
 
     let stack = (

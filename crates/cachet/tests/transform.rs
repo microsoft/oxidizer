@@ -12,11 +12,7 @@ use tick::Clock;
 
 /// Builds a cache with L1 (`MockCache<String, String>`) and L2 (`MockCache<i32, i32>`)
 /// separated by a String-to-i32 transform boundary.
-fn build_transform_cache(
-    clock: Clock,
-    l1: MockCache<String, String>,
-    l2: MockCache<i32, i32>,
-) -> Cache<String, String, impl cachet::CacheTier<String, String>> {
+fn build_transform_cache(clock: Clock, l1: MockCache<String, String>, l2: MockCache<i32, i32>) -> Cache<String, String> {
     Cache::builder::<String, String>(clock.clone())
         .storage(l1)
         .transform(
@@ -261,7 +257,7 @@ async fn transform_on_fallback_builder() {
 
     let cache = Cache::builder::<i32, i32>(clock.clone())
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .fallback(Cache::builder::<i32, i32>(clock.clone()).storage(MockCache::new()))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
@@ -285,7 +281,7 @@ async fn chained_post_transform_fallback() {
 
     let cache = Cache::builder::<i32, i32>(clock.clone())
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .transform(
             TransformEncoder::infallible(|k: &i32| k.to_string()),
             TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
@@ -320,7 +316,7 @@ fn transform_codec_debug() {
 #[test]
 fn transform_builder_debug() {
     let clock = Clock::new_frozen();
-    let builder = Cache::builder::<i32, i32>(clock).memory().ttl(Duration::from_secs(60)).transform(
+    let builder = Cache::builder::<i32, i32>(clock).memory().ttl(Duration::from_mins(1)).transform(
         TransformEncoder::infallible(|k: &i32| k.to_string()),
         TransformCodec::new(infallible(|v: &i32| v.to_string()), |v: String| v.parse::<i32>()),
     );
@@ -336,7 +332,7 @@ fn try_map_value_preserves_metadata() {
     use std::time::{Duration, SystemTime};
 
     let now = SystemTime::now();
-    let ttl = Duration::from_secs(60);
+    let ttl = Duration::from_mins(1);
     let entry = CacheEntry::expires_at(42, ttl, now);
     let mapped = entry.try_map_value(|v| Ok(v.to_string())).expect("Returns Ok");
 

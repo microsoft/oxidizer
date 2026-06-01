@@ -99,10 +99,87 @@ impl Origin {
     /// Returns the explicit port of this origin, if any.
     ///
     /// Returns the explicit port from the authority when present, or `None` when
-    /// the authority does not specify a port.
+    /// the authority does not specify a port. Default ports are not inferred from
+    /// the scheme; use [`Origin::effective_port`] for that.
     #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.authority.port_u16()
+    }
+
+    /// Returns the effective port of this origin, falling back to well-known
+    /// scheme defaults when no explicit port is present.
+    ///
+    /// Returns the explicit port from the authority when present. Otherwise,
+    /// returns the IANA-registered default port for the scheme:
+    ///
+    /// - `80` for `http`
+    /// - `443` for `https`
+    ///
+    /// Returns `None` when no explicit port is present and the scheme has no
+    /// well-known default known to this crate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::Origin;
+    /// // Explicit port is returned as-is.
+    /// let origin = Origin::from_static("https://example.com:8443");
+    /// assert_eq!(origin.effective_port(), Some(8443));
+    ///
+    /// // HTTPS default is used when no port is specified.
+    /// let origin = Origin::from_static("https://example.com");
+    /// assert_eq!(origin.effective_port(), Some(443));
+    ///
+    /// // HTTP default is used when no port is specified.
+    /// let origin = Origin::from_static("http://example.com");
+    /// assert_eq!(origin.effective_port(), Some(80));
+    /// ```
+    #[must_use]
+    pub fn effective_port(&self) -> Option<u16> {
+        if let Some(port) = self.authority.port_u16() {
+            return Some(port);
+        }
+
+        match self.scheme.as_str() {
+            s if s == Scheme::HTTP.as_str() => Some(HTTP_DEFAULT_PORT),
+            s if s == Scheme::HTTPS.as_str() => Some(HTTPS_DEFAULT_PORT),
+            _ => None,
+        }
+    }
+
+    /// Returns the effective port of this origin, or an error when it cannot
+    /// be determined.
+    ///
+    /// Behaves like [`Origin::effective_port`], but returns a [`UriError`]
+    /// instead of `None` when no explicit port is present and the scheme has
+    /// no well-known default known to this crate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] when the authority does not specify a port and
+    /// the scheme is not one of the schemes with a default port known to this
+    /// crate (`http`, `https`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::Origin;
+    /// let origin = Origin::from_static("https://example.com:8443");
+    /// assert_eq!(origin.try_effective_port().unwrap(), 8443);
+    ///
+    /// let origin = Origin::from_static("https://example.com");
+    /// assert_eq!(origin.try_effective_port().unwrap(), 443);
+    ///
+    /// let origin = Origin::from_static("http://example.com");
+    /// assert_eq!(origin.try_effective_port().unwrap(), 80);
+    /// ```
+    pub fn try_effective_port(&self) -> Result<u16, UriError> {
+        self.effective_port().ok_or_else(|| {
+            UriError::invalid_uri(format!(
+                "no explicit port and no known default port for scheme '{}'",
+                self.scheme.as_str()
+            ))
+        })
     }
 
     /// Set port for this `Origin` instance.
@@ -228,6 +305,56 @@ mod tests {
         // An explicit port is always reported regardless of the scheme.
         let origin_with_port = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
         assert_eq!(origin_with_port.port(), Some(21));
+    }
+
+    #[test]
+    fn test_effective_port() {
+        // Explicit ports are returned verbatim.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080"));
+        assert_eq!(origin.effective_port(), Some(8080));
+
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com:8443"));
+        assert_eq!(origin.effective_port(), Some(8443));
+
+        // Well-known defaults are inferred from the scheme when no port is set.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), Some(HTTP_DEFAULT_PORT));
+
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), Some(HTTPS_DEFAULT_PORT));
+
+        // Unknown schemes without an explicit port have no inferred default.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com"));
+        assert_eq!(origin.effective_port(), None);
+
+        // Unknown schemes still surface an explicit port.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
+        assert_eq!(origin.effective_port(), Some(21));
+    }
+
+    #[test]
+    fn test_try_effective_port() {
+        // Explicit ports are returned verbatim.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com:8080"));
+        assert_eq!(origin.try_effective_port().unwrap(), 8080);
+
+        // Well-known defaults are inferred from the scheme when no port is set.
+        let origin = Origin::from_parts(Scheme::HTTP, Authority::from_static("example.com"));
+        assert_eq!(origin.try_effective_port().unwrap(), HTTP_DEFAULT_PORT);
+
+        let origin = Origin::from_parts(Scheme::HTTPS, Authority::from_static("example.com"));
+        assert_eq!(origin.try_effective_port().unwrap(), HTTPS_DEFAULT_PORT);
+
+        // Unknown schemes without an explicit port return an error.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com"));
+        let err = origin
+            .try_effective_port()
+            .expect_err("expected error for unknown scheme without explicit port");
+        assert!(err.to_string().contains("ftp"), "unexpected error message: {err}");
+
+        // Unknown schemes still surface an explicit port.
+        let origin = Origin::from_parts(Scheme::from_str("ftp").unwrap(), Authority::from_static("example.com:21"));
+        assert_eq!(origin.try_effective_port().unwrap(), 21);
     }
 
     #[test]

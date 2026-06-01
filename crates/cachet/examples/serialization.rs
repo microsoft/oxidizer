@@ -30,5 +30,5 @@ async fn main() {
 
     // Get returns a typed value — deserialized from BytesView if fetched from L2.
     let value = cache.get(&key).await.expect("get failed").expect("entry not found");
-    println!("get({key}): {value:?}",);
+    println!("get({key}): {value:?}");
 }

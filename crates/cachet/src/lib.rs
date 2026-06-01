@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A composable, multi-tier caching library with stampede protection, background
@@ -60,9 +59,9 @@
 //!   `Service<CacheOperation>` becomes a `CacheTier`, so you can compose retry,
 //!   timeout, and circuit-breaker middleware around your storage using standard Tower
 //!   or `layered` patterns.
-//! - **Dynamic dispatch** - when a fallback tier is configured, the builder
-//!   automatically type-erases both tiers into a [`DynamicCache<K, V>`] so
-//!   the primary and fallback don't need to be the same concrete type.
+//! - **Dynamic dispatch** - the builder type-erases the storage tier into a
+//!   [`DynamicCache<K, V>`], so all builders produce the same `Cache<K, V>`
+//!   output type regardless of the underlying storage or tier composition.
 //! - **Configurable insert policy** - choose whether, and under what conditions,
 //!   values are inserted into a tier ([`InsertPolicy`]).
 //! - **Clock injection** - all time-based logic (TTL, TTR, timestamps) goes through
@@ -80,7 +79,7 @@
 //! | Stampede protection | ❌ | ✅ |
 //! | Background refresh | ❌ | ✅ |
 //! | Service middleware integration | ❌ | ✅ |
-//! | OpenTelemetry metrics + logs | ❌ | ✅ |
+//! | Structured telemetry (tracing) | ❌ | ✅ |
 //! | Pluggable storage backends | ❌ | ✅ |
 //! | Clock injection for testing | ❌ | ✅ |
 //!
@@ -152,8 +151,7 @@
 //! | Feature | Default | Description |
 //! |---|---|---|
 //! | `memory` | ✅ | Enables `InMemoryCache` and the `.memory()` builder method via `cachet_memory`. |
-//! | `metrics` | ❌ | Enables OpenTelemetry metrics (`cache.event.count`, `cache.operation.duration`, `cache.size`). |
-//! | `logs` | ❌ | Enables structured `tracing` log events for every cache activity. |
+//! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
 //! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
@@ -168,7 +166,7 @@
 //! # async {
 //!
 //! let clock = Clock::new_tokio();
-//! let cache = Cache::builder::<String, i32>(clock).memory().build();
+//! let cache: Cache<String, i32> = Cache::builder(clock).memory().build();
 //!
 //! cache.insert("key".to_string(), CacheEntry::new(42)).await?;
 //! let value = cache.get("key").await?;
@@ -227,43 +225,47 @@
 //!
 //! # Telemetry
 //!
-//! Enable with `metrics` and/or `logs` features. Configure via `.enable_metrics()` and `.enable_logs()`.
+//! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 //!
-//! ## Metrics (OpenTelemetry)
+//! Each cache operation emits a structured [`tracing`] event with fields
+//! `cache.name`, `cache.event`, and `cache.duration_ns`.
 //!
-//! | Metric | Type | Unit | Description |
-//! |--------|------|------|-------------|
-//! | `cache.event.count` | Counter | event | Cache operation events |
-//! | `cache.operation.duration` | Histogram | s | Operation latency |
-//! | `cache.size` | Gauge | entry | Current entry count |
+//! ## Subscribing to events
 //!
-//! **Attributes:** `cache.name`, `cache.operation`, `cache.activity`
+//! Use [`telemetry::attributes`] constants to filter and match events in a
+//! custom `tracing_subscriber::Layer`:
 //!
-//! **Operations:** `cache.get`, `cache.insert`, `cache.invalidate`, `cache.clear`
+//! ```ignore
+//! use cachet::telemetry::attributes;
 //!
-//! **Activities:** `cache.hit`, `cache.miss`, `cache.expired`, `cache.inserted`,
-//! `cache.invalidated`, `cache.refresh_hit`, `cache.refresh_miss`,
-//! `cache.fallback`, `cache.rejected`, `cache.error`, `cache.ok`
+//! // Filter by tracing target prefix
+//! let filter = tracing_subscriber::filter::Targets::new()
+//!     .with_target(attributes::TARGET, tracing::Level::DEBUG);
 //!
-//! ## Logs (tracing)
+//! // Match specific events in a Visit impl
+//! if event_value == attributes::EVENT_HIT { /* cache hit */ }
+//! ```
 //!
-//! Event name: `cache.event` with fields `cache.name`, `cache.operation`,
-//! `cache.activity`, `cache.duration_ns`.
+//! See the `telemetry_subscriber` example for a complete demonstration.
 //!
-//! | Level | Activities |
-//! |-------|-----------|
-//! | ERROR | `cache.error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.invalidated`, `cache.fallback`, `cache.rejected` |
-//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.ok` |
+//! ## Event types
+//!
+//! | Level | Events |
+//! |-------|--------|
+//! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`, `cache.eviction` |
+//! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
 
 mod builder;
 mod cache;
+#[cfg(feature = "memory")]
+mod eviction;
 mod fallback;
 mod policy;
 mod refresh;
 #[cfg(any(feature = "serialize", test))]
 mod serialize;
-mod telemetry;
+pub mod telemetry;
 mod transform;
 mod wrapper;
 

@@ -27,12 +27,16 @@ use crate::{HttpError, Result};
 /// # Examples
 ///
 /// ```
+/// # fn main() {
+/// # #[cfg(feature = "test-util")] {
 /// # use http_extensions::{HttpBody, HttpBodyBuilder};
 /// # let builder = HttpBodyBuilder::new_fake();
 /// // Create different body types
 /// let text_body: HttpBody = builder.text("Hello world");
 /// let empty_body: HttpBody = builder.empty();
 /// let binary_body: HttpBody = builder.slice(&[1, 2, 3, 4]);
+/// # }
+/// # }
 /// ```
 ///
 /// # Testing
@@ -56,9 +60,13 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpBodyBuilder;
     /// let builder = HttpBodyBuilder::new_fake();
     /// let text_body = builder.text("Test content");
+    /// # }
+    /// # }
     /// ```
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
@@ -113,6 +121,8 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError, HttpBody};
     /// # use http_body::Body;
     /// # use std::pin::Pin;
@@ -139,6 +149,8 @@ impl HttpBodyBuilder {
     /// // Create HttpBody from your custom body
     /// let custom_body = CustomBody(vec![1, 2, 3, 4]);
     /// let body = builder.body(custom_body, &HttpBodyOptions::default());
+    /// # }
+    /// # }
     /// ```
     pub fn body<B>(&self, body: B, options: &HttpBodyOptions) -> HttpBody
     where
@@ -167,6 +179,8 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::{HttpBodyOptions, HttpBodyBuilder, HttpError};
     /// # use bytesbuf::BytesView;
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -177,6 +191,9 @@ impl HttpBodyBuilder {
     /// let body = builder.stream(futures::stream::iter(chunks), &HttpBodyOptions::default());
     ///
     /// assert_eq!(body.content_length(), None); // unknown length for streams
+    ///
+    /// # }
+    /// # }
     /// ```
     pub fn stream<S>(&self, stream: S, options: &HttpBodyOptions) -> HttpBody
     where
@@ -195,6 +212,8 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::{HttpBodyBuilder, HttpBody};
     /// #
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -202,6 +221,8 @@ impl HttpBodyBuilder {
     /// let body2 = builder.text(String::from("Hello, world!")); // From String
     ///
     /// assert_eq!(body1.content_length(), body2.content_length());
+    /// # }
+    /// # }
     /// ```
     pub fn text(&self, str: impl AsRef<str>) -> HttpBody {
         self.slice(str.as_ref().as_bytes())
@@ -220,6 +241,8 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpBodyBuilder;
     /// #
     /// # let builder = HttpBodyBuilder::new_fake();
@@ -228,6 +251,8 @@ impl HttpBodyBuilder {
     /// let body = builder.slice(&data);
     ///
     /// assert_eq!(body.content_length(), Some(5));
+    /// # }
+    /// # }
     /// ```
     pub fn slice(&self, data: impl AsRef<[u8]>) -> HttpBody {
         let mut builder = self.reserve(data.as_ref().len());
@@ -247,6 +272,8 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
     /// # use http_extensions::HttpBodyBuilder;
     /// # use bytesbuf::BytesView;
     /// #
@@ -254,6 +281,8 @@ impl HttpBodyBuilder {
     /// // Create a body from existing bytes of data
     /// let body = builder.bytes(BytesView::new());
     /// assert_eq!(body.content_length(), Some(0));
+    /// # }
+    /// # }
     /// ```
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
         HttpBody::new(Kind::Bytes(Some(b.into())), self.clone())
@@ -280,6 +309,9 @@ impl HttpBodyBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() {
+    /// # #[cfg(feature = "test-util")] {
+    /// # (|| {
     /// # use http_extensions::{HttpBodyBuilder, HttpError};
     /// # use serde::Serialize;
     /// #
@@ -298,6 +330,9 @@ impl HttpBodyBuilder {
     /// // Create a body containing the JSON representation of user
     /// let body = builder.json(&user)?;
     /// # Ok::<(), HttpError>(())
+    /// # })().unwrap();
+    /// # }
+    /// # }
     /// ```
     pub fn json<T: serde_core::ser::Serialize>(&self, data: &T) -> std::result::Result<HttpBody, JsonError> {
         let builder = BytesBuf::new();
@@ -336,6 +371,12 @@ impl Memory for MemoryWrapper {
     }
 }
 
+impl AsRef<Clock> for HttpBodyBuilder {
+    fn as_ref(&self) -> &Clock {
+        &self.clock
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -354,7 +395,7 @@ mod tests {
 
     #[test]
     fn assert_send_and_sync() {
-        assert_impl_all!(HttpBodyBuilder: Send, Sync, std::fmt::Debug);
+        assert_impl_all!(HttpBodyBuilder: Send, Sync, AsRef<Clock>, std::fmt::Debug);
     }
 
     #[test]
@@ -364,6 +405,9 @@ mod tests {
         let builder = HttpBodyBuilder::new(memory, &clock);
         let body = builder.text("test");
         assert_eq!(body.content_length(), Some(4));
+
+        // access the clock
+        let _clock: &Clock = builder.as_ref();
     }
 
     #[test]

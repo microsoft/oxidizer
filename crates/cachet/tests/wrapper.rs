@@ -14,11 +14,10 @@ use tick::{Clock, ClockControl};
 
 #[cfg_attr(miri, ignore)]
 #[test]
-fn wrapper_name() {
+fn cache_name() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock).memory().build();
-    let wrapper = cache.inner();
-    assert!(!wrapper.name().is_empty());
+    assert!(!cache.name().is_empty());
 }
 
 #[cfg_attr(miri, ignore)]
@@ -103,7 +102,7 @@ async fn wrapper_len_returns_correct_count() {
 #[tokio::test]
 async fn wrapper_with_ttl_configured() {
     let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().ttl(Duration::from_secs(60)).build();
+    let cache = Cache::builder::<String, i32>(clock).memory().ttl(Duration::from_mins(1)).build();
 
     let key = "key".to_string();
     cache.insert(key.clone(), CacheEntry::new(42)).await.unwrap();
@@ -122,7 +121,7 @@ async fn wrapper_entry_with_ttl() {
 
     let key = "key".to_string();
     // Entry with per-entry TTL
-    let entry = CacheEntry::expires_after(42, Duration::from_secs(120));
+    let entry = CacheEntry::expires_after(42, Duration::from_mins(2));
     cache.insert(key.clone(), entry).await.unwrap();
 
     // Entry should exist immediately after insertion
@@ -201,7 +200,7 @@ async fn wrapper_expired_entry_returns_none() {
     let clock = Clock::new_frozen();
     let cache = Cache::builder::<String, i32>(clock.clone())
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .build();
 
     let key = "key".to_string();
@@ -213,15 +212,6 @@ async fn wrapper_expired_entry_returns_none() {
     // Entry should be treated as expired
     let result = cache.get(&key).await.unwrap();
     assert!(result.is_none(), "expired entry should return None");
-}
-
-#[cfg_attr(miri, ignore)]
-#[test]
-fn wrapper_inner_returns_reference() {
-    let clock = Clock::new_frozen();
-    let cache = Cache::builder::<String, i32>(clock).memory().build();
-    // inner() on the CacheWrapper
-    let _inner = cache.inner().inner();
 }
 
 #[cfg_attr(miri, ignore)]

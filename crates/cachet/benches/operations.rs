@@ -13,7 +13,6 @@ use cachet::{Cache, CacheEntry, CacheTier};
 use cachet_memory::InMemoryCache;
 use cachet_tier::MockCache;
 use criterion::{Criterion, criterion_group, criterion_main};
-use opentelemetry_sdk::metrics::SdkMeterProvider;
 use tick::Clock;
 use tokio::runtime::Runtime;
 
@@ -129,13 +128,11 @@ fn bench_wrapper_overhead(c: &mut Criterion) {
 
     // With telemetry
     group.bench_function("with_telemetry", |b| {
-        let meter_provider = SdkMeterProvider::builder().build();
         let cache = rt.block_on(async {
             let clock = Clock::new_tokio();
             Cache::builder(clock)
                 .storage(MockCache::<String, String>::new())
                 .enable_logs()
-                .enable_metrics(&meter_provider)
                 .build()
         });
         let key = "key".to_string();

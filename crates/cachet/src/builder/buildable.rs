@@ -15,10 +15,9 @@ use crate::{Cache, CacheTier};
 
 /// Internal trait for building cache hierarchies.
 pub(crate) trait Buildable<K, V> {
-    type Output: CacheTier<K, V> + Send + Sync + 'static;
     type TierOutput: CacheTier<K, V> + Send + Sync + 'static;
 
-    fn build(self) -> Cache<K, V, Self::Output>;
+    fn build(self) -> Cache<K, V>;
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput;
 }
@@ -29,22 +28,26 @@ where
     V: Clone + Send + Sync + 'static,
     CT: CacheTier<K, V> + Send + Sync + 'static,
 {
-    type Output = CacheWrapper<K, V, CT>;
-    type TierOutput = Self::Output;
+    type TierOutput = CacheWrapper<K, V, CT>;
 
-    fn build(self) -> Cache<K, V, Self::Output> {
+    fn build(self) -> Cache<K, V> {
         let name = self.name;
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
-        let tier = self.build_tier(clock.clone(), telemetry);
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
 
-        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        CacheWrapper::new(type_name::<CT>(self.name), self.storage, clock, self.ttl, telemetry, self.policy)
+        let name = type_name::<CT>(self.name);
+        #[cfg(feature = "memory")]
+        if let Some(hook) = &self.eviction_hook {
+            hook.init(telemetry.clone(), name);
+        }
+        CacheWrapper::new(name, self.storage, clock, self.ttl, telemetry, self.policy)
     }
 }
 
@@ -55,18 +58,17 @@ where
     PB: Buildable<K, V>,
     FB: Buildable<K, V>,
 {
-    type Output = DynamicCache<K, V>;
     type TierOutput = FallbackCache<K, V, PB::TierOutput, FB::TierOutput>;
 
-    fn build(self) -> Cache<K, V, Self::Output> {
+    fn build(self) -> Cache<K, V> {
         let name = self.name;
         let clock = self.clock.clone();
-        let telemetry = self.telemetry.clone().build();
+        let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
         let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
 
-        Cache::new(type_name::<Cache<K, V, Self::TierOutput>>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, stampede_protection)
     }
 
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {

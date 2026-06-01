@@ -17,8 +17,8 @@ use tick::Clock;
 use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
+use crate::telemetry::CacheTelemetry;
 use crate::telemetry::ext::ClockExt;
-use crate::telemetry::{CacheActivity, CacheOperation, CacheTelemetry};
 
 pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
@@ -103,9 +103,7 @@ where
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
         let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
-        self.inner
-            .telemetry
-            .record(self.inner.name, CacheOperation::Get, CacheActivity::Fallback, timed.duration);
+        self.inner.telemetry.cache_fallback(self.inner.name, timed.duration);
 
         // Propagate any error from fallback
         let fallback_value = timed.result?;
@@ -186,7 +184,6 @@ mod tests {
     use cachet_tier::MockCache;
 
     use super::*;
-    use crate::telemetry::TelemetryConfig;
     use crate::wrapper::CacheWrapper;
     use crate::{Cache, InsertPolicy};
 
@@ -195,7 +192,7 @@ mod tests {
 
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
     }
 
@@ -203,7 +200,7 @@ mod tests {
         let clock = Clock::new_frozen();
         let primary = make_primary();
         let fallback_mock = MockCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         FallbackCache::new("fallback", primary, fallback_mock, clock, None, telemetry)
     }
 
@@ -434,12 +431,12 @@ mod tests {
         let primary_mock = MockCache::<String, i32>::new();
 
         // Insert an entry with an old cached_at so should_refresh returns true
-        let old_time = clock.system_time() - Duration::from_secs(120);
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(300), old_time);
+        let old_time = clock.system_time() - Duration::from_mins(2);
+        let entry = CacheEntry::expires_at(42, Duration::from_mins(5), old_time);
         primary_mock.insert("key".to_string(), entry).await.unwrap();
 
         let fallback_mock = MockCache::<String, i32>::new();
-        let telemetry = TelemetryConfig::new().build();
+        let telemetry = CacheTelemetry::new();
         let refresh = crate::refresh::TimeToRefresh::new(Duration::from_secs(30), anyspawn::Spawner::new_tokio());
 
         let primary = CacheWrapper::new(

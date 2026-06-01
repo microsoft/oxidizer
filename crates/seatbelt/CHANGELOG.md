@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.5.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `layered`
+  - Now requires `0.1.3` of `recoverable`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+  - Now requires `0.3.1` of `tick`
+
+- ✨ Features
+
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+## [0.5.0] - 2026-05-14
+
+- ⚠️ Breaking
+
+  - update the `metrics` feature API to use OpenTelemetry 0.32 types ([#417](https://github.com/microsoft/oxidizer/pull/417))
+
+- ✨ Features
+
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - support conversion from std::io::error::ErrorKind ([#370](https://github.com/microsoft/oxidizer/pull/370))
+
+- ✔️ Tasks
+
+  - upgrade opentelemetry crates to 0.32.0 ([#417](https://github.com/microsoft/oxidizer/pull/417))
+  - run delta subset of examples on PR build ([#394](https://github.com/microsoft/oxidizer/pull/394))
+  - release a new version of tick crate ([#387](https://github.com/microsoft/oxidizer/pull/387))
+
 ## [0.4.5] - 2026-04-22
 
 - 🔧 Maintenance

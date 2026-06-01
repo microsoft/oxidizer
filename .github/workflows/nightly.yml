@@ -20,6 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check for changes in last 24 hours
+        id: check
         run: |
           # Check logs for commits in the last 24 hours on the current branch
           if [[ -z $(git log --since="24 hours ago" --pretty=format:"%H") ]]; then
@@ -34,8 +35,6 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
     steps:
       # prep
       - name: Checkout
@@ -52,8 +51,86 @@ jobs:
       - name: Mutate All
         run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs
 
+  miri-tree-borrows:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+
+      # execute
+      - name: Miri (tree borrows)
+        env:
+          MIRIFLAGS: -Zmiri-tree-borrows
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+
+  miri-strict-provenance:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+
+      # execute
+      - name: Miri (strict provenance)
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+
+  miri-race-coverage:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+
+      # execute
+      - name: Miri (race coverage)
+        env:
+          MIRIFLAGS: -Zmiri-many-seeds=0..32
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
+
+  report-failure:
+    needs:
+      - nightly-gatekeeper
+      - mutation-testing
+      - miri-tree-borrows
+      - miri-strict-provenance
+      - miri-race-coverage
+    # `always()` ensures we still run when a dependency fails; the
+    # gatekeeper guard skips the report on no-op nights.
+    if: ${{ always() && needs.nightly-gatekeeper.outputs.should_skip != 'true' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-slim
+    permissions:
+      issues: write
+    steps:
       - name: Create or Update Issue on Failure
-        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

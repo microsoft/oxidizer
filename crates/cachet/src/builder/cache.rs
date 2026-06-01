@@ -3,20 +3,21 @@
 
 use std::hash::Hash;
 use std::marker::PhantomData;
+#[cfg(feature = "memory")]
+use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "memory")]
-use cachet_memory::InMemoryCache;
-#[cfg(any(feature = "metrics", test))]
-use opentelemetry::metrics::MeterProvider;
+use cachet_memory::{InMemoryCache, InMemoryCacheBuilder};
 use tick::Clock;
 
 use super::buildable::Buildable;
 use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
+#[cfg(feature = "memory")]
+use crate::eviction::EvictionHook;
 use crate::policy::InsertPolicy;
-use crate::telemetry::TelemetryConfig;
-use crate::wrapper::CacheWrapper;
+use crate::telemetry::CacheTelemetry;
 use crate::{Cache, CacheTier};
 
 /// Builder for constructing a cache with a single tier.
@@ -45,8 +46,10 @@ pub struct CacheBuilder<K, V, CT = ()> {
     pub(crate) ttl: Option<Duration>,
     pub(crate) policy: InsertPolicy<V>,
     pub(crate) clock: Clock,
-    pub(crate) telemetry: TelemetryConfig,
+    pub(crate) telemetry: CacheTelemetry,
     pub(crate) stampede_protection: bool,
+    #[cfg(feature = "memory")]
+    pub(crate) eviction_hook: Option<Arc<EvictionHook>>,
     pub(crate) _phantom: PhantomData<(K, V)>,
 }
 
@@ -58,8 +61,10 @@ impl<K, V> CacheBuilder<K, V, ()> {
             ttl: None,
             policy: InsertPolicy::default(),
             clock,
-            telemetry: TelemetryConfig::new(),
+            telemetry: CacheTelemetry::new(),
             stampede_protection: false,
+            #[cfg(feature = "memory")]
+            eviction_hook: None,
             _phantom: PhantomData,
         }
     }
@@ -93,6 +98,8 @@ impl<K, V> CacheBuilder<K, V, ()> {
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
+            #[cfg(feature = "memory")]
+            eviction_hook: self.eviction_hook,
             _phantom: PhantomData,
         }
     }
@@ -118,7 +125,50 @@ impl<K, V> CacheBuilder<K, V, ()> {
         K: Hash + Eq + Clone + Send + Sync + 'static,
         V: Clone + Send + Sync + 'static,
     {
-        self.storage(InMemoryCache::<K, V>::new())
+        self.memory_with(|b| b)
+    }
+
+    /// Configures the cache to use in-memory storage, exposing the inner
+    /// [`InMemoryCacheBuilder`] for additional configuration (capacity, TTL,
+    /// eviction policy, custom hasher, etc.).
+    ///
+    /// Call [`InMemoryCacheBuilder::with_eviction_telemetry`] inside the
+    /// closure to emit `cache.eviction` on capacity evictions and
+    /// `cache.expired` on background TTL/TTI expiry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured [`InMemoryCacheBuilder`] fails validation
+    /// (for example, `max_capacity < initial_capacity`).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::Cache;
+    /// use tick::Clock;
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let cache = Cache::builder::<String, i32>(clock)
+    ///     .memory_with(|b| b.max_capacity(1_000).with_eviction_telemetry())
+    ///     .build();
+    /// ```
+    #[cfg(feature = "memory")]
+    #[must_use]
+    pub fn memory_with<F>(mut self, configure: F) -> CacheBuilder<K, V, InMemoryCache<K, V>>
+    where
+        K: Hash + Eq + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+        F: FnOnce(InMemoryCacheBuilder<K, V>) -> InMemoryCacheBuilder<K, V>,
+    {
+        let mut builder = configure(InMemoryCacheBuilder::<K, V>::new());
+        if builder.eviction_telemetry_enabled() {
+            let hook = Arc::new(EvictionHook::new());
+            let hook_for_listener = Arc::clone(&hook);
+            builder = builder.on_eviction(move |cause| hook_for_listener.handle(cause));
+            self.eviction_hook = Some(hook);
+        }
+        let storage = builder.build().expect("InMemoryCacheBuilder configuration must be valid");
+        self.storage(storage)
     }
 
     /// Configures the cache to use a service as the storage backend.
@@ -171,17 +221,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     #[cfg(any(feature = "logs", test))]
     #[must_use]
     pub fn enable_logs(mut self) -> Self {
-        self.telemetry = self.telemetry.with_logs();
-        self
-    }
-
-    /// Configures metrics collection for this cache.
-    ///
-    /// When configured, cache operations will emit metrics via OpenTelemetry.
-    #[cfg(any(feature = "metrics", test))]
-    #[must_use]
-    pub fn enable_metrics(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.telemetry = self.telemetry.with_metrics(meter_provider);
+        self.telemetry = CacheTelemetry::with_logging();
         self
     }
 
@@ -316,7 +356,7 @@ where
     /// let clock = Clock::new_tokio();
     /// let cache = Cache::builder::<String, i32>(clock).memory().build();
     /// ```
-    pub fn build(self) -> Cache<K, V, CacheWrapper<K, V, CT>> {
+    pub fn build(self) -> Cache<K, V> {
         <Self as Buildable<K, V>>::build(self)
     }
 }
@@ -349,39 +389,42 @@ mod tests {
 
     #[test]
     fn cache_builder_with_ttl() {
+        let control = tick::ClockControl::new();
+        let clock = control.to_clock();
+        let cache = Cache::builder::<String, i32>(clock)
+            .storage(cachet_tier::MockCache::new())
+            .ttl(Duration::from_mins(5))
+            .build();
+
+        futures::executor::block_on(async {
+            cache.insert("key".to_string(), cachet_tier::CacheEntry::new(42)).await.unwrap();
+            assert!(cache.get("key").await.unwrap().is_some(), "entry should exist before TTL");
+
+            control.advance(Duration::from_secs(301));
+            assert!(cache.get("key").await.unwrap().is_none(), "entry should expire after TTL");
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn builder_enable_logs() {
+        use testing_aids::LogCapture;
+
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .ttl(Duration::from_secs(300))
+            .enable_logs()
             .build();
 
-        assert!(cache.inner().ttl.is_some());
-        assert_eq!(cache.inner().ttl, Some(Duration::from_secs(300)));
-    }
+        futures::executor::block_on(async {
+            let _ = cache.get(&"key".to_string()).await;
+        });
 
-    #[test]
-    // OpenTelemetry SDK initialization resolves the current executable, which requires `readlink`
-    // and is blocked by Miri isolation.
-    #[cfg_attr(miri, ignore)]
-    fn builder_enable_logs() {
-        let clock = Clock::new_frozen();
-        let builder = Cache::builder::<String, i32>(clock)
-            .storage(cachet_tier::MockCache::new())
-            .enable_logs();
-        assert!(builder.telemetry.logs_enabled);
-    }
-
-    #[test]
-    // OpenTelemetry SDK initialization resolves the current executable, which requires `readlink`
-    // and is blocked by Miri isolation.
-    #[cfg_attr(miri, ignore)]
-    fn builder_enable_metrics() {
-        let clock = Clock::new_frozen();
-        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
-        let builder = Cache::builder::<String, i32>(clock)
-            .storage(cachet_tier::MockCache::new())
-            .enable_metrics(&provider);
-        assert!(builder.telemetry.meter.is_some());
+        // Logs should contain a cache event when logging is enabled
+        capture.assert_contains(crate::telemetry::attributes::EVENT_MISS);
     }
 
     #[test]

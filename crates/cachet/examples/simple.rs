@@ -11,10 +11,7 @@ use tick::Clock;
 #[tokio::main]
 async fn main() {
     let clock = Clock::new_tokio();
-    let cache = Cache::builder::<String, String>(clock)
-        .memory()
-        .ttl(Duration::from_secs(60))
-        .build();
+    let cache: Cache<String, String> = Cache::builder(clock).memory().ttl(Duration::from_mins(1)).build();
 
     let key = "user:1".to_string();
 

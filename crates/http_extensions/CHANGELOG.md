@@ -1,10 +1,49 @@
 # Changelog
 
-## Unreleased
+## [0.4.2] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.11.1` of `data_privacy`
+  - Now requires `0.9.1` of `data_privacy_macros`
+  - Now requires `0.9.1` of `data_privacy_macros_impl`
+  - Now requires `0.3.1` of `layered`
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+  - Now requires `0.1.3` of `recoverable`
+  - Now requires `0.2.2` of `templated_uri`
+  - Now requires `0.2.1` of `templated_uri_macros`
+  - Now requires `0.2.1` of `templated_uri_macros_impl`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+  - Now requires `0.3.1` of `tick`
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - bump templated_uri version ([#444](https://github.com/microsoft/oxidizer/pull/444))
+
+## [0.4.1] - 2026-05-25
+
+- 🔧 Maintenance
+
+  - bump `templated_uri` to 0.2.1
+
+## [0.4.0] - 2026-05-18
+
+- ✨ Features
+
+  - add `routing` module with `Router`, `RouterContext`, and `BaseUriConflict` for resolving the target `BaseUri` of outgoing requests
+  - `HttpRequestBuilder::build` now attaches the original templated `templated_uri::Uri` as a request extension, which `Router::resolve_request_uri` uses so repeated in-place re-routings (e.g. fallback retries with `BaseUriConflict::UseRouted`) don't duplicate the base path prefix.
 
 - ⚠️ Breaking
 
   - Rename `UrlTemplateLabel` to `UriTemplateLabel` and `RequestExt::url_template_label()` / `ExtensionsExt::url_template_label()` to `uri_template_label()`.
+  - update HTTP body and extension APIs to `bytesbuf` 0.5, `thread_aware` 0.7, `tick` 0.3, and `templated_uri` 0.2
 
 ## [0.3.2] - 2026-04-22
 

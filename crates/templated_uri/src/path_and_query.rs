@@ -137,6 +137,40 @@ impl From<HttpPathAndQuery> for PathAndQuery {
     }
 }
 
+impl TryFrom<&str> for PathAndQuery {
+    type Error = UriError;
+
+    /// Parses a string into a [`PathAndQuery`].
+    ///
+    /// The input must start with `/` (per RFC 3986 `path-abempty`); inputs without a
+    /// leading slash are rejected to avoid inconsistent rendering downstream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string does not start with `/` or is not a valid
+    /// path-and-query.
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Self::from(HttpPathAndQuery::try_from(value)?))
+    }
+}
+
+impl TryFrom<String> for PathAndQuery {
+    type Error = UriError;
+
+    /// Parses an owned string into a [`PathAndQuery`], reusing its buffer.
+    ///
+    /// Prefer this over the `&str` overload when the string is already owned: the
+    /// underlying [`http::uri::PathAndQuery`] takes the buffer without copying.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if the string does not start with `/` or is not a valid
+    /// path-and-query.
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(Self::from(HttpPathAndQuery::try_from(value)?))
+    }
+}
+
 impl TryFrom<&PathAndQuery> for HttpPathAndQuery {
     type Error = UriError;
 
@@ -219,5 +253,38 @@ mod tests {
         // Ensure owned and borrowed conversions agree.
         let converted_ref: HttpPathAndQuery = HttpPathAndQuery::try_from(&target_path).unwrap();
         assert_eq!(converted, converted_ref);
+    }
+
+    #[test]
+    fn try_from_str_succeeds() {
+        let target_path = PathAndQuery::try_from("/api/v1/users?active=true").unwrap();
+        assert_eq!(target_path.to_string().declassify_ref(), "/api/v1/users?active=true");
+    }
+
+    #[test]
+    fn try_from_str_invalid_errors() {
+        use ohno::Labeled;
+        let err = PathAndQuery::try_from("/invalid path\0").unwrap_err();
+        assert_eq!(err.label(), "uri_invalid");
+    }
+
+    #[test]
+    fn try_from_str_without_leading_slash_errors() {
+        use ohno::Labeled;
+        let err = PathAndQuery::try_from("api/v1/users").unwrap_err();
+        assert_eq!(err.label(), "uri_invalid");
+    }
+
+    #[test]
+    fn try_from_string_succeeds() {
+        let target_path = PathAndQuery::try_from(String::from("/api/v1/users?active=true")).unwrap();
+        assert_eq!(target_path.to_string().declassify_ref(), "/api/v1/users?active=true");
+    }
+
+    #[test]
+    fn try_from_string_invalid_errors() {
+        use ohno::Labeled;
+        let err = PathAndQuery::try_from(String::from("api/v1/users")).unwrap_err();
+        assert_eq!(err.label(), "uri_invalid");
     }
 }

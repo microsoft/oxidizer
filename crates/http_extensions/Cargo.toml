@@ -4,7 +4,7 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.3.2"
+version = "0.4.2"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
@@ -41,6 +41,7 @@ allowed_external_types = [
     "templated_uri::error::UriError",
     "templated_uri::path_and_query::PathAndQuery",
     "templated_uri::uri::Uri",
+    "templated_uri::base_uri::BaseUri",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
     "thread_aware::core::ThreadAware",
