@@ -5,6 +5,7 @@
 
 use native_tls::TlsConnector;
 
+use crate::TlsBackendDefaults;
 use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
@@ -27,10 +28,10 @@ impl NativeTlsOptions {
 
     /// Materializes this configuration into a [`native_tls::TlsConnector`].
     #[expect(clippy::unused_self, reason = "method takes self for symmetry with RustlsOptions::build")]
-    pub(crate) fn build(self, shared: &SharedOptions) -> Result<TlsConnector, BackendError> {
+    pub(crate) fn build(self, defaults: &TlsBackendDefaults, shared: &SharedOptions) -> Result<TlsConnector, BackendError> {
         let mut builder = native_tls::TlsConnector::builder();
         builder
-            .request_alpns(map_to_alpn(&shared.supported_http_versions))
+            .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
             .min_protocol_version(Some(native_tls::Protocol::Tlsv12));
 
         if let Some(identity) = shared.client_identity.as_ref() {
@@ -131,7 +132,9 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn build_produces_tls_connector() {
-        NativeTlsOptions::new().build(&SharedOptions::default()).unwrap();
+        NativeTlsOptions::new()
+            .build(&crate::TlsBackendDefaults::new(), &SharedOptions::default())
+            .unwrap();
     }
 
     #[test]

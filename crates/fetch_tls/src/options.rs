@@ -85,18 +85,22 @@ pub struct TlsOptions {
     pub(crate) shared: SharedOptions,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct SharedOptions {
-    pub(crate) supported_http_versions: Vec<Version>,
+    pub(crate) supported_http_versions: Option<Vec<Version>>,
     pub(crate) client_identity: Option<ClientIdentity>,
 }
 
-impl Default for SharedOptions {
-    fn default() -> Self {
-        Self {
-            supported_http_versions: vec![Version::HTTP_11, Version::HTTP_2],
-            client_identity: None,
-        }
+impl SharedOptions {
+    #[allow(
+        clippy::allow_attributes,
+        dead_code,
+        reason = "used by feature-gated backend builders; can be unused in builds without rustls/native-tls"
+    )]
+    pub(crate) fn resolved_supported_http_versions<'a>(&'a self, defaults: &'a TlsBackendDefaults) -> &'a [Version] {
+        self.supported_http_versions
+            .as_deref()
+            .unwrap_or(defaults.supported_http_versions.as_slice())
     }
 }
 
@@ -124,12 +128,12 @@ impl TlsOptions {
             TlsOptionsKind::PreConfigured(backend) => Ok(backend),
             #[cfg(any(feature = "rustls", test))]
             TlsOptionsKind::Rustls(rustls_backend) => {
-                let config = rustls_backend.build(defaults.rustls.as_ref(), &self.shared)?;
+                let config = rustls_backend.build(defaults, &self.shared)?;
                 Ok(TlsBackend::Rustls(std::sync::Arc::new(config)))
             }
             #[cfg(any(feature = "native-tls", test))]
             TlsOptionsKind::NativeTls(native_backend) => {
-                let connector = native_backend.build(&self.shared)?;
+                let connector = native_backend.build(defaults, &self.shared)?;
                 Ok(TlsBackend::NativeTls(connector))
             }
         }
@@ -145,12 +149,12 @@ impl TlsOptions {
         match defaults.default {
             #[cfg(any(feature = "rustls", test))]
             DefaultBackend::Rustls => {
-                let config = super::rustls::RustlsOptions::new().build(defaults.rustls.as_ref(), &self.shared)?;
+                let config = super::rustls::RustlsOptions::new().build(defaults, &self.shared)?;
                 Ok(TlsBackend::Rustls(std::sync::Arc::new(config)))
             }
             #[cfg(any(feature = "native-tls", test))]
             DefaultBackend::NativeTls => {
-                let connector = super::native_tls::NativeTlsOptions::new().build(&self.shared)?;
+                let connector = super::native_tls::NativeTlsOptions::new().build(defaults, &self.shared)?;
                 Ok(TlsBackend::NativeTls(connector))
             }
             DefaultBackend::Unselected => {
@@ -209,7 +213,7 @@ impl<B> TlsOptionsBuilder<B> {
             !versions.is_empty(),
             "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
         );
-        self.shared.supported_http_versions = versions.to_vec();
+        self.shared.supported_http_versions = Some(versions.to_vec());
         self
     }
 
@@ -235,9 +239,20 @@ mod tests {
     use crate::testing::AcceptAllServerCertVerifier as AcceptAll;
 
     #[test]
-    fn default_supported_http_versions_is_http1_and_http2() {
+    fn default_supported_http_versions_is_not_set() {
         let shared = SharedOptions::default();
-        assert_eq!(shared.supported_http_versions, vec![Version::HTTP_11, Version::HTTP_2]);
+        assert!(shared.supported_http_versions.is_none());
+    }
+
+    #[test]
+    fn resolved_supported_http_versions_falls_back_to_backend_defaults() {
+        let shared = SharedOptions::default();
+        let defaults = TlsBackendDefaults::new();
+
+        assert_eq!(
+            shared.resolved_supported_http_versions(&defaults),
+            [Version::HTTP_11, Version::HTTP_2]
+        );
     }
 
     #[test]

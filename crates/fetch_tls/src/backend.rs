@@ -3,6 +3,8 @@
 
 //! Fully constructed TLS backends ready for use by an HTTP client.
 
+use http::Version;
+
 /// Error returned when materializing a [`TlsBackend`] from
 /// [`TlsOptions`](super::TlsOptions) fails.
 #[ohno::error]
@@ -43,9 +45,12 @@ pub enum TlsBackend {
 /// own setter; native-tls and pre-configured backends do not consult
 /// these defaults.
 ///
-/// In addition to backend-specific defaults, `TlsBackendDefaults` carries
-/// the *default backend selection* used by [`TlsOptions::default`](super::TlsOptions::default) (and
-/// any other [`TlsOptions`](super::TlsOptions) that did not pin a backend).
+/// In addition to backend-specific defaults, `TlsBackendDefaults` carries:
+/// - the *default backend selection* used by [`TlsOptions::default`](super::TlsOptions::default) (and
+///   any other [`TlsOptions`](super::TlsOptions) that did not pin a backend), and
+/// - the default supported HTTP versions used when
+///   [`TlsOptionsBuilder::supported_http_versions`](super::TlsOptionsBuilder::supported_http_versions)
+///   was not called.
 /// Use [`TlsBackendDefaults::defaults_to_rustls`] or
 /// [`TlsBackendDefaults::defaults_to_native_tls`] to set it explicitly;
 /// [`TlsBackendDefaults::configure_rustls`] implicitly sets it to rustls if
@@ -54,12 +59,13 @@ pub enum TlsBackend {
 /// Use [`TlsBackendDefaults::new`] when no backend-specific state is
 /// required. Building a rustls backend without
 /// [`TlsBackendDefaults::configure_rustls`] returns a [`BackendError`].
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct TlsBackendDefaults {
     #[cfg(any(feature = "rustls", test))]
     pub(crate) rustls: Option<RustlsDefaults>,
 
     pub(crate) default: DefaultBackend,
+    pub(crate) supported_http_versions: Vec<Version>,
 }
 
 /// Environment-supplied defaults specific to the rustls backend.
@@ -78,6 +84,22 @@ impl TlsBackendDefaults {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Sets default HTTP versions used when [`TlsOptionsBuilder::supported_http_versions`](super::TlsOptionsBuilder::supported_http_versions)
+    /// was not called.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `versions` is empty.
+    #[must_use]
+    pub fn supported_http_versions(mut self, versions: &[Version]) -> Self {
+        assert!(
+            !versions.is_empty(),
+            "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
+        );
+        self.supported_http_versions = versions.to_vec();
+        self
     }
 
     /// Configures the rustls crypto provider and a fallback server certificate verifier.
@@ -131,6 +153,17 @@ impl TlsBackendDefaults {
     }
 }
 
+impl Default for TlsBackendDefaults {
+    fn default() -> Self {
+        Self {
+            #[cfg(any(feature = "rustls", test))]
+            rustls: None,
+            default: DefaultBackend::Unselected,
+            supported_http_versions: vec![Version::HTTP_11, Version::HTTP_2],
+        }
+    }
+}
+
 #[cfg(any(feature = "rustls", test))]
 impl From<::rustls::ClientConfig> for TlsBackend {
     fn from(config: ::rustls::ClientConfig) -> Self {
@@ -165,4 +198,29 @@ pub(crate) enum DefaultBackend {
 
     #[cfg(any(feature = "native-tls", test))]
     NativeTls,
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_supported_http_versions_is_http1_and_http2() {
+        let defaults = TlsBackendDefaults::new();
+        assert_eq!(defaults.supported_http_versions, vec![Version::HTTP_11, Version::HTTP_2]);
+    }
+
+    #[test]
+    fn supported_http_versions_overrides_defaults() {
+        let defaults = TlsBackendDefaults::new().supported_http_versions(&[Version::HTTP_11]);
+        assert_eq!(defaults.supported_http_versions, vec![Version::HTTP_11]);
+    }
+
+    #[test]
+    fn tls_backend_defaults_is_cloneable() {
+        let defaults = TlsBackendDefaults::new().supported_http_versions(&[Version::HTTP_2]);
+        let clone = defaults.clone();
+        assert_eq!(clone.supported_http_versions, vec![Version::HTTP_2]);
+    }
 }

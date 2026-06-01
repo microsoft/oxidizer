@@ -33,14 +33,11 @@ impl RustlsOptions {
     }
 
     /// Materializes this configuration into a [`rustls::ClientConfig`].
-    pub(crate) fn build(
-        self,
-        defaults: Option<&crate::backend::RustlsDefaults>,
-        shared: &SharedOptions,
-    ) -> Result<ClientConfig, BackendError> {
+    pub(crate) fn build(self, backend_defaults: &crate::TlsBackendDefaults, shared: &SharedOptions) -> Result<ClientConfig, BackendError> {
+        let rustls_defaults = backend_defaults.rustls.as_ref();
         let crypto_provider = self
             .crypto_provider
-            .or_else(|| defaults.map(|d| Arc::clone(&d.crypto_provider)))
+            .or_else(|| rustls_defaults.map(|d| Arc::clone(&d.crypto_provider)))
             .ok_or_else(|| {
                 BackendError::caused_by(
                     "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendDefaults::configure_rustls(...)",
@@ -48,7 +45,7 @@ impl RustlsOptions {
             })?;
         let verifier = match self.verifier_factory {
             Some(factory) => factory.invoke(Arc::clone(&crypto_provider)),
-            None => defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
+            None => rustls_defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
                 BackendError::caused_by(
                     "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendDefaults::configure_rustls(...)",
                 )
@@ -68,7 +65,7 @@ impl RustlsOptions {
                 .map_err(BackendError::caused_by),
             (None, None) => Ok(builder.with_no_client_auth()),
         }?;
-        config.alpn_protocols = map_to_alpn(&shared.supported_http_versions)
+        config.alpn_protocols = map_to_alpn(shared.resolved_supported_http_versions(backend_defaults))
             .iter()
             .map(|version| version.as_bytes().to_vec())
             .collect();
@@ -205,19 +202,11 @@ mod tests {
     use rustls::crypto::aws_lc_rs;
 
     use super::*;
-    use crate::backend::RustlsDefaults;
     use crate::client_identity::ClientIdentity;
     use crate::testing::{AcceptAllServerCertVerifier as AcceptAll, NoClientCertResolver as StubResolver};
 
     fn provider() -> Arc<rustls::crypto::CryptoProvider> {
         Arc::new(aws_lc_rs::default_provider())
-    }
-
-    fn defaults() -> RustlsDefaults {
-        RustlsDefaults {
-            crypto_provider: provider(),
-            verifier: Arc::new(AcceptAll),
-        }
     }
 
     fn shared_with(identity: Option<ClientIdentity>) -> SharedOptions {
@@ -263,7 +252,7 @@ mod tests {
             })),
             client_identity_resolver: None,
         };
-        rustls_backend.build(None, &shared_with(None)).unwrap();
+        rustls_backend.build(&crate::TlsBackendDefaults::new(), &shared_with(None)).unwrap();
         assert!(CALLED.load(Ordering::SeqCst));
     }
 
@@ -306,7 +295,12 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
-        let config = rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
+        let config = rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(None),
+            )
+            .unwrap();
         assert_eq!(config.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
     }
 
@@ -319,10 +313,15 @@ mod tests {
             client_identity_resolver: None,
         };
         let shared = SharedOptions {
-            supported_http_versions: vec![http::Version::HTTP_11],
+            supported_http_versions: Some(vec![http::Version::HTTP_11]),
             client_identity: None,
         };
-        let config = rustls_backend.build(Some(&defaults()), &shared).unwrap();
+        let config = rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared,
+            )
+            .unwrap();
         assert_eq!(config.alpn_protocols, vec![b"http/1.1".to_vec()]);
     }
 
@@ -335,7 +334,12 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
-        let err = rustls_backend.build(Some(&defaults()), &shared_with(Some(identity))).unwrap_err();
+        let err = rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(Some(identity)),
+            )
+            .unwrap_err();
         // Surface a debug-format check so we know the underlying rustls error is wrapped.
         let msg = format!("{err}");
         assert!(!msg.is_empty());
@@ -344,12 +348,19 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn build_falls_back_to_default_verifier() {
-        RustlsOptions::new().build(Some(&defaults()), &shared_with(None)).unwrap();
+        RustlsOptions::new()
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(None),
+            )
+            .unwrap();
     }
 
     #[test]
     fn build_without_crypto_provider_returns_error() {
-        let err = RustlsOptions::new().build(None, &shared_with(None)).unwrap_err();
+        let err = RustlsOptions::new()
+            .build(&crate::TlsBackendDefaults::new(), &shared_with(None))
+            .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("crypto provider"), "unexpected error: {msg}");
     }
@@ -362,7 +373,9 @@ mod tests {
             verifier_factory: None,
             client_identity_resolver: None,
         };
-        let err = rustls_backend.build(None, &shared_with(None)).unwrap_err();
+        let err = rustls_backend
+            .build(&crate::TlsBackendDefaults::new(), &shared_with(None))
+            .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("server certificate verifier"), "unexpected error: {msg}");
     }
@@ -375,7 +388,12 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: None,
         };
-        rustls_backend.build(None, &shared_with(None)).unwrap();
+        rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(None),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -421,7 +439,12 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: Some(Arc::new(StubResolver)),
         };
-        rustls_backend.build(Some(&defaults()), &shared_with(None)).unwrap();
+        rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(None),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -436,7 +459,12 @@ mod tests {
             verifier_factory: Some(ServerCertVerifierFactory::new(|_| Arc::new(AcceptAll))),
             client_identity_resolver: Some(Arc::new(StubResolver)),
         };
-        rustls_backend.build(Some(&defaults()), &shared_with(Some(identity))).unwrap();
+        rustls_backend
+            .build(
+                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &shared_with(Some(identity)),
+            )
+            .unwrap();
     }
 
     #[test]
