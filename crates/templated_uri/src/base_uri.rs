@@ -360,6 +360,36 @@ impl BaseUri {
         self.origin.effective_port()
     }
 
+    /// Returns the effective port of this [`BaseUri`], or an error when it
+    /// cannot be determined.
+    ///
+    /// Behaves like [`BaseUri::effective_port`], but returns a [`UriError`]
+    /// instead of `None` when no explicit port is present and the scheme has
+    /// no well-known default known to this crate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] when the authority does not specify a port and
+    /// the scheme is not one of the schemes with a default port known to this
+    /// crate (`http`, `https`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use templated_uri::BaseUri;
+    /// let base_uri = BaseUri::from_static("https://example.com:8443");
+    /// assert_eq!(base_uri.try_effective_port().unwrap(), 8443);
+    ///
+    /// let base_uri = BaseUri::from_static("https://example.com");
+    /// assert_eq!(base_uri.try_effective_port().unwrap(), 443);
+    ///
+    /// let base_uri = BaseUri::from_static("http://example.com");
+    /// assert_eq!(base_uri.try_effective_port().unwrap(), 80);
+    /// ```
+    pub fn try_effective_port(&self) -> Result<u16, UriError> {
+        self.origin.try_effective_port()
+    }
+
     /// Returns a new [`BaseUri`] with the given port.
     ///
     /// # Examples
@@ -876,6 +906,34 @@ mod tests {
         fn effective_port_infers_http_default() {
             let base_uri = BaseUri::from_static("http://example.com");
             assert_eq!(base_uri.effective_port(), Some(80));
+        }
+
+        #[test]
+        fn try_effective_port_explicit() {
+            let base_uri = BaseUri::from_static("https://example.com:8443");
+            assert_eq!(base_uri.try_effective_port().unwrap(), 8443);
+        }
+
+        #[test]
+        fn try_effective_port_infers_https_default() {
+            let base_uri = BaseUri::from_static("https://example.com");
+            assert_eq!(base_uri.try_effective_port().unwrap(), 443);
+        }
+
+        #[test]
+        fn try_effective_port_infers_http_default() {
+            let base_uri = BaseUri::from_static("http://example.com");
+            assert_eq!(base_uri.try_effective_port().unwrap(), 80);
+        }
+
+        #[test]
+        fn try_effective_port_errors_for_non_http_scheme_without_explicit_port() {
+            let base_uri = BaseUri::from_static("ftp://example.com");
+            let err = base_uri
+                .try_effective_port()
+                .expect_err("expected non-http/https URI without explicit port to error");
+
+            assert!(err.to_string().contains("ftp"));
         }
     }
 
