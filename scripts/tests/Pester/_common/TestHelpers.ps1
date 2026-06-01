@@ -6,8 +6,10 @@
     Common helpers for Pester tests. Dot-source from BeforeAll blocks.
 
 .DESCRIPTION
-    Provides Get-OxiRepoRoot for deterministic path resolution and
-    Import-Releasing for loading the shared script library.
+    Provides Get-OxiRepoRoot for deterministic path resolution from any
+    test file. Test files dot-source the shared script libraries
+    (scripts/lib/release-flow.ps1 etc.) directly using
+    Join-Path (Get-OxiRepoRoot) 'scripts\lib\<file>.ps1'.
 #>
 
 # Returns the repo root (the directory containing this scripts/tests/Pester

@@ -163,7 +163,7 @@ function Parse-ReleaseTokens {
         $changeSpec = $token.Substring($firstAt + 1)
 
         if (-not (Test-ValidPackageName -packageName $name)) {
-            throw "Invalid package name '$name' in token '$raw'. Package names must contain only letters, numbers, hyphens, and underscores; must not start or end with a hyphen; and must be 64 characters or less."
+            throw "Invalid package name '$name' in token '$raw'. Package names must contain only letters, numbers, hyphens, and underscores; must not start or end with a hyphen or underscore; and must be 64 characters or less."
         }
 
         if (-not $seenNames.Add($name)) {

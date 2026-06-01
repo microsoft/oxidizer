@@ -1,15 +1,19 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 #
-# Unit tests for Write-Changelog's cascade-emission path. Pinpoints the
-# multi-reason behavior introduced when cascadeReasons changed from a single
-# hashtable to an array of objects (so a single downstream package can record
-# being pulled in by multiple released dependencies in one PR). Invoke-Git is
-# mocked so these tests run hermetically (no synthetic git repository needed).
+# Unit tests for Write-Changelog. Pinpoints two paths:
+#   1. The cascade-emission path — introduced when cascadeReasons changed
+#      from a single hashtable to an array of objects (so a single
+#      downstream package can record being pulled in by multiple released
+#      dependencies in one PR).
+#   2. The unreleased-section folding path — Write-Changelog folds any
+#      pre-existing `## Unreleased` / `## [Unreleased]` body into the new
+#      release section ahead of the auto-generated cascade + commit bullets.
 #
-# Out of scope here: the merge-into-existing-section path (covered indirectly
-# by the GitFs Add-CascadeBulletToVersionSection tests and the end-to-end
-# scenario suite) and the version-section formatter (untouched by the refactor).
+# Invoke-Git is mocked so these tests run hermetically (no synthetic git
+# repository needed). The full end-to-end behaviour (real git history,
+# commit-message rendering, README regeneration) is covered by the
+# scenario suite under scripts/tests/Pester/scenarios/.
 
 BeforeAll {
     . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')

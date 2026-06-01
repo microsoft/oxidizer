@@ -277,7 +277,7 @@ jobs:
         run: |
           git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
 
-      - name: Analyze unreleased upstream dependencies
+      - name: Analyze unreleased dependencies
         id: analyze
         shell: pwsh
         run: |

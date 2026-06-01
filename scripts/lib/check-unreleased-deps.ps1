@@ -32,9 +32,12 @@ function Set-StepOutput {
     Add-Content -Path $env:GITHUB_OUTPUT -Value "$Name=$Value"
 }
 
-# Returns the absolute repo root by asking git. Wrapped so tests can mock it.
+# Returns the absolute repo root by asking git. Anchors the git call to this
+# script's own location so the helper works regardless of the caller's cwd
+# (otherwise running the wrapper from outside the worktree would silently
+# degrade into the catch path). Wrapped so tests can mock it.
 function Get-RepoRoot {
-    $output = Invoke-Git -Arguments @('rev-parse', '--show-toplevel')
+    $output = Invoke-Git -Arguments @('rev-parse', '--show-toplevel') -RepoRoot $PSScriptRoot
     return ($output | Select-Object -First 1).ToString().Trim()
 }
 
