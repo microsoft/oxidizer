@@ -76,11 +76,11 @@ impl ClientIdentity {
     /// `cert_chain` is leaf-first; `key_der` must be a `PKCS#8`-encoded
     /// private key.
     #[must_use]
-    pub fn from_der<I, B>(cert_chain: I, key_der: B) -> Self
+    pub fn from_der<I, C, K>(cert_chain: I, key_der: K) -> Self
     where
-        I: IntoIterator<Item = B>,
-        B: AsRef<[u8]>,
-    {
+        I: IntoIterator<Item = C>,
+        C: AsRef<[u8]>,
+        K: AsRef<[u8]>,
         let cert_chain = cert_chain
             .into_iter()
             .map(|c| rustls_pki_types::CertificateDer::from(c.as_ref().to_vec()))
