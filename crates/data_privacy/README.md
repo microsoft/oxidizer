@@ -191,7 +191,7 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3M_vhUtB5gFG-D1ZeP7gWyXGzaYsyQD3GO7GwPXvYMSh3Z2YWSBgmxkYXRhX3ByaXZhY3lmMC4xMS4x
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbcz--FS0HmAUb4PVl4_uBbJcbNpizJAPcY7sbA9e9gxKHdnZhZIGCbGRhdGFfcHJpdmFjeWYwLjExLjE
  [__link0]: https://docs.rs/data_privacy/0.11.1/data_privacy/?search=Classified
  [__link1]: https://docs.rs/data_privacy/0.11.1/data_privacy/?search=Redactor
  [__link10]: https://docs.rs/data_privacy/0.11.1/data_privacy/?search=classified
