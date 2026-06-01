@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - enforce nightly formatting ([#407](https://github.com/microsoft/oxidizer/pull/407))
+
 ## Unreleased
 
 - ⚠️ Breaking Changes

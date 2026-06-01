@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0] - 2026-06-01
+
+- ⚠️ Breaking
+
+  - Now requires `0.2.0` of `cachet_tier`
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+  - Now requires `0.1.3` of `recoverable`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- ✨ Features
+
+  - add configurable ttl on stampede protected cache, eviction telemetry ([#454](https://github.com/microsoft/oxidizer/pull/454))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.2.1]
 
 - ✨ Features

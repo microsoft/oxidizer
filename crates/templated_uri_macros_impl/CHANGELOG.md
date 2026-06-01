@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## Unreleased
 
 - ✨ Features
