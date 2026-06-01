@@ -50,12 +50,12 @@ The runtime is supplied entirely by the caller via an
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG27JhwJzXkumG9Cgswtvbtk3G11RQ0eI0kW1G87aELyEYbR5YWSDgmhhbnlzcGF3bmUwLjUuMIJrZmV0Y2hfaHlwZXJlMC4xLjGCb2h0dHBfZXh0ZW5zaW9uc2UwLjQuMQ
- [__link0]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=HyperTransportBuilder
- [__link1]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=Connect
- [__link2]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=HyperTransportBuilder::configure_hyper
- [__link3]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=HyperTransport
- [__link4]: https://docs.rs/http_extensions/0.4.1/http_extensions/?search=RequestHandler
- [__link5]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=HyperTransportBuilder::build
- [__link6]: https://docs.rs/anyspawn/0.5.0/anyspawn/?search=Spawner
- [__link7]: https://docs.rs/fetch_hyper/0.1.1/fetch_hyper/?search=Connect
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbbsmHAnNeS6Yb0KCzC29u2TcbXVFDR4jSRbUbztoQvIRhtHlhZIOCaGFueXNwYXduZTAuNS4xgmtmZXRjaF9oeXBlcmUwLjEuMoJvaHR0cF9leHRlbnNpb25zZTAuNC4y
+ [__link0]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=HyperTransportBuilder
+ [__link1]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=Connect
+ [__link2]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=HyperTransportBuilder::configure_hyper
+ [__link3]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=HyperTransport
+ [__link4]: https://docs.rs/http_extensions/0.4.2/http_extensions/?search=RequestHandler
+ [__link5]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=HyperTransportBuilder::build
+ [__link6]: https://docs.rs/anyspawn/0.5.1/anyspawn/?search=Spawner
+ [__link7]: https://docs.rs/fetch_hyper/0.1.2/fetch_hyper/?search=Connect
