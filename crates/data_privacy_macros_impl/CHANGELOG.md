@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.1] - 2026-06-01
+
+- ✨ Features
+
+  - Add named-field struct support and trait bounds in #[classified] ([#261](https://github.com/microsoft/oxidizer/pull/261))
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
 ## [0.9.0] - 2025-12-16
 
 - ✨ Features

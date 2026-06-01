@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3] - 2026-06-01
+
+- ✨ Features
+
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - add recipes docs ([#381](https://github.com/microsoft/oxidizer/pull/381))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - enforce nightly formatting ([#407](https://github.com/microsoft/oxidizer/pull/407))
+
 ## [0.1.2] - 2026-04-12
 
 - ✨ Features
