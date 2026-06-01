@@ -362,4 +362,78 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['c'].EffectiveTargetVersion | Should -Be '2.0.0'
         }
     }
+
+    Context 'cascade reason version normalisation' {
+        It 'updates a transitive cascade reason version when its target is auto-upgraded by a later iteration' {
+            # Linear chain a -> b -> c (each exposes the previous). Tokens are
+            # given in order `b a` so b iterates first and emits a cascade
+            # reason onto c referencing b.EffectiveTargetVersion=1.0.1 (patch).
+            # Then a iterates and BFS reaches both b and c. b is bumped to
+            # breaking (2.0.0) because b exposes a. Before normalisation, c's
+            # cascade reason for b would still record Version='1.0.1', which
+            # would yield a wrong "Now requires `1.0.1` of `b`" bullet in c's
+            # changelog. After normalisation, the reason references b's
+            # FINAL EffectiveTargetVersion ('2.0.0').
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') -AllowedExternalTypes @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') -AllowedExternalTypes @('b'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('b@patch', 'a@breaking')
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            # Sanity: b was auto-upgraded by a's cascade.
+            $byFolder['b'].EffectiveTargetVersion | Should -Be '2.0.0'
+            $byFolder['b'].EffectiveChangeType    | Should -Be 'breaking'
+            $byFolder['b'].AutoUpgraded           | Should -BeTrue
+
+            # c stayed at patch under one-level cascade (c does not directly
+            # expose a, so a's cascade contributes only a patch edge; b's
+            # bump is not re-iterated through c).
+            $byFolder['c'].EffectiveChangeType    | Should -Be 'patch'
+            $byFolder['c'].EffectiveTargetVersion | Should -Be '1.0.1'
+
+            $cReasonForB = @($byFolder['c'].CascadeReasons | Where-Object { $_.Target -eq 'b' })
+            $cReasonForB.Count   | Should -Be 1
+            $cReasonForB[0].Version  | Should -Be '2.0.0'   # normalised, not the stale '1.0.1'
+            # Breaking is intentionally NOT recomputed (one-level cascade
+            # semantics); leaving this assertion locks that decision in.
+            $cReasonForB[0].Breaking | Should -BeFalse
+
+            $cReasonForA = @($byFolder['c'].CascadeReasons | Where-Object { $_.Target -eq 'a' })
+            $cReasonForA.Count   | Should -Be 1
+            $cReasonForA[0].Version  | Should -Be '2.0.0'
+        }
+
+        It 'normalises cascade reason versions for packages whose cargo Name differs from their Folder' {
+            # The normalisation pass maps CascadeReason.Target (cargo Name)
+            # back to the entry by Name, not Folder. Verify that mapping
+            # works when Name and Folder differ — a common pattern in this
+            # workspace (e.g. http_extensions folder for http-extensions cargo
+            # package).
+            # NOTE: Deps must use underscore-normalised cargo names — that's
+            # the format produced by Get-WorkspacePackages (releasing.ps1
+            # normalises $dep.name.Replace('-', '_')) and the format the
+            # BFS in Get-TransitivePublishedDependentsFromBaseline expects.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'http_extensions' -Name 'http-extensions' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'http_layer'      -Name 'http-layer'      -Version '1.0.0' -Deps @('http_extensions') -AllowedExternalTypes @('http_extensions'))
+                (New-BaselinePackage -Folder 'http_server'     -Name 'http-server'     -Version '1.0.0' -Deps @('http_layer')      -AllowedExternalTypes @('http_layer'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('http-layer@patch', 'http-extensions@breaking')
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+
+            $byFolder['http_layer'].EffectiveTargetVersion | Should -Be '2.0.0'
+
+            $serverReasonForLayer = @($byFolder['http_server'].CascadeReasons | Where-Object { $_.Target -eq 'http-layer' })
+            $serverReasonForLayer.Count    | Should -Be 1
+            $serverReasonForLayer[0].Version | Should -Be '2.0.0'   # normalised via Name lookup
+        }
+    }
 }

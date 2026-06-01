@@ -299,6 +299,18 @@ function Get-TransitivePublishedDependentsFromBaseline {
 # change type for each dependent is derived from exposure of the USER TARGET
 # (not of any intermediate). Tightening the analysis is out of scope for the
 # redesign.
+#
+# After the iteration loop finishes, a final normalisation pass re-points
+# every recorded CascadeReason.Version to the target entry's FINAL
+# EffectiveTargetVersion. This is necessary because the version captured
+# during a target's outer-loop iteration may be superseded later if that
+# same target is also a dependent of yet another user-source target whose
+# iteration strengthens it. Without normalisation, downstream consumers
+# (Write-Changelog "Now requires <v> of <pkg>" bullets) would print the
+# stale pre-bump version. The companion Breaking flag is intentionally
+# left untouched — recomputing it without also re-iterating the dependent
+# would conflate "the target became breaking" with "this edge contributes
+# breaking", which under one-level cascade semantics it does not.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
@@ -465,6 +477,30 @@ function Resolve-ReleaseSet {
                 }
                 $newEntry.CascadeReasons.Add($cascadeReason)
                 $resolved[$depPkg.Folder] = $newEntry
+            }
+        }
+    }
+
+    # Normalise CascadeReason.Version to each target entry's FINAL
+    # EffectiveTargetVersion. A target X's iteration captures the version
+    # value live at that moment when emitting reasons onto its dependents.
+    # If a later outer-loop iteration (some user-source Y whose BFS reaches
+    # X) bumps X.EffectiveTargetVersion via the rank-comparison branch
+    # above, the reasons X already emitted are now stale. Re-point them
+    # here so changelog "Now requires <Version> of <Target>" bullets render
+    # the post-cascade plan rather than an intermediate snapshot. Breaking
+    # is intentionally NOT recomputed (see header comment).
+    $finalVersionByName = @{}
+    foreach ($e in $resolved.Values) { $finalVersionByName[$e.Name] = $e.EffectiveTargetVersion }
+    foreach ($e in $resolved.Values) {
+        for ($i = 0; $i -lt $e.CascadeReasons.Count; $i++) {
+            $r = $e.CascadeReasons[$i]
+            if ($finalVersionByName.ContainsKey($r.Target) -and $r.Version -ne $finalVersionByName[$r.Target]) {
+                $e.CascadeReasons[$i] = [pscustomobject]@{
+                    Target   = $r.Target
+                    Version  = $finalVersionByName[$r.Target]
+                    Breaking = $r.Breaking
+                }
             }
         }
     }
