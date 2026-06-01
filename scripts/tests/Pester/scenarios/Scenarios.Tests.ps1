@@ -63,7 +63,12 @@ Describe 'End-to-end release scenarios' {
         }
 
         # --- Released packages: at least every expected entry must appear with the expected version.
-        if ($expect.Released) {
+        # Use a $null-check (not truthiness) so a scenario that explicitly
+        # asserts NO releases via `Released = @()` still triggers the
+        # release-set bound check below — an empty array is falsy in
+        # PowerShell, and the truthiness form would have skipped the entire
+        # block and silently let unexpected releases leak through.
+        if ($null -ne $expect.Released) {
             $diag = "PromptsRaised: [$($result.PromptsRaised -join ' | ')]; RepliesGiven: [$($result.RepliesGiven -join ' | ')]; Releases: [$(($result.Releases | ForEach-Object { "$($_.Package)=$($_.NewVersion)" }) -join ', ')]"
             foreach ($exp in @($expect.Released)) {
                 $actual = $result.Releases | Where-Object { $_.Package -eq $exp.Package } | Select-Object -First 1

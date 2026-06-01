@@ -1,6 +1,6 @@
 @{
     Name        = 'S20-all-changed-accept-with-cascade'
-    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode all-changed: user accepts b as breaking (which cascades a as non-breaking), then ignores c and the cascade-elevated a. Final release set = {b, a}.'
+    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode all-changed: user accepts b as non-breaking (which cascades a as non-breaking), then ignores c and the cascade-elevated a. Final release set = {b, a}.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
