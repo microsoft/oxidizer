@@ -51,6 +51,7 @@ pub enum TlsBackend {
 /// - the default supported HTTP versions used when
 ///   [`TlsOptionsBuilder::supported_http_versions`](super::TlsOptionsBuilder::supported_http_versions)
 ///   was not called.
+///
 /// Use [`TlsBackendDefaults::defaults_to_rustls`] or
 /// [`TlsBackendDefaults::defaults_to_native_tls`] to set it explicitly;
 /// [`TlsBackendDefaults::configure_rustls`] implicitly sets it to rustls if
@@ -219,8 +220,6 @@ mod tests {
 
     #[test]
     fn tls_backend_defaults_is_cloneable() {
-        let defaults = TlsBackendDefaults::new().supported_http_versions(&[Version::HTTP_2]);
-        let clone = defaults.clone();
-        assert_eq!(clone.supported_http_versions, vec![Version::HTTP_2]);
+        static_assertions::assert_impl_all!(TlsBackendDefaults: Clone);
     }
 }

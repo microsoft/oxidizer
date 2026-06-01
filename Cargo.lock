@@ -1087,6 +1087,7 @@ dependencies = [
  "rstest",
  "rustls",
  "rustls-pki-types",
+ "static_assertions",
 ]
 
 [[package]]
