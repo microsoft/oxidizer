@@ -76,7 +76,7 @@ mod tests {
         // Clock is irrelevant for integer seconds.
         let clock = tick::Clock::new_frozen();
         let delay = get_retry_after_duration(&headers, &clock).unwrap();
-        assert_eq!(delay, Duration::from_secs(120));
+        assert_eq!(delay, Duration::from_mins(2));
     }
 
     #[test]
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn retry_after_date_in_past_returns_zero() {
         // Set a stable clock and create a timestamp 5s in the past
-        let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_millis(10_000));
+        let clock = Clock::new_frozen_at(SystemTime::UNIX_EPOCH + Duration::from_secs(10));
         let now = clock.system_time();
         let past = now.checked_sub(Duration::from_secs(5)).unwrap();
 
@@ -136,7 +136,7 @@ mod tests {
         let response = Response::builder().status(503).header(RETRY_AFTER, "60").body(()).unwrap();
         let recovery = response.recovery_with_clock(&Clock::new_frozen());
         assert_eq!(recovery.kind(), RecoveryKind::Retry);
-        assert_eq!(recovery.get_delay(), Some(Duration::from_secs(60)));
+        assert_eq!(recovery.get_delay(), Some(Duration::from_mins(1)));
 
         // Non-transient status
         let response = Response::builder().status(400).body(()).unwrap();

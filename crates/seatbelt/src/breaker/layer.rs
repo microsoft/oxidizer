@@ -604,8 +604,8 @@ mod tests {
         let layer = layer.sampling_duration(Duration::from_secs(10));
         assert_eq!(layer.sampling_duration, Duration::from_secs(10));
 
-        let layer = layer.sampling_duration(Duration::from_secs(60));
-        assert_eq!(layer.sampling_duration, Duration::from_secs(60));
+        let layer = layer.sampling_duration(Duration::from_mins(1));
+        assert_eq!(layer.sampling_duration, Duration::from_mins(1));
 
         let layer = layer.sampling_duration(Duration::from_millis(500));
         assert_eq!(layer.sampling_duration, Duration::from_millis(500));
@@ -619,11 +619,11 @@ mod tests {
         let layer = layer.break_duration(Duration::from_secs(5));
         assert_eq!(layer.break_duration, Duration::from_secs(5));
 
-        let layer = layer.break_duration(Duration::from_secs(120));
-        assert_eq!(layer.break_duration, Duration::from_secs(120));
+        let layer = layer.break_duration(Duration::from_mins(2));
+        assert_eq!(layer.break_duration, Duration::from_mins(2));
 
-        let layer = layer.break_duration(Duration::from_millis(2000));
-        assert_eq!(layer.break_duration, Duration::from_millis(2000));
+        let layer = layer.break_duration(Duration::from_secs(2));
+        assert_eq!(layer.break_duration, Duration::from_secs(2));
     }
 
     #[test]
@@ -668,7 +668,7 @@ mod tests {
             enabled: false,
             failure_threshold: 0.25,
             min_throughput: 50,
-            sampling_duration: Duration::from_secs(60),
+            sampling_duration: Duration::from_mins(1),
             break_duration: Duration::from_secs(15),
             half_open_mode: HalfOpenMode::quick(),
         };

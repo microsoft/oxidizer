@@ -178,14 +178,14 @@ mod tests {
     use super::*;
 
     fn create_refresh() -> TimeToRefresh<String> {
-        TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio())
+        TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio())
     }
 
     #[test]
     fn time_to_refresh_new() {
         let refresh = create_refresh();
 
-        assert_eq!(refresh.duration, Duration::from_secs(60));
+        assert_eq!(refresh.duration, Duration::from_mins(1));
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_should_refresh_true_when_clock_goes_backward() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(5), Spawner::new_tokio());
         let clock = Clock::new_frozen();
 
         // cached_at in the future relative to now causes duration_since to return Err
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn time_to_refresh_should_refresh_true_after_duration() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio());
         let clock = Clock::new_frozen();
 
         // cached_at is 61 seconds before now, exceeding the 60s refresh duration
@@ -272,9 +272,9 @@ mod tests {
 
     #[test]
     fn time_to_refresh_duration_access() {
-        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_secs(300), Spawner::new_tokio());
+        let refresh: TimeToRefresh<String> = TimeToRefresh::new(Duration::from_mins(5), Spawner::new_tokio());
 
-        assert_eq!(refresh.duration, Duration::from_secs(300));
+        assert_eq!(refresh.duration, Duration::from_mins(5));
     }
 
     #[test]
@@ -443,7 +443,7 @@ mod fetch_and_promote_tests {
 
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+        let refresh = TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio());
 
         let fc = FallbackCache::new("test", primary, fallback, clock, Some(refresh), telemetry);
 
@@ -505,7 +505,7 @@ mod fetch_and_promote_tests {
         let fallback = MockCache::<String, i32>::new();
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        let refresh = TimeToRefresh::new(Duration::from_secs(60), Spawner::new_tokio());
+        let refresh = TimeToRefresh::new(Duration::from_mins(1), Spawner::new_tokio());
 
         let primary_wrapper = CacheWrapper::new("primary", primary, clock.clone(), None, telemetry.clone(), InsertPolicy::default());
         let fc = FallbackCache::new("test", primary_wrapper, fallback, clock, Some(refresh), telemetry);

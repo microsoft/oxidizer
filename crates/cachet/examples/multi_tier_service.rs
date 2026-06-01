@@ -20,12 +20,12 @@ async fn main() {
     let l2_storage = MockCache::<String, String>::new();
     let l2 = Cache::builder::<String, String>(clock.clone())
         .storage(l2_storage)
-        .ttl(Duration::from_secs(600));
+        .ttl(Duration::from_mins(10));
 
     // L1: in-memory (shorter TTL, local)
     let cache = Cache::builder::<String, String>(clock)
         .memory()
-        .ttl(Duration::from_secs(60))
+        .ttl(Duration::from_mins(1))
         .fallback(l2)
         .build();
 

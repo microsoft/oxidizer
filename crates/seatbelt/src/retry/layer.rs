@@ -752,7 +752,7 @@ mod tests {
             enabled: false,
             backoff_type: Backoff::Linear,
             base_delay: Duration::from_secs(2),
-            max_delay: Some(Duration::from_secs(60)),
+            max_delay: Some(Duration::from_mins(1)),
             use_jitter: false,
             max_retry_attempts: 7,
             handle_unavailable: true,

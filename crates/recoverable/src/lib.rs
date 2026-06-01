@@ -532,7 +532,7 @@ mod tests {
             "retry (delay 30s)"
         );
         assert_eq!(
-            RecoveryInfo::unavailable().delay(Duration::from_secs(300)).to_string(),
+            RecoveryInfo::unavailable().delay(Duration::from_mins(5)).to_string(),
             "unavailable (delay 300s)"
         );
     }
@@ -566,8 +566,8 @@ mod tests {
         assert_eq!(zero_duration.get_delay(), Some(Duration::ZERO));
 
         // Delay can be applied to any recovery kind
-        let unavailable = RecoveryInfo::unavailable().delay(Duration::from_secs(300));
-        assert_eq!(unavailable.get_delay(), Some(Duration::from_secs(300)));
+        let unavailable = RecoveryInfo::unavailable().delay(Duration::from_mins(5));
+        assert_eq!(unavailable.get_delay(), Some(Duration::from_mins(5)));
         assert_eq!(unavailable.kind(), RecoveryKind::Unavailable);
 
         // Applying delay multiple times replaces the previous delay
@@ -599,13 +599,13 @@ mod tests {
         assert_eq!(RecoveryInfo::never().get_delay(), None);
         assert_eq!(RecoveryInfo::retry().get_delay(), None);
         assert_eq!(
-            RecoveryInfo::retry().delay(Duration::from_secs(60)).get_delay(),
-            Some(Duration::from_secs(60))
+            RecoveryInfo::retry().delay(Duration::from_mins(1)).get_delay(),
+            Some(Duration::from_mins(1))
         );
         assert_eq!(RecoveryInfo::unavailable().get_delay(), None);
         assert_eq!(
-            RecoveryInfo::unavailable().delay(Duration::from_secs(300)).get_delay(),
-            Some(Duration::from_secs(300))
+            RecoveryInfo::unavailable().delay(Duration::from_mins(5)).get_delay(),
+            Some(Duration::from_mins(5))
         );
     }
 
