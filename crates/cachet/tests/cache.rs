@@ -911,3 +911,42 @@ mod service_tests {
         assert!(cache.get(&"key".to_string()).await.unwrap().is_none());
     }
 }
+
+#[cfg(feature = "logs")]
+#[tokio::test]
+async fn get_or_insert_with_logging_emits_span() {
+    let capture = testing_aids::LogCapture::new();
+    let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().enable_logs().build();
+
+    let _ = cache.get_or_insert(&"k".to_string(), || async { 1 }).await;
+    capture.assert_contains("cache.miss");
+}
+
+#[cfg(feature = "logs")]
+#[tokio::test]
+async fn try_get_or_insert_with_logging_emits_span() {
+    let capture = testing_aids::LogCapture::new();
+    let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().enable_logs().build();
+
+    let _ = cache.try_get_or_insert(&"k".to_string(), || async { Ok::<_, Error>(1) }).await;
+    capture.assert_contains("cache.miss");
+}
+
+#[cfg(feature = "logs")]
+#[tokio::test]
+async fn optionally_get_or_insert_with_logging_emits_span() {
+    let capture = testing_aids::LogCapture::new();
+    let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+    let clock = Clock::new_frozen();
+    let cache = Cache::builder::<String, i32>(clock).memory().enable_logs().build();
+
+    let _ = cache.optionally_get_or_insert(&"k".to_string(), || async { Some(1) }).await;
+    capture.assert_contains("cache.miss");
+}

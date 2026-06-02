@@ -102,7 +102,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
-    fn handle_without_logging_still_emits_handler_events() {
+    fn handle_without_logging_emits_no_tracing_events() {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
@@ -113,9 +113,6 @@ mod tests {
         hook.handle(RemovalCause::Size);
         hook.handle(RemovalCause::Expired);
 
-        assert!(
-            capture.output().is_empty(),
-            "no log events should fire without logging enabled"
-        );
+        assert!(capture.output().is_empty(), "no log events should fire without logging enabled");
     }
 }

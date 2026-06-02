@@ -47,8 +47,14 @@ impl<F: Future> Future for WithRequestId<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        CURRENT_REQUEST_ID.with(|cell| cell.set(*this.request_id));
-        this.inner.poll(cx)
+        let prev = CURRENT_REQUEST_ID.with(|cell| {
+            let prev = cell.get();
+            cell.set(*this.request_id);
+            prev
+        });
+        let out = this.inner.poll(cx);
+        CURRENT_REQUEST_ID.with(|cell| cell.set(prev));
+        out
     }
 }
 
@@ -166,15 +172,6 @@ impl CacheTelemetry {
         }
     }
 
-    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
-    fn record_info_event(&self, event: &'static str) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            span.record(attributes::FIELD_EVENT, event);
-            tracing::info!(cache.event = event);
-        }
-    }
-
     pub(crate) fn record_hit(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
         self.record_debug_with_duration(attributes::EVENT_HIT, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_HIT, duration, fallback);
@@ -270,7 +267,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
-        self.record_info_event(attributes::EVENT_INSERT_REJECTED);
+        self.record_info_with_duration(attributes::EVENT_INSERT_REJECTED, Duration::ZERO);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
