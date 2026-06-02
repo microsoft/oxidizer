@@ -42,12 +42,12 @@
 //!
 //! From a **library / client** perspective that adopts `fetch_tls`, the
 //! [`TlsOptions`] is materialized into a concrete [`TlsBackend`] (backed by
-//! a specific TLS implementation) via [`TlsOptions::build_backend`]. The
-//! library supplies a [`TlsBackendDefaults`] that:
+//! a specific TLS implementation) via [`TlsBackendBuilder::build_backend`].
+//! The library supplies a [`TlsBackendBuilder`] that:
 //!
 //! - provides the information required to actually build the backend (for
 //!   example, a `rustls` crypto provider and server-certificate verifier via
-//!   [`TlsBackendDefaults::configure_rustls`]), and
+//!   [`TlsBackendBuilder::configure_rustls`]), and
 //! - decides which backend to use when the [`TlsOptions`] does not pin one
 //!   (i.e. when the consumer does not care about the underlying TLS
 //!   technology).
@@ -57,19 +57,21 @@
 //! - **`rustls`** — pure-Rust [`rustls`](::rustls). `fetch_tls` does not
 //!   bundle a crypto provider; the adopting library supplies one (along
 //!   with a server-certificate verifier) via
-//!   [`TlsBackendDefaults::configure_rustls`].
+//!   [`TlsBackendBuilder::configure_rustls`].
 //! - **`native-tls`** — platform native TLS (`SChannel` on Windows,
 //!   Security Framework on `macOS`, `OpenSSL` on Linux).
 //!
 //! With neither feature enabled, [`TlsOptions::default`] still constructs
-//! but [`TlsOptions::build_backend`] returns a [`BackendError`].
+//! but [`TlsBackendBuilder::build_backend`] returns a [`BackendError`].
 
 #[cfg(any(feature = "native-tls", feature = "rustls", test))]
 mod alpn;
 mod backend;
+mod backend_builder;
 mod options;
 
-pub use backend::{BackendError, TlsBackend, TlsBackendDefaults};
+pub use backend::{BackendError, TlsBackend};
+pub use backend_builder::TlsBackendBuilder;
 pub use options::{TlsOptions, TlsOptionsBuilder};
 
 mod client_identity;

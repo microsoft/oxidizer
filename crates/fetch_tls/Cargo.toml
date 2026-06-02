@@ -48,7 +48,7 @@ base64 = { workspace = true }
 http = { workspace = true }
 native-tls = { workspace = true, optional = true, features = ["alpn"] }
 # No crypto provider feature is enabled here; callers supply one via
-# `TlsBackendDefaults::configure_rustls`. See the crate docs for details.
+# `TlsBackendBuilder::configure_rustls`. See the crate docs for details.
 rustls = { workspace = true, features = [
     "tls12",
     "std",

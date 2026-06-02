@@ -5,7 +5,7 @@
 
 use native_tls::TlsConnector;
 
-use crate::TlsBackendDefaults;
+use crate::TlsBackendBuilder;
 use crate::alpn::map_to_alpn;
 use crate::backend::BackendError;
 use crate::options::{SharedOptions, TlsOptions, TlsOptionsBuilder, TlsOptionsKind};
@@ -28,7 +28,7 @@ impl NativeTlsOptions {
 
     /// Materializes this configuration into a [`native_tls::TlsConnector`].
     #[expect(clippy::unused_self, reason = "method takes self for symmetry with RustlsOptions::build")]
-    pub(crate) fn build(self, defaults: &TlsBackendDefaults, shared: &SharedOptions) -> Result<TlsConnector, BackendError> {
+    pub(crate) fn build(self, defaults: &TlsBackendBuilder, shared: &SharedOptions) -> Result<TlsConnector, BackendError> {
         let mut builder = native_tls::TlsConnector::builder();
         builder
             .request_alpns(map_to_alpn(shared.resolved_supported_http_versions(defaults)))
@@ -125,7 +125,8 @@ mod tests {
     fn build_fails_for_invalid_client_identity() {
         let identity = ClientIdentity::from_der(vec![vec![0xffu8, 0xff]], vec![0x30u8, 0x00]);
         let tls = TlsOptions::builder_native_tls().client_identity(identity).build();
-        tls.build_backend(&crate::TlsBackendDefaults::new())
+        crate::TlsBackendBuilder::new()
+            .build_backend(tls)
             .expect_err("expected build_backend to fail for invalid certificate");
     }
 
@@ -133,7 +134,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn build_produces_tls_connector() {
         NativeTlsOptions::new()
-            .build(&crate::TlsBackendDefaults::new(), &SharedOptions::default())
+            .build(&crate::TlsBackendBuilder::new(), &SharedOptions::default())
             .unwrap();
     }
 

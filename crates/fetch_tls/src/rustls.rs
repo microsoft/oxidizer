@@ -33,21 +33,21 @@ impl RustlsOptions {
     }
 
     /// Materializes this configuration into a [`rustls::ClientConfig`].
-    pub(crate) fn build(self, backend_defaults: &crate::TlsBackendDefaults, shared: &SharedOptions) -> Result<ClientConfig, BackendError> {
+    pub(crate) fn build(self, backend_defaults: &crate::TlsBackendBuilder, shared: &SharedOptions) -> Result<ClientConfig, BackendError> {
         let rustls_defaults = backend_defaults.rustls.as_ref();
         let crypto_provider = self
             .crypto_provider
             .or_else(|| rustls_defaults.map(|d| Arc::clone(&d.crypto_provider)))
             .ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendDefaults::configure_rustls(...)",
+                    "rustls crypto provider not supplied; set it via TlsOptionsBuilder::crypto_provider or TlsBackendBuilder::configure_rustls(...)",
                 )
             })?;
         let verifier = match self.verifier_factory {
             Some(factory) => factory.invoke(Arc::clone(&crypto_provider)),
             None => rustls_defaults.map(|d| Arc::clone(&d.verifier)).ok_or_else(|| {
                 BackendError::caused_by(
-                    "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendDefaults::configure_rustls(...)",
+                    "rustls server certificate verifier not supplied; set it via TlsOptionsBuilder::server_certificate_verifier or TlsBackendBuilder::configure_rustls(...)",
                 )
             })?,
         };
@@ -86,8 +86,8 @@ impl TlsOptions {
     ///
     /// Equivalent to `TlsOptions::builder_rustls().build()`. The crypto
     /// provider and server certificate verifier are taken from the
-    /// [`TlsBackendDefaults`](crate::TlsBackendDefaults) passed to
-    /// [`TlsOptions::build_backend`]; use [`TlsOptions::builder_rustls`] when
+    /// [`TlsBackendBuilder`](crate::TlsBackendBuilder) passed to
+    /// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend); use [`TlsOptions::builder_rustls`] when
     /// you need to override them or supply a client identity resolver.
     pub fn new_rustls() -> Self {
         Self::builder_rustls().build()
@@ -119,8 +119,8 @@ impl TlsOptionsBuilder<RustlsOptions> {
     /// Sets the rustls [`CryptoProvider`](rustls::crypto::CryptoProvider).
     ///
     /// Overrides the provider supplied by
-    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
-    /// If neither source supplies one, [`TlsOptions::build_backend`] returns
+    /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
+    /// If neither source supplies one, [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) returns
     /// a [`BackendError`](crate::BackendError).
     pub fn crypto_provider(mut self, crypto_provider: Arc<rustls::crypto::CryptoProvider>) -> Self {
         self.backend.crypto_provider = Some(crypto_provider);
@@ -130,15 +130,15 @@ impl TlsOptionsBuilder<RustlsOptions> {
     /// Sets a factory that builds the server certificate verifier from the
     /// negotiated [`CryptoProvider`].
     ///
-    /// The factory is invoked during [`TlsOptions::build_backend`] with the
+    /// The factory is invoked during [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) with the
     /// provider resolved from this builder or
-    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
+    /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
     /// Callers that don't need the provider can simply ignore the argument
     /// and return a pre-built verifier (for example, `|_| Arc::new(MyVerifier)`).
     ///
     /// Overrides the verifier supplied by
-    /// [`TlsBackendDefaults::configure_rustls`](crate::TlsBackendDefaults::configure_rustls).
-    /// If neither source supplies one, [`TlsOptions::build_backend`] returns
+    /// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls).
+    /// If neither source supplies one, [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) returns
     /// a [`BackendError`](crate::BackendError).
     pub fn server_certificate_verifier<F>(mut self, factory: F) -> Self
     where
@@ -252,7 +252,7 @@ mod tests {
             })),
             client_identity_resolver: None,
         };
-        rustls_backend.build(&crate::TlsBackendDefaults::new(), &shared_with(None)).unwrap();
+        rustls_backend.build(&crate::TlsBackendBuilder::new(), &shared_with(None)).unwrap();
         assert!(CALLED.load(Ordering::SeqCst));
     }
 
@@ -297,7 +297,7 @@ mod tests {
         };
         let config = rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(None),
             )
             .unwrap();
@@ -318,7 +318,7 @@ mod tests {
         };
         let config = rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared,
             )
             .unwrap();
@@ -336,7 +336,7 @@ mod tests {
         };
         let err = rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(Some(identity)),
             )
             .unwrap_err();
@@ -350,7 +350,7 @@ mod tests {
     fn build_falls_back_to_default_verifier() {
         RustlsOptions::new()
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(None),
             )
             .unwrap();
@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn build_without_crypto_provider_returns_error() {
         let err = RustlsOptions::new()
-            .build(&crate::TlsBackendDefaults::new(), &shared_with(None))
+            .build(&crate::TlsBackendBuilder::new(), &shared_with(None))
             .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("crypto provider"), "unexpected error: {msg}");
@@ -374,7 +374,7 @@ mod tests {
             client_identity_resolver: None,
         };
         let err = rustls_backend
-            .build(&crate::TlsBackendDefaults::new(), &shared_with(None))
+            .build(&crate::TlsBackendBuilder::new(), &shared_with(None))
             .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("server certificate verifier"), "unexpected error: {msg}");
@@ -390,7 +390,7 @@ mod tests {
         };
         rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(None),
             )
             .unwrap();
@@ -441,7 +441,7 @@ mod tests {
         };
         rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(None),
             )
             .unwrap();
@@ -461,7 +461,7 @@ mod tests {
         };
         rustls_backend
             .build(
-                &crate::TlsBackendDefaults::new().configure_rustls(provider(), Arc::new(AcceptAll)),
+                &crate::TlsBackendBuilder::new().configure_rustls(provider(), Arc::new(AcceptAll)),
                 &shared_with(Some(identity)),
             )
             .unwrap();
