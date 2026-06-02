@@ -4,6 +4,8 @@
 //! An enum that wraps the `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
+#[cfg(any(feature = "rustls", test))]
+use std::sync::Arc;
 
 use fetch_tls::TlsBackend;
 use http::Version;
@@ -65,13 +67,11 @@ where
         match backend {
             #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
-                build_rustls_connector(config.as_ref().clone(), connector, request_filter, supported_versions),
+                build_rustls_connector(Arc::unwrap_or_clone(config), connector, request_filter, supported_versions),
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
-            #[cfg_attr(coverage_nightly, coverage(off))]
-            _ => unreachable!("make doc tests happy"),
         }
     }
 }
