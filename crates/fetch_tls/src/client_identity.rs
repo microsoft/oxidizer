@@ -113,11 +113,6 @@ impl ClientIdentity {
     pub(crate) fn build_native_identity(&self) -> Result<native_tls::Identity, ClientIdentityError> {
         let key_pkcs8_der = match &self.private_key {
             rustls_pki_types::PrivateKeyDer::Pkcs8(key) => key.secret_pkcs8_der(),
-            rustls_pki_types::PrivateKeyDer::Pkcs1(_) | rustls_pki_types::PrivateKeyDer::Sec1(_) => {
-                return Err(ClientIdentityError::caused_by(
-                    "native-tls backend requires a `PKCS#8` private key (got `PKCS#1` or `SEC1`)",
-                ));
-            }
             _ => {
                 return Err(ClientIdentityError::caused_by("native-tls backend requires a `PKCS#8` private key"));
             }
@@ -246,7 +241,7 @@ mod tests {
         let Err(err) = identity.build_native_identity() else {
             panic!("expected error for PKCS#1 key");
         };
-        assert!(format!("{err}").contains("`PKCS#1` or `SEC1`"));
+        assert!(format!("{err}").contains("`PKCS#8` private key"));
     }
 
     #[test]
@@ -259,7 +254,7 @@ mod tests {
         let Err(err) = identity.build_native_identity() else {
             panic!("expected error for SEC1 key");
         };
-        assert!(format!("{err}").contains("`PKCS#1` or `SEC1`"));
+        assert!(format!("{err}").contains("`PKCS#8` private key"));
     }
 
     #[test]
