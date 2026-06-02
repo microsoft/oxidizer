@@ -19,7 +19,7 @@ This module provides [`CancellationTokenSource`][__link0] and [`CancellationToke
 modeled after the equivalent C# types. A source controls cancellation and
 hands out lightweight, cloneable tokens for observers to check.
 
-## Linked sources
+## Linked Sources
 
 A linked source cancels when *any* of its parent tokens are canceled,
 enabling composition of multiple cancellation signals:
@@ -52,18 +52,17 @@ source.cancel();
 
 ## Futures
 
-The [`WithCancellationExt`][__link2] trait adds a
-[`with_cancellation`][__link3] method
+The [`CancelableExt`][__link2] trait adds a [`cancelable`][__link3] method
 to any [`Future`][__link4], pairing it with a [`CancellationToken`][__link5] so that each
 poll checks for cancellation before and after driving the inner future.
 
 ```rust
-use cancelable::{CancellationTokenSource, WithCancellationExt};
+use cancelable::{CancelableExt, CancellationTokenSource};
 
 let source = CancellationTokenSource::new();
 let token = source.token();
 
-let result = async { 42 }.with_cancellation(token).await?;
+let result = async { 42 }.cancelable(token).await?;
 assert_eq!(result, 42);
 ```
 
@@ -73,10 +72,10 @@ assert_eq!(result, 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cancelable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbciObxqSLWWsbfKiwAXNlniAb4klZvw7J_M0bBHKwCELmcj1hZIGCamNhbmNlbGFibGVlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbE3Iea_zSpkIbvcbCI0vEEEEb7KqsBtUtyHsbFhKo1iYbGRphZIGCamNhbmNlbGFibGVlMC4xLjA
  [__link0]: https://docs.rs/cancelable/0.1.0/cancelable/?search=CancellationTokenSource
  [__link1]: https://docs.rs/cancelable/0.1.0/cancelable/?search=CancellationToken
- [__link2]: https://docs.rs/cancelable/0.1.0/cancelable/?search=future::WithCancellationExt
- [__link3]: https://docs.rs/cancelable/0.1.0/cancelable/?search=future::WithCancellationExt::with_cancellation
+ [__link2]: https://docs.rs/cancelable/0.1.0/cancelable/?search=future::CancelableExt
+ [__link3]: https://docs.rs/cancelable/0.1.0/cancelable/?search=future::CancelableExt::cancelable
  [__link4]: https://doc.rust-lang.org/stable/std/future/trait.Future.html
  [__link5]: https://docs.rs/cancelable/0.1.0/cancelable/?search=CancellationToken

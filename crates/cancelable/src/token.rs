@@ -7,7 +7,33 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-type Subscriber = Box<dyn FnOnce() + Send>;
+enum Subscriber {
+    /// An external callback for arbitrary subscriber logic.
+    External(Box<dyn FnOnce() + Send>),
+    /// A weak reference to a linked child's shared state, avoiding a heap
+    /// allocation for the common parent/child propagation path.
+    Linked(Weak<Inner>),
+}
+
+impl Subscriber {
+    fn notify(self) {
+        match self {
+            Self::External(f) => f(),
+            Self::Linked(weak) => {
+                if let Some(inner) = weak.upgrade() {
+                    inner.cancel_and_notify();
+                }
+            }
+        }
+    }
+
+    fn matches_linked(&self, target: &Weak<Inner>) -> bool {
+        match self {
+            Self::External(_) => false,
+            Self::Linked(inner) => inner.ptr_eq(target),
+        }
+    }
+}
 
 /// Shared state backing one or more [`CancellationToken`] handles.
 struct Inner {
@@ -32,6 +58,9 @@ impl Inner {
     /// Returns `true` if cancellation has been requested.
     #[must_use]
     fn is_cancelled(&self) -> bool {
+        // Use acquire/release ordering to ensure cancelable reads occur before
+        // draining the subscriber list. May not be strictly necessary since
+        // the subscriber list is protected by a lock instead of atomic.
         self.canceled.load(Ordering::Acquire)
     }
 
@@ -39,52 +68,88 @@ impl Inner {
     ///
     /// Returns `true` on success, signaling that the caller is responsible for notifying subscribers.
     fn try_set_cancelled(&self) -> bool {
+        // Use acquire/release ordering to ensure cancelable reads/updates occur
+        // before draining the subscriber list. May not be strictly necessary since
+        // the subscriber list is protected by a lock instead of atomic.
         self.canceled
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
 
     /// Signal cancellation and notify subscribers
+    ///
+    /// # Panics
+    ///
+    /// Panics when the lock protecting the subscriber list is poisoned. This
+    /// happens when another thread, which had been holding the lock, panicked.
     fn cancel_and_notify(&self) {
-        if self.try_set_cancelled() {
-            let subscribers = match self.subscribers.lock() {
-                // Lock, take contents, and unlock
-                Ok(mut guard) => guard.take().unwrap_or_default(),
+        if !self.try_set_cancelled() {
+            // Already canceled by someone else. They will notify.
+            return;
+        }
 
-                // Lock has been poisoned, which means we can't read the subscriber list.
-                Err(_) => Vec::default(),
-            };
+        // Lock, take subscribers, and unlock
+        let subscribers = self
+            .subscribers
+            .lock()
+            .expect("subscriber lock is poisoned")
+            .take()
+            .unwrap_or_default();
 
-            // Notify from outside the lock
-            for f in subscribers {
-                f();
-            }
+        // Notify from outside the lock
+        for subscriber in subscribers {
+            subscriber.notify();
         }
     }
 
     /// Subscribe to the cancellation notification
     ///
     /// If cancellation has already occurred, the callback fires immediately.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the lock protecting the subscriber list is poisoned. This
+    /// happens when another thread, which had been holding the lock, panicked.
     fn subscribe(&self, callback: Subscriber) {
-        if let Ok(mut guard) = self.subscribers.lock() {
-            // Subscribers is `Some(...)` which means we haven't notified them yet
-            // (e.g. not canceled, and not mid-cancellation). Add to the list.
-            if let Some(list) = guard.as_mut() {
-                list.push(callback);
-                return;
-            }
+        let mut guard = self.subscribers.lock().expect("subscriber lock is poisoned");
 
-            // Subscribers list was `None`, meaning cancellation has already occurred
-            // and all subscribers have already been notified.
-            //
-            // Fall through to release the lock, then notify immediately.
-        } else {
-            // Lock has been poisoned, which means we can't add to the subscriber list.
-            //
-            // The token source is unusable. Send the notification immediately.
+        // Subscribers is `Some(...)` which means we haven't notified them yet
+        // (e.g. not canceled, and not mid-cancellation). Add to the list.
+        if let Some(list) = guard.as_mut() {
+            list.push(callback);
+            return;
         }
 
-        callback();
+        // Subscribers list was `None`, meaning cancellation has already occurred
+        // and all subscribers have already been notified.
+        //
+        // Fall through to release the lock, then notify immediately.
+
+        callback.notify();
+    }
+
+    /// Remove the linked child token from the list of subscribers.
+    ///
+    /// This is a no-op if cancellation has already occurred (the list is `None`).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the lock protecting the subscriber list is poisoned. This
+    /// happens when another thread, which had been holding the lock, panicked.
+    #[cfg_attr(test, mutants::skip)] // Mutation breaks list iteration, causing tests to run forever.
+    fn unsubscribe_linked_child(&self, child: &Weak<Self>) {
+        let mut guard = self.subscribers.lock().expect("subscriber lock is poisoned");
+
+        if let Some(list) = guard.as_mut() {
+            let mut i = 0;
+            while i < list.len() {
+                if list[i].matches_linked(child) {
+                    list.swap_remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
     }
 }
 
@@ -105,8 +170,7 @@ impl Debug for Inner {
     }
 }
 
-/// A lightweight, cloneable handle for observing whether cancellation has been
-/// requested.
+/// A lightweight, cloneable handle for observing a cancellation signal.
 ///
 /// Tokens are obtained from a [`CancellationTokenSource`] via
 /// [`token()`](CancellationTokenSource::token) and can be passed throughout a
@@ -168,16 +232,27 @@ impl Default for CancellationToken {
     }
 }
 
-/// Controls cancellation for one or more [`CancellationToken`]s
+/// Controls cancellation, providing a shared [`CancellationToken`].
 ///
 /// Create a source, distribute tokens via [`token()`](Self::token), and call
-/// [`cancel()`](Self::cancel) when the operation should stop.
+/// [`cancel()`](Self::cancel) to signal when the operation should stop.
 ///
-/// Dropping a `CancellationTokenSource` does **not** cancel its tokens.
+/// # Drop Behavior
+///
+/// Dropping a [`CancellationTokenSource`] does **not** cancel its tokens.
 /// Outstanding tokens simply remain in their current state.
+///
+/// # Linked Parents
+///
+/// When a source is [`linked()`](CancellationTokenSource::linked) to a set of
+/// parents, it registers to receive notifications from each parent. When the
+/// source is later dropped, it unregistered from each of the parents. This
+/// ensures that long-lived parents only track and notify active children.
 #[derive(Debug, Default)]
 pub struct CancellationTokenSource {
     token: CancellationToken,
+    /// Parents to which this source is linked
+    parent_refs: Vec<Weak<Inner>>,
 }
 
 impl CancellationTokenSource {
@@ -186,6 +261,7 @@ impl CancellationTokenSource {
     pub fn new() -> Self {
         Self {
             token: CancellationToken::new(),
+            parent_refs: Vec::new(),
         }
     }
 
@@ -198,21 +274,21 @@ impl CancellationTokenSource {
     /// Linked sources work by registering a subscriber on each parent token.
     /// When any parent is canceled, we get a notification (callback), and use it to self-cancel.
     ///
+    /// On drop, this source unregisters itself from each parent.
+    ///
     /// [`is_cancelled()`]: CancellationToken::is_cancelled
     #[must_use]
     pub fn linked(parents: &[CancellationToken]) -> Self {
-        let source = Self::new();
+        let source = Self {
+            token: CancellationToken::new(),
+            parent_refs: parents.iter().map(CancellationToken::weak_ref).collect(),
+        };
 
         if !parents.is_empty() {
             let weak = source.token.weak_ref();
 
             for parent in parents {
-                let weak = Weak::clone(&weak);
-                parent.inner.subscribe(Box::new(move || {
-                    if let Some(inner) = weak.upgrade() {
-                        inner.cancel_and_notify();
-                    }
-                }));
+                parent.inner.subscribe(Subscriber::Linked(Weak::clone(&weak)));
             }
         }
 
@@ -252,8 +328,25 @@ impl CancellationTokenSource {
     ///
     /// If this source is already canceled, the callback fires immediately
     /// on the calling thread.
+    ///
+    /// This callback cannot be unregistered.
     pub fn subscribe(&self, callback: impl FnOnce() + Send + 'static) {
-        self.token.inner.subscribe(Box::new(callback));
+        self.token.inner.subscribe(Subscriber::External(Box::new(callback)));
+    }
+}
+
+impl Drop for CancellationTokenSource {
+    fn drop(&mut self) {
+        if self.parent_refs.is_empty() {
+            return;
+        }
+
+        let weak = self.token.weak_ref();
+        for parent_ref in &self.parent_refs {
+            if let Some(inner) = parent_ref.upgrade() {
+                inner.unsubscribe_linked_child(&weak);
+            }
+        }
     }
 }
 
@@ -419,7 +512,9 @@ mod tests {
         let token = source.token();
 
         let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !token.is_cancelled() {
+                assert!(std::time::Instant::now() < deadline, "spin loop timed out after 5 seconds");
                 std::hint::spin_loop();
             }
             true
@@ -436,7 +531,9 @@ mod tests {
         let linked_token = linked.token();
 
         let handle = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !linked_token.is_cancelled() {
+                assert!(std::time::Instant::now() < deadline, "spin loop timed out after 5 seconds");
                 std::hint::spin_loop();
             }
             true
@@ -534,5 +631,200 @@ mod tests {
 
         root.cancel();
         assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
+
+    /// Returns the number of subscribers currently registered, or `None` if
+    /// cancellation has already drained the list.
+    fn subscriber_count(inner: &Inner) -> Option<usize> {
+        inner
+            .subscribers
+            .lock()
+            .expect("subscriber lock is poisoned")
+            .as_ref()
+            .map(Vec::len)
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_removes_matching_entry() {
+        let parent = Inner::new(false);
+        let child = Arc::new(Inner::new(false));
+        let weak = Arc::downgrade(&child);
+
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        assert_eq!(subscriber_count(&parent), Some(1));
+
+        parent.unsubscribe_linked_child(&weak);
+        assert_eq!(subscriber_count(&parent), Some(0));
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_removes_all_matching_entries() {
+        let parent = Inner::new(false);
+        let child = Arc::new(Inner::new(false));
+        let weak = Arc::downgrade(&child);
+
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        assert_eq!(subscriber_count(&parent), Some(2));
+
+        parent.unsubscribe_linked_child(&weak);
+        assert_eq!(subscriber_count(&parent), Some(0));
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_leaves_other_linked_subscribers() {
+        let parent = Inner::new(false);
+        let child = Arc::new(Inner::new(false));
+        let child_other = Arc::new(Inner::new(false));
+        let weak = Arc::downgrade(&child);
+        let weak_other = Arc::downgrade(&child_other);
+
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak_other)));
+        assert_eq!(subscriber_count(&parent), Some(2));
+
+        parent.unsubscribe_linked_child(&weak);
+        assert_eq!(subscriber_count(&parent), Some(1));
+
+        // Cancelling the parent should still propagate to child_other
+        parent.cancel_and_notify();
+        assert!(child_other.is_cancelled());
+        assert!(!child.is_cancelled());
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_leaves_external_subscribers() {
+        let parent = Inner::new(false);
+        let child = Arc::new(Inner::new(false));
+        let weak = Arc::downgrade(&child);
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c = Arc::clone(&counter);
+        parent.subscribe(Subscriber::External(Box::new(move || {
+            c.fetch_add(1, Ordering::Relaxed);
+        })));
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        assert_eq!(subscriber_count(&parent), Some(2));
+
+        parent.unsubscribe_linked_child(&weak);
+        assert_eq!(subscriber_count(&parent), Some(1));
+
+        parent.cancel_and_notify();
+        assert_eq!(counter.load(Ordering::Relaxed), 1, "external subscriber should still fire");
+        assert!(!child.is_cancelled(), "unsubscribed child should not be cancelled");
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_is_noop_when_already_cancelled() {
+        let parent = Inner::new(false);
+        let child = Arc::new(Inner::new(false));
+        let weak = Arc::downgrade(&child);
+
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak)));
+        parent.cancel_and_notify();
+        assert_eq!(subscriber_count(&parent), None);
+
+        // Should not panic or have any effect
+        parent.unsubscribe_linked_child(&weak);
+        assert_eq!(subscriber_count(&parent), None);
+    }
+
+    #[test]
+    fn unsubscribe_linked_child_is_noop_when_no_match() {
+        let parent = Inner::new(false);
+        let child_a = Arc::new(Inner::new(false));
+        let child_b = Arc::new(Inner::new(false));
+        let weak_a = Arc::downgrade(&child_a);
+        let weak_b = Arc::downgrade(&child_b);
+
+        parent.subscribe(Subscriber::Linked(Weak::clone(&weak_a)));
+        assert_eq!(subscriber_count(&parent), Some(1));
+
+        parent.unsubscribe_linked_child(&weak_b);
+        assert_eq!(subscriber_count(&parent), Some(1));
+    }
+
+    #[test]
+    fn drop_linked_source_unregisters_from_parent() {
+        let parent = CancellationTokenSource::new();
+
+        {
+            let _linked = CancellationTokenSource::linked(&[parent.token()]);
+            assert_eq!(subscriber_count(&parent.token.inner), Some(1));
+            // _linked dropped here
+        }
+
+        assert_eq!(subscriber_count(&parent.token.inner), Some(0));
+    }
+
+    #[test]
+    fn drop_linked_source_unregisters_from_all_parents() {
+        let p1 = CancellationTokenSource::new();
+        let p2 = CancellationTokenSource::new();
+
+        {
+            let _linked = CancellationTokenSource::linked(&[p1.token(), p2.token()]);
+            assert_eq!(subscriber_count(&p1.token.inner), Some(1));
+            assert_eq!(subscriber_count(&p2.token.inner), Some(1));
+        }
+
+        assert_eq!(subscriber_count(&p1.token.inner), Some(0));
+        assert_eq!(subscriber_count(&p2.token.inner), Some(0));
+    }
+
+    #[test]
+    fn drop_linked_source_leaves_sibling_subscriptions() {
+        let parent = CancellationTokenSource::new();
+        let sibling = CancellationTokenSource::linked(&[parent.token()]);
+
+        {
+            let _linked = CancellationTokenSource::linked(&[parent.token()]);
+            assert_eq!(subscriber_count(&parent.token.inner), Some(2));
+        }
+
+        assert_eq!(subscriber_count(&parent.token.inner), Some(1));
+
+        // Sibling should still receive cancellation
+        parent.cancel();
+        assert!(sibling.is_cancelled());
+    }
+
+    #[test]
+    fn drop_linked_source_leaves_external_subscriptions() {
+        let parent = CancellationTokenSource::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c = Arc::clone(&counter);
+        parent.subscribe(move || {
+            c.fetch_add(1, Ordering::Relaxed);
+        });
+
+        {
+            let _linked = CancellationTokenSource::linked(&[parent.token()]);
+            assert_eq!(subscriber_count(&parent.token.inner), Some(2));
+        }
+
+        assert_eq!(subscriber_count(&parent.token.inner), Some(1));
+
+        parent.cancel();
+        assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn drop_independent_source_does_not_panic() {
+        let _source = CancellationTokenSource::new();
+        // No parents — drop should be a no-op without panicking
+    }
+
+    #[test]
+    fn drop_linked_source_after_parent_cancelled_does_not_panic() {
+        let parent = CancellationTokenSource::new();
+        let linked = CancellationTokenSource::linked(&[parent.token()]);
+
+        parent.cancel();
+        assert!(linked.is_cancelled());
+
+        // Subscriber list is already None; drop should not panic
+        drop(linked);
     }
 }

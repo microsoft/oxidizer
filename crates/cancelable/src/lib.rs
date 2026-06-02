@@ -11,7 +11,7 @@
 //! modeled after the equivalent C# types. A source controls cancellation and
 //! hands out lightweight, cloneable tokens for observers to check.
 //!
-//! # Linked sources
+//! # Linked Sources
 //!
 //! A linked source cancels when *any* of its parent tokens are canceled,
 //! enabling composition of multiple cancellation signals:
@@ -48,26 +48,25 @@
 //!
 //! # Futures
 //!
-//! The [`WithCancellationExt`] trait adds a
-//! [`with_cancellation`](WithCancellationExt::with_cancellation) method
+//! The [`CancelableExt`] trait adds a [`cancelable`](CancelableExt::cancelable) method
 //! to any [`Future`], pairing it with a [`CancellationToken`] so that each
 //! poll checks for cancellation before and after driving the inner future.
 //!
 //! ```
 //! # async fn example() -> Result<(), ohno::AppError> {
-//! use cancelable::{CancellationTokenSource, WithCancellationExt};
+//! use cancelable::{CancelableExt, CancellationTokenSource};
 //!
 //! let source = CancellationTokenSource::new();
 //! let token = source.token();
 //!
-//! let result = async { 42 }.with_cancellation(token).await?;
+//! let result = async { 42 }.cancelable(token).await?;
 //! assert_eq!(result, 42);
 //! # Ok(())
 //! # }
 //! ```
 
 pub mod future;
-pub use future::WithCancellationExt;
+pub use future::CancelableExt;
 
 mod token;
 pub use token::{CancellationToken, CancellationTokenSource};

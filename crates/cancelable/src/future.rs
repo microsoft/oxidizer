@@ -3,19 +3,19 @@
 
 //! Future extension for cooperative cancellation
 //!
-//! The [`WithCancellationExt`] trait adds a
-//! [`with_cancellation`](WithCancellationExt::with_cancellation) method
+//! The [`CancelableExt`] trait adds a
+//! [`cancelable`](CancelableExt::cancelable) method
 //! to any [`Future`], pairing it with a [`CancellationToken`] so that each
 //! poll checks for cancellation before and after driving the inner future.
 //!
 //! ```
 //! # async fn example() -> Result<(), ohno::AppError> {
-//! use cancelable::{CancellationTokenSource, WithCancellationExt};
+//! use cancelable::{CancelableExt, CancellationTokenSource};
 //!
 //! let source = CancellationTokenSource::new();
 //! let token = source.token();
 //!
-//! let result = async { 42 }.with_cancellation(token).await?;
+//! let result = async { 42 }.cancelable(token).await?;
 //! assert_eq!(result, 42);
 //! # Ok(())
 //! # }
@@ -28,14 +28,13 @@ use pin_project::pin_project;
 
 use crate::CancellationToken;
 
-/// Error returned when a [`WithCancellation`] future detects that its
-/// associated [`CancellationToken`] has been canceled.
+/// Error returned when a future is canceled
 #[ohno::error]
 #[display("operation was canceled")]
 pub struct Canceled {}
 
 /// Extension trait that adds cancellation support to any [`Future`].
-pub trait WithCancellationExt: Future + Sized {
+pub trait CancelableExt: Future + Sized {
     /// Wraps this future so that each poll checks the given [`CancellationToken`]:
     ///
     /// - If the token is canceled (before *or* after polling the inner
@@ -56,10 +55,10 @@ pub trait WithCancellationExt: Future + Sized {
     ///
     /// ```
     /// # async fn example() {
-    /// use cancelable::{CancellationTokenSource, WithCancellationExt};
+    /// use cancelable::{CancelableExt, CancellationTokenSource};
     ///
     /// let source = CancellationTokenSource::new();
-    /// let result = async { "hello" }.with_cancellation(source.token()).await;
+    /// let result = async { "hello" }.cancelable(source.token()).await;
     /// assert_eq!(result.unwrap(), "hello");
     /// # }
     /// ```
@@ -68,40 +67,38 @@ pub trait WithCancellationExt: Future + Sized {
     ///
     /// ```
     /// # async fn example() {
-    /// use cancelable::{CancellationTokenSource, WithCancellationExt};
+    /// use cancelable::{CancelableExt, CancellationTokenSource};
     ///
     /// let source = CancellationTokenSource::new();
     /// source.cancel();
     ///
-    /// let result = async { unreachable!() }
-    ///     .with_cancellation(source.token())
-    ///     .await;
+    /// let result = async { unreachable!() }.cancelable(source.token()).await;
     /// assert!(result.unwrap_err().to_string().contains("canceled"));
     /// # }
     /// ```
-    fn with_cancellation(self, token: CancellationToken) -> WithCancellation<Self>;
+    fn cancelable(self, token: CancellationToken) -> Cancelable<Self>;
 }
 
-impl<F: Future> WithCancellationExt for F {
-    fn with_cancellation(self, token: CancellationToken) -> WithCancellation<Self> {
-        WithCancellation { inner: self, token }
+impl<F: Future> CancelableExt for F {
+    fn cancelable(self, token: CancellationToken) -> Cancelable<Self> {
+        Cancelable { inner: self, token }
     }
 }
 
 /// Future returned by
-/// [`with_cancellation`](WithCancellationExt::with_cancellation).
+/// [`cancelable`](CancelableExt::cancelable).
 ///
 /// See the trait method documentation for semantics.
 #[derive(Debug)]
 #[pin_project]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct WithCancellation<F> {
+pub struct Cancelable<F> {
     #[pin]
     inner: F,
     token: CancellationToken,
 }
 
-impl<F: Future> Future for WithCancellation<F> {
+impl<F: Future> Future for Cancelable<F> {
     type Output = Result<F::Output, Canceled>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -129,27 +126,32 @@ impl<F: Future> Future for WithCancellation<F> {
 
 #[cfg(test)]
 mod tests {
+    use tick::{Clock, FutureExt};
+
     use super::*;
     use crate::CancellationTokenSource;
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn completed_future_returns_ok() {
         let source = CancellationTokenSource::new();
-        let result = async { 42 }.with_cancellation(source.token()).await;
+        let result = async { 42 }.cancelable(source.token()).await;
         assert_eq!(result.unwrap(), 42);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn cancelled_future_returns_err() {
         let source = CancellationTokenSource::new();
         source.cancel();
 
         let result = async { unreachable!("should not poll inner future") }
-            .with_cancellation(source.token())
+            .cancelable(source.token())
             .await;
         assert!(result.unwrap_err().to_string().contains("canceled"));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn cancellation_triggered_by_inner_future_leads_to_cancellation_error() {
         struct CancelOnPoll(CancellationTokenSource);
@@ -161,20 +163,25 @@ mod tests {
             }
         }
 
+        let clock = Clock::new_tokio();
         let source = CancellationTokenSource::new();
         let token = source.token();
         CancelOnPoll(source)
-            .with_cancellation(token)
+            .timeout(&clock, std::time::Duration::from_secs(5))
+            .cancelable(token)
             .await
             .expect_err("should fail")
             .to_string()
             .contains("canceled");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn already_cancelled_token() {
+        let clock = Clock::new_tokio();
         async { unreachable!() }
-            .with_cancellation(CancellationToken::cancelled())
+            .timeout(&clock, std::time::Duration::from_secs(5))
+            .cancelable(CancellationToken::cancelled())
             .await
             .expect_err("should fail")
             .to_string()
