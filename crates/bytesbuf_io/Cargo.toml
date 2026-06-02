@@ -39,11 +39,11 @@ ohno = { workspace = true }
 trait-variant = { workspace = true }
 
 [dev-dependencies]
-bytesbuf = { workspace = true, features = ["test-util"] }
+bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
 futures = { workspace = true }
 mutants = { workspace = true }
 new_zealand = { workspace = true }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 [lints]
 workspace = true
