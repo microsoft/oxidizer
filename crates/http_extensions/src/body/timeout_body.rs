@@ -237,7 +237,7 @@ mod tests {
         );
 
         // Advance the clock past the timeout before polling.
-        control.advance(Duration::from_secs(60));
+        control.advance(Duration::from_mins(1));
 
         // The inner body has data ready, so it should be returned regardless of
         // elapsed time — the idle timeout only fires when the inner body is pending.
@@ -257,7 +257,7 @@ mod tests {
         // delay fire on re-poll, exercising the delay-fires path.
         let body = ClockAdvancingBody {
             control,
-            advance_by: Duration::from_secs(60),
+            advance_by: Duration::from_mins(1),
             poll_count: AtomicU32::new(0),
         };
 

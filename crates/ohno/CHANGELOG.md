@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.3.4] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.2` of `ohno_macros`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - fine grained error labels ([#382](https://github.com/microsoft/oxidizer/pull/382))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
+## [0.3.3] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `ohno_macros`
+
+- ✨ Features
+
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - fine grained error labels ([#382](https://github.com/microsoft/oxidizer/pull/382))
+
 ## [0.3.2] - 2026-04-15
 
 - ✨ Features

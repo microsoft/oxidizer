@@ -351,13 +351,11 @@ async fn get_or_insert_with_computes_and_caches() {
     let key = "key".to_string();
 
     let entry = cache
-        .get_or_insert_with(&key, || async {
-            CacheEntry::expires_after(42, std::time::Duration::from_secs(300))
-        })
+        .get_or_insert_with(&key, || async { CacheEntry::expires_after(42, std::time::Duration::from_mins(5)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 42);
-    assert_eq!(entry.ttl(), Some(std::time::Duration::from_secs(300)));
+    assert_eq!(entry.ttl(), Some(std::time::Duration::from_mins(5)));
 
     // Second call returns cached value, not the new closure result
     let entry = cache.get_or_insert_with(&key, || async { CacheEntry::new(100) }).await.unwrap();
@@ -371,7 +369,7 @@ async fn get_or_insert_with_preserves_per_entry_ttl() {
     let cache = Cache::builder::<String, i32>(clock).memory().build();
 
     let key = "key".to_string();
-    let ttl = std::time::Duration::from_secs(60);
+    let ttl = std::time::Duration::from_mins(1);
 
     let entry = cache
         .get_or_insert_with(&key, || async { CacheEntry::expires_after(7, ttl) })
@@ -427,9 +425,7 @@ async fn stampede_protection_get_or_insert_with() {
     let key = "key".to_string();
 
     let entry = cache
-        .get_or_insert_with(&key, || async {
-            CacheEntry::expires_after(42, std::time::Duration::from_secs(120))
-        })
+        .get_or_insert_with(&key, || async { CacheEntry::expires_after(42, std::time::Duration::from_mins(2)) })
         .await
         .unwrap();
     assert_eq!(*entry.value(), 42);
@@ -450,7 +446,7 @@ async fn try_get_or_insert_with_success() {
     let cache = Cache::builder::<String, i32>(clock).memory().build();
 
     let key = "key".to_string();
-    let ttl = std::time::Duration::from_secs(600);
+    let ttl = std::time::Duration::from_mins(10);
 
     let entry = cache
         .try_get_or_insert_with(&key, || async { Ok::<_, Error>(CacheEntry::expires_after(42, ttl)) })
@@ -498,7 +494,7 @@ async fn stampede_protection_try_get_or_insert_with_success() {
 
     let entry = cache
         .try_get_or_insert_with(&key, || async {
-            Ok::<_, Error>(CacheEntry::expires_after(42, std::time::Duration::from_secs(60)))
+            Ok::<_, Error>(CacheEntry::expires_after(42, std::time::Duration::from_mins(1)))
         })
         .await
         .unwrap();

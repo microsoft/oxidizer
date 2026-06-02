@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.5.3] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.2` of `layered`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
+## [0.5.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.4` of `recoverable`
+  - Now requires `0.7.2` of `thread_aware`
+  - Now requires `0.7.2` of `thread_aware_macros`
+  - Now requires `0.7.1` of `thread_aware_macros_impl`
+  - Now requires `0.3.2` of `tick`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
+## [0.5.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `layered`
+  - Now requires `0.1.3` of `recoverable`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+  - Now requires `0.3.1` of `tick`
+
+- ✨ Features
+
+  - introduce a new "routing" module ([#389](https://github.com/microsoft/oxidizer/pull/389))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.5.0] - 2026-05-14
 
 - ⚠️ Breaking

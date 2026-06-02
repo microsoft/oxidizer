@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.3.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.2` of `thread_aware`
+  - Now requires `0.7.2` of `thread_aware_macros`
+  - Now requires `0.7.1` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- 🐛 Bug Fixes
+
+  - examples collision ([#455](https://github.com/microsoft/oxidizer/pull/455))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
+## [0.3.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- 🐛 Bug Fixes
+
+  - examples collision ([#455](https://github.com/microsoft/oxidizer/pull/455))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.3.0] - 2026-05-11
 
 - ⚠️ Breaking

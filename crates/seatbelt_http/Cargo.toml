@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt_http"
 description = "HTTP-specific extensions for the seatbelt crate."
-version = "0.2.1"
+version = "0.2.4"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "seatbelt", "http", "recovery"]
 categories = ["data-structures", "network-programming"]
@@ -45,11 +45,11 @@ tick = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
-http_extensions = { workspace = true, features = ["test-util"] }
-layered = { workspace = true }
+http_extensions = { path = "../http_extensions", features = ["test-util"] }
+layered = { path = "../layered" }
 mutants = { workspace = true }
-ohno = { workspace = true }
-tick = { workspace = true, features = ["test-util"] }
+ohno = { path = "../ohno" }
+tick = { path = "../tick", features = ["test-util"] }
 
 [lints]
 workspace = true

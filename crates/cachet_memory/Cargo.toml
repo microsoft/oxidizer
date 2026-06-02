@@ -4,7 +4,7 @@
 [package]
 name = "cachet_memory"
 description = "In-memory cache tier backed by Moka for the cachet caching library."
-version = "0.2.1"
+version = "0.3.1"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -37,9 +37,9 @@ thread_aware = { workspace = true, features = ["derive"] }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
-ohno = { workspace = true, features = ["test-util"] }
-tick = { workspace = true, features = ["test-util"] }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+ohno = { path = "../ohno", features = ["test-util"] }
+tick = { path = "../tick", features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [[bench]]
 name = "overhead"

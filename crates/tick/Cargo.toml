@@ -4,15 +4,15 @@
 [package]
 name = "tick"
 description = "Provides primitives to interact with and manipulate machine time."
-version = "0.3.0"
+version = "0.3.2"
 readme = "README.md"
 keywords = ["time", "clock", "tick", "stopwatch"]
 categories = ["data-structures"]
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/tick"
 
 [package.metadata.cargo_check_external_types]
@@ -47,11 +47,11 @@ futures-core = { workspace = true }
 jiff = { workspace = true, features = ["std"], optional = true }
 pin-project-lite = { workspace = true }
 serde_core = { workspace = true, features = ["std"], optional = true }
-thread_aware.workspace = true
+thread_aware = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["time", "rt"] }
 
 [dev-dependencies]
-ohno = { workspace = true, features = ["app-err"] }
+ohno = { path = "../ohno", features = ["app-err"] }
 
 #external
 chrono = { workspace = true, features = ["clock"] }
@@ -64,7 +64,7 @@ mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_core = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
-static_assertions.workspace = true
+static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 

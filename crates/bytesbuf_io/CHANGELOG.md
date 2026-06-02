@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.2` of `bytesbuf`
+  - Now requires `0.3.4` of `ohno`
+  - Now requires `0.3.2` of `ohno_macros`
+  - Now requires `0.7.2` of `thread_aware`
+  - Now requires `0.7.2` of `thread_aware_macros`
+  - Now requires `0.7.1` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+
+## [0.5.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.3` of `ohno`
+  - Now requires `0.3.1` of `ohno_macros`
+  - Now requires `0.7.1` of `thread_aware`
+  - Now requires `0.7.1` of `thread_aware_macros`
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
 ## [0.5.0] - 2026-05-18
 
 - ⚠️ Breaking

@@ -4,7 +4,7 @@
 [package]
 name = "bytesbuf_io"
 description = "Asynchronous I/O abstractions expressed via `bytesbuf` types."
-version = "0.5.0"
+version = "0.5.2"
 readme = "README.md"
 keywords = ["oxidizer", "io", "zero-copy", "performance", "async"]
 categories = [
@@ -39,11 +39,11 @@ ohno = { workspace = true }
 trait-variant = { workspace = true }
 
 [dev-dependencies]
-bytesbuf = { workspace = true, features = ["test-util"] }
+bytesbuf = { path = "../bytesbuf", features = ["test-util"] }
 futures = { workspace = true }
 mutants = { workspace = true }
 new_zealand = { workspace = true }
-testing_aids = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 [lints]
 workspace = true

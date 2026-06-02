@@ -4,15 +4,15 @@
 [package]
 name = "http_extensions"
 description = "Shared HTTP types and extension traits for clients and servers."
-version = "0.4.1"
+version = "0.4.4"
 readme = "README.md"
 keywords = ["oxidizer", "http", "extensions", "client", "server"]
 categories = ["network-programming"]
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
 [package.metadata.cargo_check_external_types]
@@ -57,42 +57,42 @@ json = ["dep:serde_core", "dep:serde_json"]
 test-util = ["tick/test-util"]
 
 [dependencies]
-bytes.workspace = true
+bytes = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
 futures = { workspace = true, features = ["std"] }
-http.workspace = true
-http-body.workspace = true
-http-body-util.workspace = true
-layered.workspace = true
-ohno.workspace = true
-pin-project.workspace = true
-recoverable.workspace = true
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+layered = { workspace = true }
+ohno = { workspace = true }
+pin-project = { workspace = true }
+recoverable = { workspace = true }
 serde_core = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
-templated_uri.workspace = true
+templated_uri = { workspace = true }
 thread_aware = { workspace = true, features = ["derive"] }
 tick = { workspace = true, features = ["fmt"] }
 
 [dev-dependencies]
-alloc_tracker.workspace = true
-bytesbuf = { workspace = true, features = ["bytes-compat", "test-util"] }
-criterion.workspace = true
-data_privacy.workspace = true
+alloc_tracker = { workspace = true }
+bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
+criterion = { workspace = true }
+data_privacy = { path = "../data_privacy" }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
-layered = { workspace = true, features = ["intercept", "dynamic-service"] }
-mutants.workspace = true
-ohno = { workspace = true, features = ["test-util", "app-err"] }
+layered = { path = "../layered", features = ["intercept", "dynamic-service"] }
+mutants = { workspace = true }
+ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 serde = { workspace = true, features = ["derive"] }
-serde_core.workspace = true
+serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
-static_assertions.workspace = true
-templated_uri = { workspace = true, features = ["uuid"] }
-testing_aids.workspace = true
-tick = { workspace = true, features = ["test-util", "tokio"] }
+static_assertions = { workspace = true }
+templated_uri = { path = "../templated_uri", features = ["uuid"] }
+testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
-uuid.workspace = true
+uuid = { workspace = true }
 
 [lints]
 workspace = true

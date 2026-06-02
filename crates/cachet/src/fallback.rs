@@ -432,8 +432,8 @@ mod tests {
         let primary_mock = MockCache::<String, i32>::new();
 
         // Insert an entry with an old cached_at so should_refresh returns true
-        let old_time = clock.system_time() - Duration::from_secs(120);
-        let entry = CacheEntry::expires_at(42, Duration::from_secs(300), old_time);
+        let old_time = clock.system_time() - Duration::from_mins(2);
+        let entry = CacheEntry::expires_at(42, Duration::from_mins(5), old_time);
         primary_mock.insert("key".to_string(), entry).await.unwrap();
 
         let fallback_mock = MockCache::<String, i32>::new();

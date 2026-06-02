@@ -400,7 +400,7 @@ mod tests {
         let clock = control.to_clock();
         let cache = Cache::builder::<String, i32>(clock)
             .storage(cachet_tier::MockCache::new())
-            .ttl(Duration::from_secs(300))
+            .ttl(Duration::from_mins(5))
             .build();
 
         futures::executor::block_on(async {

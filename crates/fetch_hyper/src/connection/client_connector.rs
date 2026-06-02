@@ -416,7 +416,7 @@ mod tests {
             vec![Version::HTTP_11, Version::HTTP_2],
             &meter,
             7,
-            ConnectionLifetime::Fixed(Duration::from_secs(60)),
+            ConnectionLifetime::Fixed(Duration::from_mins(1)),
         );
         let _ = cc.clone(); // exercise Clone impl
         cc.execute(BaseUri::from_static("http://example.com")).await.unwrap();

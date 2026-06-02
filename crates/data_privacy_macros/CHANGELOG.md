@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.9.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.9.2` of `data_privacy_macros_impl`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
+
+## [0.9.1] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.9.1` of `data_privacy_macros_impl`
+
+- 🐛 Bug Fixes
+
+  - Replace removed doc_auto_cfg feature with doc_cfg ([#178](https://github.com/microsoft/oxidizer/pull/178))
+
+- 📚 Documentation
+
+  - Normalize feature handling for docs.rs ([#153](https://github.com/microsoft/oxidizer/pull/153))
+  - Fix the CI badge ([#154](https://github.com/microsoft/oxidizer/pull/154))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+  - Replace cargo-rdme by cargo-doc2readme ([#148](https://github.com/microsoft/oxidizer/pull/148))
+
+- 🔄 Continuous Integration
+
+  - Add spell checker ([#158](https://github.com/microsoft/oxidizer/pull/158))
+
 ## [0.9.0] - 2025-12-16
 
 - ✨ Features
