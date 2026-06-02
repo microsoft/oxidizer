@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn connection_pool_options_connection_idle_timeout_none() {
         let options = ConnectionPoolOptions::default()
-            .connection_idle_timeout(Duration::from_secs(60))
+            .connection_idle_timeout(Duration::from_mins(1))
             .connection_idle_timeout(None);
         assert!(matches!(options.connection_idle_timeout, ConnectionIdleTimeout::Unlimited));
     }

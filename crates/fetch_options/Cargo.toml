@@ -16,6 +16,9 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_options"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["http::*"]
+
 [package.metadata.docs.rs]
 all-features = true
 
