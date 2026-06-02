@@ -72,8 +72,23 @@ where
             ),
             #[cfg(any(feature = "native-tls", test))]
             TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
+
+            // When `fetch_hyper` is built without any TLS feature but feature
+            // unification (e.g. during `cargo test --doc` across the workspace)
+            // still enables variants on `fetch_tls::TlsBackend`, the match
+            // arms above are cfg'd out. This unreachable arm keeps the match
+            // exhaustive in that configuration without affecting normal builds.
+            #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
+            _ => no_tls_backend_unreachable(),
         }
     }
+}
+
+#[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cold]
+fn no_tls_backend_unreachable() -> ! {
+    unreachable!("`TlsBackend` variants cannot be constructed when no TLS feature is enabled in `fetch_hyper`")
 }
 
 // The internal ALPN selection only manifests through TLS handshakes against
