@@ -2,14 +2,6 @@
 // Licensed under the MIT License.
 
 //! In-process fakes used by this crate's own tests.
-//!
-//! This module is compiled only under `#[cfg(test)]` and is therefore not
-//! reachable from downstream crates. The pieces here are intentionally
-//! minimal: a panicking stream for delegation tests, a canned-response
-//! [`FakeStream`], a [`FakeConnector`] that satisfies [`Connect`], a small
-//! [`TestError`] type, and a [`create_test_request`] helper.
-//!
-//! [`Connect`]: crate::Connect
 
 use std::fmt;
 use std::io::Error as IoError;
@@ -74,10 +66,9 @@ impl Connection for PanickingStream {
 /// A fake stream that returns a single canned response (or error) once any
 /// data has been written to it.
 ///
-/// The first [`poll_read`](Read::poll_read) returns `Pending` and parks the
-/// caller until the first [`poll_write`](Write::poll_write) (the request).
-/// After that, the canned response is delivered in a single read and `EOF` is
-/// returned on subsequent reads.
+/// The first [`poll_read`](Read::poll_read) parks the caller until the first
+/// [`poll_write`](Write::poll_write) (the request). The canned response is
+/// then delivered in one read, and `EOF` is returned afterwards.
 pub struct FakeStream {
     result: Option<std::result::Result<Bytes, TestError>>,
     state: Arc<Mutex<FakeStreamState>>,
@@ -315,14 +306,13 @@ pub fn sorted_attributes(attrs: &[opentelemetry::KeyValue]) -> Vec<(String, Stri
 /// Returns a real [`hyper::Error`] driven by an in-memory stream.
 ///
 /// Drives a [`hyper`] handshake against a stream that fails every read and
-/// write, returning the error produced when the connection is driven to
-/// completion. Useful for code paths that want to inspect a real
-/// `hyper::Error` without involving the network.
+/// write, returning the resulting error. Useful for inspecting a real
+/// `hyper::Error` without the network.
 ///
 /// # Panics
 ///
-/// Panics if the in-memory handshake unexpectedly succeeds or if the
-/// driven connection unexpectedly completes without an error.
+/// Panics if the in-memory handshake unexpectedly succeeds or the connection
+/// completes without an error.
 #[must_use]
 pub fn create_hyper_error() -> hyper::Error {
     use futures::executor::block_on;
@@ -363,13 +353,14 @@ mod tests {
 
     use anyspawn::Spawner;
     use bytes::Bytes;
+    use fetch_options::RequestFilter;
     use http_body_util::BodyExt;
     use layered::Service as _;
     use native_tls::TlsConnector;
     use seatbelt::RecoveryInfo;
 
     use crate::testing::{FakeConnector, TestError, create_test_request, fake_body_builder};
-    use crate::{HyperTransportBuilder, RequestFilter, TlsBackend};
+    use crate::{HyperTransportBuilder, TlsBackend};
 
     fn build_tls() -> TlsBackend {
         TlsBackend::NativeTls(TlsConnector::new().unwrap())
@@ -383,15 +374,16 @@ mod tests {
     #[tokio::test]
     async fn fake_connector_serves_canned_response() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(),
             clock,
-            build_tls(),
-            fake_body_builder(),
+            options,
         )
-        .request_filter(RequestFilter::HttpAndHttps)
-        .build();
+        .body_builder(fake_body_builder())
+        .build(build_tls());
 
         let response = handler.execute(create_test_request()).await.unwrap();
 
@@ -404,6 +396,9 @@ mod tests {
     #[tokio::test]
     async fn fake_connector_propagates_connect_failure() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.connect_timeout = Duration::from_secs(5);
         let handler = HyperTransportBuilder::new(
             FakeConnector::new_connect_failure(
                 TestError::new("forced connect error").with_inner_recoverability(RecoveryInfo::retry()),
@@ -411,12 +406,10 @@ mod tests {
             ),
             Spawner::new_tokio(),
             clock,
-            build_tls(),
-            fake_body_builder(),
+            options,
         )
-        .request_filter(RequestFilter::HttpAndHttps)
-        .connect_timeout(Duration::from_secs(5))
-        .build();
+        .body_builder(fake_body_builder())
+        .build(build_tls());
 
         let error = handler
             .execute(create_test_request())
@@ -438,11 +431,11 @@ mod tests {
             FakeConnector::new_success(http_1_response(), clock.clone()),
             Spawner::new_tokio(),
             clock,
-            build_tls(),
-            fake_body_builder(),
+            // default RequestFilter is Https only
+            fetch_options::TransportOptions::default(),
         )
-        // default RequestFilter is Https only
-        .build();
+        .body_builder(fake_body_builder())
+        .build(build_tls());
 
         let error = handler
             .execute(create_test_request())

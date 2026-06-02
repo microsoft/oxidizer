@@ -2,9 +2,9 @@
 // Licensed under the MIT License.
 
 //! The [`HyperIo`] trait alias plus a [`Connection`] impl for
-//! [`Box<dyn HyperIo>`], so a heap-allocated, type-erased stream can be used
-//! directly wherever a [`HyperIo`] is required. The matching [`Read`]/
-//! [`Write`] impls for `Box<T>` are provided by `hyper` itself.
+//! [`Box<dyn HyperIo>`], so a type-erased stream can be used wherever a
+//! [`HyperIo`] is required. The [`Read`]/[`Write`] impls for `Box<T>` come
+//! from `hyper` itself.
 
 use hyper::rt::{Read, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};

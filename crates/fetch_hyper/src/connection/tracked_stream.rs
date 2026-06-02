@@ -9,13 +9,14 @@ use std::io::IoSlice;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use fetch_options::ConnectionInfo;
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
 use opentelemetry::metrics::Histogram;
 use templated_uri::BaseUri;
 use tracing::{Level, event};
 
-use crate::telemetry::{ConnectionInfo, create_connection_attributes};
+use crate::telemetry::create_connection_attributes;
 
 /// A wrapper around a stream that tracks connection lifecycle.
 #[derive(Debug)]
@@ -113,14 +114,18 @@ mod tests {
     use std::pin::pin;
     use std::task::Waker;
 
+    use fetch_options::PoolIndex;
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use testing_aids::MetricTester;
-    use tick::Clock;
 
     use super::*;
     use crate::testing::PanickingStream;
+
+    fn frozen_info(pool_index: usize) -> ConnectionInfo {
+        ConnectionInfo::new(std::time::Instant::now, PoolIndex::new(pool_index), None)
+    }
 
     fn make_histogram() -> Histogram<f64> {
         SdkMeterProvider::builder()
@@ -134,7 +139,7 @@ mod tests {
         TrackedStream {
             inner: PanickingStream,
             base_uri: BaseUri::from_static("https://example.com"),
-            info: ConnectionInfo::new(&Clock::new_frozen(), 0, None),
+            info: frozen_info(0),
             connection_duration: None,
             connected: Connected::new(),
         }
@@ -159,7 +164,7 @@ mod tests {
         drop(TrackedStream {
             inner: PanickingStream,
             base_uri: BaseUri::from_static("https://example.com"),
-            info: ConnectionInfo::new(&Clock::new_frozen(), 0, None),
+            info: frozen_info(0),
             connection_duration: Some(histogram),
             connected: Connected::new(),
         });
@@ -175,7 +180,7 @@ mod tests {
         let stream = TrackedStream {
             inner: ConnectedOnlyStream,
             base_uri: BaseUri::from_static("https://example.com"),
-            info: ConnectionInfo::new(&Clock::new_frozen(), 7, None),
+            info: frozen_info(7),
             connection_duration: None,
             connected: Connected::new(),
         };
@@ -260,7 +265,7 @@ mod tests {
         let stream = TrackedStream::new(
             PanickingStream,
             BaseUri::from_static("https://example.com"),
-            ConnectionInfo::new(&Clock::new_frozen(), 0, None),
+            frozen_info(0),
             make_histogram(),
             Connected::new(),
         );

@@ -10,10 +10,9 @@ pub(crate) use connector::TlsConnector;
 
 /// Selects and supplies the `TLS` backend used by the transport.
 ///
-/// When neither the `rustls` nor `native-tls` feature is enabled this enum
-/// has no variants and is therefore uninhabited: the crate still compiles,
-/// but a [`TlsBackend`] value cannot be constructed and the transport
-/// cannot be used. Enable at least one `TLS` feature to make outbound
+/// With neither the `rustls` nor `native-tls` feature enabled this enum is
+/// uninhabited: the crate still compiles, but no [`TlsBackend`] can be
+/// constructed. Enable at least one `TLS` feature to make outbound
 /// connections.
 #[derive(Clone, Debug)]
 #[allow(

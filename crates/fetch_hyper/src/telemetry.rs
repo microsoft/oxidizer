@@ -1,85 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Telemetry helpers and the [`ConnectionInfo`] response extension.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+//! Telemetry helpers for the Hyper transport.
 
 use ohno::ErrorLabel;
 use opentelemetry::{KeyValue, Value};
-use tick::{Clock, Stopwatch};
-
-/// Diagnostic information about the connection that served a response.
-///
-/// Attached as a response extension by real network connections. Cheap to
-/// clone — clones share state.
-#[derive(Clone, Debug)]
-pub struct ConnectionInfo {
-    inner: Arc<ConnectionInfoInner>,
-}
-
-#[derive(Debug)]
-struct ConnectionInfoInner {
-    stopwatch: Stopwatch,
-    pool_index: usize,
-    max_age: Option<Duration>,
-    poisoned: AtomicBool,
-}
-
-impl ConnectionInfo {
-    /// Creates connection metadata tracking elapsed time from now.
-    pub(crate) fn new(clock: &Clock, pool_index: usize, max_age: Option<Duration>) -> Self {
-        Self {
-            inner: Arc::new(ConnectionInfoInner {
-                stopwatch: clock.stopwatch(),
-                pool_index,
-                max_age,
-                poisoned: AtomicBool::new(false),
-            }),
-        }
-    }
-
-    /// Time elapsed since the connection was established.
-    #[must_use]
-    pub fn age(&self) -> Duration {
-        self.inner.stopwatch.elapsed()
-    }
-
-    /// Pool that served the request (`0` for single-pool clients).
-    #[must_use]
-    pub fn pool_index(&self) -> usize {
-        self.inner.pool_index
-    }
-
-    /// `true` once the connection has been marked for removal from the pool.
-    #[must_use]
-    pub fn poisoned(&self) -> bool {
-        // Acquire pairs with the Release in `mark_poisoned`. Observing `true` is
-        // sticky, so a relaxed load would also be sound; Acquire makes intent
-        // obvious and costs nothing on the targets we support.
-        self.inner.poisoned.load(Ordering::Acquire)
-    }
-
-    /// Configured cap, or `None` if uncapped.
-    #[must_use]
-    pub fn max_age(&self) -> Option<Duration> {
-        self.inner.max_age
-    }
-
-    /// `true` once age has exceeded the configured cap.
-    pub(crate) fn is_expired(&self) -> bool {
-        self.max_age().is_some_and(|max_age| self.age() > max_age)
-    }
-
-    /// Marks the connection as poisoned. Idempotent.
-    pub(crate) fn mark_poisoned(&self) {
-        // Release: ensure any state updates preceding the poison decision
-        // happen-before any reader that observes `true`. Poisoning is monotonic.
-        self.inner.poisoned.store(true, Ordering::Release);
-    }
-}
 
 pub(crate) fn connection_network_protocol_version(connected: &hyper_util::client::legacy::connect::Connected) -> Value {
     if connected.is_negotiated_h2() {
@@ -115,10 +40,10 @@ pub(crate) fn create_connection_failure_attributes(uri: &templated_uri::BaseUri,
     ]
 }
 
-/// Returns the server port as an `i64` attribute value, using `-1` as a sentinel
+/// Returns the server port as an `i64` attribute, using `-1` as a sentinel
 /// when no port is known for the URI scheme. Keeping the attribute present
-/// (rather than omitting it) preserves a stable attribute set across all
-/// telemetry emissions, which downstream aggregations rely on.
+/// (rather than omitting it) gives a stable attribute set across emissions,
+/// which downstream aggregations rely on.
 fn server_port_attribute(uri: &templated_uri::BaseUri) -> i64 {
     uri.effective_port().map_or(-1, i64::from)
 }
@@ -129,38 +54,6 @@ mod tests {
     use super::*;
     use crate::error_labels::LABEL_CONNECT;
     use crate::testing::sorted_attributes;
-
-    #[test]
-    fn new_records_initial_state() {
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 3, Some(Duration::from_mins(1)));
-        assert_eq!(info.pool_index(), 3);
-        assert_eq!(info.max_age(), Some(Duration::from_mins(1)));
-        assert!(!info.poisoned());
-    }
-
-    #[test]
-    fn mark_poisoned_is_observable_and_idempotent() {
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, None);
-        assert!(!info.poisoned());
-        info.mark_poisoned();
-        assert!(info.poisoned());
-        info.mark_poisoned();
-        assert!(info.poisoned());
-    }
-
-    #[test]
-    fn is_expired_false_without_max_age() {
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, None);
-        assert!(!info.is_expired());
-    }
-
-    #[test]
-    fn frozen_clock_keeps_age_zero() {
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::from_nanos(1)));
-        assert_eq!(info.age(), Duration::ZERO);
-        // Even with a tiny max_age, no time has elapsed under a frozen clock.
-        assert!(!info.is_expired());
-    }
 
     #[test]
     #[cfg_attr(miri, ignore)]
@@ -181,31 +74,6 @@ mod tests {
     fn connection_network_protocol_version_default_is_1() {
         let connected = hyper_util::client::legacy::connect::Connected::new();
         assert_eq!(connection_network_protocol_version(&connected).as_str(), "1");
-    }
-
-    #[test]
-    fn is_expired_true_with_clock_control() {
-        let control = tick::ClockControl::new();
-        let clock = control.to_clock();
-        let info = ConnectionInfo::new(&clock, 0, Some(Duration::from_secs(1)));
-        assert!(!info.is_expired());
-        control.advance(Duration::from_secs(2));
-        assert!(info.is_expired());
-    }
-
-    #[test]
-    fn is_expired_false_at_exact_max_age_boundary() {
-        // Pins the comparison as strictly greater-than: at age == max_age the
-        // connection is still considered fresh. Guards against `>` -> `>=`.
-        let control = tick::ClockControl::new();
-        let clock = control.to_clock();
-        let max_age = Duration::from_secs(5);
-        let info = ConnectionInfo::new(&clock, 0, Some(max_age));
-        control.advance(max_age);
-        assert_eq!(info.age(), max_age);
-        assert!(!info.is_expired());
-        control.advance(Duration::from_nanos(1));
-        assert!(info.is_expired());
     }
 
     #[test]

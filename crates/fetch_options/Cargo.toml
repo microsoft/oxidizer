@@ -1,0 +1,32 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_options"
+description = "Options types for 'fetch' crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "http", "options", "fetch", "transport"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_options"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# external
+http = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+mutants = { workspace = true }
+static_assertions = { workspace = true }
+
+[lints]
+workspace = true

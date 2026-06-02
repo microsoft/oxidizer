@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! An enum that wraps the `TLS` connector, dispatching to the configured backend.
+//! The internal `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
 
+use fetch_options::RequestFilter;
 use http::Version;
 use templated_uri::BaseUri;
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
@@ -12,11 +13,10 @@ use tower::Service as _;
 
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
-use crate::options::RequestFilter;
 use crate::tls::TlsBackend;
 use crate::{Connect, HyperIo};
 
-/// An enum that wraps the `TLS` connector, dispatching to the correct backend at runtime.
+/// Wraps the `TLS` connector, dispatching to the active backend at runtime.
 pub(crate) enum TlsConnector<C, S>
 where
     C: Connect<S>,
