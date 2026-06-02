@@ -20,19 +20,10 @@ pub(crate) enum FallbackAction<Out> {
     Async(AsyncFallbackFn<Out>),
 }
 
-impl<Out: Send + 'static> FallbackAction<Out> {
+impl<Out: Send> FallbackAction<Out> {
     /// Create from a synchronous closure.
     pub(crate) fn new_sync(f: impl Fn(Out, FallbackActionArgs) -> Out + Send + Sync + 'static) -> Self {
         Self::Sync(SyncFallbackFn::new(f))
-    }
-
-    /// Create from an asynchronous closure.
-    pub(crate) fn new_async<F, Fut>(f: F) -> Self
-    where
-        F: Fn(Out, FallbackActionArgs) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Out> + Send + 'static,
-    {
-        Self::Async(AsyncFallbackFn::new(move |out, args| Box::pin(f(out, args))))
     }
 
     /// Invoke the fallback action.
@@ -41,6 +32,17 @@ impl<Out: Send + 'static> FallbackAction<Out> {
             Self::Sync(f) => f.call(out, args),
             Self::Async(f) => f.call(out, args).await,
         }
+    }
+}
+
+impl<Out: Send + 'static> FallbackAction<Out> {
+    /// Create from an asynchronous closure.
+    pub(crate) fn new_async<F, Fut>(f: F) -> Self
+    where
+        F: Fn(Out, FallbackActionArgs) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Out> + Send + 'static,
+    {
+        Self::Async(AsyncFallbackFn::new(move |out, args| Box::pin(f(out, args))))
     }
 }
 

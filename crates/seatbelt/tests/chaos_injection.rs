@@ -331,3 +331,22 @@ async fn rate_with_clamps_above_one(#[case] use_tower: bool) {
 
     assert_eq!(output, Ok("injected".to_string()));
 }
+
+#[tokio::test]
+async fn str_references() {
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<&str, &str> = ResilienceContext::new(&clock);
+
+    let stack = (
+        Injection::layer("test_injection", &context)
+            .rate(0.0)
+            .output_with(|_input: &str, _args| "injected"),
+        Execute::new(|input: &str| async move { input }),
+    );
+    let service = stack.into_service();
+
+    let input = "hello".to_string();
+    let output = service.execute(input.as_str()).await;
+
+    assert_eq!(output, "hello");
+}

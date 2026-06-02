@@ -140,7 +140,7 @@ impl<In, Out, S1, S2> InjectionLayer<In, Out, S1, S2> {
     }
 }
 
-impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1, S2> {
+impl<In: Send, Out: Send, S1, S2> InjectionLayer<In, Out, S1, S2> {
     /// Sets a callback-based output factory for the injected output.
     ///
     /// The `output_fn` receives the consumed input and [`InjectionOutputArgs`],
@@ -164,7 +164,7 @@ impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1
     #[must_use]
     pub fn output(self, value: Out) -> InjectionLayer<In, Out, S1, Set>
     where
-        Out: Clone + Sync,
+        Out: Clone + Sync + 'static,
     {
         self.output_with(move |_, _| value.clone())
     }
@@ -172,9 +172,9 @@ impl<In: Send + 'static, Out: Send + 'static, S1, S2> InjectionLayer<In, Out, S1
 
 impl<In, Ok, Err, S1, S2> InjectionLayer<In, Result<Ok, Err>, S1, S2>
 where
-    In: Send + 'static,
-    Ok: Send + 'static,
-    Err: Send + 'static,
+    In: Send,
+    Ok: Send,
+    Err: Send,
 {
     /// Sets a callback-based error factory for the injected output.
     ///
@@ -204,7 +204,7 @@ where
     #[must_use]
     pub fn output_error(self, error: Err) -> InjectionLayer<In, Result<Ok, Err>, S1, Set>
     where
-        Err: Clone + Sync,
+        Err: Clone + Sync + 'static,
     {
         self.output_error_with(move |_, _| error.clone())
     }
