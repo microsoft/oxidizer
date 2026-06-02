@@ -48,12 +48,12 @@ type aliases and an extension trait:
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0zpOHumdJRlG7vvc1rvGGXMG8lb6BInDEwlGyUJKXppjYapYWSDgm9odHRwX2V4dGVuc2lvbnNlMC40LjOCaHNlYXRiZWx0ZTAuNS4ygm1zZWF0YmVsdF9odHRwZTAuMi4z
- [__link0]: https://crates.io/crates/seatbelt/0.5.2
- [__link1]: https://crates.io/crates/seatbelt/0.5.2
- [__link2]: https://docs.rs/http_extensions/0.4.3/http_extensions/?search=HttpRequest
- [__link3]: https://docs.rs/http_extensions/0.4.3/http_extensions/?search=Result
- [__link4]: https://docs.rs/seatbelt_http/0.2.3/seatbelt_http/?search=HttpRecovery
- [__link5]: https://docs.rs/seatbelt_http/0.2.3/seatbelt_http/?search=HttpClone
- [__link6]: https://docs.rs/seatbelt_http/0.2.3/seatbelt_http/type.HttpResilienceContext.html
- [__link7]: https://docs.rs/seatbelt/0.5.2/seatbelt/?search=ResilienceContext
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0zpOHumdJRlG7vvc1rvGGXMG8lb6BInDEwlGyUJKXppjYapYWSDgm9odHRwX2V4dGVuc2lvbnNlMC40LjSCaHNlYXRiZWx0ZTAuNS4zgm1zZWF0YmVsdF9odHRwZTAuMi40
+ [__link0]: https://crates.io/crates/seatbelt/0.5.3
+ [__link1]: https://crates.io/crates/seatbelt/0.5.3
+ [__link2]: https://docs.rs/http_extensions/0.4.4/http_extensions/?search=HttpRequest
+ [__link3]: https://docs.rs/http_extensions/0.4.4/http_extensions/?search=Result
+ [__link4]: https://docs.rs/seatbelt_http/0.2.4/seatbelt_http/?search=HttpRecovery
+ [__link5]: https://docs.rs/seatbelt_http/0.2.4/seatbelt_http/?search=HttpClone
+ [__link6]: https://docs.rs/seatbelt_http/0.2.4/seatbelt_http/type.HttpResilienceContext.html
+ [__link7]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=ResilienceContext

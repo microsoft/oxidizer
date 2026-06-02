@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.4] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.2` of `layered`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- 🐛 Bug Fixes
+
+  - ensure that `cargo test` passes on a clean checkout ([#441](https://github.com/microsoft/oxidizer/pull/441))
+
+- ✔️ Tasks
+
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - bump templated_uri version ([#444](https://github.com/microsoft/oxidizer/pull/444))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
 ## [0.4.3] - 2026-06-02
 
 - 🔧 Maintenance

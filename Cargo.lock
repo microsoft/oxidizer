@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -1900,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "layered"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -2914,7 +2914,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "futures",
  "http",
