@@ -49,7 +49,7 @@
 //! # Futures
 //!
 //! The [`WithCancellationExt`] trait adds a
-//! [`with_cancellation`](WithCancellationExt::with_cancellation) combinator
+//! [`with_cancellation`](WithCancellationExt::with_cancellation) method
 //! to any [`Future`], pairing it with a [`CancellationToken`] so that each
 //! poll checks for cancellation before and after driving the inner future.
 //!

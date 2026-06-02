@@ -16,6 +16,12 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cancelable"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 

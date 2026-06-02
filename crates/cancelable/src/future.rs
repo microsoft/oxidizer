@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
-//! Future combinators for cooperative cancellation
+//! Future extension for cooperative cancellation
 //!
 //! The [`WithCancellationExt`] trait adds a
-//! [`with_cancellation`](WithCancellationExt::with_cancellation) combinator
+//! [`with_cancellation`](WithCancellationExt::with_cancellation) method
 //! to any [`Future`], pairing it with a [`CancellationToken`] so that each
 //! poll checks for cancellation before and after driving the inner future.
 //!
@@ -43,10 +44,10 @@ pub trait WithCancellationExt: Future + Sized {
     ///
     /// # Note on wake semantics
     ///
-    /// Cancellation is checked cooperatively: the combinator inspects the token
+    /// Cancellation is checked cooperatively: the extension inspects the token
     /// each time the inner future is polled.  If the inner future is pending
     /// and nothing else wakes the task, cancellation will not be noticed until
-    /// the next poll.  This mirrors the cooperative model of C#'s
+    /// the next poll.  This mirrors the cooperative model of the `C#` method
     /// `CancellationToken.ThrowIfCancellationRequested()`.
     ///
     /// # Examples

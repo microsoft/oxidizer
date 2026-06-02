@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use std::any::type_name;
 use std::fmt;

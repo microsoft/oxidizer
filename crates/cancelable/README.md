@@ -53,7 +53,7 @@ source.cancel();
 ## Futures
 
 The [`WithCancellationExt`][__link2] trait adds a
-[`with_cancellation`][__link3] combinator
+[`with_cancellation`][__link3] method
 to any [`Future`][__link4], pairing it with a [`CancellationToken`][__link5] so that each
 poll checks for cancellation before and after driving the inner future.
 
@@ -73,7 +73,7 @@ assert_eq!(result, 42);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cancelable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbwIR-DtpCTPsbyw0-tCMPjdAbd-QY8wrEiWQbEkCmgY5QMxFhZIGCamNhbmNlbGFibGVlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbciObxqSLWWsbfKiwAXNlniAb4klZvw7J_M0bBHKwCELmcj1hZIGCamNhbmNlbGFibGVlMC4xLjA
  [__link0]: https://docs.rs/cancelable/0.1.0/cancelable/?search=CancellationTokenSource
  [__link1]: https://docs.rs/cancelable/0.1.0/cancelable/?search=CancellationToken
  [__link2]: https://docs.rs/cancelable/0.1.0/cancelable/?search=future::WithCancellationExt
