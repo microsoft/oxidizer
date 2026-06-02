@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.3] - 2026-06-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.1` of `ohno_macros`
+
+- ✨ Features
+
+  - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
+  - fine grained error labels ([#382](https://github.com/microsoft/oxidizer/pull/382))
+
 ## [0.3.2] - 2026-04-15
 
 - ✨ Features

@@ -310,7 +310,7 @@ mod tests {
             .request_filter(RequestFilter::HttpAndHttps)
             .supported_http_versions(&[Version::HTTP_2])
             .connect_timeout(Duration::from_secs(7))
-            .connection_lifetime(ConnectionLifetime::Fixed(Duration::from_secs(60)))
+            .connection_lifetime(ConnectionLifetime::Fixed(Duration::from_mins(1)))
             .pool_index(42);
         insta::assert_debug_snapshot!("configured", configured);
     }

@@ -4,16 +4,16 @@
 [package]
 name = "recoverable"
 description = "Recovery information and classification for resilience patterns."
-version = "0.1.2"
+version = "0.1.3"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "metadata", "classification", "oxidizer"]
 categories = ["data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/recoverable"
 
 [package.metadata.docs.rs]
@@ -22,10 +22,10 @@ all-features = true
 [dependencies]
 
 [dev-dependencies]
-insta.workspace = true
-ohno.workspace = true
-static_assertions.workspace = true
-testing_aids.workspace = true
+insta = { workspace = true }
+ohno = { path = "../ohno" }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 
 [lints]
 workspace = true

@@ -45,7 +45,14 @@ let tier = ServiceAdapter::new(my_service);
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_service">source code</a>.
 </sub>
 
+<<<<<<< HEAD
  [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3K5S_LB5wBuG9aH2I-oE91BG6p757n6ShIyG2QJsgO5MU4kYWSCgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjA
  [__link0]: https://docs.rs/cachet_service/0.1.0/cachet_service/?search=ServiceAdapter
  [__link1]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier
  [__link2]: https://docs.rs/cachet_service/0.1.0/cachet_service/?search=ServiceAdapter
+=======
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbcrlL8sHnAG4b1ofYj6gT3UEbqnvnufpKEjIbZAmyA7kxTiRhZIKCbmNhY2hldF9zZXJ2aWNlZTAuMi4wgmtjYWNoZXRfdGllcmUwLjIuMA
+ [__link0]: https://docs.rs/cachet_service/0.2.0/cachet_service/?search=ServiceAdapter
+ [__link1]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheTier
+ [__link2]: https://docs.rs/cachet_service/0.2.0/cachet_service/?search=ServiceAdapter
+>>>>>>> origin/main

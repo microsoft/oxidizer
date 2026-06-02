@@ -297,7 +297,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_time_to_live_sets_ttl() {
-        let expected_ttl = Duration::from_secs(300);
+        let expected_ttl = Duration::from_mins(5);
         let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_live(expected_ttl);
 
         assert_eq!(builder.time_to_live, Some(expected_ttl));
@@ -306,7 +306,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn builder_time_to_idle_sets_tti() {
-        let expected_tti = Duration::from_secs(60);
+        let expected_tti = Duration::from_mins(1);
         let builder = InMemoryCacheBuilder::<String, i32>::new().time_to_idle(expected_tti);
 
         assert_eq!(builder.time_to_idle, Some(expected_tti));

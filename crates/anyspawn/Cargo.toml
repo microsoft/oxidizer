@@ -4,16 +4,16 @@
 [package]
 name = "anyspawn"
 description = "A generic task spawner compatible with any async runtime."
-version = "0.5.0"
+version = "0.5.1"
 readme = "README.md"
 keywords = ["oxidizer", "async", "runtime", "futures"]
 categories = ["asynchronous"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn"
 
 [package.metadata.cargo_check_external_types]
@@ -40,8 +40,8 @@ tokio = { workspace = true, features = ["rt"], optional = true }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["futures"] }
-smol = "2"
-static_assertions.workspace = true
+smol = { workspace = true }
+static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
 [[test]]

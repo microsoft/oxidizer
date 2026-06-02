@@ -180,8 +180,8 @@ async fn builder_all_options_combined() {
     let cache = InMemoryCacheBuilder::<String, i32>::new()
         .max_capacity(1000)
         .initial_capacity(100)
-        .time_to_live(Duration::from_secs(300))
-        .time_to_idle(Duration::from_secs(60))
+        .time_to_live(Duration::from_mins(5))
+        .time_to_idle(Duration::from_mins(1))
         .name("full-config-cache")
         .build()
         .expect("build failed");

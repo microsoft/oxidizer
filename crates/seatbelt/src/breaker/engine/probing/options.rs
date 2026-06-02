@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn health_probe_options_ctor_ok() {
-        let sampling_duration = Duration::from_secs(60);
+        let sampling_duration = Duration::from_mins(1);
         let failure_threshold = 0.2;
         let probing_ratio = 0.1;
 

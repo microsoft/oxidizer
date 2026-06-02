@@ -3,21 +3,18 @@
 
 [package]
 name = "multitude"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump", "rc"]
 categories = ["memory-management", "data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/multitude"
-
-[target.'cfg(loom)'.dev-dependencies]
-loom.workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -63,12 +60,6 @@ zerocopy = { workspace = true, optional = true }
 [target.'cfg(loom)'.dependencies]
 loom = { workspace = true }
 
-# Workspace dep declares `default-features = false`; we re-enable `default` here
-# (which pulls in the `benchmark` feature with `library_benchmark`,
-# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-gungraun = { workspace = true, features = ["default"] }
-
 [dev-dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
@@ -76,9 +67,18 @@ bolero = { workspace = true, features = ["std"] }
 # because bolero-libfuzzer 0.13.0 references `bolero_engine::any::run`
 # but does not itself activate that feature on `bolero-engine`.
 bumpalo = { workspace = true, features = ["collections"] }
-criterion.workspace = true
-mutants.workspace = true
-serde_json.workspace = true
+criterion = { workspace = true }
+mutants = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
+
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true

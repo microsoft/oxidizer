@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-06-01
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.6.1] - 2026-01-20
 
 - 🧩 Miscellaneous

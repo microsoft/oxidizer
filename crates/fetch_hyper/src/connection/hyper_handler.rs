@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn poison_path_no_op_when_connection_not_expired() {
         let mut extensions = Extensions::new();
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::from_secs(60)));
+        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::from_mins(1)));
         extensions.insert(info.clone());
 
         let mut req = test_request();
