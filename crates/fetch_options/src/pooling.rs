@@ -823,4 +823,14 @@ mod tests {
         let (selected, _) = selector(&clients);
         assert_eq!(*selected, 1);
     }
+
+    #[test]
+    fn pool_index_index_returns_value() {
+        assert_eq!(PoolIndex::new(7).index(), 7);
+    }
+
+    #[test]
+    fn pool_index_display() {
+        assert_eq!(PoolIndex::new(3).to_string(), "PoolIndex(3)");
+    }
 }

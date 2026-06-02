@@ -23,12 +23,21 @@ including connection keep-alive behavior, connection pooling, and HTTP version s
 ```rust
 use std::time::Duration;
 
-use fetch_options::{ConnectionLifetime, ConnectionPoolOptions};
+use fetch_options::{ConnectionLifetime, RequestFilter, TransportOptions};
 
-let pool = ConnectionPoolOptions::default()
-    .max_connections(64)
-    .connection_idle_timeout(Duration::from_secs(90))
-    .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(300)));
+fn configure(mut options: TransportOptions) -> TransportOptions {
+    options.connect_timeout = Duration::from_secs(10);
+    options.request_filter = RequestFilter::Https;
+    options.connection_pool = options
+        .connection_pool
+        .max_connections(64)
+        .connection_idle_timeout(Duration::from_secs(90))
+        .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(300)));
+
+    options
+}
+
+let options = configure(TransportOptions::default());
 ```
 
 

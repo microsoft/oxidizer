@@ -352,6 +352,32 @@ mod tests {
         );
     }
 
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn new_applies_active_connections_keep_alive() {
+        let mut options = TransportOptions::default();
+        options.connection_keep_alive = ConnectionKeepAlive::active_connections(Duration::from_secs(5), Duration::from_secs(10));
+
+        let b = make_builder_with(options);
+        assert!(matches!(
+            b.options.connection_keep_alive,
+            ConnectionKeepAlive::ActiveConnections { .. }
+        ));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn new_applies_unlimited_idle_timeout() {
+        let mut options = TransportOptions::default();
+        options.connection_pool = options.connection_pool.connection_idle_timeout(None);
+
+        let b = make_builder_with(options);
+        assert!(matches!(
+            b.options.connection_pool.connection_idle_timeout,
+            ConnectionIdleTimeout::Unlimited
+        ));
+    }
+
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn build_with_explicit_meter_yields_working_transport() {

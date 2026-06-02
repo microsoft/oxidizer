@@ -64,11 +64,11 @@ where
         match backend {
             #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
-                build_rustls_connector(config, connector, request_filter, supported_versions),
+                build_rustls_connector(config, connector, &request_filter, supported_versions),
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
-            TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
+            TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, &request_filter), PhantomData),
         }
     }
 }
@@ -82,7 +82,7 @@ where
 fn build_rustls_connector<C, S>(
     config: rustls::ClientConfig,
     connector: C,
-    request_filter: RequestFilter,
+    request_filter: &RequestFilter,
     supported_versions: &[Version],
 ) -> hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
@@ -114,7 +114,7 @@ where
 fn build_native_tls_connector<C, S>(
     native: native_tls::TlsConnector,
     connector: C,
-    request_filter: RequestFilter,
+    request_filter: &RequestFilter,
 ) -> hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
     C: Connect<S>,

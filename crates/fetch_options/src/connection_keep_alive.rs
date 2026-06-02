@@ -109,6 +109,11 @@ mod tests {
         assert_debug_snapshot!(ConnectionKeepAlive::default());
     }
 
+    #[test]
+    fn connection_keep_alive_disabled() {
+        assert!(matches!(ConnectionKeepAlive::disabled(), ConnectionKeepAlive::Disabled));
+    }
+
     #[cfg_attr(miri, ignore)]
     #[test]
     fn connection_keep_alive_active_connections() {
