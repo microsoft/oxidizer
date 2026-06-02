@@ -147,7 +147,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbSQ5poud34xIbuapoDTNMsOwbP9Moo-1_UfQblZcvmMWsNThhZIKCbHRocmVhZF9hd2FyZWUwLjcuMYJzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0kOaaLnd-MSG7mqaA0zTLDsGz_TKKPtf1H0G5WXL5jFrDU4YWSCgmx0aHJlYWRfYXdhcmVlMC43LjGCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjE
  [__link0]: https://docs.rs/thread_aware_macros/0.7.1/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.1/thread_aware_macros/?search=ThreadAware

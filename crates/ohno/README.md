@@ -292,7 +292,7 @@ uniformly via [`Labeled::label`][__link21].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/ohno">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbrCd9xja6IUYbReuvcH7u-4wbH1ETqam4eFAbE9V6cT1GHJphZIKCZG9obm9lMC4zLjOCa29obm9fbWFjcm9zZTAuMy4x
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6wnfcY2uiFGG0Xrr3B-7vuMGx9RE6mpuHhQGxPVenE9RhyaYWSCgmRvaG5vZTAuMy4zgmtvaG5vX21hY3Jvc2UwLjMuMQ
  [__link0]: https://doc.rust-lang.org/stable/std/?search=fmt::Display
  [__link1]: https://doc.rust-lang.org/stable/std/?search=fmt::Debug
  [__link10]: https://doc.rust-lang.org/stable/std/macro.unreachable.html
