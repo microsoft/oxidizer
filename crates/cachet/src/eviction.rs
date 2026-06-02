@@ -99,4 +99,23 @@ mod tests {
         hook.handle(RemovalCause::Expired);
         capture.assert_contains(attributes::EVENT_EXPIRED);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn handle_without_logging_still_emits_handler_events() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        // Logging disabled — covers the false branch of the logging_enabled check
+        let hook = Arc::new(EvictionHook::new());
+        hook.init(CacheTelemetry::new(), "no_logs");
+
+        hook.handle(RemovalCause::Size);
+        hook.handle(RemovalCause::Expired);
+
+        assert!(
+            capture.output().is_empty(),
+            "no log events should fire without logging enabled"
+        );
+    }
 }

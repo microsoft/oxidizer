@@ -621,6 +621,30 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[test]
+    fn all_span_factories_produce_enabled_spans() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(subscriber(&capture));
+        let t = CacheTelemetry::with_logging();
+
+        // Exercise every span factory so coverage includes them all.
+        let spans = [
+            t.get_span("c"),
+            t.insert_span("c"),
+            t.invalidate_span("c"),
+            t.clear_span("c"),
+            t.get_or_insert_span("c"),
+            t.try_get_or_insert_span("c"),
+            t.optionally_get_or_insert_span("c"),
+            t.tier_span("c"),
+        ];
+
+        for span in &spans {
+            assert!(!span.is_disabled(), "span factory should produce an enabled span");
+        }
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
     fn telemetry_disabled_emits_nothing() {
         let telemetry = CacheTelemetry::new();
         let capture = LogCapture::new();
@@ -821,65 +845,98 @@ mod tests {
 
     #[test]
     fn eviction_handler_receives_request_id_from_calling_thread() {
+        type TierRecord = (RequestId, String, String);
+        type OpRecord = (RequestId, String, String);
+
         struct EvictionRecorder {
-            events: Arc<Mutex<Vec<(RequestId, String, String)>>>,
+            tier_events: Arc<Mutex<Vec<TierRecord>>>,
+            operation_events: Arc<Mutex<Vec<OpRecord>>>,
         }
         impl CacheEventHandler for EvictionRecorder {
             fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
-                self.events.lock().expect("test mutex should not be poisoned").push((
+                self.tier_events.lock().expect("test mutex should not be poisoned").push((
                     event.request_id,
                     event.tier_name.to_string(),
                     event.outcome.to_string(),
                 ));
             }
-            fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
+            fn on_operation_complete(&self, event: &CacheOperationEvent<'_>) {
+                self.operation_events.lock().expect("test mutex should not be poisoned").push((
+                    event.request_id,
+                    event.cache_name.to_string(),
+                    event.operation.to_string(),
+                ));
+            }
         }
 
-        let tier_events = Arc::new(Mutex::new(Vec::<(RequestId, String, String)>::new()));
+        let tier_events = Arc::new(Mutex::new(Vec::new()));
+        let operation_events = Arc::new(Mutex::new(Vec::new()));
         let telemetry = CacheTelemetry::new().with_handler(Arc::new(EvictionRecorder {
-            events: Arc::clone(&tier_events),
+            tier_events: Arc::clone(&tier_events),
+            operation_events: Arc::clone(&operation_events),
         }));
 
-        // Simulate an insert that triggers eviction on the same thread
         let request_id = next_request_id();
         futures::executor::block_on(
             async {
                 telemetry.record_eviction("my_cache");
+                telemetry.complete_operation(request_id, "my_cache", "cache.insert", Duration::ZERO, false);
             }
             .with_request_id(request_id),
         );
 
-        let recorded = tier_events.lock().expect("test mutex should not be poisoned");
-        assert_eq!(recorded.len(), 1, "expected exactly one eviction event");
-        assert_eq!(recorded[0].0, request_id, "eviction should carry the inserting thread's request_id");
-        assert_eq!(recorded[0].2, attributes::EVENT_EVICTION);
+        let tiers = tier_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(tiers.len(), 1, "expected exactly one eviction tier event");
+        assert_eq!(tiers[0].0, request_id, "eviction should carry the inserting thread's request_id");
+        assert_eq!(tiers[0].2, attributes::EVENT_EVICTION);
+
+        let ops = operation_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(ops.len(), 1, "expected one operation complete event");
+        assert_eq!(ops[0].0, request_id);
+        assert_eq!(ops[0].2, "cache.insert");
     }
 
     #[test]
     fn eviction_without_request_context_has_zero_id() {
+        type TierRecord = (RequestId, String);
+        type OpRecord = (RequestId, String);
+
         struct IdRecorder {
-            events: Arc<Mutex<Vec<RequestId>>>,
+            tier_events: Arc<Mutex<Vec<TierRecord>>>,
+            operation_events: Arc<Mutex<Vec<OpRecord>>>,
         }
         impl CacheEventHandler for IdRecorder {
             fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
-                self.events
+                self.tier_events
                     .lock()
                     .expect("test mutex should not be poisoned")
-                    .push(event.request_id);
+                    .push((event.request_id, event.outcome.to_string()));
             }
-            fn on_operation_complete(&self, _: &CacheOperationEvent<'_>) {}
+            fn on_operation_complete(&self, event: &CacheOperationEvent<'_>) {
+                self.operation_events
+                    .lock()
+                    .expect("test mutex should not be poisoned")
+                    .push((event.request_id, event.operation.to_string()));
+            }
         }
 
-        let tier_events = Arc::new(Mutex::new(Vec::<RequestId>::new()));
+        let tier_events = Arc::new(Mutex::new(Vec::new()));
+        let operation_events = Arc::new(Mutex::new(Vec::new()));
         let telemetry = CacheTelemetry::new().with_handler(Arc::new(IdRecorder {
-            events: Arc::clone(&tier_events),
+            tier_events: Arc::clone(&tier_events),
+            operation_events: Arc::clone(&operation_events),
         }));
 
         // No WithRequestId wrapper — simulates background maintenance thread
         telemetry.record_eviction("bg_cache");
+        telemetry.complete_operation(0, "bg_cache", "background", Duration::ZERO, false);
 
-        let recorded = tier_events.lock().expect("test mutex should not be poisoned");
-        assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0], 0, "background eviction should have request_id 0");
+        let tiers = tier_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].0, 0, "background eviction should have request_id 0");
+
+        let ops = operation_events.lock().expect("test mutex should not be poisoned");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].0, 0);
     }
 }
