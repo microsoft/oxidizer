@@ -125,7 +125,6 @@ rstest = { version = "0.26.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
-rustls-symcrypt = { version = "0.2.3", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
