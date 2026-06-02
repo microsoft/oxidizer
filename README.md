@@ -33,6 +33,7 @@ These are the primary crates built out of this repo:
 - [`cachet_memory`](./crates/cachet_memory/README.md) - In-memory cache tier backed by Moka for the cachet caching library.
 - [`cachet_service`](./crates/cachet_service/README.md) - Layered service integration for the cachet caching library.
 - [`cachet_tier`](./crates/cachet_tier/README.md) - Core cache tier trait and abstractions for building cache backends.
+- [`cancelable`](./crates/cancelable/README.md) - Cooperative cancellation via tokens
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.

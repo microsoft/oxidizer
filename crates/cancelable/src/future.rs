@@ -1,28 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Future combinators for cooperative cancellation.
+//! Future combinators for cooperative cancellation
 //!
-//! The [`CancellationFutureExt`] trait adds a
-//! [`with_cancellation`](CancellationFutureExt::with_cancellation) combinator
+//! The [`WithCancellationExt`] trait adds a
+//! [`with_cancellation`](WithCancellationExt::with_cancellation) combinator
 //! to any [`Future`], pairing it with a [`CancellationToken`] so that each
 //! poll checks for cancellation before and after driving the inner future.
 //!
 //! ```
-//! # async fn example() {
-//! use oxidizer_sync::{CancellationTokenSource, CancellationFutureExt};
+//! # async fn example() -> Result<(), ohno::AppError> {
+//! use cancelable::{CancellationTokenSource, WithCancellationExt};
 //!
 //! let source = CancellationTokenSource::new();
 //! let token = source.token();
 //!
-//! let result = async { 42 }.with_cancellation(token).await;
-//! assert_eq!(result.unwrap(), 42);
+//! let result = async { 42 }.with_cancellation(token).await?;
+//! assert_eq!(result, 42);
+//! # Ok(())
 //! # }
 //! ```
 
-use crate::CancellationToken;
-use pin_project::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use pin_project::pin_project;
+
+use crate::CancellationToken;
 
 /// Error returned when a [`WithCancellation`] future detects that its
 /// associated [`CancellationToken`] has been canceled.
@@ -31,7 +34,7 @@ use std::task::{Context, Poll};
 pub struct Canceled {}
 
 /// Extension trait that adds cancellation support to any [`Future`].
-pub trait CancellationFutureExt: Future + Sized {
+pub trait WithCancellationExt: Future + Sized {
     /// Wraps this future so that each poll checks the given [`CancellationToken`]:
     ///
     /// - If the token is canceled (before *or* after polling the inner
@@ -52,12 +55,10 @@ pub trait CancellationFutureExt: Future + Sized {
     ///
     /// ```
     /// # async fn example() {
-    /// use oxidizer_sync::{CancellationTokenSource, CancellationFutureExt};
+    /// use cancelable::{CancellationTokenSource, WithCancellationExt};
     ///
     /// let source = CancellationTokenSource::new();
-    /// let result = async { "hello" }
-    ///     .with_cancellation(source.token())
-    ///     .await;
+    /// let result = async { "hello" }.with_cancellation(source.token()).await;
     /// assert_eq!(result.unwrap(), "hello");
     /// # }
     /// ```
@@ -66,7 +67,7 @@ pub trait CancellationFutureExt: Future + Sized {
     ///
     /// ```
     /// # async fn example() {
-    /// use oxidizer_sync::{CancellationTokenSource, CancellationFutureExt};
+    /// use cancelable::{CancellationTokenSource, WithCancellationExt};
     ///
     /// let source = CancellationTokenSource::new();
     /// source.cancel();
@@ -80,17 +81,14 @@ pub trait CancellationFutureExt: Future + Sized {
     fn with_cancellation(self, token: CancellationToken) -> WithCancellation<Self>;
 }
 
-impl<F: Future> CancellationFutureExt for F {
+impl<F: Future> WithCancellationExt for F {
     fn with_cancellation(self, token: CancellationToken) -> WithCancellation<Self> {
-        WithCancellation {
-            inner: self,
-            token,
-        }
+        WithCancellation { inner: self, token }
     }
 }
 
 /// Future returned by
-/// [`with_cancellation`](CancellationFutureExt::with_cancellation).
+/// [`with_cancellation`](WithCancellationExt::with_cancellation).
 ///
 /// See the trait method documentation for semantics.
 #[derive(Debug)]
@@ -145,7 +143,9 @@ mod tests {
         let source = CancellationTokenSource::new();
         source.cancel();
 
-        let result = async { unreachable!("should not poll inner future") }.with_cancellation(source.token()).await;
+        let result = async { unreachable!("should not poll inner future") }
+            .with_cancellation(source.token())
+            .await;
         assert!(result.unwrap_err().to_string().contains("canceled"));
     }
 
@@ -162,11 +162,21 @@ mod tests {
 
         let source = CancellationTokenSource::new();
         let token = source.token();
-        CancelOnPoll(source).with_cancellation(token).await.expect_err("should fail").to_string().contains("canceled");
+        CancelOnPoll(source)
+            .with_cancellation(token)
+            .await
+            .expect_err("should fail")
+            .to_string()
+            .contains("canceled");
     }
 
     #[tokio::test]
     async fn already_cancelled_token() {
-        async { unreachable!() }.with_cancellation(CancellationToken::cancelled()).await.expect_err("should fail").to_string().contains("canceled");
+        async { unreachable!() }
+            .with_cancellation(CancellationToken::cancelled())
+            .await
+            .expect_err("should fail")
+            .to_string()
+            .contains("canceled");
     }
 }

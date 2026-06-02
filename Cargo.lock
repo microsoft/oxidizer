@@ -541,6 +541,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cancelable"
+version = "0.1.0"
+dependencies = [
+ "ohno 0.3.3",
+ "pin-project",
+ "tokio",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

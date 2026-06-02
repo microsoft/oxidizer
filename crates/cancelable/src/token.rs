@@ -1,54 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 
-//! Cooperative cancellation via tokens.
-//!
-//! This module provides [`CancellationTokenSource`] and [`CancellationToken`],
-//! modeled after the equivalent C# types. A source controls cancellation and
-//! hands out lightweight, cloneable tokens for observers to check.
-//!
-//! # Linked sources
-//!
-//! A linked source cancels when *any* of its parent tokens are canceled,
-//! enabling composition of multiple cancellation signals:
-//!
-//! ```
-//! # fn example() {
-//! use oxidizer_sync::CancellationTokenSource;
-//!
-//! let parent_a = CancellationTokenSource::new();
-//! let parent_b = CancellationTokenSource::new();
-//!
-//! let linked = CancellationTokenSource::linked(&[
-//!     parent_a.token(),
-//!     parent_b.token(),
-//! ]);
-//! let token = linked.token();
-//!
-//! assert!(!token.is_cancelled());
-//! parent_a.cancel();
-//! assert!(token.is_cancelled());
-//! # }
-//! ```
-//!
-//! # Subscribers
-//!
-//! Register callbacks that fire exactly once when cancellation occurs:
-//!
-//! ```
-//! # fn example() {
-//! use oxidizer_sync::CancellationTokenSource;
-//!
-//! let source = CancellationTokenSource::new();
-//! source.subscribe(|| println!("Operation canceled"));
-//! source.cancel();
-//! # }
-//! ```
-
 use std::any::type_name;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 type Subscriber = Box<dyn FnOnce() + Send>;
 
@@ -88,14 +44,15 @@ impl Inner {
     }
 
     /// Signal cancellation and notify subscribers
-    ///
-    /// # Panics
-    ///
-    /// Panics when the mutex protecting the subscriber list has been poisoned.
     fn cancel_and_notify(&self) {
         if self.try_set_cancelled() {
-            // Lock, take contents, and unlock
-            let subscribers = self.subscribers.lock().unwrap().take().unwrap_or_default();
+            let subscribers = match self.subscribers.lock() {
+                // Lock, take contents, and unlock
+                Ok(mut guard) => guard.take().unwrap_or_default(),
+
+                // Lock has been poisoned, which means we can't read the subscriber list.
+                Err(_) => Vec::default(),
+            };
 
             // Notify from outside the lock
             for f in subscribers {
@@ -107,25 +64,23 @@ impl Inner {
     /// Subscribe to the cancellation notification
     ///
     /// If cancellation has already occurred, the callback fires immediately.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the mutex protecting the subscriber list has been poisoned.
     fn subscribe(&self, callback: Subscriber) {
-        {
-            let mut guard = self.subscribers.lock().unwrap();
-
-            // Subscribers is `Some(...)` which means they haven't notified them yet
-            // (not canceled, or mid-cancellation). Add to the list.
+        if let Ok(mut guard) = self.subscribers.lock() {
+            // Subscribers is `Some(...)` which means we haven't notified them yet
+            // (e.g. not canceled, and not mid-cancellation). Add to the list.
             if let Some(list) = guard.as_mut() {
                 list.push(callback);
                 return;
             }
 
-            // Subscribers are `None`, meaning cancellation has already occurred
+            // Subscribers list was `None`, meaning cancellation has already occurred
             // and all subscribers have already been notified.
             //
             // Fall through to release the lock, then notify immediately.
+        } else {
+            // Lock has been poisoned, which means we can't add to the subscriber list.
+            //
+            // The token source is unusable. Send the notification immediately.
         }
 
         callback();
@@ -135,11 +90,9 @@ impl Inner {
 impl Debug for Inner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let subscribers = match self.subscribers.try_lock() {
-            Ok(lock) => {
-                match &*lock {
-                    Some(s) => format!("Mutex(Some({} subscriber closure(s)))", s.len()),
-                    None => String::from("Mutex(None)"),
-                }
+            Ok(lock) => match &*lock {
+                Some(s) => format!("Mutex(Some({} subscriber closure(s)))", s.len()),
+                None => String::from("Mutex(None)"),
             },
             Err(_) => String::from("locked subscriber list"),
         };
@@ -162,7 +115,7 @@ impl Debug for Inner {
 ///
 /// ```
 /// # fn example() {
-/// use oxidizer_sync::CancellationTokenSource;
+/// use cancelable::CancellationTokenSource;
 ///
 /// let source = CancellationTokenSource::new();
 /// let token = source.token();
@@ -178,6 +131,7 @@ pub struct CancellationToken {
 }
 
 impl CancellationToken {
+    /// Create a new cancellation token
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -213,59 +167,13 @@ impl Default for CancellationToken {
     }
 }
 
-/// Controls cancellation for one or more [`CancellationToken`]s.
+/// Controls cancellation for one or more [`CancellationToken`]s
 ///
 /// Create a source, distribute tokens via [`token()`](Self::token), and call
 /// [`cancel()`](Self::cancel) when the operation should stop.
 ///
 /// Dropping a `CancellationTokenSource` does **not** cancel its tokens.
 /// Outstanding tokens simply remain in their current state.
-///
-/// # Linked sources
-///
-/// Use [`linked()`](Self::linked) to create a source that automatically
-/// cancels when *any* of the supplied parent tokens are canceled:
-///
-/// ```
-/// # fn example() {
-/// use oxidizer_sync::CancellationTokenSource;
-///
-/// let parent_a = CancellationTokenSource::new();
-/// let parent_b = CancellationTokenSource::new();
-///
-/// let linked = CancellationTokenSource::linked(&[
-///     parent_a.token(),
-///     parent_b.token(),
-/// ]);
-/// let token = linked.token();
-///
-/// assert!(!token.is_cancelled());
-/// parent_a.cancel();
-/// assert!(token.is_cancelled());
-/// # }
-/// ```
-///
-/// # Subscribers
-///
-/// Register callbacks via [`subscribe()`](Self::subscribe) that fire once when
-/// cancellation occurs. If the source is already cancelled, the callback fires
-/// immediately.
-///
-/// ```
-/// # fn example() {
-/// # use std::sync::Arc;
-/// # use std::sync::atomic::{AtomicBool, Ordering};
-/// # use oxidizer_sync::CancellationTokenSource;
-/// let source = CancellationTokenSource::new();
-/// let notified = Arc::new(AtomicBool::new(false));
-///
-/// let flag = Arc::clone(&notified);
-/// source.subscribe(move || { flag.store(true, Ordering::Relaxed); });
-///
-/// source.cancel();
-/// assert!(notified.load(Ordering::Relaxed));
-/// # }
-/// ```
 #[derive(Debug, Default)]
 pub struct CancellationTokenSource {
     token: CancellationToken,
@@ -290,6 +198,7 @@ impl CancellationTokenSource {
     /// When any parent is canceled, we get a notification (callback), and use it to self-cancel.
     ///
     /// [`is_cancelled()`]: CancellationToken::is_cancelled
+    #[must_use]
     pub fn linked(parents: &[CancellationToken]) -> Self {
         let source = Self::new();
 
@@ -298,13 +207,11 @@ impl CancellationTokenSource {
 
             for parent in parents {
                 let weak = Weak::clone(&weak);
-                parent
-                    .inner
-                    .subscribe(Box::new(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            inner.cancel_and_notify();
-                        }
-                    }));
+                parent.inner.subscribe(Box::new(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        inner.cancel_and_notify();
+                    }
+                }));
             }
         }
 
@@ -344,25 +251,6 @@ impl CancellationTokenSource {
     ///
     /// If this source is already canceled, the callback fires immediately
     /// on the calling thread.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn example() {
-    /// use std::sync::Arc;
-    /// use std::sync::atomic::{AtomicBool, Ordering};
-    /// use oxidizer_sync::CancellationTokenSource;
-    ///
-    /// let source = CancellationTokenSource::new();
-    /// let notified = Arc::new(AtomicBool::new(false));
-    ///
-    /// let flag = Arc::clone(&notified);
-    /// source.subscribe(move || { flag.store(true, Ordering::Relaxed); });
-    ///
-    /// source.cancel();
-    /// assert!(notified.load(Ordering::Relaxed));
-    /// # }
-    /// ```
     pub fn subscribe(&self, callback: impl FnOnce() + Send + 'static) {
         self.token.inner.subscribe(Box::new(callback));
     }
@@ -370,8 +258,9 @@ impl CancellationTokenSource {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    use super::*;
 
     #[test]
     fn new_source_is_not_cancelled() {

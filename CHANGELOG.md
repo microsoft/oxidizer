@@ -9,6 +9,7 @@ Please see each crate's change log below:
 - [`cachet_memory`](./crates/cachet_memory/CHANGELOG.md)
 - [`cachet_service`](./crates/cachet_service/CHANGELOG.md)
 - [`cachet_tier`](./crates/cachet_tier/CHANGELOG.md)
+- [`cancelable`](./crates/cancelable/CHANGELOG.md)
 - [`data_privacy`](./crates/data_privacy/CHANGELOG.md)
 - [`data_privacy_macros`](./crates/data_privacy_macros/CHANGELOG.md)
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/CHANGELOG.md)
