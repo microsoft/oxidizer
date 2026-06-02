@@ -171,6 +171,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn from_pem_parses_valid_cert_and_key() {
+        // `rustls_pki_types`' PEM parser identifies items by label and treats
+        // the body as opaque DER, so short placeholder bytes round-trip fine
+        // for the purpose of exercising the happy path.
+        let mut cert_pem = Vec::new();
+        write_pem_block(&mut cert_pem, "CERTIFICATE", &[0x30, 0x00]);
+        write_pem_block(&mut cert_pem, "CERTIFICATE", &[0x30, 0x01, 0x00]);
+
+        let mut key_pem = Vec::new();
+        write_pem_block(&mut key_pem, "PRIVATE KEY", &[0x30, 0x00]);
+
+        let identity = ClientIdentity::from_pem(&cert_pem, &key_pem).expect("valid PEM should parse");
+        assert_eq!(identity.cert_chain().len(), 2);
+        assert!(matches!(identity.private_key(), rustls_pki_types::PrivateKeyDer::Pkcs8(_)));
+    }
+
+    #[test]
     fn from_pem_fails_for_invalid_pem() {
         ClientIdentity::from_pem(b"not a pem", b"not a key").unwrap_err();
     }

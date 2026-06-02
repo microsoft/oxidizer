@@ -187,6 +187,23 @@ mod tests {
     }
 
     #[test]
+    fn supported_http_versions_stores_provided_versions() {
+        let builder = TlsOptions::builder_rustls().supported_http_versions(&[Version::HTTP_2]);
+        assert_eq!(builder.shared.supported_http_versions.as_deref(), Some(&[Version::HTTP_2][..]));
+    }
+
+    #[test]
+    fn supported_http_versions_overwrites_previous_value() {
+        let builder = TlsOptions::builder_rustls()
+            .supported_http_versions(&[Version::HTTP_11])
+            .supported_http_versions(&[Version::HTTP_2, Version::HTTP_11]);
+        assert_eq!(
+            builder.shared.supported_http_versions.as_deref(),
+            Some(&[Version::HTTP_2, Version::HTTP_11][..])
+        );
+    }
+
+    #[test]
     fn supported_http_versions_panics_when_empty() {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = TlsOptions::builder_rustls().supported_http_versions(&[]);

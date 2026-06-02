@@ -83,7 +83,7 @@ tokio-native-tls = { workspace = true, optional = true }
 [dev-dependencies]
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 bytes = { workspace = true }
-fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
+fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2"] }
