@@ -13,7 +13,7 @@ use crate::{ConnectionKeepAlive, ConnectionPoolOptions, DEFAULT_CONNECT_TIMEOUT,
 ///
 /// This is the view of the client configuration handed to custom transport handlers.
 /// It deliberately excludes plumbing that is the pipeline's concern rather than
-/// the transport's (base URI rewriting, redaction, TLS backend selection, I/O
+/// the transport's (base URI rewriting, redaction, `TLS` backend selection, I/O
 /// model overrides, etc.).
 ///
 /// Values on this struct are written through builder setters; a custom transport reads

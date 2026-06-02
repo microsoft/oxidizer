@@ -76,7 +76,7 @@ const DEFAULT_POOL_LIFETIME: Duration = Duration::from_secs(60);
 /// the **total** wall-clock age of a pooled connection. After serving a response, a
 /// connection older than the configured lifetime is dropped instead of being returned to
 /// the pool, forcing the next request to establish a fresh connection. This is useful for
-/// picking up DNS changes, load-balancer rotations, or refreshed credentials within a
+/// picking up `DNS` changes, load-balancer rotations, or refreshed credentials within a
 /// bounded window. By default no maximum lifetime is enforced.
 ///
 /// For per-connection customization (e.g. adding jitter so that pools created via
@@ -145,7 +145,7 @@ impl ConnectionPoolOptions {
     /// Unlike [`connection_idle_timeout`](Self::connection_idle_timeout) (which only bounds
     /// idle time), this bounds the time since the connection was established. After serving a
     /// response, a connection older than the configured cap is dropped instead of being
-    /// returned to the pool — useful for picking up DNS changes, load-balancer rotations, or
+    /// returned to the pool — useful for picking up `DNS` changes, load-balancer rotations, or
     /// refreshed credentials within a bounded window.
     ///
     /// Use [`ConnectionLifetime::fixed`] for a constant cap, [`ConnectionLifetime::per_connection`]
@@ -245,7 +245,7 @@ impl ConnectionLifetime {
     /// Returns a policy that evaluates `generator` once per new connection to
     /// determine that connection's cap (`None` opts it out of recycling).
     ///
-    /// Useful for jittering caps across connections so that pools created via
+    /// Useful for jitter caps across connections so that pools created via
     /// [`ConnectionPoolOptions::multiple_pools`] don't all recycle at the same instant.
     ///
     /// ```
