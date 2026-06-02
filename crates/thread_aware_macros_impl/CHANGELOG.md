@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.1] - 2026-06-02
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+
 ## [0.6.1] - 2026-01-20
 
 - 🧩 Miscellaneous

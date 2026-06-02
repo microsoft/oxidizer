@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.2.3] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.2` of `bytesbuf`
+  - Now requires `0.11.2` of `data_privacy`
+  - Now requires `0.9.2` of `data_privacy_macros`
+  - Now requires `0.9.2` of `data_privacy_macros_impl`
+  - Now requires `0.4.3` of `http_extensions`
+  - Now requires `0.3.4` of `ohno`
+  - Now requires `0.3.2` of `ohno_macros`
+  - Now requires `0.1.4` of `recoverable`
+  - Now requires `0.5.2` of `seatbelt`
+  - Now requires `0.2.3` of `templated_uri`
+  - Now requires `0.2.2` of `templated_uri_macros`
+  - Now requires `0.2.2` of `templated_uri_macros_impl`
+  - Now requires `0.7.2` of `thread_aware`
+  - Now requires `0.7.2` of `thread_aware_macros`
+  - Now requires `0.7.1` of `thread_aware_macros_impl`
+  - Now requires `0.3.2` of `tick`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - introduce seatbelt_http crate ([#428](https://github.com/microsoft/oxidizer/pull/428))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - bump templated_uri version ([#444](https://github.com/microsoft/oxidizer/pull/444))
+
 ## [0.2.2] - 2026-06-01
 
 - 🔧 Maintenance

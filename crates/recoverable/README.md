@@ -86,8 +86,16 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
+<<<<<<< HEAD
  [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG8WkGld0dAdTG1oAzDm5S-yFG7msTiEH07YIG3TZOaUlSzkRYWSBgmtyZWNvdmVyYWJsZWUwLjEuMw
  [__link0]: https://docs.rs/recoverable/0.1.3/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.1.3/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.1.3/recoverable/trait.Recovery.html
  [__link3]: https://docs.rs/recoverable/0.1.3/recoverable/enum.RecoveryKind.html
+=======
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMS40
+ [__link0]: https://docs.rs/recoverable/0.1.4/recoverable/?search=RecoveryInfo::never
+ [__link1]: https://docs.rs/recoverable/0.1.4/recoverable/struct.RecoveryInfo.html
+ [__link2]: https://docs.rs/recoverable/0.1.4/recoverable/trait.Recovery.html
+ [__link3]: https://docs.rs/recoverable/0.1.4/recoverable/enum.RecoveryKind.html
+>>>>>>> origin/main

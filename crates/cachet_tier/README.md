@@ -74,6 +74,7 @@ for multi-tier caches with heterogeneous storage backends.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_tier">source code</a>.
 </sub>
 
+<<<<<<< HEAD
  [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG0hRqDfWg1oDG5BT1ZI-3omTG5WE4GB0Mg57G-G4ebzGeSk5YWSBgmtjYWNoZXRfdGllcmUwLjIuMA
  [__link0]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheTier
  [__link1]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheEntry
@@ -81,3 +82,12 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link3]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=CacheTier
  [__link5]: https://docs.rs/cachet_tier/0.2.0/cachet_tier/?search=DynamicCache
+=======
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbSFGoN9aDWgMbkFPVkj7eiZMblYTgYHQyDnsb4bh5vMZ5KTlhZIGCa2NhY2hldF90aWVyZTAuMi4x
+ [__link0]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheTier
+ [__link1]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheEntry
+ [__link2]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=Error
+ [__link3]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheTier
+ [__link4]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheTier
+ [__link5]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=DynamicCache
+>>>>>>> origin/main

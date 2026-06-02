@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.3] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.11.2` of `data_privacy`
+  - Now requires `0.9.2` of `data_privacy_macros`
+  - Now requires `0.9.2` of `data_privacy_macros_impl`
+  - Now requires `0.3.4` of `ohno`
+  - Now requires `0.3.2` of `ohno_macros`
+  - Now requires `0.2.2` of `templated_uri_macros`
+  - Now requires `0.2.2` of `templated_uri_macros_impl`
+
+- ✨ Features
+
+  - add `TryFrom<&str>` for `PathAndQuery` ([#464](https://github.com/microsoft/oxidizer/pull/464))
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - add try_effective_port method ([#451](https://github.com/microsoft/oxidizer/pull/451))
+  - add effective_port and make port return explicit port ([#438](https://github.com/microsoft/oxidizer/pull/438))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - bump templated_uri version ([#444](https://github.com/microsoft/oxidizer/pull/444))
+
 ## [0.2.2] - 2026-06-01
 
 - 🔧 Maintenance
