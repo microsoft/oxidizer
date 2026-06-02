@@ -53,7 +53,6 @@ impl Default for TransportOptions {
     }
 }
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -62,15 +61,13 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn transport_options_default() {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_snapshot_suffix(std::env::consts::OS);
-        settings.bind(|| {
-            assert_debug_snapshot!(TransportOptions::default());
-        });
+        assert_debug_snapshot!(TransportOptions::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_transport_options_type() {
         static_assertions::assert_impl_all!(

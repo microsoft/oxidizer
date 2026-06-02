@@ -58,11 +58,11 @@ const DEFAULT_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 // only when the caller explicitly enables keep-alive without specifying an interval.
 const DEFAULT_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(20);
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn constants_have_expected_values() {
         assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(30));

@@ -83,7 +83,6 @@ impl ConnectionKeepAlive {
     }
 }
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -92,6 +91,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_connection_keep_alive_type() {
         static_assertions::assert_impl_all!(
@@ -103,11 +103,13 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn connection_keep_alive_default() {
         assert_debug_snapshot!(ConnectionKeepAlive::default());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn connection_keep_alive_active_connections() {
         assert_debug_snapshot!(ConnectionKeepAlive::active_connections(
@@ -121,6 +123,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn connection_keep_alive_active_and_idle_connections() {
         assert_debug_snapshot!(ConnectionKeepAlive::active_and_idle_connections(

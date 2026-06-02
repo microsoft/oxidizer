@@ -40,15 +40,22 @@ impl Http2Options {
     }
 }
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn http2_options_default() {
         assert_debug_snapshot!(Http2Options::default());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn configure_http2_options() {
+        let options = Http2Options::default().initial_max_send_streams(100).adaptive_window(true);
+        assert_debug_snapshot!(options);
     }
 }

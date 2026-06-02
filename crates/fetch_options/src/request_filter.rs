@@ -16,7 +16,6 @@ pub enum RequestFilter {
     HttpAndHttps,
 }
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -25,6 +24,7 @@ mod tests {
 
     use super::*;
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_request_filter_type() {
         static_assertions::assert_impl_all!(
@@ -36,6 +36,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn request_filter_default() {
         assert_debug_snapshot!(RequestFilter::default());

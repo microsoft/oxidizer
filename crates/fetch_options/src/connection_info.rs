@@ -113,7 +113,6 @@ impl ConnectionInfo {
     }
 }
 
-#[cfg(not(miri))]
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
@@ -138,11 +137,13 @@ mod tests {
         (clock, set)
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn assert_connection_info_type() {
         static_assertions::assert_impl_all!(ConnectionInfo: Send, Sync, Clone, Debug);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn age_tracks_the_clock_relative_to_start() {
         let (clock, set) = manual_clock();
@@ -156,6 +157,7 @@ mod tests {
         assert_eq!(info.age(), Duration::ZERO); // saturates when the clock rewinds
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn exposes_metadata_and_poison_flag() {
         let info = ConnectionInfo::new(Instant::now, PoolIndex::new(7), Some(secs(60)));
@@ -171,6 +173,7 @@ mod tests {
         assert_eq!(ConnectionInfo::new(Instant::now, PoolIndex::new(0), None).max_age(), None);
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn clones_share_state() {
         let (clock, set) = manual_clock();
@@ -186,6 +189,7 @@ mod tests {
         assert_eq!(clone.max_age(), Some(secs(30)));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn debug_lists_metadata_and_redacts_closure() {
         let debug = format!("{:?}", ConnectionInfo::new(Instant::now, PoolIndex::new(7), Some(secs(30))));
@@ -195,12 +199,14 @@ mod tests {
         assert!(debug.contains("max_age"), "{debug}");
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn is_expired_false_without_max_age() {
         let info = ConnectionInfo::new(Instant::now, PoolIndex::new(0), None);
         assert!(!info.is_expired());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn is_expired_true_once_age_exceeds_max_age() {
         let (clock, set) = manual_clock();
@@ -210,6 +216,7 @@ mod tests {
         assert!(info.is_expired());
     }
 
+    #[cfg_attr(miri, ignore)]
     #[test]
     fn is_expired_uses_strictly_greater_than_at_max_age_boundary() {
         // Pins the comparison as strictly greater-than: at age == max_age the
