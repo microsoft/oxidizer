@@ -79,7 +79,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "anyspawn"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "criterion",
  "futures",
@@ -243,7 +243,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "serde",
  "serde_json",
 ]
@@ -438,7 +438,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "bytesbuf"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -458,21 +458,21 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "bytesbuf",
  "futures",
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "testing_aids",
  "trait-variant",
 ]
 
 [[package]]
 name = "cachet"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -484,7 +484,7 @@ dependencies = [
  "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -513,7 +513,7 @@ dependencies = [
  "futures",
  "moka",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "thread_aware",
  "tick",
  "tokio",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -530,10 +530,10 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dynosaur",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "parking_lot",
  "recoverable",
  "tick",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "data_privacy_macros",
  "derive_more",
@@ -862,7 +862,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "insta",
  "mutants",
@@ -1058,7 +1058,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch_hyper"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1075,7 +1075,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1164,7 +1164,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fundle"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "fundle_macros",
  "trybuild",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "fundle_macros_impl",
  "mutants",
@@ -1180,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros_impl"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "insta",
  "mutants",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -1520,7 +1520,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pin-project",
  "recoverable",
  "serde",
@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "allocator-api2 0.4.0",
  "bolero",
@@ -2180,12 +2180,12 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "futures",
  "insta",
  "mutants",
- "ohno_macros 0.3.1",
+ "ohno_macros 0.3.2",
  "regex",
  "testing_aids",
  "thiserror",
@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "insta",
  "mutants",
@@ -2704,10 +2704,10 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "insta",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "static_assertions",
  "testing_aids",
 ]
@@ -2897,7 +2897,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -2909,7 +2909,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -2929,14 +2929,14 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "futures",
  "http",
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -3188,12 +3188,12 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "data_privacy",
  "http",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pct-str",
  "serde",
  "serde_json",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -3214,13 +3214,13 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chumsky",
  "darling",
  "insta",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -3277,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "many_cpus",
@@ -3288,7 +3288,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "mutants",
  "syn",
@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "insta",
  "prettyplease",
@@ -3317,7 +3317,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3327,7 +3327,7 @@ dependencies = [
  "insta",
  "jiff",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pin-project-lite",
  "serde",
  "serde_core",
@@ -3663,7 +3663,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "async-once-cell",
