@@ -39,19 +39,37 @@ pub(crate) enum TlsOptionsKind {
 /// committing to a particular implementation. There are a few ways to
 /// construct one:
 ///
+/// - With [`TlsOptions::builder`], a backend-agnostic builder that exposes
+///   only the configuration options common to every backend. The actual
+///   backend is chosen by the consuming library's [`TlsBackendBuilder`].
+///   This is the recommended path when an application does not care which
+///   backend ends up being used.
 /// - With one of the backend-specific constructors (for example, a
 ///   `new_rustls` / `new_native_tls` helper available when the matching
 ///   Cargo feature is enabled) for sensible defaults.
 /// - With a backend-specific builder (a `builder_rustls` /
 ///   `builder_native_tls` helper, also feature-gated) when you need to
-///   customize the client identity, certificate verifier, supported HTTP
-///   versions, and so on. The builder type is [`TlsOptionsBuilder`].
+///   customize backend-specific knobs such as the rustls certificate
+///   verifier or client-cert resolver. The builder type is
+///   [`TlsOptionsBuilder`].
 /// - By wrapping a pre-built `rustls::ClientConfig` or
 ///   `native_tls::TlsConnector` via `From`/`Into`.
 /// - With [`TlsOptions::default`], which leaves the backend choice to the
-///   consuming library.
+///   consuming library and uses default values for every shared option.
 ///
 /// # Examples
+///
+/// Backend-agnostic options that customize only the shared knobs. The
+/// consuming library's [`TlsBackendBuilder`] picks the backend:
+///
+/// ```rust
+/// use fetch_tls::TlsOptions;
+/// use http::Version;
+///
+/// let tls = TlsOptions::builder()
+///     .supported_http_versions(&[Version::HTTP_2])
+///     .build();
+/// ```
 ///
 /// Minimal rustls-backed options using defaults. The consuming library is
 /// expected to have configured the rustls crypto provider on its
@@ -109,6 +127,46 @@ impl Default for TlsOptions {
         Self {
             inner: TlsOptionsKind::Auto,
             shared: SharedOptions::default(),
+        }
+    }
+}
+
+/// Marker for [`TlsOptionsBuilder`] returned by [`TlsOptions::builder`].
+///
+/// Carries no backend-specific state: the consuming library's
+/// [`TlsBackendBuilder`] decides which backend to use when the resulting
+/// [`TlsOptions`] is materialized.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct AutoBackend;
+
+impl TlsOptions {
+    /// Creates a backend-agnostic builder for [`TlsOptions`].
+    ///
+    /// The builder exposes only options that apply to every backend (such
+    /// as supported HTTP versions and the client identity for `mTLS`).
+    /// The actual backend is selected by the consuming library's
+    /// [`TlsBackendBuilder`] when the options are materialized, so callers
+    /// don't need to pick `builder_rustls` / `builder_native_tls`
+    /// explicitly.
+    pub fn builder() -> TlsOptionsBuilder<AutoBackend> {
+        TlsOptionsBuilder {
+            backend: AutoBackend,
+            shared: SharedOptions::default(),
+        }
+    }
+}
+
+impl TlsOptionsBuilder<AutoBackend> {
+    /// Builds the final [`TlsOptions`] without pinning a backend.
+    ///
+    /// The consuming library's [`TlsBackendBuilder`] picks the backend
+    /// when [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend)
+    /// is called.
+    pub fn build(self) -> TlsOptions {
+        TlsOptions {
+            inner: TlsOptionsKind::Auto,
+            shared: self.shared,
         }
     }
 }
@@ -184,6 +242,21 @@ mod tests {
     fn default_constructs_auto_variant() {
         let tls = TlsOptions::default();
         assert!(matches!(tls.inner, TlsOptionsKind::Auto));
+    }
+
+    #[test]
+    fn builder_returns_auto_variant() {
+        let tls = TlsOptions::builder().build();
+        assert!(matches!(tls.inner, TlsOptionsKind::Auto));
+        assert!(tls.shared.supported_http_versions.is_none());
+        assert!(tls.shared.client_identity.is_none());
+    }
+
+    #[test]
+    fn builder_supports_shared_options() {
+        let tls = TlsOptions::builder().supported_http_versions(&[Version::HTTP_2]).build();
+        assert!(matches!(tls.inner, TlsOptionsKind::Auto));
+        assert_eq!(tls.shared.supported_http_versions.as_deref(), Some(&[Version::HTTP_2][..]));
     }
 
     #[test]

@@ -16,9 +16,10 @@
 //! # Two perspectives
 //!
 //! Applications work with [`TlsOptions`] (and its builder,
-//! [`TlsOptionsBuilder`]) to describe what they want: pick a specific
-//! backend, wrap an already-built backend, or leave the choice to the
-//! consuming library.
+//! [`TlsOptionsBuilder`]) to describe what they want: leave the backend
+//! choice entirely to the consuming library via
+//! [`TlsOptions::builder`], pick a specific backend, wrap an already-built
+//! backend, or use [`TlsOptions::default`] for backend-agnostic defaults.
 //!
 //! Libraries that adopt `fetch_tls` use [`TlsBackendBuilder`] to turn a
 //! [`TlsOptions`] into a ready-to-use [`TlsBackend`]. The library
@@ -46,7 +47,7 @@ mod options;
 
 pub use backend::{BackendError, TlsBackend};
 pub use backend_builder::TlsBackendBuilder;
-pub use options::{TlsOptions, TlsOptionsBuilder};
+pub use options::{AutoBackend, TlsOptions, TlsOptionsBuilder};
 
 mod client_identity;
 pub use client_identity::{ClientIdentity, ClientIdentityError};

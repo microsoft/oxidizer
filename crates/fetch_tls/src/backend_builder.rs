@@ -312,6 +312,22 @@ mod tests {
 
             #[test]
             #[cfg_attr(miri, ignore)]
+            fn builder_routes_through_default_backend() {
+                let tls = TlsOptions::builder().build();
+                let backend = rustls_defaults().build_backend(tls).unwrap();
+                assert!(matches!(backend, TlsBackend::Rustls(_)));
+            }
+
+            #[test]
+            #[cfg_attr(miri, ignore)]
+            fn builder_propagates_shared_options_to_chosen_backend() {
+                let tls = TlsOptions::builder().supported_http_versions(&[Version::HTTP_2]).build();
+                let backend = TlsBackendBuilder::new().defaults_to_native_tls().build_backend(tls).unwrap();
+                assert!(matches!(backend, TlsBackend::NativeTls(_)));
+            }
+
+            #[test]
+            #[cfg_attr(miri, ignore)]
             fn configure_rustls_auto_promotes_unselected_to_rustls() {
                 let backend = rustls_defaults().build_backend(TlsOptions::default()).unwrap();
                 assert!(matches!(backend, TlsBackend::Rustls(_)));
