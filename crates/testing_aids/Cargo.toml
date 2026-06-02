@@ -8,11 +8,11 @@ version = "0.0.0"
 readme = "README.md"
 publish = false
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 
 [dependencies]
 futures = { workspace = true, features = ["executor"] }
@@ -22,8 +22,8 @@ tracing = { workspace = true, features = ["std"] }
 tracing-subscriber = { workspace = true, features = ["fmt", "registry"] }
 
 [dev-dependencies]
-mockall.workspace = true
-mutants.workspace = true
+mockall = { workspace = true }
+mutants = { workspace = true }
 
 [lints]
 workspace = true

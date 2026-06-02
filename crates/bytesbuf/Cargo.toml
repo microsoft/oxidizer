@@ -9,15 +9,12 @@ readme = "README.md"
 keywords = ["oxidizer", "buffers", "io", "zero-copy"]
 categories = ["data-structures", "network-programming"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf"
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-libc.workspace = true
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -43,21 +40,24 @@ test-util = []
 
 [dependencies]
 bytes = { workspace = true, features = ["std"], optional = true }
-infinity_pool.workspace = true
-new_zealand.workspace = true
-nm.workspace = true
-num-traits.workspace = true
+infinity_pool = { workspace = true }
+new_zealand = { workspace = true }
+nm = { workspace = true }
+num-traits = { workspace = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
-thread_aware.workspace = true
+thread_aware = { workspace = true }
 
 [dev-dependencies]
-alloc_tracker.workspace = true
+alloc_tracker = { workspace = true }
 bytes = { workspace = true, features = ["std"] }
-criterion.workspace = true
-mutants.workspace = true
-static_assertions.workspace = true
-testing_aids.workspace = true
-windows-sys.workspace = true
+criterion = { workspace = true }
+mutants = { workspace = true }
+static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+windows-sys = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = { workspace = true }
 
 [lints]
 workspace = true
