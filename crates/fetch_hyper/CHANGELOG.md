@@ -1,15 +1,8 @@
 # Changelog
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 ## [0.2.0] - 2026-06-02
 
-- ⚠️ Breaking
-
   - depend on `fetch_tls` crate
-=======
-=======
-## [0.1.4] - 2026-06-02
 
 - 🔧 Maintenance
 
@@ -31,7 +24,6 @@
 
   - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
 
->>>>>>> origin/main
 ## [0.1.3] - 2026-06-02
 
 - 🔧 Maintenance
