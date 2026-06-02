@@ -81,6 +81,7 @@ impl ClientIdentity {
         I: IntoIterator<Item = C>,
         C: AsRef<[u8]>,
         K: AsRef<[u8]>,
+    {
         let cert_chain = cert_chain
             .into_iter()
             .map(|c| rustls_pki_types::CertificateDer::from(c.as_ref().to_vec()))
