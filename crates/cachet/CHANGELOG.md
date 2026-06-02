@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.2` of `layered`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- ✔️ Tasks
+
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
 ## [0.6.1] - 2026-06-02
 
 - 🔧 Maintenance

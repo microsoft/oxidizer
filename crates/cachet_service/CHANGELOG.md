@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.2` of `layered`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - add configurable ttl on stampede protected cache, eviction telemetry ([#454](https://github.com/microsoft/oxidizer/pull/454))
+
+- ✔️ Tasks
+
+  - Release all packages again to unbreak GitHub publishing (part N+1) ([#467](https://github.com/microsoft/oxidizer/pull/467))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.2.1] - 2026-06-02
 
 - 🔧 Maintenance

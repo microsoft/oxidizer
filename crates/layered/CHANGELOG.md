@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2] - 2026-06-02
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+  - improve ergonomics of BytesView::as_read() ([#272](https://github.com/microsoft/oxidizer/pull/272))
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+  - Improve our crate's repository property. ([#246](https://github.com/microsoft/oxidizer/pull/246))
+
 ## [0.3.1] - 2026-06-01
 
 - ✨ Features
