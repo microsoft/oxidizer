@@ -51,10 +51,10 @@ a [`BackendError`][__link5].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_c_MUhcML6qG2ZZBxJ9qD3qG1HAxyflQ3KlG_zX8IvGvZo9YWSBgmlmZXRjaF90bHNlMC4xLjA
- [__link0]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions
- [__link1]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptionsBuilder
- [__link2]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsBackendBuilder
- [__link3]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsOptions
- [__link4]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=TlsBackend
- [__link5]: https://docs.rs/fetch_tls/0.1.0/fetch_tls/?search=BackendError
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_c_MUhcML6qG2ZZBxJ9qD3qG1HAxyflQ3KlG_zX8IvGvZo9YWSBgmlmZXRjaF90bHNlMC4yLjA
+ [__link0]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=TlsOptions
+ [__link1]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=TlsOptionsBuilder
+ [__link2]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=TlsBackendBuilder
+ [__link3]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=TlsOptions
+ [__link4]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=TlsBackend
+ [__link5]: https://docs.rs/fetch_tls/0.2.0/fetch_tls/?search=BackendError

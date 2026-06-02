@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0] - 2026-06-02
+
+- ⚠️ Breaking
+
+  - depend on `fetch_tls` crate
+
 ## [0.1.2] - 2026-06-01
 
 - 🔧 Maintenance
