@@ -265,7 +265,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbg_hDqE88LP4bMh0J5Y4y4Osb0zDJ1kwqOsoblCGrm49Rx2thZIiCaGJ5dGVzYnVmZTAuNS4wgmZjYWNoZXRlMC41LjGCbWNhY2hldF9tZW1vcnllMC4yLjGCbmNhY2hldF9zZXJ2aWNlZTAuMS4wgmtjYWNoZXRfdGllcmUwLjEuMIJkdGlja2UwLjMuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjIuMA
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG4P4Q6hPPCz-GzIdCeWOMuDrG9MwydZMKjrKG5Qhq5uPUcdrYWSIgmhieXRlc2J1ZmUwLjUuMIJmY2FjaGV0ZTAuNS4xgm1jYWNoZXRfbWVtb3J5ZTAuMi4xgm5jYWNoZXRfc2VydmljZWUwLjEuMIJrY2FjaGV0X3RpZXJlMC4xLjCCZHRpY2tlMC4zLjCCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjA
  [__link0]: https://docs.rs/cachet/0.5.1/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.0
  [__link10]: https://docs.rs/cachet_tier/0.1.0/cachet_tier/?search=CacheTier

@@ -35,29 +35,27 @@ pub(crate) enum TlsOptionsKind {
 
 /// TLS configuration for an HTTP client.
 ///
-/// For most callers, [`TlsOptions::new_rustls`] and
-/// [`TlsOptions::new_native_tls`] are the simplest way to construct
-/// [`TlsOptions`]: they produce a configuration with appropriate defaults
-/// for the selected backend. When you need to customize the configuration
-/// (for example, to set a client identity, override the server certificate
-/// verifier, or change supported HTTP versions), use the corresponding
-/// builder constructor [`TlsOptions::builder_rustls`] or
-/// [`TlsOptions::builder_native_tls`] instead.
+/// `TlsOptions` describes the TLS behavior an application wants without
+/// committing to a particular implementation. There are a few ways to
+/// construct one:
 ///
-/// If you do not want to pick a backend yourself, use
-/// [`TlsOptions::default`] to defer that choice to the HTTP client that
-/// adopts `fetch_tls`.
-///
-/// You can also convert from a pre-built
-/// [`rustls::ClientConfig`](::rustls::ClientConfig) /
-/// [`native_tls::TlsConnector`](::native_tls::TlsConnector) via
-/// [`From`]/[`Into`] to wrap a backend you have already built.
+/// - With one of the backend-specific constructors (for example, a
+///   `new_rustls` / `new_native_tls` helper available when the matching
+///   Cargo feature is enabled) for sensible defaults.
+/// - With a backend-specific builder (a `builder_rustls` /
+///   `builder_native_tls` helper, also feature-gated) when you need to
+///   customize the client identity, certificate verifier, supported HTTP
+///   versions, and so on. The builder type is [`TlsOptionsBuilder`].
+/// - By wrapping a pre-built `rustls::ClientConfig` or
+///   `native_tls::TlsConnector` via `From`/`Into`.
+/// - With [`TlsOptions::default`], which leaves the backend choice to the
+///   consuming library.
 ///
 /// # Examples
 ///
-/// Minimal rustls-backed [`TlsOptions`] using default settings; supply a
-/// [`TlsBackendBuilder::configure_rustls`](crate::TlsBackendBuilder::configure_rustls)
-/// when calling [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) to materialize a backend:
+/// Minimal rustls-backed options using defaults. The consuming library is
+/// expected to have configured the rustls crypto provider on its
+/// [`TlsBackendBuilder`] before materializing this into a backend:
 ///
 /// ```rust,no_run
 /// # #[cfg(feature = "rustls")] {
@@ -67,8 +65,8 @@ pub(crate) enum TlsOptionsKind {
 /// # }
 /// ```
 ///
-/// Minimal native-tls-backed [`TlsOptions`] using default settings; no
-/// backend defaults are required to materialize the backend:
+/// Minimal native-tls-backed options using defaults; no environment-
+/// supplied defaults are required to materialize the backend:
 ///
 /// ```rust,no_run
 /// # #[cfg(feature = "native-tls")] {
@@ -103,10 +101,9 @@ impl SharedOptions {
     }
 }
 
-/// Constructs [`TlsOptions`] whose backend is chosen at
-/// [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend) time from the supplied
-/// [`TlsBackendBuilder`]. See [`TlsBackendBuilder`] for how to select the
-/// default backend.
+/// Constructs [`TlsOptions`] whose backend is chosen when the consuming
+/// library materializes them via its [`TlsBackendBuilder`]. See
+/// [`TlsBackendBuilder`] for how to configure the default backend.
 impl Default for TlsOptions {
     fn default() -> Self {
         Self {
@@ -118,10 +115,9 @@ impl Default for TlsOptions {
 
 /// Type-state builder for [`TlsOptions`], parameterized by backend.
 ///
-/// `B` selects the backend: [`RustlsOptions`](super::RustlsOptions) (rustls)
-/// or [`NativeTlsOptions`](super::NativeTlsOptions) (platform native).
-/// Obtain via [`TlsOptions::builder_rustls`] or
-/// [`TlsOptions::builder_native_tls`], then call `.build()`.
+/// The type parameter `B` carries the backend-specific state (rustls or
+/// native-tls). Obtain a builder from one of the feature-gated
+/// `TlsOptions::builder_*` constructors and finish with `.build()`.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct TlsOptionsBuilder<B> {
@@ -154,7 +150,7 @@ impl<B> TlsOptionsBuilder<B> {
     /// Sets the client identity for mutual TLS (`mTLS`) authentication.
     ///
     /// The same identity works for either backend; backend-specific
-    /// conversion happens in [`TlsBackendBuilder::build_backend`](crate::TlsBackendBuilder::build_backend).
+    /// conversion happens when the options are materialized into a backend.
     /// The native-tls backend requires the private key to be `PKCS#8`.
     pub fn client_identity(mut self, identity: ClientIdentity) -> Self {
         self.shared.client_identity = Some(identity);

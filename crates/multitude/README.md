@@ -383,7 +383,7 @@ existing `_rc`/`_arc` slice methods).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxSsckQO6X9rG16hze1SNSzMGw6W-TYGhj3rG1Gc1jfyNoYcYWSFgmhieXRlbXVja2YxLjI1LjCCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjCCaW11bHRpdHVkZWUwLjEuMIJoemVyb2NvcHlmMC44LjQ5
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGxSsckQO6X9rG16hze1SNSzMGw6W-TYGhj3rG1Gc1jfyNoYcYWSFgmhieXRlbXVja2YxLjI1LjCCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjCCaW11bHRpdHVkZWUwLjEuMIJoemVyb2NvcHlmMC44LjQ4
  [__link0]: https://crates.io/crates/bumpalo
  [__link1]: https://docs.rs/multitude/0.1.0/multitude/?search=rc::Rc
  [__link10]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::String
@@ -459,7 +459,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link74]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::format_utf16
  [__link75]: https://crates.io/crates/widestring
  [__link76]: https://docs.rs/multitude/0.1.0/multitude/?search=zerocopy::ZerocopyView
- [__link77]: https://docs.rs/zerocopy/0.8.49/zerocopy/?search=FromZeros
+ [__link77]: https://docs.rs/zerocopy/0.8.48/zerocopy/?search=FromZeros
  [__link78]: `Arena::zerocopy()`
  [__link79]: https://docs.rs/multitude/0.1.0/multitude/?search=bytemuck::BytemuckView
  [__link8]: https://docs.rs/multitude/0.1.0/multitude/?search=strings::ArcStr
