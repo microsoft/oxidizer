@@ -423,6 +423,7 @@ pub(crate) enum PoolSelectionStrategy {
 
 impl PoolSelectionStrategy {
     pub(crate) fn select<'a, T>(&self, clients: &'a [T]) -> (&'a T, PoolIndex) {
+        assert!(!clients.is_empty(), "clients must not be empty");
         match self {
             Self::Saturating {
                 requests_per_client,
