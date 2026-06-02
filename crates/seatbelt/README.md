@@ -199,11 +199,7 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
-<<<<<<< HEAD
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2LxVq77_N9dG1R--JdN59FkG5IrJw60OjsiGw6BM6tJVV5kYWSFgmdsYXllcmVkZTAuMy4xgmtyZWNvdmVyYWJsZWUwLjEuM4Joc2VhdGJlbHRlMC41LjGCZHRpY2tlMC4zLjGCbXRvd2VyX3NlcnZpY2VlMC4zLjM
-=======
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYvFWrvv8310bVH74l03n0WQbkisnDrQ6OyIbDoEzq0lVXmRhZIWCZ2xheWVyZWRlMC4zLjGCa3JlY292ZXJhYmxlZTAuMS40gmhzZWF0YmVsdGUwLjUuMoJkdGlja2UwLjMuMoJtdG93ZXJfc2VydmljZWUwLjMuMw
->>>>>>> origin/main
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2LxVq77_N9dG1R--JdN59FkG5IrJw60OjsiGw6BM6tJVV5kYWSFgmdsYXllcmVkZTAuMy4xgmtyZWNvdmVyYWJsZWUwLjEuNIJoc2VhdGJlbHRlMC41LjKCZHRpY2tlMC4zLjKCbXRvd2VyX3NlcnZpY2VlMC4zLjM
  [__link0]: https://crates.io/crates/layered/0.3.1
  [__link1]: https://docs.rs/layered/0.3.1/layered/?search=Stack
  [__link10]: https://docs.rs/seatbelt/0.5.2/seatbelt/hedging/index.html

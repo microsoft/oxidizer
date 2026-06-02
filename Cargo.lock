@@ -1103,7 +1103,7 @@ dependencies = [
  "insta",
  "mutants",
  "native-tls",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "rstest",
  "rustls",
  "rustls-pki-types",

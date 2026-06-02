@@ -227,19 +227,11 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
-<<<<<<< HEAD
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGy_QQ3DXXBTMG-wYrAGx4Q0zGwo33-kq3ZvDG8lbbk3MMbc-YWSCgmx0aHJlYWRfYXdhcmVlMC43LjGCZHRpY2tlMC4zLjE
- [__link0]: https://docs.rs/tick/0.3.1/tick/?search=ClockControl
- [__link1]: https://docs.rs/tick/0.3.1/tick/?search=Clock
- [__link10]: https://docs.rs/tick/0.3.1/tick/?search=FutureExt
- [__link11]: https://docs.rs/tick/0.3.1/tick/?search=SystemTimeExt
-=======
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbL9BDcNdcFMwb7BisAbHhDTMbCjff6Srdm8MbyVtuTcwxtz5hZIKCbHRocmVhZF9hd2FyZWUwLjcuMoJkdGlja2UwLjMuMg
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGy_QQ3DXXBTMG-wYrAGx4Q0zGwo33-kq3ZvDG8lbbk3MMbc-YWSCgmx0aHJlYWRfYXdhcmVlMC43LjKCZHRpY2tlMC4zLjI
  [__link0]: https://docs.rs/tick/0.3.2/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.3.2/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.3.2/tick/?search=FutureExt
  [__link11]: https://docs.rs/tick/0.3.2/tick/?search=SystemTimeExt
->>>>>>> origin/main
  [__link12]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
  [__link13]: https://crates.io/crates/jiff
  [__link14]: https://crates.io/crates/chrono
