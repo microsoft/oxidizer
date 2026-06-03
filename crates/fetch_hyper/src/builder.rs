@@ -154,7 +154,9 @@ where
     ///
     /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
-    pub fn new(connector: C, spawner: Spawner, clock: Clock, options: TransportOptions) -> Self {
+    pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions) -> Self {
+        coerce_options(&mut options);
+
         let hyper_builder = configure_hyper_builder(spawner, &clock, &options);
 
         Self {
@@ -206,6 +208,12 @@ where
             .unwrap_or_else(|| HttpBodyBuilder::new(GlobalPool::new(), &self.clock));
 
         HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
+    }
+}
+
+fn coerce_options(options: &mut TransportOptions) {
+    if options.supported_http_versions.is_empty() {
+        options.supported_http_versions = vec![Version::HTTP_11, Version::HTTP_2];
     }
 }
 
@@ -494,5 +502,15 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn coerce_options_fills_empty_http_versions_with_defaults() {
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = vec![];
+
+        coerce_options(&mut options);
+
+        assert_eq!(options.supported_http_versions, vec![Version::HTTP_11, Version::HTTP_2]);
     }
 }
