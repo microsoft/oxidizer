@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Mechanisms to classify, manipulate, and redact sensitive data.
 //!
