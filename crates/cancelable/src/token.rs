@@ -495,21 +495,22 @@ mod tests {
         parent.cancel();
     }
 
-    fn start_polling_thead_for_is_cancelled(token: CancellationToken) -> JoinHandle<()> {
+    fn start_cancellation_polling_thead(token: CancellationToken) -> JoinHandle<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let counter = Arc::new(AtomicUsize::new(0));
 
         let thread_counter = Arc::clone(&counter);
         let thread_handle = std::thread::spawn(move || {
             while !token.is_cancelled() {
                 thread_counter.fetch_add(1, Ordering::Relaxed);
+                assert!(std::time::Instant::now() < deadline, "thread did not finish in time");
                 std::hint::spin_loop();
             }
         });
 
         // wait for the thread to start running
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while counter.load(Ordering::Relaxed) == 0 {
-            assert!(std::time::Instant::now() < deadline, "thread did not start running");
+            assert!(std::time::Instant::now() < deadline, "thread did not start in time");
             std::hint::spin_loop();
         }
 
@@ -519,7 +520,7 @@ mod tests {
     #[test]
     fn cancel_visible_across_threads() {
         let source = CancellationTokenSource::new();
-        let handle = start_polling_thead_for_is_cancelled(source.token());
+        let handle = start_cancellation_polling_thead(source.token());
         source.cancel();
         handle.join().expect("thread should complete successfully");
     }
@@ -528,7 +529,7 @@ mod tests {
     fn linked_cancellation_is_visible_across_threads() {
         let parent = CancellationTokenSource::new();
         let linked = CancellationTokenSource::linked(&[parent.token()]);
-        let handle = start_polling_thead_for_is_cancelled(linked.token());
+        let handle = start_cancellation_polling_thead(linked.token());
         parent.cancel();
         handle.join().expect("thread should complete successfully");
     }
