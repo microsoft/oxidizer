@@ -16,9 +16,8 @@ use crate::{ConnectionKeepAlive, ConnectionPoolOptions, DEFAULT_CONNECT_TIMEOUT,
 /// the transport's (base URI rewriting, redaction, `TLS` backend selection, I/O
 /// model overrides, etc.).
 ///
-/// Values on this struct are written through builder setters; a custom transport reads
-/// them to size its own resources (pool limits, keep-alive timers, supported protocol
-/// versions, ...).
+/// Values on this struct are typically configured by mutating the fields directly; a custom transport reads
+/// them to size its own resources (pool limits, keep-alive timers, supported protocol versions, ...).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TransportOptions {
