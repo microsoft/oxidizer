@@ -22,7 +22,7 @@ use crate::error_labels::LABEL_CONNECT;
 
 /// A stream that panics on every operation.
 ///
-/// Useful for verifying that wrappers (e.g. `Box<dyn HyperIo>`,
+/// Useful for verifying that wrappers (e.g. `Pin<Box<dyn HyperIo>>`,
 /// `TrackedStream`) forward each method to the inner stream — the panic
 /// message is the method name.
 #[derive(Debug, Default)]

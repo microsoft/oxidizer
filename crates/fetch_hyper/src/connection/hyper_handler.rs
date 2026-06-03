@@ -9,6 +9,7 @@
 
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::pin::Pin;
 
 use bytesbuf::BytesView;
 use fetch_options::ConnectionInfo;
@@ -33,7 +34,8 @@ use crate::recoverability::detect_recoverability;
 use crate::tls::TlsConnector;
 
 /// The fully-wrapped connector chain handed to `hyper`'s [`Client`].
-type WrappedConnector<C, S> = HyperConnectorAdapter<ClientConnector<TlsConnector<C, S>, Box<dyn HyperIo>>, TrackedStream<Box<dyn HyperIo>>>;
+type WrappedConnector<C, S> =
+    HyperConnectorAdapter<ClientConnector<TlsConnector<C, S>, Pin<Box<dyn HyperIo>>>, TrackedStream<Pin<Box<dyn HyperIo>>>>;
 
 /// A Hyper-backed request handler, parameterized by the user-supplied
 /// connector and stream types. Public consumers see only the
@@ -41,7 +43,7 @@ type WrappedConnector<C, S> = HyperConnectorAdapter<ClientConnector<TlsConnector
 pub(crate) struct HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     client: Client<WrappedConnector<C, S>, HttpBody>,
     body_builder: http_extensions::HttpBodyBuilder,
@@ -50,7 +52,7 @@ where
 impl<C, S> fmt::Debug for HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
@@ -60,7 +62,7 @@ where
 impl<C, S> Service<HttpRequest> for HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     type Out = Result<HttpResponse>;
 
@@ -99,7 +101,7 @@ pub(crate) fn build_hyper_handler<C, S>(
 ) -> HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     let HyperTransportBuilder {
         connector,

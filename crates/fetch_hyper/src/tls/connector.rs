@@ -4,6 +4,7 @@
 //! The internal `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 use fetch_options::RequestFilter;
 use http::Version;
@@ -132,9 +133,13 @@ where
 impl<C, S> layered::Service<BaseUri> for TlsConnector<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    // `hyper-rustls`/`hyper-tls` only implement `Service` for their
+    // `HttpsConnector` when the wrapped transport stream is `Unpin`, so the
+    // inner stream type must be `Unpin` here even though `HyperIo` itself no
+    // longer requires it (the erased `Pin<Box<dyn HyperIo>>` output does not).
+    S: HyperIo + Unpin,
 {
-    type Out = http_extensions::Result<Box<dyn HyperIo>>;
+    type Out = http_extensions::Result<Pin<Box<dyn HyperIo>>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
         match self {
@@ -144,7 +149,7 @@ where
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
-                    .map(|s| Box::new(s) as Box<dyn HyperIo>)
+                    .map(|s| Box::pin(s) as Pin<Box<dyn HyperIo>>)
                     .map_err(handle_tls_error)
             }
             #[cfg(any(feature = "native-tls", test))]
@@ -153,7 +158,7 @@ where
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
-                    .map(|s| Box::new(s) as Box<dyn HyperIo>)
+                    .map(|s| Box::pin(s) as Pin<Box<dyn HyperIo>>)
                     .map_err(handle_tls_error)
             }
             #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]

@@ -112,7 +112,7 @@ where
 pub struct HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     pub(crate) connector: C,
     pub(crate) clock: Clock,
@@ -127,7 +127,7 @@ where
 impl<C, S> fmt::Debug for HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(std::any::type_name::<Self>())
@@ -140,7 +140,7 @@ where
 impl<C, S> HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     /// Creates a new builder configured by `options`.
     ///
