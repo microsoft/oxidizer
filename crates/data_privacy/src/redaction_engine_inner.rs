@@ -56,8 +56,12 @@ impl RedactionEngineInner {
     }
 
     #[must_use]
-    pub fn would_redact(&self, data_class: &DataClass) -> bool {
-        !matches!(self.redactors.get(data_class), Some(RedactionPolicy::Suppressed))
+    pub fn redacts(&self, data_class: &DataClass) -> bool {
+        match self.redactors.get(data_class) {
+            Some(RedactionPolicy::Suppressed) => false,
+            Some(RedactionPolicy::Redact(redactor)) => redactor.redacts(data_class),
+            None => self.fallback.redacts(data_class),
+        }
     }
 
     pub fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
@@ -81,6 +85,7 @@ impl Debug for RedactionEngineInner {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use data_privacy_macros::taxonomy;
     use rustc_hash::FxBuildHasher;
@@ -138,22 +143,36 @@ mod tests {
     }
 
     #[test]
-    fn test_would_redact_returns_true_for_unknown_class() {
+    fn test_redacts_returns_true_for_unknown_class() {
         let inner = RedactionEngineInner::default();
-        assert!(inner.would_redact(&TestTaxonomy::Sensitive.data_class()));
+        assert!(inner.redacts(&TestTaxonomy::Sensitive.data_class()));
     }
 
     #[test]
-    fn test_would_redact_returns_true_for_registered_redactor() {
+    fn test_redacts_returns_true_for_registered_redactor() {
         let mut inner = RedactionEngineInner::default();
         inner.insert(TestTaxonomy::Sensitive, SimpleRedactor::new());
-        assert!(inner.would_redact(&TestTaxonomy::Sensitive.data_class()));
+        assert!(inner.redacts(&TestTaxonomy::Sensitive.data_class()));
     }
 
     #[test]
-    fn test_would_redact_returns_false_for_suppressed_class() {
+    fn test_redacts_returns_false_for_suppressed_class() {
         let mut inner = RedactionEngineInner::default();
         inner.suppress(TestTaxonomy::Sensitive);
-        assert!(!inner.would_redact(&TestTaxonomy::Sensitive.data_class()));
+        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
+    }
+
+    #[test]
+    fn test_redacts_returns_false_for_passthrough_redactor() {
+        let mut inner = RedactionEngineInner::default();
+        inner.insert(TestTaxonomy::Sensitive, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
+        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
+    }
+
+    #[test]
+    fn test_redacts_returns_false_for_passthrough_fallback() {
+        let mut inner = RedactionEngineInner::default();
+        inner.set_fallback(SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough));
+        assert!(!inner.redacts(&TestTaxonomy::Sensitive.data_class()));
     }
 }

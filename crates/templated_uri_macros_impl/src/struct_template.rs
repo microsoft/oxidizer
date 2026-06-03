@@ -171,7 +171,7 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
         }
 
         impl ::data_privacy::RedactedDisplay for #ident {
-            fn fmt(&self, engine: &::data_privacy::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, engine: &dyn ::data_privacy::Redactor, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 #redacted_display
             }
         }

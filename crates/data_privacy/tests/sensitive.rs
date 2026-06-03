@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
 use data_privacy::{Classified, RedactionEngine, Sensitive};
 use data_privacy_macros::taxonomy;
+use insta::assert_snapshot;
 
 #[taxonomy(test)]
 #[derive(Debug)]
@@ -183,4 +184,77 @@ fn test_redacted_long_value_fallback_path() {
     let to_string_out = engine.redacted_to_string(&wrapper);
     assert_eq!(to_string_out.len(), long_plain.len());
     assert!(to_string_out.chars().all(|c| c == '*'));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_redacted_debug_output_is_nonempty() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .build();
+    let wrapper = Sensitive::new("hello", TestTaxonomy::PII);
+
+    let mut debug_out = String::new();
+    engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
+    assert_snapshot!(debug_out, @"*******");
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_redacted_display_output_is_nonempty() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .build();
+    let wrapper = Sensitive::new("hello", TestTaxonomy::PII);
+
+    let mut display_out = String::new();
+    engine.redacted_display(&wrapper, &mut display_out).unwrap();
+    assert_snapshot!(display_out, @"*****");
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_redacted_to_string_is_nonempty() {
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::Replace('*')))
+        .build();
+    let wrapper = Sensitive::new("hello", TestTaxonomy::PII);
+
+    let result = engine.redacted_to_string(&wrapper);
+    assert_snapshot!(result, @"*****");
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_redacted_display_at_stack_buffer_boundary() {
+    // Value with Display output of exactly 128 bytes (STACK_BUFFER_SIZE) exercises the <= boundary.
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
+        .build();
+    let value_at_boundary = "x".repeat(128);
+    let wrapper = Sensitive::new(value_at_boundary, TestTaxonomy::PII);
+
+    let mut display_out = String::new();
+    engine.redacted_display(&wrapper, &mut display_out).unwrap();
+    assert_snapshot!(display_out, @"<test/p_i_i:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx>");
+
+    // Verify the result is the same as to_redacted_string
+    let to_string_out = engine.redacted_to_string(&wrapper);
+    assert_eq!(display_out, to_string_out);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn test_redacted_debug_at_stack_buffer_boundary() {
+    // Value with Debug output of exactly 128 bytes exercises the <= boundary.
+    // For a String, Debug adds quotes: `"xxx..."` so we need 126 chars to get 128 bytes of debug output.
+    let engine = RedactionEngine::builder()
+        .add_class_redactor(TestTaxonomy::PII, SimpleRedactor::with_mode(SimpleRedactorMode::PassthroughAndTag))
+        .build();
+    let value_at_boundary = "x".repeat(126);
+    let wrapper = Sensitive::new(value_at_boundary, TestTaxonomy::PII);
+
+    let mut debug_out = String::new();
+    engine.redacted_debug(&wrapper, &mut debug_out).unwrap();
+    assert_snapshot!(debug_out, @r#"<test/p_i_i:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">"#);
 }

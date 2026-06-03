@@ -126,8 +126,7 @@ macro_rules! impl_str_read_traits {
     };
 }
 
-pub(crate) use impl_str_accessors;
-pub(crate) use impl_str_read_traits;
+pub(crate) use {impl_str_accessors, impl_str_read_traits};
 
 /// Element-generic Local-flavor storage scaffolding (`from_raw_data`,
 /// `from_in_chunk`, `from_owned_in_chunk`, `Clone`) shared by both the
@@ -290,9 +289,7 @@ macro_rules! impl_str_handle_core {
     };
 }
 
-pub(crate) use impl_str_handle_core;
-pub(crate) use impl_str_handle_local_storage;
-pub(crate) use impl_str_handle_shared_storage;
+pub(crate) use {impl_str_handle_core, impl_str_handle_local_storage, impl_str_handle_shared_storage};
 
 /// UTF-16 sibling of [`impl_str_handle_core`] — emits `Clone`,
 /// `from_raw_data`, `data_ptr`, `Unpin`, `PartialEq<Utf16Str>` /

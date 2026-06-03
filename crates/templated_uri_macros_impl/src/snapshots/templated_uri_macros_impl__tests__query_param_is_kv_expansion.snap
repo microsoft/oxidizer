@@ -72,7 +72,7 @@ impl ::std::fmt::Debug for QueryTest {
 impl ::data_privacy::RedactedDisplay for QueryTest {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        engine: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/api/")?;

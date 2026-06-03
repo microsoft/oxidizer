@@ -7,7 +7,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 
-use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
+use data_privacy::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor, Sensitive};
 use http::uri::{Parts, PathAndQuery as HttpPathAndQuery};
 
 use crate::error::UriError;
@@ -169,12 +169,12 @@ impl Uri {
 
 impl RedactedDisplay for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
         if let Some(base_uri) = self.base_uri.as_ref() {
             write!(f, "{base_uri}")?;
         }
 
-        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(engine)) {
+        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(redactor)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -186,12 +186,12 @@ impl RedactedDisplay for Uri {
 
 impl RedactedDebug for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
         if let Some(base_uri) = self.base_uri.as_ref() {
             write!(f, "{base_uri}")?;
         }
 
-        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(engine)) {
+        match self.path_and_query.as_ref().map(|p| p.to_redacted_string(redactor)) {
             // If there is a base URI, trim the leading slash from the path and query to avoid double slashes.
             Some(pq) if self.base_uri.is_some() => f.write_str(pq.trim_start_matches('/'))?,
             Some(pq) => f.write_str(&pq)?,
@@ -343,6 +343,8 @@ impl TryFrom<Uri> for HttpPathAndQuery {
 
 #[cfg(test)]
 mod tests {
+    use data_privacy::RedactionEngine;
+
     use super::*;
 
     #[test]

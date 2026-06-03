@@ -80,7 +80,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
         }
 
         impl ::data_privacy::RedactedDisplay for #ident {
-            fn fmt(&self, engine: &::data_privacy::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, engine: &dyn ::data_privacy::Redactor, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 match self {
                     #(#variant_matches => ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?),*
                 }

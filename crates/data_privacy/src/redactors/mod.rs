@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-mod redactor;
-
 pub mod simple_redactor;
 
 #[cfg(feature = "xxh3")]
@@ -10,8 +8,6 @@ pub mod xxh3_redactor;
 
 #[cfg(feature = "rapidhash")]
 pub mod rapidhash_redactor;
-
-pub use redactor::Redactor;
 
 #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
 #[inline]
@@ -28,16 +24,19 @@ pub fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::fmt::Write;
 
     use data_privacy_macros::taxonomy;
 
-    use super::*;
+    use crate::Redactor;
 
     #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
     #[test]
     fn test_u64_to_hex_array() {
+        use super::u64_to_hex_array;
+
         let result = u64_to_hex_array(0x1234_5678_9abc_def0);
         let expected = b"123456789abcdef0";
         assert_eq!(result, *expected);
@@ -53,7 +52,11 @@ mod tests {
 
     struct TestRedactor;
 
-    impl Redactor for TestRedactor {
+    impl crate::Redactor for TestRedactor {
+        fn redacts(&self, _data_class: &crate::DataClass) -> bool {
+            true
+        }
+
         fn redact(&self, _data_class: &crate::DataClass, value: &str, output: &mut dyn Write) -> std::fmt::Result {
             write!(output, "{value}tomato")
         }

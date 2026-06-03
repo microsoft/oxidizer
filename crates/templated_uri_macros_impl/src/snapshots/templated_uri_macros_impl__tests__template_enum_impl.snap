@@ -60,7 +60,7 @@ impl ::std::fmt::Debug for Test {
 impl ::data_privacy::RedactedDisplay for Test {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        engine: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         match self {

@@ -7,7 +7,7 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use data_privacy::{Classified, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
+use data_privacy::{Classified, RedactedDebug, RedactedDisplay, RedactedToString, Redactor, Sensitive};
 use http::uri::PathAndQuery as HttpPathAndQuery;
 
 use crate::error::UriError;
@@ -80,15 +80,15 @@ impl PathAndQuery {
 
 impl RedactedDisplay for PathAndQuery {
     #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.0 {
             PathAndQueryInner::Static(classified_pq) => {
                 // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
                 // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
                 let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
-                RedactedDisplay::fmt(&reclassified, engine, f)
+                RedactedDisplay::fmt(&reclassified, redactor, f)
             }
-            PathAndQueryInner::Templated(templated) => RedactedDisplay::fmt(&**templated, engine, f),
+            PathAndQueryInner::Templated(templated) => RedactedDisplay::fmt(&**templated, redactor, f),
         }
     }
 }
@@ -105,12 +105,12 @@ impl fmt::Debug for PathAndQuery {
 
 impl RedactedDebug for PathAndQuery {
     #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
         let mut tuple = f.debug_tuple("PathAndQuery");
         match &self.0 {
             PathAndQueryInner::Static(_) => tuple.finish(),
             PathAndQueryInner::Templated(templated) => {
-                let rendered = templated.deref().to_redacted_string(engine);
+                let rendered = templated.deref().to_redacted_string(redactor);
                 tuple.field(&rendered).finish()
             }
         }
