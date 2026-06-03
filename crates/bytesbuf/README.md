@@ -471,7 +471,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG91Jt_IDJ8uaGzw7UvcHuNDdG2jPnTC62v9nG8FGesia3fwjYWSBgmhieXRlc2J1ZmUwLjUuMg
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb3Um38gMny5obPDtS9we40N0baM-dMLra_2cbwUZ6yJrd_CNhZIGCaGJ5dGVzYnVmZTAuNS4y
  [__link0]: https://docs.rs/bytesbuf/0.5.2/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.2/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.2/bytesbuf/?search=BytesView

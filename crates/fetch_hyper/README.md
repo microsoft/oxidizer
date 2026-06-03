@@ -39,23 +39,11 @@ The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
-<<<<<<< HEAD
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuNS4ygmtmZXRjaF9oeXBlcmUwLjEuNIJtZmV0Y2hfb3B0aW9uc2UwLjEuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40
- [__link0]: https://docs.rs/fetch_hyper/0.1.4/fetch_hyper/?search=HyperTransportBuilder
- [__link1]: https://docs.rs/fetch_hyper/0.1.4/fetch_hyper/?search=Connect
- [__link2]: https://docs.rs/fetch_options/0.1.0/fetch_options/?search=TransportOptions
- [__link3]: https://docs.rs/fetch_hyper/0.1.4/fetch_hyper/?search=HyperTransport
-=======
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG27JhwJzXkumG9Cgswtvbtk3G11RQ0eI0kW1G87aELyEYbR5YWSDgmhhbnlzcGF3bmUwLjUuMoJrZmV0Y2hfaHlwZXJlMC4yLjCCb2h0dHBfZXh0ZW5zaW9uc2UwLjQuNA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuNS4ygmtmZXRjaF9oeXBlcmUwLjIuMIJtZmV0Y2hfb3B0aW9uc2UwLjEuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40
  [__link0]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransportBuilder
  [__link1]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=Connect
- [__link2]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransportBuilder::configure_hyper
+ [__link2]: https://docs.rs/fetch_options/0.1.0/fetch_options/?search=TransportOptions
  [__link3]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransport
->>>>>>> origin/main
  [__link4]: https://docs.rs/http_extensions/0.4.4/http_extensions/?search=RequestHandler
  [__link5]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransportBuilder::build
  [__link6]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=Spawner
-<<<<<<< HEAD
-=======
- [__link7]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=Connect
->>>>>>> origin/main
