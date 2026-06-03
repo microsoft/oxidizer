@@ -495,7 +495,7 @@ mod tests {
         parent.cancel();
     }
 
-    fn start_cancellation_polling_thead(token: CancellationToken) -> JoinHandle<()> {
+    fn start_cancellation_polling_thread(token: CancellationToken) -> JoinHandle<()> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let counter = Arc::new(AtomicUsize::new(0));
 
@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn cancel_visible_across_threads() {
         let source = CancellationTokenSource::new();
-        let handle = start_cancellation_polling_thead(source.token());
+        let handle = start_cancellation_polling_thread(source.token());
         source.cancel();
         handle.join().expect("thread should complete successfully");
     }
@@ -529,7 +529,7 @@ mod tests {
     fn linked_cancellation_is_visible_across_threads() {
         let parent = CancellationTokenSource::new();
         let linked = CancellationTokenSource::linked(&[parent.token()]);
-        let handle = start_cancellation_polling_thead(linked.token());
+        let handle = start_cancellation_polling_thread(linked.token());
         parent.cancel();
         handle.join().expect("thread should complete successfully");
     }
