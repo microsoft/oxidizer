@@ -239,7 +239,7 @@ impl Default for CancellationToken {
 ///
 /// When a source is [`linked()`](CancellationTokenSource::linked) to a set of
 /// parents, it registers to receive notifications from each parent. When the
-/// source is later dropped, it unregistered from each of the parents. This
+/// source is later dropped, it unregisters from each of the parents. This
 /// ensures that long-lived parents only track and notify active children.
 #[derive(Debug, Default)]
 pub struct CancellationTokenSource {
