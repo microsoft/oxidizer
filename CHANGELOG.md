@@ -14,6 +14,7 @@ Please see each crate's change log below:
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/CHANGELOG.md)
 - [`fetch_hyper`](./crates/fetch_hyper/CHANGELOG.md)
 - [`fetch_options`](./crates/fetch_options/CHANGELOG.md)
+- [`fetch_tls`](./crates/fetch_tls/CHANGELOG.md)
 - [`fundle`](./crates/fundle/CHANGELOG.md)
 - [`fundle_macros`](./crates/fundle_macros/CHANGELOG.md)
 - [`fundle_macros_impl`](./crates/fundle_macros_impl/CHANGELOG.md)

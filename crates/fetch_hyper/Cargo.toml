@@ -4,7 +4,7 @@
 [package]
 name = "fetch_hyper"
 description = "Hyper-based HTTP transport utilities for fetch."
-version = "0.1.4"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["oxidizer", "hyper", "fetch", "http", "tls"]
 categories = ["network-programming"]
@@ -21,6 +21,7 @@ allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
     "fetch_options::*",
+    "fetch_tls::*",
     "http_extensions::*",
     "layered::*",
     "templated_uri::*",
@@ -39,14 +40,20 @@ allowed_external_types = [
 all-features = true
 
 [features]
-rustls = ["dep:rustls", "dep:hyper-rustls"]
-native-tls = ["dep:native-tls", "dep:hyper-tls", "dep:tokio-native-tls"]
+rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
+native-tls = [
+    "dep:native-tls",
+    "dep:hyper-tls",
+    "dep:tokio-native-tls",
+    "fetch_tls/native-tls",
+]
 
 [dependencies]
 # internal
 anyspawn = { workspace = true }
 bytesbuf = { workspace = true }
 fetch_options = { workspace = true }
+fetch_tls = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true, features = ["dynamic-service"] }
 ohno = { workspace = true }
@@ -79,6 +86,7 @@ tokio-native-tls = { workspace = true, optional = true }
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 bytes = { workspace = true }
 fetch_options = { path = "../fetch_options" }
+fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2"] }

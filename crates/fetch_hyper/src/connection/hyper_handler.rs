@@ -191,6 +191,7 @@ mod tests {
     use bytes::Bytes;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
+    use fetch_tls::TlsBackend;
     use http_body_util::BodyExt as _;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
     use layered::Service as _;
@@ -198,7 +199,6 @@ mod tests {
     use super::*;
     use crate::HyperTransport;
     use crate::testing::{FakeConnector, create_hyper_error, fake_body_builder};
-    use crate::tls::TlsBackend;
 
     fn tls() -> TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()

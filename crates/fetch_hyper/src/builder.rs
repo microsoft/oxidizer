@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use anyspawn::Spawner;
 use bytesbuf::mem::GlobalPool;
 use fetch_options::{ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, TransportOptions};
+use fetch_tls::TlsBackend;
 use http::Version;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, Result};
 use hyper_util::client::legacy;
@@ -20,7 +21,6 @@ use tick::Clock;
 use crate::HyperIo;
 use crate::connection::Connect;
 use crate::connection::hyper_handler::build_hyper_handler;
-use crate::tls::TlsBackend;
 
 /// A type-erased Hyper request handler.
 #[derive(Clone, Debug)]
@@ -78,7 +78,7 @@ where
 ///
 /// ```
 /// use anyspawn::Spawner;
-/// use fetch_hyper::{HyperTransport, HyperTransportBuilder, TlsBackend};
+/// use fetch_hyper::{HyperTransport, HyperTransportBuilder};
 /// use fetch_options::TransportOptions;
 /// use hyper_util::rt::TokioIo;
 /// use layered::Execute;
@@ -95,7 +95,7 @@ where
 /// # async fn run() {
 /// // A real `TlsBackend` does expensive store initialization, so it is
 /// // stubbed out too; the function below is never actually called.
-/// let tls: TlsBackend = unreachable!("doc example; never invoked");
+/// let tls: fetch_tls::TlsBackend = unreachable!("doc example; never invoked");
 ///
 /// let transport: HyperTransport = HyperTransportBuilder::new(
 ///     Execute::new(connect),

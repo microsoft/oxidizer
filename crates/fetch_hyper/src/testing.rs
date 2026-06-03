@@ -354,6 +354,7 @@ mod tests {
     use anyspawn::Spawner;
     use bytes::Bytes;
     use fetch_options::RequestFilter;
+    use fetch_tls::TlsBackend;
     use http_body_util::BodyExt;
     use layered::Service as _;
     use native_tls::TlsConnector;
@@ -363,7 +364,7 @@ mod tests {
     use crate::{HyperTransportBuilder, TlsBackend};
 
     fn build_tls() -> TlsBackend {
-        TlsBackend::NativeTls(TlsConnector::new().unwrap())
+        TlsConnector::new().unwrap().into()
     }
 
     fn http_1_response() -> Bytes {
