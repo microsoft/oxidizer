@@ -913,6 +913,7 @@ mod service_tests {
 }
 
 #[cfg(feature = "logs")]
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn get_or_insert_with_logging_emits_span() {
     let capture = testing_aids::LogCapture::new();
@@ -926,6 +927,7 @@ async fn get_or_insert_with_logging_emits_span() {
 }
 
 #[cfg(feature = "logs")]
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn try_get_or_insert_with_logging_emits_span() {
     let capture = testing_aids::LogCapture::new();
@@ -939,6 +941,7 @@ async fn try_get_or_insert_with_logging_emits_span() {
 }
 
 #[cfg(feature = "logs")]
+#[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn optionally_get_or_insert_with_logging_emits_span() {
     let capture = testing_aids::LogCapture::new();
