@@ -30,11 +30,9 @@
 //!
 //!    - Mutable references with lifetimes tied to the arena (`&mut T`,
 //!      `&mut str`, `&mut [T]`).
-//!    - Reference-counted smart pointers ([`Rc`], [`RcStr`](strings::RcStr)) for
-//!      single-threaded sharing.
-//!    - Atomic reference-counted smart pointers ([`Arc`], [`ArcStr`](strings::ArcStr))
+//!    - Atomic reference-counted smart pointers ([`Arc`], [`Arc<str>`](Arc), [`Arc<[T]>`](Arc))
 //!      for cross-thread sharing.
-//!    - Owned, mutable smart pointers ([`Box`], [`BoxStr`](strings::BoxStr)).
+//!    - Owned, mutable smart pointers ([`Box`], [`Box<str>`](Box), [`Box<[T]>`](Box)).
 //!
 //! 2. **Early Reclamation.** In many situations, `multitude` can reclaim memory from individual chunks as soon as their reference counts drop to zero,
 //!    without waiting for the entire arena to be dropped. This allows for more efficient memory usage in long-running arenas with many short-lived allocations.
@@ -44,20 +42,19 @@
 //!
 //! 4. **Drop Support.** `multitude` automatically runs `Drop` for allocated values at the appropriate time.
 //!
-//! 5. **Efficient Immutable String References.** `multitude` provides [`RcStr`](strings::RcStr), [`ArcStr`](strings::ArcStr), and
-//!    [`BoxStr`](strings::BoxStr) — single-pointer (8 bytes) smart pointers to UTF-8 strings stored in the arena. Refcounted, atomic-refcounted,
-//!    and owned-mutable variants respectively, all sharing the same compact layout.
+//! 5. **Uniformly Thin Smart Pointers.** `multitude`'s [`Arc<T>`](Arc) and [`Box<T>`](Box) are **8 bytes** on 64-bit
+//!    for *every* `T`, including DST `T` such as `str`, `[U]`, and `dyn Trait`. DST metadata (slice length, vtable)
+//!    is stored unaligned in the chunk prefix, so `Vec<Arc<str>>` and similar collections are 2× denser than `Vec<std::sync::Arc<str>>`.
 //!
-//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String) and [`Vec`](vec::Vec) which are growable collections that live in the arena and can be frozen into compact
-//!    reference-counted smart pointers when you're done building.
+//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String) and [`Vec`](vec::Vec) which are growable collections that live in the arena.
 //!
 //! 7. **Dynamically-Sized Types.** `multitude` supports dynamically-sized types (DSTs) like slices and strings, allowing you to allocate and manage them in the
 //!    arena with the same flexibility as sized types. The [`dst-factory`](https://crates.io/crates/dst-factory) crate is a great companion for building DSTs in the arena.
 //!
 //! 8. **`format!`-style Macro.** `multitude` includes a [`format!`](strings::format!)-style macro that allows you to create formatted strings directly in the arena, avoiding intermediate allocations and copies.
 //!
-//! 9. **UTF-16 Support.** With the `utf16` Cargo feature, `multitude` provides a parallel set of arena-resident UTF-16 string types ([`RcUtf16Str`](strings::RcUtf16Str),
-//!    [`ArcUtf16Str`](strings::ArcUtf16Str), [`BoxUtf16Str`](strings::BoxUtf16Str), [`Utf16String`](strings::Utf16String)) and a [`format_utf16!`](strings::format_utf16!) macro for FFI / Windows / JS-engine
+//! 9. **UTF-16 Support.** With the `utf16` Cargo feature, `multitude` provides a parallel set of arena-resident UTF-16 string types
+//!    ([`ArcUtf16Str`](strings::ArcUtf16Str), [`BoxUtf16Str`](strings::BoxUtf16Str), [`Utf16String`](strings::Utf16String)) and a [`format_utf16!`](strings::format_utf16!) macro for FFI / Windows / JS-engine
 //!    interop without per-call transcoding at every boundary.
 //!
 //! 10. **`#![no_std]` Support.** `multitude` can be used in `#![no_std]` environments, making it suitable for embedded systems and other resource-constrained contexts.
@@ -69,18 +66,17 @@
 //!
 //! let arena = Arena::new();
 //!
-//! // Cheap reference-counted allocation of any user type.
+//! // Cheap atomic reference-counted allocation of any user type.
 //! struct Point { x: f64, y: f64 }
-//! let p = arena.alloc_rc(Point { x: 3.0, y: 4.0 });
+//! let p = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
 //! let p2 = p.clone();
 //! assert_eq!(p.x, p2.x);
 //!
 //! // Single-pointer immutable strings.
-//! let name = arena.alloc_str_rc("Alice");
+//! let name = arena.alloc_str_arc("Alice");
 //! assert_eq!(&*name, "Alice");
 //!
-//! // format! macro returning a String (call .into_arena_str() to
-//! // freeze into a compact 8-byte RcStr).
+//! // format! macro returning a String.
 //! let greeting = multitude::strings::format!(in &arena, "Hello, {}!", "world");
 //! assert_eq!(&*greeting, "Hello, world!");
 //! ```
@@ -113,26 +109,30 @@
 //!
 //! ## Smart Pointers
 //!
-//! Smart pointers ([`Rc`], [`Arc`], [`Box`] and their `str` variations) work in a way similar to the like-named types
+//! Smart pointers ([`Arc`], [`Box`] and their `str` variations) work in a way similar to the like-named types
 //! in the standard library, except that they reference addresses within an arena.
 //!
 //! ```
-//! use multitude::Rc;
+//! use multitude::Arc;
 //!
 //! struct Point {
 //!     x: f64,
 //!     y: f64,
 //! }
 //!
-//! let p: Rc<Point> = {
+//! let p: Arc<Point> = {
 //!     let arena = multitude::Arena::new();
-//!     arena.alloc_rc(Point { x: 3.0, y: 4.0 })
+//!     arena.alloc_arc(Point { x: 3.0, y: 4.0 })
 //!     // arena dropped here
 //! };
 //! assert_eq!(p.x, 3.0);
 //! ```
 //!
-//! Although [`Arena`] itself is single-threaded (`!Send` and `!Sync`), the arc-family of types (e.g., [`Arc`]) enable cross-thread sharing.
+//! Although [`Arena`] itself is `!Sync`, it is [`Send`]: an arena —
+//! along with any in-flight references and smart pointers — can be
+//! moved between threads. For cross-thread *sharing*, allocate
+//! [`Arc`]-family smart pointers (e.g. [`Arc<u64>`](Arc), [`Arc<str>`](Arc))
+//! and `.clone()` them across threads.
 //!
 //! ```
 //! let arena = multitude::Arena::new();
@@ -185,19 +185,19 @@
 //!
 //! Once you're done building, you can **freeze them** into immutable smart pointers:
 //!
-//! - [`String::into_arena_str`](strings::String::into_arena_str) → [`RcStr`](strings::RcStr) (**8 bytes**). The
-//!   freeze itself is **O(1)** — no copy, no new allocation.
-//! - [`Vec::into_arena_rc`](vec::Vec::into_arena_rc) → [`Rc<[T]>`](crate::Rc) (16-byte slice fat
-//!   pointer; immutable, cloneable, refcount-based). For `T: !Drop`,
-//!   the freeze is **O(1)** too.
+//! - [`String::into_arena_box_str`](strings::String::into_arena_box_str) → [`Box<str>`](crate::Box) (**8 bytes**, thin).
+//!   The freeze is **O(n)** — it copies the bytes into a compact,
+//!   length-prefixed allocation so the resulting single pointer is
+//!   `Send`-safe and can outlive the arena.
+//! - [`Vec::into_arena_box`](vec::Vec::into_arena_box) → [`Box<[T]>`](crate::Box) (**8 bytes**, thin).
+//!   For `T: !Drop`, the freeze is **O(1)**.
 //!
-//! Both freezes also reclaim any unused capacity left in the buffer
-//! when the conditions allow it, so those bytes become available for
-//! the next allocation.
+//! The `Vec` freeze also reclaims any unused capacity left in the
+//! buffer when the conditions allow it, so those bytes become available
+//! for the next allocation.
 //!
 //! ```
-//! use multitude::Arena;
-//! use multitude::strings::RcStr;
+//! use multitude::{Arena, Box};
 //!
 //! let arena = Arena::new();
 //!
@@ -206,16 +206,14 @@
 //! builder.push_str("hello, ");
 //! builder.push_str("world");
 //!
-//! // Freeze for storage: 8-byte single-pointer smart pointer. O(1) — no copy.
-//! let stored: RcStr = builder.into_arena_str();
+//! // Freeze for storage: 8-byte single-pointer smart pointer. O(n) — copies the bytes.
+//! let stored: Box<str> = builder.into_arena_box_str();
 //! assert_eq!(&*stored, "hello, world");
-//! # let _ = stored.clone();
 //! ```
 //!
 //! Use this pattern whenever you'd be storing many strings or slices
-//! long-term — the per-pointer savings (16 bytes for strings, 8 for
-//! slices) add up quickly across millions of items, and the frozen
-//! smart pointers are also cheaper to clone.
+//! long-term — the per-pointer savings (8 bytes for both strings and
+//! slices) add up quickly across millions of items.
 //!
 //! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md)
 //! for a feature-by-feature comparison with [`bumpalo`](https://crates.io/crates/bumpalo).
@@ -233,14 +231,13 @@
 //! 1. **Smart pointers (immutable / owned).** Compact handles to string
 //!    data already stored in the arena. They use a single-pointer (8
 //!    bytes on 64-bit) layout — half the size of `&str` — by storing
-//!    the length inline with the string bytes. They differ in how
+//!    the length unaligned in the chunk prefix. They differ in how
 //!    sharing and mutability work:
 //!
 //!    | UTF-8 | UTF-16 | Sharing | Mutable | Notes |
 //!    |---|---|---|---|---|
-//!    | [`RcStr`](strings::RcStr)   | [`RcUtf16Str`](strings::RcUtf16Str)   | refcount, `!Send`/`!Sync` | no | cheapest clone |
-//!    | [`ArcStr`](strings::ArcStr) | [`ArcUtf16Str`](strings::ArcUtf16Str) | atomic refcount, `Send + Sync` | no | cross-thread |
-//!    | [`BoxStr`](strings::BoxStr) | [`BoxUtf16Str`](strings::BoxUtf16Str) | unique owner | yes | drops eagerly |
+//!    | [`Arc<str>`](crate::Arc) | [`ArcUtf16Str`](strings::ArcUtf16Str) | atomic refcount; `Clone`, `Send + Sync` | no | cross-thread sharing |
+//!    | [`Box<str>`](crate::Box) | [`BoxUtf16Str`](strings::BoxUtf16Str) | unique owner; `Send + Sync` (not `Clone`) | yes | drops eagerly |
 //!
 //!    Like the other arena smart pointers, they keep their owning chunk
 //!    alive via a refcount, so they can outlive the [`Arena`] they came
@@ -252,15 +249,18 @@
 //!    length + capacity + arena reference. You build them up with
 //!    `push_str` / `push_char` / [`format!`](strings::format!) /
 //!    [`format_utf16!`](strings::format_utf16!), then **freeze** them
-//!    in O(1) into one of the smart pointers above:
+//!    into one of the smart pointers above:
 //!
 //!    | Builder | Freeze method | Result |
 //!    |---|---|---|
-//!    | [`String`](strings::String) | [`into_arena_str`](strings::String::into_arena_str) | [`RcStr`](strings::RcStr) |
-//!    | [`Utf16String`](strings::Utf16String) | [`into_arena_utf16_str`](strings::Utf16String::into_arena_utf16_str) | [`RcUtf16Str`](strings::RcUtf16Str) |
+//!    | [`String`](strings::String) | [`into_arena_box_str`](strings::String::into_arena_box_str) | [`Box<str>`](crate::Box) |
+//!    | [`Utf16String`](strings::Utf16String) | [`into_arena_box_utf16_str`](strings::Utf16String::into_arena_box_utf16_str) | [`BoxUtf16Str`](strings::BoxUtf16Str) |
 //!
-//!    The freeze reuses the buffer in place — no copy — and returns
+//!    The UTF-16 freeze reuses the buffer in place (O(1)) and returns
 //!    any unused tail capacity to the chunk's bump cursor when it can.
+//!    The UTF-8 freeze copies the bytes (O(n)) into a compact,
+//!    length-prefixed allocation so [`Box<str>`](crate::Box) stays a
+//!    single, `Send`-safe pointer.
 //!
 //! UTF-16 support requires the `utf16` Cargo feature. Strict (validated)
 //! UTF-16 only — lone surrogates are rejected. The UTF-16 types
@@ -272,19 +272,19 @@
 //!
 //! ```
 //! use multitude::Arena;
-//! use multitude::strings::RcStr;
+//! use multitude::Box;
 //!
 //! let arena = Arena::new();
 //!
 //! // Single-pointer immutable strings.
-//! let s = arena.alloc_str_rc("hello, world");
+//! let s = arena.alloc_str_arc("hello, world");
 //! assert_eq!(&*s, "hello, world");
 //!
 //! // Build incrementally and freeze:
 //! let mut b = arena.alloc_string();
 //! b.push_str("abc");
 //! b.push_str("123");
-//! let frozen: RcStr = b.into_arena_str();
+//! let frozen: Box<str> = b.into_arena_box_str();
 //! assert_eq!(&*frozen, "abc123");
 //!
 //! // format!-style:
@@ -303,18 +303,18 @@
 //! let arena = Arena::new();
 //!
 //! // From a validated &Utf16Str literal:
-//! let s = arena.alloc_utf16_str_rc(utf16str!("hello, world"));
+//! let s = arena.alloc_utf16_str_arc(utf16str!("hello, world"));
 //! assert_eq!(&*s, utf16str!("hello, world"));
 //!
 //! // Or transcode from a &str:
-//! let s2 = arena.alloc_utf16_str_rc_from_str("hello");
+//! let s2 = arena.alloc_utf16_str_arc_from_str("hello");
 //! assert_eq!(&*s2, utf16str!("hello"));
 //!
 //! // Build incrementally and freeze:
 //! let mut b = arena.alloc_utf16_string();
 //! b.push_str(utf16str!("abc"));
 //! b.push_from_str("123");
-//! let frozen = b.into_arena_utf16_str();
+//! let frozen = b.into_arena_box_utf16_str();
 //! assert_eq!(&*frozen, utf16str!("abc123"));
 //!
 //! // format!-style:
@@ -327,7 +327,7 @@
 //! # Building DSTs
 //!
 //! With the `dst` Cargo feature enabled, [`Arena`] exposes
-//! [`Arena::alloc_dst_arc`] / [`Arena::alloc_dst_rc`] /
+//! [`Arena::alloc_dst_arc`] and
 //! [`Arena::alloc_dst_box`] (and their `try_*` siblings) for
 //! constructing values whose layout is only known at runtime (custom
 //! DSTs, fat pointers, trait objects).
@@ -362,7 +362,7 @@
 //!
 //! The same feature also enables eight `Arena::alloc_slice_*_box`
 //! methods that produce `Box<[T]>` directly (mirroring the
-//! existing `_rc`/`_arc` slice methods).
+//! existing `_arc` slice methods).
 //!
 //! # Crate Features
 //!
@@ -370,12 +370,12 @@
 //! |---------|-------------|
 //! | `std` *(default)* | Enables [`std::io::Write`] on [`Vec<u8>`](vec::Vec) for use with `write!`, `std::io::copy`, `serde_json::to_writer`, and similar. Disable for `#![no_std]` environments (the crate still requires `alloc`). |
 //! | `stats` | Enables runtime instrumentation counters returned by `Arena::stats`. Disable for the tightest allocation throughput when you don't need observability. |
-//! | `serde` | Adds `Serialize` impls for [`RcStr`](strings::RcStr), [`ArcStr`](strings::ArcStr), [`String`](strings::String), and [`Vec`](vec::Vec). With `serde + utf16`, also adds impls for the UTF-16 types (transcoded to UTF-8 on the wire). |
-//! | `dst` | Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`] / [`Arena::alloc_dst_rc`] / [`Arena::alloc_dst_box`], plus eight `Arena::alloc_slice_*_box` methods. |
-//! | `utf16` | Adds a parallel UTF-16 string surface ([`RcUtf16Str`](strings::RcUtf16Str), [`ArcUtf16Str`](strings::ArcUtf16Str), [`BoxUtf16Str`](strings::BoxUtf16Str), [`Utf16String`](strings::Utf16String), and [`format_utf16!`](strings::format_utf16!)) backed by the [`widestring`](https://crates.io/crates/widestring) crate. Lengths are counted in `u16` elements. |
+//! | `serde` | Adds `Serialize` impls for [`Arc<str>`](Arc), [`Box<str>`](Box), [`String`](strings::String), and [`Vec`](vec::Vec). With `serde + utf16`, also adds impls for the UTF-16 types (transcoded to UTF-8 on the wire). |
+//! | `dst` | Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`] / [`Arena::alloc_dst_box`], plus eight `Arena::alloc_slice_*_box` methods. |
+//! | `utf16` | Adds a parallel UTF-16 string surface ([`ArcUtf16Str`](strings::ArcUtf16Str), [`BoxUtf16Str`](strings::BoxUtf16Str), [`Utf16String`](strings::Utf16String), and [`format_utf16!`](strings::format_utf16!)) backed by the [`widestring`](https://crates.io/crates/widestring) crate. Lengths are counted in `u16` elements. |
 //! | `zerocopy` | Provides [`ZerocopyView`](zerocopy::ZerocopyView) for safe zero-initialized allocation of types implementing [`zerocopy::FromZeros`](::zerocopy::FromZeros). Access via [`Arena::zerocopy()`]. |
 //! | `bytemuck` | Provides [`BytemuckView`](bytemuck::BytemuckView) for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`](::bytemuck::Zeroable). Access via [`Arena::bytemuck()`]. |
-//! | `bytes` | Adds [`From`] conversions from [`Arc<[u8]>`](Arc) and [`ArcStr`](strings::ArcStr) into [`bytes::Bytes`](::bytes::Bytes), enabling zero-copy integration with the Tokio / Hyper async ecosystem. |
+//! | `bytes` | Adds [`From`] conversions from [`Arc<[u8]>`](Arc) and [`Arc<str>`](Arc) into [`bytes::Bytes`](::bytes::Bytes), enabling zero-copy integration with the Tokio / Hyper async ecosystem. |
 //! | `bytesbuf` | Implements [`bytesbuf::mem::Memory`](::bytesbuf::mem::Memory) directly on [`Arena`], so that [`BytesBuf`](::bytesbuf::BytesBuf) buffers can be backed by arena chunks. Implies `std`. |
 
 #![no_std]
@@ -383,7 +383,7 @@
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/multitude/favicon.ico")]
 
 extern crate alloc;
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", test))]
 extern crate std;
 
 mod allocator_impl;
@@ -392,20 +392,26 @@ mod arena;
 mod arena_builder;
 #[cfg(feature = "stats")]
 mod arena_stats;
-mod arena_str_macros;
 mod r#box;
 #[cfg(feature = "dst")]
 #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
 pub mod dst;
 mod internal;
-mod rc;
-mod smart_ptr_macros;
 pub mod strings;
+mod thin_smart_ptr_common;
 pub mod vec;
 
-#[cfg(any(feature = "bytemuck", feature = "zerocopy"))]
-mod zero_init_macros;
+#[cfg(test)]
+mod tests_support;
 
+// Ecosystem integration modules. Visibility differs by what the
+// integration exposes:
+//   - `bytemuck` / `zerocopy` are `pub` because they introduce types
+//     (`BytemuckView` / `ZerocopyView`) that users need to name in
+//     their own code.
+//   - `bytes` / `bytesbuf` are private because they only add `From`
+//     impls / inherent methods on existing types; nothing in them
+//     needs to be path-addressable from outside.
 #[cfg(feature = "bytemuck")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bytemuck")))]
 pub mod bytemuck;
@@ -426,4 +432,3 @@ pub use self::arena_builder::ArenaBuilder;
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
-pub use self::rc::Rc;

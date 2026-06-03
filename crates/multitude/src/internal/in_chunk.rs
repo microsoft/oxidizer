@@ -1,173 +1,109 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! A `NonNull<T>` known to lie inside a live chunk of a given flavor.
-//!
-//! This moves chunk-header recovery behind a safe `chunk_ptr` call once
-//! the caller has established the invariant at construction.
+//! Pointer-into-chunk-payload smart pointer.
 
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::Allocator;
-
-use super::local_chunk::LocalChunk;
-use super::mask::{local_chunk_of, shared_chunk_of};
-use super::shared_chunk::SharedChunk;
-
-mod sealed {
-    pub trait Sealed {}
-}
-
-/// Recover the chunk header for a value pointer of `Self`'s flavor.
+/// A non-null, well-aligned pointer that — by construction — addresses
+/// storage inside the payload of a live arena chunk (with one narrow
+/// exception for ZSTs, see below).
 ///
-/// Sealed to [`LocalChunk<A>`] and [`SharedChunk<A>`].
-pub(crate) trait ChunkRecover: sealed::Sealed {
-    /// Recover the fat chunk pointer for `value`.
-    ///
-    /// # Safety
-    ///
-    /// `value` must point into a live chunk of `Self`'s flavor. The
-    /// result is valid only while that chunk stays live.
-    unsafe fn recover_chunk<T: ?Sized>(value: NonNull<T>) -> NonNull<Self>;
-}
-
-impl<A: Allocator + Clone> sealed::Sealed for LocalChunk<A> {}
-impl<A: Allocator + Clone> ChunkRecover for LocalChunk<A> {
-    #[inline]
-    unsafe fn recover_chunk<T: ?Sized>(value: NonNull<T>) -> NonNull<Self> {
-        // SAFETY: caller forwards the chunk-header invariant.
-        unsafe { local_chunk_of::<T, A>(value) }
-    }
-}
-
-impl<A: Allocator + Clone> sealed::Sealed for SharedChunk<A> {}
-impl<A: Allocator + Clone> ChunkRecover for SharedChunk<A> {
-    #[inline]
-    unsafe fn recover_chunk<T: ?Sized>(value: NonNull<T>) -> NonNull<Self> {
-        // SAFETY: caller forwards the chunk-header invariant.
-        unsafe { shared_chunk_of::<T, A>(value) }
-    }
-}
-
-/// A non-null pointer to `T` known to lie inside a live chunk of `K`.
+/// `InChunk<T>` is the fundamental "I came from the allocator" pointer
+/// abstraction. The rest of the crate carries these around instead of raw
+/// `NonNull<T>` so that the difference between "any pointer" and "a pointer
+/// the allocator handed out" is visible in the type system.
 ///
-/// Construction is `unsafe`; chunk recovery is then safe.
+/// # Invariants
 ///
-/// `InChunk` stays `!Send + !Sync` so the smart-pointer wrapper makes
-/// the cross-thread claim.
-pub(crate) struct InChunk<T: ?Sized, K: ChunkRecover + ?Sized> {
+/// - `self.ptr` is non-null and well-aligned for `T`.
+/// - If `core::mem::size_of_val(&*self.ptr) > 0`, the pointed-to region lies
+///   entirely within the payload of an arena chunk whose lifetime exceeds the
+///   use of this `InChunk`. (Liveness is enforced externally by the holder of
+///   the chunk's `Arc`.)
+/// - For zero-sized values (ZSTs and empty slices) the pointer is permitted
+///   to be a dangling, well-aligned non-null address. There is no payload
+///   storage to reference in that case.
+///
+/// `InChunk` is `Copy` because copying a pointer cannot violate any of the
+/// above. Mutability and aliasing discipline are enforced by the wrappers
+/// (`Uninit`, `UninitDrop`, `ArenaBuf`, etc.) that consume `InChunk`s.
+pub(crate) struct InChunk<T: ?Sized> {
     ptr: NonNull<T>,
-    // `*const K` keeps dropck for `K` and leaves Send/Sync to the wrapper.
-    _marker: PhantomData<*const K>,
+    _phantom: PhantomData<*const T>,
 }
 
-impl<T: ?Sized, K: ChunkRecover + ?Sized> InChunk<T, K> {
-    /// Wrap a value pointer inside a live chunk of flavor `K`.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must point into the payload of a live `K` chunk produced by
-    /// an [`crate::Arena`] allocation.
+impl<T: ?Sized> Clone for InChunk<T> {
     #[inline]
-    pub(crate) const unsafe fn new(ptr: NonNull<T>) -> Self {
-        Self { ptr, _marker: PhantomData }
-    }
-
-    /// Return the wrapped pointer.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn as_non_null(self) -> NonNull<T> {
-        self.ptr
-    }
-
-    /// Return the wrapped pointer as `*mut T`.
-    #[inline]
-    #[must_use]
-    pub(crate) const fn as_ptr(self) -> *mut T {
-        self.ptr.as_ptr()
-    }
-
-    /// Borrow the pointee as `&T`.
-    ///
-    /// The pointee must also be initialized; `InChunk` only constrains
-    /// its address.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`NonNull::as_ref`].
-    #[inline]
-    pub(crate) unsafe fn as_ref<'a>(&self) -> &'a T {
-        // SAFETY: forwarded by caller.
-        unsafe { self.ptr.as_ref() }
-    }
-
-    /// Borrow the pointee as `&mut T`.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`NonNull::as_mut`].
-    #[inline]
-    pub(crate) unsafe fn as_mut<'a>(&mut self) -> &'a mut T {
-        // SAFETY: forwarded by caller.
-        unsafe { self.ptr.as_mut() }
-    }
-
-    /// Recover the chunk header that owns this value.
-    ///
-    /// This is safe because the `InChunk` invariant guarantees the mask
-    /// lands on the right live chunk.
-    #[inline]
-    #[must_use]
-    pub(crate) fn chunk_ptr(self) -> NonNull<K> {
-        // SAFETY: by `InChunk`'s construction invariant, `self.ptr`
-        // points into a live `K`-flavored chunk, so `recover_chunk`'s
-        // safety condition is met.
-        unsafe { K::recover_chunk(self.ptr) }
-    }
-}
-
-impl<T: ?Sized, K: ChunkRecover + ?Sized> Clone for InChunk<T, K> {
-    #[inline]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: ?Sized, K: ChunkRecover + ?Sized> Copy for InChunk<T, K> {}
+impl<T: ?Sized> Copy for InChunk<T> {}
 
-/// `InChunk<T, _>` over a [`LocalChunk<A>`].
-pub(crate) type InLocalChunk<T, A> = InChunk<T, LocalChunk<A>>;
-
-/// `InChunk<T, _>` over a [`SharedChunk<A>`].
-pub(crate) type InSharedChunk<T, A> = InChunk<T, SharedChunk<A>>;
-
-#[cfg(test)]
-mod tests {
-    use super::{InLocalChunk, InSharedChunk};
-    use crate::Arena;
-
-    /// `Rc::clone`/`Arc::clone` can bypass the manual `Clone` body, so
-    /// call the trait method explicitly here.
-    #[test]
-    fn in_local_chunk_explicit_clone_runs_clone_body() {
-        let arena = Arena::new();
-        let rc = arena.alloc_rc(7_u32);
-        let raw = core::ptr::NonNull::new(rc.as_ptr().cast_mut()).unwrap();
-        // SAFETY: `Rc::as_ptr` points into a live local chunk for as long as `rc` is alive.
-        let in_chunk: InLocalChunk<u32, allocator_api2::alloc::Global> = unsafe { InLocalChunk::new(raw) };
-        let cloned = Clone::clone(&in_chunk);
-        assert_eq!(cloned.as_ptr(), in_chunk.as_ptr());
+impl<T: ?Sized> InChunk<T> {
+    /// Wraps a raw `NonNull<T>` that satisfies the type invariants above.
+    ///
+    /// This constructor is `pub(super)` so only sibling modules in
+    /// `internal/` (notably `ChunkMutator`) can mint `InChunk` values; the
+    /// rest of the crate may only obtain them through allocator outputs.
+    #[inline]
+    pub(super) fn from_raw(ptr: NonNull<T>) -> Self {
+        Self {
+            ptr,
+            _phantom: PhantomData,
+        }
     }
 
-    #[test]
-    fn in_shared_chunk_explicit_clone_runs_clone_body() {
-        let arena = Arena::new();
-        let arc = arena.alloc_arc(11_u32);
-        let raw = core::ptr::NonNull::new(arc.as_ptr().cast_mut()).unwrap();
-        // SAFETY: `Arc::as_ptr` points into a live shared chunk.
-        let in_chunk: InSharedChunk<u32, allocator_api2::alloc::Global> = unsafe { InSharedChunk::new(raw) };
-        let cloned = Clone::clone(&in_chunk);
-        assert_eq!(cloned.as_ptr(), in_chunk.as_ptr());
+    /// Returns the underlying raw pointer.
+    #[inline]
+    pub(crate) fn as_ptr(self) -> *mut T {
+        self.ptr.as_ptr()
+    }
+
+    /// Returns the underlying non-null pointer.
+    #[inline]
+    pub(crate) fn as_non_null(self) -> NonNull<T> {
+        self.ptr
+    }
+}
+
+impl<T: ?Sized> InChunk<T> {
+    /// Reinterprets the pointer as pointing at a `U` instead of a `T`.
+    ///
+    /// The caller is responsible for ensuring the target type `U` is a valid
+    /// interpretation of the same storage (matching size and alignment).
+    #[inline]
+    pub(crate) fn cast<U>(self) -> InChunk<U> {
+        InChunk {
+            ptr: self.ptr.cast(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl InChunk<u8> {
+    /// Returns the integer address of the pointer.
+    #[inline]
+    pub(crate) fn addr(self) -> usize {
+        self.ptr.as_ptr() as usize
+    }
+
+    /// Builds an `InChunk<[T]>` describing `len` consecutive `T`s starting at
+    /// this byte address.
+    ///
+    /// The caller (always `ChunkMutator`) is responsible for ensuring that
+    /// the address is aligned for `T` and that `len * size_of::<T>()` bytes
+    /// of valid in-chunk storage start here.
+    #[inline]
+    pub(crate) fn into_slice<T>(self, len: usize) -> InChunk<[T]> {
+        let slice = NonNull::slice_from_raw_parts(self.ptr.cast::<T>(), len);
+        InChunk {
+            ptr: slice,
+            _phantom: PhantomData,
+        }
     }
 }

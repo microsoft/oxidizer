@@ -3,25 +3,19 @@
 
 //! Basic inherent methods.
 
-use core::ptr::{self, NonNull};
-use core::slice;
-
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::Vec;
 use crate::Arena;
+use crate::arena::{ExpectAlloc, panic_alloc};
+use crate::internal::arena_buf::ArenaBuf;
 
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Create an empty vector backed by `arena`. No allocation until the first push.
     #[inline]
     #[must_use]
     pub const fn new_in(arena: &'a Arena<A>) -> Self {
-        Self {
-            arena,
-            data: NonNull::dangling(),
-            len: 0,
-            cap: 0,
-        }
+        Self::from_buf(ArenaBuf::new(), arena)
     }
 
     /// Create an empty vector with capacity for at least `cap` elements.
@@ -32,10 +26,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Use [`Self::try_with_capacity_in`] for a fallible variant.
     #[must_use]
     pub fn with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Self {
-        match Self::try_with_capacity_in(cap, arena) {
-            Ok(vec) => vec,
-            Err(_e) => panic!("multitude: allocator returned AllocError"),
-        }
+        (Self::try_with_capacity_in(cap, arena)).expect_alloc()
     }
 
     /// Fallible variant of [`Self::with_capacity_in`].
@@ -45,9 +36,11 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
     pub fn try_with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Result<Self, AllocError> {
-        let mut vec = Self::new_in(arena);
-        vec.try_reserve_exact(cap)?;
-        Ok(vec)
+        let mut v = Self::new_in(arena);
+        if cap > 0 {
+            v.try_grow_to(cap)?;
+        }
+        Ok(v)
     }
 
     /// Push a value.
@@ -56,25 +49,17 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_push`] for a fallible variant.
-    #[expect(
+    #[allow(
         clippy::inline_always,
         reason = "hot path; force-inlining keeps the cap-check + bump + write tight in callers' loops"
     )]
     #[inline(always)]
     pub fn push(&mut self, value: T) {
-        if self.len == self.cap {
-            self.grow_one();
-        }
-        // SAFETY: the capacity check above guarantees `len < cap`, so this slot is allocated and uninitialized.
-        unsafe { self.data.as_ptr().add(self.len).write(value) };
-        self.len += 1;
-    }
-
-    #[cold]
-    #[inline(never)]
-    pub(super) fn grow_one(&mut self) {
-        if self.try_grow_amortized(1).is_err() {
-            panic!("multitude: allocator returned AllocError");
+        if let Err(value) = self.buf.push_within_cap(value) {
+            if self.try_grow_one().is_err() {
+                panic_alloc!();
+            }
+            self.buf.push_within_cap(value).ok().expect("capacity grown above to fit one push");
         }
     }
 
@@ -85,28 +70,21 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
     #[inline(always)]
-    #[expect(
+    #[allow(
         clippy::inline_always,
         reason = "hot path; mirror of `push` — keep cap-check + bump + write tight in callers' loops"
     )]
     pub fn try_push(&mut self, value: T) -> Result<(), AllocError> {
-        if self.len == self.cap {
-            self.try_grow_amortized(1)?;
+        if let Err(value) = self.buf.push_within_cap(value) {
+            self.try_grow_one()?;
+            self.buf.push_within_cap(value).ok().expect("capacity grown above to fit one push");
         }
-        // SAFETY: growth above guarantees `len < cap`, so this slot is allocated and uninitialized.
-        unsafe { self.data.as_ptr().add(self.len).write(value) };
-        self.len += 1;
         Ok(())
     }
 
     /// Pop a value.
     pub fn pop(&mut self) -> Option<T> {
-        if self.len == 0 {
-            return None;
-        }
-        self.len -= 1;
-        // SAFETY: the old last element was initialized; decrementing len transfers ownership to the caller.
-        Some(unsafe { self.data.as_ptr().add(self.len).read() })
+        self.buf.pop()
     }
 
     /// Reserve capacity for at least `additional` more elements.
@@ -118,7 +96,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         if self.try_reserve(additional).is_err() {
-            panic!("multitude: allocator returned AllocError");
+            panic_alloc!();
         }
     }
 
@@ -130,49 +108,51 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// alignment is at least 32 KiB.
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), AllocError> {
-        self.try_grow_amortized(additional)
+        let needed = self.buf.len().checked_add(additional).ok_or(AllocError)?;
+        if needed <= self.buf.cap() {
+            return Ok(());
+        }
+        self.try_grow_to(grow_target(self.buf.cap(), needed))
     }
 
     /// Drop all elements but keep the capacity.
     pub fn clear(&mut self) {
-        self.truncate(0);
+        self.buf.clear();
     }
 
     /// Returns the number of elements in the vector.
     #[must_use]
     #[inline]
     pub const fn len(&self) -> usize {
-        self.len
+        self.buf.len()
     }
 
     /// Returns `true` if the vector contains no elements.
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.len == 0
+        self.buf.len() == 0
     }
 
     /// Returns the total number of elements the vector can hold without reallocating.
     #[must_use]
     #[inline]
     pub const fn capacity(&self) -> usize {
-        self.cap
+        self.buf.cap()
     }
 
     /// Returns a slice view of the vector's contents.
     #[must_use]
     #[inline]
     pub fn as_slice(&self) -> &[T] {
-        // SAFETY: `data` points to `cap` elements (or is dangling for len 0/ZST), and the first `len` are initialized.
-        unsafe { slice::from_raw_parts(self.data.as_ptr(), self.len) }
+        self.buf.as_slice()
     }
 
     /// Returns a mutable slice view of the vector's contents.
     #[must_use]
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: `data` points to `cap` elements (or is dangling for len 0/ZST), and the first `len` are initialized.
-        unsafe { slice::from_raw_parts_mut(self.data.as_ptr(), self.len) }
+        self.buf.as_mut_slice()
     }
 
     /// Appends all elements of `other` to this vector by copying them.
@@ -181,11 +161,29 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     where
         T: Copy,
     {
-        let other = other.as_ref();
-        self.reserve(other.len());
-        // SAFETY: reserve guarantees enough tail capacity, and the destination tail is uninitialized.
-        unsafe { ptr::copy_nonoverlapping(other.as_ptr(), self.data.as_ptr().add(self.len), other.len()) };
-        self.len += other.len();
+        if self.try_extend_from_slice(other).is_err() {
+            panic_alloc!();
+        }
+    }
+
+    /// Fallible variant of [`Self::extend_from_slice`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data
+    /// alignment is at least 32 KiB.
+    #[inline]
+    pub fn try_extend_from_slice(&mut self, other: impl AsRef<[T]>) -> Result<(), AllocError>
+    where
+        T: Copy,
+    {
+        let src = other.as_ref();
+        let needed = self.buf.len().checked_add(src.len()).ok_or(AllocError)?;
+        if needed > self.buf.cap() {
+            self.try_grow_to(grow_target(self.buf.cap(), needed))?;
+        }
+        self.buf.extend_copy(src);
+        Ok(())
     }
 
     /// Build a `Vec` by collecting `iter` into a fresh vector backed by `arena`.
@@ -196,23 +194,44 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     pub fn from_iter_in<I: IntoIterator<Item = T>>(iter: I, arena: &'a Arena<A>) -> Self {
         let iter = iter.into_iter();
         let (lower, _) = iter.size_hint();
-        let mut vec = Self::with_capacity_in(lower, arena);
-        vec.extend(iter);
-        vec
+        let mut v = Self::with_capacity_in(lower, arena);
+        for item in iter {
+            v.push(item);
+        }
+        v
     }
 
     /// Returns a raw pointer to the vector's buffer.
     #[must_use]
     #[inline]
     pub const fn as_ptr(&self) -> *const T {
-        self.data.as_ptr()
+        self.buf.as_ptr()
     }
 
     /// Returns an unsafe mutable pointer to the vector's buffer.
     #[must_use]
     #[inline]
-    #[expect(clippy::needless_pass_by_ref_mut, reason = "API shape mirrors std::Vec::as_mut_ptr")]
+    #[allow(clippy::needless_pass_by_ref_mut, reason = "API shape mirrors std::Vec::as_mut_ptr")]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
-        self.data.as_ptr()
+        self.buf.as_mut_ptr()
     }
+}
+
+impl<T, A: Allocator + Clone> Vec<'_, T, A> {
+    /// Grow capacity by at least 1 using the amortized doubling policy.
+    #[cold]
+    #[inline(never)]
+    fn try_grow_one(&mut self) -> Result<(), AllocError> {
+        let cur = self.buf.cap();
+        let target = grow_target(cur, cur.checked_add(1).ok_or(AllocError)?);
+        self.try_grow_to(target)
+    }
+}
+
+/// Amortized-doubling growth target: at least `needed`, at least `4`, at
+/// least `2 * cur`. Saturates on overflow; the caller's `try_grow_to`
+/// rejects requests whose layout overflows.
+#[inline]
+fn grow_target(cur: usize, needed: usize) -> usize {
+    needed.max(4).max(cur.saturating_mul(2))
 }

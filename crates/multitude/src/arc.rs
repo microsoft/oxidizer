@@ -1,21 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
+#![allow(
     clippy::type_repetition_in_bounds,
     reason = "trait-impl `where` clauses are kept uniform across all forwarding impls"
 )]
 
 use core::marker::PhantomData;
-use core::mem::{MaybeUninit, forget, needs_drop};
-use core::ptr::{NonNull, addr_eq, slice_from_raw_parts_mut};
+use core::mem::{self, MaybeUninit};
+use core::pin::Pin;
+use core::ptr::{self, NonNull};
 
 use allocator_api2::alloc::{Allocator, Global};
+use ptr_meta::Pointee;
 
-use crate::internal::drop_list::{drop_shim_one, drop_shim_slice};
-use crate::internal::in_chunk::InSharedChunk;
+use crate::internal::chunk_ref::ChunkRef;
+use crate::internal::drop_entry::{self, DropFn};
 use crate::internal::shared_chunk::SharedChunk;
-use crate::internal::sync::Ordering;
+use crate::internal::thin_dst;
+use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
 
 /// A thread-safe reference-counted smart pointer to a `T` stored in an [`Arena`](crate::Arena).
@@ -26,14 +29,15 @@ use crate::vec::Vec;
 /// **O(1)** and uses a single Relaxed atomic increment (matching
 /// `std::sync::Arc`). Dropping a clone is one Release decrement plus,
 /// on the final dec to zero, an Acquire fence before chunk teardown.
-/// For single-threaded code, prefer [`Rc`](crate::Rc) — it has the same
-/// shape with a non-atomic refcount.
 ///
 /// `Arc` keeps its containing chunk alive by holding a +1 refcount on
 /// it, so the smart pointer can outlive the arena it came from and
-/// survives [`Arena::reset`](crate::Arena::reset). `T::drop` runs when
-/// the chunk is reclaimed (i.e. when its last live allocation is
-/// released).
+/// survives [`Arena::reset`](crate::Arena::reset). For `T: Drop`, a
+/// drop entry is registered at allocation time and `T::drop` runs at
+/// chunk teardown (when the chunk's last reference is released); for
+/// `T: !Drop` (the common case for strings, numbers, slices, etc.),
+/// no drop entry is reserved and the only per-allocation cost beyond
+/// the value itself is the chunk's atomic refcount.
 ///
 /// # Pinning
 ///
@@ -52,105 +56,73 @@ use crate::vec::Vec;
 /// let h = thread::spawn(move || *b);
 /// assert_eq!(*a, h.join().unwrap());
 /// ```
-pub struct Arc<T: ?Sized, A: Allocator + Clone = Global> {
-    /// Pointer into a shared chunk's payload, carrying the
-    /// in-a-shared-chunk invariant statically so chunk-header
-    /// recovery is a safe operation. The type owns one logical
-    /// refcount on the chunk (either via the inflated count while
-    /// the chunk is `current_shared`, or via a real `+1` after
-    /// swap-out reconciliation).
-    ptr: InSharedChunk<T, A>,
-    /// Variance: `Arc<T>` is covariant in `T`. The phantom carries
-    /// `T` for dropck and `A` for monomorphization.
+pub struct Arc<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
+    /// **Thin** pointer to the first byte of the contained value, which
+    /// lives in a 64K-aligned [`SharedChunk`](crate::internal::shared_chunk::SharedChunk)'s
+    /// payload. The chunk header is recovered by masking, and `T`'s
+    /// pointer metadata (if any — `()` for `T: Sized`, `usize` for
+    /// slice DSTs / `str`, vtable for trait objects) is stored in the
+    /// `size_of::<T::Metadata>()` bytes immediately preceding the
+    /// payload (read with [`core::ptr::read_unaligned`]).
+    ///
+    /// This makes `Arc<T>` 8 bytes uniformly, even for DST `T`.
+    ptr: NonNull<u8>,
+    /// Variance + dropck marker. Send/Sync are gated by explicit
+    /// unsafe impls below.
     _phantom: PhantomData<(*const T, A)>,
 }
 
-impl<T: ?Sized, A: Allocator + Clone> Arc<T, A> {
-    /// Wrap a freshly allocated value pointer.
+impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
+    /// Builds an `Arc` from a thin payload pointer.
+    ///
+    /// For DST `T`, the metadata is recovered on demand from the chunk
+    /// prefix at `thin - size_of::<T::Metadata>()` via `as_fat_ptr`; the
+    /// caller must have already written it there at allocation time.
+    /// For `T: Sized`, the prefix is zero-sized and no metadata is
+    /// stored.
     ///
     /// # Safety
     ///
-    /// `ptr` must point to an initialized `T` in a shared arena chunk,
-    /// and the arena must already have accounted for this handle in
-    /// `arcs_issued`.
+    /// - `thin` must reference the payload of a fully-initialized `T`
+    ///   whose storage was bump-allocated from a [`SharedChunk<A>`] via
+    ///   the thin-DST allocator path. For DST `T` the chunk prefix
+    ///   must carry the matching `T::Metadata`. For `T: Drop`, a drop
+    ///   entry must already be registered so the destructor runs at
+    ///   chunk teardown.
+    /// - The caller must have just acquired a +1 refcount on that chunk
+    ///   in the new `Arc`'s name; the returned `Arc` takes ownership of
+    ///   that +1 and releases it in [`Drop`].
+    /// - `thin` must lie within the first `CHUNK_ALIGN` bytes of the
+    ///   chunk so the header-from-mask helper recovers the chunk
+    ///   address correctly.
     #[inline]
-    pub(crate) unsafe fn from_value_ptr(ptr: NonNull<T>) -> Self {
-        // SAFETY: caller forwards the in-shared-chunk invariant.
-        unsafe { Self::from_in_chunk(InSharedChunk::new(ptr)) }
-    }
-
-    /// Like [`Self::from_value_ptr`] for an already-validated in-chunk pointer.
-    ///
-    /// # Safety
-    ///
-    /// `ptr` must name an initialized `T`, and `arcs_issued` must
-    /// already account for this handle.
-    #[inline]
-    pub(crate) const unsafe fn from_in_chunk(ptr: InSharedChunk<T, A>) -> Self {
+    pub(crate) unsafe fn from_raw(thin: NonNull<u8>) -> Self {
         Self {
-            ptr,
+            ptr: thin,
             _phantom: PhantomData,
         }
     }
 
-    /// Build an `Arc` from an [`OwnedInSharedChunk`] that already proves
-    /// the in-chunk invariant and owns the `+1`.
+    /// Returns the thin chunk pointer — the byte address of the
+    /// value's payload inside its hosting chunk. Carries chunk-wide
+    /// provenance (no `&T` narrowing). Used by string-flavored
+    /// conversions in `strings/str_impls.rs` to retag between
+    /// `Arc<str>` and `Arc<[u8]>` without losing the chunk-recovery
+    /// borrow-stack tag the smart pointer's `Drop` walks back through.
     #[inline]
-    pub(crate) fn from_owned_in_chunk(owned: crate::internal::owned_in_chunk::OwnedInSharedChunk<T, A>) -> Self {
-        Self {
-            ptr: owned.into_in_chunk(),
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Borrow the containing chunk header while this `Arc` keeps it alive.
-    #[inline]
-    fn chunk(&self) -> &SharedChunk<A> {
-        // SAFETY: `self.ptr` is in a live shared chunk, held by this `Arc`.
-        unsafe { self.ptr.chunk_ptr().as_ref() }
-    }
-
-    /// Returns a raw pointer to the value.
-    #[inline]
-    #[must_use]
-    pub const fn as_ptr(&self) -> *const T {
-        self.ptr.as_ptr()
+    pub(crate) fn thin_ptr(&self) -> NonNull<u8> {
+        self.ptr
     }
 
     /// True iff both handles point at the same address.
     #[inline]
     #[must_use]
     pub fn ptr_eq(a: &Self, b: &Self) -> bool {
-        addr_eq(a.ptr.as_ptr(), b.ptr.as_ptr())
-    }
-
-    /// Convert this `Arc<T, A>` into a [`Pin<Arc<T, A>>`](core::pin::Pin).
-    ///
-    /// Sound for any `T` (including `!Unpin`) because the value's
-    /// address is fixed at allocation time, every live clone holds a
-    /// chunk refcount that keeps the storage alive at the same
-    /// address, and the value is dropped at that same address when
-    /// the last clone is released — satisfying `Pin`'s contract.
-    ///
-    /// `Arc` exposes only `&T` through `Deref`, so there is no way to
-    /// move the value out of a `Pin<Arc<T>>`.
-    #[must_use]
-    #[inline]
-    pub fn into_pin(this: Self) -> core::pin::Pin<Self> {
-        // SAFETY: storage address is fixed and stays alive at the
-        // same address as long as any clone exists.
-        unsafe { core::pin::Pin::new_unchecked(this) }
+        ptr::addr_eq(a.ptr.as_ptr(), b.ptr.as_ptr())
     }
 }
 
-impl<T: ?Sized, A: Allocator + Clone> From<Arc<T, A>> for core::pin::Pin<Arc<T, A>> {
-    /// Mirror of `From<std::sync::Arc<T>> for Pin<std::sync::Arc<T>>`.
-    /// See [`Arc::into_pin`] for the soundness argument.
-    #[inline]
-    fn from(arc: Arc<T, A>) -> Self {
-        Arc::into_pin(arc)
-    }
-}
+impl_thin_smart_ptr_common!(Arc);
 
 impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     /// Convert a handle to `MaybeUninit<T>` whose value is now
@@ -173,30 +145,22 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     #[inline]
     #[must_use]
     pub unsafe fn assume_init(self) -> Arc<T, A> {
-        let ptr = self.ptr.as_non_null().cast::<T>();
-        if needs_drop::<T>() {
-            let chunk = self.chunk();
-            let data_addr = chunk.data().as_ptr() as usize;
-            let value_offset = self.ptr.as_ptr() as *const u8 as usize - data_addr;
-            // Acquire pairs with the owner-thread Release publish so
-            // all of `entries[0..count]` is visible. Retargeting the
-            // matching entry's `drop_fn` is an atomic Release store —
-            // concurrent `assume_init` clones writing the same slot
-            // is well-defined.
-            let entry = chunk
-                .drop_entries_acquire()
-                .iter()
-                .find(|e| e.value_offset as usize == value_offset)
-                .expect(
-                    "Arc::<MaybeUninit<T>>::assume_init: no drop entry reserved for this allocation. \
-                     Use `Arena::alloc_uninit_arc::<T>()` / `alloc_zeroed_arc`; \
-                     `Arena::alloc_arc(MaybeUninit::new(...))` does not reserve an entry and would silently leak `T::drop`.",
-                );
-            entry.store_drop_fn(drop_shim_one::<T>, Ordering::Release);
+        if const { mem::needs_drop::<T>() } {
+            // SAFETY: `self.ptr` references a live value inside a
+            // `SharedChunk<A>` this `Arc` holds a +1 on; `alloc_uninit_arc`
+            // reserved a placeholder drop entry for it. Commit the real shim
+            // so `T::drop` runs at chunk teardown.
+            unsafe {
+                commit_uninit_drop_entry::<A>(self.ptr, 1, drop_entry::drop_shim::<T>, false);
+            }
         }
-        forget(self);
-        // SAFETY: value is initialized; refcount transfers.
-        unsafe { Arc::from_value_ptr(ptr) }
+        let thin = self.ptr;
+        mem::forget(self);
+        // SAFETY: `thin` carries the +1 the consumed handle held; the value is
+        // now a valid `T` per the caller's contract. `Arc<MaybeUninit<T>>` and
+        // `Arc<T>` for sized `T` share the same chunk layout (no metadata
+        // prefix), so no prefix rewrite is needed.
+        unsafe { Arc::from_raw(thin) }
     }
 
     /// Pinned mirror of [`Self::assume_init`]. The pin is preserved
@@ -207,15 +171,16 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     /// Same contract as [`Self::assume_init`].
     #[must_use]
     #[inline]
-    pub unsafe fn assume_init_pin(this: core::pin::Pin<Self>) -> core::pin::Pin<Arc<T, A>>
+    pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Arc<T, A>>
     where
         A: 'static,
     {
-        // SAFETY: storage is unchanged across the cast; the
-        // `assume_init` contract is the caller's.
+        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
+        // value's address is unchanged across this cast, and the
+        // caller asserts the contents are a valid `T`.
         unsafe {
-            let inner = core::pin::Pin::into_inner_unchecked(this);
-            core::pin::Pin::new_unchecked(inner.assume_init())
+            let inner: Self = Pin::into_inner_unchecked(this);
+            Arc::into_pin(inner.assume_init())
         }
     }
 }
@@ -238,30 +203,27 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
     #[inline]
     #[must_use]
     pub unsafe fn assume_init(self) -> Arc<[T], A> {
-        let old_ptr = self.ptr.as_non_null();
-        let len = old_ptr.len();
-        if needs_drop::<T>() {
-            let chunk = self.chunk();
-            let data_addr = chunk.data().as_ptr() as usize;
-            let value_offset = old_ptr.as_ptr() as *const u8 as usize - data_addr;
-            // Synchronization matches the scalar `assume_init` case
-            // above (Acquire load + Release retarget).
-            let entry = chunk
-                .drop_entries_acquire()
-                .iter()
-                .find(|e| e.value_offset as usize == value_offset)
-                .expect(
-                    "Arc::<[MaybeUninit<T>]>::assume_init: no drop entry reserved for this allocation. \
-                     Use `Arena::alloc_uninit_slice_arc::<T>()` / `alloc_zeroed_slice_arc`; \
-                     `alloc_slice_*_arc` of `MaybeUninit<T>` does not reserve an entry and would silently leak.",
-                );
-            entry.store_drop_fn(drop_shim_slice::<T>, Ordering::Release);
+        // SAFETY: `Arc<[MaybeUninit<T>]>` and `Arc<[T]>` share an
+        // identical chunk prefix layout (the slice length, written as
+        // `usize` by the allocator); read the length from the prefix
+        // directly rather than relying on the (now-thin) `self.ptr`.
+        let len: usize = unsafe { thin_dst::read_metadata::<[T]>(self.ptr) };
+        if const { mem::needs_drop::<T>() } {
+            // SAFETY: see the scalar `assume_init`; the placeholder slice
+            // drop entry reserved by `alloc_uninit_slice_arc` is committed to
+            // `drop_shim::<T>` so all `len` elements drop at chunk teardown.
+            unsafe {
+                commit_uninit_drop_entry::<A>(self.ptr, len, drop_entry::drop_shim::<T>, true);
+            }
         }
-        forget(self);
-        let data = old_ptr.as_ptr().cast::<T>();
-        let fat = slice_from_raw_parts_mut(data, len);
-        // SAFETY: caller guarantees initialization; refcount transfers.
-        unsafe { Arc::from_value_ptr(NonNull::new_unchecked(fat)) }
+        let thin = self.ptr;
+        mem::forget(self);
+        // SAFETY: `thin` carries the +1 the consumed handle held; every
+        // element is now a valid `T` per the caller's contract.
+        // `Arc<[MaybeUninit<T>]>` and `Arc<[T]>` share the same chunk
+        // prefix layout, so the length already stored there matches the
+        // new fat pointer's metadata.
+        unsafe { Arc::from_raw(thin) }
     }
 
     /// Pinned mirror of [`Self::assume_init`] for slices.
@@ -271,22 +233,81 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
     /// Same contract as [`Self::assume_init`].
     #[must_use]
     #[inline]
-    pub unsafe fn assume_init_pin_slice(this: core::pin::Pin<Self>) -> core::pin::Pin<Arc<[T], A>>
+    pub unsafe fn assume_init_pin_slice(this: Pin<Self>) -> Pin<Arc<[T], A>>
     where
         A: 'static,
     {
-        // SAFETY: storage is unchanged across the cast.
+        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
+        // value's address is unchanged across this cast, and the
+        // caller asserts every element is a valid `T`.
         unsafe {
-            let inner = core::pin::Pin::into_inner_unchecked(this);
-            core::pin::Pin::new_unchecked(inner.assume_init())
+            let inner: Self = Pin::into_inner_unchecked(this);
+            Arc::into_pin(inner.assume_init())
         }
     }
 }
 
-impl<T: ?Sized, A: Allocator + Clone> Clone for Arc<T, A> {
+/// Locates the placeholder [`DropEntry`](crate::internal::drop_entry) that
+/// `Arena::alloc_uninit_arc` / `alloc_uninit_slice_arc` reserved for the
+/// value at `value` and commits `drop_fn` into it, so the value's destructor
+/// runs when the hosting chunk is torn down.
+///
+/// `len` is `1` for a scalar value or the element count for a slice.
+/// `is_slice` only selects the panic message.
+///
+/// # Safety
+///
+/// - `value` must point at a value reserved via the uninit-`Arc` path, living
+///   in the first `CHUNK_ALIGN` bytes of a live `SharedChunk<A>` on which the
+///   caller holds a strong reference.
+/// - `assume_init` must be called at most once per allocation (the placeholder
+///   commit is a non-atomic write; concurrent commits on cloned handles are
+///   not supported).
+#[inline]
+unsafe fn commit_uninit_drop_entry<A: Allocator + Clone>(value: NonNull<u8>, len: usize, drop_fn: DropFn, is_slice: bool) {
+    let header = SharedChunk::<A>::header_from_value_ptr(value);
+    // SAFETY: `header` has full chunk provenance via `with_addr`;
+    // reconstruct the fat DST pointer for typed field access.
+    let chunk = unsafe { NonNull::new_unchecked(SharedChunk::<A>::header_to_fat(header.as_ptr())) };
+    // SAFETY: `chunk` is a live `SharedChunk<A>` (caller holds a +1).
+    let chunk_ref = unsafe { chunk.as_ref() };
+    // SAFETY: `chunk` is live; `payload_ptr` returns its payload start.
+    let payload = unsafe { SharedChunk::<A>::payload_ptr(chunk) }.as_ptr();
+    let payload_len = chunk_ref.capacity;
+    let value_offset = (value.as_ptr() as usize) - (payload as usize);
+    // Acquire pairs with the owner thread's Release publish of the count in
+    // `ChunkMutator::publish_drop_count`, so the placeholder slot's bytes are
+    // visible to this (possibly different) thread before we read/commit it.
+    let count = chunk_ref.drop_entry_count_acquire();
+    // SAFETY: `payload`, `payload_len`, and `count` describe the live chunk's
+    // drop region; we hold a +1 and the contract forbids concurrent commits.
+    let committed = unsafe { drop_entry::commit_placeholder_drop_fn(payload, payload_len, count, value_offset, len, drop_fn) };
+    assert!(
+        committed,
+        "{}",
+        if is_slice {
+            "Arc::<[MaybeUninit<T>]>::assume_init: no drop entry reserved for this allocation. \
+             Use `Arena::alloc_uninit_slice_arc::<T>()` / `alloc_zeroed_slice_arc`; allocating \
+             a `MaybeUninit<T>` slice via the ordinary slice-Arc helpers does not reserve one \
+             and would silently leak each `T::drop`."
+        } else {
+            "Arc::<MaybeUninit<T>>::assume_init: no drop entry reserved for this allocation. \
+             Use `Arena::alloc_uninit_arc::<T>()` / `alloc_zeroed_arc`; \
+             `Arena::alloc_arc(MaybeUninit::new(...))` does not reserve an entry and would \
+             silently leak `T::drop`."
+        }
+    );
+}
+
+impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Arc<T, A> {
     #[inline]
     fn clone(&self) -> Self {
-        self.chunk().inc_ref();
+        // SAFETY: `self` owns a live +1 on its chunk so the chunk is
+        // alive; `clone_from_value_ptr` mints a fresh +1 via an
+        // atomic bump and returns a `ChunkRef` that owns it. We
+        // `forget` that `ChunkRef`, handing the +1 to the new `Arc`.
+        let chunk_ref = unsafe { ChunkRef::<A>::clone_from_value_ptr(self.ptr) };
+        let _ = chunk_ref.forget();
         Self {
             ptr: self.ptr,
             _phantom: PhantomData,
@@ -294,23 +315,27 @@ impl<T: ?Sized, A: Allocator + Clone> Clone for Arc<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator + Clone> Drop for Arc<T, A> {
+impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Arc<T, A> {
     #[inline]
     fn drop(&mut self) {
-        let chunk = self.ptr.chunk_ptr();
-        // SAFETY: we own one outstanding refcount, which `dec_ref`
-        // consumes.
-        unsafe { SharedChunk::dec_ref(chunk) };
+        // SAFETY: `ptr` is hosted in a 64K-aligned SharedChunk we
+        // hold a +1 strong reference on. `ChunkRef::from_value_ptr`
+        // adopts that +1 and releases it on its own drop. We do not
+        // invoke `T::drop` here — for `T: Drop`, a drop entry was
+        // registered at allocation time so the chunk's teardown runs
+        // `T::drop` when the last reference releases the chunk; for
+        // `T: !Drop` no destructor is needed.
+        unsafe {
+            let _ref: ChunkRef<A> = ChunkRef::from_value_ptr(self.ptr);
+        }
     }
 }
 
-crate::smart_ptr_macros::impl_smart_ptr_forwarding_traits!(Arc);
-
 // SAFETY: same cross-thread invariants as `std::sync::Arc`; the backing
 // chunk refcount is atomic and sharing is gated on `T` and `A`.
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Clone + Send + Sync> Send for Arc<T, A> {}
+unsafe impl<T: ?Sized + Pointee + Sync + Send, A: Allocator + Clone + Send + Sync> Send for Arc<T, A> {}
 // SAFETY: same invariants as the `Send` impl.
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Clone + Send + Sync> Sync for Arc<T, A> {}
+unsafe impl<T: ?Sized + Pointee + Sync + Send, A: Allocator + Clone + Send + Sync> Sync for Arc<T, A> {}
 
 impl<'a, T, A: Allocator + Clone> From<Vec<'a, T, A>> for Arc<[T], A>
 where

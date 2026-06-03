@@ -1,528 +1,282 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::similar_names,
-    reason = "short field-name aliases like p_dc/p_rc match the layout diagram at the top of the module"
-)]
+//! Multi-threaded reference-counted arena chunk.
 
-//! `SharedChunk`: 64 KiB-aligned bump-allocation tile with an atomic
-//! refcount, the cross-thread-shareable counterpart to
-//! [`LocalChunk`](super::local_chunk::LocalChunk).
-//!
-//! Cross-thread `Arc::clone` does `fetch_add(1, Relaxed)`,
-//! `Arc::drop` does `fetch_sub(1, Release)` followed by an Acquire
-//! fence on the last-decrement path. While a chunk is "current" on
-//! an arena, the refcount is held inflated at [`LARGE`] and
-//! `arcs_issued` (a non-atomic `Cell` on the arena's `current_shared`
-//! slot) counts the live arcs; the inflation is reconciled in a
-//! single atomic op at chunk swap-out.
+// See note in `local_chunk.rs`: methods touching raw memory are `unsafe fn`
+// with module-level safety contracts; we don't repeat the inner unsafe
+// wrappers that edition 2024 requires by default.
+#![allow(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
+#![allow(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
 
 use alloc::sync::Weak;
 use core::alloc::Layout;
+use core::cell::UnsafeCell;
 use core::mem;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
+use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicUsize, Ordering, fence};
 
-use allocator_api2::alloc::Allocator;
+use allocator_api2::alloc::{AllocError, Allocator};
 
+use super::chunk::Chunk;
 use super::chunk_provider::ChunkProvider;
-use super::constants::{CHUNK_ALIGN, LARGE, refcount_overflow_abort};
-use super::drop_list::DropEntry;
-use super::sync::{AtomicPtr, AtomicU16, AtomicUsize, Ordering, fence};
+use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
+use super::drop_entry::replay_drops;
 
-/// Cache-line-padded wrapper. Used to isolate the cross-thread
-/// `refcount` atomic from the adjacent read-mostly header fields so
-/// `Arc::clone`/`Arc::drop` traffic does not ping-pong the cache line
-/// holding the chunk's allocator/provider/capacity slots.
-#[repr(C, align(64))]
-pub(crate) struct CachePadded<T>(pub(crate) T);
-
-impl<T> CachePadded<T> {
-    #[inline]
-    pub(crate) const fn new(v: T) -> Self {
-        Self(v)
-    }
-}
-
-/// Cross-thread-shareable bump-allocation tile.
+/// A bump-allocation chunk whose allocations can outlive the arena.
 ///
-/// Allocations are 64 KiB-aligned via the backing allocator's
-/// [`Layout`] rather than via `repr(align)`, so sub-64 KiB chunks do
-/// not get padded out to a 64 KiB multiple.
+/// Reference counts and cache-list links are atomic so that handles released
+/// from any thread can safely race with the arena's own teardown path. The
+/// header is followed in memory by `capacity` bytes of payload; see
+/// [`payload_ptr`](Self::payload_ptr).
 #[repr(C)]
 pub(crate) struct SharedChunk<A: Allocator + Clone> {
-    /// Atomic refcount, cache-padded to keep cross-thread RMW traffic
-    /// off the read-mostly fields below. Held at [`LARGE`] while the
-    /// chunk is the arena's `current_shared`; swap-out reconciles in
-    /// one `fetch_sub(LARGE - arcs_issued, Release)`.
-    ///
-    /// Placed first to absorb the 64-byte alignment `CachePadded`
-    /// imposes on the struct: if `refcount` followed the other
-    /// fields, about 48 bytes of padding would precede it.
-    pub(crate) refcount: CachePadded<AtomicUsize>,
-
-    /// Clone of the backing allocator. Lets the chunk
-    /// free its own backing allocation even after the
-    /// [`ChunkProvider`] is gone.
     pub(crate) allocator: A,
-
-    /// Back-edge to the owning provider's cache. `upgrade()` returns
-    /// `None` if the provider has already been torn down — the chunk
-    /// then self-frees through `allocator`.
     pub(crate) provider: Weak<ChunkProvider<A>>,
-
-    /// Total payload capacity in bytes.
     pub(crate) capacity: usize,
-
-    /// Intrusive list link, thin `AtomicPtr<u8>` (a `*mut SharedChunk`
-    /// is fat and can't live in an atomic; reconstructed via
-    /// [`Self::from_thin_ptr`]). Used as the
-    /// `ChunkProvider::shared_cache_head` Treiber-stack link (`Relaxed`
-    /// — the head CAS publishes with Release semantics); null when
-    /// the chunk is `current_shared` or in flight between owners.
-    pub(crate) next: AtomicPtr<u8>,
-
-    /// Number of [`DropEntry`]s on the back-stack;
-    /// `drop_back = capacity - drop_count * size_of::<DropEntry>()`.
-    /// `u16` covers about 1024 entries.
-    ///
-    /// Atomic because `Arc::<MaybeUninit<T>>::assume_init` may run on
-    /// a non-owner thread and walks the back-stack to retarget the
-    /// placeholder shim. Owner writes Release, cross-thread readers
-    /// Acquire; owner-only RMWs are Relaxed.
-    ///
-    /// Placed after `next` so this `u16` sits flush against `data`
-    /// (align 1) instead of forcing a 6-byte padding hole between
-    /// two align-8 fields. See
-    /// [`super::local_chunk::LocalChunk::drop_count`].
-    pub(crate) drop_count: AtomicU16,
-
-    /// Bump-payload tail. `data.len() == capacity`. Declared as
-    /// `[UnsafeCell<u8>]` (same layout as `[u8]`) so shared borrows
-    /// of the chunk allow interior-mutable writes into the payload —
-    /// required for the atomic stores `Arc::assume_init` retargeting
-    /// performs into trailing `DropEntry` fields.
-    pub(crate) data: [core::cell::UnsafeCell<u8>],
-}
-
-// SAFETY: every header field is itself `Send` (the atomic fields are
-// intrinsically `Send + Sync`; the user-supplied allocator `A` is
-// constrained to `Send + Sync` at the public API boundary
-// (`Arena::alloc_arc`)). The payload `data` is reachable cross-thread
-// only through `Arc<T>` smart pointers, which require `T: Send + Sync`.
-// Per-entry `DropEntry::value_offset` and `DropEntry::len` are written
-// non-atomically by the arena-owner thread but published to cross-thread
-// observers via the Release `fetch_add` on `drop_count` performed in
-// `bump_shared_drop_count`. Foreign threads only iterate entries
-// `[0..drop_count.load(Acquire)]`, so every entry they observe is fully
-// written.
-unsafe impl<A: Allocator + Clone + Send + Sync> Send for SharedChunk<A> {}
-// SAFETY: same reasoning as `Send`. `drop_count` is an `AtomicU16` so
-// the cross-thread read in `Arc::<MaybeUninit<T>>::assume_init` does
-// not race with the arena-owner thread's increments.
-unsafe impl<A: Allocator + Clone + Send + Sync> Sync for SharedChunk<A> {}
-
-/// Header size: offset from chunk base to the start of `data`.
-///
-/// Derived from the real [`SharedChunk`] via `offset_of!` (no shadow
-/// struct to drift). The `data` tail has alignment 1, so it sits
-/// immediately after `drop_count`. Not necessarily a multiple of
-/// `align_of::<DropEntry>()`; back-stack alignment is handled by
-/// [`super::drop_list::round_payload`].
-#[inline]
-pub(crate) const fn header_size<A: Allocator + Clone>() -> usize {
-    core::mem::offset_of!(SharedChunk<A>, drop_count) + core::mem::size_of::<AtomicU16>()
-}
-
-/// Alignment passed to the backing [`Allocator`]: at least
-/// [`CHUNK_ALIGN`] so the pointer-masking trick in [`super::mask`]
-/// can recover the chunk header from any interior pointer.
-/// `CachePadded<AtomicUsize>` (align 64) is well below `CHUNK_ALIGN`
-/// so doesn't raise this further.
-#[inline]
-#[cfg_attr(test, mutants::skip)]
-pub(crate) const fn chunk_align<A: Allocator + Clone>() -> usize {
-    let a = core::mem::align_of::<A>();
-    if a > CHUNK_ALIGN { a } else { CHUNK_ALIGN }
-}
-
-/// Round `total` (= `header + payload`) up to the chunk struct's
-/// structural alignment so the actual allocation is at least
-/// `size_of_val(&*fat_ptr)` — required for `as_ref` soundness.
-///
-/// Cached classes are multiples of 64 already (`512 << c`); oversized
-/// requests may gain up to 63 bytes. `SharedChunk<A>` has structural
-/// alignment `max(align_of::<A>(), 64)` (driven by
-/// `CachePadded<AtomicUsize>`; no `repr(align(…))`).
-///
-/// `saturating_add` defends against overflow when `total` is near
-/// `usize::MAX`: a wrapped result would land near 0 and let
-/// `Layout::from_size_align` silently produce a sub-allocation. See
-/// the sibling [`super::local_chunk::alloc_size`].
-#[inline]
-#[cfg_attr(test, mutants::skip)]
-pub(crate) const fn alloc_size<A: Allocator + Clone>(total: usize) -> usize {
-    let user = core::mem::align_of::<A>();
-    let struct_align = if user > 64 { user } else { 64 };
-    let mask = struct_align - 1;
-    total.saturating_add(mask) & !mask
-}
-
-/// Maximum byte offset within `data` at which a value pointer may
-/// land while still being mask-recoverable; mirror of
-/// [`super::local_chunk::max_bump_extent`].
-#[inline]
-#[cfg_attr(test, mutants::skip)] // Boundary mutations require exact-capacity chunks not reachable through public APIs.
-pub(crate) const fn max_bump_extent<A: Allocator + Clone>() -> usize {
-    CHUNK_ALIGN - header_size::<A>()
+    pub(crate) ref_count: AtomicUsize,
+    pub(crate) drop_entry_count: AtomicU16,
+    /// Explicit padding so the header size stays a multiple of 8, keeping
+    /// the payload start 8-aligned. The payload start must be 8-aligned both
+    /// for the `AtomicPtr<u8>` cache link stored there while the chunk is free
+    /// (see [`cache_link`](Self::cache_link)) and for the `DropEntry`s the bump
+    /// allocator packs against the payload tail (which are positioned relative
+    /// to the payload start; see [`replay_drops`](super::drop_entry::replay_drops)).
+    /// Without it, shrinking `drop_entry_count` from `usize` to `u16` would land
+    /// the payload at a non-8-aligned offset, which is UB. This is temporary:
+    /// once those payload-relative accesses are made tolerant of an unaligned
+    /// payload base, this padding can be removed and the header shrunk.
+    _padding: [u8; 6],
+    pub(crate) data: [UnsafeCell<u8>],
 }
 
 impl<A: Allocator + Clone> SharedChunk<A> {
-    /// Reconstruct a fat `NonNull<SharedChunk>` from a thin chunk
-    /// header address. Reads the chunk's `capacity` field to fill in
-    /// the slice metadata.
+    #[inline]
+    pub(crate) const fn header_size() -> usize {
+        mem::offset_of!(Self, _padding) + mem::size_of::<[u8; 6]>()
+    }
+
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // both branches saturate at CHUNK_ALIGN
+    pub(crate) const fn struct_align() -> usize {
+        let a = mem::align_of::<A>();
+        let b = mem::align_of::<usize>();
+        let base = if a >= b { a } else { b };
+        if base >= CHUNK_ALIGN { base } else { CHUNK_ALIGN }
+    }
+
+    /// Recovers the chunk header (as a thin `*mut u8` carrying the
+    /// chunk allocation's provenance) from a pointer into the chunk's
+    /// payload by walking backwards through the chunk's `CHUNK_ALIGN`
+    /// tile.
+    ///
+    /// Uses [`NonNull::byte_sub`] (provenance-preserving) rather than
+    /// reconstituting the header pointer from an integer.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // mask mutations break refcount → OOM in mutant harness
+    pub(crate) fn header_from_value_ptr(value: NonNull<u8>) -> NonNull<u8> {
+        let offset_within_chunk = (value.as_ptr() as usize) & (CHUNK_ALIGN - 1);
+        // SAFETY: the smart-pointer invariant guarantees `value` lies
+        // within the first `CHUNK_ALIGN` bytes of its chunk, so
+        // `byte_sub(offset_within_chunk)` lands exactly on the chunk
+        // header and stays within the original allocation's
+        // provenance.
+        unsafe { value.byte_sub(offset_within_chunk) }
+    }
+
+    /// Reconstructs the fat DST `*mut Self` from a thin header pointer
+    /// by reading the chunk's `capacity` field.
     ///
     /// # Safety
     ///
-    /// `addr` must be the base of a live `SharedChunk` header.
+    /// `header` must carry full chunk-allocation provenance.
     #[inline]
-    pub(crate) unsafe fn from_thin_ptr(addr: *mut u8) -> NonNull<Self> {
-        let header_only: *const Self = core::ptr::slice_from_raw_parts(addr, 0) as *const Self;
-        // SAFETY: see above.
-        let capacity = unsafe { (*header_only).capacity };
-        let fat: *mut Self = core::ptr::slice_from_raw_parts_mut(addr, capacity) as *mut Self;
-        // SAFETY: `addr` is non-null per the caller's invariant.
-        unsafe { NonNull::new_unchecked(fat) }
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "chunk header is over-aligned; capacity offset is a multiple of usize alignment"
+    )]
+    pub(crate) unsafe fn header_to_fat(header: *mut u8) -> *mut Self {
+        let cap_field_offset = mem::offset_of!(Self, capacity);
+        let cap = ptr::read(header.add(cap_field_offset).cast::<usize>());
+        ptr::slice_from_raw_parts_mut(header, cap) as *mut Self
     }
 
-    /// Thin (header-base) pointer to `chunk`, suitable for storing in
-    /// the `next` link or the Treiber-stack head tag.
-    #[inline]
-    pub(crate) fn to_thin_ptr(chunk: NonNull<Self>) -> *mut u8 {
-        chunk.as_ptr().cast::<u8>()
-    }
-
-    /// Allocate a fresh chunk sized exactly to `total_bytes`. Mirror of
-    /// [`super::local_chunk::LocalChunk::allocate`]; see there for the
-    /// size/alignment contract on `total_bytes`. The returned chunk
-    /// has refcount pre-inflated to [`LARGE`].
-    pub(crate) fn allocate(
-        allocator: A,
-        provider: Weak<ChunkProvider<A>>,
-        total_bytes: usize,
-    ) -> Result<NonNull<Self>, allocator_api2::alloc::AllocError> {
-        let header_bytes = header_size::<A>();
-        if total_bytes < header_bytes {
-            return Err(allocator_api2::alloc::AllocError);
-        }
-        let payload = total_bytes - header_bytes;
-        // Bump to the struct's structural alignment so `size_of_val` matches.
-        let total = alloc_size::<A>(total_bytes);
-
-        let layout = Layout::from_size_align(total, chunk_align::<A>()).map_err(|_e| allocator_api2::alloc::AllocError)?;
-
-        let raw = allocator.allocate(layout)?;
-        let raw_ptr = raw.cast::<u8>();
-
-        // Ensure the chunk end fits in isize so internal bump-cursor
-        // arithmetic (which asserts isize-fit via `assert_unchecked` on
-        // the hot path) is always justified for allocations inside this
-        // chunk. This guards against pathological backing allocators
-        // returning addresses in the upper half of the address space.
-        let start_addr = raw_ptr.as_ptr() as usize;
-        if !super::constants::chunk_end_addr_fits_in_isize(start_addr, total) {
-            // SAFETY: `raw_ptr`/`layout` came from this allocator's
-            // successful `allocate` call.
-            unsafe { allocator.deallocate(raw_ptr, layout) };
-            return Err(allocator_api2::alloc::AllocError);
-        }
-
-        let fat: *mut Self = core::ptr::slice_from_raw_parts_mut(raw_ptr.as_ptr(), payload) as *mut Self;
-
-        // SAFETY: `raw` points at `total` freshly allocated bytes; each
-        // header field is initialized before it is read.
+    // Mutation testing is suppressed: `> → >=` only differs at the
+    // unreachable exact-`isize::MAX` boundary.
+    #[cfg_attr(test, mutants::skip)]
+    pub(crate) fn allocate(allocator: A, provider: Weak<ChunkProvider<A>>, payload_size: usize) -> Result<NonNull<Self>, AllocError> {
+        let (raw_u8_ptr, _layout) =
+            crate::internal::chunk_alloc::alloc_chunk_raw(&allocator, Self::header_size(), Self::struct_align(), payload_size)?;
+        let fat: *mut Self = ptr::slice_from_raw_parts_mut(raw_u8_ptr, payload_size) as *mut Self;
+        // SAFETY: see `LocalChunk::allocate`.
         unsafe {
-            let p_alloc = core::ptr::addr_of_mut!((*fat).allocator);
-            core::ptr::write(p_alloc, allocator);
-            let p_prov = core::ptr::addr_of_mut!((*fat).provider);
-            core::ptr::write(p_prov, provider);
-            let p_cap = core::ptr::addr_of_mut!((*fat).capacity);
-            core::ptr::write(p_cap, payload);
-            let p_rc = core::ptr::addr_of_mut!((*fat).refcount);
-            core::ptr::write(p_rc, CachePadded::new(AtomicUsize::new(LARGE)));
-            let p_dc = core::ptr::addr_of_mut!((*fat).drop_count);
-            core::ptr::write(p_dc, AtomicU16::new(0));
-            let p_next = core::ptr::addr_of_mut!((*fat).next);
-            core::ptr::write(p_next, AtomicPtr::<u8>::new(core::ptr::null_mut()));
+            ptr::write(&raw mut (*fat).allocator, allocator);
+            ptr::write(&raw mut (*fat).provider, provider);
+            ptr::write(&raw mut (*fat).capacity, payload_size);
+            ptr::write(&raw mut (*fat).ref_count, AtomicUsize::new(1));
+            ptr::write(&raw mut (*fat).drop_entry_count, AtomicU16::new(0));
+            Ok(NonNull::new_unchecked(fat))
         }
-
-        // SAFETY: `raw` is non-null per the allocator contract.
-        Ok(unsafe { NonNull::new_unchecked(fat) })
     }
 
-    /// Pointer to the first byte of `data`.
-    ///
-    /// Takes a `NonNull<Self>` (raw) rather than `&Self`: an
-    /// `&SharedChunk`-derived `*const u8` would leave a `SharedReadOnly`
-    /// tag on the chunk-wide borrow stack, blocking later
-    /// `drop_in_place` operations in `free_backing` (which need
-    /// Unique). The returned pointer carries chunk-wide provenance
-    /// derived directly from the raw `chunk` pointer.
-    ///
-    /// # Safety
-    ///
-    /// `chunk` must point to a live `SharedChunk` (dereferenceable
-    /// for `alloc_size::<A>(header_size + capacity)` bytes).
     #[inline]
-    pub(crate) unsafe fn data_ptr(chunk: NonNull<Self>) -> NonNull<u8> {
-        let base: *mut u8 = chunk.as_ptr().cast::<u8>();
-        // SAFETY: `data` starts at offset `header_size`; the chunk
-        // covers at least `header + capacity` bytes.
-        let p = unsafe { base.add(header_size::<A>()) };
-        // SAFETY: positive in-bounds offset from a non-null base.
-        unsafe { NonNull::new_unchecked(p) }
+    pub(crate) unsafe fn payload_ptr(chunk: NonNull<Self>) -> NonNull<u8> {
+        // SAFETY: see `LocalChunk::payload_ptr`.
+        let data_slice_ptr: *mut [UnsafeCell<u8>] = &raw mut (*chunk.as_ptr()).data;
+        NonNull::new_unchecked(data_slice_ptr.cast::<u8>())
     }
 
-    /// Safe `&self`-based payload-base accessor. The borrow proves the
-    /// chunk is live, so [`Self::data_ptr`]'s safety condition is met.
-    #[inline]
-    pub(crate) fn data(&self) -> NonNull<u8> {
-        // SAFETY: `&self` proves the chunk is live for at least the
-        // duration of this borrow.
-        unsafe { Self::data_ptr(NonNull::from(self)) }
-    }
-
-    /// Atomically bump the refcount. Safe because `&self` proves the
-    /// chunk is live (some other party already holds a refcount).
-    #[inline]
-    pub(crate) fn inc_ref(&self) {
-        let rc = &self.refcount.0;
-        let prev = rc.fetch_add(1, Ordering::Relaxed);
-        debug_assert!(prev > 0, "shared inc_ref on a dead chunk");
-        check_shared_refcount(prev);
-    }
-
-    /// Borrow the chunk's currently-recorded drop entries (Acquire-
-    /// ordered load of `drop_count`). Used by cross-thread
-    /// `Arc::<MaybeUninit<T>>::assume_init`: the Acquire here pairs
-    /// with the owner thread's Release publish so all bytes of
-    /// `entries[0..count]` are visible.
-    #[inline]
-    pub(crate) fn drop_entries_acquire(&self) -> &[DropEntry] {
-        let count = self.drop_count.load(Ordering::Acquire) as usize;
-        let top = self.capacity;
-        let base = top - count * mem::size_of::<DropEntry>();
-        #[expect(
-            clippy::cast_ptr_alignment,
-            reason = "chunk payloads are CHUNK_ALIGN aligned; `data + base` is naturally `DropEntry`-aligned by construction"
-        )]
-        // SAFETY: chunk-layout invariant — `count` densely packed,
-        // naturally aligned `DropEntry`s live at `data + base`, all
-        // initialized at allocation time.
-        unsafe {
-            // SAFETY: caller-held refcount keeps `self` live.
-            let data = Self::data_ptr(NonNull::from(self)).as_ptr();
-            let ptr = data.add(base).cast::<DropEntry>();
-            core::slice::from_raw_parts(ptr, count)
-        }
-    }
-
-    /// Atomically decrement the refcount; if it just hit zero, route
-    /// the chunk back to its provider (or self-free if the provider
-    /// is gone). Consumes the caller's refcount.
-    ///
     /// # Safety
     ///
-    /// Caller must own one of the outstanding refcounts on `chunk`.
-    pub(crate) unsafe fn dec_ref(chunk: NonNull<Self>) {
-        // Access via raw pointer rather than `&Self`: taking an
-        // `&SharedChunk` here would leave a SharedReadOnly tag on the
-        // chunk-wide borrow stack, colliding with the `drop_in_place`
-        // in `free_backing` (which needs Unique) on the zero-routing
-        // path.
-        // SAFETY: refcount-positive invariant.
-        let prev = unsafe { (*chunk.as_ptr()).refcount.0.fetch_sub(1, Ordering::Release) };
-        debug_assert!(prev > 0, "shared dec_ref on a dead chunk");
-        if prev == 1 {
-            // Hit zero. Synchronize-with all the prior Release decs
-            // before observing the chunk's contents.
-            fence(Ordering::Acquire);
-            // SAFETY: we just took the last refcount; nobody else
-            // observes the chunk.
-            unsafe { Self::route_release(chunk) };
-        }
-    }
-
-    /// Refcount-zero release: replay drops and either return the
-    /// chunk to its provider's cache or self-free its backing
-    /// allocation.
-    ///
-    /// # Safety
-    ///
-    /// Caller must have just observed the refcount transition to
-    /// zero (with Acquire ordering).
-    unsafe fn route_release(chunk: NonNull<Self>) {
-        // Raw-pointer access (no `&Self` borrow) so subsequent
-        // `free_backing` can `drop_in_place` chunk fields.
-        // SAFETY: refcount-zero — exclusive ownership.
-        let provider_weak = unsafe { alloc::sync::Weak::clone(&(*chunk.as_ptr()).provider) };
-        if let Some(provider) = provider_weak.upgrade() {
-            // SAFETY: refcount-zero — we own the chunk; provider
-            // releases it to its cache or frees it.
-            unsafe { provider.release_shared(chunk) };
-        } else {
-            // SAFETY: refcount-zero — exclusive ownership.
-            unsafe { Self::replay_drops(chunk) };
-            // SAFETY: drops just replayed.
-            unsafe { Self::free_backing(chunk) };
-        }
-    }
-
-    /// Replay the trailing drop list and reset the bookkeeping.
-    ///
-    /// Takes `NonNull<Self>` rather than `&self` so the release path
-    /// can run without putting a chunk-wide `SharedReadOnly` tag on the
-    /// borrow stack (which would later collide with `free_backing`'s
-    /// `drop_in_place`).
-    ///
-    /// # Safety
-    ///
-    /// Caller must own the chunk exclusively.
-    pub(crate) unsafe fn replay_drops(chunk: NonNull<Self>) {
-        // SAFETY: caller-owned chunk.
-        let count = unsafe { (*chunk.as_ptr()).drop_count.load(Ordering::Relaxed) } as usize;
-        if count == 0 {
-            return;
-        }
-        // SAFETY: caller-owned chunk.
-        let capacity = unsafe { (*chunk.as_ptr()).capacity };
-        // SAFETY: caller-owned chunk.
-        let data = unsafe { Self::data_ptr(chunk) }.as_ptr();
-        // Reset BEFORE iteration; see `LocalChunk::replay_drops`
-        // for the panic-safety rationale.
-        // SAFETY: caller-owned chunk.
-        // Relaxed is sufficient: `replay_drops` is only invoked
-        // after the caller has driven the refcount to zero (see
-        // `dec_ref`/`reconcile_swap_out`), which establishes exclusive
-        // ownership of this chunk. No other thread can hold a handle
-        // that observes `drop_count` while we reset it. If a future
-        // change introduces a diagnostic API that peeks at `drop_count`
-        // from outside the refcount-zero state, this store must be
-        // upgraded to Release to pair with the consumer's Acquire load.
-        unsafe { (*chunk.as_ptr()).drop_count.store(0, Ordering::Relaxed) };
-        // SAFETY: chunk-layout invariant — `count` densely packed,
-        // naturally aligned `DropEntry`s live at the tail of the
-        // payload; each one's `(value_offset, len, drop_fn)` satisfies
-        // the drop-shim invariant.
-        unsafe { crate::internal::drop_list::replay_drop_entries(data, capacity, count) };
-    }
-
-    /// Tear the chunk down: drop the header fields and free the
-    /// backing allocation.
-    ///
-    /// # Safety
-    ///
-    /// Caller must own the chunk exclusively (refcount zero) and the
-    /// drop list must have already been replayed.
-    pub(crate) unsafe fn free_backing(chunk: NonNull<Self>) {
-        // Move `allocator` out so we can free *after* dropping the
-        // other header fields.
-        // SAFETY: caller owns the chunk exclusively; `capacity`,
-        // `allocator`, and each `addr_of!`d header field are live values
-        // dropped exactly once here.
-        let (capacity, allocator) = unsafe {
-            let capacity = (*chunk.as_ptr()).capacity;
-            let allocator: A = core::ptr::read(core::ptr::addr_of!((*chunk.as_ptr()).allocator));
-            core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).provider));
-            core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).refcount));
-            core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).drop_count));
-            core::ptr::drop_in_place(core::ptr::addr_of_mut!((*chunk.as_ptr()).next));
-            (capacity, allocator)
-        };
-
-        let total_bytes = alloc_size::<A>(header_size::<A>() + capacity);
-        let layout =
-            Layout::from_size_align(total_bytes, chunk_align::<A>()).expect("layout was valid at allocation time, must remain valid here");
-
+    /// Caller must hold the unique remaining reference (refcount observed
+    /// zero with an acquire fence covering all prior releases).
+    pub(crate) unsafe fn destroy(chunk: NonNull<Self>) {
+        let header = Self::header_size();
+        let align = Self::struct_align();
+        let header_ref = &*chunk.as_ptr();
+        let capacity = header_ref.capacity;
+        let drop_count = header_ref.drop_entry_count.load(Ordering::Acquire) as usize;
+        replay_drops(Self::payload_ptr(chunk).as_ptr(), capacity, drop_count);
+        let allocator: A = ptr::read(&raw const (*chunk.as_ptr()).allocator);
+        ptr::drop_in_place(&raw mut (*chunk.as_ptr()).provider);
+        let total = header + capacity;
+        let layout = Layout::from_size_align(total, align).expect("matches allocate(); header+capacity stayed within isize::MAX");
         let raw_ptr = chunk.as_ptr().cast::<u8>();
-        // SAFETY: chunk-header invariant — pointer + layout matches
-        // what the allocator returned.
-        unsafe {
-            allocator.deallocate(NonNull::new_unchecked(raw_ptr), layout);
-        }
+        allocator.deallocate(NonNull::new_unchecked(raw_ptr), layout);
         drop(allocator);
     }
 
-    /// Reset cache-relevant header fields when the chunk is being
-    /// handed out from the cache. Restores the refcount inflation to
-    /// [`LARGE`] via a Release store so subsequent `alloc_arc`s on
-    /// the new tenant chunk are well-defined.
+    /// Pointer to the `AtomicPtr<u8>` cache link stored in the first
+    /// bytes of the chunk's payload. Cache stores thin pointers since
+    /// `*mut Self` is fat for the DST.
     ///
     /// # Safety
     ///
-    /// Caller must own the chunk exclusively (just popped from the
-    /// cache).
-    pub(crate) unsafe fn revive_for_reuse(&self) {
-        // Reset bookkeeping fields *before* re-publishing via the
-        // Release refcount store. The caller owns the chunk
-        // exclusively at this point (just popped from the cache), but
-        // ordering the writes this way keeps the Release store as the
-        // synchronizing edge so the pattern is sound even if a future
-        // change adds another observer.
-        //
-        // Visibility of `drop_count = 0` to cross-thread
-        // `Arc::<MaybeUninit<T>>::assume_init` readers (which Acquire
-        // `drop_count`, not `refcount`) is established transitively
-        // through the first `bump_shared_drop_count` Release
-        // `fetch_add` after revival: that Release is
-        // sequenced-after this Relaxed store of 0, so any Acquire
-        // load of `drop_count` observes both the increment and the
-        // preceding zero-write.
-        self.drop_count.store(0, Ordering::Relaxed);
-        self.next.store(core::ptr::null_mut(), Ordering::Relaxed);
-        self.refcount.0.store(LARGE, Ordering::Release);
+    /// Chunk must be in the cached state.
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "SharedChunk payload is CHUNK_ALIGN-aligned; AtomicPtr fits within that alignment"
+    )]
+    #[inline]
+    pub(crate) unsafe fn cache_link(chunk: NonNull<Self>) -> *const AtomicPtr<u8> {
+        Self::payload_ptr(chunk).as_ptr().cast::<AtomicPtr<u8>>()
     }
 
-    /// Apply the deferred-reconciliation swap-out math. Performs one
-    /// `fetch_sub(LARGE - arcs_issued, Release)`; if the
-    /// chunk just hit zero, runs the chunk-return path through the
-    /// provider (or self-frees).
+    /// Re-initializes a chunk popped from the cache: refcount → 1,
+    /// drop-entry count → 0. The caller becomes the +1 holder.
     ///
     /// # Safety
     ///
-    /// Caller must hold the inflated refcount on `chunk` (i.e.,
-    /// `chunk` was the arena's `current_shared` and is being swapped
-    /// out). `arcs_issued` is the value of the arena's local
-    /// counter at swap-out time.
-    pub(crate) unsafe fn reconcile_swap_out(chunk: NonNull<Self>, arcs_issued: usize) {
-        // `LARGE` is large enough that this subtraction can never
-        // underflow on real workloads (see plan's "Overflow" note).
-        let to_subtract = LARGE - arcs_issued;
-        // Raw access (no `&SharedChunk` borrow): on the zero-routing
-        // branch we go on to `route_release` → `free_backing`.
-        // SAFETY: chunk live — caller holds the inflated refcount.
-        let prev = unsafe { (*chunk.as_ptr()).refcount.0.fetch_sub(to_subtract, Ordering::Release) };
-        debug_assert!(prev >= to_subtract, "shared swap-out reconcile underflow");
-        if prev == to_subtract {
-            fence(Ordering::Acquire);
-            // SAFETY: we observed the last refcount transition to zero
-            // with Acquire ordering.
-            unsafe { Self::route_release(chunk) };
+    /// `chunk` must be a freshly popped, refcount-zero, uniquely-owned
+    /// chunk; the cache link is invalidated by this call.
+    #[inline]
+    pub(crate) unsafe fn reinit_for_acquire(chunk: NonNull<Self>) {
+        // SAFETY: caller owns the unique reference; atomics are safe to
+        // store unconditionally.
+        let r = &*chunk.as_ptr();
+        r.ref_count.store(1, Ordering::Relaxed);
+        r.drop_entry_count.store(0, Ordering::Relaxed);
+    }
+
+    /// Loads the drop-entry count with `Acquire` ordering.
+    ///
+    /// The [`Chunk::drop_entry_count`](super::chunk::Chunk::drop_entry_count)
+    /// accessor uses `Relaxed`, which suffices for the owner thread. This
+    /// `Acquire` variant is for cross-thread readers (the deferred-init
+    /// commit in [`Arc`](crate::Arc)): it pairs with the owner thread's
+    /// `Release` publish in
+    /// [`set_drop_entry_count`](super::chunk::Chunk::set_drop_entry_count)
+    /// (via `ChunkMutator::publish_drop_count`) so the placeholder slot's
+    /// bytes are visible before the count is read.
+    #[inline]
+    pub(crate) fn drop_entry_count_acquire(&self) -> usize {
+        self.drop_entry_count.load(Ordering::Acquire) as usize
+    }
+
+    /// Overwrites the refcount. Test-only seam so unit tests can drive
+    /// refcount-dependent paths (e.g. the overflow guard) without poking
+    /// the field directly.
+    #[cfg(test)]
+    pub(crate) fn set_ref_count_for_test(&self, count: usize) {
+        self.ref_count.store(count, Ordering::Relaxed);
+    }
+
+    /// Decrements `chunk`'s refcount on behalf of the caller, and if
+    /// that drops the count to zero, routes the chunk back through
+    /// [`teardown_and_release`](super::chunk_ops::ChunkOps::teardown_and_release).
+    ///
+    /// Used by smart-pointer drop paths ([`Box`](crate::Box),
+    /// [`Arc`](crate::Arc)) and by [`ChunkMutator`](super::ChunkMutator)
+    /// itself to share the "release one ref I am holding" sequence.
+    ///
+    /// # Safety
+    ///
+    /// Caller must hold exactly one strong reference to `chunk` that
+    /// is being released by this call; after the call returns the
+    /// caller must not dereference `chunk` again.
+    #[inline]
+    pub(crate) unsafe fn release_one_ref(chunk: NonNull<Self>) {
+        // SAFETY: caller holds a +1 we are releasing. `dec_ref`
+        // observes the previous refcount; if it returns true the
+        // caller holds the unique remaining reference and we route
+        // through `teardown_and_release`.
+        use super::chunk_ops::ChunkOps;
+        let chunk_ref = chunk.as_ref();
+        if chunk_ref.dec_ref() {
+            Self::teardown_and_release(chunk);
         }
     }
 }
 
-#[inline(always)]
-#[expect(
-    clippy::inline_always,
-    reason = "must inline at every inc_ref site to avoid a per-call function-call overhead; see PERF.md"
-)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Refcount overflow requires physically unreachable outstanding refs.
-fn check_shared_refcount(prev: usize) {
-    if prev >= LARGE.saturating_add(LARGE) {
-        refcount_overflow_abort();
+impl<A: Allocator + Clone> Chunk for SharedChunk<A> {
+    #[inline]
+    fn inc_ref(&self) {
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        #[inline(never)]
+        #[cold]
+        fn overflow() -> ! {
+            refcount_overflow_abort()
+        }
+        let prev = self.ref_count.fetch_add(1, Ordering::Relaxed);
+        if prev == usize::MAX {
+            overflow();
+        }
     }
+
+    #[inline]
+    fn dec_ref(&self) -> bool {
+        let prev = self.ref_count.fetch_sub(1, Ordering::Release);
+        if prev == 1 {
+            fence(Ordering::Acquire);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    fn drop_entry_count(&self) -> usize {
+        self.drop_entry_count.load(Ordering::Relaxed) as usize
+    }
+
+    #[inline]
+    fn set_drop_entry_count(&self, count: usize) {
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "a 64KiB chunk holds at most 4096 drop entries (« u16::MAX); round-trip asserted below"
+        )]
+        let narrowed = count as u16;
+        debug_assert_eq!(usize::from(narrowed), count, "drop-entry count exceeds u16 range");
+        self.drop_entry_count.store(narrowed, Ordering::Release);
+    }
+}
+
+/// Largest payload byte count a shared chunk can offer to a bump allocator
+/// after accounting for the header.
+#[inline]
+#[must_use]
+pub(crate) const fn max_bump_extent<A: Allocator + Clone>() -> usize {
+    super::constants::MAX_CHUNK_BYTES - SharedChunk::<A>::header_size()
 }
 
 #[cfg(test)]
@@ -531,12 +285,55 @@ mod tests {
 
     use super::*;
 
-    /// Targeted fast-fail for `header_size` mutations. See the mirror
-    /// in `local_chunk::tests` for rationale.
+    /// `struct_align` returns the max of `align_of::<A>()`,
+    /// `align_of::<usize>()`, and `CHUNK_ALIGN`. Pin the exact value so
+    /// the `>= → <` mutation flips it.
     #[test]
-    fn header_size_matches_struct_layout() {
-        let expected = core::mem::offset_of!(SharedChunk<Global>, drop_count) + core::mem::size_of::<AtomicU16>();
-        assert_eq!(header_size::<Global>(), expected);
-        assert!(header_size::<Global>() > 0);
+    fn struct_align_is_max_of_components() {
+        let got = SharedChunk::<Global>::struct_align();
+        // Shared chunks must be CHUNK_ALIGN-aligned so smart-pointer
+        // chunk-header recovery via `byte_sub` lands on the header.
+        assert!(got >= super::super::constants::CHUNK_ALIGN);
+        assert!(got >= mem::align_of::<Global>());
+        assert!(got >= mem::align_of::<usize>());
+        // Equality at the typical case: Global is ZST so its align is
+        // 1, usize align is 8 (on 64-bit), CHUNK_ALIGN dominates.
+        assert_eq!(got, super::super::constants::CHUNK_ALIGN);
+    }
+
+    /// `max_bump_extent` subtracts the header from `MAX_CHUNK_BYTES`;
+    /// pin the relation so `- → +` mutation is caught.
+    #[test]
+    fn max_bump_extent_is_max_minus_header() {
+        let header = SharedChunk::<Global>::header_size();
+        let extent = max_bump_extent::<Global>();
+        assert_eq!(extent, super::super::constants::MAX_CHUNK_BYTES - header);
+        assert!(extent < super::super::constants::MAX_CHUNK_BYTES);
+    }
+
+    // Covers `inc_ref`'s refcount-overflow guard call site: forcing the
+    // refcount to its saturation point and incrementing once routes through
+    // `refcount_overflow_abort`, which panics (instead of aborting) under
+    // `cfg(test)` so the otherwise-unreachable guard can be exercised.
+    #[test]
+    #[should_panic(expected = "refcount overflow")]
+    fn inc_ref_overflow_triggers_abort_guard() {
+        // SAFETY: single-threaded test. Allocate a real chunk, force its
+        // refcount to the saturation point, then `inc_ref` to drive the
+        // overflow guard. We catch the panic, restore the refcount so the
+        // chunk can be safely destroyed (avoiding a Miri leak), then resume
+        // unwinding so `should_panic` observes the original panic.
+        unsafe {
+            let chunk = SharedChunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            chunk.as_ref().set_ref_count_for_test(usize::MAX);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                chunk.as_ref().inc_ref();
+            }));
+            chunk.as_ref().set_ref_count_for_test(0);
+            SharedChunk::destroy(chunk);
+            if let Err(payload) = result {
+                std::panic::resume_unwind(payload);
+            }
+        }
     }
 }

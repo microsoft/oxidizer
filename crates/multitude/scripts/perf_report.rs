@@ -86,7 +86,7 @@ const GROUPS: &[Group] = &[
         "arena_creation",
         &[
             ("multitude", Some("arena_creation_multitude")),
-            ("bumpalo", Some("arena_creation_bumpalo")),
+            ("bumpalo_new", Some("arena_creation_bumpalo_new")),
         ],
     ),
     (
@@ -98,16 +98,12 @@ const GROUPS: &[Group] = &[
             ("alloc_box_with", Some("alloc_box_with")),
             ("alloc_uninit_box", Some("alloc_uninit_box")),
             ("alloc_zeroed_box", Some("alloc_zeroed_box")),
-            ("alloc_rc", Some("alloc_rc")),
-            ("alloc_rc_with", Some("alloc_rc_with")),
-            ("alloc_uninit_rc", Some("alloc_uninit_rc")),
-            ("alloc_zeroed_rc", Some("alloc_zeroed_rc")),
             ("alloc_arc", Some("alloc_arc")),
             ("alloc_arc_with", Some("alloc_arc_with")),
             ("alloc_uninit_arc", Some("alloc_uninit_arc")),
             ("alloc_zeroed_arc", Some("alloc_zeroed_arc")),
-            ("bumpalo", Some("alloc_u64_bumpalo")),
-            ("bumpalo_with", Some("alloc_u64_bumpalo_with")),
+            ("bumpalo_alloc", Some("alloc_u64_bumpalo_alloc")),
+            ("bumpalo_alloc_with", Some("alloc_u64_bumpalo_alloc_with")),
         ],
     ),
     (
@@ -115,9 +111,8 @@ const GROUPS: &[Group] = &[
         &[
             ("alloc_str", Some("alloc_str")),
             ("alloc_str_box", Some("alloc_str_box")),
-            ("alloc_str_rc", Some("alloc_str_rc")),
             ("alloc_str_arc", Some("alloc_str_arc")),
-            ("bumpalo", Some("alloc_str_bumpalo")),
+            ("bumpalo_alloc_str", Some("alloc_str_bumpalo_alloc_str")),
         ],
     ),
     (
@@ -133,22 +128,16 @@ const GROUPS: &[Group] = &[
             ("alloc_slice_fill_iter_box", Some("alloc_slice_fill_iter_box")),
             ("alloc_uninit_slice_box", Some("alloc_uninit_slice_box")),
             ("alloc_zeroed_slice_box", Some("alloc_zeroed_slice_box")),
-            ("alloc_slice_copy_rc", Some("alloc_slice_copy_rc")),
-            ("alloc_slice_clone_rc", Some("alloc_slice_clone_rc")),
-            ("alloc_slice_fill_with_rc", Some("alloc_slice_fill_with_rc")),
-            ("alloc_slice_fill_iter_rc", Some("alloc_slice_fill_iter_rc")),
-            ("alloc_uninit_slice_rc", Some("alloc_uninit_slice_rc")),
-            ("alloc_zeroed_slice_rc", Some("alloc_zeroed_slice_rc")),
             ("alloc_slice_copy_arc", Some("alloc_slice_copy_arc")),
             ("alloc_slice_clone_arc", Some("alloc_slice_clone_arc")),
             ("alloc_slice_fill_with_arc", Some("alloc_slice_fill_with_arc")),
             ("alloc_slice_fill_iter_arc", Some("alloc_slice_fill_iter_arc")),
             ("alloc_uninit_slice_arc", Some("alloc_uninit_slice_arc")),
             ("alloc_zeroed_slice_arc", Some("alloc_zeroed_slice_arc")),
-            ("bumpalo_copy", Some("alloc_slice_bumpalo_copy")),
-            ("bumpalo_clone", Some("alloc_slice_bumpalo_clone")),
-            ("bumpalo_fill_with", Some("alloc_slice_bumpalo_fill_with")),
-            ("bumpalo_fill_iter", Some("alloc_slice_bumpalo_fill_iter")),
+            ("bumpalo_alloc_slice_copy", Some("alloc_slice_bumpalo_alloc_slice_copy")),
+            ("bumpalo_alloc_slice_clone", Some("alloc_slice_bumpalo_alloc_slice_clone")),
+            ("bumpalo_alloc_slice_fill_with", Some("alloc_slice_bumpalo_alloc_slice_fill_with")),
+            ("bumpalo_alloc_slice_fill_iter", Some("alloc_slice_bumpalo_alloc_slice_fill_iter")),
         ],
     ),
     (
@@ -156,8 +145,8 @@ const GROUPS: &[Group] = &[
         &[
             ("alloc_string", Some("alloc_string")),
             ("alloc_string_with_capacity", Some("alloc_string_with_capacity")),
-            ("bumpalo_grow", Some("string_builder_bumpalo_grow")),
-            ("bumpalo_with_cap", Some("string_builder_bumpalo_with_cap")),
+            ("bumpalo_string_new_in", Some("string_builder_bumpalo_string_new_in")),
+            ("bumpalo_string_with_capacity_in", Some("string_builder_bumpalo_string_with_capacity_in")),
         ],
     ),
     (
@@ -165,25 +154,25 @@ const GROUPS: &[Group] = &[
         &[
             ("alloc_vec", Some("alloc_vec")),
             ("alloc_vec_with_capacity", Some("alloc_vec_with_capacity")),
-            ("bumpalo_grow", Some("vec_builder_bumpalo_grow")),
-            ("bumpalo_with_cap", Some("vec_builder_bumpalo_with_cap")),
+            ("bumpalo_vec_new_in", Some("vec_builder_bumpalo_vec_new_in")),
+            ("bumpalo_vec_with_capacity_in", Some("vec_builder_bumpalo_vec_with_capacity_in")),
         ],
     ),
     (
         "drop",
         &[
-            ("box_u64", None),
-            ("rc_u64", None),
-            ("arc_u64", None),
+            ("box_u64", Some("drop_box_u64")),
+            ("rc_u64", Some("drop_rc_u64")),
+            ("arc_u64", Some("drop_arc_u64")),
             ("box_droppy", Some("drop_box_droppy")),
             ("rc_droppy", Some("drop_rc_droppy")),
             ("arc_droppy", Some("drop_arc_droppy")),
             ("str_box", Some("drop_str_box")),
             ("str_rc", Some("drop_str_rc")),
             ("str_arc", Some("drop_str_arc")),
-            ("slice_box_u64", None),
-            ("slice_rc_u64", None),
-            ("slice_arc_u64", None),
+            ("slice_box_u64", Some("drop_slice_box_u64")),
+            ("slice_rc_u64", Some("drop_slice_rc_u64")),
+            ("slice_arc_u64", Some("drop_slice_arc_u64")),
             ("slice_box_droppy", Some("drop_slice_box_droppy")),
             ("slice_rc_droppy", Some("drop_slice_rc_droppy")),
             ("slice_arc_droppy", Some("drop_slice_arc_droppy")),
@@ -193,16 +182,16 @@ const GROUPS: &[Group] = &[
 ];
 
 const COMPARISONS: &[(&str, &str, &str)] = &[
-    ("alloc_u64", "alloc", "bumpalo"),
-    ("alloc_str", "alloc_str", "bumpalo"),
-    ("alloc_slice", "alloc_slice_copy", "bumpalo_copy"),
-    ("alloc_slice", "alloc_slice_clone", "bumpalo_clone"),
-    ("alloc_slice", "alloc_slice_fill_with", "bumpalo_fill_with"),
-    ("alloc_slice", "alloc_slice_fill_iter", "bumpalo_fill_iter"),
-    ("string_builder", "alloc_string", "bumpalo_grow"),
-    ("string_builder", "alloc_string_with_capacity", "bumpalo_with_cap"),
-    ("vec_builder", "alloc_vec", "bumpalo_grow"),
-    ("vec_builder", "alloc_vec_with_capacity", "bumpalo_with_cap"),
+    ("alloc_u64", "alloc", "bumpalo_alloc"),
+    ("alloc_str", "alloc_str", "bumpalo_alloc_str"),
+    ("alloc_slice", "alloc_slice_copy", "bumpalo_alloc_slice_copy"),
+    ("alloc_slice", "alloc_slice_clone", "bumpalo_alloc_slice_clone"),
+    ("alloc_slice", "alloc_slice_fill_with", "bumpalo_alloc_slice_fill_with"),
+    ("alloc_slice", "alloc_slice_fill_iter", "bumpalo_alloc_slice_fill_iter"),
+    ("string_builder", "alloc_string", "bumpalo_string_new_in"),
+    ("string_builder", "alloc_string_with_capacity", "bumpalo_string_with_capacity_in"),
+    ("vec_builder", "alloc_vec", "bumpalo_vec_new_in"),
+    ("vec_builder", "alloc_vec_with_capacity", "bumpalo_vec_with_capacity_in"),
 ];
 
 fn unit_to_ns(unit: &str) -> Option<f64> {
@@ -234,23 +223,64 @@ fn parse_time_line(line: &str) -> Option<f64> {
     Some(median * scale)
 }
 
-/// Parse a criterion log and return `{group/variant: median_ns}` aligned
-/// 1:1 with `expected` in execution order. In non-TTY mode criterion only
-/// writes the per-bench `time:` summary line.
-fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Vec<(String, f64)> {
-    let medians: Vec<f64> = text.lines().filter_map(parse_time_line).collect();
-    if medians.len() != expected.len() {
-        eprintln!(
-            "warning: criterion log has {} time entries, expected {}",
-            medians.len(),
-            expected.len()
-        );
+/// True for a non-empty, non-indented `group/variant` identifier (the
+/// shape criterion emits on its own line or inline before `time:`).
+/// "Benchmarking foo/bar: ..." progress lines are filtered out by the
+/// no-colon and no-internal-whitespace checks.
+fn is_bench_name(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
     }
-    expected
-        .iter()
-        .zip(medians.iter())
-        .map(|((g, v), t)| (format!("{g}/{v}"), *t))
-        .collect()
+    if s.contains(':') || s.contains(char::is_whitespace) {
+        return false;
+    }
+    let Some((g, v)) = s.split_once('/') else { return false; };
+    if g.is_empty() || v.is_empty() {
+        return false;
+    }
+    let id_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    g.chars().all(id_char) && v.chars().all(id_char)
+}
+
+/// Parse a criterion log and return `{group/variant: median_ns}`.
+///
+/// Criterion writes the bench identifier either on its own line just
+/// before the `time:` line (long names) or on the same line as `time:`
+/// separated by whitespace (short names). Both shapes are handled.
+///
+/// `expected` is used only for a sanity-check warning when names are
+/// missing or extra; it does not gate which entries get returned.
+fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Vec<(String, f64)> {
+    let mut out: Vec<(String, f64)> = Vec::new();
+    let mut pending: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Same-line form: `group/variant  time:   [...]`.
+        if let Some(t_idx) = line.find("time:") {
+            let head = line[..t_idx].trim();
+            let name_inline = if is_bench_name(head) { Some(head.to_string()) } else { None };
+            let name = name_inline.or_else(|| pending.take());
+            if let (Some(name), Some(t)) = (name, parse_time_line(line)) {
+                out.push((name, t));
+            }
+            continue;
+        }
+        // Bare-name line: stash for the next `time:` we see.
+        if is_bench_name(trimmed) {
+            pending = Some(trimmed.to_string());
+        }
+    }
+
+    let expected_keys: std::collections::HashSet<String> =
+        expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
+    let got_keys: std::collections::HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
+    for missing in expected_keys.difference(&got_keys) {
+        eprintln!("warning: criterion log missing expected bench {missing}");
+    }
+    for extra in got_keys.difference(&expected_keys) {
+        eprintln!("warning: criterion log has unexpected bench {extra}");
+    }
+    out
 }
 
 fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
@@ -265,8 +295,11 @@ struct GungEntry {
 
 /// Parse the iai-callgrind / gungraun text output.
 ///
-/// Per-bench header looks like `<prefix>::<module>::<fn> run ...` and metrics
-/// follow as `  <Metric>: <value>|...`.
+/// Per-bench header looks like
+/// `<prefix>::<module>::<fn> run:(<args>)` for `#[bench::run(...)]`
+/// benches, and `<prefix>::<module>::<fn>` (no trailing run-clause) for
+/// plain `#[library_benchmark]` benches. Both shapes are accepted.
+/// Metric lines follow as `  <Metric>: <value>|...`.
 fn parse_gungraun(text: &str, prefix: &str) -> Vec<GungEntry> {
     let mut out: Vec<GungEntry> = Vec::new();
     let mut cur: Option<GungEntry> = None;
@@ -275,19 +308,25 @@ fn parse_gungraun(text: &str, prefix: &str) -> Vec<GungEntry> {
         if let Some(rest) = line.strip_prefix(&header_prefix) {
             if let Some(after_mod) = rest.find("::") {
                 let after = &rest[after_mod + 2..];
-                if let Some(space) = after.find(' ') {
-                    let fn_name = &after[..space];
-                    let tail = after[space..].trim_start();
-                    if tail.starts_with("run") {
-                        if let Some(prev) = cur.take() {
-                            out.push(prev);
-                        }
-                        cur = Some(GungEntry {
-                            name: fn_name.to_string(),
-                            metrics: Vec::new(),
-                        });
-                        continue;
+                // `after` is either "<fn>" alone or "<fn> run:(...)";
+                // split on the first whitespace to isolate the fn name.
+                let fn_name = match after.find(char::is_whitespace) {
+                    Some(sp) => &after[..sp],
+                    None => after,
+                };
+                // Reject obvious non-identifier shapes so unrelated lines
+                // that happen to start with the prefix can't slip through.
+                let valid = !fn_name.is_empty()
+                    && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if valid {
+                    if let Some(prev) = cur.take() {
+                        out.push(prev);
                     }
+                    cur = Some(GungEntry {
+                        name: fn_name.to_string(),
+                        metrics: Vec::new(),
+                    });
+                    continue;
                 }
             }
         }
