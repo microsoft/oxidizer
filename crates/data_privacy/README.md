@@ -55,9 +55,10 @@ This crate is built around two primary traits:
 
 * The [`Classified`][__link0] trait is used to mark types that hold sensitive data.
 
-* The [`Redactor`][__link1] trait defines the logic needed by an individual redactor. This crate provides a
-  few implementations of this trait, such as [`SimpleRedactor`][__link2], but others can
-  be implemented and used by applications as well.
+* The [`Redactor`][__link1] trait defines the interface for applying redaction. Both
+  [`RedactionEngine`][__link2] (the high-level engine that routes data classes to
+  strategies) and individual redaction strategies (e.g. hash-based or
+  replacement-based redactors) implement this trait.
 
 This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
 [`Classified`][__link3] trait:
@@ -191,19 +192,19 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG3M_vhUtB5gFG-D1ZeP7gWyXGzaYsyQD3GO7GwPXvYMSh3Z2YWSBgmxkYXRhX3ByaXZhY3lmMC4xMS4y
- [__link0]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
- [__link1]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Redactor
- [__link10]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=classified
- [__link11]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=taxonomy
- [__link12]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=classified
- [__link13]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactionEngine
- [__link14]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactionEngine::builder
- [__link2]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=simple_redactor::SimpleRedactor
- [__link3]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
- [__link4]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedDebug
- [__link5]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedDisplay
- [__link6]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedToString
- [__link7]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=taxonomy
- [__link8]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=DataClass
- [__link9]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEyLjCCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4wgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTAuMA
+ [__link0]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Classified
+ [__link1]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Redactor
+ [__link10]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=classified
+ [__link11]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=taxonomy
+ [__link12]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=classified
+ [__link13]: https://docs.rs/data_privacy/0.12.0/data_privacy/?search=RedactionEngine
+ [__link14]: https://docs.rs/data_privacy/0.12.0/data_privacy/?search=RedactionEngine::builder
+ [__link2]: https://docs.rs/data_privacy/0.12.0/data_privacy/?search=RedactionEngine
+ [__link3]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Classified
+ [__link4]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=RedactedDebug
+ [__link5]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=RedactedDisplay
+ [__link6]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=RedactedToString
+ [__link7]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=taxonomy
+ [__link8]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=DataClass
+ [__link9]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Classified
