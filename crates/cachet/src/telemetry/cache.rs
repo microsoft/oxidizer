@@ -709,6 +709,25 @@ mod tests {
         assert!(capture.output().is_empty());
     }
 
+    #[test]
+    fn logging_enabled_without_subscriber_is_noop() {
+        // logging_enabled=true but no tracing subscriber → spans are disabled.
+        // This exercises the `logging_enabled && span.is_disabled()` branches.
+        let telemetry = CacheTelemetry::with_logging();
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async {
+                telemetry.record_hit("c", Duration::ZERO, false);
+                telemetry.record_get_error("c", Duration::ZERO, false);
+                telemetry.record_insert_rejected("c", false);
+                telemetry.record_fallback();
+                telemetry.complete_operation(request_id, "c", "cache.get", Duration::ZERO, true);
+            }
+            .with_request_id(request_id),
+        );
+        // No panic = all paths handled gracefully with disabled spans.
+    }
+
     #[cfg_attr(miri, ignore)]
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
         let capture = LogCapture::new();
@@ -890,6 +909,26 @@ mod tests {
         let c = next_request_id();
         assert!(b > a, "request IDs must increment: got {a} then {b}");
         assert!(c > b, "request IDs must increment: got {b} then {c}");
+    }
+
+    #[test]
+    fn with_request_id_resets_thread_local_after_completion() {
+        let request_id = next_request_id();
+        futures::executor::block_on(
+            async {
+                assert_eq!(
+                    CacheTelemetry::current_request_id(),
+                    request_id,
+                    "request_id should be set during poll"
+                );
+            }
+            .with_request_id(request_id),
+        );
+        assert_eq!(
+            CacheTelemetry::current_request_id(),
+            0,
+            "request_id should be reset to 0 after WithRequestId completes"
+        );
     }
 
     #[test]
