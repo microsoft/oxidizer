@@ -499,16 +499,16 @@ mod tests {
         assert_eq!(options.max_connections, usize::MAX);
         assert!(matches!(
             options.connection_idle_timeout,
-            ConnectionIdleTimeout::Limited(d) if d == Duration::from_secs(60)
+            ConnectionIdleTimeout::Limited(d) if d == Duration::from_mins(1)
         ));
     }
 
     #[test]
     fn connection_pool_options_connection_idle_timeout_set() {
-        let options = ConnectionPoolOptions::default().connection_idle_timeout(Duration::from_secs(120));
+        let options = ConnectionPoolOptions::default().connection_idle_timeout(Duration::from_mins(2));
         assert!(matches!(
             options.connection_idle_timeout,
-            ConnectionIdleTimeout::Limited(d) if d == Duration::from_secs(120)
+            ConnectionIdleTimeout::Limited(d) if d == Duration::from_mins(2)
         ));
     }
 
@@ -546,7 +546,7 @@ mod tests {
         let options = ConnectionPoolOptions::default();
         assert!(matches!(
             options.connection_idle_timeout,
-            ConnectionIdleTimeout::Limited(d) if d == Duration::from_secs(60)
+            ConnectionIdleTimeout::Limited(d) if d == Duration::from_mins(1)
         ));
     }
 
@@ -564,8 +564,8 @@ mod tests {
 
     #[test]
     fn connection_lifetime_field_returns_configured_value() {
-        let options = ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(3600)));
-        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_secs(3600)));
+        let options = ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::fixed(Duration::from_hours(1)));
+        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_hours(1)));
     }
 
     #[test]
@@ -577,8 +577,8 @@ mod tests {
     #[test]
     fn connection_lifetime_field_returns_per_connection() {
         let options =
-            ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::per_connection(|| Some(Duration::from_secs(120))));
-        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_secs(120)));
+            ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::per_connection(|| Some(Duration::from_mins(2))));
+        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_mins(2)));
     }
 
     #[test]
@@ -589,14 +589,14 @@ mod tests {
 
     #[test]
     fn connection_pool_options_connection_lifetime_set() {
-        let options = ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(3600)));
-        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_secs(3600)));
+        let options = ConnectionPoolOptions::default().connection_lifetime(ConnectionLifetime::fixed(Duration::from_hours(1)));
+        assert_eq!(options.connection_lifetime.resolve(), Some(Duration::from_hours(1)));
     }
 
     #[test]
     fn connection_pool_options_connection_lifetime_set_unlimited() {
         let options = ConnectionPoolOptions::default()
-            .connection_lifetime(ConnectionLifetime::fixed(Duration::from_secs(60)))
+            .connection_lifetime(ConnectionLifetime::fixed(Duration::from_mins(1)))
             .connection_lifetime(ConnectionLifetime::unlimited());
         assert_eq!(options.connection_lifetime.resolve(), None);
     }
