@@ -166,25 +166,25 @@ mod tests {
         let clock = Clock::new_tokio();
         let source = CancellationTokenSource::new();
         let token = source.token();
-        CancelOnPoll(source)
+        let message = CancelOnPoll(source)
             .timeout(&clock, std::time::Duration::from_secs(5))
             .cancelable(token)
             .await
             .expect_err("should fail")
-            .to_string()
-            .contains("canceled");
+            .to_string();
+        assert!(message.contains("canceled"));
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn already_cancelled_token() {
         let clock = Clock::new_tokio();
-        async { unreachable!() }
+        let message = async { unreachable!() }
             .timeout(&clock, std::time::Duration::from_secs(5))
             .cancelable(CancellationToken::cancelled())
             .await
             .expect_err("should fail")
-            .to_string()
-            .contains("canceled");
+            .to_string();
+        assert!(message.contains("canceled"));
     }
 }

@@ -123,8 +123,8 @@ impl Inner {
         // Subscribers list was `None`, meaning cancellation has already occurred
         // and all subscribers have already been notified.
         //
-        // Fall through to release the lock, then notify immediately.
-
+        // Release the lock, then notify immediately.
+        drop(guard);
         callback.notify();
     }
 

@@ -545,7 +545,7 @@ name = "cancelable"
 version = "0.1.0"
 dependencies = [
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pin-project",
  "tick",
  "tokio",
