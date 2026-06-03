@@ -360,8 +360,8 @@ mod tests {
     use native_tls::TlsConnector;
     use seatbelt::RecoveryInfo;
 
+    use crate::HyperTransportBuilder;
     use crate::testing::{FakeConnector, TestError, create_test_request, fake_body_builder};
-    use crate::{HyperTransportBuilder, TlsBackend};
 
     fn build_tls() -> TlsBackend {
         TlsConnector::new().unwrap().into()

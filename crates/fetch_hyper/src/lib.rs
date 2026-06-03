@@ -42,4 +42,3 @@ pub mod testing;
 
 pub use builder::{HyperTransport, HyperTransportBuilder};
 pub use connection::{Connect, HyperIo};
-pub use tls::TlsBackend;

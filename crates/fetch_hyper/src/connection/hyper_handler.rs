@@ -13,6 +13,7 @@ use std::pin::Pin;
 
 use bytesbuf::BytesView;
 use fetch_options::ConnectionInfo;
+use fetch_tls::TlsBackend;
 use futures::TryFutureExt;
 use http::Extensions;
 use http_body_util::BodyExt;
@@ -95,7 +96,7 @@ where
 /// Assembles a [`HyperHandler`] from a configured [`HyperTransportBuilder`].
 pub(crate) fn build_hyper_handler<C, S>(
     builder: HyperTransportBuilder<C, S>,
-    tls: crate::tls::TlsBackend,
+    tls: TlsBackend,
     body_builder: http_extensions::HttpBodyBuilder,
     meter: &Meter,
 ) -> HyperHandler<C, S>
@@ -191,7 +192,6 @@ mod tests {
     use bytes::Bytes;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
-    use fetch_tls::TlsBackend;
     use http_body_util::BodyExt as _;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
     use layered::Service as _;

@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use anyspawn::Spawner;
 use bytes::Bytes;
-use fetch_hyper::{HyperTransportBuilder, TlsBackend};
-use fetch_options::{RequestFilter};
-use fetch_tls::TransportOptions;
+use fetch_hyper::HyperTransportBuilder;
+use fetch_options::{RequestFilter, TransportOptions};
+use fetch_tls::TlsBackend;
 use http::{Method, StatusCode, Version};
 use http_extensions::{HttpBodyBuilder, HttpRequestBuilder, Result};
 use hyper_util::rt::TokioIo;

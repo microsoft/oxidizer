@@ -1063,6 +1063,7 @@ dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "fetch_options",
  "fetch_tls",
  "futures",
  "http",
@@ -1092,6 +1093,16 @@ dependencies = [
  "tracing",
  "tracing-test",
  "wiremock",
+]
+
+[[package]]
+name = "fetch_options"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "insta",
+ "mutants",
+ "static_assertions",
 ]
 
 [[package]]
