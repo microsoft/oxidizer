@@ -42,22 +42,23 @@ pin_project! {
     }
 }
 
+/// RAII guard that resets the thread-local request ID to 0 on drop,
+/// ensuring cleanup even if the inner future panics during poll.
+struct ResetRequestId;
+
+impl Drop for ResetRequestId {
+    fn drop(&mut self) {
+        CURRENT_REQUEST_ID.with(|cell| cell.set(0));
+    }
+}
+
 impl<F: Future> Future for WithRequestId<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-
-        // RAII guard resets the thread-local to 0 even if the inner poll panics.
-        struct ResetGuard;
-        impl Drop for ResetGuard {
-            fn drop(&mut self) {
-                CURRENT_REQUEST_ID.with(|cell| cell.set(0));
-            }
-        }
-
         CURRENT_REQUEST_ID.with(|cell| cell.set(*this.request_id));
-        let _guard = ResetGuard;
+        let _guard = ResetRequestId;
         this.inner.poll(cx)
     }
 }
@@ -77,6 +78,7 @@ impl<F: Future> WithRequestIdExt for F {
 
 /// Converts a `Duration` to nanoseconds as `u64`, saturating at `u64::MAX`.
 /// A `u64` of nanoseconds covers around 584 years - overflow is not a practical concern.
+#[cfg(any(feature = "logs", test))]
 fn saturating_nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
@@ -143,36 +145,66 @@ impl CacheTelemetry {
         }
     }
 
-    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    #[cfg_attr(
+        not(feature = "logs"),
+        expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
     fn record_debug_with_duration(&self, event: &'static str, duration: Duration) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            let duration_ns = saturating_nanos(duration);
-            span.record(attributes::FIELD_EVENT, event);
-            span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                let duration_ns = saturating_nanos(duration);
+                span.record(attributes::FIELD_EVENT, event);
+                span.record(attributes::FIELD_DURATION_NS, duration_ns);
+                tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
+            }
+        }
+        #[cfg(not(any(feature = "logs", test)))]
+        {
+            let _ = (event, duration);
         }
     }
 
-    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    #[cfg_attr(
+        not(feature = "logs"),
+        expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
     fn record_info_with_duration(&self, event: &'static str, duration: Duration) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            let duration_ns = saturating_nanos(duration);
-            span.record(attributes::FIELD_EVENT, event);
-            span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                let duration_ns = saturating_nanos(duration);
+                span.record(attributes::FIELD_EVENT, event);
+                span.record(attributes::FIELD_DURATION_NS, duration_ns);
+                tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
+            }
+        }
+        #[cfg(not(any(feature = "logs", test)))]
+        {
+            let _ = (event, duration);
         }
     }
 
-    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    #[cfg_attr(
+        not(feature = "logs"),
+        expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
     fn record_error_with_duration(&self, event: &'static str, duration: Duration) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            let duration_ns = saturating_nanos(duration);
-            span.record(attributes::FIELD_EVENT, event);
-            span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                let duration_ns = saturating_nanos(duration);
+                span.record(attributes::FIELD_EVENT, event);
+                span.record(attributes::FIELD_DURATION_NS, duration_ns);
+                tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
+            }
+        }
+        #[cfg(not(any(feature = "logs", test)))]
+        {
+            let _ = (event, duration);
         }
     }
 
@@ -271,10 +303,13 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            span.record(attributes::FIELD_EVENT, attributes::EVENT_INSERT_REJECTED);
-            tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                span.record(attributes::FIELD_EVENT, attributes::EVENT_INSERT_REJECTED);
+                tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
+            }
         }
         self.emit_tier_event(
             Self::current_request_id(),
@@ -285,11 +320,17 @@ impl CacheTelemetry {
         );
     }
 
-    #[expect(clippy::unused_self, reason = "Consistent API — may use self in future (e.g., emit migration)")]
+    #[cfg_attr(
+        not(feature = "logs"),
+        expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
     pub(crate) fn record_fallback(&self) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            span.record(attributes::FIELD_FALLBACK, true);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                span.record(attributes::FIELD_FALLBACK, true);
+            }
         }
     }
 
@@ -347,11 +388,14 @@ impl CacheTelemetry {
         duration: Duration,
         coalesced: bool,
     ) {
-        let span = Span::current();
-        if !span.is_disabled() {
-            span.record(attributes::FIELD_DURATION_NS, saturating_nanos(duration));
-            if coalesced {
-                span.record(attributes::FIELD_COALESCED, true);
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            let span = Span::current();
+            if !span.is_disabled() {
+                span.record(attributes::FIELD_DURATION_NS, saturating_nanos(duration));
+                if coalesced {
+                    span.record(attributes::FIELD_COALESCED, true);
+                }
             }
         }
 
