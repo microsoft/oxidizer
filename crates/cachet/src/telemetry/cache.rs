@@ -47,14 +47,18 @@ impl<F: Future> Future for WithRequestId<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let prev = CURRENT_REQUEST_ID.with(|cell| {
-            let prev = cell.get();
-            cell.set(*this.request_id);
-            prev
-        });
-        let out = this.inner.poll(cx);
-        CURRENT_REQUEST_ID.with(|cell| cell.set(prev));
-        out
+
+        // RAII guard resets the thread-local to 0 even if the inner poll panics.
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                CURRENT_REQUEST_ID.with(|cell| cell.set(0));
+            }
+        }
+
+        CURRENT_REQUEST_ID.with(|cell| cell.set(*this.request_id));
+        let _guard = ResetGuard;
+        this.inner.poll(cx)
     }
 }
 
@@ -267,7 +271,11 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
-        self.record_info_with_duration(attributes::EVENT_INSERT_REJECTED, Duration::ZERO);
+        let span = Span::current();
+        if !span.is_disabled() {
+            span.record(attributes::FIELD_EVENT, attributes::EVENT_INSERT_REJECTED);
+            tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
+        }
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
