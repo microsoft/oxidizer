@@ -77,11 +77,6 @@ impl Inner {
     }
 
     /// Signal cancellation and notify subscribers
-    ///
-    /// # Panics
-    ///
-    /// Panics when the lock protecting the subscriber list is poisoned. This
-    /// happens when another thread, which had been holding the lock, panicked.
     fn cancel_and_notify(&self) {
         if !self.try_set_cancelled() {
             // Already canceled by someone else. They will notify.
@@ -92,7 +87,7 @@ impl Inner {
         let subscribers = self
             .subscribers
             .lock()
-            .expect("subscriber lock is poisoned")
+            .expect("subscriber lock should not be poisoned because lock is never held over fallible or unsafe calls")
             .take()
             .unwrap_or_default();
 
@@ -105,13 +100,11 @@ impl Inner {
     /// Subscribe to the cancellation notification
     ///
     /// If cancellation has already occurred, the callback fires immediately.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the lock protecting the subscriber list is poisoned. This
-    /// happens when another thread, which had been holding the lock, panicked.
     fn subscribe(&self, callback: Subscriber) {
-        let mut guard = self.subscribers.lock().expect("subscriber lock is poisoned");
+        let mut guard = self
+            .subscribers
+            .lock()
+            .expect("subscriber lock should not be poisoned because lock is never held over fallible or unsafe calls");
 
         // Subscribers is `Some(...)` which means we haven't notified them yet
         // (e.g. not canceled, and not mid-cancellation). Add to the list.
@@ -353,6 +346,7 @@ impl Drop for CancellationTokenSource {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicUsize;
+    use std::thread::JoinHandle;
 
     use super::*;
 
@@ -490,57 +484,53 @@ mod tests {
     #[test]
     fn dropped_linked_source_does_not_notify_on_parent_cancel() {
         let parent = CancellationTokenSource::new();
-        let counter = Arc::new(AtomicUsize::new(0));
 
         {
             let linked = CancellationTokenSource::linked(&[parent.token()]);
-            let c = Arc::clone(&counter);
-            linked.subscribe(move || {
-                c.fetch_add(1, Ordering::Relaxed);
-            });
+            linked.subscribe(|| panic!("should not be called"));
 
             // linked dropped here
         }
 
         parent.cancel();
-        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
+    fn start_polling_thead_for_is_cancelled(token: CancellationToken) -> JoinHandle<()> {
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let thread_counter = Arc::clone(&counter);
+        let thread_handle = std::thread::spawn(move || {
+            while !token.is_cancelled() {
+                thread_counter.fetch_add(1, Ordering::Relaxed);
+                std::hint::spin_loop();
+            }
+        });
+
+        // wait for the thread to start running
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while counter.load(Ordering::Relaxed) == 0 {
+            assert!(std::time::Instant::now() < deadline, "thread did not start running");
+            std::hint::spin_loop();
+        }
+
+        thread_handle
     }
 
     #[test]
     fn cancel_visible_across_threads() {
         let source = CancellationTokenSource::new();
-        let token = source.token();
-
-        let handle = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while !token.is_cancelled() {
-                assert!(std::time::Instant::now() < deadline, "spin loop timed out after 5 seconds");
-                std::hint::spin_loop();
-            }
-            true
-        });
-
+        let handle = start_polling_thead_for_is_cancelled(source.token());
         source.cancel();
-        assert!(handle.join().unwrap());
+        handle.join().expect("thread should complete successfully");
     }
 
     #[test]
     fn linked_cancellation_is_visible_across_threads() {
         let parent = CancellationTokenSource::new();
         let linked = CancellationTokenSource::linked(&[parent.token()]);
-        let linked_token = linked.token();
-
-        let handle = std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while !linked_token.is_cancelled() {
-                assert!(std::time::Instant::now() < deadline, "spin loop timed out after 5 seconds");
-                std::hint::spin_loop();
-            }
-            true
-        });
-
+        let handle = start_polling_thead_for_is_cancelled(linked.token());
         parent.cancel();
-        assert!(handle.join().unwrap());
+        handle.join().expect("thread should complete successfully");
     }
 
     #[test]
@@ -826,5 +816,54 @@ mod tests {
 
         // Subscriber list is already None; drop should not panic
         drop(linked);
+    }
+
+    #[test]
+    fn linked_with_no_parents_behaves_like_independent_source() {
+        let source = CancellationTokenSource::linked(&[]);
+        assert!(!source.is_cancelled());
+
+        source.cancel();
+        assert!(source.is_cancelled());
+    }
+
+    #[test]
+    fn debug_inner_not_cancelled_no_subscribers() {
+        let source = CancellationTokenSource::new();
+        let debug = format!("{source:?}");
+        assert!(debug.contains("canceled: false"), "expected canceled: false, got: {debug}");
+        assert!(debug.contains("0 subscriber closure(s)"), "expected 0 subscribers, got: {debug}");
+    }
+
+    #[test]
+    fn debug_inner_not_cancelled_with_subscribers() {
+        let source = CancellationTokenSource::new();
+        source.subscribe(|| {});
+        source.subscribe(|| {});
+        let debug = format!("{source:?}");
+        assert!(debug.contains("canceled: false"), "expected canceled: false, got: {debug}");
+        assert!(debug.contains("2 subscriber closure(s)"), "expected 2 subscribers, got: {debug}");
+    }
+
+    #[test]
+    fn debug_inner_cancelled() {
+        let source = CancellationTokenSource::new();
+        source.cancel();
+        let debug = format!("{source:?}");
+        assert!(debug.contains("canceled: true"), "expected canceled: true, got: {debug}");
+        assert!(debug.contains("Mutex(None)"), "expected Mutex(None), got: {debug}");
+    }
+
+    #[test]
+    fn debug_inner_while_mutex_locked() {
+        let source = CancellationTokenSource::new();
+        // Hold the subscriber lock from the current thread so try_lock fails
+        // during Debug formatting.
+        let _guard = source.token.inner.subscribers.lock().unwrap();
+        let debug = format!("{source:?}");
+        assert!(
+            debug.contains("locked subscriber list"),
+            "expected locked subscriber list, got: {debug}"
+        );
     }
 }

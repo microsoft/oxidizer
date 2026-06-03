@@ -126,10 +126,24 @@ impl<F: Future> Future for Cancelable<F> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use tick::{Clock, FutureExt};
 
     use super::*;
     use crate::CancellationTokenSource;
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn future_returns_ok() {
+        let clock = Clock::new_tokio();
+        let source = CancellationTokenSource::new();
+        clock
+            .delay(Duration::from_millis(100))
+            .cancelable(source.token())
+            .await
+            .expect("should succeed without being canceled");
+    }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
