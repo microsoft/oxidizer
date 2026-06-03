@@ -60,15 +60,15 @@ impl ::std::fmt::Debug for Test {
 impl ::data_privacy::RedactedDisplay for Test {
     fn fmt(
         &self,
-        engine: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         match self {
             Test::FirstTemplate(template_variant) => {
-                ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                ::data_privacy::RedactedDisplay::fmt(template_variant, redactor, f)?
             }
             Test::SecondTemplate(template_variant) => {
-                ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?
+                ::data_privacy::RedactedDisplay::fmt(template_variant, redactor, f)?
             }
         }
         Ok(())
