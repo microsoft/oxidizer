@@ -155,7 +155,7 @@ where
     /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
     pub fn new(connector: C, spawner: Spawner, clock: Clock, options: TransportOptions) -> Self {
-        let hyper_builder = Self::configure_hyper_builder(spawner, &clock, &options);
+        let hyper_builder = configure_hyper_builder(spawner, &clock, &options);
 
         Self {
             connector,
