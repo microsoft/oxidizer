@@ -935,21 +935,12 @@ mod tests {
 
     #[test]
     fn nested_with_request_id_restores_outer_id() {
-        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-
-        fn noop_waker() -> Waker {
-            fn no_op(_: *const ()) {}
-            fn clone(p: *const ()) -> RawWaker {
-                RawWaker::new(p, &VTABLE)
-            }
-            static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, no_op, no_op, no_op);
-            unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
-        }
+        use std::task::{Context, Poll, Waker};
 
         let outer_id = next_request_id();
         let inner_id = next_request_id();
 
-        let waker = noop_waker();
+        let waker = Waker::noop();
 
         // Poll outer WithRequestId, which sets outer_id
         let mut outer = std::pin::pin!(
