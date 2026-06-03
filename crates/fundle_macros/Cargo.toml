@@ -4,16 +4,16 @@
 [package]
 name = "fundle_macros"
 description = "Macros for the fundle crate."
-version = "0.3.1"
+version = "0.3.2"
 readme = "README.md"
 keywords = ["oxidizer", "di", "proc-macro"]
 categories = ["rust-patterns"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fundle_macros"
 
 [package.metadata.docs.rs]
@@ -23,10 +23,10 @@ all-features = true
 proc-macro = true
 
 [dependencies]
-fundle_macros_impl.workspace = true
+fundle_macros_impl = { workspace = true }
 
 [dev-dependencies]
-mutants.workspace = true
+mutants = { workspace = true }
 
 [lints]
 workspace = true

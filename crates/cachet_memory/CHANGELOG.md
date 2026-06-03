@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.1] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.1` of `cachet_tier`
+  - Now requires `0.3.4` of `ohno`
+  - Now requires `0.3.2` of `ohno_macros`
+  - Now requires `0.1.4` of `recoverable`
+  - Now requires `0.7.2` of `thread_aware`
+  - Now requires `0.7.2` of `thread_aware_macros`
+  - Now requires `0.7.1` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+
+- 🧩 Miscellaneous
+
+  - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
+
 ## [0.3.0] - 2026-06-01
 
 - ⚠️ Breaking

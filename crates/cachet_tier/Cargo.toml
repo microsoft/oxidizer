@@ -4,7 +4,7 @@
 [package]
 name = "cachet_tier"
 description = "Core cache tier trait and abstractions for building cache backends."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -38,7 +38,7 @@ recoverable = { workspace = true }
 
 [dev-dependencies]
 parking_lot = { workspace = true }
-tick = { workspace = true, features = ["test-util"] }
+tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",

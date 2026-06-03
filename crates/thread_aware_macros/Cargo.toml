@@ -4,16 +4,16 @@
 [package]
 name = "thread_aware_macros"
 description = "Macros for the thread_aware crate."
-version = "0.7.1"
+version = "0.7.2"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware", "macro", "derive"]
 categories = ["data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware_macros"
 
 [package.metadata.docs.rs]
@@ -24,10 +24,10 @@ proc-macro = true
 
 [dependencies]
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
-thread_aware_macros_impl.workspace = true
+thread_aware_macros_impl = { workspace = true }
 
 [dev-dependencies]
-mutants.workspace = true
+mutants = { workspace = true }
 
 [lints]
 workspace = true
