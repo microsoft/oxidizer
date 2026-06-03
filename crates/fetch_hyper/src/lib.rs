@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_hyper/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_hyper/favicon.ico")]
@@ -56,4 +56,3 @@ pub use builder::{HyperTransport, HyperTransportBuilder};
 pub use connection::{Connect, HyperIo};
 pub use options::{ConnectionLifetime, RequestFilter};
 pub use telemetry::ConnectionInfo;
-pub use tls::TlsBackend;

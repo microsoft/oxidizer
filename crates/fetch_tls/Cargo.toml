@@ -1,0 +1,69 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_tls"
+description = "TLS configurations and APIs used by 'fetch' crate."
+version = "0.2.0"
+readme = "README.md"
+keywords = ["oxidizer", "tls", "fetch", "http", "client"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_tls"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # ohno macro-generated trait impls
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+    # External dependencies surfaced in the public API
+    "http::version::Version",
+    # TLS backends (feature-gated)
+    "rustls::client::client_conn::ClientConfig",
+    "rustls::client::client_conn::ResolvesClientCert",
+    "rustls::crypto::CryptoProvider",
+    "rustls::verify::ServerCertVerifier",
+    "native_tls::TlsConnector",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+rustls = ["dep:rustls"]
+native-tls = ["dep:native-tls"]
+
+[dependencies]
+# internal
+ohno = { workspace = true }
+
+# external
+base64 = { workspace = true }
+http = { workspace = true }
+native-tls = { workspace = true, optional = true, features = ["alpn"] }
+# No crypto provider feature is enabled here; callers supply one via
+# `TlsBackendBuilder::configure_rustls`. See the crate docs for details.
+rustls = { workspace = true, features = [
+    "tls12",
+    "std",
+], default-features = false, optional = true }
+rustls-pki-types = { workspace = true, features = ["alloc", "std"] }
+
+[dev-dependencies]
+insta = { workspace = true }
+mutants = { workspace = true }
+native-tls = { workspace = true, features = ["alpn"] }
+rstest = { workspace = true }
+# Test code unconditionally references both backends; pull them in as
+# dev-dependencies so `cargo test` works with no features enabled.
+rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"], default-features = false }
+static_assertions = { workspace = true }
+
+[lints]
+workspace = true
