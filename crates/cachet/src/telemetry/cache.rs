@@ -35,6 +35,8 @@ pin_project! {
     /// even if the task migrates to a different thread between polls.
     ///
     /// Same pattern as `tracing::Instrument` which re-enters the span per poll.
+    /// Supports nesting (e.g., a `get_or_insert` closure calling another cache
+    /// operation) by saving and restoring the previous request ID.
     pub(crate) struct WithRequestId<F> {
         #[pin]
         inner: F,
@@ -42,13 +44,13 @@ pin_project! {
     }
 }
 
-/// RAII guard that resets the thread-local request ID to 0 on drop,
+/// RAII guard that restores the previous thread-local request ID on drop,
 /// ensuring cleanup even if the inner future panics during poll.
-struct ResetRequestId;
+struct RestoreRequestId(RequestId);
 
-impl Drop for ResetRequestId {
+impl Drop for RestoreRequestId {
     fn drop(&mut self) {
-        CURRENT_REQUEST_ID.with(|cell| cell.set(0));
+        CURRENT_REQUEST_ID.with(|cell| cell.set(self.0));
     }
 }
 
@@ -57,8 +59,8 @@ impl<F: Future> Future for WithRequestId<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        CURRENT_REQUEST_ID.with(|cell| cell.set(*this.request_id));
-        let _guard = ResetRequestId;
+        let prev = CURRENT_REQUEST_ID.with(|cell| cell.replace(*this.request_id));
+        let _guard = RestoreRequestId(prev);
         this.inner.poll(cx)
     }
 }
@@ -152,13 +154,13 @@ impl CacheTelemetry {
     fn record_debug_with_duration(&self, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
+            let duration_ns = saturating_nanos(duration);
             let span = Span::current();
             if !span.is_disabled() {
-                let duration_ns = saturating_nanos(duration);
                 span.record(attributes::FIELD_EVENT, event);
                 span.record(attributes::FIELD_DURATION_NS, duration_ns);
-                tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
             }
+            tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -173,13 +175,13 @@ impl CacheTelemetry {
     fn record_info_with_duration(&self, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
+            let duration_ns = saturating_nanos(duration);
             let span = Span::current();
             if !span.is_disabled() {
-                let duration_ns = saturating_nanos(duration);
                 span.record(attributes::FIELD_EVENT, event);
                 span.record(attributes::FIELD_DURATION_NS, duration_ns);
-                tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
             }
+            tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -194,13 +196,13 @@ impl CacheTelemetry {
     fn record_error_with_duration(&self, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
+            let duration_ns = saturating_nanos(duration);
             let span = Span::current();
             if !span.is_disabled() {
-                let duration_ns = saturating_nanos(duration);
                 span.record(attributes::FIELD_EVENT, event);
                 span.record(attributes::FIELD_DURATION_NS, duration_ns);
-                tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
             }
+            tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -308,8 +310,8 @@ impl CacheTelemetry {
             let span = Span::current();
             if !span.is_disabled() {
                 span.record(attributes::FIELD_EVENT, attributes::EVENT_INSERT_REJECTED);
-                tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
             }
+            tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
         }
         self.emit_tier_event(
             Self::current_request_id(),
@@ -929,6 +931,55 @@ mod tests {
             0,
             "request_id should be reset to 0 after WithRequestId completes"
         );
+    }
+
+    #[test]
+    fn nested_with_request_id_restores_outer_id() {
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+        fn noop_waker() -> Waker {
+            fn no_op(_: *const ()) {}
+            fn clone(p: *const ()) -> RawWaker {
+                RawWaker::new(p, &VTABLE)
+            }
+            static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, no_op, no_op, no_op);
+            unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+        }
+
+        let outer_id = next_request_id();
+        let inner_id = next_request_id();
+
+        let waker = noop_waker();
+
+        // Poll outer WithRequestId, which sets outer_id
+        let mut outer = std::pin::pin!(
+            async {
+                assert_eq!(CacheTelemetry::current_request_id(), outer_id);
+
+                // Poll inner WithRequestId — sets inner_id, should restore outer_id on completion
+                let mut inner = std::pin::pin!(
+                    async {
+                        assert_eq!(CacheTelemetry::current_request_id(), inner_id);
+                    }
+                    .with_request_id(inner_id)
+                );
+                let mut inner_cx = Context::from_waker(&waker);
+                assert!(matches!(inner.as_mut().poll(&mut inner_cx), Poll::Ready(())));
+
+                // After inner completes, outer_id should be restored
+                assert_eq!(
+                    CacheTelemetry::current_request_id(),
+                    outer_id,
+                    "outer request_id should be restored after nested WithRequestId"
+                );
+            }
+            .with_request_id(outer_id)
+        );
+        let mut outer_cx = Context::from_waker(&waker);
+        assert!(matches!(outer.as_mut().poll(&mut outer_cx), Poll::Ready(())));
+
+        // After outer completes, should be reset to 0
+        assert_eq!(CacheTelemetry::current_request_id(), 0);
     }
 
     #[test]
