@@ -169,68 +169,6 @@ where
         }
     }
 
-    /// Builds a `hyper-util` legacy client builder pre-configured from
-    /// `options`, including the timer, pool sizing, HTTP/2 tuning, keep-alive
-    /// policy, and HTTP-version preference.
-    fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportOptions) -> legacy::Builder {
-        let timer = crate::timer::ClockTimer::new(clock.clone());
-        let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
-        hyper_builder.timer(timer.clone()).pool_timer(timer);
-
-        Self::apply_pool_options(&mut hyper_builder, &options.connection_pool);
-        Self::apply_http2_options(&mut hyper_builder, &options.http_2);
-        Self::apply_keep_alive(&mut hyper_builder, &options.connection_keep_alive);
-        Self::apply_http_version_preference(&mut hyper_builder, &options.supported_http_versions);
-
-        hyper_builder
-    }
-
-    fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
-        let pool_idle_timeout = match pool.connection_idle_timeout {
-            ConnectionIdleTimeout::Unlimited => None,
-            ConnectionIdleTimeout::Limited(timeout) => Some(timeout),
-        };
-
-        hyper_builder
-            .pool_idle_timeout(pool_idle_timeout)
-            .pool_max_idle_per_host(pool.max_connections);
-    }
-
-    fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
-        hyper_builder
-            .http2_initial_max_send_streams(http_2.initial_max_send_streams)
-            .http2_adaptive_window(http_2.adaptive_window);
-    }
-
-    fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &ConnectionKeepAlive) {
-        match *keep_alive {
-            ConnectionKeepAlive::Disabled => {
-                hyper_builder.http2_keep_alive_while_idle(false).http2_keep_alive_interval(None);
-            }
-            ConnectionKeepAlive::ActiveConnections { interval, timeout } => {
-                hyper_builder
-                    .http2_keep_alive_while_idle(false)
-                    .http2_keep_alive_interval(interval)
-                    .http2_keep_alive_timeout(timeout);
-            }
-            ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout } => {
-                hyper_builder
-                    .http2_keep_alive_while_idle(true)
-                    .http2_keep_alive_interval(interval)
-                    .http2_keep_alive_timeout(timeout);
-            }
-        }
-    }
-
-    /// Applies the HTTP-version preference to `hyper_builder`. Only flips
-    /// `http2_only` on when HTTP/2 is the sole supported version; other
-    /// combinations fall through to the client builder's defaults.
-    fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: &[Version]) {
-        if versions.len() == 1 && versions[0] == Version::HTTP_2 {
-            hyper_builder.http2_only(true);
-        }
-    }
-
     /// Sets the [`HttpBodyBuilder`] used to wrap incoming response bodies.
     ///
     /// When not set, [`build`](Self::build) constructs one with a fresh
@@ -268,6 +206,69 @@ where
             .unwrap_or_else(|| HttpBodyBuilder::new(GlobalPool::new(), &self.clock));
 
         HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
+    }
+}
+
+/// Builds a `hyper-util` legacy client builder pre-configured from
+/// `options`, including the timer, pool sizing, HTTP/2 tuning, keep-alive
+/// policy, and HTTP-version preference.
+fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportOptions) -> legacy::Builder {
+    let timer = crate::timer::ClockTimer::new(clock.clone());
+    let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
+    hyper_builder.timer(timer.clone()).pool_timer(timer);
+
+    apply_pool_options(&mut hyper_builder, &options.connection_pool);
+    apply_http2_options(&mut hyper_builder, &options.http_2);
+    apply_keep_alive(&mut hyper_builder, &options.connection_keep_alive);
+    apply_http_version_preference(&mut hyper_builder, &options.supported_http_versions);
+
+    hyper_builder
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
+    let pool_idle_timeout = match pool.connection_idle_timeout {
+        ConnectionIdleTimeout::Unlimited => None,
+        ConnectionIdleTimeout::Limited(timeout) => Some(timeout),
+    };
+
+    hyper_builder
+        .pool_idle_timeout(pool_idle_timeout)
+        .pool_max_idle_per_host(pool.max_connections);
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
+    hyper_builder
+        .http2_initial_max_send_streams(http_2.initial_max_send_streams)
+        .http2_adaptive_window(http_2.adaptive_window);
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &ConnectionKeepAlive) {
+    match *keep_alive {
+        ConnectionKeepAlive::Disabled => {
+            hyper_builder.http2_keep_alive_while_idle(false).http2_keep_alive_interval(None);
+        }
+        ConnectionKeepAlive::ActiveConnections { interval, timeout } => {
+            hyper_builder
+                .http2_keep_alive_while_idle(false)
+                .http2_keep_alive_interval(interval)
+                .http2_keep_alive_timeout(timeout);
+        }
+        ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout } => {
+            hyper_builder
+                .http2_keep_alive_while_idle(true)
+                .http2_keep_alive_interval(interval)
+                .http2_keep_alive_timeout(timeout);
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: &[Version]) {
+    if versions.iter().all(|v| *v == Version::HTTP_2) {
+        hyper_builder.http2_only(true);
     }
 }
 

@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 // Matches `SocketsHttpHandler.PooledConnectionIdleTimeout` in .NET (1 minute).
-const DEFAULT_POOL_LIFETIME: Duration = Duration::from_secs(60);
+const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 
 /// Configuration options for HTTP connection pooling.
 ///
