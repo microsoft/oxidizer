@@ -54,6 +54,14 @@ const MAX_REDIRECTS: u32 = 10;
 async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
+    // When run without any arguments (e.g. by the workspace example runner in CI),
+    // there is no certificate/key/URL to exercise, so exit successfully instead of
+    // letting `argh` fail with a missing-argument error (exit code 1).
+    if std::env::args_os().nth(1).is_none() {
+        info!("No arguments provided; nothing to do. See the module docs for usage.");
+        return Ok(());
+    }
+
     let args: Args = argh::from_env();
 
     info!("Loading client certificate from: {}", args.cert);

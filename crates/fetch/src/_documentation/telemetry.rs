@@ -13,9 +13,9 @@
 //!
 //! | Metric | Instrument | Unit | Emitted when |
 //! |--------|-----------|------|--------------|
-//! | [`http.client.request.duration`](#httpclientrequestduration) | Histogram\<f64\> | `s` | Every HTTP request completes (success **or** failure) |
-//! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | Histogram\<f64\> | `s` | A TCP/TLS connection attempt finishes (success **or** failure) |
-//! | [`http.client.connection.duration`](#httpclientconnectionduration) | Histogram\<f64\> | `s` | A connection is closed (the underlying stream is dropped) |
+//! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | Every HTTP request completes (success **or** failure) |
+//! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | A TCP/TLS connection attempt finishes (success **or** failure) |
+//! | [`http.client.connection.duration`](#httpclientconnectionduration) | `Histogram<f64>` | `s` | A connection is closed (the underlying stream is dropped) |
 //!
 //! ---
 //!
