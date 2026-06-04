@@ -1968,6 +1968,10 @@ function Invoke-ReleasePackagesMain {
 
     # 2. MODE / INPUT VALIDATION + TOKEN PARSE
     $hasTokens = ($null -ne $Packages) -and ($Packages.Count -gt 0)
+    if ($Mode -ne 'targeted' -and $Force) {
+        Write-Error "release-packages.ps1 -Force is only valid with -Packages (targeted mode). The -Changed and -All modes only accept change-type answers (breaking / non-breaking / patch) and never explicit version pins, so the pin-vs-cascade rejection that -Force overrides cannot fire."
+        Exit 1
+    }
     if ($Mode -eq 'targeted') {
         if (-not $hasTokens) {
             Write-Error 'release-packages.ps1 -Packages requires at least one ''<name>@<change-spec>'' token. Use -Changed or -All for a guided walk instead.'

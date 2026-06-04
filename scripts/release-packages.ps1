@@ -113,18 +113,24 @@
     .\release-packages.ps1 -Packages 'bytesbuf@breaking','http_extensions@nonbreaking'
 
 .PARAMETER Force
-    Switch: relax the explicit-version-pin rejection. By default, if a
-    cascade computation requires a higher version than an explicit
-    `<name>@<major>.<minor>.<patch>` pin allows, the release plan is
-    rejected (the script refuses to silently override an explicit pin).
-    With -Force, the explicit pin is honored verbatim, the package's
-    EffectiveChangeType tag is upgraded to match the cascade so any
-    further cascade decisions are correct, and a warning is printed
-    flagging that downstream consumers may break.
+    Switch (valid only with -Packages): relax the explicit-version-pin
+    rejection. By default, if a cascade computation requires a higher
+    version than an explicit `<name>@<major>.<minor>.<patch>` pin
+    allows, the release plan is rejected (the script refuses to
+    silently override an explicit pin). With -Force, the explicit pin
+    is honored verbatim, the package's EffectiveChangeType tag is
+    upgraded to match the cascade so any further cascade decisions are
+    correct, and a warning is printed flagging that downstream
+    consumers may break.
 
     -Force does NOT relax the always-fatal "pin is not strictly greater
-    than the current on-disk version" check, and has no effect on change-
-    type tokens (which are always auto-upgraded silently).
+    than the current on-disk version" check, and has no effect on
+    change-type tokens (which are always auto-upgraded silently).
+
+    -Force is not exposed in -Changed or -All mode: those modes only
+    accept change-type answers (breaking / non-breaking / patch) and
+    never explicit version pins, so the pin-vs-cascade rejection
+    cannot fire there.
 
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
@@ -159,7 +165,7 @@ param(
     [Parameter(Mandatory = $true, ParameterSetName = 'All')]
     [switch]$All,
 
-    [Parameter()]
+    [Parameter(ParameterSetName = 'ByPackages')]
     [switch]$Force
 )
 
