@@ -576,8 +576,16 @@ function Get-PackageLastReleaseBaseline {
     $relPath = "crates/$PackageFolder/Cargo.toml"
     # -G matches any added/removed diff line whose content matches the regex.
     # Anchoring at column 0 keeps us on top-level keys, not version-like strings
-    # appearing inside dependency tables or arbitrary literals.
-    $out = Invoke-Git -Arguments @('log', '-1', '--format=%H', '-G', '^(version|publish)\s*=', '--', $relPath) -RepoRoot $RepoRoot -AllowFailure
+    # appearing inside dependency tables or arbitrary literals. We accept the
+    # dotted-key TOML variants `publish.workspace = true` and
+    # `version.workspace = true` (which inherit from the workspace root) in
+    # addition to the literal inline forms `publish = ...` and `version = ...`
+    # (which already match the `(version|publish)` group whether the
+    # right-hand side is a literal, an array, or an inline table like
+    # `{ workspace = true }`). NOTE: this pattern is a POSIX ERE — git's `-G`
+    # flag does not accept PCRE extensions like `(?:...)`, so we use a
+    # capturing group for the optional `.workspace` suffix instead.
+    $out = Invoke-Git -Arguments @('log', '-1', '--format=%H', '-G', '^(version|publish)(\.workspace)?\s*=', '--', $relPath) -RepoRoot $RepoRoot -AllowFailure
     $result = $null
     if ($null -ne $out) {
         $sha = (@($out))[0]

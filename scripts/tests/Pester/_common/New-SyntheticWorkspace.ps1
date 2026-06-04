@@ -151,8 +151,35 @@ function Write-PackageCargoToml {
         'description = "synthetic test package"'
         'license = "MIT"'
     )
-    if ($Package.ContainsKey('Published') -and $Package.Published -eq $false) {
-        $lines += 'publish = false'
+    # PublishSyntax (optional) controls how the `publish` key is emitted.
+    # Supported values:
+    #   - 'omitted'           : no publish key (Cargo defaults to true).
+    #   - 'literal-false'     : `publish = false`
+    #   - 'literal-true'      : `publish = true`
+    #   - 'dotted-workspace'  : `publish.workspace = true` (requires the
+    #                           workspace root to define
+    #                           `[workspace.package] publish = ...`).
+    #   - 'inline-workspace'  : `publish = { workspace = true }` (likewise).
+    #   - 'array'             : `publish = ["fake-registry"]` (restricted).
+    # If PublishSyntax is absent, the legacy Published=$false → `publish = false`
+    # default applies; Published=$true (or absent) emits nothing.
+    $publishSyntax = $null
+    if ($Package.ContainsKey('PublishSyntax')) { $publishSyntax = $Package.PublishSyntax }
+    if ($null -eq $publishSyntax) {
+        if ($Package.ContainsKey('Published') -and $Package.Published -eq $false) {
+            $publishSyntax = 'literal-false'
+        } else {
+            $publishSyntax = 'omitted'
+        }
+    }
+    switch ($publishSyntax) {
+        'omitted'          { }
+        'literal-false'    { $lines += 'publish = false' }
+        'literal-true'     { $lines += 'publish = true' }
+        'dotted-workspace' { $lines += 'publish.workspace = true' }
+        'inline-workspace' { $lines += 'publish = { workspace = true }' }
+        'array'            { $lines += 'publish = ["fake-registry"]' }
+        default            { throw "Unknown PublishSyntax '$publishSyntax' on package '$($Package.Name)'" }
     }
     if ($Package.ContainsKey('AllowedExternalTypes') -and $null -ne $Package.AllowedExternalTypes) {
         $lines += ''
@@ -202,9 +229,20 @@ function Write-RootCargoToml {
         '[workspace]'
         'resolver = "2"'
         'members = ["crates/*"]'
-        ''
-        '[workspace.dependencies]'
     )
+    # Optional [workspace.package] inheritance block. Tests that exercise
+    # `publish.workspace = true` / `version.workspace = true` need the
+    # workspace root to define a default; expose this via Spec.WorkspacePackage.
+    if ($Spec.ContainsKey('WorkspacePackage') -and $null -ne $Spec.WorkspacePackage) {
+        $lines += ''
+        $lines += '[workspace.package]'
+        foreach ($key in @($Spec.WorkspacePackage.Keys)) {
+            $value = $Spec.WorkspacePackage[$key]
+            $lines += "$key = $value"
+        }
+    }
+    $lines += ''
+    $lines += '[workspace.dependencies]'
     foreach ($package in $Spec.Packages) {
         $lines += "$($package.Name) = { path = `"crates/$($package.Name)`", version = `"$($package.Version)`" }"
     }

@@ -145,6 +145,167 @@ Describe 'Get-PackageLastReleaseBaseline' {
     }
 }
 
+Describe 'Get-PackageLastReleaseBaseline (TOML publish-syntax variants)' {
+
+    # The baseline detector inspects committed history for diff hunks whose
+    # added/removed lines start with `version = ...`, `publish = ...`,
+    # `version.workspace = ...`, or `publish.workspace = ...`. The dotted-key
+    # forms are TOML-equivalent to the inline-table forms but tools commonly
+    # round-trip between them; the regex must accept both.
+
+    It 'recognises a commit that flips publish = false → publish.workspace = true as a baseline reset' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'literal-false' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'true' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pubflip-literal-to-dotted')
+
+        # Source edit before the flip so we have a non-baseline commit between
+        # C0 (initial) and the publish flip.
+        $ws.ModifySource('pkg')
+        $ws.AddCommit('drive-by source edit')
+        $beforeFlipSha = $ws.GitSha('HEAD')
+
+        # Rewrite Cargo.toml to use the dotted-key inheritance form.
+        $cargoPath = Join-Path $ws.Path 'crates\pkg\Cargo.toml'
+        $content = [System.IO.File]::ReadAllText($cargoPath)
+        $content = $content -replace 'publish = false', 'publish.workspace = true'
+        [System.IO.File]::WriteAllText($cargoPath, $content)
+        $ws.AddCommit('flip publish to dotted-key workspace inheritance')
+        $flipSha = $ws.GitSha('HEAD')
+
+        $sha = Get-PackageLastReleaseBaseline -RepoRoot $ws.Path -PackageFolder 'pkg'
+        $sha | Should -Be $flipSha
+        $sha | Should -Not -Be $beforeFlipSha
+    }
+
+    It 'recognises a commit that flips publish.workspace = true → publish = false as a baseline reset' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'dotted-workspace' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'true' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pubflip-dotted-to-literal')
+
+        $ws.ModifySource('pkg')
+        $ws.AddCommit('drive-by source edit')
+
+        $cargoPath = Join-Path $ws.Path 'crates\pkg\Cargo.toml'
+        $content = [System.IO.File]::ReadAllText($cargoPath)
+        $content = $content -replace 'publish\.workspace = true', 'publish = false'
+        [System.IO.File]::WriteAllText($cargoPath, $content)
+        $ws.AddCommit('flip publish to literal false')
+        $flipSha = $ws.GitSha('HEAD')
+
+        $sha = Get-PackageLastReleaseBaseline -RepoRoot $ws.Path -PackageFolder 'pkg'
+        $sha | Should -Be $flipSha
+    }
+
+    It 'recognises a commit that flips inline-table publish = { workspace = true } to a different value as a baseline reset' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'inline-workspace' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'true' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pubflip-inline-to-literal')
+
+        $ws.ModifySource('pkg')
+        $ws.AddCommit('drive-by source edit')
+
+        $cargoPath = Join-Path $ws.Path 'crates\pkg\Cargo.toml'
+        $content = [System.IO.File]::ReadAllText($cargoPath)
+        $content = $content -replace 'publish = \{ workspace = true \}', 'publish = false'
+        [System.IO.File]::WriteAllText($cargoPath, $content)
+        $ws.AddCommit('flip publish to literal false')
+        $flipSha = $ws.GitSha('HEAD')
+
+        $sha = Get-PackageLastReleaseBaseline -RepoRoot $ws.Path -PackageFolder 'pkg'
+        $sha | Should -Be $flipSha
+    }
+
+    It 'treats a commit that adds version.workspace = true as a baseline reset' {
+        Reset-ReleaseScriptCaches
+        # Start with a literal version line, then rewrite to the dotted-key form.
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0' }
+            )
+            WorkspacePackage = [ordered]@{ version = '"0.1.0"' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'verflip-literal-to-dotted')
+
+        $ws.ModifySource('pkg')
+        $ws.AddCommit('drive-by source edit')
+
+        $cargoPath = Join-Path $ws.Path 'crates\pkg\Cargo.toml'
+        $content = [System.IO.File]::ReadAllText($cargoPath)
+        $content = $content -replace 'version = "0\.1\.0"', 'version.workspace = true'
+        [System.IO.File]::WriteAllText($cargoPath, $content)
+        $ws.AddCommit('flip version to dotted-key workspace inheritance')
+        $flipSha = $ws.GitSha('HEAD')
+
+        $sha = Get-PackageLastReleaseBaseline -RepoRoot $ws.Path -PackageFolder 'pkg'
+        $sha | Should -Be $flipSha
+    }
+}
+
+Describe 'Get-WorkspacePackages: publish-syntax variants via cargo metadata' {
+
+    # cargo metadata normalises every publish-key syntax (literal,
+    # inline-table-workspace, dotted-key-workspace, array) into a single
+    # `publish` field on the package object. Get-WorkspacePackages relies on
+    # that normalisation, so we exercise the variants end-to-end.
+
+    It 'reports Published=$true for publish.workspace = true with workspace publish = true' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'dotted-workspace' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'true' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pub-dotted-true')
+
+        $packages = Get-WorkspacePackages -repoRoot $ws.Path
+        ($packages | Where-Object { $_.Name -eq 'pkg' }).Published | Should -BeTrue
+    }
+
+    It 'reports Published=$false for publish.workspace = true with workspace publish = false' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'dotted-workspace' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'false' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pub-dotted-false')
+
+        $packages = Get-WorkspacePackages -repoRoot $ws.Path
+        ($packages | Where-Object { $_.Name -eq 'pkg' }).Published | Should -BeFalse
+    }
+
+    It 'reports Published=$true for publish = { workspace = true } with workspace publish = true' {
+        Reset-ReleaseScriptCaches
+        $spec = @{
+            Packages = @(
+                @{ Name = 'pkg'; Version = '0.1.0'; PublishSyntax = 'inline-workspace' }
+            )
+            WorkspacePackage = [ordered]@{ publish = 'true' }
+        }
+        $ws = New-SyntheticWorkspace -Spec $spec -Path (Join-Path $TestDrive 'pub-inline-true')
+
+        $packages = Get-WorkspacePackages -repoRoot $ws.Path
+        ($packages | Where-Object { $_.Name -eq 'pkg' }).Published | Should -BeTrue
+    }
+}
+
 Describe 'Get-WorkspacePackages' {
     BeforeAll {
         Reset-ReleaseScriptCaches
