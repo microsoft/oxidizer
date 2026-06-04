@@ -9,6 +9,7 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use fetch_options::{ConnectionInfo, ConnectionLifetime, PoolIndex};
 use http::Version;
 use http_extensions::{HttpError, Result};
 use hyper_util::client::legacy::connect::{Connected, Connection};
@@ -23,8 +24,7 @@ use crate::connection::connect::Connect;
 use crate::connection::io::HyperIo;
 use crate::connection::tracked_stream::TrackedStream;
 use crate::error_labels::{LABEL_CONNECT, LABEL_HTTP_VERSION_UNSUPPORTED, collect_error_labels};
-use crate::options::ConnectionLifetime;
-use crate::telemetry::{ConnectionInfo, create_connection_attributes, create_connection_failure_attributes};
+use crate::telemetry::{create_connection_attributes, create_connection_failure_attributes};
 
 /// A connector service that applies connect-timeout, version verification,
 /// and lifecycle tracking on top of a user-supplied [`Connect`].
@@ -35,7 +35,7 @@ pub(crate) struct ClientConnector<C, S> {
     supported_versions: Vec<Version>,
     connection_setup_duration: Histogram<f64>,
     connection_duration: Histogram<f64>,
-    pool_index: usize,
+    pool_index: PoolIndex,
     connection_lifetime: ConnectionLifetime,
     _marker: PhantomData<fn() -> S>,
 }
@@ -63,7 +63,7 @@ impl<C, S> ClientConnector<C, S> {
         connect_timeout: Duration,
         supported_versions: Vec<Version>,
         meter: &Meter,
-        pool_index: usize,
+        pool_index: PoolIndex,
         connection_lifetime: ConnectionLifetime,
     ) -> Self {
         Self {
@@ -117,11 +117,19 @@ where
         Ok(TrackedStream::new(
             connection,
             input,
-            ConnectionInfo::new(&self.clock, self.pool_index, max_age),
+            ConnectionInfo::new(connection_now(&self.clock), self.pool_index, max_age),
             self.connection_duration.clone(),
             connected,
         ))
     }
+}
+
+/// Builds a `Fn() -> Instant` closure backed by `clock`, for handing to
+/// [`ConnectionInfo::new`]. Cloning the [`Clock`] is cheap and lets the
+/// closure outlive the borrow.
+fn connection_now(clock: &Clock) -> impl Fn() -> std::time::Instant + Send + Sync + 'static {
+    let clock = clock.clone();
+    move || clock.instant()
 }
 
 async fn connect_with_timeout<S>(
@@ -415,8 +423,8 @@ mod tests {
             Duration::from_secs(5),
             vec![Version::HTTP_11, Version::HTTP_2],
             &meter,
-            7,
-            ConnectionLifetime::Fixed(Duration::from_mins(1)),
+            PoolIndex::new(7),
+            ConnectionLifetime::fixed(Duration::from_mins(1)),
         );
         let _ = cc.clone(); // exercise Clone impl
         cc.execute(BaseUri::from_static("http://example.com")).await.unwrap();
@@ -441,8 +449,8 @@ mod tests {
             Duration::from_secs(5),
             vec![Version::HTTP_2, Version::HTTP_3],
             &meter,
-            0,
-            ConnectionLifetime::Unlimited,
+            PoolIndex::new(0),
+            ConnectionLifetime::unlimited(),
         );
         let err = cc
             .execute(BaseUri::from_static("https://example.com"))

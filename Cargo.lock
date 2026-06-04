@@ -1071,11 +1071,12 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch_hyper"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "fetch_options",
  "fetch_tls",
  "futures",
  "http",
@@ -1108,8 +1109,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "fetch_tls"
+name = "fetch_options"
 version = "0.2.0"
+dependencies = [
+ "http",
+ "insta",
+ "mutants",
+ "static_assertions",
+]
+
+[[package]]
+name = "fetch_tls"
+version = "0.2.1"
 dependencies = [
  "base64",
  "http",

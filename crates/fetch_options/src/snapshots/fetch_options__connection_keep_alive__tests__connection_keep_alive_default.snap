@@ -1,0 +1,5 @@
+---
+source: crates/fetch_options/src/connection_keep_alive.rs
+expression: "ConnectionKeepAlive::default()"
+---
+Disabled
