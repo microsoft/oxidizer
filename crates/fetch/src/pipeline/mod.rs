@@ -1,7 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This module defines different types of request processing pipelines.
+//! Request-processing pipelines that wire handlers together for an [`HttpClient`](crate::HttpClient).
+//!
+//! A pipeline determines which handlers a request passes through, and in what
+//! order. The client supports three flavors:
+//!
+//! - **standard**: a production-ready stack with timeouts, retries, logging, and
+//!   metrics, configured via [`StandardRequestPipeline`].
+//! - **custom**: a fully user-defined stack of layers over the dispatch handler.
+//! - **minimal**: only the dispatch handler, with no middleware.
+//!
+//! [`PipelineContext`] carries the shared dependencies (clock, meter, router, and
+//! so on) handed to pipeline factories. See
+//! [`HttpClientBuilder`](crate::HttpClientBuilder) for how each flavor is selected.
 
 mod builder;
 mod custom;

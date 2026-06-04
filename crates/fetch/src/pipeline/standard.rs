@@ -54,8 +54,9 @@ pub enum RecoveryMode {
 ///
 /// This type is used by [`HttpClientBuilder::standard_pipeline`][crate::HttpClientBuilder::standard_pipeline]
 /// to configure the default pipeline when creating HTTP clients. Individual layers
-/// are configured through `with_*` builder methods that accept a closure receiving
-/// the current layer and returning the modified layer.
+/// are configured through builder methods (such as [`retry`][Self::retry] and
+/// [`attempt_timeout`][Self::attempt_timeout]) that accept a closure receiving the
+/// current layer and returning the modified layer.
 ///
 /// # Handlers
 ///

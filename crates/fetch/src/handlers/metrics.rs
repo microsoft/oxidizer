@@ -159,9 +159,9 @@ impl MetricsLayer {
 impl<S> Layer<S> for MetricsLayer {
     type Service = Metrics<S>;
 
-    /// Creates a new layer that wraps the given service with logging.
+    /// Wraps the given service with a [`Metrics`] handler.
     ///
-    /// This layer will log requests and responses using the provided clock for timing.
+    /// The resulting handler records request metrics against the configured meter.
     fn layer(&self, inner: S) -> Self::Service {
         let meter = self.meter.clone().unwrap_or_else(|| Metering::Global.into());
         Metrics {

@@ -43,7 +43,7 @@ impl Default for TokioDeps {
 }
 
 impl TokioDeps {
-    /// Create `TokioDeps` with a specific clock and an HTTP client specific memory pool.
+    /// Creates `TokioDeps` with the given clock and a dedicated HTTP-client memory pool.
     #[must_use]
     pub fn with_clock(clock: &Clock) -> Self {
         Self {

@@ -21,7 +21,7 @@ use tick::{Clock, FutureExt as TimeoutExt};
 use crate::pipeline::Pipeline;
 use crate::{HttpBodyBuilder, HttpError, HttpRequest, HttpResponse, Result};
 
-/// A runtime agnostic HTTP client for sending HTTP requests.
+/// A runtime-agnostic HTTP client for sending HTTP requests.
 ///
 /// `HttpClient` provides a high-level, fluent API for common HTTP operations over a
 /// configurable transport. It runs on the Tokio runtime by default, but any runtime
@@ -109,8 +109,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -142,8 +142,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -175,8 +175,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -204,8 +204,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -230,8 +230,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -265,8 +265,8 @@ impl HttpClient {
     ///
     /// # Performance tip
     ///
-    /// While you can provide strings for the method and URI, using pre-created
-    /// [`Uri`] instance is more efficient as it avoids parsing overhead.
+    /// While you can provide a string for the URI, using a pre-created [`Uri`]
+    /// instance is more efficient as it avoids parsing overhead.
     ///
     /// # Examples
     ///
@@ -297,10 +297,10 @@ impl HttpClient {
         }
     }
 
-    /// Returns a new `HttpClient` instance with the specified base URI.
+    /// Returns a new `HttpClient` that uses the given base URI for all requests.
     ///
-    /// This method allows you to create a new client based on original client that uses the provided [`BaseUri`]
-    /// for all requests. The original client remains unchanged.
+    /// The new client shares this client's pipeline and configuration; only the
+    /// base URI differs. The original client is left unchanged.
     #[must_use]
     pub fn with_base_uri(&self, base_uri: BaseUri) -> Self {
         Self {

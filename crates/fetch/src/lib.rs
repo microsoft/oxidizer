@@ -835,5 +835,5 @@ pub mod resilience;
 
 pub mod pipeline;
 
-/// Longer form documentation for [`fetch`](crate).
+/// Longer-form documentation for [`fetch`](crate).
 pub mod _documentation;

@@ -1,19 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! # HTTP Request Handlers
+//! Composable handlers that process HTTP requests as they flow through the pipeline.
 //!
-//! HTTP requests flow through a pipeline of handlers that each add specific functionality.
-//! Stack them together to build your custom request processing chain!
+//! Each handler adds one specific behavior — buffering, metrics, logging, or
+//! network dispatch — and wraps the next handler in the chain. Stacking them
+//! builds the request-processing pipeline used by an
+//! [`HttpClient`](crate::HttpClient).
 //!
-//! See [`RequestHandler`][super::RequestHandler] for more details on how handlers work and how to create your own.
+//! See [`RequestHandler`][super::RequestHandler] for how handlers work and how to
+//! write your own.
 //!
-//! ## Available Handlers
+//! # Available Handlers
 //!
-//! - [`Buffering`]: Buffers the entire response body into memory
-//! - [`Metrics`]: Collects performance data for monitoring
-//! - [`Logging`]: Adds structured request/response logging
-//! - [`Dispatch`]: Sends requests to the network (managed by the `HttpClient`)
+//! - [`Buffering`]: buffers the entire response body into memory.
+//! - [`Metrics`]: collects performance data for monitoring.
+//! - [`Logging`]: adds structured request/response logging.
+//! - [`Dispatch`]: sends requests to the network (managed by the `HttpClient`).
 
 mod dispatch;
 pub use dispatch::Dispatch;

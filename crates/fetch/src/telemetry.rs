@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Telemetry related APIs for fetch.
+//! Telemetry types for enriching `fetch` metrics and inspecting connections.
+//!
+//! [`TelemetryAttributes`] lets you attach custom [`KeyValue`] attributes to a
+//! request so they are merged into the metrics recorded for it.
+//! [`ConnectionInfo`] reports details about the connection that served a response.
+//!
+//! For the full list of emitted metrics and their attributes, see the
+//! [telemetry reference](crate::_documentation::telemetry).
 
 /// Diagnostic information about the connection that served an HTTP response.
 ///
@@ -16,20 +23,21 @@ use opentelemetry::{KeyValue, Value};
 
 pub(crate) const METER_NAME: &str = "fetch";
 
-/// A collection of key value attributes that can be attached to the request.
+/// A set of key-value attributes that enrich `fetch` telemetry.
 ///
-/// These attributes are used to enrich the fetch telemetry if available.
+/// Attach these to a request (via its extensions) to merge custom dimensions
+/// into the metrics recorded for that request.
 #[derive(Debug, Clone, Default)]
 pub struct TelemetryAttributes(smallvec::SmallVec<[KeyValue; 9]>);
 
 impl TelemetryAttributes {
-    /// Creates an empty telemetry attributes.
+    /// Creates an empty set of telemetry attributes.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Adds an [`KeyValue`] to the telemetry attributes.
+    /// Adds a [`KeyValue`] attribute to the set.
     pub fn push(&mut self, attribute: KeyValue) {
         self.0.push(attribute);
     }

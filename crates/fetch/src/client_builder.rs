@@ -227,17 +227,14 @@ impl HttpClientBuilder {
 
     /// Sets a custom OpenTelemetry meter provider for the client.
     ///
-    /// This allows you to provide your own [`MeterProvider`] implementation for collecting metrics.
-    /// By default, the client uses a global meter provider. Use this method to override it for this client instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `meter_provider` - A reference to a custom [`MeterProvider`] to use for metrics collection.
+    /// The given [`MeterProvider`] is used to collect this client's metrics. By
+    /// default, the client uses the global meter provider; use this method to
+    /// override it for this client instance.
     ///
     /// # Performance
     ///
-    /// For thread-isolated runtimes, it's preferable to use per-thread instance of meter provider
-    /// to avoid lock contention that happens when using a global meter provider.
+    /// For thread-isolated runtimes, prefer a per-thread meter provider to avoid
+    /// the lock contention that a global meter provider can cause.
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     #[cfg_attr(test, mutants::skip)] // FIXME: mutants remove resilience context and other fields, which we can't really assert on
@@ -290,14 +287,15 @@ impl HttpClientBuilder {
         }
     }
 
-    /// Sets the base URI for client.
+    /// Sets the base URI for the client.
     ///
-    /// This setting overrides any endpoint set in the Uri type you pass to the request methods,
-    /// leading to three possible scenarios:
+    /// This setting overrides any endpoint set in the [`Uri`](templated_uri::Uri) you pass to the
+    /// request methods, leading to three possible scenarios:
     ///
-    /// - `HttpClientBuilder::base_uri` is set - [`BaseUri`] on request's [`Uri`](templated_uri::Uri) is ignored and the client uses the provided [`BaseUri`] instead.
-    /// - `HttpClientBuilder::base_uri` is not set, but the request [`Uri`](templated_uri::Uri) has a [`BaseUri`] - the client uses the [`BaseUri`] from the request's [`Uri`](templated_uri::Uri).
-    /// -  No endpoint is set on either side - the builder fails with `Validation` [`Error`](crate::HttpError)
+    /// - `HttpClientBuilder::base_uri` is set: the [`BaseUri`] on the request's [`Uri`](templated_uri::Uri) is ignored and the client uses the provided [`BaseUri`] instead.
+    /// - `HttpClientBuilder::base_uri` is not set, but the request [`Uri`](templated_uri::Uri) has a [`BaseUri`]: the client uses the [`BaseUri`] from the request's [`Uri`](templated_uri::Uri).
+    /// - No endpoint is set on either side: the request fails with a validation [`HttpError`](crate::HttpError).
+    ///
     /// ```rust
     /// # #[cfg(feature = "test-util")]
     /// # {
@@ -406,7 +404,7 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Sets the redaction engine for client.
+    /// Sets the redaction engine for the client.
     ///
     /// The [`RedactionEngine`] is used to redact sensitive information from requests and responses.
     /// This is particularly useful for logging and telemetry, where you want to avoid exposing
@@ -417,16 +415,10 @@ impl HttpClientBuilder {
         self
     }
 
-    /// Builds the configured HTTP client.
+    /// Builds the configured [`HttpClient`](crate::HttpClient).
     ///
-    /// This finalizes all configuration settings and creates the actual client
-    /// instance. After calling this method, you'll have a fully functional
-    /// [`HttpClient`](crate::HttpClient) ready to make HTTP requests.
-    ///
-    /// # Returns
-    ///
-    /// A new [`HttpClient`](crate::HttpClient) instance configured according to
-    /// the settings specified on this builder.
+    /// This finalizes all configuration and returns a ready-to-use client that
+    /// reflects every setting applied to this builder.
     #[must_use]
     pub fn build(self) -> crate::HttpClient {
         let clock = self.transport.clock().clone();
