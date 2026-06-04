@@ -203,6 +203,23 @@ impl From<PathAndQuery> for Uri {
     }
 }
 
+/// Deserializes a [`PathAndQuery`] from a string, validating it via [`PathAndQuery::try_from`].
+///
+/// Deserialization always yields the static variant; a [`PathAndQueryTemplate`]
+/// is never reconstructed from serialized data. Brace characters are accepted as
+/// literal path content, so a string like `/users/{id}` deserializes into a
+/// static path whose text is `/users/{id}` verbatim - it is *not* interpreted as
+/// a template placeholder. Only a [`Deserialize`](serde::Deserialize) impl is
+/// provided: [`PathAndQuery`] is privacy-classified and intentionally has no
+/// plain [`Display`](std::fmt::Display)/[`Serialize`](serde::Serialize).
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PathAndQuery {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -286,5 +303,47 @@ mod tests {
         use ohno::Labeled;
         let err = PathAndQuery::try_from(String::from("api/v1/users")).unwrap_err();
         assert_eq!(err.label(), "uri_invalid");
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::PathAndQuery;
+
+    #[test]
+    fn deserialize_static_path_and_query() {
+        let paq: PathAndQuery = serde_json::from_str(r#""/api/v1/users?active=true""#).unwrap();
+        assert_eq!(paq.to_string().declassify_ref(), "/api/v1/users?active=true");
+    }
+
+    #[test]
+    fn deserialize_rejects_missing_leading_slash() {
+        serde_json::from_str::<PathAndQuery>(r#""api/v1/users""#).unwrap_err();
+    }
+
+    #[test]
+    fn deserialize_error_does_not_leak_input() {
+        // `UriError` must never echo the raw input, preserving the privacy posture.
+        let err = serde_json::from_str::<PathAndQuery>(r#""SECRETPATH_no_slash""#).unwrap_err();
+        assert!(
+            !err.to_string().contains("SECRETPATH"),
+            "deserialize error must not leak the raw input"
+        );
+    }
+
+    #[test]
+    fn path_and_query_does_not_implement_serialize() {
+        // Deserialize-only is intentional for this privacy-classified type.
+        static_assertions::assert_not_impl_any!(PathAndQuery: serde::Serialize);
+    }
+
+    #[test]
+    fn deserialize_braces_are_literal_static_content() {
+        // A `PathAndQueryTemplate` is never reconstructed from serialized data.
+        // Braces are valid path characters, so `/users/{id}` deserializes into a
+        // static path containing the literal text `{id}`, not a template placeholder.
+        let paq: PathAndQuery = serde_json::from_str(r#""/users/{id}""#).unwrap();
+        assert_eq!(paq.to_string().declassify_ref(), "/users/{id}");
+        assert!(paq.label().is_none(), "deserialized value must be a static path, not a template");
     }
 }
