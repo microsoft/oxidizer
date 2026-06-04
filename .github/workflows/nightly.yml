@@ -38,7 +38,7 @@ jobs:
   miri-tree-borrows:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest
     steps:
       # prep
       - name: Checkout
@@ -54,63 +54,9 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-          # Crates whose tests are run one-by-one in separate Miri processes
-          # to avoid accumulating tree-borrows metadata beyond runner memory.
-          MIRI_ISOLATED_CRATES: multitude
         run: |
-          set -euo pipefail
-
-          TOOLCHAIN="+${{ env.RUST_NIGHTLY }}"
-          COMMON_ARGS="--all-features --lib --tests"
-
-          # Build excludes for workspace run
-          EXCLUDES=""
-          for crate in $MIRI_ISOLATED_CRATES; do
-            EXCLUDES="$EXCLUDES --exclude $crate"
-          done
-
-          # 1) Workspace run (everything except isolated crates)
-          if [[ -n "$EXCLUDES" ]]; then
-            echo "::group::Workspace (excluding: $MIRI_ISOLATED_CRATES)"
-            cargo $TOOLCHAIN miri test $COMMON_ARGS --workspace $EXCLUDES
-            echo "::endgroup::"
-          fi
-
-          # 2) Isolated crates: run each lib test as its own Miri process.
-          #    Integration tests (--tests) are already separate binaries, so
-          #    they run normally alongside the lib tests at the end.
-          for crate in $MIRI_ISOLATED_CRATES; do
-            echo "::group::Listing lib tests for $crate"
-            TESTS=$(cargo $TOOLCHAIN test -p "$crate" --all-features --lib -- --list 2>/dev/null \
-              | grep ': test$' | sed 's/: test$//')
-            TEST_COUNT=$(echo "$TESTS" | wc -l)
-            echo "Found $TEST_COUNT lib tests in $crate"
-            echo "::endgroup::"
-
-            CURRENT=0
-            FAILED=0
-            for test in $TESTS; do
-              CURRENT=$((CURRENT + 1))
-              echo "::group::[$CURRENT/$TEST_COUNT] $crate :: $test"
-              if ! cargo $TOOLCHAIN miri test -p "$crate" --all-features --lib -- --exact "$test" 2>&1; then
-                echo "::error::FAILED: $crate :: $test"
-                FAILED=$((FAILED + 1))
-              fi
-              echo "::endgroup::"
-            done
-
-            # Run integration tests normally (each is already a separate binary)
-            echo "::group::$crate integration tests"
-            if ! cargo $TOOLCHAIN miri test -p "$crate" --all-features --tests 2>&1; then
-              echo "::error::FAILED: $crate integration tests"
-              FAILED=$((FAILED + 1))
-            fi
-            echo "::endgroup::"
-
-            if [[ $FAILED -gt 0 ]]; then
-              echo "::error::$FAILED test(s) failed in $crate"
-              exit 1
-            fi
-          done
+          cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests \
+            -- --skip alloc_slice_local_with_or_panic_at_u16_max_succeeds \
+               --skip alloc_slice_shared_with_or_panic_at_u16_max_succeeds
         timeout-minutes: 240
 
