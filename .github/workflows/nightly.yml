@@ -76,14 +76,15 @@ jobs:
             echo "::endgroup::"
           fi
 
-          # 2) Isolated crates: run each test as its own Miri process
+          # 2) Isolated crates: run each lib test as its own Miri process.
+          #    Integration tests (--tests) are already separate binaries, so
+          #    they run normally alongside the lib tests at the end.
           for crate in $MIRI_ISOLATED_CRATES; do
-            echo "::group::Listing tests for $crate"
-            # Use non-miri test binary to list tests quickly
-            TESTS=$(cargo $TOOLCHAIN test -p "$crate" $COMMON_ARGS -- --list 2>/dev/null \
+            echo "::group::Listing lib tests for $crate"
+            TESTS=$(cargo $TOOLCHAIN test -p "$crate" --all-features --lib -- --list 2>/dev/null \
               | grep ': test$' | sed 's/: test$//')
             TEST_COUNT=$(echo "$TESTS" | wc -l)
-            echo "Found $TEST_COUNT tests in $crate"
+            echo "Found $TEST_COUNT lib tests in $crate"
             echo "::endgroup::"
 
             CURRENT=0
@@ -91,12 +92,20 @@ jobs:
             for test in $TESTS; do
               CURRENT=$((CURRENT + 1))
               echo "::group::[$CURRENT/$TEST_COUNT] $crate :: $test"
-              if ! cargo $TOOLCHAIN miri test -p "$crate" $COMMON_ARGS -- --exact "$test" 2>&1; then
+              if ! cargo $TOOLCHAIN miri test -p "$crate" --all-features --lib -- --exact "$test" 2>&1; then
                 echo "::error::FAILED: $crate :: $test"
                 FAILED=$((FAILED + 1))
               fi
               echo "::endgroup::"
             done
+
+            # Run integration tests normally (each is already a separate binary)
+            echo "::group::$crate integration tests"
+            if ! cargo $TOOLCHAIN miri test -p "$crate" --all-features --tests 2>&1; then
+              echo "::error::FAILED: $crate integration tests"
+              FAILED=$((FAILED + 1))
+            fi
+            echo "::endgroup::"
 
             if [[ $FAILED -gt 0 ]]; then
               echo "::error::$FAILED test(s) failed in $crate"
