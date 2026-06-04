@@ -46,9 +46,19 @@ mod tests {
         Box::pin(PanickingStream)
     }
 
+    fn create_boxed() -> Box<dyn HyperIo> {
+        Box::new(PanickingStream)
+    }
+
     #[should_panic(expected = "connected")]
     #[test]
     fn connected_delegates_to_inner() {
         let _ = create().connected();
+    }
+
+    #[should_panic(expected = "connected")]
+    #[test]
+    fn boxed_connected_delegates_to_inner() {
+        let _ = create_boxed().connected();
     }
 }

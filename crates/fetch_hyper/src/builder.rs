@@ -279,7 +279,6 @@ fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: 
         hyper_builder.http2_only(true);
     }
 }
-}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

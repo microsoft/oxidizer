@@ -375,12 +375,12 @@ impl PoolSelection {
         }
     }
 
-/// Creates a `PoolSelection` that distributes requests evenly across
-/// pools in a strict round-robin fashion.
-///
-/// Each successive request is routed to the next pool,
-/// cycling back to the first pool after reaching the last one.
-/// This provides the most even distribution of requests across all pools.
+    /// Creates a `PoolSelection` that distributes requests evenly across
+    /// pools in a strict round-robin fashion.
+    ///
+    /// Each successive request is routed to the next pool,
+    /// cycling back to the first pool after reaching the last one.
+    /// This provides the most even distribution of requests across all pools.
     #[must_use]
     pub fn round_robin() -> Self {
         Self { mode: Mode::RoundRobin }
