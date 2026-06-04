@@ -405,9 +405,9 @@ big-picture view of what releasing the package could ripple through
 (cascading may pull more dependents into the release set after the
 prompt, so a release-set-rooted listing would be misleadingly narrow).
 A package with no in-workspace dependents is shown with the hint
-"no in-workspace dependents".
+"No in-workspace dependents".
 
-If you ignore every prompt, the script exits without writing any files.
+If you skip every prompt, the script exits without writing any files.
 
 ---
 

@@ -1094,7 +1094,7 @@ function Format-PackageMenu {
     if ($directDependents.Count -gt 0) {
         [void]$sb.AppendLine("  Direct dependents in this workspace: $($directDependents -join ', ')")
     } else {
-        [void]$sb.AppendLine('  no in-workspace dependents')
+        [void]$sb.AppendLine('  No in-workspace dependents')
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
