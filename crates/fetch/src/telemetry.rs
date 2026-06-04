@@ -215,5 +215,7 @@ mod tests {
         assert_eq!(Value::from("2.0"), network_protocol_version(Version::HTTP_2));
 
         assert_eq!(Value::from("3.0"), network_protocol_version(Version::HTTP_3));
+
+        assert_eq!(Value::from("_OTHER"), network_protocol_version(Version::HTTP_09));
     }
 }

@@ -330,4 +330,20 @@ mod tests {
         let response = handler.execute(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn pooled_dispatch_mode_has_debug_representation() {
+        let mode = DispatchMode::pooled(
+            vec![
+                TransportHandler::new(FakeHandler::from(StatusCode::OK)),
+                TransportHandler::new(FakeHandler::from(StatusCode::ACCEPTED)),
+            ],
+            PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT),
+        );
+
+        let debug_str = format!("{mode:?}");
+        assert!(debug_str.contains("Pooled"));
+        assert!(debug_str.contains("transports"));
+    }
 }

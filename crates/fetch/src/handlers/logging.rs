@@ -130,11 +130,44 @@ fn redacted_path_and_query(request: &HttpRequest, engine: &RedactionEngine) -> O
 #[cfg(test)]
 mod tests {
     use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-    use http::Request;
-    use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
+    use http::{Request, StatusCode};
+    use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
     use templated_uri::Uri;
 
     use super::*;
+    use crate::handlers::Dispatch;
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn execute_logs_and_returns_successful_response() {
+        let clock = Clock::new_frozen();
+        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
+
+        let request = HttpRequestBuilder::new_fake()
+            .uri("https://example.com/path?query=value")
+            .build()
+            .unwrap();
+
+        let response = handler.execute(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn execute_logs_and_propagates_inner_error() {
+        let clock = Clock::new_frozen();
+        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let handler = layer.layer(Dispatch::new_fake(FakeHandler::never_completes()));
+
+        // Request without scheme/authority triggers a validation error in Dispatch.
+        let request = Request::get(http::Uri::from_static("/no-authority"))
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+
+        let error = handler.execute(request).await.unwrap_err();
+        assert_eq!(collect_error_labels(&error), "uri_origin_missing");
+    }
 
     #[test]
     fn redacted_path_and_query_when_templated_path_and_query_attached() {

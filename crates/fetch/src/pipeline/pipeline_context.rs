@@ -81,3 +81,37 @@ impl PipelineContext {
         &self.router
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use http_extensions::HttpBodyOptions;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+    use super::*;
+
+    fn test_context(body_builder: HttpBodyBuilder) -> PipelineContext {
+        let clock = Clock::new_frozen();
+        let meter = SdkMeterProvider::default().meter("test");
+
+        PipelineContext::new(
+            HttpResilienceContext::new(&clock),
+            &meter,
+            RedactionEngine::default(),
+            body_builder,
+            clock,
+            Router::default(),
+        )
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn body_builder_returns_the_configured_builder() {
+        let body_builder = HttpBodyBuilder::new_fake().with_options(HttpBodyOptions::default().buffer_limit(4321));
+        let context = test_context(body_builder);
+
+        // The accessor must expose the exact builder supplied at construction, including its
+        // distinctive buffer limit.
+        assert!(format!("{:?}", context.body_builder()).contains("4321"));
+    }
+}

@@ -482,6 +482,20 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
+    fn callbacks_have_compact_debug_representation() {
+        let layer = test_layer()
+            .on_record(|_duration, _result, _attrs| {})
+            .enrich_from_request(|_attrs, _request| {})
+            .enrich_from_response(|_attrs, _result| {});
+
+        let debug_str = format!("{layer:?}");
+        assert!(debug_str.contains("OnRecordCallback(..)"));
+        assert!(debug_str.contains("RequestEnricher(..)"));
+        assert!(debug_str.contains("ResponseEnricher(..)"));
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
     fn on_record_is_called() {
         let called = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&called);

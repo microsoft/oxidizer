@@ -408,4 +408,46 @@ mod tests {
 
         assert_eq!(pipeline.recovery_mode, RecoveryMode::Hedging);
     }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn test_attempt_layer_configure_closures_are_invoked() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let clock = Clock::new_frozen();
+        let invocations = Arc::new(AtomicUsize::new(0));
+
+        let intercept_flag = Arc::clone(&invocations);
+        let logs_flag = Arc::clone(&invocations);
+        let metrics_flag = Arc::clone(&invocations);
+
+        let _pipeline = StandardRequestPipeline::new(
+            &HttpResilienceContext::new(&clock),
+            &RedactionEngine::default(),
+            &clock,
+            &test_meter(),
+            &Router::default(),
+        )
+        .attempt_intercept(move |intercept| {
+            intercept_flag.fetch_add(1, Ordering::Relaxed);
+            intercept
+        })
+        .attempt_logs(move |logs| {
+            logs_flag.fetch_add(1, Ordering::Relaxed);
+            logs
+        })
+        .attempt_metrics(move |metrics| {
+            metrics_flag.fetch_add(1, Ordering::Relaxed);
+            metrics
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn test_configure_standard_pipeline_debug() {
+        let configure = ConfigureStandardPipeline::default();
+        let debug_str = format!("{configure:?}");
+        assert!(debug_str.contains("ConfigureStandardPipeline"));
+    }
 }

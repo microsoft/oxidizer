@@ -329,4 +329,14 @@ mod tests {
         // The factory must have been called at least once to build the per-slot handler.
         assert!(counter.load(Ordering::Relaxed) >= 1);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn transport_has_type_name_debug_representation() {
+        // `Transport` holds non-Debug closures, so its Debug impl falls back to the type
+        // name. The builder embeds the transport, so formatting it exercises that impl.
+        let builder = create_builder(ok_factory, Isolation::Shared, custom_deps());
+
+        assert!(format!("{builder:?}").contains("Transport"));
+    }
 }

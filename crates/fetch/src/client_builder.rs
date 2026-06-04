@@ -515,6 +515,55 @@ mod tests {
     }
 
     #[test]
+    fn connection_keep_alive_sets_option() {
+        use std::time::Duration;
+
+        use crate::options::ConnectionKeepAlive;
+
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+            .connection_keep_alive(ConnectionKeepAlive::active_connections(Duration::from_secs(15), Duration::from_secs(5)));
+
+        assert!(matches!(
+            builder.options.transport.connection_keep_alive,
+            ConnectionKeepAlive::ActiveConnections { interval, timeout }
+                if interval == Duration::from_secs(15) && timeout == Duration::from_secs(5)
+        ));
+    }
+
+    #[tokio::test]
+    async fn tls_options_are_stored_without_breaking_the_pipeline() {
+        use crate::tls::TlsOptions;
+
+        // The fake transport ignores TLS, so a custom `TlsOptions` must be accepted and
+        // stored without affecting request handling.
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+            .tls_options(TlsOptions::default())
+            .build();
+
+        let response = client.get("https://example.com").fetch().await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn redaction_engine_sets_option() {
+        use data_privacy::RedactedToString;
+        use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
+        use data_privacy::RedactionEngine;
+        use templated_uri::{PathAndQuery, Uri};
+
+        let engine = RedactionEngine::builder()
+            .add_class_redactor(Uri::DATA_CLASS, SimpleRedactor::with_mode(SimpleRedactorMode::Passthrough))
+            .build();
+
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).redaction_engine(&engine);
+
+        // The stored engine must be the configured one: a passthrough redactor leaves the
+        // path untouched.
+        let redacted = PathAndQuery::from_static("/path").to_redacted_string(&builder.options.redaction_engine);
+        assert_eq!(redacted, "/path");
+    }
+
+    #[test]
     fn standard_pipeline_after_minimal_creates_new_pipeline() {
         let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
             .standard_pipeline(|pipeline, _context| pipeline.retry(|retry| retry.max_retry_attempts(3)))
