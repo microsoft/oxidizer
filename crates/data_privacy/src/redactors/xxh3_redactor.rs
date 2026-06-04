@@ -48,6 +48,10 @@ impl xxH3Redactor {
 }
 
 impl Redactor for xxH3Redactor {
+    fn redacts(&self, _data_class: &DataClass) -> bool {
+        true
+    }
+
     fn redact(&self, _: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         let hash = xxh3_64_with_secret(value.as_bytes(), &self.secret);
         let buffer = crate::redactors::u64_to_hex_array::<REDACTED_LEN>(hash);
@@ -58,6 +62,7 @@ impl Redactor for xxH3Redactor {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     #[test]
     fn test_with_secret_creates_redactor_with_custom_secret() {

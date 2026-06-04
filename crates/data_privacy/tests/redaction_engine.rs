@@ -4,7 +4,7 @@
 #![expect(missing_docs, reason = "Test code")]
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine};
+use data_privacy::{DataClass, IntoDataClass, RedactedDisplay, RedactionEngine, Redactor};
 use data_privacy_macros::{classified, taxonomy};
 
 #[taxonomy(test)]
@@ -65,7 +65,7 @@ where
 fn collect_output_as_class(engine: &RedactionEngine, data_class: impl IntoDataClass, value: &str) -> String {
     let mut output = String::new();
     engine
-        .redact(data_class.into_data_class(), value, &mut output)
+        .redact(&data_class.into_data_class(), value, &mut output)
         .expect("redact should succeed in tests");
     output
 }
@@ -429,8 +429,8 @@ fn suppress_redaction_prevents_redaction_for_class() {
         .suppress_redaction(TestTaxonomy::Insensitive)
         .build();
 
-    assert!(engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
-    assert!(!engine.would_redact(&TestTaxonomy::Insensitive.data_class()));
+    assert!(engine.redacts(&TestTaxonomy::Sensitive.data_class()));
+    assert!(!engine.redacts(&TestTaxonomy::Insensitive.data_class()));
 }
 
 #[test]
@@ -448,10 +448,10 @@ fn suppress_redaction_results_in_passthrough_output() {
 }
 
 #[test]
-fn would_redact_returns_true_for_unregistered_class() {
+fn redacts_returns_true_for_unregistered_class() {
     let engine = RedactionEngine::builder().build();
 
-    assert!(engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
+    assert!(engine.redacts(&TestTaxonomy::Sensitive.data_class()));
 }
 
 #[test]
@@ -461,5 +461,5 @@ fn suppress_redaction_overrides_previously_added_redactor() {
         .suppress_redaction(TestTaxonomy::Sensitive)
         .build();
 
-    assert!(!engine.would_redact(&TestTaxonomy::Sensitive.data_class()));
+    assert!(!engine.redacts(&TestTaxonomy::Sensitive.data_class()));
 }
