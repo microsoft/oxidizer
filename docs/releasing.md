@@ -3,20 +3,29 @@
 This document is the reference for the human-driven release tooling in
 `scripts/`:
 
-- `scripts/release-packages.ps1` — interactive release driver. The caller
-  supplies the full release plan up-front via `-Packages` (a list of
-  `name@change-spec` tokens); the script resolves the plan into a release
-  set, surfaces any direct or transitive dependencies that have unreleased
-  modifications for the caller to review, and applies the resulting
-  version-number increments, changelog updates, and dependent cascade in
-  one shot.
-- `scripts/release-changed-packages.ps1` — guided counterpart to
-  `release-packages.ps1` for when you do not yet know which packages to
-  release. The script walks you through *every* workspace package with
-  unreleased modifications, one prompt at a time, and lets you ignore
-  each one or release it as breaking / non-breaking / patch. Each
-  acceptance feeds into the same plan resolver and cascade-toward-dependents
-  logic as the token-based flow. Interactive-only.
+- `scripts/release-packages.ps1` — interactive release driver. Picks one
+  of three mutually-exclusive target-selection modes:
+
+  - `-Packages '<name>@<change-spec>', ...` — the caller supplies the
+    full release plan up-front as `name@change-spec` tokens. The only
+    mode that runs non-interactively.
+  - `-Changed` — guided walk through every workspace package with
+    unreleased modifications (changes newer than the package's last
+    `version =` / `publish =` commit). The script prompts for a
+    per-package decision (view diff / ignore / release as breaking,
+    non-breaking, or patch). Interactive-only.
+  - `-All` — guided walk through every publishable workspace package,
+    even ones with no on-disk modifications. Use to force-walk the
+    workspace when a refactor may have touched packages the change scan
+    misses, or to coordinate a multi-package release after an internal
+    cleanup. Interactive-only.
+
+  In every mode the same downstream pipeline runs: plan resolution,
+  cascade toward dependents, an interactive elevation review for any
+  modified-but-unreleased dependencies, a final plan display, then
+  atomic application of all version-number increments, changelog
+  updates, README regeneration, and `Cargo.toml` rewrites.
+
 - `scripts/check-unreleased-dependencies.ps1` — CI helper that flags for
   reviewer attention any workspace packages with unreleased modifications
   that are transitively pulled in by a package this PR is releasing.
@@ -284,22 +293,33 @@ The user-review queue therefore contains two categories of finding:
    picking too strong a change type is harmless except it forces direct
    dependents to bump as well.
 
-2. Run:
+2. Run one of:
 
    ```powershell
+   # Targeted (only mode that runs non-interactively):
    ./scripts/release-packages.ps1 -Packages 'pkg1@<change-spec>','pkg2@<change-spec>'
+
+   # Guided walk through every package with on-disk modifications:
+   ./scripts/release-packages.ps1 -Changed
+
+   # Guided walk through every publishable package, modified or not:
+   ./scripts/release-packages.ps1 -All
    ```
 
    The script will:
-   - Parse the tokens and compute the resolved release set, including
-     the cascade toward dependents.
+   - Parse the tokens (targeted mode) or seed the review loop with every
+     modified / every publishable package (guided modes) and compute the
+     resolved release set, including the cascade toward dependents.
    - Show the release plan.
    - For each workspace package with unreleased modifications that is
      transitively pulled in by something in the release set (and is not
      itself in the release set with a cascade-applied change type of
      `breaking`), show a per-package menu where you can view the diff and
      decide whether to include the package, elevate its change type, or
-     leave it out.
+     leave it out. In `-All` mode the same menu is also shown for
+     publishable packages with no on-disk changes; the "View diff" option
+     is relabelled `View diff (no changes in this package)` so the empty
+     state is obvious before you open the editor.
    - After review, apply all version-number increments, changelog
      updates, README regeneration, `Cargo.toml` rewrites, and workspace
      `[workspace.dependencies]` updates in one shot.
@@ -320,23 +340,31 @@ when re-planning the same release.
 
 If a previous run produced changes you want to discard before
 re-planning, use `git reset` / `git restore` to revert the on-disk
-state first, then re-run with the corrected `-Packages` argument.
+state first, then re-run with the corrected arguments.
 
 ---
 
-## Guided changed-packages workflow
+## Guided modes (`-Changed`, `-All`)
 
-When you know "something changed and probably needs releasing" but do not
-yet have the full `-Packages` list ready, use the guided alternative:
+Both `-Changed` and `-All` walk the workspace one package at a time and
+prompt for a per-package release decision. They differ only in which
+packages get surfaced:
 
-```powershell
-./scripts/release-changed-packages.ps1
-```
+- `-Changed` surfaces every published workspace package with unreleased
+  modifications. Use this when you know "something changed and probably
+  needs releasing" but do not yet have the full `-Packages` list ready.
+  If the scan finds no packages with unreleased modifications, the
+  script prints a confirmation and exits without prompting.
 
-The script takes no arguments. It scans the workspace for every package
-with unreleased modifications and walks you through them one at a time.
-For each surfaced package the menu is the same as the per-package review
-menu used by `release-packages.ps1`:
+- `-All` surfaces every published workspace package, regardless of
+  whether the on-disk content has been modified. Use this when you want
+  to force-walk the entire workspace — for example to coordinate a
+  multi-package release after an internal refactor, or when you suspect
+  the change scan might be missing something. Packages with no detected
+  changes still expose the View-diff option (relabelled to make the
+  empty state obvious) so muscle-memory navigation continues to work.
+
+For each surfaced package the menu lets you:
 
 - **View the diff** since the last release commit.
 - **Ignore** the package (leave it unreleased; treat the change as
@@ -345,22 +373,22 @@ menu used by `release-packages.ps1`:
   token for the package internally and feeds it back into the planner.
 
 Acceptances behave exactly as if you had passed the corresponding
-`-Packages` token to `release-packages.ps1`: the planner re-resolves the
-release set, computes the cascade toward dependents, and the next
-iteration surfaces any newly-relevant elevation candidates. Decisions
-are final — each package is prompted at most once. If a later
-acceptance cascade-pulls a previously-ignored package into the release
-set, or strengthens an already-reviewed package's cascade level, the
-planner silently accepts the cascade-applied level (reflecting the
-user's earlier decision not to elevate). The final release plan summary
-records the cascade reasons for every released package.
+`-Packages` token: the planner re-resolves the release set, computes
+the cascade toward dependents, and the next iteration surfaces any
+newly-relevant elevation candidates. Decisions are final — each
+package is prompted at most once. If a later acceptance cascade-pulls
+a previously-ignored package into the release set, or strengthens an
+already-reviewed package's cascade level, the planner silently accepts
+the cascade-applied level (reflecting the user's earlier decision not
+to elevate). The final release plan summary records the cascade
+reasons for every released package.
 
-Conceptually, the workflow is equivalent to imagining a virtual `*`
-package that depends on every changed workspace package and running
-`release-packages.ps1` to cascade releases from `*` outward. There is no
+Conceptually, both guided modes are equivalent to imagining a virtual
+`*` package that depends on every surfaced workspace package and
+running the planner to cascade releases from `*` outward. There is no
 real `*` token; the review loop seeds its dependency BFS with every
-changed package as an additional root, so per-package chains between
-changed packages emerge naturally during planning.
+surfaced package as an additional root, so per-package chains between
+surfaced packages emerge naturally during planning.
 
 For each surfaced package the menu lists **every in-workspace dependency
 chain** ending at that package — not only the chains rooted at the
@@ -371,12 +399,9 @@ prompt, so a release-set-rooted listing would be misleadingly narrow).
 A package with no in-workspace dependents is shown with the hint
 "no in-workspace dependents".
 
-`release-changed-packages.ps1` is **interactive-only**. For
-scripted / CI use, invoke `release-packages.ps1` with an explicit
-`-Packages` list so the choices are explicit and auditable.
-
-If the scan finds no packages with unreleased modifications, the script
-prints a confirmation and exits without prompting. If you ignore every
+Both `-Changed` and `-All` are **interactive-only**. For scripted /
+CI use, invoke `release-packages.ps1 -Packages` with an explicit token
+list so the choices are explicit and auditable. If you ignore every
 prompt, the script exits without writing any files.
 
 ---
