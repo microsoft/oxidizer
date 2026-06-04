@@ -220,12 +220,16 @@ of the review, but cannot suppress a cascade-imposed change type.
 ### Errors the planner rejects
 
 - An explicit semver that is not strictly greater than the package's
-  current on-disk version.
+  current on-disk version. (Always fatal — `-Force` does not relax this.)
 - A user-supplied change type that pins the package *below* what the
   cascade computes for it. (The planner can auto-upgrade ordinary
   change-type tokens, but treats an explicit semver token as a hard
   pin — if the explicit version is below what the cascade requires the
-  planner errors instead of silently overriding the caller.)
+  planner errors instead of silently overriding the caller. Pass
+  `-Force` to override: the pin is honored verbatim, the package's
+  effective change-type tag is still upgraded so further cascade
+  decisions are correct, and a warning is printed flagging that
+  downstream consumers may break.)
 
 ---
 

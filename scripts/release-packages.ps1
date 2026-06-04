@@ -51,12 +51,14 @@
     rather than mirroring the target's change type. Dev-only dependents are
     skipped — they automatically pick up the new workspace version.
 
-    All inputs you request (change types and explicit version pins) are
-    treated as MINIMUMS. The cascade analysis may strengthen a requested
-    change type (e.g. an exposing dependent of a breaking release will be
-    upgraded from your requested `patch` to `breaking`). Explicit version
-    pins must already satisfy any cascade-required minimum version; if not,
-    the resolver errors with the conflict explained.
+    User-provided change types may be automatically upgraded by cascade
+    analysis if dependency exposure rules require a stronger change type
+    (e.g. an exposing dependent of a breaking release is upgraded from
+    your requested `patch` to `breaking`). If an explicit version number
+    is specified for a package and cascade logic requires a higher
+    version number than the pin allows, the release plan is rejected
+    (or, with -Force, the pin is honored verbatim and a warning is
+    printed flagging that downstream consumers may break).
 
 .PARAMETER Packages
     The list of workspace packages to release, in the form
@@ -110,6 +112,20 @@
     # between them or onto their dependents is computed automatically.
     .\release-packages.ps1 -Packages 'bytesbuf@breaking','http_extensions@nonbreaking'
 
+.PARAMETER Force
+    Switch: relax the explicit-version-pin rejection. By default, if a
+    cascade computation requires a higher version than an explicit
+    `<name>@<major>.<minor>.<patch>` pin allows, the release plan is
+    rejected (the script refuses to silently override an explicit pin).
+    With -Force, the explicit pin is honored verbatim, the package's
+    EffectiveChangeType tag is upgraded to match the cascade so any
+    further cascade decisions are correct, and a warning is printed
+    flagging that downstream consumers may break.
+
+    -Force does NOT relax the always-fatal "pin is not strictly greater
+    than the current on-disk version" check, and has no effect on change-
+    type tokens (which are always auto-upgraded silently).
+
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
     .\release-packages.ps1 -Packages 'my-package@1.0.0'
@@ -117,6 +133,11 @@
 .EXAMPLE
     # Pin a pre-release version.
     .\release-packages.ps1 -Packages 'my-package@1.0.0-rc.1'
+
+.EXAMPLE
+    # Force-honor a pin even when cascade analysis requires a higher version
+    # (downstream consumers may break — use with caution).
+    .\release-packages.ps1 -Packages 'my-package@1.0.0' -Force
 
 .EXAMPLE
     # Guided walk through every workspace package with unreleased modifications.
@@ -136,7 +157,10 @@ param(
     [switch]$Changed,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'All')]
-    [switch]$All
+    [switch]$All,
+
+    [Parameter()]
+    [switch]$Force
 )
 
 # All helpers, configuration, and Invoke-ReleasePackagesMain live in the
@@ -151,4 +175,4 @@ $mode = switch ($PSCmdlet.ParameterSetName) {
     'All'        { 'all' }
 }
 
-Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages | Out-Null
+Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null

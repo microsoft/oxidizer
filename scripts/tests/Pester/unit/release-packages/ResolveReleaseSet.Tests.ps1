@@ -332,6 +332,73 @@ Describe 'Resolve-ReleaseSet' {
             { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
                 Should -Throw -ExpectedMessage "*Cannot release 'b' as v1.1.0*cascade requires*v2.0.0*"
         }
+
+        It 'mentions -Force in the rejection error message so the user knows about the override' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
+            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
+                Should -Throw -ExpectedMessage '*-Force*'
+        }
+
+        It '-Force honors the explicit pin verbatim when cascade requires a higher version' {
+            # a breaking would normally require b 2.0.0; user pinned b at 1.1.0.
+            # With -Force, b stays at 1.1.0 but the change-type tag is upgraded
+            # so any further cascade decisions for b would be correct.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+            $byFolder['b'].EffectiveTargetVersion    | Should -Be '1.1.0'
+            $byFolder['b'].RequestedTargetVersion    | Should -Be '1.1.0'
+            $byFolder['b'].EffectiveChangeType       | Should -Be 'breaking'
+            $byFolder['b'].PinHonoredAgainstCascade  | Should -BeTrue
+        }
+
+        It '-Force emits a warning naming the package, the pin, the cascade-required minimum, and the cascade sources' {
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
+            $warnings = @()
+            $null = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningVariable +warnings -WarningAction SilentlyContinue
+            ($warnings -join "`n") | Should -Match '-Force'
+            ($warnings -join "`n") | Should -Match "'b'"
+            ($warnings -join "`n") | Should -Match 'v1\.1\.0'
+            ($warnings -join "`n") | Should -Match 'v2\.0\.0'
+            ($warnings -join "`n") | Should -Match 'a'
+        }
+
+        It '-Force does NOT set PinHonoredAgainstCascade when the pin already satisfies the cascade' {
+            # a non-breaking would require b 1.1.0 (cascade-required); user pinned
+            # b at 1.5.0 which already satisfies. -Force is a no-op here.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+            )
+            $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking', 'b@1.5.0')
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force
+            $byFolder = @{}
+            foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
+            $byFolder['b'].PinHonoredAgainstCascade | Should -BeFalse
+            $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.5.0'
+        }
+
+        It '-Force does NOT relax the always-fatal "pin not strictly greater than current" check' {
+            # Pin equal to current version is always rejected, even with -Force,
+            # because it would be a no-op (or downgrade) regardless of cascade.
+            $baseline = @((New-BaselinePackage -Folder 'pkg' -Version '1.2.3'))
+            $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.2.3')
+            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force } |
+                Should -Throw -ExpectedMessage '*strictly greater than the current version*'
+        }
     }
 
     Context 'diamond dependency with two user-source roots' {

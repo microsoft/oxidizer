@@ -256,21 +256,30 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #                       call during a single release-packages run, otherwise
 #                       cascade math would double-bump (the on-disk state
 #                       mutates as releases land).
+#   -Force            : if set, an explicit version pin that numerically
+#                       undershoots the cascade-required version is honored
+#                       verbatim instead of throwing. EffectiveChangeType is
+#                       still upgraded so downstream cascade decisions are
+#                       correct; PinHonoredAgainstCascade is set so callers
+#                       (and Show-ReleasePlan) can warn the user. -Force does
+#                       NOT relax the always-fatal "pin is not strictly
+#                       greater than the current on-disk version" check.
 #
 # Returns: an array of pscustomobject entries, one per resolved package:
 #
 #   @{
-#     Folder                  = '<crate folder>'
-#     Name                    = '<cargo package name>'  # may differ from Folder
-#     CurrentVersion          = '<baseline version>'
-#     RequestedChangeType     = 'breaking'|'non-breaking'|'patch'|$null   # null for cascade-source
-#     RequestedTargetVersion  = '<pin>'|$null                              # null when not pinned
-#     EffectiveChangeType     = 'breaking'|'non-breaking'|'patch'         # after cascade resolution
-#     EffectiveTargetVersion  = '<version>'                                # after cascade resolution
-#     Source                  = 'user'|'cascade'
-#     AutoUpgraded            = $true|$false   # user-source entry strengthened by cascade
-#     CascadeReasons          = [List<{Target,Version,Breaking}>]          # one per (target → dep) edge
-#     RawToken                = '<original token>'|$null                   # null for cascade-source
+#     Folder                    = '<crate folder>'
+#     Name                      = '<cargo package name>'  # may differ from Folder
+#     CurrentVersion            = '<baseline version>'
+#     RequestedChangeType       = 'breaking'|'non-breaking'|'patch'|$null   # null for cascade-source
+#     RequestedTargetVersion    = '<pin>'|$null                              # null when not pinned
+#     EffectiveChangeType       = 'breaking'|'non-breaking'|'patch'         # after cascade resolution
+#     EffectiveTargetVersion    = '<version>'                                # after cascade resolution
+#     Source                    = 'user'|'cascade'
+#     AutoUpgraded              = $true|$false   # user-source entry strengthened by cascade
+#     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
+#     CascadeReasons            = [List<{Target,Version,Breaking}>]          # one per (target → dep) edge
+#     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
 #
 # Resolution algorithm:
@@ -286,8 +295,10 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #          breaking). For user-source entries with -Change keyword,
 #          auto-upgrade silently and set AutoUpgraded=$true. For user-source
 #          entries with an explicit version pin, throw if the pin would
-#          numerically undershoot the cascade-required version; otherwise
-#          honour the pin and bump only the change-type tag.
+#          numerically undershoot the cascade-required version (or, with
+#          -Force, honor the pin verbatim, upgrade the change-type tag, and
+#          set PinHonoredAgainstCascade=$true); otherwise honour the pin and
+#          bump only the change-type tag.
 #        - or create a new cascade-source entry.
 #      Cascade reasons are recorded per (target → dep) edge with dedup by
 #      target name (re-encountering an edge for an already-strengthened target
@@ -313,7 +324,8 @@ function Get-TransitivePublishedDependentsFromBaseline {
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        [Parameter(Mandatory = $false)][switch]$Force
     )
 
     if ($null -eq $ParsedTokens -or @($ParsedTokens).Count -eq 0) {
@@ -364,17 +376,18 @@ function Resolve-ReleaseSet {
         }
 
         $resolved[$pkg.Folder] = [pscustomobject]@{
-            Folder                  = $pkg.Folder
-            Name                    = $pkg.Name
-            CurrentVersion          = $currentVersion
-            RequestedChangeType     = $req.RequestedChangeType
-            RequestedTargetVersion  = $req.RequestedTargetVersion
-            EffectiveChangeType     = $effectiveChangeType
-            EffectiveTargetVersion  = $effectiveTargetVersion
-            Source                  = 'user'
-            AutoUpgraded            = $false
-            CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
-            RawToken                = $req.RawToken
+            Folder                   = $pkg.Folder
+            Name                     = $pkg.Name
+            CurrentVersion           = $currentVersion
+            RequestedChangeType      = $req.RequestedChangeType
+            RequestedTargetVersion   = $req.RequestedTargetVersion
+            EffectiveChangeType      = $effectiveChangeType
+            EffectiveTargetVersion   = $effectiveTargetVersion
+            Source                   = 'user'
+            AutoUpgraded             = $false
+            PinHonoredAgainstCascade = $false
+            CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
+            RawToken                 = $req.RawToken
         }
     }
 
@@ -432,18 +445,29 @@ function Resolve-ReleaseSet {
                     if (-not [string]::IsNullOrEmpty($existing.RequestedTargetVersion)) {
                         # User pinned an explicit version. Verify it numerically
                         # satisfies the cascade requirement; if not, the user
-                        # has to revise their request.
+                        # has to revise their request — unless -Force was set,
+                        # in which case we honor the pin verbatim, still bump
+                        # the EffectiveChangeType tag, and flag the entry so
+                        # the user sees a clear warning at plan-display time.
                         $cmpPin = Compare-SemanticVersions -version1 $existing.RequestedTargetVersion -version2 $cascadeRequiredVersion
                         if ($cmpPin -lt 0) {
-                            $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                            throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin or use a change-type keyword."
+                            if ($Force) {
+                                $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+                                Write-Warning "-Force: honoring explicit pin v$($existing.RequestedTargetVersion) on '$($existing.Folder)' even though cascade requires at least v$cascadeRequiredVersion (cascade sources: $reasonsNames). The package's EffectiveChangeType tag is upgraded to '$dependentChangeType' but the version on disk will be v$($existing.RequestedTargetVersion). Downstream consumers may break."
+                                $existing.EffectiveChangeType       = $dependentChangeType
+                                $existing.PinHonoredAgainstCascade  = $true
+                            } else {
+                                $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+                                throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (downstream consumers may break)."
+                            }
+                        } else {
+                            # Pin still satisfies. Bump the EffectiveChangeType tag
+                            # (so cascade re-exposure decisions for this entry's
+                            # own dependents — if we iterated them, which we don't
+                            # at present — would be correct) but keep the pin as
+                            # the version.
+                            $existing.EffectiveChangeType = $dependentChangeType
                         }
-                        # Pin still satisfies. Bump the EffectiveChangeType tag
-                        # (so cascade re-exposure decisions for this entry's
-                        # own dependents — if we iterated them, which we don't
-                        # at present — would be correct) but keep the pin as
-                        # the version.
-                        $existing.EffectiveChangeType = $dependentChangeType
                     } else {
                         $existing.EffectiveChangeType    = $dependentChangeType
                         $existing.EffectiveTargetVersion = $cascadeRequiredVersion
@@ -454,17 +478,18 @@ function Resolve-ReleaseSet {
                 }
             } else {
                 $newEntry = [pscustomobject]@{
-                    Folder                  = $depPkg.Folder
-                    Name                    = $depPkg.Name
-                    CurrentVersion          = $depPkg.Version
-                    RequestedChangeType     = $null
-                    RequestedTargetVersion  = $null
-                    EffectiveChangeType     = $dependentChangeType
-                    EffectiveTargetVersion  = Get-NextVersion -currentVersion $depPkg.Version -ChangeType $dependentChangeType
-                    Source                  = 'cascade'
-                    AutoUpgraded            = $false
-                    CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
-                    RawToken                = $null
+                    Folder                   = $depPkg.Folder
+                    Name                     = $depPkg.Name
+                    CurrentVersion           = $depPkg.Version
+                    RequestedChangeType      = $null
+                    RequestedTargetVersion   = $null
+                    EffectiveChangeType      = $dependentChangeType
+                    EffectiveTargetVersion   = Get-NextVersion -currentVersion $depPkg.Version -ChangeType $dependentChangeType
+                    Source                   = 'cascade'
+                    AutoUpgraded             = $false
+                    PinHonoredAgainstCascade = $false
+                    CascadeReasons           = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken                 = $null
                 }
                 $newEntry.CascadeReasons.Add($cascadeReason)
                 $resolved[$depPkg.Folder] = $newEntry
@@ -1456,7 +1481,8 @@ function Invoke-PlanReview {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
         [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
-        [Parameter(Mandatory = $false)][ValidateSet('targeted', 'all-changed')][string]$Mode = 'targeted'
+        [Parameter(Mandatory = $false)][ValidateSet('targeted', 'all-changed')][string]$Mode = 'targeted',
+        [Parameter(Mandatory = $false)][switch]$Force
     )
 
     # Interactivity is enforced by the entry-point Invoke-ReleasePackagesMain.
@@ -1513,7 +1539,7 @@ function Invoke-PlanReview {
             if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
                 $resolvedHash = @{}
             } else {
-                $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+                $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -Force:$Force)
                 $resolvedHash = @{}
                 foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
             }
@@ -1596,7 +1622,7 @@ function Invoke-PlanReview {
         if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
             $resolvedHash = @{}
         } else {
-            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline)
+            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -Force:$Force)
             $resolvedHash = @{}
             foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
         }
@@ -1786,15 +1812,19 @@ function Show-ReleasePlan {
     Write-Host "📋 Final release plan ($total $packageNoun):" -ForegroundColor Cyan
 
     foreach ($entry in $userEntries) {
-        $tag = if ($entry.AutoUpgraded) {
+        $tag = if ($entry.PinHonoredAgainstCascade) {
+            "user-requested ($($entry.EffectiveChangeType); -Force: pin honored over cascade)"
+        } elseif ($entry.AutoUpgraded) {
             "user-requested (auto-upgraded by cascade to $($entry.EffectiveChangeType))"
         } else {
             "user-requested ($($entry.EffectiveChangeType))"
         }
-        Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [$tag]" -ForegroundColor Green
+        $color = if ($entry.PinHonoredAgainstCascade) { 'Yellow' } else { 'Green' }
+        Write-Host "  • $($entry.Folder): $($entry.CurrentVersion) -> $($entry.EffectiveTargetVersion)   [$tag]" -ForegroundColor $color
         if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
             $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-            Write-Host "      strengthened by cascade from: $names" -ForegroundColor DarkGray
+            $reasonLabel = if ($entry.PinHonoredAgainstCascade) { 'cascade required upgrade from' } else { 'strengthened by cascade from' }
+            Write-Host "      $($reasonLabel): $names" -ForegroundColor DarkGray
         }
     }
 
@@ -1804,17 +1834,22 @@ function Show-ReleasePlan {
         Write-Host "      cascaded from: $names" -ForegroundColor DarkGray
     }
 
-    # Footer: explain the "minimums" semantics. Always printed so reviewers
-    # don't have to remember the contract; the second line only fires when at
-    # least one user-requested change type was actually strengthened by
-    # cascade analysis.
+    # Footer: explain how cascade interacts with user input. Always printed so
+    # reviewers don't have to remember the contract; the conditional lines
+    # only fire when the corresponding situation applies (at least one user
+    # entry was auto-upgraded, or at least one was pinned over cascade via
+    # -Force).
     Write-Host ''
-    Write-Host 'Note: requested change types are MINIMUMS; cascade analysis may strengthen them to honor dependency exposure rules.' -ForegroundColor DarkGray
+    Write-Host 'Note: user-provided change types may be automatically upgraded if cascade logic deems it necessary (e.g. non-breaking -> breaking).' -ForegroundColor DarkGray
     $autoUpgraded = @($userEntries | Where-Object { $_.AutoUpgraded })
     if ($autoUpgraded.Count -gt 0) {
-        Write-Host "Items above tagged 'auto-upgraded by cascade' were strengthened from the requested change type." -ForegroundColor DarkGray
+        Write-Host "Items above tagged 'auto-upgraded by cascade' were upgraded from the user-requested change type." -ForegroundColor DarkGray
     }
-    Write-Host 'Explicit version pins are NOT auto-upgraded by cascade — if a cascade requires a higher version than a pin allows, the planner errors out instead.' -ForegroundColor DarkGray
+    $forcedPins = @($userEntries | Where-Object { $_.PinHonoredAgainstCascade })
+    if ($forcedPins.Count -gt 0) {
+        Write-Host "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin even though cascade required a higher version — downstream consumers may break." -ForegroundColor Yellow
+    }
+    Write-Host 'If an explicit version number is specified in the release-spec but cascade logic requires a higher version number, the release plan is rejected (use -Force to override).' -ForegroundColor DarkGray
 }
 
 # Prints the "Success! Next steps" block after a bundled release. Picks the
@@ -1899,7 +1934,10 @@ function Invoke-ReleasePackagesMain {
         [Parameter()]
         [AllowNull()]
         [AllowEmptyCollection()]
-        [string[]]$Packages = @()
+        [string[]]$Packages = @(),
+
+        [Parameter()]
+        [switch]$Force
     )
 
     # 1. PRE-FLIGHT
@@ -1996,7 +2034,7 @@ function Invoke-ReleasePackagesMain {
     try {
         $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
             -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
-            -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode
+            -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode -Force:$Force
     } catch {
         Write-Error $_.Exception.Message
         Exit 1

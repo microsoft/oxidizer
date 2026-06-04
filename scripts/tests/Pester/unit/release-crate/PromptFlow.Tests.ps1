@@ -1085,31 +1085,33 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
 }
 
 # ---------------------------------------------------------------------------
-# Show-ReleasePlan footer (MINIMUMS semantics)
+# Show-ReleasePlan footer (cascade-upgrade semantics)
 # ---------------------------------------------------------------------------
 
-Describe 'Show-ReleasePlan: MINIMUMS footer' {
+Describe 'Show-ReleasePlan: cascade-upgrade footer' {
 
     BeforeAll {
         function script:New-PlanEntryForFooterTest {
             param(
                 [string]$Folder,
-                [string]$Source                  = 'user',
-                [bool]$AutoUpgraded              = $false,
-                [string]$EffectiveChangeType     = 'breaking',
-                [string]$CurrentVersion          = '1.0.0',
-                [string]$EffectiveTargetVersion  = '2.0.0',
-                [object[]]$CascadeReasons        = @()
+                [string]$Source                   = 'user',
+                [bool]$AutoUpgraded               = $false,
+                [bool]$PinHonoredAgainstCascade   = $false,
+                [string]$EffectiveChangeType      = 'breaking',
+                [string]$CurrentVersion           = '1.0.0',
+                [string]$EffectiveTargetVersion   = '2.0.0',
+                [object[]]$CascadeReasons         = @()
             )
             [pscustomobject]@{
-                Folder                 = $Folder
-                Name                   = $Folder
-                Source                 = $Source
-                AutoUpgraded           = $AutoUpgraded
-                EffectiveChangeType    = $EffectiveChangeType
-                CurrentVersion         = $CurrentVersion
-                EffectiveTargetVersion = $EffectiveTargetVersion
-                CascadeReasons         = $CascadeReasons
+                Folder                   = $Folder
+                Name                     = $Folder
+                Source                   = $Source
+                AutoUpgraded             = $AutoUpgraded
+                PinHonoredAgainstCascade = $PinHonoredAgainstCascade
+                EffectiveChangeType      = $EffectiveChangeType
+                CurrentVersion           = $CurrentVersion
+                EffectiveTargetVersion   = $EffectiveTargetVersion
+                CascadeReasons           = $CascadeReasons
             }
         }
     }
@@ -1124,18 +1126,18 @@ Describe 'Show-ReleasePlan: MINIMUMS footer' {
         } -ModuleName $null
     }
 
-    It 'prints the always-on MINIMUMS notice line' {
+    It 'prints the always-on cascade-upgrade notice line' {
         $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
         Show-ReleasePlan -ResolvedReleaseSet $plan
 
-        ($script:Captured -join "`n") | Should -Match 'requested change types are MINIMUMS'
+        ($script:Captured -join "`n") | Should -Match 'user-provided change types may be automatically upgraded'
     }
 
-    It 'prints the explicit-pin-not-auto-upgraded clarification' {
+    It 'prints the explicit-pin-rejection clarification with -Force override hint' {
         $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
         Show-ReleasePlan -ResolvedReleaseSet $plan
 
-        ($script:Captured -join "`n") | Should -Match 'Explicit version pins are NOT auto-upgraded'
+        ($script:Captured -join "`n") | Should -Match 'If an explicit version number is specified.*the release plan is rejected.*-Force'
     }
 
     It 'omits the auto-upgraded line when no user entry was strengthened' {
@@ -1155,10 +1157,36 @@ Describe 'Show-ReleasePlan: MINIMUMS footer' {
         ($script:Captured -join "`n") | Should -Match "tagged 'auto-upgraded by cascade'"
     }
 
+    It 'omits the pin-honored-over-cascade line when no entry was forced' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' -PinHonoredAgainstCascade $false }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Not -Match "'-Force: pin honored over cascade'"
+    }
+
+    It 'includes the pin-honored-over-cascade line when at least one entry was forced' {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -PinHonoredAgainstCascade $false
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match "'-Force: pin honored over cascade'"
+        ($script:Captured -join "`n") | Should -Match 'downstream consumers may break'
+    }
+
+    It "tags a forced entry's per-package line with '-Force: pin honored over cascade'" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        # Per-package line, not the footer:
+        ($script:Captured -join "`n") | Should -Match '• b:.*-Force: pin honored over cascade'
+    }
+
     It 'omits the footer entirely when the plan is empty (just the placeholder line)' {
         Show-ReleasePlan -ResolvedReleaseSet @{}
 
-        ($script:Captured -join "`n") | Should -Not -Match 'MINIMUMS'
+        ($script:Captured -join "`n") | Should -Not -Match 'may be automatically upgraded'
         ($script:Captured -join "`n") | Should -Match 'Release plan: \(empty\)'
     }
 }
