@@ -48,12 +48,12 @@ type aliases and an extension trait:
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt_http">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2UwLjUuMIJoc2VhdGJlbHRlMC41LjOCbXNlYXRiZWx0X2h0dHBlMC40LjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbTOk4e6Z0lGUbu-9zWu8YZcwbyVvoEicMTCUbJQkpemmNhqlhZIOCb2h0dHBfZXh0ZW5zaW9uc2UwLjUuMIJoc2VhdGJlbHRlMC41LjOCbXNlYXRiZWx0X2h0dHBlMC4zLjA
  [__link0]: https://crates.io/crates/seatbelt/0.5.3
  [__link1]: https://crates.io/crates/seatbelt/0.5.3
  [__link2]: https://docs.rs/http_extensions/0.5.0/http_extensions/?search=HttpRequest
  [__link3]: https://docs.rs/http_extensions/0.5.0/http_extensions/?search=Result
- [__link4]: https://docs.rs/seatbelt_http/0.4.0/seatbelt_http/?search=HttpRecovery
- [__link5]: https://docs.rs/seatbelt_http/0.4.0/seatbelt_http/?search=HttpClone
- [__link6]: https://docs.rs/seatbelt_http/0.4.0/seatbelt_http/type.HttpResilienceContext.html
+ [__link4]: https://docs.rs/seatbelt_http/0.3.0/seatbelt_http/?search=HttpRecovery
+ [__link5]: https://docs.rs/seatbelt_http/0.3.0/seatbelt_http/?search=HttpClone
+ [__link6]: https://docs.rs/seatbelt_http/0.3.0/seatbelt_http/type.HttpResilienceContext.html
  [__link7]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=ResilienceContext
