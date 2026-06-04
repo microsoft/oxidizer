@@ -480,18 +480,16 @@ mod tests {
         insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
     }
 
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[cfg_attr(miri, ignore)] // insta snapshots are not supported under Miri.
     #[test]
     fn callbacks_have_compact_debug_representation() {
-        let layer = test_layer()
-            .on_record(|_duration, _result, _attrs| {})
-            .enrich_from_request(|_attrs, _request| {})
-            .enrich_from_response(|_attrs, _result| {});
+        let on_record = OnRecordCallback(Arc::new(|_duration, _result, _attrs| {}));
+        let request_enricher = RequestEnricher(Arc::new(|_attrs, _request| {}));
+        let response_enricher = ResponseEnricher(Arc::new(|_attrs, _result| {}));
 
-        let debug_str = format!("{layer:?}");
-        assert!(debug_str.contains("OnRecordCallback(..)"));
-        assert!(debug_str.contains("RequestEnricher(..)"));
-        assert!(debug_str.contains("ResponseEnricher(..)"));
+        insta::assert_debug_snapshot!("on_record", on_record);
+        insta::assert_debug_snapshot!("request_enricher", request_enricher);
+        insta::assert_debug_snapshot!("response_enricher", response_enricher);
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.

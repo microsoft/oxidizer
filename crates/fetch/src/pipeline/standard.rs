@@ -444,10 +444,10 @@ mod tests {
         assert_eq!(invocations.load(Ordering::Relaxed), 3);
     }
 
+    #[cfg_attr(miri, ignore)] // insta snapshots are not supported under Miri.
     #[test]
     fn test_configure_standard_pipeline_debug() {
         let configure = ConfigureStandardPipeline::default();
-        let debug_str = format!("{configure:?}");
-        assert!(debug_str.contains("ConfigureStandardPipeline"));
+        insta::assert_debug_snapshot!(configure);
     }
 }

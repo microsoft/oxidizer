@@ -520,8 +520,9 @@ mod tests {
 
         use crate::options::ConnectionKeepAlive;
 
-        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
-            .connection_keep_alive(ConnectionKeepAlive::active_connections(Duration::from_secs(15), Duration::from_secs(5)));
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).connection_keep_alive(
+            ConnectionKeepAlive::active_connections(Duration::from_secs(15), Duration::from_secs(5)),
+        );
 
         assert!(matches!(
             builder.options.transport.connection_keep_alive,
@@ -546,9 +547,8 @@ mod tests {
 
     #[test]
     fn redaction_engine_sets_option() {
-        use data_privacy::RedactedToString;
         use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-        use data_privacy::RedactionEngine;
+        use data_privacy::{RedactedToString, RedactionEngine};
         use templated_uri::{PathAndQuery, Uri};
 
         let engine = RedactionEngine::builder()

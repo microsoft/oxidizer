@@ -342,8 +342,6 @@ mod tests {
             PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT),
         );
 
-        let debug_str = format!("{mode:?}");
-        assert!(debug_str.contains("Pooled"));
-        assert!(debug_str.contains("transports"));
+        insta::assert_debug_snapshot!(mode);
     }
 }
