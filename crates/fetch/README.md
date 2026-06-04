@@ -21,10 +21,23 @@ for making HTTP requests without worrying about the complex details of modern HT
 
 ## Why a new HTTP client?
 
-`fetch`’s headline feature is its **modularity**: it forces neither a runtime, an I/O
-implementation, nor a particular HTTP transport on you. The request pipeline is built around a
-*transport handler* at its leaf that you can swap out, with everything above it — resilience,
-observability, routing, logging, retries — layered on top. This makes `fetch` both:
+`fetch` bundles the capabilities real-world services need into a single client, ready to use
+out of the box:
+
+* **Secure, resilient and observable by default**: Strong TLS validation, built-in resilience
+  (retries, circuit breaking, hedging), and OpenTelemetry-compatible observability are
+  pre-configured for real-world use.
+* **Built-in testability**: The `test-util` feature lets you mock HTTP responses without complex
+  setup, making tests fast and deterministic.
+* **Composable pipeline**: Modular request handlers make it easy to add or customize behaviors
+  like logging, metrics, or retries.
+* **Memory efficient**: Uses smart pooling and zero-copy techniques to handle large responses
+  with minimal overhead.
+
+Crucially, `fetch` delivers these features **without forcing a runtime, an I/O implementation, or
+a particular HTTP transport on you**. The request pipeline is built around a *transport handler*
+at its leaf that you can swap out, with everything above it — resilience, observability, routing,
+logging, retries — layered on top. This makes `fetch`:
 
 * **runtime-agnostic**: Tokio works out of the box, or plug in any async runtime and I/O by
   supplying your own transport handler; and
@@ -36,17 +49,6 @@ That makes `fetch` an excellent fit for **libraries that want to stay runtime- a
 transport-agnostic**: they depend on `fetch` for its features while leaving the runtime and
 transport choice to the consuming application, which plugs in whatever it already uses. See the
 [`custom`][__link3] module and [`custom::create_builder`][__link4] for a worked example.
-
-It also addresses several other needs:
-
-* **Secure, resilient and observable by default**: Strong TLS validation, built-in resilience,
-  OpenTelemetry-compatible observability, and security are pre-configured for real-world use.
-* **Composable pipeline**: Modular request handlers make it easy to add or customize behaviors like
-  logging, metrics, or retries.
-* **Built-in testability**: The `test-util` feature lets you mock HTTP responses without complex setup,
-  making tests fast and deterministic.
-* **Memory efficient**: Uses smart pooling and zero-copy techniques to handle large responses with
-  minimal overhead.
 
 ### How does it compare to `reqwest`?
 
@@ -695,7 +697,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb39mIYrOzrFgbZfA5pOiFuqUb_veIg2SKOpkbOux1JcOe7athZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjKCZWZldGNoZjAuMTAuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40gmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuM4JtdGVtcGxhdGVkX3VyaWUwLjIuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb2WmD1F_UIKMb_y_LH96pMFEbQe6yUIzNiPAbptABq0g7vmVhZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjKCZWZldGNoZjAuMTAuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40gmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuM4JtdGVtcGxhdGVkX3VyaWUwLjIuMw
  [__link0]: https://docs.rs/fetch/0.10.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.4.4/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.10.0/fetch/?search=HttpClient::post
