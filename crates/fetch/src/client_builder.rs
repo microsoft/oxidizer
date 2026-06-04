@@ -524,6 +524,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn tls_options_are_stored_without_breaking_the_pipeline() {
         use crate::tls::TlsOptions;
