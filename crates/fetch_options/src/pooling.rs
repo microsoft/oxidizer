@@ -332,7 +332,7 @@ impl fmt::Display for PoolIndex {
     }
 }
 
-/// Configures how requests are distributed across a pool of connections.
+/// Configures how requests are distributed across multiple connection pools.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PoolSelection {
@@ -340,13 +340,13 @@ pub struct PoolSelection {
 }
 
 impl PoolSelection {
-    /// Default number of requests routed to a single connection by
+    /// Default number of requests routed to a single pool by
     /// [`PoolSelection::saturating`] before moving to the next.
     pub const DEFAULT_REQUESTS_PER_CLIENT: u32 = 100;
 
     /// Creates a `PoolSelection` that routes requests in a round-robin fashion,
-    /// with each connection handling a well-defined number of requests before
-    /// moving to the next connection.
+    /// with each pool handling a well-defined number of requests before moving
+    /// to the next pool.
     ///
     /// Use [`PoolSelection::DEFAULT_REQUESTS_PER_CLIENT`] for the standard
     /// threshold (100 requests), or pass any other `u32` value.
