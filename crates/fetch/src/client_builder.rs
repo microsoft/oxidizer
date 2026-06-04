@@ -576,8 +576,8 @@ mod tests {
         assert!(dbg.contains("max_attempts: 4"));
     }
 
-    #[tokio::test]
-    async fn response_body_options() {
+    #[test]
+    fn response_body_options() {
         let custom = HttpBodyOptions::default().buffer_limit(1234);
 
         let mut builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());

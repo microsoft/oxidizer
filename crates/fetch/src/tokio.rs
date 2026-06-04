@@ -230,4 +230,23 @@ mod tests {
         let response = client.get("https://example.com/after-relocation").fetch().await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn build_tls_backend_skips_empty_supported_http_versions() {
+        use fetch_options::TransportOptions;
+
+        use crate::tls::TlsOptions;
+
+        // An empty `supported_http_versions` means "no preference", so
+        // `build_tls_backend` must leave the builder's own default versions in place.
+        // It must NOT forward the empty list to `TlsBackendBuilder::supported_http_versions`,
+        // which panics on an empty slice. The `!is_empty()` guard is what prevents that
+        // panic; without it, materializing the backend here panics.
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = Vec::new();
+
+        // Must not panic: the empty list has to be skipped, not forwarded.
+        let _backend = super::build_tls_backend(&options, TlsOptions::default());
+    }
 }

@@ -610,11 +610,11 @@ mod tests {
         use crate::options::{ConnectionPoolOptions, PoolSelection};
         use crate::pipeline::Pipeline;
 
+        let mut pools = ConnectionPoolOptions::default();
+        pools.multiple_pools = Some((1, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)));
         let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
             .minimal_pipeline()
-            .connection_pool_options(
-                ConnectionPoolOptions::default().multiple_pools(1, PoolSelection::saturating(PoolSelection::DEFAULT_REQUESTS_PER_CLIENT)),
-            )
+            .connection_pool_options(pools)
             .build();
 
         let Pipeline::Minimal(dispatch) = client.pipeline() else {
