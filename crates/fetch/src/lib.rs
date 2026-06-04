@@ -70,7 +70,7 @@
 //! | **Zero-copy Buffers** | ✅ Built-in | ❌ Partial, uses `Bytes` |
 //! | **Linux support** | ✅ Full support | ✅ Full support |
 //!
-//! [^1]: Advanced HTTP client features include things like multipart uploads, cookies, proxies, and redirects.
+//! [^1]: Advanced HTTP client features include things like file uploads, cookies, proxies, and redirects.
 //! [^2]: The features currently missing (cookies, redirects, forms) may be added in future versions as the
 //! client matures.
 //!
@@ -709,7 +709,7 @@
 //! which takes care of essential TLS operations:
 //!
 //! - Verifies certificates against the operating system's trusted root `CAs`.
-//! - Validates hostnames and checks certificate expiration.
+//! - Validates host names and checks certificate expiration.
 //! - Enforces TLS security policies.
 //!
 //! TLS is configured automatically; simply construct a client and make HTTPS requests:

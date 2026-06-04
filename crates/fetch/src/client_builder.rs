@@ -194,7 +194,7 @@ impl HttpClientBuilder {
     ///
     /// Use `TlsOptions::builder_rustls()` for the rustls backend,
     /// or `TlsOptions::builder_native_tls()` for the platform native TLS backend.
-    /// The rustls backend also supports mutual TLS (mTLS) via the builder's
+    /// The rustls backend also supports mutual TLS (`mTLS`) via the builder's
     /// `client_identity` method.
     ///
     /// # Example

@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Mutual TLS (mTLS) authentication with the fetch HTTP client using the rustls backend.
+//! Mutual TLS (`mTLS`) authentication with the fetch HTTP client using the rustls backend.
 //!
-//! It loads a client certificate and private key from PEM files, configures the HTTP client
+//! It loads a client certificate and private key from `PEM` files, configures the HTTP client
 //! with a client identity, and performs a GET request to a user-specified URL.
 //!
 //! Note: The fetch crate does not follow redirects automatically, so this example
@@ -31,14 +31,14 @@ use tracing::info;
 #[path = "util/utils.rs"]
 mod utils;
 
-/// Demonstrates mutual TLS (mTLS) authentication with the fetch HTTP client.
+/// Demonstrates mutual TLS (`mTLS`) authentication with the fetch HTTP client.
 #[derive(FromArgs)]
 struct Args {
-    /// path to the client certificate PEM file
+    /// path to the client certificate `PEM` file
     #[argh(option)]
     cert: String,
 
-    /// path to the client private key PEM file
+    /// path to the client private key `PEM` file
     #[argh(option)]
     key: String,
 

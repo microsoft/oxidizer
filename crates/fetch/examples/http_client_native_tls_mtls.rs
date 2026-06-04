@@ -1,11 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates mutual TLS (mTLS) authentication with the fetch HTTP client
+//! This example demonstrates mutual TLS (`mTLS`) authentication with the fetch HTTP client
 //! using the platform native TLS backend (`SChannel` on Windows, Security Framework on macOS,
 //! `OpenSSL` on Linux).
 //!
-//! It loads a client certificate and PKCS#8 private key from PEM files, configures the HTTP
+//! It loads a client certificate and `PKCS#8` private key from `PEM` files, configures the HTTP
 //! client with a client identity, and performs a GET request to a user-specified URL.
 //!
 //! # Usage
@@ -14,7 +14,7 @@
 //! cargo run -p fetch --example http_client_native_tls_mtls --features fetch/native-tls,fetch/tokio -- --cert client.pem --key client-key.pem --url https://example.com/api
 //! ```
 //!
-//! You can generate a self-signed client certificate (PEM + PKCS#8 key) for testing with:
+//! You can generate a self-signed client certificate (`PEM` + `PKCS#8` key) for testing with:
 //! ```sh
 //! openssl req -x509 -newkey rsa:2048 -keyout client-key.pem -out client.pem -days 365 -nodes -subj "/CN=test"
 //! ```
@@ -31,15 +31,15 @@ use tracing::info;
 #[path = "util/utils.rs"]
 mod utils;
 
-/// Demonstrates mutual TLS (mTLS) authentication with the fetch HTTP client
+/// Demonstrates mutual TLS (`mTLS`) authentication with the fetch HTTP client
 /// using the platform native TLS backend.
 #[derive(FromArgs)]
 struct Args {
-    /// path to the client certificate PEM file
+    /// path to the client certificate `PEM` file
     #[argh(option)]
     cert: String,
 
-    /// path to the PKCS#8 PEM private key file
+    /// path to the `PKCS#8` `PEM` private key file
     #[argh(option)]
     key: String,
 

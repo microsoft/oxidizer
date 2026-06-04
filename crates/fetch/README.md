@@ -73,7 +73,7 @@ any transport — including `reqwest` itself — and keep all of `fetch`’s sur
 |**Zero-copy Buffers**|✅ Built-in|❌ Partial, uses `Bytes`|
 |**Linux support**|✅ Full support|✅ Full support|
 
-[^1]: Advanced HTTP client features include things like multipart uploads, cookies, proxies, and redirects.
+[^1]: Advanced HTTP client features include things like file uploads, cookies, proxies, and redirects.
 
 [^2]: The features currently missing (cookies, redirects, forms) may be added in future versions as the
     client matures.
@@ -623,7 +623,7 @@ platform trust store via [`rustls-platform-verifier`][__link75],
 which takes care of essential TLS operations:
 
 * Verifies certificates against the operating system’s trusted root `CAs`.
-* Validates hostnames and checks certificate expiration.
+* Validates host names and checks certificate expiration.
 * Enforces TLS security policies.
 
 TLS is configured automatically; simply construct a client and make HTTPS requests:
@@ -697,7 +697,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb2WmD1F_UIKMb_y_LH96pMFEbQe6yUIzNiPAbptABq0g7vmVhZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjKCZWZldGNoZjAuMTAuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40gmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuM4JtdGVtcGxhdGVkX3VyaWUwLjIuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbg9gUGftKOZYbOcUidqRvtlIb4jNz0TaSSBQbzELqodjgpHxhZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjKCZWZldGNoZjAuMTAuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40gmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuM4JtdGVtcGxhdGVkX3VyaWUwLjIuMw
  [__link0]: https://docs.rs/fetch/0.10.0/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.4.4/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.10.0/fetch/?search=HttpClient::post

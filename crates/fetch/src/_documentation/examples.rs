@@ -48,8 +48,8 @@
 //! | Example | Description |
 //! |---------|-------------|
 //! | [`http_client_native_tls`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_native_tls.rs) | Switches the client to the platform native-TLS backend. |
-//! | [`http_client_mtls`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_mtls.rs) | Mutual TLS with the rustls backend using a PEM client identity, following redirects manually. |
-//! | [`http_client_native_tls_mtls`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_native_tls_mtls.rs) | Mutual TLS with the native-TLS backend using a PEM client identity. |
+//! | [`http_client_mtls`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_mtls.rs) | Mutual TLS with the rustls backend using a `PEM` client identity, following redirects manually. |
+//! | [`http_client_native_tls_mtls`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_native_tls_mtls.rs) | Mutual TLS with the native-TLS backend using a `PEM` client identity. |
 //!
 //! # Telemetry & testing
 //!

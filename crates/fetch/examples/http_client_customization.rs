@@ -40,7 +40,7 @@ async fn main() -> Result<(), ohno::AppError> {
                 // Customize the retry behavior.
                 .retry(|retry| {
                     retry
-                        .base_delay(Duration::from_millis(10))
+                        .base_delay(Duration::ZERO)
                         .max_retry_attempts(50) // we can do many retries, this does not do any external IO
                         .http_clone(HttpClone::all()) // we clone all idempotent requests (PUT, DELETE, etc)
                         .http_recovery(|response: &HttpResponse| response.recovery())
