@@ -1,0 +1,12 @@
+# Tests to skip in the miri-tree-borrows CI job.
+# One fully-qualified test name per line. Blank lines and lines
+# starting with '#' are ignored. Names are passed as --skip
+# arguments (substring match).
+#
+# arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
+#   Although the allocation itself is only 4 KiB (512 u64s), the
+#   arena's bump-fit / drop-entry / protective-hold path involves
+#   many pointer reborrows into the 64 KiB pre-allocated chunk.
+#   Under tree-borrows the per-byte provenance tracking exceeds
+#   the 16 GB runner memory limit.
+arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path

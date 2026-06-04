@@ -8,14 +8,6 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
-    inputs:
-      miri-tree-borrows-skip:
-        description: >
-          Space-separated list of test names to --skip in the
-          miri-tree-borrows job (substring match).
-        required: false
-        default: >-
-          arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
 
 jobs:
   nightly-gatekeeper:
@@ -62,21 +54,17 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-          # Tests skipped by default (also configurable via workflow_dispatch input):
-          #
-          # arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
-          #   Although the allocation itself is only 4 KiB (512 u64s),
-          #   the arena's bump-fit / drop-entry / protective-hold path
-          #   involves many pointer reborrows into the 64 KiB pre-
-          #   allocated chunk. Under tree-borrows the per-byte provenance
-          #   tracking for these reborrows exceeds 16 GB.
-          MIRI_SKIP: ${{ inputs.miri-tree-borrows-skip || 'arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path' }}
         run: |
           SKIP_ARGS=""
-          for test in $MIRI_SKIP; do
-            SKIP_ARGS="$SKIP_ARGS --skip $test"
-          done
-          echo "Skipping tests: $MIRI_SKIP"
+          if [[ -f .miri-tree-borrows-skip ]]; then
+            while IFS= read -r line; do
+              line="${line%%#*}"    # strip inline comments
+              line="${line// /}"    # trim whitespace
+              [[ -z "$line" ]] && continue
+              SKIP_ARGS="$SKIP_ARGS --skip $line"
+              echo "Skipping: $line"
+            done < .miri-tree-borrows-skip
+          fi
           cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests \
             -- $SKIP_ARGS
         timeout-minutes: 240
