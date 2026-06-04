@@ -4,16 +4,16 @@
 [package]
 name = "ohno_macros"
 description = "Macros for the ohno crate."
-version = "0.3.1"
+version = "0.3.2"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/ohno_macros"
 
 [package.metadata.docs.rs]
@@ -23,14 +23,14 @@ all-features = true
 proc-macro = true
 
 [dependencies]
-proc-macro2.workspace = true
-quote.workspace = true
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro"] }
 
 [dev-dependencies]
-insta.workspace = true
-mutants.workspace = true
-prettyplease.workspace = true
+insta = { workspace = true }
+mutants = { workspace = true }
+prettyplease = { workspace = true }
 
 [lints]
 workspace = true

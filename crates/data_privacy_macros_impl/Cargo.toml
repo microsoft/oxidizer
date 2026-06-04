@@ -4,16 +4,16 @@
 [package]
 name = "data_privacy_macros_impl"
 description = "Macros for the data_privacy crate."
-version = "0.9.1"
+version = "0.10.0"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "redaction", "scrubbing"]
 categories = ["data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_macros_impl"
 
 [package.metadata.cargo_check_external_types]
@@ -27,14 +27,14 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-proc-macro2.workspace = true
-quote.workspace = true
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 syn = { workspace = true, features = ["derive", "full", "parsing", "printing", "proc-macro"] }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
-mutants.workspace = true
-prettyplease.workspace = true
+mutants = { workspace = true }
+prettyplease = { workspace = true }
 
 [lints]
 workspace = true

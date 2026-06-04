@@ -79,7 +79,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "anyspawn"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "criterion",
  "futures",
@@ -234,16 +234,16 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "autocfg"
-version = "1.5.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "serde",
  "serde_json",
 ]
@@ -400,9 +400,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.20.3"
+version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
+checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
 name = "bytemuck"
@@ -438,7 +438,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "bytesbuf"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -458,21 +458,21 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "bytesbuf",
  "futures",
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "testing_aids",
  "trait-variant",
 ]
 
 [[package]]
 name = "cachet"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -484,7 +484,7 @@ dependencies = [
  "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -513,7 +513,7 @@ dependencies = [
  "futures",
  "moka",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "thread_aware",
  "tick",
  "tokio",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -530,10 +530,10 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dynosaur",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "parking_lot",
  "recoverable",
  "tick",
@@ -832,9 +832,9 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "6.2.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
 dependencies = [
  "cfg-if",
  "crossbeam-utils",
@@ -846,10 +846,12 @@ dependencies = [
 
 [[package]]
 name = "data_privacy"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
+ "data_privacy_core",
  "data_privacy_macros",
  "derive_more",
+ "insta",
  "mutants",
  "once_cell",
  "rapidhash",
@@ -861,8 +863,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "data_privacy_core"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "mutants",
+ "serde",
+ "serde_core",
+ "serde_json",
+]
+
+[[package]]
 name = "data_privacy_macros"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "data_privacy_macros_impl",
  "mutants",
@@ -870,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "data_privacy_macros_impl"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "insta",
  "mutants",
@@ -932,9 +945,9 @@ dependencies = [
 
 [[package]]
 name = "displaydoc"
-version = "0.2.6"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
+checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -987,9 +1000,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.16.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "embedded-io"
@@ -1058,11 +1071,13 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch_hyper"
-version = "0.1.2"
+version = "0.3.0"
 dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "fetch_options",
+ "fetch_tls",
  "futures",
  "http",
  "http-body-util",
@@ -1075,7 +1090,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1091,6 +1106,32 @@ dependencies = [
  "tracing",
  "tracing-test",
  "wiremock",
+]
+
+[[package]]
+name = "fetch_options"
+version = "0.2.0"
+dependencies = [
+ "http",
+ "insta",
+ "mutants",
+ "static_assertions",
+]
+
+[[package]]
+name = "fetch_tls"
+version = "0.2.1"
+dependencies = [
+ "base64",
+ "http",
+ "insta",
+ "mutants",
+ "native-tls",
+ "ohno 0.3.4",
+ "rstest",
+ "rustls",
+ "rustls-pki-types",
+ "static_assertions",
 ]
 
 [[package]]
@@ -1164,7 +1205,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "fundle"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "fundle_macros",
  "trybuild",
@@ -1172,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "fundle_macros_impl",
  "mutants",
@@ -1180,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "fundle_macros_impl"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "insta",
  "mutants",
@@ -1505,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -1520,7 +1561,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pin-project",
  "recoverable",
  "serde",
@@ -1773,9 +1814,9 @@ dependencies = [
 
 [[package]]
 name = "infinity_pool"
-version = "0.8.18"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "484aa4e251c49527ea35ce8c82f2a5e40d00cc0536c612301d92020eaeb2f370"
+checksum = "5e77de9e116ed8eb5d865f630a3931a9c27a51f69a50838a2f1b4c4d20043e10"
 dependencies = [
  "new_zealand",
  "num-integer",
@@ -1871,9 +1912,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.99"
+version = "0.3.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "142bc4740e452c1e57ade0cbc129f139c9093e354346f0872ef985f4f5cf5f11"
+checksum = "67df7112613f8bfd9150013a0314e196f4800d3201ae742489d999db2f979f08"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -1883,7 +1924,7 @@ dependencies = [
 
 [[package]]
 name = "layered"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -1939,9 +1980,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.30"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "616ec5685824bcc94416c6d4a7a446eea774a31efd7062c8480ba6fd06d7a6e5"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "loom"
@@ -1987,9 +2028,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.8.1"
+version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
+checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "mio"
@@ -2050,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "allocator-api2 0.4.0",
  "bolero",
@@ -2127,9 +2168,9 @@ dependencies = [
 
 [[package]]
 name = "num-conv"
-version = "0.2.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
+checksum = "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
 
 [[package]]
 name = "num-integer"
@@ -2180,12 +2221,12 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "futures",
  "insta",
  "mutants",
- "ohno_macros 0.3.1",
+ "ohno_macros 0.3.2",
  "regex",
  "testing_aids",
  "thiserror",
@@ -2206,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "insta",
  "mutants",
@@ -2303,9 +2344,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.32.1"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b59f80e1ac4d5ff7a2db8fb6c80badb7f0f3f858211fba08dd9aaec750894f9"
+checksum = "368afaed344110f40b179bb8fbe54bc52d98f9bd2b281799ef32487c2650c956"
 dependencies = [
  "futures-channel",
  "futures-executor",
@@ -2369,9 +2410,9 @@ dependencies = [
 
 [[package]]
 name = "pastey"
-version = "0.2.3"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
+checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
 
 [[package]]
 name = "pct-str"
@@ -2704,10 +2745,10 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "insta",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "static_assertions",
  "testing_aids",
 ]
@@ -2897,7 +2938,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.5.1"
+version = "0.5.3"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -2909,7 +2950,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -2929,14 +2970,14 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.2.2"
+version = "0.2.4"
 dependencies = [
  "futures",
  "http",
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -3003,9 +3044,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
  "itoa",
  "memchr",
@@ -3188,12 +3229,12 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "data_privacy",
  "http",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pct-str",
  "serde",
  "serde_json",
@@ -3206,7 +3247,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -3214,13 +3255,13 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chumsky",
  "darling",
  "insta",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -3277,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "many_cpus",
@@ -3288,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "mutants",
  "syn",
@@ -3297,7 +3338,7 @@ dependencies = [
 
 [[package]]
 name = "thread_aware_macros_impl"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "insta",
  "prettyplease",
@@ -3317,7 +3358,7 @@ dependencies = [
 
 [[package]]
 name = "tick"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -3327,7 +3368,7 @@ dependencies = [
  "insta",
  "jiff",
  "mutants",
- "ohno 0.3.3",
+ "ohno 0.3.4",
  "pin-project-lite",
  "serde",
  "serde_core",
@@ -3651,9 +3692,9 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.13.2"
+version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-xid"
@@ -3663,7 +3704,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uniflight"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ahash",
  "async-once-cell",
@@ -3786,9 +3827,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.122"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ed04576f974d2b2fba0f38c51dbc5518011e38c36bf1143164be765528fd409"
+checksum = "49ace1d07c165b0864824eee619580c4689389afa9dc9ed3a4c75040d82e6790"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -3799,9 +3840,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.122"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "916151b09da36bd82f6615cbf3a419e2f0ba23a03c6160e8e92eb6bd4aa1dec6"
+checksum = "8e68e6f4afd367a562002c05637acb8578ff2dea1943df76afb9e83d177c8578"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -3809,9 +3850,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.122"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "299047362ccbfce148b67ab7e73349f77748e00c8296f9542adfad2ad82c5c5e"
+checksum = "d95a9ec35c64b2a7cb35d3fead40c4238d0940c86d107136999567a4703259f2"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -3822,9 +3863,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.122"
+version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a929b2c61f11ba3e9bc35b50c1f25cb38e0e892c0c231ae2b8cf78d5dad4437"
+checksum = "c4e0100b01e9f0d03189a92b96772a1fb998639d981193d7dbab487302513441"
 dependencies = [
  "unicode-ident",
 ]

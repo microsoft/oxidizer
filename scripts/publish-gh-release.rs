@@ -114,7 +114,7 @@ fn extract_changelog(crate_path: &str, crate_name: &str, version: &str) -> Resul
     for line in content.lines() {
         if line.starts_with("## ") {
             if found {
-                // Reached the next section — stop.
+                // Reached the next section - stop.
                 break;
             }
             // Match "## [version]" or "## version" with an optional trailing date/suffix.

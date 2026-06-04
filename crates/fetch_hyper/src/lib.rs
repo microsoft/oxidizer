@@ -10,39 +10,27 @@
 //!
 //! # Internal implementation detail
 //!
-//! This crate is an **internal implementation detail** of the `SDK`. It is not
-//! part of the public API surface and must not be re-exported from any other
-//! crate. Consumers should depend on the higher-level `SDK` crates instead of
-//! taking a direct dependency on `fetch_hyper`, and `SDK` crates that do depend
-//! on it must keep its types out of their own public APIs (no `pub use`,
-//! no types appearing in public function signatures, trait bounds, or
-//! associated types).
+//! This crate is an internal implementation detail of the `SDK`. It is not part
+//! of the public API surface, must not be re-exported, and offers no stability
+//! guarantees: anything may change in any release, including patch releases.
 //!
-//! No stability guarantees are offered: items may be added, renamed, removed,
-//! or have their semantics changed in any release — including patch releases —
-//! without notice.
-//!
-//! Narrow scope: just the transport that issues HTTP/1.1 or HTTP/2 requests
-//! over `TLS` (or plain-text). No higher-level pipeline, retry, caching, etc.
+//! Scope is narrow: just the transport that issues HTTP/1.1 or HTTP/2 requests
+//! over `TLS` (or plain-text). No higher-level pipeline, retry, or caching.
 //!
 //! The entry points are:
 //!
-//! - [`HyperTransportBuilder`]: generic over a user-supplied [`Connect`]
-//!   service. Exposes setters for the few knobs driving our own logic plus a
-//!   [`configure_hyper`](HyperTransportBuilder::configure_hyper) escape
-//!   hatch for `hyper`'s own builder.
-//! - [`HyperTransport`]: the type-erased [`RequestHandler`] produced
-//!   by [`HyperTransportBuilder::build`].
+//! - [`HyperTransportBuilder`]: builds a transport from a user-supplied
+//!   [`Connect`] service and a [`fetch_options::TransportOptions`].
+//! - [`HyperTransport`]: the type-erased [`RequestHandler`] produced by
+//!   [`HyperTransportBuilder::build`].
 //!
-//! The runtime is supplied entirely by the caller via an
-//! [`anyspawn::Spawner`] together with any service implementing [`Connect`].
+//! The runtime is supplied by the caller via an [`anyspawn::Spawner`].
 //!
 //! [`RequestHandler`]: http_extensions::RequestHandler
 
 mod builder;
 mod connection;
 mod error_labels;
-mod options;
 mod recoverability;
 mod telemetry;
 mod timer;
@@ -54,6 +42,3 @@ pub mod testing;
 
 pub use builder::{HyperTransport, HyperTransportBuilder};
 pub use connection::{Connect, HyperIo};
-pub use options::{ConnectionLifetime, RequestFilter};
-pub use telemetry::ConnectionInfo;
-pub use tls::TlsBackend;

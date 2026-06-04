@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::redaction_engine_builder::RedactionEngineBuilder;
 use crate::redaction_engine_inner::RedactionEngineInner;
-use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString};
+use crate::{DataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
 
 /// Lets you apply redaction to classified data.
 ///
@@ -75,16 +75,6 @@ impl RedactionEngine {
         Self { inner: Arc::new(inner) }
     }
 
-    /// Returns whether redaction would take place for the given data class.
-    ///
-    /// Returns `false` only when redaction has been explicitly suppressed for this data class
-    /// via [`RedactionEngineBuilder::suppress_redaction`]. Returns `true` in all other cases,
-    /// including when no specific redactor is registered (since the fallback redactor applies).
-    #[must_use]
-    pub fn would_redact(&self, data_class: &DataClass) -> bool {
-        self.inner.would_redact(data_class)
-    }
-
     /// Redacts a value implementing [`RedactedDebug`], sending the results to the output sink.
     ///
     /// # Errors
@@ -147,24 +137,20 @@ impl RedactionEngine {
     pub fn redacted_to_string(&self, value: &impl RedactedToString) -> String {
         value.to_redacted_string(self)
     }
+}
 
-    /// Redacts a string with an explicit data classification, sending the results to the output sink.
-    ///
-    /// # Errors
-    ///
-    /// This function returns [`Err`] if, and only if, writing to the provided output sink (which implements [`Write`]) returns [`Err`]. String redaction is considered an infallible operation;
-    /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
-    /// has occurred (as a [`std::fmt::Error`]) back up the stack.
-    pub fn redact(&self, data_class: impl AsRef<DataClass>, value: impl AsRef<str>, output: &mut impl Write) -> core::fmt::Result {
-        let data_class_ref = data_class.as_ref();
-        let value_str = value.as_ref();
+impl Redactor for RedactionEngine {
+    fn redacts(&self, data_class: &DataClass) -> bool {
+        self.inner.redacts(data_class)
+    }
 
-        if let Some(redactor) = self.inner.resolve(data_class_ref) {
-            redactor.redact(data_class_ref, value_str, output)
+    fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
+        if let Some(strategy) = self.inner.resolve(data_class) {
+            strategy.redact(data_class, value, output)
         } else {
             // Redaction has been explicitly suppressed for this data class; pass through unmodified,
             // bypassing both class-specific and fallback redactors.
-            output.write_str(value_str)
+            output.write_str(value)
         }
     }
 }

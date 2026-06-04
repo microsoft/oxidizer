@@ -1,0 +1,7 @@
+---
+source: crates/fetch_tls/src/rustls.rs
+expression: factory
+---
+ServerCertVerifierFactory {
+    factory: "<custom verifier factory>",
+}

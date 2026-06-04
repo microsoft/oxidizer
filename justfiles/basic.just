@@ -74,7 +74,7 @@ docs:
 
 # Run all stand-alone example binaries to ensure they complete with exit code 0.
 # Implemented in Rust (via cargo-script) so that exit codes propagate cleanly
-# through `just` and CI on every platform — see AB#7306508.
+# through `just` and CI on every platform - see AB#7306508.
 [script]
 examples PROFILE='dev' EXCLUDE='':
     $ErrorActionPreference = "Stop"

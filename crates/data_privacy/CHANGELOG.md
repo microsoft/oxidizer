@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.12.0] - 2026-06-03
+
+- ✨ Features
+
+  - Introduce the `Redactor` trait as the primary interface for redaction, replacing direct use of `RedactionEngine` in trait signatures.
+  - `RedactionEngine` now implements the `Redactor` trait.
+  - `RedactedDebug::fmt` and `RedactedDisplay::fmt` now accept `&dyn Redactor` instead of `&RedactionEngine`.
+  - `RedactedToString::to_redacted_string` now accepts `&dyn Redactor` instead of `&RedactionEngine`.
+  - Rename `would_redact` into `redacts` and implement it for all redactors.
+  - Move core types and traits (`Classified`, `DataClass`, `IntoDataClass`, `RedactedDebug`, `RedactedDisplay`, `RedactedToString`, `Redactor`) to the new `data_privacy_core` crate, re-exported from `data_privacy`.
+
+## [0.11.2] - 2026-06-02
+
+- 🔧 Maintenance
+
+  - Now requires `0.9.2` of `data_privacy_macros`
+  - Now requires `0.9.2` of `data_privacy_macros_impl`
+
+- ✨ Features
+
+  - release all packages for MSRV increment ([#463](https://github.com/microsoft/oxidizer/pull/463))
+
+- ✔️ Tasks
+
+  - Tidy cargo dependencies to unbreak publishing ([#466](https://github.com/microsoft/oxidizer/pull/466))
+  - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
+
 ## [0.11.1] - 2026-06-01
 
 - 🔧 Maintenance

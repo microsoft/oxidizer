@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use anyspawn::Spawner;
 use bytes::Bytes;
-use fetch_hyper::{HyperTransportBuilder, RequestFilter, TlsBackend};
+use fetch_hyper::HyperTransportBuilder;
+use fetch_options::{RequestFilter, TransportOptions};
+use fetch_tls::TlsBackend;
 use http::{Method, StatusCode, Version};
 use http_extensions::{HttpBodyBuilder, HttpRequestBuilder, Result};
 use hyper_util::rt::TokioIo;
@@ -42,6 +44,19 @@ fn test_clock() -> Clock {
     ClockControl::new().auto_advance_timers(true).to_clock()
 }
 
+/// Builds [`TransportOptions`] with `HttpAndHttps`, a 5s connect timeout, and
+/// the caller-supplied list of supported HTTP versions (empty `versions` keeps
+/// the default).
+fn options(versions: &[Version]) -> TransportOptions {
+    let mut options = TransportOptions::default();
+    options.request_filter = RequestFilter::HttpAndHttps;
+    options.connect_timeout = Duration::from_secs(5);
+    if !versions.is_empty() {
+        options.supported_http_versions = versions.to_vec();
+    }
+    options
+}
+
 async fn serve(body: impl Into<Bytes>) -> MockServer {
     let mock_server = MockServer::start().await;
 
@@ -57,16 +72,9 @@ async fn serve(body: impl Into<Bytes>) -> MockServer {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn real_http_request_succeeds() {
-    let handler = HyperTransportBuilder::new(
-        TokioConnector,
-        Spawner::new_tokio(),
-        test_clock(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
-    )
-    .connect_timeout(Duration::from_secs(5))
-    .request_filter(RequestFilter::HttpAndHttps)
-    .build();
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[]))
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -85,16 +93,12 @@ async fn real_http_request_succeeds() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn https_only_filter_rejects_http_request() {
-    // No `.request_filter(...)` call: defaults to `RequestFilter::Https`.
-    let handler = HyperTransportBuilder::new(
-        TokioConnector,
-        Spawner::new_tokio(),
-        test_clock(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
-    )
-    .connect_timeout(Duration::from_secs(5))
-    .build();
+    // No explicit `request_filter` override: defaults to `RequestFilter::Https`.
+    let mut opts = TransportOptions::default();
+    opts.connect_timeout = Duration::from_secs(5);
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), opts)
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -120,13 +124,10 @@ async fn http2_only_rejected_when_server_negotiates_http1() {
         TokioConnector,
         Spawner::new_tokio(),
         test_clock(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
+        options(&[Version::HTTP_2, Version::HTTP_3]),
     )
-    .connect_timeout(Duration::from_secs(5))
-    .request_filter(RequestFilter::HttpAndHttps)
-    .supported_http_versions(&[Version::HTTP_2, Version::HTTP_3])
-    .build();
+    .body_builder(HttpBodyBuilder::new_fake())
+    .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -160,17 +161,9 @@ async fn http2_only_with_single_supported_version_uses_prior_knowledge() {
     // would speak HTTP/1.1 and the post-connect protocol verification step
     // would reject the response, so this test pins down the prior-knowledge
     // behavior selected by the `len == 1 && [0] == HTTP_2` branch.
-    let handler = HyperTransportBuilder::new(
-        TokioConnector,
-        Spawner::new_tokio(),
-        test_clock(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
-    )
-    .connect_timeout(Duration::from_secs(5))
-    .request_filter(RequestFilter::HttpAndHttps)
-    .supported_http_versions(&[Version::HTTP_2])
-    .build();
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[Version::HTTP_2]))
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -192,17 +185,9 @@ async fn single_http1_version_does_not_enable_http2_only() {
     // Builder sees a single supported version of HTTP/1.1. Since the version
     // is not HTTP/2, prior-knowledge mode must NOT be enabled, otherwise the
     // request would fail against an HTTP/1.1 server.
-    let handler = HyperTransportBuilder::new(
-        TokioConnector,
-        Spawner::new_tokio(),
-        test_clock(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
-    )
-    .connect_timeout(Duration::from_secs(5))
-    .request_filter(RequestFilter::HttpAndHttps)
-    .supported_http_versions(&[Version::HTTP_11])
-    .build();
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), test_clock(), options(&[Version::HTTP_11]))
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -231,19 +216,13 @@ async fn zero_lifetime_poisons_connection_after_request() {
     // response delivery (`is_expired` is `age > max_age`, strictly), so a
     // controlled clock would have to be advanced from inside hyper-util's
     // pool — `Clock::new_tokio()` is used here as a deliberate exception.
-    use fetch_hyper::ConnectionInfo;
+    use fetch_options::ConnectionInfo;
 
-    let handler = HyperTransportBuilder::new(
-        TokioConnector,
-        Spawner::new_tokio(),
-        Clock::new_tokio(),
-        build_tls(),
-        HttpBodyBuilder::new_fake(),
-    )
-    .connect_timeout(Duration::from_secs(5))
-    .request_filter(RequestFilter::HttpAndHttps)
-    .connection_lifetime(fetch_hyper::ConnectionLifetime::Fixed(Duration::ZERO))
-    .build();
+    let mut opts = options(&[]);
+    opts.connection_pool.connection_lifetime = fetch_options::ConnectionLifetime::fixed(Duration::ZERO);
+    let handler = HyperTransportBuilder::new(TokioConnector, Spawner::new_tokio(), Clock::new_tokio(), opts)
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(build_tls());
 
     let server = serve(Bytes::from_static(b"Hello World!")).await;
 
@@ -258,5 +237,5 @@ async fn zero_lifetime_poisons_connection_after_request() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let info = response.extensions().get::<ConnectionInfo>().unwrap();
-    assert!(info.poisoned(), "connection should have been poisoned by zero lifetime");
+    assert!(info.is_poisoned(), "connection should have been poisoned by zero lifetime");
 }

@@ -556,3 +556,8 @@ addressability
 bumpable
 dereferenceable
 NonNull
+crypto
+rustls
+TLS
+verifier
+Verifier

@@ -9,10 +9,13 @@
 
 use std::error::Error;
 use std::fmt::{self, Display};
+use std::pin::Pin;
 
 use bytesbuf::BytesView;
+use fetch_options::ConnectionInfo;
+use fetch_tls::TlsBackend;
 use futures::TryFutureExt;
-use http::{Extensions, Version};
+use http::Extensions;
 use http_body_util::BodyExt;
 use http_extensions::timeout::BodyTimeout;
 use http_extensions::{HttpBody, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, Result};
@@ -29,11 +32,11 @@ use crate::connection::io::HyperIo;
 use crate::connection::tracked_stream::TrackedStream;
 use crate::error_labels::LABEL_REQUEST_HYPER;
 use crate::recoverability::detect_recoverability;
-use crate::telemetry::ConnectionInfo;
 use crate::tls::TlsConnector;
 
 /// The fully-wrapped connector chain handed to `hyper`'s [`Client`].
-type WrappedConnector<C, S> = HyperConnectorAdapter<ClientConnector<TlsConnector<C, S>, Box<dyn HyperIo>>, TrackedStream<Box<dyn HyperIo>>>;
+type WrappedConnector<C, S> =
+    HyperConnectorAdapter<ClientConnector<TlsConnector<C, S>, Pin<Box<dyn HyperIo>>>, TrackedStream<Pin<Box<dyn HyperIo>>>>;
 
 /// A Hyper-backed request handler, parameterized by the user-supplied
 /// connector and stream types. Public consumers see only the
@@ -41,7 +44,7 @@ type WrappedConnector<C, S> = HyperConnectorAdapter<ClientConnector<TlsConnector
 pub(crate) struct HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     client: Client<WrappedConnector<C, S>, HttpBody>,
     body_builder: http_extensions::HttpBodyBuilder,
@@ -50,7 +53,7 @@ where
 impl<C, S> fmt::Debug for HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(std::any::type_name::<Self>()).finish_non_exhaustive()
@@ -60,7 +63,7 @@ where
 impl<C, S> Service<HttpRequest> for HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     type Out = Result<HttpResponse>;
 
@@ -91,39 +94,35 @@ where
 }
 
 /// Assembles a [`HyperHandler`] from a configured [`HyperTransportBuilder`].
-pub(crate) fn build_hyper_handler<C, S>(builder: HyperTransportBuilder<C, S>, meter: &Meter) -> HyperHandler<C, S>
+pub(crate) fn build_hyper_handler<C, S>(
+    builder: HyperTransportBuilder<C, S>,
+    tls: TlsBackend,
+    body_builder: http_extensions::HttpBodyBuilder,
+    meter: &Meter,
+) -> HyperHandler<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     let HyperTransportBuilder {
         connector,
         clock,
-        tls,
-        body_builder,
-        request_filter,
-        supported_http_versions,
-        connection_lifetime,
-        connect_timeout,
+        options,
         pool_index,
-        mut hyper_builder,
+        hyper_builder,
         ..
     } = builder;
 
-    if supported_http_versions.len() == 1 && supported_http_versions[0] == Version::HTTP_2 {
-        hyper_builder.http2_only(true);
-    }
-
-    let tls_connector = TlsConnector::new(tls, connector, request_filter, &supported_http_versions);
+    let tls_connector = TlsConnector::new(tls, connector, options.request_filter, &options.supported_http_versions);
 
     let inner = ClientConnector::new(
         tls_connector,
         clock,
-        connect_timeout,
-        supported_http_versions,
+        options.connect_timeout,
+        options.supported_http_versions,
         meter,
         pool_index,
-        connection_lifetime,
+        options.connection_pool.connection_lifetime,
     );
 
     HyperHandler {
@@ -180,7 +179,7 @@ fn handle_poisoning(capture: &CaptureConnection, extensions: &Extensions) {
         && let Some(connected) = capture.connection_metadata().as_ref()
     {
         connected.poison();
-        info.mark_poisoned();
+        ConnectionInfo::poison(info);
     }
 }
 
@@ -191,16 +190,15 @@ mod tests {
 
     use anyspawn::Spawner;
     use bytes::Bytes;
+    use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
+    use http::Version;
     use http_body_util::BodyExt as _;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
     use layered::Service as _;
-    use tick::Clock;
 
     use super::*;
     use crate::HyperTransport;
-    use crate::options::{ConnectionLifetime, RequestFilter};
     use crate::testing::{FakeConnector, create_hyper_error, fake_body_builder};
-    use crate::tls::TlsBackend;
 
     fn tls() -> TlsBackend {
         native_tls::TlsConnector::new().unwrap().into()
@@ -212,10 +210,12 @@ mod tests {
 
     fn make_handler(connector: FakeConnector, lifetime: ConnectionLifetime) -> HyperTransport {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
-        HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
-            .request_filter(RequestFilter::HttpAndHttps)
-            .connection_lifetime(lifetime)
-            .build()
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.connection_pool.connection_lifetime = lifetime;
+        HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options)
+            .body_builder(HttpBodyBuilder::new_fake())
+            .build(tls())
     }
 
     fn test_request() -> HttpRequest {
@@ -230,9 +230,12 @@ mod tests {
     fn debug_renders_handler_type() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
         let handler: HyperHandler<FakeConnector, crate::testing::FakeStream> = build_hyper_handler(
-            HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
-                .request_filter(RequestFilter::HttpAndHttps),
+            HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options),
+            tls(),
+            HttpBodyBuilder::new_fake(),
             &opentelemetry::global::meter("test"),
         );
         let rendered = format!("{handler:?}");
@@ -247,7 +250,7 @@ mod tests {
         // `create_http_error_from_hyper_util`.
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(Bytes::from_static(b"NOT A VALID HTTP RESPONSE"), clock.clone());
-        let handler = make_handler(connector, ConnectionLifetime::Unlimited);
+        let handler = make_handler(connector, ConnectionLifetime::unlimited());
         let err = handler.execute(test_request()).await.expect_err("expected error");
         assert!(!err.to_string().is_empty());
     }
@@ -260,10 +263,12 @@ mod tests {
         // simply exercise the build path and request execution.
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
-        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, tls(), HttpBodyBuilder::new_fake())
-            .request_filter(RequestFilter::HttpAndHttps)
-            .supported_http_versions(&[Version::HTTP_2])
-            .build();
+        let mut options = fetch_options::TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.supported_http_versions = vec![Version::HTTP_2];
+        let handler = HyperTransportBuilder::new(connector, Spawner::new_tokio(), clock, options)
+            .body_builder(HttpBodyBuilder::new_fake())
+            .build(tls());
         // Execute to drive the http2 path; we don't care if it fails or not.
         let _ = handler.execute(test_request()).await;
     }
@@ -280,22 +285,27 @@ mod tests {
     #[test]
     fn poison_path_no_op_when_connection_not_expired() {
         let mut extensions = Extensions::new();
-        let info = ConnectionInfo::new(&Clock::new_frozen(), 0, Some(Duration::from_mins(1)));
+        let info = ConnectionInfo::new(std::time::Instant::now, PoolIndex::new(0), Some(Duration::from_mins(1)));
         extensions.insert(info.clone());
 
         let mut req = test_request();
         let capture = capture_connection::<HttpBody>(&mut req);
         handle_poisoning(&capture, &extensions);
-        assert!(!info.poisoned(), "should not be poisoned when not expired");
+        assert!(!info.is_poisoned(), "should not be poisoned when not expired");
     }
 
     #[test]
     fn poison_path_no_op_when_no_capture_metadata() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
         let mut extensions = Extensions::new();
-        let control = tick::ClockControl::new();
-        let clock = control.to_clock();
-        let info = ConnectionInfo::new(&clock, 0, Some(Duration::from_secs(1)));
-        control.advance(Duration::from_secs(5));
+        let base = std::time::Instant::now();
+        let offset = Arc::new(AtomicU64::new(0));
+        let clock_offset = Arc::clone(&offset);
+        let now = move || base + Duration::from_nanos(clock_offset.load(Ordering::Relaxed));
+        let info = ConnectionInfo::new(now, PoolIndex::new(0), Some(Duration::from_secs(1)));
+        offset.store(u64::try_from(Duration::from_secs(5).as_nanos()).unwrap(), Ordering::Relaxed);
         assert!(info.is_expired());
         extensions.insert(info.clone());
 
@@ -303,8 +313,8 @@ mod tests {
         let capture = capture_connection::<HttpBody>(&mut req);
         // capture.connection_metadata() returns None until hyper populates it.
         handle_poisoning(&capture, &extensions);
-        // No metadata available → mark_poisoned must NOT be called.
-        assert!(!info.poisoned());
+        // No metadata available → ConnectionInfo::poison must NOT be called.
+        assert!(!info.is_poisoned());
     }
 
     #[cfg_attr(miri, ignore)]
@@ -312,7 +322,7 @@ mod tests {
     async fn end_to_end_response_is_returned_with_body() {
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
         let connector = FakeConnector::new_success(http_response_bytes(), clock.clone());
-        let handler = make_handler(connector, ConnectionLifetime::Unlimited);
+        let handler = make_handler(connector, ConnectionLifetime::unlimited());
         let resp = handler.execute(test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
         let body = resp.into_body().collect().await.unwrap().to_bytes();

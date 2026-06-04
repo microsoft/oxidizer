@@ -1,7 +1,0 @@
----
-source: crates/fetch_hyper/src/options.rs
-expression: "ConnectionLifetime::Fixed(Duration::from_secs(7))"
----
-Fixed(
-    7s,
-)

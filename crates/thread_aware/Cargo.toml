@@ -4,16 +4,16 @@
 [package]
 name = "thread_aware"
 description = "Facilities to support thread-isolated state."
-version = "0.7.1"
+version = "0.7.2"
 readme = "README.md"
 keywords = ["oxidizer", "thread", "aware"]
 categories = ["data-structures"]
 
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware"
 
 [package.metadata.cargo_check_external_types]
@@ -35,9 +35,9 @@ thread_aware_macros = { workspace = true, optional = true }
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
 many_cpus = { workspace = true, features = ["test-util"] }
-mutants.workspace = true
-static_assertions.workspace = true
-thread_aware_macros = { workspace = true }
+mutants = { workspace = true }
+static_assertions = { workspace = true }
+thread_aware_macros = { path = "../thread_aware_macros" }
 
 [lints]
 workspace = true

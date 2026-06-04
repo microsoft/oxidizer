@@ -40,7 +40,7 @@ struct Args {
 // mutations if their tests reside in dependent packages.
 const TEST_GROUPS: &[&[&str]] = &[
     &["bytesbuf"],
-    &["data_privacy", "data_privacy_macros", "data_privacy_macros_impl"],
+    &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["ohno", "ohno_macros"],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],
