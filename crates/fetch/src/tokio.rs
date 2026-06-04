@@ -199,6 +199,16 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn new_tokio_uses_default_deps() {
+        // `new_tokio` builds the client from `TokioDeps::default()`, exercising the default
+        // dependency wiring (including `Clock::new_tokio`) and the standard pipeline.
+        let client = HttpClient::new_tokio();
+
+        assert!(client.pipeline().is_standard());
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn tokio_client_works_after_relocation() {
         let affinities = pinned_affinities(&[2]);
         let clock = Clock::new_tokio();

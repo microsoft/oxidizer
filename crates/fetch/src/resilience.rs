@@ -85,4 +85,4 @@
 //! # }
 //! ```
 
-pub use seatbelt_http::*;
+pub use seatbelt_http::{HttpClone, HttpRecovery, HttpResilienceContext, breaker, hedging, retry, timeout};

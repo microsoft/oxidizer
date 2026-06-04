@@ -115,4 +115,18 @@ mod tests {
         // distinctive buffer limit.
         assert!(format!("{:?}", context.body_builder()).contains("4321"));
     }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn accessors_return_constructed_dependencies() {
+        let context = test_context(HttpBodyBuilder::new_fake());
+
+        // Every accessor must hand back the dependency wired in at construction; exercise each
+        // one and discard the value. The assertion is simply that accessing must not panic.
+        let _ = context.clock();
+        let _ = context.meter();
+        let _ = context.resilience_context();
+        let _ = context.redaction_engine();
+        let _ = context.router();
+    }
 }

@@ -192,6 +192,27 @@ mod tests {
         );
 
         assert!(matches!(pipeline, Pipeline::Minimal(_)));
+        assert!(!pipeline.is_standard());
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    #[should_panic(expected = "must be custom pipeline")]
+    fn dbg_string_for_minimal_pipeline_panics() {
+        let clock = Clock::new_frozen();
+        let dispatch = Dispatch::new_fake(StatusCode::OK);
+        let pipeline = PipelineBuilder::Minimal.build(
+            dispatch,
+            HttpResilienceContext::new(&clock),
+            RedactionEngine::default(),
+            &test_meter(),
+            HttpBodyBuilder::new_fake(),
+            clock,
+            Router::default(),
+        );
+
+        // The debug accessor is only valid for custom pipelines; a minimal pipeline must panic.
+        let _ = pipeline.dbg_string_for_custom_pipeline();
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.

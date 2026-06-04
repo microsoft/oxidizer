@@ -471,6 +471,23 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
+    async fn fetch_fails_when_router_uri_resolution_conflicts() {
+        use http_extensions::routing::BaseUriConflict;
+
+        let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
+            .router(Router::fixed(BaseUri::from_static("https://api.example.com")).conflict_policy(BaseUriConflict::Fail))
+            .build();
+
+        // The request targets a different absolute base URI than the router's fixed base URI.
+        // With a `Fail` conflict policy the router rejects resolution in `execute`, short-circuiting
+        // before the request ever reaches the pipeline.
+        let err = client.get("https://existing.example.com/items").fetch().await.unwrap_err();
+
+        assert_eq!(collect_error_labels(&err), "uri_conflict");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn test_request_handler_implementation() {
         let client = HttpClient::new_fake(StatusCode::ACCEPTED);
 
