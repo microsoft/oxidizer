@@ -275,9 +275,10 @@ fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &Connection
 
 #[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
 fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: &[Version]) {
-    if versions.iter().all(|v| *v == Version::HTTP_2) {
+    if versions.len() == 1 && versions[0] == Version::HTTP_2 {
         hyper_builder.http2_only(true);
     }
+}
 }
 
 #[cfg(test)]
