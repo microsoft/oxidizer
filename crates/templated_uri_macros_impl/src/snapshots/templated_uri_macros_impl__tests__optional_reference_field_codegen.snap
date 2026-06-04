@@ -60,10 +60,10 @@ impl ::std::fmt::Debug for ReferenceOptional {
         f.debug_tuple("ReferenceOptional").field(&"/items{?name}").finish()
     }
 }
-impl ::data_privacy::RedactedDisplay for ReferenceOptional {
+impl ::templated_uri::RedactedDisplay for ReferenceOptional {
     fn fmt(
         &self,
-        redactor: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::templated_uri::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/items")?;
@@ -77,7 +77,7 @@ impl ::data_privacy::RedactedDisplay for ReferenceOptional {
                 }
                 f.write_str("name")?;
                 f.write_str("=")?;
-                <str as ::data_privacy::RedactedDisplay>::fmt(*__val, redactor, f)?;
+                <str as ::templated_uri::RedactedDisplay>::fmt(*__val, redactor, f)?;
                 __first = false;
             }
         }

@@ -89,14 +89,14 @@ impl ::std::fmt::Debug for OptionalTest {
         f.debug_tuple("OptionalTest").field(&"/items/{id}{?filter,limit}").finish()
     }
 }
-impl ::data_privacy::RedactedDisplay for OptionalTest {
+impl ::templated_uri::RedactedDisplay for OptionalTest {
     fn fmt(
         &self,
-        redactor: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::templated_uri::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/items/")?;
-        <u32 as ::data_privacy::RedactedDisplay>::fmt(&self.id, redactor, f)?;
+        <u32 as ::templated_uri::RedactedDisplay>::fmt(&self.id, redactor, f)?;
         {
             let mut __first = true;
             {
@@ -107,7 +107,7 @@ impl ::data_privacy::RedactedDisplay for OptionalTest {
                 }
                 f.write_str("filter")?;
                 f.write_str("=")?;
-                <String as ::data_privacy::RedactedDisplay>::fmt(
+                <String as ::templated_uri::RedactedDisplay>::fmt(
                     &self.filter,
                     redactor,
                     f,
@@ -122,7 +122,7 @@ impl ::data_privacy::RedactedDisplay for OptionalTest {
                 }
                 f.write_str("limit")?;
                 f.write_str("=")?;
-                <u32 as ::data_privacy::RedactedDisplay>::fmt(__val, redactor, f)?;
+                <u32 as ::templated_uri::RedactedDisplay>::fmt(__val, redactor, f)?;
                 __first = false;
             }
         }

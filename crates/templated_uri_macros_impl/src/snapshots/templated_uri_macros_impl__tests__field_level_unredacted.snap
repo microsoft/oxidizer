@@ -78,20 +78,20 @@ impl ::std::fmt::Debug for Test {
             .finish()
     }
 }
-impl ::data_privacy::RedactedDisplay for Test {
+impl ::templated_uri::RedactedDisplay for Test {
     fn fmt(
         &self,
-        redactor: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::templated_uri::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/example.com/")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.param, redactor, f)?;
+        <String as ::templated_uri::RedactedDisplay>::fmt(&self.param, redactor, f)?;
         f.write_str("/")?;
         ::std::write!(f, "{}", self.param2)?;
         f.write_str("/")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.param3, redactor, f)?;
+        <String as ::templated_uri::RedactedDisplay>::fmt(&self.param3, redactor, f)?;
         f.write_str("/")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.param4, redactor, f)?;
+        <String as ::templated_uri::RedactedDisplay>::fmt(&self.param4, redactor, f)?;
         ::std::result::Result::Ok(())
     }
 }

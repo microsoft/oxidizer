@@ -109,7 +109,7 @@
 //! for an end-to-end version that wires up a [`RedactionEngine`].
 
 #[expect(unused_imports, reason = "simplifies the docs")]
-use ::data_privacy::{DataClass, RedactedDisplay, RedactionEngine, Sensitive};
+use ::data_privacy::{DataClass, RedactionEngine, Sensitive};
 #[expect(unused_imports, reason = "simplifies the docs")]
 use ::http::*;
 
