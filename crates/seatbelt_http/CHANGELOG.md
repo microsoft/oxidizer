@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `data_privacy` to 0.12.0
+  - bump `http_extensions` to 0.5.0
+
 ## [0.2.4] - 2026-06-02
 
 - 🔧 Maintenance

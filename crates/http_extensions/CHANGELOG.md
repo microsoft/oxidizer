@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `data_privacy` to 0.12.0
+
 ## [0.4.4] - 2026-06-02
 
 - 🔧 Maintenance
