@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to use [`fundle`] to build an HTTP client application with
 //! telemetry (an OpenTelemetry meter provider) and a custom rustls certificate verifier.

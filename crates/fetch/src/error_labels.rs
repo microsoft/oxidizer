@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![allow(dead_code, reason = "this code is cheap and adding build conditions just complicates it")]
 

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Plugs a custom `EchoHandler` into [`fetch::custom::create_builder`] as the transport
 //! handler. Every request's body is returned verbatim in the response.

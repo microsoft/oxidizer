@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use data_privacy::RedactionEngine;
 use futures::future::Either;

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 #![allow(clippy::missing_panics_doc, reason = "improves readability in benchmarks")]
 #![allow(clippy::unwrap_used, reason = "benchmark code")]

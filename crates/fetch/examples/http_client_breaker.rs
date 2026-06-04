@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Demonstrates the HTTP circuit breaker with per-origin isolation.
 //!

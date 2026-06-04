@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to use the HTTP client with multiple REST endpoints
 //! and templated URIs for more complex API interactions with multiple target paths.

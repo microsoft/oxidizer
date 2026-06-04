@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Mocked replies from "Crates.io" api for a specific crate / crate query
 use http::StatusCode;

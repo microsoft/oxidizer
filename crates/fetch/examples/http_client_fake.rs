@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example shows how to use the "fakes" feature to mock the HTTP client with specific responses.
 

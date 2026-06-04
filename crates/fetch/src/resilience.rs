@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Re-exports the [`seatbelt_http`] crate which provides HTTP-specific
 //! extensions for [`seatbelt`] resilience middleware.

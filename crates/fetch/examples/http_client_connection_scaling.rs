@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to create a simple HTTP client that sends multiple
 //! concurrent requests to example.com and how the underlying connection pool dynamically

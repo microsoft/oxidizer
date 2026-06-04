@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates how to use the `HttpClient` to download a response in a streaming
 //! manner and write it incrementally to a file.

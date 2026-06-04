@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates mutual TLS (mTLS) authentication with the fetch HTTP client
 //! using the platform native TLS backend (`SChannel` on Windows, Security Framework on macOS,

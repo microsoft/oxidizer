@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Integration tests for the standard pipeline exercising the circuit breaker,
 //! retries, hedging, and per-origin isolation.

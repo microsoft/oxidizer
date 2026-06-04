@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 use http_extensions::{HttpRequest, HttpResponse, RequestHandler, Result};
 use layered::{DynamicService, DynamicServiceExt, Service};

@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! This example demonstrates advanced HTTP client configuration options including:
 //! - Connection keep-alive strategies

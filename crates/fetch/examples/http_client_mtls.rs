@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Mutual TLS (mTLS) authentication with the fetch HTTP client using the rustls backend.
 //!

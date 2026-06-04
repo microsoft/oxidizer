@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Telemetry emitted by the [`fetch`](crate) crate.
 //!

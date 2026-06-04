@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Demonstrates basic usage of the HTTP client on the Tokio runtime.
 

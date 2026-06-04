@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Custom transport-handler entry points for [`HttpClient`].
 //!

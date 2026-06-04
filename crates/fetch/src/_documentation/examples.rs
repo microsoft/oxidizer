@@ -1,4 +1,5 @@
 // Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 
 //! Runnable examples for the [`fetch`](crate) crate.
 //!
