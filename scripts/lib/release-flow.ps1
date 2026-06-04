@@ -1098,7 +1098,7 @@ function Format-PackageMenu {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
-    [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial')
+    [void]$sb.AppendLine('  2. Skip package')
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     if (-not $hideNonBreaking) {
         [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")
@@ -1583,7 +1583,7 @@ function Invoke-PlanReview {
                     Write-Host "  Keeping '$($next.Folder)' at its cascade-applied $cascadeLevel level; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
                     [void]$reviewedCascadeAsIs.Add($next.Folder)
                 } else {
-                    Write-Host "  Leaving '$($next.Folder)' unreleased; reviewer should confirm the change is immaterial." -ForegroundColor DarkGray
+                    Write-Host "  Skipping '$($next.Folder)'; cascade may still pull it into the release plan on a later iteration." -ForegroundColor DarkGray
                     [void]$declined.Add($next.Folder)
                 }
                 continue

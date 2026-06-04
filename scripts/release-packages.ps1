@@ -28,7 +28,7 @@
        Guided walk: the planner scans the workspace for every package with
        unreleased modifications (changes newer than its last `version =` /
        `publish =` commit) and walks the user through them one prompt at a
-       time. For each surfaced package the user can view the diff, ignore the
+       time. For each surfaced package the user can view the diff, skip the
        package, or release it as breaking / non-breaking / patch. Each
        acceptance is fed back to the planner, which re-resolves the release
        set and cascade so the next iteration surfaces only newly-relevant

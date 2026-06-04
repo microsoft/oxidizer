@@ -195,7 +195,7 @@ Describe 'Format-PackageMenu' {
         $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
         $lines.Count | Should -Be 5
         $lines[0] | Should -Match '^\s*1\. View diff$'
-        $lines[1] | Should -Match '^\s*2\. Ignore package - the changes are immaterial$'
+        $lines[1] | Should -Match '^\s*2\. Skip package$'
         # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
         $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
         $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
