@@ -81,7 +81,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Logging<T> {
                         name: "http.response.complete",
                         Level::DEBUG,
                         http.request.method = method.as_str(),
-                        server.address = url.authority().map(Authority::as_str),
+                        server.address = url.authority().map(Authority::host),
                         server.port = url.port_u16(),
                         http.response.status_code = response.status().as_u16(),
                         network.protocol.version = ?response.version(),
