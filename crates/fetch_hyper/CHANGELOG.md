@@ -67,7 +67,6 @@
 - 🧩 Miscellaneous
 
   - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
->>>>>>> origin/main
 
 ## [0.1.2] - 2026-06-01
 
