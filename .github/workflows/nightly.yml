@@ -70,7 +70,18 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        run: |
+          # Monitor memory in background
+          (while true; do echo "=== $(date -Iseconds) ==="; free -m; echo; sleep 30; done) &
+          MONITOR_PID=$!
+          EXIT=0
+          cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests 2>&1 || EXIT=$?
+          kill $MONITOR_PID 2>/dev/null || true
+          echo "--- exit code: $EXIT ---"
+          echo "--- dmesg OOM check ---"
+          sudo dmesg | grep -i -E 'oom|killed|out of memory' || echo "No OOM messages found"
+          exit $EXIT
+        timeout-minutes: 240
 
   miri-strict-provenance:
     needs: [nightly-gatekeeper]
