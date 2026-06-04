@@ -161,42 +161,18 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn redacted_debug_produces_nonempty_output() {
-        struct Adapter<'a, T: ?Sized> {
-            inner: &'a T,
-            redactor: &'a dyn Redactor,
-        }
-        impl<T: RedactedDebug + ?Sized> std::fmt::Display for Adapter<'_, T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                <T as RedactedDebug>::fmt(self.inner, self.redactor, f)
-            }
-        }
         let sensitive = Sensitive::new("secret", DataClass::new("test", "pii"));
-        let result = Adapter {
-            inner: &sensitive,
-            redactor: &TagRedactor as &dyn Redactor,
-        }
-        .to_string();
+        let redactor: &dyn Redactor = &TagRedactor;
+        let result = core::fmt::from_fn(|f| <Sensitive<_> as RedactedDebug>::fmt(&sensitive, redactor, f)).to_string();
         assert_snapshot!(result, @r#"<test/pii:"secret">"#);
     }
 
     #[test]
     #[cfg_attr(miri, ignore)]
     fn redacted_display_produces_nonempty_output() {
-        struct Adapter<'a, T: ?Sized> {
-            inner: &'a T,
-            redactor: &'a dyn Redactor,
-        }
-        impl<T: RedactedDisplay + ?Sized> std::fmt::Display for Adapter<'_, T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                <T as RedactedDisplay>::fmt(self.inner, self.redactor, f)
-            }
-        }
         let sensitive = Sensitive::new("secret", DataClass::new("test", "pii"));
-        let result = Adapter {
-            inner: &sensitive,
-            redactor: &TagRedactor as &dyn Redactor,
-        }
-        .to_string();
+        let redactor: &dyn Redactor = &TagRedactor;
+        let result = core::fmt::from_fn(|f| <Sensitive<_> as RedactedDisplay>::fmt(&sensitive, redactor, f)).to_string();
         assert_snapshot!(result, @"<test/pii:secret>");
     }
 
@@ -222,22 +198,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn redacted_debug_at_exact_buffer_boundary() {
         // Debug of a String adds quotes: "xxx" -> 126 chars + 2 quotes = 128 bytes
-        struct Adapter<'a, T: ?Sized> {
-            inner: &'a T,
-            redactor: &'a dyn Redactor,
-        }
-        impl<T: RedactedDebug + ?Sized> std::fmt::Display for Adapter<'_, T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                <T as RedactedDebug>::fmt(self.inner, self.redactor, f)
-            }
-        }
         let value = "x".repeat(126);
         let sensitive = Sensitive::new(value, DataClass::new("test", "pii"));
-        let result = Adapter {
-            inner: &sensitive,
-            redactor: &TagRedactor as &dyn Redactor,
-        }
-        .to_string();
+        let redactor: &dyn Redactor = &TagRedactor;
+        let result = core::fmt::from_fn(|f| <Sensitive<_> as RedactedDebug>::fmt(&sensitive, redactor, f)).to_string();
         assert_snapshot!(result, @r#"<test/pii:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">"#);
     }
 
