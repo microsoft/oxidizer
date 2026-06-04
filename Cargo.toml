@@ -7,7 +7,7 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.93"
 authors = ["The Oxidizer Project Authors"]
 license = "MIT"
 homepage = "https://github.com/microsoft/oxidizer"
