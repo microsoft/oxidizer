@@ -937,7 +937,7 @@ function Show-ReleaseSummary {
 
     Write-Host ""
     Write-Host "📦 Released packages:" -ForegroundColor Green
-    foreach ($r in $releases) {
+    foreach ($r in @($releases | Sort-Object -Property Package)) {
         Write-Host "  - $($r.Package): $($r.OldVersion) -> $($r.NewVersion)" -ForegroundColor Green
     }
     Write-Host ""

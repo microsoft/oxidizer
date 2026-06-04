@@ -1190,3 +1190,45 @@ Describe 'Show-ReleasePlan: cascade-upgrade footer' {
         ($script:Captured -join "`n") | Should -Match 'Release plan: \(empty\)'
     }
 }
+
+# ---------------------------------------------------------------------------
+# Show-ReleaseSummary (released-packages list ordering)
+# ---------------------------------------------------------------------------
+
+Describe 'Show-ReleaseSummary' {
+
+    BeforeEach {
+        # Capture every Write-Host call so we can assert on the rendered order.
+        $script:Captured = New-Object 'System.Collections.Generic.List[string]'
+        Mock -CommandName Write-Host -MockWith {
+            param($Object)
+            if ($null -ne $Object) { $script:Captured.Add([string]$Object) }
+        } -ModuleName $null
+    }
+
+    It 'prints released packages in alphabetical order regardless of input order' {
+        # Inputs deliberately out of order (and not just reverse — interleaved).
+        $releases = @(
+            [pscustomobject]@{ Package = 'zeta';    OldVersion = '1.0.0'; NewVersion = '1.0.1' }
+            [pscustomobject]@{ Package = 'alpha';   OldVersion = '1.0.0'; NewVersion = '2.0.0' }
+            [pscustomobject]@{ Package = 'middle';  OldVersion = '0.4.1'; NewVersion = '0.4.2' }
+            [pscustomobject]@{ Package = 'bravo';   OldVersion = '0.1.0'; NewVersion = '0.1.1' }
+        )
+
+        Show-ReleaseSummary -releases $releases
+
+        # Filter to the package lines, in render order, and assert alphabetical.
+        $pkgLines = @($script:Captured | Where-Object { $_ -match '^\s*-\s+' })
+        $pkgLines.Count | Should -Be 4
+        $pkgLines[0]    | Should -Match '^\s*-\s+alpha:'
+        $pkgLines[1]    | Should -Match '^\s*-\s+bravo:'
+        $pkgLines[2]    | Should -Match '^\s*-\s+middle:'
+        $pkgLines[3]    | Should -Match '^\s*-\s+zeta:'
+    }
+
+    It 'handles an empty release list without throwing' {
+        { Show-ReleaseSummary -releases @() } | Should -Not -Throw
+        # The header is still emitted (so the user sees the section ran).
+        ($script:Captured -join "`n") | Should -Match 'Released packages'
+    }
+}
