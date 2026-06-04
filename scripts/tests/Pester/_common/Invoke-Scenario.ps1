@@ -87,27 +87,34 @@ function Invoke-Scenario {
     # point and capture the release records + any thrown exception.
     Push-Location $ws.Path
     try {
-        # Two entry-point modes are supported:
+        # The scenario harness wires a single entry point — Invoke-ReleasePackagesMain —
+        # and selects between its three -Mode values from the scenario PSD1:
         #
-        #   Run.Mode = 'all-changed' → Invoke-ReleaseChangedPackagesMain
-        #     (interactive guided walk; no -Packages tokens).
+        #   Run.Mode = 'changed' → Invoke-ReleasePackagesMain -Mode 'changed'
+        #     (interactive guided walk through every modified package; no
+        #     -Packages tokens).
         #
-        #   otherwise (default) → Invoke-ReleasePackagesMain with explicit
-        #     -Packages tokens (the historical scenario style).
+        #   Run.Mode = 'all'     → Invoke-ReleasePackagesMain -Mode 'all'
+        #     (interactive guided walk through every publishable package, even
+        #     ones with no on-disk modifications).
+        #
+        #   otherwise (default) → Invoke-ReleasePackagesMain -Mode 'targeted'
+        #     with explicit -Packages tokens (the historical scenario style).
         $error.Clear()
         $caught = $null
 
-        if ($scenario.Run.Mode -eq 'all-changed') {
+        $runMode = if ($scenario.Run.Mode) { $scenario.Run.Mode } else { 'targeted' }
+        if ($runMode -in @('changed', 'all')) {
             if ($null -ne $scenario.Run.Packages -or $null -ne $scenario.Run.PackageName) {
-                throw "Scenario '$($scenario.Name)' uses Run.Mode='all-changed' but also sets Run.Packages/Run.PackageName; choose one."
+                throw "Scenario '$($scenario.Name)' uses Run.Mode='$runMode' but also sets Run.Packages/Run.PackageName; choose one."
             }
             try {
-                $releases = Invoke-ReleaseChangedPackagesMain 6> $null
+                $releases = Invoke-ReleasePackagesMain -Mode $runMode 6> $null
             } catch {
                 $caught = $_
                 $releases = @()
             }
-        } else {
+        } elseif ($runMode -eq 'targeted') {
             # New-style scenarios provide Run.Packages directly (a string[] of
             # '<name>@<change-spec>' tokens). Legacy scenarios provided
             # Run.PackageName + Run.Change/Run.Version + Run.BaseRef; translate
@@ -117,7 +124,7 @@ function Invoke-Scenario {
                 $packageTokens = @($scenario.Run.Packages)
             } else {
                 if (-not $scenario.Run.PackageName) {
-                    throw "Scenario '$($scenario.Name)' must provide either Run.Mode='all-changed', Run.Packages, or Run.PackageName."
+                    throw "Scenario '$($scenario.Name)' must provide either Run.Mode='changed'/'all', Run.Packages, or Run.PackageName."
                 }
                 $changeSpec = if ($scenario.Run.Version) {
                     $scenario.Run.Version
@@ -137,11 +144,13 @@ function Invoke-Scenario {
             }
 
             try {
-                $releases = Invoke-ReleasePackagesMain -Packages $packageTokens 6> $null
+                $releases = Invoke-ReleasePackagesMain -Mode 'targeted' -Packages $packageTokens 6> $null
             } catch {
                 $caught = $_
                 $releases = @()
             }
+        } else {
+            throw "Scenario '$($scenario.Name)' has unknown Run.Mode '$runMode'. Expected 'targeted', 'changed', or 'all'."
         }
     } finally {
         Pop-Location

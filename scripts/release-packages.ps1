@@ -6,30 +6,40 @@
     Releases one or more workspace packages from a single bundled plan.
 
 .DESCRIPTION
-    Drives the full release of every package listed in -Packages plus every
-    workspace package that needs to cascade as a consequence:
-    1. Plan resolution: parse every token, compute the transitive
-       cascade-toward-dependents from each user-listed package, fold in
-       per-package change-type requirements (the user's request, auto-upgraded
-       when the cascade requires a stronger change).
-    2. Pre-release review: any workspace package that has unreleased
-       modifications (changes newer than its last `version =` / `publish =`
-       commit) and is not already part of the resolved plan is surfaced to
-       the user one at a time so the user can elevate-into / decline-from the
-       plan. Plan-resolution re-runs after every decision. Release-set
-       members carrying a non-breaking cascade-applied change type are also
-       surfaced so the user can decide whether to elevate them based on
-       their pending modifications.
-    3. Plan display: the final resolved plan is printed to the console for a
-       last eyeball before any file writes happen.
-    4. Atomic execution: the plan is executed top-down — Cargo.toml +
-       workspace Cargo.toml + CHANGELOG.md + README.md are updated for every
-       release-set member in topological order (dependencies first,
-       dependents last). No prompts are issued during execution; every
-       decision was made in step 2.
-    5. Post-execution: a workspace `cargo check` confirms the workspace still
-       builds, and a summary + next-steps message lists every released
-       package with its old → new version.
+    The driver supports three mutually-exclusive modes for selecting which
+    workspace packages to release. In every mode the same downstream pipeline
+    runs: plan resolution + cascade toward dependents, an interactive
+    elevation review for any modified-but-unreleased dependencies, a final
+    plan display, and atomic execution of all Cargo.toml / CHANGELOG.md /
+    README.md / workspace Cargo.toml writes, followed by a workspace
+    `cargo check` and a summary.
+
+    Modes:
+
+    1. Targeted (-Packages, default).
+       The caller provides the entire release plan up front as a list of
+       `<name>@<change-spec>` tokens. The planner cascades toward dependents
+       and surfaces any modified-and-unreleased dependencies for review. This
+       is the only mode that works non-interactively.
+
+    2. Changed (-Changed).
+       Interactive guided walk: the planner scans the workspace for every
+       package with unreleased modifications (changes newer than its last
+       `version =` / `publish =` commit) and walks the user through them one
+       prompt at a time. For each surfaced package the user can view the diff,
+       ignore the package, or release it as breaking / non-breaking / patch.
+       Each acceptance is fed back to the planner, which re-resolves the
+       release set and cascade so the next iteration surfaces only newly-
+       relevant elevation candidates.
+
+    3. All (-All).
+       Same interactive walk as -Changed, but the change-detection scan is
+       skipped: every publishable workspace package is surfaced for review,
+       even ones with no on-disk modifications. Use this when you want to
+       force-walk the entire workspace (e.g. preparing a coordinated multi-
+       package release after a refactor that may have touched everything).
+       Surfaced packages with no detected changes still expose the View-diff
+       menu option (relabelled to make the empty state obvious).
 
     Cargo's 0.x.y SemVer rules are honored throughout: for `0.x.y` packages a
     Breaking change becomes `0.(x+1).0`, NonBreaking and Patch both map to
@@ -63,6 +73,20 @@
     incompatible behaviour after `cargo update`; picking too strong is
     harmless except it forces direct dependents to bump as well.
 
+.PARAMETER Changed
+    Interactive switch: walk through every workspace package that has
+    unreleased modifications (changes newer than its last `version =` /
+    `publish =` commit) and prompt for a per-package release decision.
+    Mutually exclusive with -Packages and -All. Interactive-only — refuses
+    to run when stdin is not a terminal.
+
+.PARAMETER All
+    Interactive switch: walk through every publishable workspace package,
+    even ones with no on-disk modifications. Use to force-walk the workspace
+    when you need a coordinated multi-package release plan or when a refactor
+    might have touched packages the modification scan misses. Mutually
+    exclusive with -Packages and -Changed. Interactive-only.
+
 .EXAMPLE
     # Release 'bytesbuf_io' as a breaking change. Cascade is automatic.
     .\release-packages.ps1 -Packages 'bytesbuf_io@breaking'
@@ -76,12 +100,26 @@
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
     .\release-packages.ps1 -Packages 'my-package@1.0.0'
+
+.EXAMPLE
+    # Guided walk through every workspace package with unreleased modifications.
+    .\release-packages.ps1 -Changed
+
+.EXAMPLE
+    # Guided walk through every publishable workspace package.
+    .\release-packages.ps1 -All
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'ByPackages')]
 param(
-    [Parameter(Mandatory = $true, Position = 0)]
+    [Parameter(Mandatory = $true, Position = 0, ParameterSetName = 'ByPackages')]
     [ValidateNotNull()]
-    [string[]]$Packages
+    [string[]]$Packages,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'Changed')]
+    [switch]$Changed,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'All')]
+    [switch]$All
 )
 
 # All helpers, configuration, and Invoke-ReleasePackagesMain live in the
@@ -90,4 +128,10 @@ param(
 # import.
 . "$PSScriptRoot/lib/release-flow.ps1"
 
-Invoke-ReleasePackagesMain -Packages $Packages | Out-Null
+$mode = switch ($PSCmdlet.ParameterSetName) {
+    'ByPackages' { 'targeted' }
+    'Changed'    { 'changed' }
+    'All'        { 'all' }
+}
+
+Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages | Out-Null

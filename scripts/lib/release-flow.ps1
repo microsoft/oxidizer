@@ -1013,9 +1013,30 @@ function Format-PackageMenu {
     $hideNonBreaking = Test-IsNonBreakingOptionRedundant -CurrentVersion $current
     $hidePatch = $hideNonBreaking -or (Test-IsPatchOptionRedundant -CurrentVersion $current)
 
+    # ChangedFileCount may be 0 (or missing) in -All mode where the planner
+    # surfaces every published package regardless of on-disk modification
+    # status. Adapt the header verb and the "View diff" label so the reviewer
+    # is not misled into expecting changes that aren't there. The "View diff"
+    # menu option stays in slot 1 in both cases so muscle memory works.
+    $changeCount = 0
+    if ($null -ne $Finding.PSObject.Properties['ChangedFileCount']) {
+        $rawCount = $Finding.ChangedFileCount
+        if ($null -ne $rawCount) {
+            $changeCount = [int]$rawCount
+        }
+    }
+    $hasChanges = $changeCount -gt 0
+
+    $headerLine = if ($hasChanges) {
+        "Detected package with unreleased modifications: $folder$queueSuffix"
+    } else {
+        "Reviewing package (no detected changes): $folder$queueSuffix"
+    }
+    $viewDiffLabel = if ($hasChanges) { 'View diff' } else { 'View diff (no changes in this package)' }
+
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("Detected package with unreleased modifications: $folder$queueSuffix")
+    [void]$sb.AppendLine($headerLine)
     # Show every in-workspace dependency chain ending at this package, NOT
     # just the chains the current release plan reaches. The release set can
     # grow during this review loop (each accepted release may cascade to
@@ -1034,7 +1055,7 @@ function Format-PackageMenu {
         [void]$sb.AppendLine('  no in-workspace dependents')
     }
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('  1. View diff')
+    [void]$sb.AppendLine("  1. $viewDiffLabel")
     [void]$sb.AppendLine('  2. Ignore package - the changes are immaterial')
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     if (-not $hideNonBreaking) {
@@ -1426,12 +1447,12 @@ function Invoke-PlanReview {
 
     $isInteractive = Test-InteractiveSession
 
-    # all-changed mode is the back-end for release-changed-packages.ps1, whose
-    # entire UX is "prompt the user for each modified package". Refuse early
-    # in non-interactive contexts (CI, redirected stdin) so the caller sees
-    # a clear error instead of a noisy warning + empty result.
+    # all-changed mode is the back-end for release-packages.ps1 -Changed / -All,
+    # whose entire UX is "prompt the user for each surfaced package". Refuse
+    # early in non-interactive contexts (CI, redirected stdin) so the caller
+    # sees a clear error instead of a noisy warning + empty result.
     if ($Mode -eq 'all-changed' -and -not $isInteractive) {
-        throw 'Invoke-PlanReview -Mode ''all-changed'' requires an interactive session. Use release-packages.ps1 for scripted/CI releases.'
+        throw 'Invoke-PlanReview -Mode ''all-changed'' requires an interactive session. Use release-packages.ps1 -Packages for scripted/CI releases.'
     }
 
     # Working token list, mutable. Each accepted finding appends a new token.
@@ -1866,11 +1887,25 @@ function Show-FinalMessageForBundle {
     Write-Host '---' -ForegroundColor Green
 }
 
-# Top-level entry point for the bundled-input release flow. Parses the
-# -Packages token list, captures immutable baselines (workspace + modifications),
-# runs the pre-release interactive elevation review, prints the final plan,
-# executes the plan atomically, then runs the workspace cargo check and
-# prints the summary + final message.
+# Top-level entry point for the bundled-input release flow. Routes the three
+# user-facing modes ('targeted' / 'changed' / 'all') through one shared
+# pipeline: pre-flight checks, plan resolution / cascade / interactive
+# elevation review, plan display, atomic execution, post-execution workspace
+# `cargo check`, and final summary message.
+#
+# Targeted mode is the only one that accepts a non-empty $Packages list and
+# the only one that can run non-interactively. Changed and All modes are
+# interactive guided walks and refuse to run when stdin is not a terminal —
+# they discover their own targets:
+#
+#   - Changed surfaces every published workspace package with unreleased
+#     modifications (changes newer than its last `version =` /
+#     `publish =` commit).
+#   - All surfaces every published workspace package, regardless of whether
+#     the on-disk content has been modified. The change-detection scan still
+#     runs (for ChangedFileCount accuracy in the menu) but its result is
+#     augmented so the predicate inside Get-UnreleasedModifiedDependencies
+#     accepts every published package as eligible.
 #
 # Returns the array of release records (so Pester scenarios can assert on
 # them). Errors during input validation / pre-flight checks call Exit 1 to
@@ -1878,9 +1913,14 @@ function Show-FinalMessageForBundle {
 function Invoke-ReleasePackagesMain {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNull()]
-        [string[]]$Packages
+        [Parameter()]
+        [ValidateSet('targeted', 'changed', 'all')]
+        [string]$Mode = 'targeted',
+
+        [Parameter()]
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [string[]]$Packages = @()
     )
 
     # 1. PRE-FLIGHT
@@ -1900,12 +1940,32 @@ function Invoke-ReleasePackagesMain {
         Exit 1
     }
 
-    # 2. PARSE TOKENS
-    try {
-        $parsedTokens = Parse-ReleaseTokens -Tokens $Packages
-    } catch {
-        Write-Error $_.Exception.Message
-        Exit 1
+    # 2. MODE / INPUT VALIDATION + TOKEN PARSE
+    $hasTokens = ($null -ne $Packages) -and ($Packages.Count -gt 0)
+    if ($Mode -eq 'targeted') {
+        if (-not $hasTokens) {
+            Write-Error 'release-packages.ps1 -Packages requires at least one ''<name>@<change-spec>'' token. Use -Changed or -All for a guided walk instead.'
+            Exit 1
+        }
+        try {
+            $parsedTokens = Parse-ReleaseTokens -Tokens $Packages
+        } catch {
+            Write-Error $_.Exception.Message
+            Exit 1
+        }
+    } else {
+        if ($hasTokens) {
+            Write-Error "release-packages.ps1 -$Mode does not accept -Packages tokens; the planner discovers targets for you."
+            Exit 1
+        }
+        # Both interactive modes refuse early in non-interactive contexts
+        # (CI, redirected stdin) so the caller sees a clear error instead of
+        # a noisy warning + empty result later in Invoke-PlanReview.
+        if (-not (Test-InteractiveSession)) {
+            Write-Error "release-packages.ps1 -$Mode is interactive-only. For non-interactive (scripted/CI) use, invoke with an explicit -Packages list."
+            Exit 1
+        }
+        $parsedTokens = @()
     }
 
     # 3. DETERMINE GITHUB REPO URL
@@ -1922,114 +1982,51 @@ function Invoke-ReleasePackagesMain {
     $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $repoRoot.Path)
     $modifiedSnapshot  = Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
 
-    # 5. PRE-RELEASE REVIEW (interactive loop; no disk writes)
-    try {
-        $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
-            -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
-            -ModifiedSnapshot $modifiedSnapshot
-    } catch {
-        Write-Error $_.Exception.Message
-        Exit 1
+    # 4a. ALL-MODE SNAPSHOT AUGMENTATION (private to this entry-point).
+    # Get-UnreleasedModifiedDependencies's surfacing predicate filters on
+    # $modifiedMap.ContainsKey($folder). To make every publishable package
+    # eligible without threading a new mode flag through the predicate, we
+    # synthesise stub entries with ChangedFileCount = 0 for each published
+    # package not already represented. The synthesised snapshot must NOT
+    # escape this function — its zero-count entries would be misleading in
+    # PR-comment / dep-scan contexts that consume "really modified" data.
+    if ($Mode -eq 'all') {
+        foreach ($pkg in $workspaceBaseline) {
+            if ($pkg.Published -and -not $modifiedSnapshot.ContainsKey($pkg.Folder)) {
+                $modifiedSnapshot[$pkg.Folder] = 0
+            }
+        }
     }
 
-    # 6. SHOW PLAN
-    Show-ReleasePlan -ResolvedReleaseSet $resolvedHash
-
-    # 7. EXECUTE PLAN (atomic — all writes happen here)
-    try {
-        $releases = @(Invoke-ResolvedRelease -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml `
-            -PrBaseUrl $prBaseUrl -ResolvedReleaseSet $resolvedHash -WorkspaceBaseline $workspaceBaseline)
-    } catch {
-        Write-Error "Release execution failed: $_"
-        Exit 1
-    }
-
-    Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
-
-    Show-ReleaseSummary -releases $releases
-    Show-FinalMessageForBundle -Releases $releases -ResolvedReleaseSet $resolvedHash
-
-    return ,$releases
-}
-
-
-# Entry point for `scripts/release-changed-packages.ps1` — the guided counterpart
-# to `Invoke-ReleasePackagesMain`. Mirrors that function's pre-flight + execute
-# sequence, but seeds the review loop with NO explicit user tokens. Instead it
-# asks `Invoke-PlanReview -Mode 'all-changed'` to surface every workspace
-# package with unreleased modifications and walk the user through each one.
-#
-# Interactive-only by design: non-interactive callers must use the token-driven
-# `Invoke-ReleasePackagesMain` so the choices are explicit and auditable.
-function Invoke-ReleaseChangedPackagesMain {
-    [CmdletBinding()]
-    param()
-
-    # 1. PRE-FLIGHT
-    if (-not (Test-CommandExists -command 'git')) {
-        Write-Error 'Git is not installed or not found in your PATH.'
-        Exit 1
-    }
-
-    $repoRoot = Get-Location
-    if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
-        Write-Error 'This script must be run from the root of a Git repository.'
-        Exit 1
-    }
-    $rootCargoToml = Join-Path $repoRoot 'Cargo.toml'
-    if (-not (Test-Path $rootCargoToml)) {
-        Write-Error "Could not find root Cargo.toml at '$rootCargoToml'."
-        Exit 1
-    }
-
-    # Fail fast for non-interactive sessions BEFORE doing any workspace scan
-    # work — Invoke-PlanReview will refuse anyway, but reporting the precise
-    # remediation here saves the user a slow scan first.
-    if (-not (Test-InteractiveSession)) {
-        Write-Error 'release-changed-packages.ps1 is an interactive-only workflow. For non-interactive (scripted/CI) use, invoke release-packages.ps1 with an explicit package list.'
-        Exit 1
-    }
-
-    # 2. DETERMINE GITHUB REPO URL
-    $prBaseUrl = $null
-    $remoteUrl = Invoke-Git -Arguments @('remote', 'get-url', 'origin') -RepoRoot $repoRoot.Path -AllowFailure
-    if ($remoteUrl -and $remoteUrl -match $script:GitHubRepoRegex) {
-        $repoIdentifier = $matches[1] -replace '\.git$', ''
-        $prBaseUrl = "https://github.com/$repoIdentifier/pull"
-    } else {
-        Write-Warning "Could not determine GitHub repository from remote 'origin'. Links will not be generated."
-    }
-
-    # 3. SNAPSHOT WORKSPACE + MODIFICATIONS (immutable for the run)
-    $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $repoRoot.Path)
-    $modifiedSnapshot  = Get-PackagesWithUnreleasedChanges -RepoRoot $repoRoot.Path
-
-    # 4. EARLY EXIT IF NO CHANGES — saves the user from an empty prompt loop.
-    if ($modifiedSnapshot.Count -eq 0) {
+    # 4b. CHANGED-MODE EARLY EXIT — saves the user from an empty prompt loop.
+    if ($Mode -eq 'changed' -and $modifiedSnapshot.Count -eq 0) {
         Write-Host ''
         Write-Host '✅ No workspace packages have unreleased modifications. Nothing to release.' -ForegroundColor Green
         return ,@()
     }
 
     # 5. PRE-RELEASE REVIEW (interactive loop; no disk writes).
-    # No user tokens: the all-changed mode lets the review loop add every
-    # changed published package as a BFS root, surfacing them one-by-one for
-    # decision. Acceptances become tokens inside the loop and feed
-    # Resolve-ReleaseSet on the next iteration just like the targeted flow.
+    # 'changed' and 'all' both map to Invoke-PlanReview's 'all-changed' mode:
+    # the planner adds every snapshot entry as a BFS root, surfacing them
+    # one-by-one for a per-package decision. Acceptances become tokens inside
+    # the loop and feed Resolve-ReleaseSet on the next iteration just like
+    # the targeted flow.
+    $planReviewMode = if ($Mode -eq 'targeted') { 'targeted' } else { 'all-changed' }
     try {
         $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
-            -ParsedTokens @() -WorkspaceBaseline $workspaceBaseline `
-            -ModifiedSnapshot $modifiedSnapshot -Mode 'all-changed'
+            -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
+            -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode
     } catch {
         Write-Error $_.Exception.Message
         Exit 1
     }
 
-    # 6. EARLY EXIT IF USER IGNORED EVERYTHING — skip Show-ReleasePlan /
-    # Invoke-ResolvedRelease / Invoke-WorkspaceCheck. They handle empty input
-    # gracefully but we'd waste a `cargo check` run and the user already
-    # knows nothing will happen.
-    if ($null -eq $resolvedHash -or $resolvedHash.Count -eq 0) {
+    # 6. EARLY EXIT IF GUIDED USER IGNORED EVERYTHING — skip Show-ReleasePlan
+    # / Invoke-ResolvedRelease / Invoke-WorkspaceCheck. They handle empty
+    # input gracefully but we'd waste a `cargo check` run and the user
+    # already knows nothing will happen. Cannot apply to targeted mode
+    # because targeted requires at least one token.
+    if ($Mode -ne 'targeted' -and ($null -eq $resolvedHash -or $resolvedHash.Count -eq 0)) {
         Write-Host ''
         Write-Host '✅ No packages selected for release.' -ForegroundColor Green
         return ,@()

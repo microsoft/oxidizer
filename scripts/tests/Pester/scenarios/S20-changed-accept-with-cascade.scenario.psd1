@@ -1,6 +1,6 @@
 @{
-    Name        = 'S20-all-changed-accept-with-cascade'
-    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode all-changed: user accepts b as non-breaking (which cascades a as non-breaking), then ignores c and the cascade-elevated a. Final release set = {b, a}.'
+    Name        = 'S20-changed-accept-with-cascade'
+    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode changed: user accepts b as non-breaking (which cascades a as non-breaking), then ignores c and the cascade-elevated a. Final release set = {b, a}.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -12,7 +12,7 @@
     )
 
     Run = @{
-        Mode    = 'all-changed'
+        Mode    = 'changed'
         Answers = @(
             # Iter 1: queue = [b, c, a]. Accept b as non-breaking (option 4).
             # In 0.x semver this is "patch-style": 0.2.0 -> 0.2.1. We pick

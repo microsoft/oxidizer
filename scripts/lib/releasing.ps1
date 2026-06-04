@@ -879,7 +879,7 @@ function Get-UnreleasedModifiedDependencies {
         # changed packages surface naturally, AND sweeps any modified-published
         # package the surfacing predicate accepts but no BFS run reached as a
         # dep, adding it as a "stub" finding (DependencyChains = @()). Used by
-        # the guided changed-packages workflow (release-changed-packages.ps1).
+        # the guided changed-packages workflow (release-packages.ps1 -Changed / -All).
         [switch]$IncludeAllModifiedAsRoots
     )
 

@@ -82,6 +82,64 @@ Describe 'Format-PackageMenu' {
         $out | Should -Match 'Detected package with unreleased modifications: ohno'
     }
 
+    Context 'no-changes (-All-mode) finding' {
+
+        # When the planner surfaces a package via -All mode there may be no
+        # on-disk modification at all. ChangedFileCount = 0 (or missing)
+        # signals this case; the menu must adapt its header and the
+        # "View diff" label so the reviewer is not misled into expecting
+        # changes that aren't there. The View-diff option still occupies
+        # menu slot 1 for muscle-memory consistency with the changed-finding
+        # variant.
+
+        function script:NewNoChangesFinding {
+            param([string]$Folder = 'unchanged', [string]$CurrentVersion = '1.2.3')
+            return [pscustomobject]@{
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 0
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
+            }
+        }
+
+        It 'rewrites the header verb when ChangedFileCount is 0' {
+            $out = Format-PackageMenu -Finding (NewNoChangesFinding -Folder 'unchanged') -RemainingCount 0
+            $out | Should -Match 'Reviewing package \(no detected changes\): unchanged'
+            $out | Should -Not -Match 'Detected package with unreleased modifications'
+        }
+
+        It 'relabels option 1 to "View diff (no changes in this package)" when ChangedFileCount is 0' {
+            $out = Format-PackageMenu -Finding (NewNoChangesFinding) -RemainingCount 0
+            $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
+            $lines[0] | Should -Match '^\s*1\. View diff \(no changes in this package\)$'
+        }
+
+        It 'keeps the standard "View diff" label and modifications header when ChangedFileCount is > 0' {
+            $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 0
+            $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
+            $lines[0] | Should -Match '^\s*1\. View diff$'
+            $out | Should -Match 'Detected package with unreleased modifications'
+        }
+
+        It 'treats a missing ChangedFileCount as 0 (no-changes flavour)' {
+            # Defensive: hand-rolled findings without the ChangedFileCount
+            # property should still render, falling back to the no-changes
+            # flavour rather than crashing.
+            $finding = [pscustomobject]@{
+                Folder                    = 'sparse'
+                PackageName               = 'sparse'
+                CurrentVersion            = '1.0.0'
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
+            }
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+            $out | Should -Match 'Reviewing package \(no detected changes\)'
+            $out | Should -Match '1\. View diff \(no changes in this package\)'
+        }
+    }
+
     It 'omits the queued-count suffix when RemainingCount is 0' {
         $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 0
         $out | Should -Not -Match '\(\+\d+ packages? queued\)'

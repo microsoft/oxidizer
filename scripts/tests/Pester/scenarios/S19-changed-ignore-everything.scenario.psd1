@@ -1,6 +1,6 @@
 @{
-    Name        = 'S19-all-changed-ignore-everything'
-    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode all-changed and ignore every prompt; expect no releases and no errors. Validates the early-exit path when the user declines every surfaced finding.'
+    Name        = 'S19-changed-ignore-everything'
+    Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode changed and ignore every prompt; expect no releases and no errors. Validates the early-exit path when the user declines every surfaced finding.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -12,12 +12,12 @@
     )
 
     Run = @{
-        # Mode='all-changed' invokes Invoke-ReleaseChangedPackagesMain (no
-        # -Packages list). The review loop seeds BFS roots from every changed
-        # package, so the user is walked through b, c, a in that order — b and
-        # c come first as BFS-recorded dependencies of a; a comes last as a
-        # Phase-B stub (no in-release-set dependents).
-        Mode    = 'all-changed'
+        # Mode='changed' invokes Invoke-ReleasePackagesMain -Mode 'changed'
+        # (no -Packages list). The review loop seeds BFS roots from every
+        # changed package, so the user is walked through b, c, a in that
+        # order — b and c come first as BFS-recorded dependencies of a;
+        # a comes last as a Phase-B stub (no in-release-set dependents).
+        Mode    = 'changed'
         Answers = @(
             @{ Match = "Choose option for 'b'"; Reply = '2' }
             @{ Match = "Choose option for 'c'"; Reply = '2' }
