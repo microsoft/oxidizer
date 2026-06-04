@@ -3,14 +3,31 @@ source: crates/fetch_hyper/src/builder.rs
 expression: configured
 ---
 fetch_hyper::builder::HyperTransportBuilder<fetch_hyper::testing::FakeConnector, fetch_hyper::testing::FakeStream> {
-    request_filter: HttpAndHttps,
-    supported_http_versions: [
-        HTTP/2.0,
-    ],
-    connect_timeout: 7s,
-    connection_lifetime: Fixed(
-        60s,
+    options: TransportOptions {
+        connect_timeout: 7s,
+        connection_keep_alive: Disabled,
+        request_filter: HttpAndHttps,
+        supported_http_versions: [
+            HTTP/2.0,
+        ],
+        connection_pool: ConnectionPoolOptions {
+            connection_idle_timeout: Limited(
+                60s,
+            ),
+            max_connections: 18446744073709551615,
+            multiple_pools: None,
+            connection_lifetime: ConnectionLifetime(
+                60s,
+            ),
+        },
+        http_2: Http2Options {
+            initial_max_send_streams: None,
+            adaptive_window: false,
+        },
+        extra: {},
+    },
+    pool_index: PoolIndex(
+        42,
     ),
-    pool_index: 42,
     ..
 }
