@@ -53,6 +53,24 @@ Describe 'Parse-ReleaseTokens' {
             $parsed = Parse-ReleaseTokens -Tokens @('pkg@42.987.65')
             $parsed[0].RequestedTargetVersion | Should -Be '42.987.65'
         }
+
+        It 'accepts SemVer 2.0 pre-release identifiers' {
+            $parsed = Parse-ReleaseTokens -Tokens @(
+                'pkg1@1.2.3-pre01',
+                'pkg2@1.0.0-rc.1',
+                'pkg3@1.0.0-alpha.beta',
+                'pkg4@0.1.0-beta+meta'
+            )
+            $parsed[0].RequestedTargetVersion | Should -Be '1.2.3-pre01'
+            $parsed[1].RequestedTargetVersion | Should -Be '1.0.0-rc.1'
+            $parsed[2].RequestedTargetVersion | Should -Be '1.0.0-alpha.beta'
+            $parsed[3].RequestedTargetVersion | Should -Be '0.1.0-beta+meta'
+        }
+
+        It 'accepts SemVer 2.0 build metadata without pre-release' {
+            $parsed = Parse-ReleaseTokens -Tokens @('pkg@1.0.0+exp.sha.5')
+            $parsed[0].RequestedTargetVersion | Should -Be '1.0.0+exp.sha.5'
+        }
     }
 
     Context 'duplicate rejection' {
@@ -99,6 +117,23 @@ Describe 'Parse-ReleaseTokens' {
             { Parse-ReleaseTokens -Tokens @('pkg@1') }        | Should -Throw -ExpectedMessage "*Invalid change specifier '1'*"
             { Parse-ReleaseTokens -Tokens @('pkg@1.2.3.4') }  | Should -Throw -ExpectedMessage "*Invalid change specifier '1.2.3.4'*"
             { Parse-ReleaseTokens -Tokens @('pkg@v1.2.3') }   | Should -Throw -ExpectedMessage "*Invalid change specifier 'v1.2.3'*"
+        }
+
+        It 'rejects 1- and 2-component versions with the three-component error message' {
+            # The error message must explicitly mention the three-component
+            # requirement so users typing 'foo@1' / 'foo@1.2' know how to fix it.
+            { Parse-ReleaseTokens -Tokens @('pkg@1') }   | Should -Throw -ExpectedMessage '*three components*'
+            { Parse-ReleaseTokens -Tokens @('pkg@1.2') } | Should -Throw -ExpectedMessage '*three components*'
+        }
+
+        It 'rejects leading-zero components (per SemVer 2.0)' {
+            { Parse-ReleaseTokens -Tokens @('pkg@01.2.3') } | Should -Throw -ExpectedMessage "*Invalid change specifier '01.2.3'*"
+            { Parse-ReleaseTokens -Tokens @('pkg@1.02.3') } | Should -Throw -ExpectedMessage "*Invalid change specifier '1.02.3'*"
+        }
+
+        It 'rejects malformed pre-release suffixes' {
+            { Parse-ReleaseTokens -Tokens @('pkg@1.2.3-') }   | Should -Throw -ExpectedMessage "*Invalid change specifier '1.2.3-'*"
+            { Parse-ReleaseTokens -Tokens @('pkg@1.2.3-01') } | Should -Throw -ExpectedMessage "*Invalid change specifier '1.2.3-01'*"  # leading-zero numeric identifier
         }
 
         It 'rejects invalid package names' {

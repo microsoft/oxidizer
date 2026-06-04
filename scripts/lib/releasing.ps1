@@ -30,7 +30,13 @@
 
 $script:ConventionalCommitRegex = [regex]'^(\w+)(?:\(.*\))?(!)?:\s*(.*)'
 $script:PrReferenceRegex = [regex]'\s*(\(#(\d+)\))$'
-$script:SemanticVersionRegex = [regex]'^\d+\.\d+\.\d+$'
+# Strict SemVer 2.0 grammar from https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+# Anchored. Disallows leading zeros in numeric components AND in pre-release
+# numeric identifiers. Allows optional pre-release (-...) and build (+...)
+# suffixes. The [semver] PowerShell type would parse some illegal inputs (e.g.
+# '01.2.3') so we validate with this regex first and only cast to [semver]
+# afterwards for ordering operations.
+$script:SemanticVersionRegex = [regex]'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'
 # Matches a Cargo.toml's [package]-scoped `version = "..."` line.
 #   - Anchored at line start so substring keys like `rust-version` do not match.
 #   - Walks from the [package] header through lines that don't start a new TOML
@@ -132,28 +138,47 @@ function Test-ValidVersion {
     return $script:SemanticVersionRegex.IsMatch($version)
 }
 
-# Returns -1, 0, or 1 — semantic version ordering on the (major, minor, patch) triple.
+# Strict SemVer 2.0 splitter — validates with $script:SemanticVersionRegex and
+# returns a hashtable with keys Major/Minor/Patch (all [int]) plus PreRelease
+# and Build (strings, possibly empty). Throws on invalid input. Pre-release
+# numeric identifiers are intentionally kept as strings since their grammar
+# permits forms like '0' (allowed) but not '01' (rejected by the regex).
+function Split-SemanticVersion {
+    param([Parameter(Mandatory = $true)][string]$version)
+
+    $m = $script:SemanticVersionRegex.Match($version)
+    if (-not $m.Success) {
+        throw "Invalid SemVer version '$version'. Expected the form <major>.<minor>.<patch>[-<prerelease>][+<build>] with exactly three numeric components (no leading zeros)."
+    }
+
+    return @{
+        Major      = [int]$m.Groups[1].Value
+        Minor      = [int]$m.Groups[2].Value
+        Patch      = [int]$m.Groups[3].Value
+        PreRelease = $m.Groups[4].Value
+        Build      = $m.Groups[5].Value
+    }
+}
+
+# Returns -1, 0, or 1 — SemVer 2.0 ordering (full Major/Minor/Patch +
+# pre-release identifier comparison; build metadata is ignored per spec).
+# Both inputs are validated strictly via Split-SemanticVersion and will throw
+# on invalid input (including 1- or 2-component forms).
 function Compare-SemanticVersions {
     param(
         [string]$version1,
         [string]$version2
     )
 
-    # Force array context — a single-segment input ('1') pipes a scalar [int] out
-    # of ForEach-Object, and `$x += 0` on a scalar [int] performs arithmetic
-    # rather than array concatenation, so the pad-to-3 loop below would never
-    # terminate.
-    $v1Parts = @($version1.Split('.') | ForEach-Object { [int]$_ })
-    $v2Parts = @($version2.Split('.') | ForEach-Object { [int]$_ })
+    # Validate via Split-SemanticVersion (throws on invalid input). [semver]
+    # alone would silently accept '01.2.3' and similar non-canonical forms.
+    [void](Split-SemanticVersion -version $version1)
+    [void](Split-SemanticVersion -version $version2)
 
-    while ($v1Parts.Count -lt 3) { $v1Parts += 0 }
-    while ($v2Parts.Count -lt 3) { $v2Parts += 0 }
-
-    for ($i = 0; $i -lt 3; $i++) {
-        if ($v1Parts[$i] -gt $v2Parts[$i]) { return 1 }
-        elseif ($v1Parts[$i] -lt $v2Parts[$i]) { return -1 }
-    }
-
+    $sv1 = [semver]$version1
+    $sv2 = [semver]$version2
+    if ($sv1 -gt $sv2) { return 1 }
+    if ($sv1 -lt $sv2) { return -1 }
     return 0
 }
 
@@ -189,25 +214,30 @@ function Get-NextVersion {
         [string]$ChangeType
     )
 
-    # Force array context — see Compare-SemanticVersions for the rationale.
-    $parts = @($currentVersion.Split('.') | ForEach-Object { [int]$_ })
-    while ($parts.Count -lt 3) { $parts += 0 }
+    # Strict-parse the input. Pre-release / build suffixes are recognised but
+    # dropped from the output — the next-version computation only operates on
+    # the (major, minor, patch) triple, and we never emit pre-release versions
+    # from a release (the release is always a clean SemVer).
+    $parts = Split-SemanticVersion -version $currentVersion
+    $major = $parts.Major
+    $minor = $parts.Minor
+    $patch = $parts.Patch
 
-    if ($parts[0] -ge 1) {
+    if ($major -ge 1) {
         switch ($ChangeType) {
-            'breaking'     { return "$($parts[0] + 1).0.0" }
-            'non-breaking' { return "$($parts[0]).$($parts[1] + 1).0" }
-            'patch'        { return "$($parts[0]).$($parts[1]).$($parts[2] + 1)" }
+            'breaking'     { return "$($major + 1).0.0" }
+            'non-breaking' { return "$major.$($minor + 1).0" }
+            'patch'        { return "$major.$minor.$($patch + 1)" }
         }
     }
-    elseif ($parts[1] -ge 1) {
+    elseif ($minor -ge 1) {
         switch ($ChangeType) {
-            'breaking' { return "0.$($parts[1] + 1).0" }
-            default    { return "0.$($parts[1]).$($parts[2] + 1)" }
+            'breaking' { return "0.$($minor + 1).0" }
+            default    { return "0.$minor.$($patch + 1)" }
         }
     }
     else {
-        return "0.0.$($parts[2] + 1)"
+        return "0.0.$($patch + 1)"
     }
 }
 
@@ -227,19 +257,19 @@ function Get-ChangeTypeFromVersions {
         [string]$newVersion
     )
 
-    # Force array context — see Compare-SemanticVersions for the rationale.
-    $oldParts = @($oldVersion.Split('.') | ForEach-Object { [int]$_ })
-    $newParts = @($newVersion.Split('.') | ForEach-Object { [int]$_ })
-    while ($oldParts.Count -lt 3) { $oldParts += 0 }
-    while ($newParts.Count -lt 3) { $newParts += 0 }
+    # Strict-parse both inputs. Pre-release / build metadata is dropped from the
+    # numeric-component comparison (pre-release-only transitions like
+    # 1.0.0-pre01 → 1.0.0 are classified as the weakest 'patch').
+    $oldParts = Split-SemanticVersion -version $oldVersion
+    $newParts = Split-SemanticVersion -version $newVersion
 
-    if ($oldParts[0] -ge 1) {
-        if ($newParts[0] -ne $oldParts[0]) { return 'breaking' }
-        if ($newParts[1] -ne $oldParts[1]) { return 'non-breaking' }
+    if ($oldParts.Major -ge 1) {
+        if ($newParts.Major -ne $oldParts.Major) { return 'breaking' }
+        if ($newParts.Minor -ne $oldParts.Minor) { return 'non-breaking' }
         return 'patch'
     }
-    if ($oldParts[1] -ge 1) {
-        if ($newParts[1] -ne $oldParts[1]) { return 'breaking' }
+    if ($oldParts.Minor -ge 1) {
+        if ($newParts.Minor -ne $oldParts.Minor) { return 'breaking' }
         return 'patch'
     }
     return 'breaking'
@@ -252,14 +282,12 @@ function Test-IsBreakingChange {
         [string]$ChangeType
     )
 
-    # Force array context — see Compare-SemanticVersions for the rationale.
-    $parts = @($oldVersion.Split('.') | ForEach-Object { [int]$_ })
-    while ($parts.Count -lt 3) { $parts += 0 }
+    $parts = Split-SemanticVersion -version $oldVersion
 
-    if ($parts[0] -ge 1) {
+    if ($parts.Major -ge 1) {
         return $ChangeType -eq 'breaking'
     }
-    if ($parts[1] -ge 1) {
+    if ($parts.Minor -ge 1) {
         return $ChangeType -eq 'breaking'
     }
     return $true
@@ -853,9 +881,8 @@ function New-ResolvedReleaseSetFromBaseRef {
 #                       - chains rooted in release-set members (or, in
 #                       -IncludeAllModifiedAsRoots mode, also in other
 #                       modified-published packages) that transitively reach
-#                       `this_dep`. Used by the non-interactive bail-out
-#                       printer and the PR sticky comment to highlight what is
-#                       at risk in the current release plan specifically.
+#                       `this_dep`. Used by the PR sticky comment to highlight
+#                       what is at risk in the current release plan specifically.
 #   WorkspaceDependencyChains  - @( @('top_dependent', ..., 'this_dep'), ... )
 #                       - every path in the workspace dep graph ending at
 #                       `this_dep`, irrespective of release-set membership.

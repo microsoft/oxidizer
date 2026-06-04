@@ -25,19 +25,40 @@ Describe 'Compare-SemanticVersions' {
         Compare-SemanticVersions -version1 '2.0.0' -version2 '1.99.99' | Should -Be 1
     }
 
-    It 'pads short versions with zeros' {
-        Compare-SemanticVersions -version1 '1.2' -version2 '1.2.0' | Should -Be 0
-        Compare-SemanticVersions -version1 '1.2' -version2 '1.2.1' | Should -Be -1
-        Compare-SemanticVersions -version1 '1.3' -version2 '1.2.99' | Should -Be 1
+    It 'orders a pre-release version before the corresponding release version (SemVer 2.0)' {
+        # SemVer 2.0 §11: a pre-release version has lower precedence than the
+        # associated normal version.
+        Compare-SemanticVersions -version1 '1.0.0-pre01' -version2 '1.0.0' | Should -Be -1
+        Compare-SemanticVersions -version1 '1.0.0-rc.1' -version2 '1.0.0' | Should -Be -1
+        Compare-SemanticVersions -version1 '1.0.0' -version2 '1.0.0-rc.1' | Should -Be 1
     }
 
-    It 'pads single-segment versions with zeros (forces array context internally)' {
-        # Previously, '1'.Split('.') |ForEach-Object {[int]$_} flowed a scalar out
-        # of the pipeline and the pad-to-3 loop hung. Verifies the array-context
-        # fix in releasing.ps1.
-        Compare-SemanticVersions -version1 '1'   -version2 '1.0.0' | Should -Be 0
-        Compare-SemanticVersions -version1 '1'   -version2 '1.0.1' | Should -Be -1
-        Compare-SemanticVersions -version1 '2'   -version2 '1.99.99' | Should -Be 1
+    It 'orders pre-release identifiers numerically and lexically (SemVer 2.0)' {
+        # SemVer 2.0 §11.4: numeric identifiers compared numerically;
+        # alphanumeric identifiers compared in ASCII sort order.
+        Compare-SemanticVersions -version1 '1.0.0-alpha' -version2 '1.0.0-beta'  | Should -Be -1
+        Compare-SemanticVersions -version1 '1.0.0-rc.1'  -version2 '1.0.0-rc.2'  | Should -Be -1
+        Compare-SemanticVersions -version1 '1.0.0-alpha.1' -version2 '1.0.0-alpha.10' | Should -Be -1
+    }
+
+    It 'ignores build metadata in ordering (SemVer 2.0)' {
+        # SemVer 2.0 §10: build metadata MUST be ignored when determining
+        # version precedence.
+        Compare-SemanticVersions -version1 '1.0.0+a' -version2 '1.0.0+b' | Should -Be 0
+        Compare-SemanticVersions -version1 '1.0.0-rc.1+a' -version2 '1.0.0-rc.1+b' | Should -Be 0
+    }
+
+    It 'throws on 1- or 2-component inputs' {
+        # Lenient pad-to-three behaviour has been retired; the helpers are
+        # strict SemVer 2.0 from the outside in.
+        { Compare-SemanticVersions -version1 '1.2'  -version2 '1.2.0' } | Should -Throw
+        { Compare-SemanticVersions -version1 '1'    -version2 '1.0.0' } | Should -Throw
+    }
+
+    It 'throws on leading-zero components' {
+        # [semver] would parse '01.2.3' as '1.2.3'; the strict regex rejects it.
+        { Compare-SemanticVersions -version1 '01.2.3' -version2 '1.2.3' } | Should -Throw
+        { Compare-SemanticVersions -version1 '1.2.3' -version2 '1.02.3' } | Should -Throw
     }
 }
 
@@ -77,14 +98,25 @@ Describe 'Get-NextVersion' {
         }
     }
 
-    Context 'short-form inputs (pads to three segments)' {
-        It 'handles two-segment inputs' {
-            Get-NextVersion -currentVersion '1.2' -ChangeType 'patch' | Should -Be '1.2.1'
-            Get-NextVersion -currentVersion '0.1' -ChangeType 'patch' | Should -Be '0.1.1'
+    Context 'pre-release / build metadata are dropped from the next version' {
+        It 'strips pre-release suffixes' {
+            Get-NextVersion -currentVersion '1.0.0-rc.1' -ChangeType 'breaking'     | Should -Be '2.0.0'
+            Get-NextVersion -currentVersion '1.0.0-rc.1' -ChangeType 'non-breaking' | Should -Be '1.1.0'
+            Get-NextVersion -currentVersion '1.0.0-rc.1' -ChangeType 'patch'        | Should -Be '1.0.1'
         }
-        It 'handles single-segment inputs (was a latent infinite loop)' {
-            Get-NextVersion -currentVersion '1' -ChangeType 'patch' | Should -Be '1.0.1'
-            Get-NextVersion -currentVersion '2' -ChangeType 'breaking' | Should -Be '3.0.0'
+        It 'strips build metadata suffixes' {
+            Get-NextVersion -currentVersion '1.0.0+meta'     -ChangeType 'breaking' | Should -Be '2.0.0'
+            Get-NextVersion -currentVersion '1.0.0-rc.1+abc' -ChangeType 'breaking' | Should -Be '2.0.0'
+        }
+    }
+
+    Context 'rejects malformed input' {
+        It 'throws on 1- or 2-component inputs' {
+            { Get-NextVersion -currentVersion '1.2' -ChangeType 'patch' } | Should -Throw
+            { Get-NextVersion -currentVersion '1'   -ChangeType 'patch' } | Should -Throw
+        }
+        It 'throws on leading-zero components' {
+            { Get-NextVersion -currentVersion '01.2.3' -ChangeType 'patch' } | Should -Throw
         }
     }
 }
@@ -102,10 +134,9 @@ Describe 'Get-ChangeTypeFromVersions' {
     Context '0.0.z' {
         It 'reports every change as breaking' { Get-ChangeTypeFromVersions -oldVersion '0.0.1' -newVersion '0.0.2' | Should -Be 'breaking' }
     }
-    Context 'short-form inputs (pads to three segments)' {
-        It 'handles single-segment inputs (was a latent infinite loop)' {
-            Get-ChangeTypeFromVersions -oldVersion '1' -newVersion '1.0.1' | Should -Be 'patch'
-            Get-ChangeTypeFromVersions -oldVersion '1' -newVersion '2.0.0' | Should -Be 'breaking'
+    Context 'rejects malformed input' {
+        It 'throws on 1- or 2-component inputs' {
+            { Get-ChangeTypeFromVersions -oldVersion '1' -newVersion '1.0.1' } | Should -Throw
         }
     }
 }
@@ -128,10 +159,9 @@ Describe 'Test-IsBreakingChange' {
             Test-IsBreakingChange -oldVersion '0.0.1' -ChangeType 'breaking' | Should -BeTrue
         }
     }
-    Context 'short-form inputs (pads to three segments)' {
-        It 'handles single-segment inputs (was a latent infinite loop)' {
-            Test-IsBreakingChange -oldVersion '1' -ChangeType 'breaking' | Should -BeTrue
-            Test-IsBreakingChange -oldVersion '1' -ChangeType 'non-breaking' | Should -BeFalse
+    Context 'rejects malformed input' {
+        It 'throws on 1- or 2-component inputs' {
+            { Test-IsBreakingChange -oldVersion '1' -ChangeType 'breaking' } | Should -Throw
         }
     }
 }
@@ -148,18 +178,71 @@ Describe 'Test-ValidVersion' {
         Test-ValidVersion -version $null | Should -BeTrue
     }
 
-    It 'rejects pre-release and metadata suffixes' {
-        Test-ValidVersion -version '1.2.3-alpha' | Should -BeFalse
-        Test-ValidVersion -version '1.2.3+build' | Should -BeFalse
+    It 'accepts SemVer 2.0 pre-release identifiers' {
+        Test-ValidVersion -version '1.2.3-alpha'      | Should -BeTrue
+        Test-ValidVersion -version '1.2.3-pre01'      | Should -BeTrue
+        Test-ValidVersion -version '1.2.3-rc.1'       | Should -BeTrue
+        Test-ValidVersion -version '1.0.0-alpha.beta' | Should -BeTrue
+    }
+
+    It 'accepts SemVer 2.0 build metadata' {
+        Test-ValidVersion -version '1.2.3+build'      | Should -BeTrue
+        Test-ValidVersion -version '1.2.3+exp.sha.5'  | Should -BeTrue
+        Test-ValidVersion -version '1.0.0-rc.1+meta'  | Should -BeTrue
     }
 
     It 'rejects short / long forms' {
         Test-ValidVersion -version '1.2'    | Should -BeFalse
+        Test-ValidVersion -version '1'      | Should -BeFalse
         Test-ValidVersion -version '1.2.3.4'| Should -BeFalse
     }
 
     It 'rejects non-numeric components' {
         Test-ValidVersion -version '1.x.3' | Should -BeFalse
+    }
+
+    It 'rejects leading-zero numeric components (per SemVer 2.0)' {
+        Test-ValidVersion -version '01.2.3' | Should -BeFalse
+        Test-ValidVersion -version '1.02.3' | Should -BeFalse
+        Test-ValidVersion -version '1.2.03' | Should -BeFalse
+    }
+
+    It 'rejects malformed pre-release / build suffixes' {
+        Test-ValidVersion -version '1.2.3-'     | Should -BeFalse
+        Test-ValidVersion -version '1.2.3+'     | Should -BeFalse
+        Test-ValidVersion -version '1.2.3-01'   | Should -BeFalse  # leading zero in numeric pre-release identifier
+    }
+}
+
+Describe 'Split-SemanticVersion' {
+    It 'splits a plain SemVer triple' {
+        $parts = Split-SemanticVersion -version '1.2.3'
+        $parts.Major      | Should -Be 1
+        $parts.Minor      | Should -Be 2
+        $parts.Patch      | Should -Be 3
+        $parts.PreRelease | Should -BeNullOrEmpty
+        $parts.Build      | Should -BeNullOrEmpty
+    }
+
+    It 'splits a pre-release version' {
+        $parts = Split-SemanticVersion -version '1.0.0-rc.1'
+        $parts.Major      | Should -Be 1
+        $parts.Minor      | Should -Be 0
+        $parts.Patch      | Should -Be 0
+        $parts.PreRelease | Should -Be 'rc.1'
+        $parts.Build      | Should -BeNullOrEmpty
+    }
+
+    It 'splits a version with build metadata' {
+        $parts = Split-SemanticVersion -version '1.0.0-beta+meta'
+        $parts.PreRelease | Should -Be 'beta'
+        $parts.Build      | Should -Be 'meta'
+    }
+
+    It 'throws on invalid input' {
+        { Split-SemanticVersion -version '1.2'     } | Should -Throw '*Invalid SemVer*'
+        { Split-SemanticVersion -version '01.2.3'  } | Should -Throw '*Invalid SemVer*'
+        { Split-SemanticVersion -version 'bogus'   } | Should -Throw '*Invalid SemVer*'
     }
 }
 

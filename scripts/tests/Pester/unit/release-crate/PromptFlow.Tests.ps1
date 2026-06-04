@@ -853,7 +853,6 @@ Describe 'Invoke-PlanReview iteration-cap behaviour' {
         # Silence the chatty interactive output; we only need the final return
         # value and the Write-Warning emitted on the cap path.
         Mock -CommandName Write-Host -MockWith { } -ModuleName $null
-        Mock -CommandName Test-InteractiveSession -MockWith { $true }
 
         # 1 published package in the synthetic workspace => $runawayCap = 10.
         # The exact baseline is irrelevant because Resolve-ReleaseSet is mocked,
@@ -999,23 +998,10 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
         }
     }
 
-    It 'throws with a pointer to release-packages.ps1 when invoked non-interactively' {
-        Mock -CommandName Test-InteractiveSession -MockWith { $false }
-
-        {
-            Invoke-PlanReview `
-                -RepoRoot $TestDrive `
-                -ParsedTokens @() `
-                -WorkspaceBaseline @() `
-                -Mode 'all-changed'
-        } | Should -Throw '*release-packages.ps1*'
-    }
-
-    It 'returns @{} without invoking Resolve-ReleaseSet when interactive, no userTokens, and no findings' {
+    It 'returns @{} without invoking Resolve-ReleaseSet when no userTokens and no findings' {
         # Empty $ParsedTokens combined with no findings = nothing to surface.
         # The all-changed path must skip Resolve-ReleaseSet (which would throw
         # on empty input) and return an empty plan cleanly.
-        Mock -CommandName Test-InteractiveSession -MockWith { $true }
         Mock -CommandName Resolve-ReleaseSet -MockWith {
             throw 'Resolve-ReleaseSet should not be invoked when Mode=all-changed and userTokens is empty.'
         }
@@ -1033,7 +1019,6 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
     }
 
     It 'passes -IncludeAllModifiedAsRoots to Get-UnreleasedModifiedDependencies' {
-        Mock -CommandName Test-InteractiveSession -MockWith { $true }
         Mock -CommandName Resolve-ReleaseSet -MockWith { throw 'should not be called' }
         Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
 
@@ -1062,7 +1047,6 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
     It 'defaults to -Mode targeted when omitted (no -IncludeAllModifiedAsRoots flag)' {
         # Regression: existing callers (release-packages.ps1) don't pass -Mode
         # and must continue to see targeted behavior with no behavioral drift.
-        Mock -CommandName Test-InteractiveSession -MockWith { $true }
         Mock -CommandName Resolve-ReleaseSet -MockWith {
             param($ParsedTokens, $WorkspaceBaseline)
             $entries = @()
@@ -1097,5 +1081,84 @@ Describe 'Invoke-PlanReview -Mode all-changed' {
         Should -Invoke -CommandName Get-UnreleasedModifiedDependencies -Times 1 -Exactly -ParameterFilter {
             -not $IncludeAllModifiedAsRoots
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Show-ReleasePlan footer (MINIMUMS semantics)
+# ---------------------------------------------------------------------------
+
+Describe 'Show-ReleasePlan: MINIMUMS footer' {
+
+    BeforeAll {
+        function script:New-PlanEntryForFooterTest {
+            param(
+                [string]$Folder,
+                [string]$Source                  = 'user',
+                [bool]$AutoUpgraded              = $false,
+                [string]$EffectiveChangeType     = 'breaking',
+                [string]$CurrentVersion          = '1.0.0',
+                [string]$EffectiveTargetVersion  = '2.0.0',
+                [object[]]$CascadeReasons        = @()
+            )
+            [pscustomobject]@{
+                Folder                 = $Folder
+                Name                   = $Folder
+                Source                 = $Source
+                AutoUpgraded           = $AutoUpgraded
+                EffectiveChangeType    = $EffectiveChangeType
+                CurrentVersion         = $CurrentVersion
+                EffectiveTargetVersion = $EffectiveTargetVersion
+                CascadeReasons         = $CascadeReasons
+            }
+        }
+    }
+
+    BeforeEach {
+        # Capture every Write-Host call into a buffer so we can grep the
+        # rendered plan for the footer lines.
+        $script:Captured = New-Object 'System.Collections.Generic.List[string]'
+        Mock -CommandName Write-Host -MockWith {
+            param($Object)
+            if ($null -ne $Object) { $script:Captured.Add([string]$Object) }
+        } -ModuleName $null
+    }
+
+    It 'prints the always-on MINIMUMS notice line' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match 'requested change types are MINIMUMS'
+    }
+
+    It 'prints the explicit-pin-not-auto-upgraded clarification' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match 'Explicit version pins are NOT auto-upgraded'
+    }
+
+    It 'omits the auto-upgraded line when no user entry was strengthened' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' -AutoUpgraded $false }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Not -Match "tagged 'auto-upgraded by cascade'"
+    }
+
+    It 'includes the auto-upgraded line when at least one user entry was strengthened' {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -AutoUpgraded $false
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match "tagged 'auto-upgraded by cascade'"
+    }
+
+    It 'omits the footer entirely when the plan is empty (just the placeholder line)' {
+        Show-ReleasePlan -ResolvedReleaseSet @{}
+
+        ($script:Captured -join "`n") | Should -Not -Match 'MINIMUMS'
+        ($script:Captured -join "`n") | Should -Match 'Release plan: \(empty\)'
     }
 }

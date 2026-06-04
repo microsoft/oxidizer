@@ -7,18 +7,22 @@ This document is the reference for the human-driven release tooling in
   of three mutually-exclusive target-selection modes:
 
   - `-Packages '<name>@<change-spec>', ...` — the caller supplies the
-    full release plan up-front as `name@change-spec` tokens. The only
-    mode that runs non-interactively.
+    full release plan up-front as `name@change-spec` tokens.
   - `-Changed` — guided walk through every workspace package with
     unreleased modifications (changes newer than the package's last
     `version =` / `publish =` commit). The script prompts for a
     per-package decision (view diff / ignore / release as breaking,
-    non-breaking, or patch). Interactive-only.
+    non-breaking, or patch).
   - `-All` — guided walk through every publishable workspace package,
     even ones with no on-disk modifications. Use to force-walk the
     workspace when a refactor may have touched packages the change scan
     misses, or to coordinate a multi-package release after an internal
-    cleanup. Interactive-only.
+    cleanup.
+
+  All three modes are interactive — even `-Packages` may prompt for
+  elevation review when modified-but-unreleased dependencies of the
+  requested packages are detected. The script must be run from an
+  interactive terminal.
 
   In every mode the same downstream pipeline runs: plan resolution,
   cascade toward dependents, an interactive elevation review for any
@@ -296,7 +300,7 @@ The user-review queue therefore contains two categories of finding:
 2. Run one of:
 
    ```powershell
-   # Targeted (only mode that runs non-interactively):
+   # Targeted — pin the plan up front:
    ./scripts/release-packages.ps1 -Packages 'pkg1@<change-spec>','pkg2@<change-spec>'
 
    # Guided walk through every package with on-disk modifications:
@@ -399,10 +403,7 @@ prompt, so a release-set-rooted listing would be misleadingly narrow).
 A package with no in-workspace dependents is shown with the hint
 "no in-workspace dependents".
 
-Both `-Changed` and `-All` are **interactive-only**. For scripted /
-CI use, invoke `release-packages.ps1 -Packages` with an explicit token
-list so the choices are explicit and auditable. If you ignore every
-prompt, the script exits without writing any files.
+If you ignore every prompt, the script exits without writing any files.
 
 ---
 

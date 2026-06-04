@@ -8,32 +8,34 @@
 .DESCRIPTION
     The driver supports three mutually-exclusive modes for selecting which
     workspace packages to release. In every mode the same downstream pipeline
-    runs: plan resolution + cascade toward dependents, an interactive
-    elevation review for any modified-but-unreleased dependencies, a final
-    plan display, and atomic execution of all Cargo.toml / CHANGELOG.md /
-    README.md / workspace Cargo.toml writes, followed by a workspace
-    `cargo check` and a summary.
+    runs: plan resolution + cascade toward dependents, an elevation review for
+    any modified-but-unreleased dependencies, a final plan display, and atomic
+    execution of all Cargo.toml / CHANGELOG.md / README.md / workspace
+    Cargo.toml writes, followed by a workspace `cargo check` and a summary.
+
+    Every mode is interactive — even the targeted mode prompts for elevation
+    review when modified-but-unreleased dependencies of the requested packages
+    are detected. The script must be run from an interactive terminal.
 
     Modes:
 
     1. Targeted (-Packages, default).
        The caller provides the entire release plan up front as a list of
        `<name>@<change-spec>` tokens. The planner cascades toward dependents
-       and surfaces any modified-and-unreleased dependencies for review. This
-       is the only mode that works non-interactively.
+       and surfaces any modified-and-unreleased dependencies for review.
 
     2. Changed (-Changed).
-       Interactive guided walk: the planner scans the workspace for every
-       package with unreleased modifications (changes newer than its last
-       `version =` / `publish =` commit) and walks the user through them one
-       prompt at a time. For each surfaced package the user can view the diff,
-       ignore the package, or release it as breaking / non-breaking / patch.
-       Each acceptance is fed back to the planner, which re-resolves the
-       release set and cascade so the next iteration surfaces only newly-
-       relevant elevation candidates.
+       Guided walk: the planner scans the workspace for every package with
+       unreleased modifications (changes newer than its last `version =` /
+       `publish =` commit) and walks the user through them one prompt at a
+       time. For each surfaced package the user can view the diff, ignore the
+       package, or release it as breaking / non-breaking / patch. Each
+       acceptance is fed back to the planner, which re-resolves the release
+       set and cascade so the next iteration surfaces only newly-relevant
+       elevation candidates.
 
     3. All (-All).
-       Same interactive walk as -Changed, but the change-detection scan is
+       Same guided walk as -Changed, but the change-detection scan is
        skipped: every publishable workspace package is surfaced for review,
        even ones with no on-disk modifications. Use this when you want to
        force-walk the entire workspace (e.g. preparing a coordinated multi-
@@ -49,6 +51,13 @@
     rather than mirroring the target's change type. Dev-only dependents are
     skipped — they automatically pick up the new workspace version.
 
+    All inputs you request (change types and explicit version pins) are
+    treated as MINIMUMS. The cascade analysis may strengthen a requested
+    change type (e.g. an exposing dependent of a breaking release will be
+    upgraded from your requested `patch` to `breaking`). Explicit version
+    pins must already satisfy any cascade-required minimum version; if not,
+    the resolver errors with the conflict explained.
+
 .PARAMETER Packages
     The list of workspace packages to release, in the form
     `<name>@<change-spec>`. Names match the folder name under `crates/` (or
@@ -61,9 +70,14 @@
     - `patch`            : SemVer-compatible internal change. 1.2.3 -> 1.2.4;
                            0.4.1 -> 0.4.2 (numerically equal to nonbreaking
                            on 0.x.y packages).
-    - `<major>.<minor>.<patch>` : explicit version pin, e.g. `1.0.0` or
-                           `2.5.0`. Must be strictly greater than the
-                           package's current on-disk version.
+    - `<major>.<minor>.<patch>[-<prerelease>][+<build>]` : explicit SemVer 2.0
+                           version pin. Must have exactly three numeric
+                           components — 1- or 2-component forms like `1` or
+                           `1.2` are rejected. Examples: `1.0.0`, `2.5.0`,
+                           `1.0.0-rc.1`, `0.1.0-pre01`, `1.0.0-beta+meta`.
+                           Must be strictly greater than the package's
+                           current on-disk version per SemVer 2.0 ordering
+                           (so e.g. `1.0.0-rc.1` < `1.0.0`).
 
     Each release decision is a judgment call: the author must review the
     actual diff being released (source + dependency edits) and decide
@@ -74,18 +88,17 @@
     harmless except it forces direct dependents to bump as well.
 
 .PARAMETER Changed
-    Interactive switch: walk through every workspace package that has
-    unreleased modifications (changes newer than its last `version =` /
-    `publish =` commit) and prompt for a per-package release decision.
-    Mutually exclusive with -Packages and -All. Interactive-only — refuses
-    to run when stdin is not a terminal.
+    Switch: walk through every workspace package that has unreleased
+    modifications (changes newer than its last `version =` / `publish =`
+    commit) and prompt for a per-package release decision. Mutually
+    exclusive with -Packages and -All.
 
 .PARAMETER All
-    Interactive switch: walk through every publishable workspace package,
-    even ones with no on-disk modifications. Use to force-walk the workspace
-    when you need a coordinated multi-package release plan or when a refactor
-    might have touched packages the modification scan misses. Mutually
-    exclusive with -Packages and -Changed. Interactive-only.
+    Switch: walk through every publishable workspace package, even ones
+    with no on-disk modifications. Use to force-walk the workspace when you
+    need a coordinated multi-package release plan or when a refactor might
+    have touched packages the modification scan misses. Mutually exclusive
+    with -Packages and -Changed.
 
 .EXAMPLE
     # Release 'bytesbuf_io' as a breaking change. Cascade is automatic.
@@ -100,6 +113,10 @@
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
     .\release-packages.ps1 -Packages 'my-package@1.0.0'
+
+.EXAMPLE
+    # Pin a pre-release version.
+    .\release-packages.ps1 -Packages 'my-package@1.0.0-rc.1'
 
 .EXAMPLE
     # Guided walk through every workspace package with unreleased modifications.

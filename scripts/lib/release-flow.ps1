@@ -98,10 +98,15 @@ function Sort-KeysByPreferredOrder {
 # release request entries. Each token is a string of the form '<name>@<change>',
 # where <change> is one of:
 #
-#   - breaking, nonbreaking, patch  (case-insensitive change-type keywords)
-#   - x.y.z                         (explicit semver pin — exactly three dotted
-#                                    non-negative integers; e.g. '1.0.0' or
-#                                    '2.5.0')
+#   - breaking, nonbreaking, patch        (case-insensitive change-type keywords)
+#   - <major>.<minor>.<patch>[-<prerelease>][+<build>]
+#                                         (strict SemVer 2.0 pin — always
+#                                          exactly three numeric components,
+#                                          no leading zeros; optional
+#                                          pre-release identifier and optional
+#                                          build metadata. Examples: '1.0.0',
+#                                          '2.5.0', '1.0.0-rc.1',
+#                                          '0.1.0-beta.2+meta')
 #
 # Returns an array of pscustomobject entries, one per token:
 #
@@ -126,6 +131,7 @@ function Sort-KeysByPreferredOrder {
 #     a token is trimmed first.
 #   - Unknown change-type keywords or malformed semvers throw a descriptive
 #     error that quotes both the token and the offending change-spec text.
+#     One- or two-component version forms ('1', '1.2') are rejected.
 function Parse-ReleaseTokens {
     param(
         [Parameter(Mandatory = $true)]
@@ -176,10 +182,15 @@ function Parse-ReleaseTokens {
             'nonbreaking' { $requestedChangeType = 'non-breaking'; break }
             'patch'       { $requestedChangeType = 'patch';        break }
             default {
-                if ($changeSpec -match '^\d+\.\d+\.\d+$') {
+                # Strict SemVer 2.0 — three numeric components, optional
+                # pre-release identifier (-...), optional build metadata
+                # (+...). 1- or 2-component forms like 'foo@1' or 'foo@1.2'
+                # are intentionally rejected; pinning a release requires
+                # full disambiguation.
+                if ($script:SemanticVersionRegex.IsMatch($changeSpec)) {
                     $requestedTargetVersion = $changeSpec
                 } else {
-                    throw "Invalid change specifier '$changeSpec' in token '$raw'. Expected one of: 'breaking', 'nonbreaking', 'patch', or an explicit semantic version 'x.y.z' (e.g. '1.0.0', '2.5.0')."
+                    throw "Invalid change specifier '$changeSpec' in token '$raw'. Expected one of: 'breaking', 'nonbreaking', 'patch', or an explicit SemVer 2.0 version with all three components (e.g. '1.0.0', '2.5.0', '1.0.0-rc.1', '1.0.0-beta.2+meta'). One- or two-component forms like '1' or '1.2' are not accepted."
                 }
             }
         }
@@ -1412,18 +1423,15 @@ function Invoke-WorkspaceCheck {
 #      $reviewedCascadeAsIs (release-set cascade-source folders the user
 #      already accepted as-is).
 #   3. If empty: review complete — return the resolved release set.
-#   4. Non-interactive: emit a warning summary listing both buckets
-#      (not-in-release-set vs in-release-set-with-cascade-below-breaking)
-#      and return the current resolved set unchanged. The CI scan in
-#      check-unreleased-dependencies.ps1 will flag the same findings.
-#      -Mode 'all-changed' is rejected non-interactively up-front because
-#      its entire purpose is interactive triage.
-#   5. Interactive: prompt the user for the first finding via
-#      Get-PackageReleaseDecision. On 'ignore' add to the appropriate
-#      hashset; on accept ('breaking'/'non-breaking'/'patch') append a
-#      synthetic '<folder>@<change>' token to $userTokens and loop. The
-#      menu's "view diff" option is owned by Get-PackageReleaseDecision
-#      and never returns control here.
+#   4. Prompt the user for the first finding via Get-PackageReleaseDecision.
+#      On 'ignore' add to the appropriate hashset; on accept
+#      ('breaking'/'non-breaking'/'patch') append a synthetic
+#      '<folder>@<change>' token to $userTokens and loop. The menu's
+#      "view diff" option is owned by Get-PackageReleaseDecision and never
+#      returns control here.
+#
+# Interactivity is enforced by the entry-point (Invoke-ReleasePackagesMain);
+# this function assumes a terminal is available for Read-Host.
 #
 # Decisions are FINAL. If a previously-declined package is later cascade-pulled
 # into the release set, or a previously-reviewed-as-is package has its cascade
@@ -1451,15 +1459,8 @@ function Invoke-PlanReview {
         [Parameter(Mandatory = $false)][ValidateSet('targeted', 'all-changed')][string]$Mode = 'targeted'
     )
 
-    $isInteractive = Test-InteractiveSession
-
-    # all-changed mode is the back-end for release-packages.ps1 -Changed / -All,
-    # whose entire UX is "prompt the user for each surfaced package". Refuse
-    # early in non-interactive contexts (CI, redirected stdin) so the caller
-    # sees a clear error instead of a noisy warning + empty result.
-    if ($Mode -eq 'all-changed' -and -not $isInteractive) {
-        throw 'Invoke-PlanReview -Mode ''all-changed'' requires an interactive session. Use release-packages.ps1 -Packages for scripted/CI releases.'
-    }
+    # Interactivity is enforced by the entry-point Invoke-ReleasePackagesMain.
+    # By the time we get here we know we can Read-Host without failing.
 
     # Working token list, mutable. Each accepted finding appends a new token.
     $userTokens = New-Object 'System.Collections.Generic.List[object]'
@@ -1524,10 +1525,8 @@ function Invoke-PlanReview {
             # cascade-applied level is silently accepted. Show-ReleasePlan's
             # output records the cascade reasons for transparency.
 
-            if ($isInteractive) {
-                Write-Host ''
-                Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
-            }
+            Write-Host ''
+            Write-Host '🔍 Analyzing packages for unreleased modifications...' -ForegroundColor Cyan
 
             if ($Mode -eq 'all-changed') {
                 $allFindings = @(Get-UnreleasedModifiedDependencies -RepoRoot $RepoRoot -ResolvedReleaseSet $resolvedHash -ModifiedSnapshot $ModifiedSnapshot -IncludeAllModifiedAsRoots)
@@ -1543,49 +1542,8 @@ function Invoke-PlanReview {
             )
 
             if ($queue.Count -eq 0) {
-                if ($isInteractive) {
-                    Write-Host ''
-                    Write-Host '✅ No further unreleased modifications detected; release plan finalised.' -ForegroundColor Green
-                }
-                return $resolvedHash
-            }
-
-            if (-not $isInteractive) {
-                $notInReleaseSet = @($queue | Where-Object { -not $_.InReleaseSet })
-                $inReleaseSet    = @($queue | Where-Object { $_.InReleaseSet })
-
                 Write-Host ''
-                if ($notInReleaseSet.Count -gt 0) {
-                    Write-Host '⚠️  The following workspace packages have unreleased modifications (changes newer than their last `version =` / `publish =` commit) and are NOT part of this release:' -ForegroundColor Yellow
-                    foreach ($finding in $notInReleaseSet) {
-                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
-                        $chains = @($finding.DependencyChains)
-                        if ($chains.Count -gt 0) {
-                            Write-Host '      potentially affected dependency chains:' -ForegroundColor DarkGray
-                            foreach ($chain in $chains) {
-                                Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
-                            }
-                        } else {
-                            Write-Host '      no dependents in release set' -ForegroundColor DarkGray
-                        }
-                    }
-                }
-                if ($inReleaseSet.Count -gt 0) {
-                    Write-Host '⚠️  The following workspace packages are being released with a non-breaking cascade-applied version change, BUT also have pre-existing modifications that may warrant a more impactful change type (e.g. breaking). A reviewer should confirm the cascade-applied change type is sufficient:' -ForegroundColor Yellow
-                    foreach ($finding in $inReleaseSet) {
-                        Write-Host "  • $($finding.Folder)" -ForegroundColor Yellow
-                        $chains = @($finding.DependencyChains)
-                        if ($chains.Count -gt 0) {
-                            Write-Host '      cascade-pulled in via:' -ForegroundColor DarkGray
-                            foreach ($chain in $chains) {
-                                Write-Host "        $($chain -join ' -> ')" -ForegroundColor DarkGray
-                            }
-                        } else {
-                            Write-Host '      cascade-included; no other in-release-set packages depend on this' -ForegroundColor DarkGray
-                        }
-                    }
-                }
-                Write-Warning 'Non-interactive session: leaving the above packages as-is. Reviewer should confirm the choices are appropriate.'
+                Write-Host '✅ No further unreleased modifications detected; release plan finalised.' -ForegroundColor Green
                 return $resolvedHash
             }
 
@@ -1845,6 +1803,18 @@ function Show-ReleasePlan {
         $names = ($entry.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
         Write-Host "      cascaded from: $names" -ForegroundColor DarkGray
     }
+
+    # Footer: explain the "minimums" semantics. Always printed so reviewers
+    # don't have to remember the contract; the second line only fires when at
+    # least one user-requested change type was actually strengthened by
+    # cascade analysis.
+    Write-Host ''
+    Write-Host 'Note: requested change types are MINIMUMS; cascade analysis may strengthen them to honor dependency exposure rules.' -ForegroundColor DarkGray
+    $autoUpgraded = @($userEntries | Where-Object { $_.AutoUpgraded })
+    if ($autoUpgraded.Count -gt 0) {
+        Write-Host "Items above tagged 'auto-upgraded by cascade' were strengthened from the requested change type." -ForegroundColor DarkGray
+    }
+    Write-Host 'Explicit version pins are NOT auto-upgraded by cascade — if a cascade requires a higher version than a pin allows, the planner errors out instead.' -ForegroundColor DarkGray
 }
 
 # Prints the "Success! Next steps" block after a bundled release. Picks the
@@ -1895,14 +1865,17 @@ function Show-FinalMessageForBundle {
 
 # Top-level entry point for the bundled-input release flow. Routes the three
 # user-facing modes ('targeted' / 'changed' / 'all') through one shared
-# pipeline: pre-flight checks, plan resolution / cascade / interactive
-# elevation review, plan display, atomic execution, post-execution workspace
-# `cargo check`, and final summary message.
+# pipeline: pre-flight checks, plan resolution / cascade / elevation review,
+# plan display, atomic execution, post-execution workspace `cargo check`, and
+# final summary message.
 #
-# Targeted mode is the only one that accepts a non-empty $Packages list and
-# the only one that can run non-interactively. Changed and All modes are
-# interactive guided walks and refuse to run when stdin is not a terminal —
-# they discover their own targets:
+# Every mode is intended for interactive use — the elevation review prompts
+# the user even in targeted mode if modified-but-unreleased dependencies of
+# the requested packages are detected. The script refuses to run when stdin
+# is not a terminal, regardless of mode.
+#
+# Targeted mode is the only mode that accepts a non-empty $Packages list.
+# Changed and All modes discover their own targets:
 #
 #   - Changed surfaces every published workspace package with unreleased
 #     modifications (changes newer than its last `version =` /
@@ -1946,6 +1919,15 @@ function Invoke-ReleasePackagesMain {
         Exit 1
     }
 
+    # Every mode is interactive: the elevation review can prompt even in
+    # targeted mode when a requested release has modified-but-unreleased
+    # dependencies. Bail out early with a clear error if stdin is not a
+    # terminal, rather than failing deep inside Read-Host.
+    if (-not (Test-InteractiveSession)) {
+        Write-Error 'release-packages.ps1 must be run from an interactive terminal — every mode may prompt the user for elevation review of modified-but-unreleased dependencies.'
+        Exit 1
+    }
+
     # 2. MODE / INPUT VALIDATION + TOKEN PARSE
     $hasTokens = ($null -ne $Packages) -and ($Packages.Count -gt 0)
     if ($Mode -eq 'targeted') {
@@ -1962,13 +1944,6 @@ function Invoke-ReleasePackagesMain {
     } else {
         if ($hasTokens) {
             Write-Error "release-packages.ps1 -$Mode does not accept -Packages tokens; the planner discovers targets for you."
-            Exit 1
-        }
-        # Both interactive modes refuse early in non-interactive contexts
-        # (CI, redirected stdin) so the caller sees a clear error instead of
-        # a noisy warning + empty result later in Invoke-PlanReview.
-        if (-not (Test-InteractiveSession)) {
-            Write-Error "release-packages.ps1 -$Mode is interactive-only. For non-interactive (scripted/CI) use, invoke with an explicit -Packages list."
             Exit 1
         }
         $parsedTokens = @()
