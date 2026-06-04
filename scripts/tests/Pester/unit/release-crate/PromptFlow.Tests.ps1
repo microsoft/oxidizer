@@ -156,20 +156,38 @@ Describe 'Format-PackageMenu' {
         $out | Should -Match '\(\+3 packages queued\)'
     }
 
-    It 'renders an "in-workspace dependents:" header followed by one indented line per chain' {
+    It 'renders a "Direct dependents in this workspace:" line listing each direct dependent exactly once' {
+        # Two chains a->b->d and a->c->d give two distinct direct dependents (b, c).
+        # The deep "a" root must NOT appear (it depends only transitively).
         $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('a', 'c', 'd'))
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
 
-        # Single header line, regardless of how many chains.
-        ([regex]::Matches($out, 'in-workspace dependents:')).Count | Should -Be 1
+        # Single header line (the chain printout was replaced with a single
+        # comma-separated line to keep large workspaces readable).
+        ([regex]::Matches($out, 'Direct dependents in this workspace:')).Count | Should -Be 1
 
-        # Split into raw lines so trailing `\r` (from StringBuilder.AppendLine on Windows)
-        # doesn't trip up `$` anchors.
-        $lines = $out -split "`r?`n"
+        # Direct dependents only — no transitive root and no full chains.
+        $out | Should -Match 'Direct dependents in this workspace: b, c'
+        $out | Should -Not -Match 'in-workspace dependents:'
         $out | Should -Not -Match 'pulled in by:'
         $out | Should -Not -Match 'potentially affected dependency chains'
-        $lines | Should -Contain '    a -> b -> d'
-        $lines | Should -Contain '    a -> c -> d'
+
+        # Drill into just the dependents line to confirm "a" (transitive root)
+        # is absent — sibling lines like "1.2.3 -> 2.0.0" contain '->' and 'a'
+        # legitimately, so a blanket -Not -Match against the full menu would
+        # be wrong.
+        $lines = $out -split "`r?`n"
+        $dependentsLine = $lines | Where-Object { $_ -match 'Direct dependents' } | Select-Object -First 1
+        $dependentsLine | Should -Not -Match '->'
+        $dependentsLine | Should -Not -Match '\ba\b'
+    }
+
+    It 'deduplicates direct dependents when the same direct dependent appears via multiple chains' {
+        # b is the direct dependent of d via both chains; it must appear once.
+        $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('x', 'b', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependents in this workspace: b\b'
+        ([regex]::Matches($out, '\bb\b')).Count | Should -Be 1
     }
 
     It 'lists the five menu options in the exact order and wording from the spec' {
@@ -266,7 +284,7 @@ Describe 'Format-PackageMenu' {
         # that absence plainly so the reviewer knows the release blast radius
         # is limited to this package alone (modulo external consumers).
 
-        It 'replaces the chains header with "no in-workspace dependents" when the workspace list is empty' {
+        It 'replaces the dependents line with "no in-workspace dependents" when the workspace list is empty' {
             $finding = [pscustomobject]@{
                 Folder                    = 'lonely'
                 PackageName               = 'lonely'
@@ -276,11 +294,11 @@ Describe 'Format-PackageMenu' {
                 WorkspaceDependencyChains = @()
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Not -Match 'in-workspace dependents:'
+            $out | Should -Not -Match 'Direct dependents in this workspace:'
             $out | Should -Match 'no in-workspace dependents'
         }
 
-        It 'renders workspace chains even when DependencyChains (release-set rooted) is empty' {
+        It 'renders the direct-dependents line even when DependencyChains (release-set rooted) is empty' {
             # Stub findings produced by Get-UnreleasedModifiedDependencies in
             # -IncludeAllModifiedAsRoots mode have DependencyChains = @() but
             # may still have workspace-rooted chains via the reverse-dep walk.
@@ -293,7 +311,7 @@ Describe 'Format-PackageMenu' {
                 WorkspaceDependencyChains = @(, @('a', 'd'))
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Match 'in-workspace dependents:'
+            $out | Should -Match 'Direct dependents in this workspace: a'
             $out | Should -Not -Match 'no in-workspace dependents'
         }
 
@@ -308,9 +326,9 @@ Describe 'Format-PackageMenu' {
                 WorkspaceDependencyChains = @(, @('a', 'b', 'd'))
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $lines = $out -split "`r?`n"
-            $lines | Should -Contain '    a -> b -> d'
-            $lines | Should -Not -Contain '    release_set_root -> d'
+            # Direct dependent of d via the workspace chain is b (not release_set_root).
+            $out | Should -Match 'Direct dependents in this workspace: b\b'
+            $out | Should -Not -Match 'release_set_root'
         }
     }
 }

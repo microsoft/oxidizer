@@ -1037,20 +1037,26 @@ function Format-PackageMenu {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine($headerLine)
-    # Show every in-workspace dependency chain ending at this package, NOT
-    # just the chains the current release plan reaches. The release set can
-    # grow during this review loop (each accepted release may cascade to
-    # additional dependents), so the "big picture" workspace view gives the
-    # reviewer a stable, release-set-independent answer to "what could be
-    # affected by releasing this package?". When the package has no
-    # in-workspace dependents we say so plainly rather than dropping the
-    # section entirely - the absence is itself useful signal.
+    # Show direct in-workspace dependents (packages that import this one
+    # directly) as a comma-separated list. We deliberately omit transitive
+    # dependents and full chains: in a workspace with hundreds of packages
+    # the multi-line chain printout was overwhelming and rarely told the
+    # reviewer anything they could act on. Direct dependents are what
+    # cascade-toward-dependents pivots on, so they remain the most relevant
+    # signal at decision time. Derived from WorkspaceDependencyChains so the
+    # set is stable and release-set-independent (see chain construction in
+    # Get-InWorkspaceDependencyChains: each chain is [root, ..., target],
+    # so the direct dependent of the target is the second-to-last element).
     $chains = @($Finding.WorkspaceDependencyChains)
-    if ($chains.Count -gt 0) {
-        [void]$sb.AppendLine('  in-workspace dependents:')
-        foreach ($chain in $chains) {
-            [void]$sb.AppendLine("    $($chain -join ' -> ')")
-        }
+    $directDependents = [System.Collections.Generic.SortedSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($chain in $chains) {
+        $arr = @($chain)
+        if ($arr.Length -lt 2) { continue }
+        [void]$directDependents.Add($arr[$arr.Length - 2])
+    }
+    if ($directDependents.Count -gt 0) {
+        [void]$sb.AppendLine("  Direct dependents in this workspace: $($directDependents -join ', ')")
     } else {
         [void]$sb.AppendLine('  no in-workspace dependents')
     }
