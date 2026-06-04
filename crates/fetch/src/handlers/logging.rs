@@ -97,7 +97,6 @@ impl<T: RequestHandler> Service<HttpRequest> for Logging<T> {
                 Err(err) => {
                     event!(
                         name: "http.response.error",
-                        name: "http.response.error",
                         Level::WARN,
                         http.request.method = method.as_str(),
                         server.address = url.authority().map(Authority::host),
@@ -150,7 +149,7 @@ mod tests {
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
 
         let request = HttpRequestBuilder::new_fake()
-            .uri("https://example.com/path?query=value")
+            .uri("https://example.com:123/path?query=value")
             .build()
             .unwrap();
 
@@ -162,6 +161,7 @@ mod tests {
         capture.assert_contains("HTTP response received successfully");
         capture.assert_contains("http.request.method=\"GET\"");
         capture.assert_contains("server.address=\"example.com\"");
+        capture.assert_contains("server.port=123");
         capture.assert_contains("http.response.status_code=200");
         capture.assert_contains("network.protocol.version=HTTP/1.1");
         capture.assert_contains("url.scheme=\"https\"");
