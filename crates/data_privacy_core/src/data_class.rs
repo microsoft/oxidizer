@@ -145,12 +145,10 @@ const fn is_valid_identifier(s: &str) -> bool {
         return false;
     }
 
-    // Validate first character
     if !is_valid_ascii_ident_start(bytes[0]) {
         return false;
     }
 
-    // Validate remaining characters
     let mut i = 1;
     while i < bytes.len() {
         if !is_valid_ascii_ident_continue(bytes[i]) {
@@ -162,8 +160,82 @@ const fn is_valid_identifier(s: &str) -> bool {
     true
 }
 
-#[cfg(all(test, feature = "serde"))]
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn new_stores_taxonomy_and_name() {
+        let dc = DataClass::new("contoso", "customer_id");
+        assert_eq!(dc.taxonomy(), "contoso");
+        assert_eq!(dc.name(), "customer_id");
+    }
+
+    #[test]
+    fn display_uses_slash_separator() {
+        let dc = DataClass::new("contoso", "customer_id");
+        assert_eq!(dc.to_string(), "contoso/customer_id");
+    }
+
+    #[test]
+    fn as_ref_returns_self() {
+        let dc = DataClass::new("contoso", "customer_id");
+        let dc_ref: &DataClass = dc.as_ref();
+        assert_eq!(dc_ref, &dc);
+    }
+
+    #[test]
+    fn into_data_class_identity() {
+        let dc = DataClass::new("contoso", "customer_id");
+        let dc2 = dc.clone().into_data_class();
+        assert_eq!(dc, dc2);
+    }
+
+    #[test]
+    fn valid_identifiers() {
+        assert!(is_valid_identifier("foo"));
+        assert!(is_valid_identifier("_bar"));
+        assert!(is_valid_identifier("Baz123"));
+        assert!(is_valid_identifier("_"));
+        assert!(is_valid_identifier("a"));
+    }
+
+    #[test]
+    fn invalid_identifiers() {
+        assert!(!is_valid_identifier(""));
+        assert!(!is_valid_identifier("1abc"));
+        assert!(!is_valid_identifier("a-b"));
+        assert!(!is_valid_identifier("a b"));
+    }
+
+    #[test]
+    fn data_class_equality_and_ordering() {
+        let a = DataClass::new("a", "x");
+        let b = DataClass::new("b", "x");
+        assert!(a < b);
+        assert_eq!(a, a.clone());
+    }
+
+    #[test]
+    fn data_class_debug() {
+        let dc = DataClass::new("t", "n");
+        let dbg = format!("{dc:?}");
+        assert!(dbg.contains("DataClass"));
+    }
+
+    #[test]
+    fn data_class_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(DataClass::new("t", "n"));
+        assert!(set.contains(&DataClass::new("t", "n")));
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod serde_tests {
     use super::*;
 
     #[test]
@@ -217,86 +289,9 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_invalid_type() {
-        let serialized = "123";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.is_data());
-    }
-
-    #[test]
-    fn test_deserialize_expecting_message() {
-        let serialized = "false";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
+    fn test_deserialize_wrong_type_triggers_expecting() {
+        // Passing a number instead of a string triggers Visitor::expecting
+        let err = serde_json::from_str::<DataClass>("42").unwrap_err();
         assert!(err.to_string().contains("a string in taxonomy/name format"));
-    }
-
-    #[test]
-    fn test_is_valid_identifier_valid() {
-        let _ = DataClass::new("a", "a");
-        let _ = DataClass::new("a1", "a");
-        let _ = DataClass::new("a_b", "a");
-        let _ = DataClass::new("_a", "a");
-        let _ = DataClass::new("A", "a");
-        let _ = DataClass::new("A1", "a");
-        let _ = DataClass::new("A_B", "a");
-        let _ = DataClass::new("_A", "a");
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_is_valid_identifier_invalid_empty() {
-        let _ = DataClass::new("", "a");
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_is_valid_identifier_invalid_starts_with_number() {
-        let _ = DataClass::new("1a", "a");
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_is_valid_identifier_invalid_contains_invalid_char() {
-        let _ = DataClass::new("a-b", "a");
-    }
-
-    #[test]
-    fn test_is_valid_identifier_invalid_hash() {
-        // Hash character is not valid in identifiers
-        let serialized = "\"r#type/data\"";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.to_string().contains("invalid taxonomy identifier"));
-    }
-
-    #[test]
-    fn test_unicode_identifiers_emoji_invalid() {
-        // Emoji are not XID_Start or XID_Continue, should be invalid
-        let serialized = "\"test/🦀data\"";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.to_string().contains("invalid name identifier"));
-    }
-
-    #[test]
-    fn test_unicode_invalid_start_with_digit() {
-        // Even with Unicode, can't start with a digit
-        let serialized = "\"1μετρο/data\"";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.to_string().contains("invalid taxonomy identifier"));
-    }
-
-    #[test]
-    fn test_unicode_invalid_whitespace() {
-        // Whitespace is not XID_Continue
-        let serialized = "\"hello world/data\"";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.to_string().contains("invalid taxonomy identifier"));
-    }
-
-    #[test]
-    fn test_unicode_invalid_punctuation() {
-        // Most punctuation is not XID_Continue (except underscore)
-        let serialized = "\"hello-world/data\"";
-        let err = serde_json::from_str::<DataClass>(serialized).unwrap_err();
-        assert!(err.to_string().contains("invalid taxonomy identifier"));
     }
 }

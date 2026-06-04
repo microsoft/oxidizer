@@ -1,0 +1,8 @@
+---
+source: crates/fetch_options/src/connection_keep_alive.rs
+expression: "ConnectionKeepAlive::active_connections(None, None)"
+---
+ActiveConnections {
+    interval: 20s,
+    timeout: 20s,
+}

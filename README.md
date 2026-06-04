@@ -36,6 +36,7 @@ These are the primary crates built out of this repo:
 - [`cancelable`](./crates/cancelable/README.md) - Cooperative cancellation via tokens
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
+- [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.

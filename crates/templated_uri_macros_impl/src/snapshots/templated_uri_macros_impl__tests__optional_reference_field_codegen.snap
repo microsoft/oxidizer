@@ -63,7 +63,7 @@ impl ::std::fmt::Debug for ReferenceOptional {
 impl ::data_privacy::RedactedDisplay for ReferenceOptional {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/items")?;
@@ -77,7 +77,7 @@ impl ::data_privacy::RedactedDisplay for ReferenceOptional {
                 }
                 f.write_str("name")?;
                 f.write_str("=")?;
-                <str as ::data_privacy::RedactedDisplay>::fmt(*__val, engine, f)?;
+                <str as ::data_privacy::RedactedDisplay>::fmt(*__val, redactor, f)?;
                 __first = false;
             }
         }

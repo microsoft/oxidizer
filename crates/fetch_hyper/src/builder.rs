@@ -6,9 +6,10 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::time::Duration;
 
 use anyspawn::Spawner;
+use bytesbuf::mem::GlobalPool;
+use fetch_options::{ConnectionIdleTimeout, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, TransportOptions};
 use fetch_tls::TlsBackend;
 use http::Version;
 use http_extensions::{HttpBodyBuilder, HttpRequest, HttpResponse, Result};
@@ -20,7 +21,6 @@ use tick::Clock;
 use crate::HyperIo;
 use crate::connection::Connect;
 use crate::connection::hyper_handler::build_hyper_handler;
-use crate::options::{ConnectionLifetime, RequestFilter};
 
 /// A type-erased Hyper request handler.
 #[derive(Clone, Debug)]
@@ -48,9 +48,6 @@ impl Service<HttpRequest> for HyperTransport {
     }
 }
 
-/// Default connect timeout applied by [`HyperTransportBuilder`].
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Adapter exposing an [`anyspawn::Spawner`] as a [`hyper::rt::Executor`].
 #[derive(Clone)]
 pub(crate) struct SpawnerExecutor(pub(crate) Spawner);
@@ -68,24 +65,21 @@ where
 
 /// Builder for [`HyperTransport`].
 ///
-/// Generic over:
+/// Generic over the user-supplied [`Connect`] service `C` and the stream type
+/// `S` it produces.
 ///
-/// - `C` — the user-supplied [`Connect`] service that opens raw TCP
-///   connections,
-/// - `S` — the stream type produced by `C`.
-///
-/// Knobs that drive logic in this crate (`TLS` backend, request filtering,
-/// connect timeout, pool aging, telemetry) live as setters on this builder.
-/// Knobs that pass straight through to `hyper`'s [`legacy::Builder`] (pool
-/// size, keep-alive, HTTP/2 tuning, …) are configured through the
-/// [`configure_hyper`](Self::configure_hyper) escape hatch.
+/// Transport-level knobs (request filter, supported HTTP versions, connect
+/// timeout, connection pool, keep-alive, HTTP/2 tuning) come from the
+/// [`fetch_options::TransportOptions`] passed to [`new`](Self::new). The
+/// remaining knobs (body builder, pool index, OpenTelemetry meter) have
+/// dedicated setters.
 ///
 /// # Examples
 ///
 /// ```
 /// use anyspawn::Spawner;
 /// use fetch_hyper::{HyperTransport, HyperTransportBuilder};
-/// use http_extensions::HttpBodyBuilder;
+/// use fetch_options::TransportOptions;
 /// use hyper_util::rt::TokioIo;
 /// use layered::Execute;
 /// use templated_uri::BaseUri;
@@ -93,17 +87,14 @@ where
 ///
 /// type MyStream = TokioIo<TcpStream>;
 ///
-/// // Pretend we actually open a TCP connection here. The body uses
-/// // `unreachable!()` to avoid the cost of a real dial in a doctest.
+/// // Stubbed out: the doctest never dials, so the body is never reached.
 /// async fn connect(_uri: BaseUri) -> http_extensions::Result<MyStream> {
 ///     unreachable!("doc example; never invoked")
 /// }
 ///
 /// # async fn run() {
-/// // Constructing a real `TlsBackend` (e.g. a `native_tls::TlsConnector`)
-/// // performs expensive certificate/store initialization, so we skip it
-/// // here with `unreachable!()` — the async function below is never
-/// // actually called.
+/// // A real `TlsBackend` does expensive store initialization, so it is
+/// // stubbed out too; the function below is never actually called.
 /// let tls: fetch_tls::TlsBackend = unreachable!("doc example; never invoked");
 ///
 /// let transport: HyperTransport = HyperTransportBuilder::new(
@@ -112,30 +103,22 @@ where
 ///     tick::ClockControl::new()
 ///         .auto_advance_timers(true)
 ///         .to_clock(),
-///     tls,
-///     HttpBodyBuilder::new_fake(),
+///     TransportOptions::default(),
 /// )
-/// .configure_hyper(|builder| {
-///     builder.pool_max_idle_per_host(8);
-/// })
-/// .build();
+/// .build(tls);
 /// # let _ = transport;
 /// # }
 /// ```
 pub struct HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     pub(crate) connector: C,
     pub(crate) clock: Clock,
-    pub(crate) tls: TlsBackend,
-    pub(crate) body_builder: HttpBodyBuilder,
-    pub(crate) request_filter: RequestFilter,
-    pub(crate) supported_http_versions: Vec<Version>,
-    pub(crate) connection_lifetime: ConnectionLifetime,
-    pub(crate) connect_timeout: Duration,
-    pub(crate) pool_index: usize,
+    pub(crate) body_builder: Option<HttpBodyBuilder>,
+    pub(crate) options: TransportOptions,
+    pub(crate) pool_index: PoolIndex,
     pub(crate) meter: Option<Meter>,
     pub(crate) hyper_builder: legacy::Builder,
     pub(crate) _marker: PhantomData<fn() -> S>,
@@ -144,14 +127,11 @@ where
 impl<C, S> fmt::Debug for HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(std::any::type_name::<Self>())
-            .field("request_filter", &self.request_filter)
-            .field("supported_http_versions", &self.supported_http_versions)
-            .field("connect_timeout", &self.connect_timeout)
-            .field("connection_lifetime", &self.connection_lifetime)
+            .field("options", &self.options)
             .field("pool_index", &self.pool_index)
             .finish_non_exhaustive()
     }
@@ -160,78 +140,50 @@ where
 impl<C, S> HyperTransportBuilder<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    S: HyperIo + Unpin,
 {
-    /// Creates a new builder.
+    /// Creates a new builder configured by `options`.
     ///
-    /// `connector` is any [`Connect`]-implementing service.
-    /// `spawner` is an [`anyspawn::Spawner`] used to drive `hyper`'s background
-    /// tasks. `clock` drives our connect-timeout and connection-age accounting
-    /// and is also used as timer for `hyper`.
+    /// `connector` is any [`Connect`] service. `spawner` drives `hyper`'s
+    /// background tasks. `clock` drives connect-timeout and connection-age
+    /// accounting and acts as `hyper`'s timer.
     ///
-    /// The [`HttpBodyBuilder`] is used to wrap incoming response bodies.
+    /// `options` drives every transport-level knob; pass
+    /// [`TransportOptions::default`] to accept the defaults. The body builder,
+    /// pool index, and OpenTelemetry meter have dedicated setters instead.
+    ///
+    /// The `TLS` backend is supplied at [`build`](Self::build) time.
     #[must_use]
-    pub fn new(connector: C, spawner: Spawner, clock: Clock, tls: impl Into<TlsBackend>, body_builder: HttpBodyBuilder) -> Self {
-        let timer = crate::timer::ClockTimer::new(clock.clone());
-        let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
-        hyper_builder.timer(timer.clone()).pool_timer(timer);
+    pub fn new(connector: C, spawner: Spawner, clock: Clock, mut options: TransportOptions) -> Self {
+        coerce_options(&mut options);
+
+        let hyper_builder = configure_hyper_builder(spawner, &clock, &options);
 
         Self {
             connector,
             clock,
-            body_builder,
-            request_filter: RequestFilter::default(),
-            supported_http_versions: vec![Version::HTTP_11, Version::HTTP_2],
-            connection_lifetime: ConnectionLifetime::default(),
-            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
-            pool_index: 0,
+            body_builder: None,
+            options,
+            pool_index: PoolIndex::new(0),
             meter: None,
             hyper_builder,
             _marker: PhantomData,
-            tls: tls.into(),
         }
     }
 
-    /// Restricts which URL schemes (`http`/`https`) are accepted.
-    #[must_use]
-    pub fn request_filter(mut self, filter: RequestFilter) -> Self {
-        self.request_filter = filter;
-        self
-    }
-
-    /// Sets the negotiable HTTP versions for outgoing requests.
+    /// Sets the [`HttpBodyBuilder`] used to wrap incoming response bodies.
     ///
-    /// # Panics
-    ///
-    /// Panics if `versions` is empty.
+    /// When not set, [`build`](Self::build) constructs one with a fresh
+    /// [`GlobalPool`] and the builder's clock.
     #[must_use]
-    pub fn supported_http_versions(mut self, versions: &[Version]) -> Self {
-        assert!(
-            !versions.is_empty(),
-            "supported_http_versions cannot be empty; configure at least one HTTP version (for example HTTP/1.1 or HTTP/2)"
-        );
-        self.supported_http_versions = versions.to_vec();
-        self
-    }
-
-    /// Caps how long the transport waits for a `TCP`+`TLS` connection to be
-    /// established before failing with a timeout error.
-    #[must_use]
-    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
-        self.connect_timeout = timeout;
-        self
-    }
-
-    /// Caps the total wall-clock lifetime of a pooled connection.
-    #[must_use]
-    pub fn connection_lifetime(mut self, lifetime: ConnectionLifetime) -> Self {
-        self.connection_lifetime = lifetime;
+    pub fn body_builder(mut self, body_builder: HttpBodyBuilder) -> Self {
+        self.body_builder = Some(body_builder);
         self
     }
 
     /// Sets the pool index used to tag connection-level telemetry.
     #[must_use]
-    pub fn pool_index(mut self, pool_index: usize) -> Self {
+    pub fn pool_index(mut self, pool_index: PoolIndex) -> Self {
         self.pool_index = pool_index;
         self
     }
@@ -243,42 +195,98 @@ where
         self
     }
 
-    /// Invokes a callback that further tunes `hyper`'s [`legacy::Builder`].
+    /// Builds the configured [`HyperTransport`] using the supplied `TLS` backend.
     ///
-    /// The callback runs *immediately*, after this crate's own defaults
-    /// (timer, pool timer) have been applied, so it can override any of them
-    /// (e.g. pool sizing, keep-alive, HTTP/2 initial windows, …).
-    ///
-    /// Note: the `http2_only` flag implied by
-    /// [`supported_http_versions`](Self::supported_http_versions) is applied
-    /// at [`build`](Self::build) time and therefore takes precedence over any
-    /// value set here.
+    /// Requires at least one `TLS` feature (`rustls` or `native-tls`);
+    /// otherwise [`TlsBackend`] cannot be constructed.
     #[must_use]
-    pub fn configure_hyper<F>(mut self, configure: F) -> Self
-    where
-        F: FnOnce(&mut legacy::Builder),
-    {
-        configure(&mut self.hyper_builder);
-        self
-    }
-
-    /// Builds the configured [`HyperTransport`].
-    ///
-    /// Requires at least one `TLS` feature (`rustls` or `native-tls`) to be
-    /// enabled — otherwise [`TlsBackend`] cannot be constructed and the
-    /// transport pipeline is not compiled.
-    #[must_use]
-    pub fn build(self) -> HyperTransport {
+    pub fn build(self, tls: TlsBackend) -> HyperTransport {
         let meter = self.meter.clone().unwrap_or_else(|| opentelemetry::global::meter("fetch_hyper"));
+        let body_builder = self
+            .body_builder
+            .clone()
+            .unwrap_or_else(|| HttpBodyBuilder::new(GlobalPool::new(), &self.clock));
 
-        HyperTransport::new(build_hyper_handler(self, &meter).into_dynamic())
+        HyperTransport::new(build_hyper_handler(self, tls, body_builder, &meter).into_dynamic())
+    }
+}
+
+fn coerce_options(options: &mut TransportOptions) {
+    if options.supported_http_versions.is_empty() {
+        options.supported_http_versions = vec![Version::HTTP_11, Version::HTTP_2];
+    }
+}
+
+/// Builds a `hyper-util` legacy client builder pre-configured from
+/// `options`, including the timer, pool sizing, HTTP/2 tuning, keep-alive
+/// policy, and HTTP-version preference.
+fn configure_hyper_builder(spawner: Spawner, clock: &Clock, options: &TransportOptions) -> legacy::Builder {
+    let timer = crate::timer::ClockTimer::new(clock.clone());
+    let mut hyper_builder = legacy::Client::builder(SpawnerExecutor(spawner));
+    hyper_builder.timer(timer.clone()).pool_timer(timer);
+
+    apply_pool_options(&mut hyper_builder, &options.connection_pool);
+    apply_http2_options(&mut hyper_builder, &options.http_2);
+    apply_keep_alive(&mut hyper_builder, &options.connection_keep_alive);
+    apply_http_version_preference(&mut hyper_builder, &options.supported_http_versions);
+
+    hyper_builder
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_pool_options(hyper_builder: &mut legacy::Builder, pool: &ConnectionPoolOptions) {
+    let pool_idle_timeout = match pool.connection_idle_timeout {
+        ConnectionIdleTimeout::Unlimited => None,
+        ConnectionIdleTimeout::Limited(timeout) => Some(timeout),
+    };
+
+    hyper_builder
+        .pool_idle_timeout(pool_idle_timeout)
+        .pool_max_idle_per_host(pool.max_connections);
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_http2_options(hyper_builder: &mut legacy::Builder, http_2: &Http2Options) {
+    hyper_builder
+        .http2_initial_max_send_streams(http_2.initial_max_send_streams)
+        .http2_adaptive_window(http_2.adaptive_window);
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_keep_alive(hyper_builder: &mut legacy::Builder, keep_alive: &ConnectionKeepAlive) {
+    match *keep_alive {
+        ConnectionKeepAlive::Disabled => {
+            hyper_builder.http2_keep_alive_while_idle(false).http2_keep_alive_interval(None);
+        }
+        ConnectionKeepAlive::ActiveConnections { interval, timeout } => {
+            hyper_builder
+                .http2_keep_alive_while_idle(false)
+                .http2_keep_alive_interval(interval)
+                .http2_keep_alive_timeout(timeout);
+        }
+        ConnectionKeepAlive::ActiveAndIdleConnections { interval, timeout } => {
+            hyper_builder
+                .http2_keep_alive_while_idle(true)
+                .http2_keep_alive_interval(interval)
+                .http2_keep_alive_timeout(timeout);
+        }
+    }
+}
+
+#[cfg_attr(test, mutants::skip)] // cannot be verified with hyper APIs
+fn apply_http_version_preference(hyper_builder: &mut legacy::Builder, versions: &[Version]) {
+    if versions.len() == 1 && versions[0] == Version::HTTP_2 {
+        hyper_builder.http2_only(true);
     }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::time::Duration;
+
     use bytes::Bytes;
+    use fetch_options::{ConnectionLifetime, RequestFilter};
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
@@ -289,14 +297,23 @@ mod tests {
         native_tls::TlsConnector::new().unwrap().into()
     }
 
-    fn make_builder() -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
+    fn make_builder_with(options: TransportOptions) -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
         HyperTransportBuilder::new(
             FakeConnector::new_success(Bytes::new(), tick::ClockControl::new().auto_advance_timers(true).to_clock()),
             Spawner::new_tokio(),
             tick::ClockControl::new().auto_advance_timers(true).to_clock(),
-            tls(),
-            HttpBodyBuilder::new_fake(),
+            options,
         )
+    }
+
+    fn make_builder() -> HyperTransportBuilder<FakeConnector, crate::testing::FakeStream> {
+        make_builder_with(TransportOptions::default())
+    }
+
+    fn http_and_https_options() -> TransportOptions {
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options
     }
 
     #[test]
@@ -306,12 +323,12 @@ mod tests {
         assert!(defaults.meter.is_none(), "meter is not part of Debug output");
         insta::assert_debug_snapshot!("defaults", defaults);
 
-        let configured = make_builder()
-            .request_filter(RequestFilter::HttpAndHttps)
-            .supported_http_versions(&[Version::HTTP_2])
-            .connect_timeout(Duration::from_secs(7))
-            .connection_lifetime(ConnectionLifetime::Fixed(Duration::from_mins(1)))
-            .pool_index(42);
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.supported_http_versions = vec![Version::HTTP_2];
+        options.connect_timeout = Duration::from_secs(7);
+        options.connection_pool.connection_lifetime = ConnectionLifetime::fixed(Duration::from_mins(1));
+        let configured = make_builder_with(options).pool_index(PoolIndex::new(42));
         insta::assert_debug_snapshot!("configured", configured);
     }
 
@@ -326,12 +343,48 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn configure_hyper_runs_callback_synchronously() {
-        let mut called = false;
-        let _b = make_builder().configure_hyper(|_| {
-            called = true;
-        });
-        assert!(called);
+    fn new_applies_transport_options_to_builder() {
+        let mut options = TransportOptions::default();
+        options.request_filter = RequestFilter::HttpAndHttps;
+        options.connect_timeout = Duration::from_secs(7);
+        options.supported_http_versions = vec![Version::HTTP_2];
+        options.connection_pool.connection_lifetime = ConnectionLifetime::fixed(Duration::from_mins(1));
+        options.connection_keep_alive = ConnectionKeepAlive::active_and_idle_connections(None, None);
+
+        let b = make_builder_with(options);
+        assert_eq!(b.options.request_filter, RequestFilter::HttpAndHttps);
+        assert_eq!(b.options.connect_timeout, Duration::from_secs(7));
+        assert_eq!(b.options.supported_http_versions, vec![Version::HTTP_2]);
+        assert_eq!(
+            b.options.connection_pool.connection_lifetime.resolve(),
+            Some(Duration::from_mins(1))
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn new_applies_active_connections_keep_alive() {
+        let mut options = TransportOptions::default();
+        options.connection_keep_alive = ConnectionKeepAlive::active_connections(Duration::from_secs(5), Duration::from_secs(10));
+
+        let b = make_builder_with(options);
+        assert!(matches!(
+            b.options.connection_keep_alive,
+            ConnectionKeepAlive::ActiveConnections { .. }
+        ));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn new_applies_unlimited_idle_timeout() {
+        let mut options = TransportOptions::default();
+        options.connection_pool = options.connection_pool.connection_idle_timeout(None);
+
+        let b = make_builder_with(options);
+        assert!(matches!(
+            b.options.connection_pool.connection_idle_timeout,
+            ConnectionIdleTimeout::Unlimited
+        ));
     }
 
     #[cfg_attr(miri, ignore)]
@@ -344,12 +397,11 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(),
             clock,
-            tls(),
-            HttpBodyBuilder::new_fake(),
+            http_and_https_options(),
         )
-        .request_filter(RequestFilter::HttpAndHttps)
+        .body_builder(HttpBodyBuilder::new_fake())
         .meter(provider.meter("test"))
-        .build();
+        .build(tls());
         let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
@@ -361,15 +413,16 @@ mod tests {
         // exercise the build path with HTTP/2-only configuration to confirm
         // it succeeds without panicking.
         let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = vec![Version::HTTP_2];
         let _handler = HyperTransportBuilder::new(
             FakeConnector::new_success(Bytes::new(), clock.clone()),
             Spawner::new_tokio(),
             clock,
-            tls(),
-            HttpBodyBuilder::new_fake(),
+            options,
         )
-        .supported_http_versions(&[Version::HTTP_2])
-        .build();
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(tls());
     }
 
     #[cfg_attr(miri, ignore)]
@@ -381,11 +434,10 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(),
             clock,
-            tls(),
-            HttpBodyBuilder::new_fake(),
+            http_and_https_options(),
         )
-        .request_filter(RequestFilter::HttpAndHttps)
-        .build();
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(tls());
         let cloned = handler.clone();
         let _ = format!("{cloned:?}");
         let resp = cloned.execute(crate::testing::create_test_request()).await.unwrap();
@@ -401,14 +453,32 @@ mod tests {
             FakeConnector::new_success(response_bytes, clock.clone()),
             Spawner::new_tokio(),
             clock,
-            tls(),
-            HttpBodyBuilder::new_fake(),
+            http_and_https_options(),
         )
-        .request_filter(RequestFilter::HttpAndHttps)
-        .build();
+        .body_builder(HttpBodyBuilder::new_fake())
+        .build(tls());
 
         let service: DynamicService<HttpRequest, Result<HttpResponse>> = handler.into();
         let resp = service.execute(crate::testing::create_test_request()).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn build_without_body_builder_uses_default() {
+        // Pin the default body builder path in `build`: when no `body_builder`
+        // is provided, `build` synthesizes one and still produces a working
+        // transport.
+        let response_bytes = Bytes::from_static(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        let clock = tick::ClockControl::new().auto_advance_timers(true).to_clock();
+        let handler = HyperTransportBuilder::new(
+            FakeConnector::new_success(response_bytes, clock.clone()),
+            Spawner::new_tokio(),
+            clock,
+            http_and_https_options(),
+        )
+        .build(tls());
+        let resp = handler.execute(crate::testing::create_test_request()).await.unwrap();
         assert_eq!(resp.status(), 200);
     }
 
@@ -432,5 +502,15 @@ mod tests {
             tokio::task::yield_now().await;
         }
         assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn coerce_options_fills_empty_http_versions_with_defaults() {
+        let mut options = TransportOptions::default();
+        options.supported_http_versions = vec![];
+
+        coerce_options(&mut options);
+
+        assert_eq!(options.supported_http_versions, vec![Version::HTTP_11, Version::HTTP_2]);
     }
 }

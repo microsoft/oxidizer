@@ -40,7 +40,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                 } else {
                     quote! {
                         ::std::write!(f, "{}{}: ", #separator, #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#field_name, redactor, f)?;
                     }
                 }
             });
@@ -64,7 +64,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
                     }
                 } else {
                     quote! {
-                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDebug>::fmt(&self.#index, redactor, f)?;
                     }
                 };
 
@@ -91,7 +91,7 @@ pub fn redacted_debug(input: TokenStream) -> Result<TokenStream> {
         impl #impl_generics ::data_privacy::RedactedDebug for #name #ty_generics #where_clause {
             fn fmt(
                 &self,
-                engine: &::data_privacy::RedactionEngine,
+                redactor: &dyn ::data_privacy::Redactor,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
                 ::std::write!(f, #opening)?;
@@ -131,7 +131,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                 } else {
                     quote! {
                         ::std::write!(f, "{}{}: ", #separator, #field_name_str)?;
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_name, redactor, f)?;
                     }
                 }
             });
@@ -155,7 +155,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
                     }
                 } else {
                     quote! {
-                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, engine, f)?;
+                        <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#index, redactor, f)?;
                     }
                 };
 
@@ -182,7 +182,7 @@ pub fn redacted_display(input: TokenStream) -> Result<TokenStream> {
         impl #impl_generics ::data_privacy::RedactedDisplay for #name #ty_generics #where_clause {
             fn fmt(
                 &self,
-                engine: &::data_privacy::RedactionEngine,
+                redactor: &dyn ::data_privacy::Redactor,
                 f: &mut ::std::fmt::Formatter,
             ) -> ::std::fmt::Result {
                 ::std::write!(f, #opening)?;

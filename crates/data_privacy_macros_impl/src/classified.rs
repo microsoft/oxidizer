@@ -106,7 +106,7 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 clippy::cast_possible_truncation,
                 reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
-            fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            fn fmt(&self, redactor: &dyn ::data_privacy::Redactor, output: &mut ::std::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 const STACK_BUFFER_SIZE: usize = 128;
                 let v = &#field_access;
                 let dc = <Self as ::data_privacy::Classified>::data_class(self);
@@ -121,9 +121,9 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 };
                 if amount <= local_buf.len() {
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-                    engine.redact(dc, s, output)
+                    redactor.redact(dc, s, output)
                 } else {
-                    engine.redact(dc, format!("{v:?}"), output)
+                    redactor.redact(dc, &format!("{v:?}"), output)
                 }
             }
         }
@@ -133,7 +133,7 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 clippy::cast_possible_truncation,
                 reason = "Converting from u64 to usize, value is known to be <= STACK_BUFFER_SIZE"
             )]
-            fn fmt(&self, engine: &::data_privacy::RedactionEngine, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
+            fn fmt(&self, redactor: &dyn ::data_privacy::Redactor, output: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
                 const STACK_BUFFER_SIZE: usize = 128;
                 let v = &#field_access;
                 let dc = <Self as ::data_privacy::Classified>::data_class(self);
@@ -148,9 +148,9 @@ pub fn classified(attr_args: TokenStream, item: TokenStream) -> SynResult<TokenS
                 };
                 if amount <= local_buf.len() {
                     let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-                    engine.redact(dc, s, output)
+                    redactor.redact(dc, s, output)
                 } else {
-                    engine.redact(dc, format!("{v}"), output)
+                    redactor.redact(dc, &format!("{v}"), output)
                 }
             }
         }
