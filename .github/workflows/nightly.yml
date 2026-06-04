@@ -15,7 +15,7 @@ on:
           miri-tree-borrows job (substring match).
         required: false
         default: >-
-          alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
+          arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
 
 jobs:
   nightly-gatekeeper:
@@ -64,13 +64,13 @@ jobs:
           MIRIFLAGS: -Zmiri-tree-borrows
           # Tests skipped by default (also configurable via workflow_dispatch input):
           #
-          # alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
+          # arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
           #   Although the allocation itself is only 4 KiB (512 u64s),
           #   the arena's bump-fit / drop-entry / protective-hold path
           #   involves many pointer reborrows into the 64 KiB pre-
           #   allocated chunk. Under tree-borrows the per-byte provenance
           #   tracking for these reborrows exceeds 16 GB.
-          MIRI_SKIP: ${{ inputs.miri-tree-borrows-skip || 'alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path' }}
+          MIRI_SKIP: ${{ inputs.miri-tree-borrows-skip || 'arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path' }}
         run: |
           SKIP_ARGS=""
           for test in $MIRI_SKIP; do
