@@ -55,6 +55,7 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     steps:
       # prep
       - name: Checkout
@@ -76,6 +77,7 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     steps:
       # prep
       - name: Checkout
