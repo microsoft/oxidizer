@@ -192,24 +192,6 @@ assert_eq!(output_buffer, "********");
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy">source code</a>.
 </sub>
 
-<<<<<<< HEAD
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbcz--FS0HmAUb4PVl4_uBbJcbNpizJAPcY7sbA9e9gxKHdnZhZIGCbGRhdGFfcHJpdmFjeWYwLjExLjI
- [__link0]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
- [__link1]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Redactor
- [__link10]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=classified
- [__link11]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=taxonomy
- [__link12]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=classified
- [__link13]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactionEngine
- [__link14]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactionEngine::builder
- [__link2]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=simple_redactor::SimpleRedactor
- [__link3]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
- [__link4]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedDebug
- [__link5]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedDisplay
- [__link6]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=RedactedToString
- [__link7]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=taxonomy
- [__link8]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=DataClass
- [__link9]: https://docs.rs/data_privacy/0.11.2/data_privacy/?search=Classified
-=======
  [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbfPAU5OoNavUbRy0yQBG8se0b5QdS3UiPpR4bCQr6vjqou8phZIOCbGRhdGFfcHJpdmFjeWYwLjEyLjCCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4wgnNkYXRhX3ByaXZhY3lfbWFjcm9zZjAuMTAuMA
  [__link0]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Classified
  [__link1]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Redactor
@@ -226,4 +208,3 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link7]: https://docs.rs/data_privacy_macros/0.10.0/data_privacy_macros/?search=taxonomy
  [__link8]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=DataClass
  [__link9]: https://docs.rs/data_privacy_core/0.1.0/data_privacy_core/?search=Classified
->>>>>>> origin/main
