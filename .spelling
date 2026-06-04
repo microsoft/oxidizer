@@ -42,7 +42,6 @@ C-RELNOTES
 C-RW-VALUE
 C-SERDE
 C-SMART-PTR
-CAS
 CLI
 CONTRIBUTING.md
 CPUs
@@ -126,7 +125,6 @@ RMWs
 RPC
 Rc
 Redis
-Reqwest
 Resize
 Reusability
 Rustdoc
@@ -561,3 +559,14 @@ rustls
 TLS
 verifier
 Verifier
+multipart
+hostnames
+customizable
+durations
+unencrypted
+mTLS
+globals
+seatbelt
+CAS
+PEM
+runnable

@@ -1,0 +1,582 @@
+// Copyright (c) Microsoft Corporation.
+
+use std::fmt::{self, Debug};
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures::FutureExt;
+use layered::{Layer, Service};
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Histogram, Meter, MeterProvider};
+use opentelemetry_semantic_conventions::attribute::SERVER_PORT;
+use opentelemetry_semantic_conventions::metric::HTTP_CLIENT_REQUEST_DURATION;
+use opentelemetry_semantic_conventions::trace::{
+    ERROR_TYPE, HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME, NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS,
+    URL_SCHEME, URL_TEMPLATE,
+};
+use seatbelt::RecoveryInfo;
+use tick::Clock;
+
+use crate::error_labels::{LABEL_ABANDONED, collect_error_labels};
+use crate::telemetry::{
+    Metering, TelemetryAttributes, http_method_name, network_protocol_name, network_protocol_version, server_port, url_scheme_or,
+};
+use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
+
+type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
+type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
+type ResponseEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync>;
+
+/// Callback invoked after metric attributes have been collected, allowing
+/// callers to observe the reported attributes alongside the request result.
+#[derive(Clone)]
+struct OnRecordCallback(CallbackType);
+
+impl Debug for OnRecordCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("OnRecordCallback(..)")
+    }
+}
+
+/// Callback that adds caller-provided attributes derived from the inbound
+/// [`HttpRequest`] before the request is dispatched.
+#[derive(Clone)]
+struct RequestEnricher(RequestEnricherFn);
+
+impl Debug for RequestEnricher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RequestEnricher(..)")
+    }
+}
+
+/// Callback that adds caller-provided attributes derived from the request
+/// outcome before metrics are recorded.
+#[derive(Clone)]
+struct ResponseEnricher(ResponseEnricherFn);
+
+impl Debug for ResponseEnricher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ResponseEnricher(..)")
+    }
+}
+
+/// Request handler that automatically collects HTTP metrics.
+///
+/// Simply drop this handler in front of any existing [`RequestHandler`] to
+/// automatically gather OpenTelemetry-compatible metrics for all HTTP requests.
+///
+/// # Metrics Collected
+///
+/// * **Meter name**: `fetch`
+/// * **Duration**: [`http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration) - How long requests take in seconds
+#[derive(Debug)]
+pub struct Metrics<T> {
+    inner: T,
+    clock: Clock,
+    request_duration: Histogram<f64>,
+    on_record: Option<OnRecordCallback>,
+    enrich_from_request: Option<RequestEnricher>,
+    enrich_from_response: Option<ResponseEnricher>,
+}
+
+/// Layer that wraps a service with [`Metrics`].
+///
+/// Use [`MetricsLayer::on_record`] to register a callback that is
+/// invoked every time a metric is recorded. This lets callers observe the
+/// final set of attributes alongside the request result without needing to
+/// instrument the histogram themselves.
+#[derive(Debug)]
+pub struct MetricsLayer {
+    clock: Clock,
+    meter: Option<Meter>,
+    on_record: Option<OnRecordCallback>,
+    enrich_from_request: Option<RequestEnricher>,
+    enrich_from_response: Option<ResponseEnricher>,
+}
+
+impl MetricsLayer {
+    /// Sets the [`Meter`] used to create the request-duration histogram when the
+    /// layer is built.
+    ///
+    /// When no meter is configured, the global meter provider is used.
+    #[must_use]
+    pub fn meter(mut self, meter: Meter) -> Self {
+        self.meter = Some(meter);
+        self
+    }
+
+    /// Sets the meter from the given [`MeterProvider`], creating the `fetch`
+    /// meter used to record the request-duration histogram when the layer is
+    /// built.
+    ///
+    /// When no meter is configured, the global meter provider is used.
+    #[must_use]
+    pub fn meter_provider(mut self, meter_provider: &dyn MeterProvider) -> Self {
+        self.meter = Some(Metering::custom(meter_provider).into());
+        self
+    }
+
+    /// Registers a callback that is invoked each time a request metric is
+    /// recorded, receiving the request duration, the result, and the
+    /// collected [`KeyValue`] attributes.
+    #[must_use]
+    pub fn on_record(mut self, callback: impl Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync + 'static) -> Self {
+        self.on_record = Some(OnRecordCallback(Arc::new(callback)));
+        self
+    }
+
+    /// Registers a closure that enriches the metric [`TelemetryAttributes`]
+    /// using information from the outgoing [`HttpRequest`].
+    ///
+    /// The closure is invoked once per request, after the built-in request
+    /// attributes have been collected and before the request is dispatched.
+    /// Any attributes pushed to the provided `TelemetryAttributes` are merged
+    /// into the final set of metric attributes for that request.
+    #[must_use]
+    pub fn enrich_from_request(mut self, enricher: impl Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync + 'static) -> Self {
+        self.enrich_from_request = Some(RequestEnricher(Arc::new(enricher)));
+        self
+    }
+
+    /// Registers a closure that enriches the metric [`TelemetryAttributes`]
+    /// using information from the request outcome.
+    ///
+    /// The closure is invoked once per request, after the built-in response
+    /// or error attributes have been collected and before the histogram is
+    /// recorded. Any attributes pushed to the provided `TelemetryAttributes`
+    /// are merged into the final set of metric attributes for that request.
+    #[must_use]
+    pub fn enrich_from_response(
+        mut self,
+        enricher: impl Fn(&mut TelemetryAttributes, &Result<HttpResponse>) + Send + Sync + 'static,
+    ) -> Self {
+        self.enrich_from_response = Some(ResponseEnricher(Arc::new(enricher)));
+        self
+    }
+}
+
+impl<S> Layer<S> for MetricsLayer {
+    type Service = Metrics<S>;
+
+    /// Creates a new layer that wraps the given service with logging.
+    ///
+    /// This layer will log requests and responses using the provided clock for timing.
+    fn layer(&self, inner: S) -> Self::Service {
+        let meter = self.meter.clone().unwrap_or_else(|| Metering::Global.into());
+        Metrics {
+            inner,
+            clock: self.clock.clone(),
+            request_duration: build_request_duration(&meter),
+            on_record: self.on_record.clone(),
+            enrich_from_request: self.enrich_from_request.clone(),
+            enrich_from_response: self.enrich_from_response.clone(),
+        }
+    }
+}
+
+impl Metrics<()> {
+    /// Creates a [`Layer`] that records request metrics using the given clock.
+    ///
+    /// By default the global meter provider is used to create the request-duration
+    /// histogram when the layer is built. Use [`MetricsLayer::meter`] or
+    /// [`MetricsLayer::meter_provider`] to record metrics against a custom meter.
+    #[must_use]
+    pub fn layer(clock: &Clock) -> MetricsLayer {
+        MetricsLayer {
+            clock: clock.clone(),
+            meter: None,
+            on_record: None,
+            enrich_from_request: None,
+            enrich_from_response: None,
+        }
+    }
+}
+
+/// Builds the request-duration histogram recorded by [`Metrics`].
+fn build_request_duration(meter: &Meter) -> Histogram<f64> {
+    meter
+        .f64_histogram(HTTP_CLIENT_REQUEST_DURATION)
+        .with_description("Duration of HTTP client requests.")
+        .with_unit("s")
+        .with_boundaries(vec![
+            0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        ])
+        .build()
+}
+
+impl<T: RequestHandler> Service<HttpRequest> for Metrics<T> {
+    type Out = Result<HttpResponse>;
+
+    fn execute(&self, input: HttpRequest) -> impl Future<Output = Result<HttpResponse>> + Send {
+        let watch = self.clock.stopwatch();
+        let mut attributes = TelemetryAttributes::default();
+
+        fill_request_attributes(&mut attributes, &input, self.enrich_from_request.as_ref());
+
+        let mut guard = MetricsDropGuard {
+            watch,
+            attributes,
+            request_duration: &self.request_duration,
+            on_record: &self.on_record,
+            enrich_from_response: &self.enrich_from_response,
+            already_recorded: false,
+        };
+
+        self.inner.execute(input).inspect(move |r| guard.record(r))
+    }
+}
+
+fn fill_response_attributes(attributes: &mut TelemetryAttributes, response: &HttpResponse) {
+    attributes.push(KeyValue::new(NETWORK_PROTOCOL_NAME, network_protocol_name()));
+    attributes.push(KeyValue::new(
+        NETWORK_PROTOCOL_VERSION,
+        network_protocol_version(response.version()),
+    ));
+    attributes.push(KeyValue::new(HTTP_RESPONSE_STATUS_CODE, i64::from(response.status().as_u16())));
+
+    if let Some(values) = response.extensions().get::<TelemetryAttributes>() {
+        attributes.extend(values.values().iter().cloned());
+    }
+}
+
+fn fill_request_attributes(attributes: &mut TelemetryAttributes, request: &HttpRequest, enricher: Option<&RequestEnricher>) {
+    attributes.push(KeyValue::new(HTTP_REQUEST_METHOD, http_method_name(request.method())));
+
+    if let Some(val) = request.uri().authority() {
+        attributes.push(KeyValue::new(SERVER_ADDRESS, val.host().to_string()));
+    }
+
+    if let Some(val) = server_port(request.uri()) {
+        attributes.push(KeyValue::new(SERVER_PORT, val));
+    }
+
+    attributes.push(KeyValue::new(URL_SCHEME, url_scheme_or(request.uri().scheme())));
+
+    if let Some(template) = request.uri_template_label() {
+        attributes.push(KeyValue::new(URL_TEMPLATE, template.into_cow()));
+    }
+
+    if let Some(values) = request.extensions().get::<TelemetryAttributes>() {
+        attributes.extend(values.values().iter().cloned());
+    }
+
+    if let Some(enricher) = enricher {
+        (enricher.0)(attributes, request);
+    }
+}
+
+fn fill_error_attributes(attributes: &mut TelemetryAttributes, error: &HttpError) {
+    attributes.push(KeyValue::new(ERROR_TYPE, collect_error_labels(error).into_cow()));
+}
+
+/// Drop guard that ensures metrics are recorded even when the request future
+/// is cancelled.
+struct MetricsDropGuard<'a> {
+    watch: tick::Stopwatch,
+    attributes: TelemetryAttributes,
+    request_duration: &'a Histogram<f64>,
+    on_record: &'a Option<OnRecordCallback>,
+    enrich_from_response: &'a Option<ResponseEnricher>,
+    already_recorded: bool,
+}
+
+impl MetricsDropGuard<'_> {
+    /// Disarm the guard and record metrics with the actual request outcome.
+    fn record(&mut self, result: &Result<HttpResponse>) {
+        self.already_recorded = true;
+
+        match result {
+            Ok(response) => fill_response_attributes(&mut self.attributes, response),
+            Err(err) => fill_error_attributes(&mut self.attributes, err),
+        }
+
+        if let Some(enricher) = self.enrich_from_response {
+            (enricher.0)(&mut self.attributes, result);
+        }
+
+        let elapsed = self.watch.elapsed();
+
+        if let Some(on_record) = self.on_record {
+            (on_record.0)(elapsed, result, self.attributes.values());
+        }
+
+        self.request_duration.record(elapsed.as_secs_f64(), self.attributes.values());
+    }
+}
+
+impl Drop for MetricsDropGuard<'_> {
+    fn drop(&mut self) {
+        if self.already_recorded {
+            return;
+        }
+
+        self.record(&Err(HttpError::other(
+            "the future has been dropped",
+            RecoveryInfo::never(),
+            LABEL_ABANDONED,
+        )));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::Poll;
+
+    use futures::executor::block_on;
+    use http::{Request, StatusCode, Version};
+    use http_extensions::{FakeHandler, HttpRequestBuilder};
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use templated_uri::{EscapedString, templated};
+
+    use super::*;
+    use crate::{HttpBodyBuilder, HttpResponseBuilder};
+
+    fn test_layer() -> MetricsLayer {
+        let provider = SdkMeterProvider::builder().build();
+        Metrics::layer(&Clock::new_frozen()).meter_provider(&provider)
+    }
+
+    fn test_request() -> HttpRequest {
+        Request::get("https://example.com/test")
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap()
+    }
+
+    /// Collects attributes into a deterministic, snapshot-friendly representation.
+    ///
+    /// The result is sorted by key so the snapshot output is stable regardless of
+    /// the underlying insertion order.
+    #[mutants::skip]
+    fn sorted_attrs(attributes: &[KeyValue]) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = attributes
+            .iter()
+            .map(|kv| (kv.key.as_str().to_owned(), kv.value.as_str().into_owned()))
+            .collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        pairs
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_request_attributes() {
+        let request = Request::get("https://example.com/test?query=value")
+            .extension(TelemetryAttributes::from_iter([KeyValue::new("extra", "extra_val")]))
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_request_attributes(&mut attributes, &request, None);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_request_attributes_with_template() {
+        let request = HttpRequestBuilder::new_fake()
+            .get(CrateUrl { crate_name: "abc".into() })
+            .build()
+            .unwrap();
+
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_request_attributes(&mut attributes, &request, None);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_request_attributes_with_template_label() {
+        let request = HttpRequestBuilder::new_fake()
+            .get(CrateUrl2 { crate_name: "abc".into() })
+            .build()
+            .unwrap();
+
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_request_attributes(&mut attributes, &request, None);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_response_attributes() {
+        let extra = TelemetryAttributes::from_iter([KeyValue::new("extra", "extra_val")]);
+
+        let response = HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .version(Version::HTTP_11)
+            .extension(extra)
+            .build()
+            .unwrap();
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_response_attributes(&mut attributes, &response);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[test]
+    fn many_attributes_ok() {
+        let extra = (0..1000)
+            .map(|v| KeyValue::new(v.to_string(), v.to_string()))
+            .collect::<TelemetryAttributes>();
+
+        let response = HttpResponseBuilder::new_fake()
+            .status(StatusCode::OK)
+            .version(Version::HTTP_11)
+            .extension(extra)
+            .build()
+            .unwrap();
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_response_attributes(&mut attributes, &response);
+
+        assert!(attributes.values().len() > 1000);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_error_attributes() {
+        // Create an error
+        let error = HttpError::from(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Connection refused"));
+
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_error_attributes(&mut attributes, &error);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[templated(template = "/api/v1/crates/{crate_name}", unredacted)]
+    #[derive(Clone)]
+    struct CrateUrl {
+        crate_name: EscapedString,
+    }
+
+    #[templated(template = "/api/v1/crates/{crate_name}", label = "crates_api", unredacted)]
+    struct CrateUrl2 {
+        crate_name: EscapedString,
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn test_fill_request_attributes_with_url_template_label_extension() {
+        use http_extensions::UriTemplateLabel;
+
+        let mut request = Request::get("https://example.com/api/users/123")
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+        request.extensions_mut().insert(UriTemplateLabel::new("/api/users/{id}"));
+
+        let mut attributes = TelemetryAttributes::new();
+
+        fill_request_attributes(&mut attributes, &request, None);
+
+        insta::assert_debug_snapshot!(sorted_attrs(attributes.values()));
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn on_record_is_called() {
+        let called = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&called);
+
+        let handler = test_layer()
+            .on_record(move |_duration, _result, _attrs| {
+                flag.store(true, Ordering::Relaxed);
+            })
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        assert!(called.load(Ordering::Relaxed));
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn no_callback_by_default() {
+        let handler = test_layer().layer(FakeHandler::from(StatusCode::OK));
+
+        let result = block_on(Service::execute(&handler, test_request()));
+        result.unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn enrich_from_request_and_response_add_attributes() {
+        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let attrs_clone = Arc::clone(&recorded_attrs);
+
+        let handler = test_layer()
+            .enrich_from_request(|attrs, request| {
+                attrs.push(KeyValue::new("request.method", request.method().as_str().to_owned()));
+                attrs.push(KeyValue::new("request.custom", "req_val"));
+            })
+            .enrich_from_response(|attrs, result| {
+                let status = result.as_ref().map_or(-1, |r| i64::from(r.status().as_u16()));
+                attrs.push(KeyValue::new("response.status", status));
+                attrs.push(KeyValue::new("response.is_err", result.is_err()));
+            })
+            .on_record(move |_duration, _result, attrs| {
+                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+            })
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        let attrs = recorded_attrs.lock().unwrap();
+        insta::assert_debug_snapshot!(sorted_attrs(&attrs));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn abandoned_future_records_abandoned_error_type() {
+        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let attrs_clone = Arc::clone(&recorded_attrs);
+
+        let handler = test_layer()
+            .on_record(move |_duration, _result, attrs| {
+                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+            })
+            .layer(FakeHandler::from_async_handler(|_req| async {
+                // This future will never complete because it pends forever.
+                std::future::pending::<Result<HttpResponse>>().await
+            }));
+
+        // Poll the future once so the guard is created, then drop it.
+        let mut future = Box::pin(Service::execute(&handler, test_request()));
+
+        // Should be pending because the inner handler never resolves.
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
+
+        // Drop the future, triggering the MetricsDropGuard.
+        drop(future);
+
+        let attrs = recorded_attrs.lock().unwrap();
+        insta::assert_debug_snapshot!(sorted_attrs(&attrs));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn completed_future_does_not_record_abandoned() {
+        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let attrs_clone = Arc::clone(&recorded_attrs);
+
+        let handler = test_layer()
+            .on_record(move |_duration, _result, attrs| {
+                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+            })
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        let attrs = recorded_attrs.lock().unwrap();
+        insta::assert_debug_snapshot!(sorted_attrs(&attrs));
+    }
+}

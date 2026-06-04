@@ -1,0 +1,256 @@
+# Copyright (c) Microsoft Corporation.
+
+[package]
+name = "fetch"
+description = "HTTP client with resilience, observability, and Tokio runtime support."
+version = "0.10.0"
+readme = "README.md"
+keywords = ["http", "client", "async", "resilience", "observability"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch"
+
+[features]
+default = []
+tls = ["rustls"]
+rustls = [
+    "dep:rustls",
+    "dep:rustls-platform-verifier",
+    "fetch_hyper?/rustls",
+    "fetch_tls/rustls",
+]
+native-tls = [
+    "dep:native-tls",
+    "fetch_hyper?/native-tls",
+    "fetch_tls/native-tls",
+]
+json = ["dep:serde", "http_extensions/json"]
+test-util = ["tick/test-util", "http_extensions/test-util"]
+tokio = [
+    "dep:tokio",
+    "dep:anyspawn",
+    "anyspawn/tokio",
+    "dep:fetch_hyper",
+    "dep:hyper-util",
+    "hyper-util/tokio",
+    "hyper-util/http1",
+    "hyper-util/http2",
+    "tick/tokio",
+    # The aws-lc-rs crypto provider is only pulled in when both `tokio` and
+    # `rustls` are enabled, because it is exclusively used by the Tokio
+    # transport's rustls backend (`tokio::build_tls_backend`).
+    "rustls?/aws-lc-rs",
+]
+
+[dependencies]
+# internal
+anyspawn = { workspace = true, optional = true }
+bytesbuf = { workspace = true }
+data_privacy = { workspace = true }
+fetch_hyper = { workspace = true, optional = true }
+fetch_options = { workspace = true }
+fetch_tls = { workspace = true }
+fundle = { workspace = true }
+http_extensions = { workspace = true }
+layered = { workspace = true, features = [
+    "dynamic-service",
+    "intercept",
+] }
+ohno.workspace = true
+seatbelt = { workspace = true, features = ["timeout", "retry", "breaker", "hedging", "logs", "metrics"] }
+seatbelt_http = { workspace = true, features = ["timeout", "retry", "breaker", "hedging"] }
+templated_uri = { workspace = true, features = ["uuid"] }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
+
+# external
+bytes = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+opentelemetry = { workspace = true, features = ["futures", "metrics"] }
+opentelemetry-semantic-conventions = { workspace = true, features = [
+    "semconv_experimental",
+] }
+serde = { workspace = true, optional = true }
+smallvec = { workspace = true }
+tracing = { workspace = true }
+
+# tokio runtime transport
+hyper-util = { workspace = true, optional = true, features = ["client-legacy"] }
+tokio = { workspace = true, features = ["rt", "net"], optional = true }
+
+# TLS related crates
+native-tls = { workspace = true, features = ["alpn"], optional = true }
+rustls = { workspace = true, features = [
+    "tls12",
+    "std",
+], default-features = false, optional = true }
+rustls-platform-verifier = { workspace = true, optional = true }
+
+[dev-dependencies]
+# internal
+anyspawn = { workspace = true, features = ["tokio"] }
+data_privacy.workspace = true
+fetch_hyper = { workspace = true, features = ["rustls", "native-tls"] }
+fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
+http_extensions = { workspace = true, features = ["test-util", "json"] }
+ohno = { workspace = true, features = ["test-util", "app-err"] }
+tick = { workspace = true, features = [
+    "test-util",
+    "tokio",
+] }
+
+# external
+alloc_tracker = { workspace = true }
+argh = { workspace = true }
+criterion = { workspace = true }
+fastrand.workspace = true
+hyper = { workspace = true, features = ["http2", "client"] }
+hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
+insta = { workspace = true }
+mutants = { workspace = true }
+native-tls = { workspace = true, features = ["alpn"] }
+opentelemetry-stdout = { workspace = true, features = [
+    "metrics",
+], default-features = false }
+opentelemetry_sdk = { workspace = true, features = [
+    "metrics",
+    "testing",
+], default-features = false }
+rstest = { workspace = true }
+rustls = { workspace = true, features = [
+    "tls12",
+    "std",
+    "aws-lc-rs",
+], default-features = false }
+rustls-platform-verifier = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+static_assertions = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt-multi-thread",
+    "rt",
+    "net",
+] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { workspace = true }
+wiremock = { workspace = true }
+tracing-appender = { workspace = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "http_client_fake"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_breaker"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_resilience"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_tokio"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_native_tls"
+required-features = ["native-tls", "tokio"]
+
+[[example]]
+name = "http_client_custom"
+
+[[example]]
+name = "http_client_custom_pipeline"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_telemetry"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_customization"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_native_tls_mtls"
+required-features = ["native-tls", "tokio"]
+
+[[example]]
+name = "http_client_advanced"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_api_with_templated_uri"
+required-features = ["test-util", "json"]
+
+[[example]]
+name = "http_client_app"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_connection_scaling"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_json"
+required-features = ["test-util", "json"]
+
+[[example]]
+name = "http_client_minimal_pipeline"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_mtls"
+required-features = ["tokio", "rustls"]
+
+[[example]]
+name = "http_client_pooling"
+required-features = ["test-util"]
+
+[[example]]
+name = "http_client_streaming"
+required-features = ["tokio", "rustls"]
+
+[[bench]]
+harness = false
+name = "pipelines"
+required-features = ["test-util"]
+
+[[bench]]
+harness = false
+name = "http_crate"
+required-features = ["test-util"]
+
+[[test]]
+name = "requests"
+required-features = ["tokio", "rustls", "test-util"]
+
+[[test]]
+name = "uri_handling"
+required-features = ["test-util"]
+
+[[test]]
+name = "thread_aware"
+required-features = ["tokio", "rustls", "test-util"]
+
+[[test]]
+name = "resilience"
+required-features = ["test-util"]
+
+[[test]]
+name = "standard_pipeline"
+required-features = ["test-util"]
+
+[[test]]
+name = "timeout"
+required-features = ["test-util"]
