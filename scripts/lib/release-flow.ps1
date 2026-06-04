@@ -1092,7 +1092,8 @@ function Format-PackageMenu {
         [void]$directDependents.Add($arr[$arr.Length - 2])
     }
     if ($directDependents.Count -gt 0) {
-        [void]$sb.AppendLine("  Direct dependents in this workspace: $($directDependents -join ', ')")
+        $dependentLabel = if ($directDependents.Count -eq 1) { 'Direct dependent' } else { 'Direct dependents' }
+        [void]$sb.AppendLine("  $($dependentLabel) in this workspace: $($directDependents -join ', ')")
     } else {
         [void]$sb.AppendLine('  No in-workspace dependents')
     }
@@ -1843,11 +1844,21 @@ function Show-ReleasePlan {
     Write-Host 'Note: user-provided change types may be automatically upgraded if cascade logic deems it necessary (e.g. non-breaking -> breaking).' -ForegroundColor DarkGray
     $autoUpgraded = @($userEntries | Where-Object { $_.AutoUpgraded })
     if ($autoUpgraded.Count -gt 0) {
-        Write-Host "Items above tagged 'auto-upgraded by cascade' were upgraded from the user-requested change type." -ForegroundColor DarkGray
+        $autoUpgradedLine = if ($autoUpgraded.Count -eq 1) {
+            "Item above tagged 'auto-upgraded by cascade' was upgraded from the user-requested change type."
+        } else {
+            "Items above tagged 'auto-upgraded by cascade' were upgraded from the user-requested change type."
+        }
+        Write-Host $autoUpgradedLine -ForegroundColor DarkGray
     }
     $forcedPins = @($userEntries | Where-Object { $_.PinHonoredAgainstCascade })
     if ($forcedPins.Count -gt 0) {
-        Write-Host "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin even though cascade required a higher version — downstream consumers may break." -ForegroundColor Yellow
+        $forcedPinsLine = if ($forcedPins.Count -eq 1) {
+            "Item above tagged '-Force: pin honored over cascade' kept its explicit version pin even though cascade required a higher version — downstream consumers may break."
+        } else {
+            "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin even though cascade required a higher version — downstream consumers may break."
+        }
+        Write-Host $forcedPinsLine -ForegroundColor Yellow
     }
     Write-Host 'If an explicit version number is specified in the release-spec but cascade logic requires a higher version number, the release plan is rejected (use -Force to override).' -ForegroundColor DarkGray
 }

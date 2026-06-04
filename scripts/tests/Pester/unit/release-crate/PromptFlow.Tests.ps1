@@ -184,10 +184,28 @@ Describe 'Format-PackageMenu' {
 
     It 'deduplicates direct dependents when the same direct dependent appears via multiple chains' {
         # b is the direct dependent of d via both chains; it must appear once.
+        # Only one distinct dependent remains, so the singular "Direct dependent" label is used.
         $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('x', 'b', 'd'))
         $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-        $out | Should -Match 'Direct dependents in this workspace: b\b'
+        $out | Should -Match 'Direct dependent in this workspace: b\b'
+        $out | Should -Not -Match 'Direct dependents in this workspace:'
         ([regex]::Matches($out, '\bb\b')).Count | Should -Be 1
+    }
+
+    It 'uses the singular "Direct dependent" label when exactly one direct dependent is listed' {
+        # `,@(...)` forces PowerShell to treat the single chain as an array of
+        # one chain rather than flattening it into a single chain of strings.
+        $finding = NewFinding -Folder 'd' -Chains @(, @('a', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependent in this workspace: a\b'
+        $out | Should -Not -Match 'Direct dependents in this workspace:'
+    }
+
+    It 'uses the plural "Direct dependents" label when two or more direct dependents are listed' {
+        $finding = NewFinding -Folder 'd' -Chains @(@('a', 'd'), @('b', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependents in this workspace: a, b\b'
+        $out | Should -Not -Match 'Direct dependent in this workspace:'
     }
 
     It 'lists the five menu options in the exact order and wording from the spec' {
@@ -311,7 +329,7 @@ Describe 'Format-PackageMenu' {
                 WorkspaceDependencyChains = @(, @('a', 'd'))
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
-            $out | Should -Match 'Direct dependents in this workspace: a'
+            $out | Should -Match 'Direct dependent in this workspace: a'
             $out | Should -Not -Match 'no in-workspace dependents'
         }
 
@@ -327,7 +345,7 @@ Describe 'Format-PackageMenu' {
             }
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
             # Direct dependent of d via the workspace chain is b (not release_set_root).
-            $out | Should -Match 'Direct dependents in this workspace: b\b'
+            $out | Should -Match 'Direct dependent in this workspace: b\b'
             $out | Should -Not -Match 'release_set_root'
         }
     }
@@ -1157,6 +1175,27 @@ Describe 'Show-ReleasePlan: cascade-upgrade footer' {
         ($script:Captured -join "`n") | Should -Match "tagged 'auto-upgraded by cascade'"
     }
 
+    It "uses singular 'Item above' wording when exactly one entry was auto-upgraded" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Item above tagged 'auto-upgraded by cascade' was upgraded from the user-requested change type\."
+        $captured | Should -Not -Match "Items above tagged 'auto-upgraded by cascade'"
+    }
+
+    It "uses plural 'Items above' wording when two or more entries were auto-upgraded" {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -AutoUpgraded $true
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Items above tagged 'auto-upgraded by cascade' were upgraded from the user-requested change type\."
+        $captured | Should -Not -Match "Item above tagged 'auto-upgraded by cascade'"
+    }
+
     It 'omits the pin-honored-over-cascade line when no entry was forced' {
         $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' -PinHonoredAgainstCascade $false }
         Show-ReleasePlan -ResolvedReleaseSet $plan
@@ -1173,6 +1212,27 @@ Describe 'Show-ReleasePlan: cascade-upgrade footer' {
 
         ($script:Captured -join "`n") | Should -Match "'-Force: pin honored over cascade'"
         ($script:Captured -join "`n") | Should -Match 'downstream consumers may break'
+    }
+
+    It "uses singular 'Item above' wording when exactly one entry was forced" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Item above tagged '-Force: pin honored over cascade' kept its explicit version pin"
+        $captured | Should -Not -Match "Items above tagged '-Force: pin honored over cascade' kept their"
+    }
+
+    It "uses plural 'Items above' wording when two or more entries were forced" {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -PinHonoredAgainstCascade $true
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin"
+        $captured | Should -Not -Match "Item above tagged '-Force: pin honored over cascade' kept its"
     }
 
     It "tags a forced entry's per-package line with '-Force: pin honored over cascade'" {

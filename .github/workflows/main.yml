@@ -252,11 +252,11 @@ jobs:
           delete: true
 
   release-deps:
-    # Informational check: flags workspace crates that have unreleased modifications
-    # (changes newer than the crate's own last `version =` / `publish =` commit) and
-    # are transitively depended on by a crate this PR is releasing. The release set
+    # Informational check: flags workspace packages that have unreleased modifications
+    # (changes newer than the package's own last `version =` / `publish =` commit) and
+    # are transitively depended on by a package this PR is releasing. The release set
     # is derived from a PR-vs-base-ref version diff; the modification baseline is
-    # per-crate, so previously-merged-but-unreleased changes are flagged too. See
+    # per-package, so previously-merged-but-unreleased changes are flagged too. See
     # scripts/check-unreleased-dependencies.ps1.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -264,7 +264,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
       - name: Setup
@@ -518,7 +518,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
       - name: Setup
         # The synthetic-workspace fixture builder shells out to `cargo metadata`,
         # so Rust must be available even though no Rust code is compiled.

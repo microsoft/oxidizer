@@ -196,6 +196,33 @@ Describe 'Format-UnreleasedDependenciesReport' {
         $md | Should -Not -Match '\| Package \| Files changed'
     }
 
+    It 'uses the singular release-set header and footer when exactly one package is released' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.2.0') `
+            -NotReleasedFindings  @() `
+            -ElevationCandidates  @()
+
+        $md | Should -Match 'This PR releases the following workspace package:'
+        $md | Should -Not -Match 'This PR releases the following workspace packages:'
+        # Footer must agree in number: "the released package builds ... it will resolve ..."
+        $md | Should -Match 'the released package builds against the modified version'
+        $md | Should -Match 'Once published, however, it will resolve'
+        $md | Should -Not -Match 'the released packages build against'
+        $md | Should -Not -Match 'they will resolve'
+    }
+
+    It 'uses the plural release-set header and footer when two or more packages are released' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.2.0', '  - `pkg2` 0.5.0 -> 0.6.0') `
+            -NotReleasedFindings  @() `
+            -ElevationCandidates  @()
+
+        $md | Should -Match 'This PR releases the following workspace packages:'
+        $md | Should -Not -Match 'This PR releases the following workspace package:'
+        $md | Should -Match 'the released packages build against'
+        $md | Should -Match 'they will resolve'
+    }
+
     It 'ends with exactly one trailing newline' {
         $md = Format-UnreleasedDependenciesReport `
             -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.2.0') `
@@ -218,6 +245,29 @@ Describe 'Format-UnreleasedDependenciesReport' {
         $md | Should -Not -Match 'change type is non-breaking'
     }
 
+    It 'uses singular intro for the NotReleasedFindings table when exactly one finding is listed' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.2.0') `
+            -NotReleasedFindings  @((NewFinding -Folder 'dep1' -DependencyChains @(, @('pkg1', 'dep1')))) `
+            -ElevationCandidates  @()
+
+        $md | Should -Match 'The following workspace package has \*\*unreleased modifications\*\* \(changes newer than its last `version =` or `publish =` change\) and is \*not\* part of this release:'
+        $md | Should -Not -Match 'The following workspace packages have \*\*unreleased modifications\*\*'
+    }
+
+    It 'uses plural intro for the NotReleasedFindings table when two or more findings are listed' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.2.0') `
+            -NotReleasedFindings  @(
+                (NewFinding -Folder 'dep1' -DependencyChains @(, @('pkg1', 'dep1'))),
+                (NewFinding -Folder 'dep2' -DependencyChains @(, @('pkg1', 'dep2')))
+            ) `
+            -ElevationCandidates  @()
+
+        $md | Should -Match 'The following workspace packages have \*\*unreleased modifications\*\* \(changes newer than their last `version =` or `publish =` change\) and are \*not\* part of this release:'
+        $md | Should -Not -Match 'The following workspace package has \*\*unreleased modifications\*\*'
+    }
+
     It 'emits only the "elevation candidates" table when only ElevationCandidates is non-empty' {
         $md = Format-UnreleasedDependenciesReport `
             -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.1.1') `
@@ -227,6 +277,29 @@ Describe 'Format-UnreleasedDependenciesReport' {
         $md | Should -Match 'change type is non-breaking / patch'
         $md | Should -Match '\| `pkg1` \| 7 \| `pkg1` \|'
         $md | Should -Not -Match 'are \*not\* part of this release'
+    }
+
+    It 'uses singular intro for the ElevationCandidates table when exactly one candidate is listed' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.1.1') `
+            -NotReleasedFindings  @() `
+            -ElevationCandidates  @((NewFinding -Folder 'pkg1' -DependencyChains @(, @('pkg1'))))
+
+        $md | Should -Match 'The following workspace package \*\*is\*\* part of this release, but its change type is non-breaking / patch while it also contains modifications from earlier commits\.'
+        $md | Should -Not -Match 'The following workspace packages \*\*are\*\* part of this release'
+    }
+
+    It 'uses plural intro for the ElevationCandidates table when two or more candidates are listed' {
+        $md = Format-UnreleasedDependenciesReport `
+            -ReleaseEntryLines    @('  - `pkg1` 0.1.0 -> 0.1.1') `
+            -NotReleasedFindings  @() `
+            -ElevationCandidates  @(
+                (NewFinding -Folder 'pkg1' -DependencyChains @(, @('pkg1'))),
+                (NewFinding -Folder 'pkg2' -DependencyChains @(, @('pkg2')))
+            )
+
+        $md | Should -Match 'The following workspace packages \*\*are\*\* part of this release, but their change type is non-breaking / patch while they also contain modifications from earlier commits\.'
+        $md | Should -Not -Match 'The following workspace package \*\*is\*\* part of this release'
     }
 
     It 'emits BOTH tables when both buckets are non-empty' {

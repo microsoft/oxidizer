@@ -21,7 +21,11 @@
 . (Join-Path $PSScriptRoot 'releasing.ps1')
 
 # Appends "$Name=$Value" to $env:GITHUB_OUTPUT, when defined. A no-op outside
-# GitHub Actions so local invocations don't blow up.
+# GitHub Actions so local invocations don't blow up. -LiteralPath bypasses
+# wildcard interpretation in case $env:GITHUB_OUTPUT contains characters PowerShell
+# would otherwise treat as glob metacharacters; -Encoding utf8 is pinned explicitly so
+# the file format is deterministic across PowerShell versions (Windows PowerShell 5.1
+# defaults to UTF-8 with BOM, which GitHub Actions accepts but is needlessly fragile).
 function Set-StepOutput {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -29,7 +33,7 @@ function Set-StepOutput {
     )
 
     if ([string]::IsNullOrEmpty($env:GITHUB_OUTPUT)) { return }
-    Add-Content -Path $env:GITHUB_OUTPUT -Value "$Name=$Value"
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value" -Encoding utf8
 }
 
 # Returns the absolute repo root by asking git. Anchors the git call to this
@@ -94,10 +98,23 @@ function Format-UnreleasedDependenciesReport {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ElevationCandidates
     )
 
+    $releaseCount = $ReleaseEntryLines.Count
+    $releaseSingular = ($releaseCount -eq 1)
+    $releaseHeader = if ($releaseSingular) {
+        'This PR releases the following workspace package:'
+    } else {
+        'This PR releases the following workspace packages:'
+    }
+    $whatThisMeansBody = if ($releaseSingular) {
+        'Locally, the released package builds against the modified version of each unreleased dependency via path-references. Once published, however, it will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.'
+    } else {
+        'Locally, the released packages build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.'
+    }
+
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add('## 📦 Unreleased Workspace Dependency Changes') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('This PR releases the following workspace packages:') | Out-Null
+    $lines.Add($releaseHeader) | Out-Null
     $lines.Add('') | Out-Null
     foreach ($entry in $ReleaseEntryLines) {
         $lines.Add($entry) | Out-Null
@@ -105,7 +122,12 @@ function Format-UnreleasedDependenciesReport {
     $lines.Add('') | Out-Null
 
     if ($NotReleasedFindings.Count -gt 0) {
-        $lines.Add('The following workspace packages have **unreleased modifications** (changes newer than their last `version =` or `publish =` change) and are *not* part of this release:') | Out-Null
+        $notReleasedIntro = if ($NotReleasedFindings.Count -eq 1) {
+            'The following workspace package has **unreleased modifications** (changes newer than its last `version =` or `publish =` change) and is *not* part of this release:'
+        } else {
+            'The following workspace packages have **unreleased modifications** (changes newer than their last `version =` or `publish =` change) and are *not* part of this release:'
+        }
+        $lines.Add($notReleasedIntro) | Out-Null
         $lines.Add('') | Out-Null
         $lines.Add('| Package | Files changed | Reached via |') | Out-Null
         $lines.Add('|-------|--------------:|-------------|') | Out-Null
@@ -118,7 +140,12 @@ function Format-UnreleasedDependenciesReport {
     }
 
     if ($ElevationCandidates.Count -gt 0) {
-        $lines.Add('The following workspace packages **are** part of this release, but their change type is non-breaking / patch while they also contain modifications from earlier commits. Reviewer should confirm the chosen change type is appropriate:') | Out-Null
+        $elevationIntro = if ($ElevationCandidates.Count -eq 1) {
+            'The following workspace package **is** part of this release, but its change type is non-breaking / patch while it also contains modifications from earlier commits. Reviewer should confirm the chosen change type is appropriate:'
+        } else {
+            'The following workspace packages **are** part of this release, but their change type is non-breaking / patch while they also contain modifications from earlier commits. Reviewer should confirm the chosen change type is appropriate:'
+        }
+        $lines.Add($elevationIntro) | Out-Null
         $lines.Add('') | Out-Null
         $lines.Add('| Package | Files changed | Reached via |') | Out-Null
         $lines.Add('|-------|--------------:|-------------|') | Out-Null
@@ -131,7 +158,7 @@ function Format-UnreleasedDependenciesReport {
     }
     $lines.Add('### What this means') | Out-Null
     $lines.Add('') | Out-Null
-    $lines.Add('Locally, the released packages build against the modified version of each unreleased dependency via path-references. Once published, however, they will resolve against the **last released** version of each dependency on crates.io — which does not include the unreleased changes.') | Out-Null
+    $lines.Add($whatThisMeansBody) | Out-Null
     $lines.Add('') | Out-Null
     $lines.Add('- If the unreleased changes are **material** to the released package''s behavior or public API, you should release the dependency too (add it to the `-Packages` list when re-running ``scripts/release-packages.ps1``).') | Out-Null
     $lines.Add('- If the changes are **immaterial** (formatting, doc tweaks, internal-only refactors), this comment can be ignored.') | Out-Null
@@ -205,10 +232,11 @@ function Invoke-CheckUnreleasedDependencies {
             -NotReleasedFindings  $notReleased `
             -ElevationCandidates  $elevationCandidates
 
-        Set-Content -Path $OutputFile -Value $content -Encoding utf8 -NoNewline
+        Set-Content -LiteralPath $OutputFile -Value $content -Encoding utf8 -NoNewline
 
         $findingCount = $findings.Count
-        Write-Host "Wrote $findingCount finding$(if ($findingCount -eq 1) { '' } else { 's' }) to '$OutputFile'."
+        $findingNoun = if ($findingCount -eq 1) { 'finding' } else { 'findings' }
+        Write-Host "Wrote $findingCount $findingNoun to '$OutputFile'."
         Set-StepOutput -Name 'has_findings' -Value 'true'
         return
     }

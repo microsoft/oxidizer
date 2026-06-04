@@ -98,9 +98,13 @@ fn main() {
 
     if test_groups.len() > initial_count {
         let added = test_groups.len() - initial_count;
-        let s = if added == 1 { "" } else { "s" };
+        let phrase = if added == 1 {
+            "1 ungrouped package as an individual group".to_string()
+        } else {
+            format!("{added} ungrouped packages as individual groups")
+        };
         println!();
-        println!("Added {added} ungrouped package{s} as individual group{s}");
+        println!("Added {phrase}");
     }
 
     println!();
