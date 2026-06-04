@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `fetch_tls` to 0.2.1
+  - depends on `fetch_options` and drop duplicate types
+
 ## [0.2.0] - 2026-06-02
 
   - depend on `fetch_tls` crate
