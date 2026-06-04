@@ -97,10 +97,10 @@ impl<T: RequestHandler> Service<HttpRequest> for Logging<T> {
                 Err(err) => {
                     event!(
                         name: "http.response.error",
+                        name: "http.response.error",
                         Level::WARN,
                         http.request.method = method.as_str(),
-                        server.address = url.authority().map(Authority::as_str),
-                        server.port = url.port_u16(),
+                        server.address = url.authority().map(Authority::host),
                         error.type = %collect_error_labels(&err),
                         exception.message = err.message(),
                         url.scheme = url.scheme_str(),
