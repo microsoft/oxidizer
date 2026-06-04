@@ -10,8 +10,9 @@ use crate::DataClass;
 /// Although instances are encapsulated, it's possible to extract the instances when
 /// classification is no longer needed.
 ///
-/// You rarely implement this trait by hand, instead use the [`classified`](data_privacy_macros::classified) macro to generate
-/// classified types automatically.
+/// You rarely implement this trait by hand, instead use the
+/// [`classified`](https://docs.rs/data_privacy/latest/data_privacy/attr.classified.html) macro from the
+/// [`data_privacy`](https://docs.rs/data_privacy) crate to generate classified types automatically.
 ///
 /// # Ancillary Traits
 ///
@@ -26,7 +27,7 @@ use crate::DataClass;
 /// # Example
 ///
 /// ```rust
-/// use data_privacy::{Classified, DataClass};
+/// use data_privacy_core::{Classified, DataClass};
 ///
 /// #[derive(Debug)]
 /// struct Person {
@@ -63,7 +64,6 @@ use crate::DataClass;
 /// assert_eq!(classified.data_class().name(), "classified_person");
 ///  ```
 pub trait Classified {
-    /// Returns the data class of the classified data.
-    #[must_use]
+    /// Returns the data class assigned to this instance.
     fn data_class(&self) -> &DataClass;
 }

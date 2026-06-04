@@ -50,7 +50,7 @@ The runtime is supplied entirely by the caller via an
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG27JhwJzXkumG9Cgswtvbtk3G11RQ0eI0kW1G87aELyEYbR5YWSDgmhhbnlzcGF3bmUwLjUuMoJrZmV0Y2hfaHlwZXJlMC4yLjCCb2h0dHBfZXh0ZW5zaW9uc2UwLjQuNA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbbsmHAnNeS6Yb0KCzC29u2TcbXVFDR4jSRbUbztoQvIRhtHlhZIOCaGFueXNwYXduZTAuNS4ygmtmZXRjaF9oeXBlcmUwLjIuMIJvaHR0cF9leHRlbnNpb25zZTAuNC40
  [__link0]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransportBuilder
  [__link1]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=Connect
  [__link2]: https://docs.rs/fetch_hyper/0.2.0/fetch_hyper/?search=HyperTransportBuilder::configure_hyper

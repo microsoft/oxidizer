@@ -30,7 +30,7 @@ where
     )]
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         output: &mut ::std::fmt::Formatter<'_>,
     ) -> ::core::fmt::Result {
         const STACK_BUFFER_SIZE: usize = 128;
@@ -47,9 +47,9 @@ where
         };
         if amount <= local_buf.len() {
             let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-            engine.redact(dc, s, output)
+            redactor.redact(dc, s, output)
         } else {
-            engine.redact(dc, format!("{v:?}"), output)
+            redactor.redact(dc, &format!("{v:?}"), output)
         }
     }
 }
@@ -63,7 +63,7 @@ where
     )]
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         output: &mut ::std::fmt::Formatter,
     ) -> ::core::fmt::Result {
         const STACK_BUFFER_SIZE: usize = 128;
@@ -80,9 +80,9 @@ where
         };
         if amount <= local_buf.len() {
             let s = unsafe { ::core::str::from_utf8_unchecked(&local_buf[..amount]) };
-            engine.redact(dc, s, output)
+            redactor.redact(dc, s, output)
         } else {
-            engine.redact(dc, format!("{v}"), output)
+            redactor.redact(dc, &format!("{v}"), output)
         }
     }
 }

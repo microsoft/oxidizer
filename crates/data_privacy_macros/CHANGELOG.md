@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-06-03
+
+- ✨ Features
+
+  - Generated code now uses `&dyn Redactor` instead of `&RedactionEngine` to match updated trait signatures in `data_privacy`.
+
 ## [0.9.2] - 2026-06-02
 
 - 🔧 Maintenance

@@ -6,8 +6,7 @@
 use std::borrow::Cow;
 use std::fmt::Write;
 
-use crate::DataClass;
-use crate::redactors::Redactor;
+use crate::{DataClass, Redactor};
 
 /// Mode of operation for the `SimpleRedactor`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +65,10 @@ impl SimpleRedactor {
 }
 
 impl Redactor for SimpleRedactor {
+    fn redacts(&self, _data_class: &DataClass) -> bool {
+        !matches!(self.mode, SimpleRedactorMode::Passthrough)
+    }
+
     #[cfg_attr(test, mutants::skip)]
     fn redact(&self, data_class: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         const ASTERISKS: &str =

@@ -81,7 +81,7 @@ impl ::std::fmt::Debug for Test {
 impl ::data_privacy::RedactedDisplay for Test {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/example.com/")?;
