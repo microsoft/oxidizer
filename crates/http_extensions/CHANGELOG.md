@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.6] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `ohno_macros` to 0.3.3
+
+- ⚠️ Breaking
+
+  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
+
+- ✨ Features
+
+  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
+
+## [0.4.5] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `thread_aware_macros_impl` to 0.7.2
+
+- ⚠️ Breaking
+
+  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
+
+- ✨ Features
+
+  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
+
 ## [0.4.4] - 2026-06-02
 
 - 🔧 Maintenance

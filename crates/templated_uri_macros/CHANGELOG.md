@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `ohno_macros` to 0.3.3
+
 ## [0.2.2] - 2026-06-02
 
 - 🔧 Maintenance
