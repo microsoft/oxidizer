@@ -55,7 +55,6 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 240
     steps:
       # prep
       - name: Checkout
@@ -72,12 +71,12 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 240
 
   miri-strict-provenance:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 240
     steps:
       # prep
       - name: Checkout
@@ -94,6 +93,7 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 240
 
   miri-race-coverage:
     needs: [nightly-gatekeeper]
