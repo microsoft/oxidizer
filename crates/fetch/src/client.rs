@@ -377,6 +377,7 @@ pub(super) enum HttpClientPipeline {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{Request, StatusCode, Uri};
     use http_extensions::FakeHandler;

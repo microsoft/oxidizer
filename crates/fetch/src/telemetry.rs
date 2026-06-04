@@ -129,6 +129,7 @@ pub(crate) fn network_protocol_version(version: Version) -> Value {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::Method;
 

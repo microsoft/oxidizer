@@ -57,6 +57,7 @@ impl<T: RequestHandler> Service<HttpRequest> for Buffering<T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{StatusCode, Uri};
     use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};

@@ -289,6 +289,7 @@ impl Debug for ConfigureStandardPipeline {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Duration;
 

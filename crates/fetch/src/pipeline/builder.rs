@@ -166,6 +166,7 @@ impl PipelineBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::time::Duration;
 

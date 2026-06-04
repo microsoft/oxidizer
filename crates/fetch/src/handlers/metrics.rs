@@ -320,6 +320,7 @@ impl Drop for MetricsDropGuard<'_> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::Poll;

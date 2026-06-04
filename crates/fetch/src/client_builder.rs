@@ -493,6 +493,7 @@ fn create_dispatch_handler(meter: &Meter, options: ClientOptions, transport: &Tr
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};

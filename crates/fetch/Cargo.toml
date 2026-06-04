@@ -16,6 +16,30 @@ license.workspace = true
 homepage.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytesbuf::mem::global::GlobalPool",
+    "bytesbuf::mem::has_memory::HasMemory",
+    "bytesbuf::mem::memory::Memory",
+    "data_privacy::redaction_engine::RedactionEngine",
+    "fetch_options::*",
+    "fetch_tls::*",
+    "http::*",
+    "http_extensions::*",
+    "seatbelt_http::*",
+    "templated_uri::*",
+    "layered::intercept::InterceptLayer",
+    "layered::service::Service",
+    "opentelemetry::common::KeyValue",
+    "opentelemetry::metrics::meter::Meter",
+    "opentelemetry::metrics::meter::MeterProvider",
+    "recoverable::Recovery",
+    "recoverable::RecoveryInfo",
+    "thread_aware::core::ThreadAware",
+    "tick::clock::Clock",
+    "tower_layer::Layer",
+]
+
 [features]
 default = []
 tls = ["rustls"]
@@ -95,13 +119,14 @@ rustls-platform-verifier = { workspace = true, optional = true }
 
 [dev-dependencies]
 # internal
-anyspawn = { workspace = true, features = ["tokio"] }
-data_privacy.workspace = true
-fetch_hyper = { workspace = true, features = ["rustls", "native-tls"] }
-fetch_tls = { workspace = true, features = ["rustls", "native-tls"] }
-http_extensions = { workspace = true, features = ["test-util", "json"] }
-ohno = { workspace = true, features = ["test-util", "app-err"] }
-tick = { workspace = true, features = [
+anyspawn = { path = "../anyspawn", features = ["tokio"] }
+data_privacy = { path = "../data_privacy" }
+fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
+fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
+http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
+ohno = { path = "../ohno", features = ["test-util", "app-err"] }
+testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", features = [
     "test-util",
     "tokio",
 ] }

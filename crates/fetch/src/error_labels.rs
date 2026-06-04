@@ -64,6 +64,7 @@ fn resolve_io_error_label(error: &std::io::Error) -> ErrorLabel {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::io::{self, ErrorKind};
 

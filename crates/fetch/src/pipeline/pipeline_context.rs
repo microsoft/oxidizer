@@ -83,6 +83,7 @@ impl PipelineContext {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http_extensions::HttpBodyOptions;
     use opentelemetry::metrics::MeterProvider;

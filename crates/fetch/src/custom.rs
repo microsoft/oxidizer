@@ -243,6 +243,7 @@ pub(crate) fn create_body_builder(pool: &GlobalPool, clock: &Clock, options: &Cl
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

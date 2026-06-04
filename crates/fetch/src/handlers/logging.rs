@@ -128,11 +128,13 @@ fn redacted_path_and_query(request: &HttpRequest, engine: &RedactionEngine) -> O
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
     use http::{Request, StatusCode};
     use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
     use templated_uri::Uri;
+    use testing_aids::LogCapture;
 
     use super::*;
     use crate::handlers::Dispatch;
@@ -140,6 +142,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_returns_successful_response() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
         let layer = Logging::layer(&clock, &RedactionEngine::default());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
@@ -151,11 +156,26 @@ mod tests {
 
         let response = handler.execute(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+
+        let output = capture.output();
+        assert!(output.contains("DEBUG"), "expected DEBUG level, got:\n{output}");
+        capture.assert_contains("HTTP response received successfully");
+        capture.assert_contains("http.request.method=\"GET\"");
+        capture.assert_contains("server.address=\"example.com\"");
+        capture.assert_contains("http.response.status_code=200");
+        capture.assert_contains("network.protocol.version=HTTP/1.1");
+        capture.assert_contains("url.scheme=\"https\"");
+        capture.assert_contains("url.path.template=\"/path?query=value\"");
+        // The default redaction engine redacts the path and query to an empty string.
+        capture.assert_contains("url.path.redacted=\"\"");
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_propagates_inner_error() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
         let clock = Clock::new_frozen();
         let layer = Logging::layer(&clock, &RedactionEngine::default());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::never_completes()));
@@ -167,6 +187,14 @@ mod tests {
 
         let error = handler.execute(request).await.unwrap_err();
         assert_eq!(collect_error_labels(&error), "uri_origin_missing");
+
+        let output = capture.output();
+        assert!(output.contains("WARN"), "expected WARN level, got:\n{output}");
+        capture.assert_contains("HTTP response failed");
+        capture.assert_contains("http.request.method=\"GET\"");
+        capture.assert_contains("error.type=uri_origin_missing");
+        capture.assert_contains("exception.message=\"request must have scheme and authority set\"");
+        capture.assert_contains("url.path.redacted=\"\"");
     }
 
     #[test]
