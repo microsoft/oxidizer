@@ -13,7 +13,6 @@ use std::sync::Arc;
 use cachet_tier::{CacheEntry, CacheTier, SizeError};
 use futures::join;
 use tick::Clock;
-use tracing::Instrument;
 
 use crate::Error;
 use crate::cache::CacheName;
@@ -115,7 +114,6 @@ where
 
             Ok(fallback_value)
         }
-        .instrument(tracing::Span::current())
         .await
     }
 }

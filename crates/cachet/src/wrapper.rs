@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use cachet_tier::{CacheTier, SizeError};
 use tick::Clock;
-use tracing::Instrument;
 
 use crate::cache::CacheName;
 use crate::telemetry::CacheTelemetry;
@@ -130,7 +129,6 @@ where
     CT: CacheTier<K, V> + Send + Sync,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let span = self.telemetry.tier_span(self.name);
         async {
             let watch = self.clock.stopwatch();
             match self.inner.get(key).await {
@@ -141,12 +139,10 @@ where
                 }
             }
         }
-        .instrument(span)
         .await
     }
 
     async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
-        let span = self.telemetry.tier_span(self.name);
         async {
             entry.ensure_cached_at(self.clock.system_time());
             if !self.policy.should_insert(&entry) {
@@ -162,12 +158,10 @@ where
             }
             result
         }
-        .instrument(span)
         .await
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        let span = self.telemetry.tier_span(self.name);
         async {
             let watch = self.clock.stopwatch();
             let result = self.inner.invalidate(key).await;
@@ -177,12 +171,10 @@ where
             }
             result
         }
-        .instrument(span)
         .await
     }
 
     async fn clear(&self) -> Result<(), Error> {
-        let span = self.telemetry.tier_span(self.name);
         async {
             let watch = self.clock.stopwatch();
             let result = self.inner.clear().await;
@@ -192,7 +184,6 @@ where
             }
             result
         }
-        .instrument(span)
         .await
     }
 

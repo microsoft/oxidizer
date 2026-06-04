@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Demonstrates cachet telemetry: spans for traces, events for logs.
+//! Demonstrates cachet telemetry as structured tracing events.
 //!
 //! Run with: `cargo run --example telemetry_subscriber --features "memory,logs"`
 
@@ -9,19 +9,12 @@ use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
 use tick::Clock;
-use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 
 #[tokio::main]
 async fn main() {
-    // Set up a subscriber that shows both events and span open/close.
-    // This demonstrates what cachet telemetry looks like out of the box.
-    let subscriber = tracing_subscriber::registry().with(
-        tracing_subscriber::fmt::layer()
-            .with_ansi(true)
-            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-            .with_target(false),
-    );
+    // Set up a subscriber that shows cachet's structured events.
+    let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_ansi(true).with_target(false));
     tracing::subscriber::set_global_default(subscriber).expect("subscriber already set");
 
     let clock = Clock::new_tokio();

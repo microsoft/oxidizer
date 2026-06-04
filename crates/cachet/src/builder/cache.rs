@@ -291,7 +291,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// [`Cache::get_or_insert`](crate::Cache::get_or_insert), and promotion from a fallback tier.
     ///
     /// If the policy rejects an insert, the operation is skipped and a
-    /// `cache.rejected` telemetry event is recorded with `cache.operation = cache.insert`.
+    /// `cache.insert_rejected` telemetry event is recorded.
     ///
     /// # Examples
     ///

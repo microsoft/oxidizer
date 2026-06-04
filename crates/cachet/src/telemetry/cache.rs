@@ -11,7 +11,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use pin_project_lite::pin_project;
-use tracing::Span;
 
 use crate::cache::CacheName;
 use crate::telemetry::attributes;
@@ -34,7 +33,6 @@ pin_project! {
     /// on every poll. This ensures the correct request ID is available
     /// even if the task migrates to a different thread between polls.
     ///
-    /// Same pattern as `tracing::Instrument` which re-enters the span per poll.
     /// Supports nesting (e.g., a `get_or_insert` closure calling another cache
     /// operation) by saving and restoring the previous request ID.
     pub(crate) struct WithRequestId<F> {
@@ -88,7 +86,7 @@ fn saturating_nanos(duration: Duration) -> u64 {
 /// Cache telemetry provider.
 ///
 /// This type is created internally by the cache builder and handles
-/// creating cache operation spans and recording structured tracing events.
+/// emitting structured tracing events and forwarding handler callbacks.
 #[derive(Clone, Default)]
 pub struct CacheTelemetry {
     #[cfg(any(feature = "logs", test))]
@@ -155,11 +153,6 @@ impl CacheTelemetry {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_EVENT, event);
-                span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            }
             tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
@@ -176,11 +169,6 @@ impl CacheTelemetry {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_EVENT, event);
-                span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            }
             tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
@@ -197,11 +185,6 @@ impl CacheTelemetry {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_EVENT, event);
-                span.record(attributes::FIELD_DURATION_NS, duration_ns);
-            }
             tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
@@ -307,10 +290,6 @@ impl CacheTelemetry {
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_EVENT, attributes::EVENT_INSERT_REJECTED);
-            }
             tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
         }
         self.emit_tier_event(
@@ -329,10 +308,7 @@ impl CacheTelemetry {
     pub(crate) fn record_fallback(&self) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_FALLBACK, true);
-            }
+            tracing::info!(cache.event = "cache.fallback", cache.fallback = true);
         }
     }
 
@@ -362,7 +338,7 @@ impl CacheTelemetry {
     /// Records that an entry expired in the background (moka eviction listener).
     ///
     /// Unlike [`record_expired`](Self::record_expired), this fires from a
-    /// background thread with no parent span, so it emits a standalone event.
+    /// background thread with no parent operation context, so it emits a standalone event.
     /// Like [`record_eviction`](Self::record_eviction), the request ID is
     /// read from the thread-local (non-zero when triggered synchronously
     /// during a cache operation).
@@ -392,13 +368,13 @@ impl CacheTelemetry {
     ) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let span = Span::current();
-            if !span.is_disabled() {
-                span.record(attributes::FIELD_DURATION_NS, saturating_nanos(duration));
-                if coalesced {
-                    span.record(attributes::FIELD_COALESCED, true);
-                }
-            }
+            let duration_ns = saturating_nanos(duration);
+            tracing::debug!(
+                cache.name = cache_name,
+                cache.operation = operation,
+                cache.duration_ns = duration_ns,
+                cache.coalesced = coalesced
+            );
         }
 
         if let Some(handler) = &self.handler {
@@ -426,163 +402,6 @@ impl CacheTelemetry {
         self.logging_enabled = true;
         self
     }
-
-    pub(crate) fn get_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.get",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty,
-                cache.coalesced = tracing::field::Empty,
-                cache.fallback = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn insert_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.insert",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn invalidate_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.invalidate",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn clear_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.clear",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn get_or_insert_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.get_or_insert",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty,
-                cache.coalesced = tracing::field::Empty,
-                cache.fallback = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn try_get_or_insert_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.try_get_or_insert",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty,
-                cache.coalesced = tracing::field::Empty,
-                cache.fallback = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn optionally_get_or_insert_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.optionally_get_or_insert",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty,
-                cache.coalesced = tracing::field::Empty,
-                cache.fallback = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-
-    pub(crate) fn tier_span(&self, name: CacheName) -> Span {
-        if self.logging_enabled {
-            tracing::span!(
-                tracing::Level::DEBUG,
-                "cache.tier",
-                cache.name = name,
-                cache.event = tracing::field::Empty,
-                cache.duration_ns = tracing::field::Empty
-            )
-        } else {
-            Span::none()
-        }
-    }
-}
-
-#[cfg(not(any(feature = "logs", test)))]
-#[cfg_attr(test, mutants::skip)] // Equivalent mutants: cfg-gated off during testing.
-#[expect(clippy::unused_self, reason = "Span factories are no-ops when logs are disabled")]
-impl CacheTelemetry {
-    pub(crate) fn get_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn insert_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn invalidate_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn clear_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn get_or_insert_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn try_get_or_insert_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn optionally_get_or_insert_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
-
-    pub(crate) fn tier_span(&self, _: CacheName) -> Span {
-        Span::none()
-    }
 }
 
 #[cfg(test)]
@@ -590,19 +409,12 @@ mod tests {
     use std::sync::Mutex;
 
     use testing_aids::LogCapture;
-    use tracing::Instrument;
-    use tracing_subscriber::fmt::format::FmtSpan;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
 
     fn subscriber(capture: &LogCapture) -> impl tracing::Subscriber {
-        tracing_subscriber::registry().with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(capture.clone())
-                .with_ansi(false)
-                .with_span_events(FmtSpan::CLOSE),
-        )
+        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(capture.clone()).with_ansi(false))
     }
 
     #[cfg_attr(miri, ignore)]
@@ -613,24 +425,27 @@ mod tests {
         let telemetry = CacheTelemetry::with_logging();
 
         let request_id = next_request_id();
-        futures::executor::block_on(
+        futures::executor::block_on(async {
             async {
                 telemetry.record_hit("my_test_cache", Duration::from_nanos(12345), false);
                 telemetry.complete_operation(request_id, "my_test_cache", "cache.get", Duration::from_nanos(12345), true);
                 telemetry.record_fallback();
             }
             .with_request_id(request_id)
-            .instrument(telemetry.get_span("my_test_cache")),
-        );
+            .await;
+        });
 
         capture.assert_contains(attributes::FIELD_NAME);
         capture.assert_contains(attributes::FIELD_EVENT);
         capture.assert_contains(attributes::FIELD_DURATION_NS);
+        capture.assert_contains(attributes::FIELD_OPERATION);
         capture.assert_contains(attributes::FIELD_COALESCED);
         capture.assert_contains(attributes::FIELD_FALLBACK);
         capture.assert_contains("my_test_cache");
         capture.assert_contains(attributes::EVENT_HIT);
+        capture.assert_contains("cache.get");
         capture.assert_contains("12345");
+        capture.assert_contains("cache.fallback");
         capture.assert_contains("true");
     }
 
@@ -642,56 +457,32 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
-        futures::executor::block_on(
+        futures::executor::block_on(async {
             async { telemetry.record_get_error("cache", Duration::ZERO, false) }
                 .with_request_id(request_id)
-                .instrument(telemetry.tier_span("cache")),
-        );
+                .await;
+        });
         capture.assert_contains("ERROR");
 
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
-        futures::executor::block_on(
+        futures::executor::block_on(async {
             async { telemetry.record_expired("cache", Duration::ZERO, false) }
                 .with_request_id(request_id)
-                .instrument(telemetry.tier_span("cache")),
-        );
+                .await;
+        });
         capture.assert_contains("INFO");
 
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
-        futures::executor::block_on(
+        futures::executor::block_on(async {
             async { telemetry.record_hit("cache", Duration::ZERO, false) }
                 .with_request_id(request_id)
-                .instrument(telemetry.tier_span("cache")),
-        );
+                .await;
+        });
         capture.assert_contains("DEBUG");
-    }
-
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn all_span_factories_produce_enabled_spans() {
-        let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-        let t = CacheTelemetry::with_logging();
-
-        // Exercise every span factory so coverage includes them all.
-        let spans = [
-            t.get_span("c"),
-            t.insert_span("c"),
-            t.invalidate_span("c"),
-            t.clear_span("c"),
-            t.get_or_insert_span("c"),
-            t.try_get_or_insert_span("c"),
-            t.optionally_get_or_insert_span("c"),
-            t.tier_span("c"),
-        ];
-
-        for span in &spans {
-            assert!(!span.is_disabled(), "span factory should produce an enabled span");
-        }
     }
 
     #[cfg_attr(miri, ignore)]
@@ -702,19 +493,19 @@ mod tests {
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
 
         let request_id = next_request_id();
-        futures::executor::block_on(
+        futures::executor::block_on(async {
             async { telemetry.record_hit("cache", Duration::from_secs(1), false) }
                 .with_request_id(request_id)
-                .instrument(telemetry.get_span("cache")),
-        );
+                .await;
+        });
 
         assert!(capture.output().is_empty());
     }
 
     #[test]
     fn logging_enabled_without_subscriber_is_noop() {
-        // logging_enabled=true but no tracing subscriber → spans are disabled.
-        // This exercises the `logging_enabled && span.is_disabled()` branches.
+        // logging_enabled=true but no tracing subscriber.
+        // No panic means tracing events degrade to a no-op cleanly.
         let telemetry = CacheTelemetry::with_logging();
         let request_id = next_request_id();
         futures::executor::block_on(
@@ -727,7 +518,7 @@ mod tests {
             }
             .with_request_id(request_id),
         );
-        // No panic = all paths handled gracefully with disabled spans.
+        // No panic = all paths handled gracefully without a subscriber.
     }
 
     #[cfg_attr(miri, ignore)]
@@ -744,102 +535,92 @@ mod tests {
     #[test]
     fn every_helper_emits_its_event() {
         assert_emits(attributes::EVENT_HIT, |t, request_id| {
-            futures::executor::block_on(
-                async { t.record_hit("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .instrument(t.tier_span("c")),
-            );
+            futures::executor::block_on(async {
+                async { t.record_hit("c", Duration::ZERO, false) }.with_request_id(request_id).await;
+            });
         });
         assert_emits(attributes::EVENT_MISS, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_miss("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.tier_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_EXPIRED, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_expired("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.tier_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_GET_ERROR, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_get_error("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.tier_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_REFRESH_HIT, |t, request_id| {
-            futures::executor::block_on(
-                async { t.record_refresh_hit(Duration::ZERO) }
-                    .with_request_id(request_id)
-                    .instrument(t.get_span("c")),
-            );
+            futures::executor::block_on(async {
+                async { t.record_refresh_hit(Duration::ZERO) }.with_request_id(request_id).await;
+            });
         });
         assert_emits(attributes::EVENT_REFRESH_MISS, |t, request_id| {
-            futures::executor::block_on(
-                async { t.record_refresh_miss(Duration::ZERO) }
-                    .with_request_id(request_id)
-                    .instrument(t.get_span("c")),
-            );
+            futures::executor::block_on(async {
+                async { t.record_refresh_miss(Duration::ZERO) }.with_request_id(request_id).await;
+            });
         });
         assert_emits(attributes::EVENT_INSERTED, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_inserted("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.insert_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
-            futures::executor::block_on(
-                async { t.record_insert_rejected("c", false) }
-                    .with_request_id(request_id)
-                    .instrument(t.insert_span("c")),
-            );
+            futures::executor::block_on(async {
+                async { t.record_insert_rejected("c", false) }.with_request_id(request_id).await;
+            });
         });
         assert_emits(attributes::EVENT_INSERT_ERROR, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_insert_error("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.insert_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_INVALIDATED, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_invalidated("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.invalidate_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_INVALIDATE_ERROR, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_invalidate_error("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.invalidate_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_CLEARED, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_cleared("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.clear_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_CLEAR_ERROR, |t, request_id| {
-            futures::executor::block_on(
+            futures::executor::block_on(async {
                 async { t.record_clear_error("c", Duration::ZERO, false) }
                     .with_request_id(request_id)
-                    .instrument(t.clear_span("c")),
-            );
+                    .await;
+            });
         });
         assert_emits(attributes::EVENT_EVICTION, |t, request_id| {
-            futures::executor::block_on(
-                async { t.record_eviction("c") }
-                    .with_request_id(request_id)
-                    .instrument(t.get_span("c")),
-            );
+            futures::executor::block_on(async {
+                async { t.record_eviction("c") }.with_request_id(request_id).await;
+            });
         });
     }
 
@@ -954,7 +735,7 @@ mod tests {
                     }
                     .with_request_id(inner_id)
                 );
-                let mut inner_cx = Context::from_waker(&waker);
+                let mut inner_cx = Context::from_waker(waker);
                 assert!(matches!(inner.as_mut().poll(&mut inner_cx), Poll::Ready(())));
 
                 // After inner completes, outer_id should be restored
@@ -966,7 +747,7 @@ mod tests {
             }
             .with_request_id(outer_id)
         );
-        let mut outer_cx = Context::from_waker(&waker);
+        let mut outer_cx = Context::from_waker(waker);
         assert!(matches!(outer.as_mut().poll(&mut outer_cx), Poll::Ready(())));
 
         // After outer completes, should be reset to 0

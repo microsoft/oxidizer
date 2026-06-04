@@ -9,7 +9,6 @@ use std::hash::Hash;
 
 use cachet_tier::{CacheEntry, CacheTier, DynamicCache, SizeError};
 use tick::Clock;
-use tracing::Instrument;
 use uniflight::Merger;
 
 use crate::Error;
@@ -232,7 +231,6 @@ where
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
     {
         let request_id = next_request_id();
-        let span = self.telemetry.get_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let (result, coalesced) = if let Some(mergers) = &self.mergers {
@@ -253,7 +251,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -284,7 +281,6 @@ where
     /// ```
     pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<(), Error> {
         let request_id = next_request_id();
-        let span = self.telemetry.insert_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let result = self.storage.insert(key, entry.into()).await;
@@ -293,7 +289,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -317,7 +312,6 @@ where
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
     {
         let request_id = next_request_id();
-        let span = self.telemetry.invalidate_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let (result, coalesced) = if let Some(mergers) = &self.mergers {
@@ -338,7 +332,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -362,7 +355,6 @@ where
     /// Returns an error if the underlying cache tier operation fails.
     pub async fn clear(&self) -> Result<(), Error> {
         let request_id = next_request_id();
-        let span = self.telemetry.clear_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let result = self.storage.clear().await;
@@ -371,7 +363,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -470,7 +461,6 @@ where
         Fut: Future<Output = V> + Send,
     {
         let request_id = next_request_id();
-        let span = self.telemetry.get_or_insert_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let owned = key.to_owned();
@@ -489,7 +479,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -720,7 +709,6 @@ where
         Fut: Future<Output = Result<V, E>> + Send,
     {
         let request_id = next_request_id();
-        let span = self.telemetry.try_get_or_insert_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let owned = key.to_owned();
@@ -739,7 +727,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 
@@ -810,7 +797,6 @@ where
         Fut: Future<Output = Option<V>> + Send,
     {
         let request_id = next_request_id();
-        let span = self.telemetry.optionally_get_or_insert_span(self.name);
         let watch = self.clock.stopwatch();
         async {
             let owned = key.to_owned();
@@ -829,7 +815,6 @@ where
             result
         }
         .with_request_id(request_id)
-        .instrument(span)
         .await
     }
 

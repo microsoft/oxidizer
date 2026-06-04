@@ -230,9 +230,9 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 
-Each cache operation creates a structured [`tracing`][__link20] span and emits events inside
-that span. Span fields include `cache.name`, `cache.event`, and `cache.duration_ns`,
-with `cache.coalesced` and `cache.fallback` recorded when applicable.
+Each cache operation emits structured [`tracing`][__link20] events. Event fields include
+`cache.name`, `cache.event`, `cache.duration_ns`, and `cache.operation`, with
+`cache.coalesced` and `cache.fallback` recorded when applicable.
 
 ### Subscribing to events
 
@@ -266,7 +266,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG2xL7qJyuCgIG_83YqgWgkfeG5xypaCx1UNDG_r6sBXY4Zc3YWSIgmhieXRlc2J1ZmUwLjUuMoJmY2FjaGV0ZTAuNi4ygm1jYWNoZXRfbWVtb3J5ZTAuMy4xgm5jYWNoZXRfc2VydmljZWUwLjIuMoJrY2FjaGV0X3RpZXJlMC4yLjGCZHRpY2tlMC4zLjKCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjI
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG1SlUsq8JhozG8GxRSYYFzJGGytyZY2NjhMFGxOIGd3DC-SbYWSIgmhieXRlc2J1ZmUwLjUuMoJmY2FjaGV0ZTAuNi4ygm1jYWNoZXRfbWVtb3J5ZTAuMy4xgm5jYWNoZXRfc2VydmljZWUwLjIuMoJrY2FjaGV0X3RpZXJlMC4yLjGCZHRpY2tlMC4zLjKCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjI
  [__link0]: https://docs.rs/cachet/0.6.2/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.2
  [__link10]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheTier

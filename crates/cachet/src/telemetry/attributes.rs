@@ -3,9 +3,9 @@
 
 //! Public constants for cachet telemetry field names and event values.
 //!
-//! Use these constants to filter or match cachet spans and events in a custom
-//! `tracing_subscriber::Layer`. Cache operation spans record `FIELD_NAME`,
-//! `FIELD_EVENT`, and `FIELD_DURATION_NS`, with additional flag fields when applicable.
+//! Use these constants to filter or match cachet telemetry events in a custom
+//! `tracing_subscriber::Layer`. Cache operations emit structured events with
+//! `FIELD_NAME`, `FIELD_EVENT`, `FIELD_DURATION_NS`, and additional fields when applicable.
 //!
 //! # Example
 //!
@@ -40,6 +40,9 @@ pub const FIELD_EVENT: &str = "cache.event";
 
 /// Field name for the operation duration in nanoseconds.
 pub const FIELD_DURATION_NS: &str = "cache.duration_ns";
+
+/// Field name for the cache operation name.
+pub const FIELD_OPERATION: &str = "cache.operation";
 
 /// Field name recording whether request coalescing was used.
 pub const FIELD_COALESCED: &str = "cache.coalesced";
@@ -102,6 +105,7 @@ mod tests {
         assert_eq!(FIELD_NAME, "cache.name");
         assert_eq!(FIELD_EVENT, "cache.event");
         assert_eq!(FIELD_DURATION_NS, "cache.duration_ns");
+        assert_eq!(FIELD_OPERATION, "cache.operation");
         assert_eq!(FIELD_COALESCED, "cache.coalesced");
         assert_eq!(FIELD_FALLBACK, "cache.fallback");
     }

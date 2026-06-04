@@ -16,7 +16,6 @@ use std::time::{Duration, SystemTime};
 use anyspawn::Spawner;
 use cachet_tier::{CacheEntry, CacheTier};
 use parking_lot::Mutex;
-use tracing::Instrument;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
 
@@ -145,7 +144,6 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
-        let span = self.telemetry.get_span(self.name);
         async {
             let watch = self.clock.stopwatch();
             match self.fallback.get(&key).await {
@@ -153,7 +151,6 @@ where
                 Ok(None) | Err(_) => self.handle_fallback_miss(watch.elapsed()),
             }
         }
-        .instrument(span)
         .await;
     }
 

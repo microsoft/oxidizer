@@ -227,9 +227,9 @@
 //!
 //! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
 //!
-//! Each cache operation creates a structured [`tracing`] span and emits events inside
-//! that span. Span fields include `cache.name`, `cache.event`, and `cache.duration_ns`,
-//! with `cache.coalesced` and `cache.fallback` recorded when applicable.
+//! Each cache operation emits structured [`tracing`] events. Event fields include
+//! `cache.name`, `cache.event`, `cache.duration_ns`, and `cache.operation`, with
+//! `cache.coalesced` and `cache.fallback` recorded when applicable.
 //!
 //! ## Subscribing to events
 //!

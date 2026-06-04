@@ -915,7 +915,7 @@ mod service_tests {
 #[cfg(feature = "logs")]
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn get_or_insert_with_logging_emits_span_and_events() {
+async fn get_or_insert_with_logging_emits_operation_and_events() {
     let capture = testing_aids::LogCapture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
@@ -930,7 +930,7 @@ async fn get_or_insert_with_logging_emits_span_and_events() {
 #[cfg(feature = "logs")]
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn try_get_or_insert_with_logging_emits_span_and_events() {
+async fn try_get_or_insert_with_logging_emits_operation_and_events() {
     let capture = testing_aids::LogCapture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
@@ -945,7 +945,7 @@ async fn try_get_or_insert_with_logging_emits_span_and_events() {
 #[cfg(feature = "logs")]
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
-async fn optionally_get_or_insert_with_logging_emits_span_and_events() {
+async fn optionally_get_or_insert_with_logging_emits_operation_and_events() {
     let capture = testing_aids::LogCapture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
