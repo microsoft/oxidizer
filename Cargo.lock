@@ -1132,7 +1132,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.3.4",
+ "ohno 0.3.5",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
