@@ -102,7 +102,7 @@
 //! template definition stays declarative and the compiler refuses to mix up,
 //! say, a `UserId` with another numeric id. The classification carried by
 //! `UserId` flows through into the rendered URI, so logging the path through
-//! [`RedactedDisplay`] redacts the right components without any per-call-site
+//! [`RedactedDisplay`][data_privacy::RedactedDisplay] redacts the right components without any per-call-site
 //! ceremony.
 //!
 //! See [`examples/classified_templating.rs`](https://github.com/microsoft/oxidizer/blob/main/crates/templated_uri/examples/classified_templating.rs)
