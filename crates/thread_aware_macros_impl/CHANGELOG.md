@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.2] - 2026-06-05
+
+- ✔️ Tasks
+
+  - Technical release
+
 ## [0.7.1] - 2026-06-02
 
 - ✔️ Tasks
