@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0] - 2026-06-04
+
+- ⚠️ Breaking
+
+  - bump `data_privacy` to 0.12.0
+
+- 🔧 Maintenance
+
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
+
+- ✨ Features
+
+  - add serde Deserialize for Uri and PathAndQuery ([#473](https://github.com/microsoft/oxidizer/pull/473))
+
 ## [0.2.3] - 2026-06-02
 
 - 🔧 Maintenance
