@@ -157,8 +157,8 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 #render_body
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
-                Ok(::templated_uri::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::__private::http::uri::PathAndQuery, ::templated_uri::UriError> {
+                Ok(::templated_uri::__private::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
             }
         }
 

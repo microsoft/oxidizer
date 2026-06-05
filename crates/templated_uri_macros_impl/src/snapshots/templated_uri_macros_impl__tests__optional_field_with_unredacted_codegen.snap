@@ -66,11 +66,11 @@ impl ::templated_uri::PathAndQueryTemplate for OptionalUnredactedTest {
     fn to_path_and_query(
         &self,
     ) -> ::std::result::Result<
-        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::__private::http::uri::PathAndQuery,
         ::templated_uri::UriError,
     > {
         Ok(
-            ::templated_uri::http::uri::PathAndQuery::try_from(
+            ::templated_uri::__private::http::uri::PathAndQuery::try_from(
                 ::templated_uri::PathAndQueryTemplate::render(self),
             )?,
         )

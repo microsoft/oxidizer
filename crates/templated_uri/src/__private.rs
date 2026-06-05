@@ -3,3 +3,5 @@
 
 #[doc(hidden)]
 pub use data_privacy::{RedactedDisplay, Redactor};
+#[doc(hidden)]
+pub use http;

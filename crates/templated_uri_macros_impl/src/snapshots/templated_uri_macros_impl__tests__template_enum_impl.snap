@@ -28,7 +28,7 @@ impl ::templated_uri::PathAndQueryTemplate for Test {
     fn to_path_and_query(
         &self,
     ) -> ::std::result::Result<
-        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::__private::http::uri::PathAndQuery,
         ::templated_uri::UriError,
     > {
         match self {

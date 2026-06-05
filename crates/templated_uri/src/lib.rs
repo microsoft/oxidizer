@@ -203,11 +203,6 @@ pub use base_uri::BaseUri;
 pub use error::UriError;
 pub use escape::{Escape, Raw};
 pub use escaped::{EscapeError, Escaped, EscapedString};
-// Re-export the `http` crate so macro-generated code can refer to
-// `http::uri::PathAndQuery` via `::templated_uri::http` without requiring
-// downstream crates to depend on `http` directly.
-#[doc(hidden)]
-pub use http;
 pub use http::uri::{Authority, Scheme};
 pub use macros::{Escape, Raw, templated};
 pub use origin::Origin;
