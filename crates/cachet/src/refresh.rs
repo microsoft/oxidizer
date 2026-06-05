@@ -144,14 +144,11 @@ where
     F: CacheTier<K, V> + Send + Sync + 'static,
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
-        async {
-            let watch = self.clock.stopwatch();
-            match self.fallback.get(&key).await {
-                Ok(Some(value)) => self.handle_fallback_hit(key, value, watch.elapsed()).await,
-                Ok(None) | Err(_) => self.handle_fallback_miss(watch.elapsed()),
-            }
+        let watch = self.clock.stopwatch();
+        match self.fallback.get(&key).await {
+            Ok(Some(value)) => self.handle_fallback_hit(key, value, watch.elapsed()).await,
+            Ok(None) | Err(_) => self.handle_fallback_miss(watch.elapsed()),
         }
-        .await;
     }
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {

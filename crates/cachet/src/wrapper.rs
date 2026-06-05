@@ -129,62 +129,50 @@ where
     CT: CacheTier<K, V> + Send + Sync,
 {
     async fn get(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        async {
-            let watch = self.clock.stopwatch();
-            match self.inner.get(key).await {
-                Ok(value) => Ok(self.handle_get_result(value, watch.elapsed())),
-                Err(e) => {
-                    self.telemetry.record_get_error(self.name, watch.elapsed(), self.fallback);
-                    Err(e)
-                }
+        let watch = self.clock.stopwatch();
+        match self.inner.get(key).await {
+            Ok(value) => Ok(self.handle_get_result(value, watch.elapsed())),
+            Err(e) => {
+                self.telemetry.record_get_error(self.name, watch.elapsed(), self.fallback);
+                Err(e)
             }
         }
-        .await
     }
 
     async fn insert(&self, key: K, mut entry: CacheEntry<V>) -> Result<(), Error> {
-        async {
-            entry.ensure_cached_at(self.clock.system_time());
-            if !self.policy.should_insert(&entry) {
-                self.telemetry.record_insert_rejected(self.name, self.fallback);
-                return Ok(());
-            }
-
-            let watch = self.clock.stopwatch();
-            let result = self.inner.insert(key, entry).await;
-            match &result {
-                Ok(()) => self.telemetry.record_inserted(self.name, watch.elapsed(), self.fallback),
-                Err(_) => self.telemetry.record_insert_error(self.name, watch.elapsed(), self.fallback),
-            }
-            result
+        entry.ensure_cached_at(self.clock.system_time());
+        if !self.policy.should_insert(&entry) {
+            self.telemetry.record_insert_rejected(self.name, self.fallback);
+            return Ok(());
         }
-        .await
+
+        let watch = self.clock.stopwatch();
+        let result = self.inner.insert(key, entry).await;
+        match &result {
+            Ok(()) => self.telemetry.record_inserted(self.name, watch.elapsed(), self.fallback),
+            Err(_) => self.telemetry.record_insert_error(self.name, watch.elapsed(), self.fallback),
+        }
+        result
     }
 
     async fn invalidate(&self, key: &K) -> Result<(), Error> {
-        async {
-            let watch = self.clock.stopwatch();
-            let result = self.inner.invalidate(key).await;
-            match &result {
-                Ok(()) => self.telemetry.record_invalidated(self.name, watch.elapsed(), self.fallback),
-                Err(_) => self.telemetry.record_invalidate_error(self.name, watch.elapsed(), self.fallback),
-            }
-            result
+        let watch = self.clock.stopwatch();
+        let result = self.inner.invalidate(key).await;
+        match &result {
+            Ok(()) => self.telemetry.record_invalidated(self.name, watch.elapsed(), self.fallback),
+            Err(_) => self.telemetry.record_invalidate_error(self.name, watch.elapsed(), self.fallback),
         }
-        .await
+        result
     }
 
     async fn clear(&self) -> Result<(), Error> {
-        async {
-            let watch = self.clock.stopwatch();
-            let result = self.inner.clear().await;
-            match &result {
-                Ok(()) => self.telemetry.record_cleared(self.name, watch.elapsed(), self.fallback),
-                Err(_) => self.telemetry.record_clear_error(self.name, watch.elapsed(), self.fallback),
-            }
-            result
+        let watch = self.clock.stopwatch();
+        let result = self.inner.clear().await;
+        match &result {
+            Ok(()) => self.telemetry.record_cleared(self.name, watch.elapsed(), self.fallback),
+            Err(_) => self.telemetry.record_clear_error(self.name, watch.elapsed(), self.fallback),
         }
-        .await
+        result
     }
 
     async fn len(&self) -> Result<u64, SizeError> {
