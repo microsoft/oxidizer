@@ -30,6 +30,7 @@ cachet = { path = "crates/cachet", default-features = false, version = "0.6.4" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.3.3" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.3" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.2" }
+cancelable = { path = "crates/cancelable", default-features = false, version = "0.1.0" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.0" }
 data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.0" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.0" }

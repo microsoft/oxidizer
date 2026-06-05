@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "cancelable"
+description = "Cooperative cancellation via tokens"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "async", "futures"]
+categories = ["asynchronous", "concurrency"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/cancelable"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "ohno::enrichable::Enrichable",
+    "ohno::error_ext::ErrorExt",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+ohno = { workspace = true }
+pin-project = { workspace = true }
+
+[dev-dependencies]
+mutants = { workspace = true }
+ohno = { workspace = true, features = ["app-err"] }
+tick = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
