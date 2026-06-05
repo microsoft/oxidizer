@@ -6,9 +6,6 @@
 
   - bump `ohno_macros` to 0.3.3
 
-- ⚠️ Breaking
-
-  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
 
 - ✨ Features
 
