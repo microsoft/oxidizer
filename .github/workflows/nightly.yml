@@ -145,6 +145,11 @@ jobs:
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
       - name: Setup Miri Flags
+        # Rotate seed pairs daily based on day-of-month (1–31) to spread
+        # coverage over time. Each night runs 2 seeds: day 1 → seeds
+        # 1..2, day 2 → seeds 3..4, …, day 31 → seeds 61..62. Over a
+        # full month this covers seeds 1–62 without the memory and time
+        # cost of running all seeds every night.
         run: |
             SEED_BASE="$(date +%d)"
             SEED_LOW=$((2 * ${SEED_BASE} - 1))
