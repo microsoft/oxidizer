@@ -1,0 +1,8 @@
+---
+source: crates/fetch_options/src/http2.rs
+expression: "Http2Options::default()"
+---
+Http2Options {
+    initial_max_send_streams: None,
+    adaptive_window: false,
+}

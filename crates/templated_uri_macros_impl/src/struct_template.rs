@@ -157,8 +157,8 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
                 #render_body
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
-                Ok(::templated_uri::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::__private::http::uri::PathAndQuery, ::templated_uri::UriError> {
+                Ok(::templated_uri::__private::http::uri::PathAndQuery::try_from(::templated_uri::PathAndQueryTemplate::render(self))?)
             }
         }
 
@@ -170,8 +170,8 @@ pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> 
             }
         }
 
-        impl ::data_privacy::RedactedDisplay for #ident {
-            fn fmt(&self, redactor: &dyn ::data_privacy::Redactor, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::templated_uri::__private::RedactedDisplay for #ident {
+            fn fmt(&self, redactor: &dyn ::templated_uri::__private::Redactor, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 #redacted_display
             }
         }
@@ -509,7 +509,7 @@ fn redacted_display_group_all_required(
         if unredacted || field_unredacted {
             stmts.push(quote! { ::std::write!(f, "{}", self.#field_ident)?; });
         } else {
-            stmts.push(quote! { <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, redactor, f)?; });
+            stmts.push(quote! { <#field_type as ::templated_uri::__private::RedactedDisplay>::fmt(&self.#field_ident, redactor, f)?; });
         }
     }
     stmts
@@ -556,7 +556,7 @@ fn redacted_display_group_with_optional(
             let display_value = if unredacted || field_unredacted {
                 quote! { ::std::write!(f, "{}", #val_arg)?; }
             } else {
-                quote! { <#self_ty as ::data_privacy::RedactedDisplay>::fmt(#val_arg, redactor, f)?; }
+                quote! { <#self_ty as ::templated_uri::__private::RedactedDisplay>::fmt(#val_arg, redactor, f)?; }
             };
 
             inner_stmts.push(quote! {
@@ -572,7 +572,7 @@ fn redacted_display_group_with_optional(
                 quote! { ::std::write!(f, "{}", self.#field_ident)?; }
             } else {
                 let field_type = &field.ty;
-                quote! { <#field_type as ::data_privacy::RedactedDisplay>::fmt(&self.#field_ident, redactor, f)?; }
+                quote! { <#field_type as ::templated_uri::__private::RedactedDisplay>::fmt(&self.#field_ident, redactor, f)?; }
             };
 
             inner_stmts.push(quote! {
