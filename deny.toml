@@ -13,6 +13,9 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "BSL-1.0",
+    # CDLA-Permissive-2.0 covers the Mozilla CA certificate data bundled by
+    # `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
+    "CDLA-Permissive-2.0",
 ]
 
 confidence-threshold = 0.8

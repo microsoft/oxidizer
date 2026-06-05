@@ -83,6 +83,7 @@ const DEFAULT_POOL_LIFETIME: Duration = Duration::from_mins(1);
 /// [`multiple_pools`](Self::multiple_pools) don't all recycle at the same instant), use
 /// [`ConnectionLifetime::per_connection`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ConnectionPoolOptions {
     /// How long idle pooled connections are kept before eviction.
     pub connection_idle_timeout: ConnectionIdleTimeout,
