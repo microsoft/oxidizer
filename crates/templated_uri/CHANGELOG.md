@@ -10,7 +10,6 @@
 - ✨ Features
 
   - add serde Deserialize for Uri and PathAndQuery ([#473](https://github.com/microsoft/oxidizer/pull/473))
-  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
 
 ## [0.2.3] - 2026-06-02
 
