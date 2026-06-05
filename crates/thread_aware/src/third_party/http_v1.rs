@@ -57,9 +57,8 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
-    use crate::affinity::Affinity;
     #[cfg(feature = "threads")]
-    use crate::affinity::pinned_affinities;
+    use crate::affinity::{Affinity, pinned_affinities};
 
     /// Counts how many times `relocate` has been called.
     ///
@@ -68,9 +67,11 @@ mod tests {
     /// otherwise mutants that replace the body of `relocate` with `()` would
     /// survive when the inner type's `relocate` itself has no observable
     /// effect (as it does for `HeaderValue` or `Vec<u8>`).
+    #[cfg(feature = "threads")]
     #[derive(Default)]
     struct Counter(u32);
 
+    #[cfg(feature = "threads")]
     impl ThreadAware for Counter {
         fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
             self.0 += 1;
