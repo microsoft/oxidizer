@@ -139,13 +139,14 @@ impl Uri {
         }
     }
 
-    /// Returns the [`PathAndQuery`] for this URI, if any.
+    /// Returns a reference to the [`PathAndQuery`] for this URI, if any.
     ///
-    /// To obtain the validated [`http::uri::PathAndQuery`] use
-    /// [`http::uri::PathAndQuery::try_from`] on the returned value (or directly on the [`Uri`]).
+    /// To obtain an owned value use `path_and_query().cloned()`. To obtain the validated
+    /// [`http::uri::PathAndQuery`] use [`http::uri::PathAndQuery::try_from`] on the returned
+    /// value (or directly on the [`Uri`]).
     #[must_use]
-    pub fn to_path_and_query(&self) -> Option<PathAndQuery> {
-        self.path_and_query.clone()
+    pub fn path_and_query(&self) -> Option<&PathAndQuery> {
+        self.path_and_query.as_ref()
     }
 
     /// Returns the URI as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
@@ -366,7 +367,7 @@ mod tests {
         let base = BaseUri::from_static("https://example.com/api/");
         let uri: Uri = base.into();
         assert_eq!(uri.to_string().declassify_ref(), "https://example.com/api/");
-        assert!(uri.to_path_and_query().is_none());
+        assert!(uri.path_and_query().is_none());
     }
 
     #[test]

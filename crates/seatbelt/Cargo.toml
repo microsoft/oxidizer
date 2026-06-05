@@ -21,6 +21,7 @@ allowed_external_types = [
     "layered::layer::stack::Stack",
     "layered::service::Service",
     "opentelemetry::metrics::meter::MeterProvider",
+    "recoverable::attempt::Attempt",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
     "recoverable::RecoveryKind",

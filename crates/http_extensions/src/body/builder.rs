@@ -9,9 +9,9 @@ use http_body_util::BodyExt;
 use thread_aware::{ThreadAware, Unaware};
 use tick::Clock;
 
+use super::HttpBody;
 use super::options::HttpBodyOptions;
 use super::timeout_body::TimeoutBody;
-use super::{HttpBody, Kind};
 #[cfg(any(feature = "json", test))]
 use crate::json::JsonError;
 use crate::{HttpError, Result};
@@ -160,11 +160,8 @@ impl HttpBodyBuilder {
         let body = body.map_err(Into::into);
 
         match merged.timeout {
-            Some(timeout) => HttpBody::new(
-                Kind::Body(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), merged),
-                self.clone(),
-            ),
-            None => HttpBody::new(Kind::Body(Box::pin(body), merged), self.clone()),
+            Some(timeout) => HttpBody::from_streaming(Box::pin(TimeoutBody::new(body, timeout, &self.clock)), merged),
+            None => HttpBody::from_streaming(Box::pin(body), merged),
         }
     }
 
@@ -284,16 +281,24 @@ impl HttpBodyBuilder {
     /// # }
     /// # }
     /// ```
+    #[expect(
+        clippy::unused_self,
+        reason = "kept as a builder method for API consistency with other body constructors"
+    )]
     pub fn bytes(&self, b: impl Into<BytesView>) -> HttpBody {
-        HttpBody::new(Kind::Bytes(Some(b.into())), self.clone())
+        HttpBody::from_bytes(b.into())
     }
 
     /// Creates an empty body (zero bytes).
     ///
     /// Use this for HTTP methods that don't need a body like GET or HEAD requests,
     /// or for responses that only need status codes or headers.
+    #[expect(
+        clippy::unused_self,
+        reason = "kept as a builder method for API consistency with other body constructors"
+    )]
     pub fn empty(&self) -> HttpBody {
-        HttpBody::new(Kind::Empty, self.clone())
+        HttpBody::empty()
     }
 
     #[cfg(any(feature = "json", test))]

@@ -8,7 +8,7 @@ use templated_uri::{BaseUri, Uri};
 
 use super::RouterContext;
 use crate::error_labels::{LABEL_URI_CONFLICT, LABEL_URI_MISSING};
-use crate::{HttpError, HttpRequest};
+use crate::{HttpError, HttpRequest, RequestExt};
 
 /// Strategy used by [`Router::resolve_uri`] when both the target [`Uri`] and the
 /// routing produce a [`BaseUri`].
@@ -72,44 +72,6 @@ pub enum BaseUriConflict {
 pub struct Router {
     resolver: Arc<Resolver>,
     conflict_policy: BaseUriConflict,
-}
-
-/// Request extension carrying the caller's [`original`](Self::original)
-/// templated [`Uri`] and the most recently [`routed`](Self::routed) result.
-///
-/// [`Router::resolve_request_uri`] always routes from [`original`](Self::original)
-/// so repeated re-routings are idempotent, and overwrites only
-/// [`routed`](Self::routed) on each call.
-#[derive(Clone, Debug)]
-pub struct RequestUris {
-    original: Uri,
-    routed: Option<Uri>,
-}
-
-impl RequestUris {
-    /// Creates a [`RequestUris`] with the given templated [`Uri`] as the
-    /// [`original`](Self::original) and no [`routed`](Self::routed) yet.
-    #[must_use]
-    pub fn new(original: Uri) -> Self {
-        Self { original, routed: None }
-    }
-
-    /// Returns the caller-supplied templated [`Uri`].
-    #[must_use]
-    pub fn original(&self) -> &Uri {
-        &self.original
-    }
-
-    /// Returns the most recently resolved [`Uri`], if any.
-    #[must_use]
-    pub fn routed(&self) -> Option<&Uri> {
-        self.routed.as_ref()
-    }
-
-    /// Records the most recently resolved [`Uri`].
-    pub fn set_routed(&mut self, routed: Uri) {
-        self.routed = Some(routed);
-    }
 }
 
 impl Router {
@@ -246,12 +208,14 @@ impl Router {
     /// Resolves the [`HttpRequest`]'s URI in place by routing it through
     /// [`Router::resolve_uri`].
     ///
-    /// Routes from [`RequestUris::original`] when the extension is present
+    /// Routes from [`RequestInfo::original_uri`][crate::RequestInfo::original_uri] when the
+    /// extension is present
     /// (attached by [`HttpRequestBuilder::build`][crate::HttpRequestBuilder::build]),
     /// or from the request's current [`http::Uri`] otherwise. On success,
-    /// updates the request's [`http::Uri`] and the
-    /// [`routed`](RequestUris::routed) field, attaching a [`RequestUris`] if
-    /// none was present. [`original`](RequestUris::original) is never
+    /// updates the request's [`http::Uri`], the
+    /// [`routed_uri`](crate::RequestInfo::routed_uri) and [`attempt`](crate::RequestInfo::attempt)
+    /// fields, attaching a [`RequestInfo`][crate::RequestInfo] if
+    /// none was present. [`original_uri`](crate::RequestInfo::original_uri) is never
     /// overwritten, so repeated calls always re-route from the caller's
     /// untouched target.
     ///
@@ -266,20 +230,21 @@ impl Router {
         // Always route from the caller-supplied target so repeated calls
         // are idempotent. Clone rather than take, so a failure below leaves
         // the request unchanged.
-        let original: Uri = match request.extensions().get::<RequestUris>() {
-            Some(uris) => uris.original().clone(),
+        let original: Uri = match request.request_info().and_then(|info| info.original_uri.clone()) {
+            Some(original) => original,
             None => request.uri().clone().try_into()?,
         };
+        let attempt = context.attempt();
         let resolved = self.resolve_uri(context.with_request(request), original.clone())?;
         let http_uri = resolved.clone().try_into()?;
 
         // Commit: update the request's URI and record the resolved URI.
-        // Only `routed` is mutated; `original` is preserved across attempts.
+        // Only `routed_uri` is mutated; `original_uri` is preserved across attempts.
         *request.uri_mut() = http_uri;
-        request
-            .extensions_mut()
-            .get_or_insert_with(|| RequestUris::new(original))
-            .set_routed(resolved);
+        let info = request.request_info_mut();
+        info.original_uri.get_or_insert(original);
+        info.routed_uri = Some(resolved);
+        info.attempt = Some(attempt);
 
         Ok(())
     }
@@ -322,12 +287,12 @@ impl std::fmt::Debug for Resolver {
 
 fn use_fallback(context: &RouterContext) -> bool {
     // first attempt never uses fallback
-    if context.attempt() == 0 {
+    if context.attempt().is_first() {
         return false;
     }
 
     // best effort, for last attempt always try the fallback
-    if context.is_last_attempt() {
+    if context.attempt().is_last() {
         return true;
     }
 
@@ -342,8 +307,10 @@ fn use_fallback(context: &RouterContext) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use ohno::Labeled;
+    use recoverable::Attempt;
 
     use super::*;
+    use crate::RequestInfo;
 
     fn target_with_base() -> Uri {
         "https://existing.example.com/items".parse().unwrap()
@@ -466,7 +433,7 @@ mod tests {
         );
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
-            .with_attempt(1, false);
+            .with_attempt(Attempt::new(1, false));
         let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
@@ -477,7 +444,7 @@ mod tests {
             BaseUri::from_static("https://primary.example.com"),
             BaseUri::from_static("https://fallback.example.com"),
         );
-        let ctx = RouterContext::new().with_attempt(2, true);
+        let ctx = RouterContext::new().with_attempt(Attempt::new(2, true));
         let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://fallback.example.com/v1/items");
     }
@@ -488,7 +455,7 @@ mod tests {
             BaseUri::from_static("https://primary.example.com"),
             BaseUri::from_static("https://fallback.example.com"),
         );
-        let ctx = RouterContext::new().with_attempt(0, true);
+        let ctx = RouterContext::new().with_attempt(Attempt::new(0, true));
         let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
@@ -513,7 +480,7 @@ mod tests {
         // and must replace the previously-attached primary base URI on the request.
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
-            .with_attempt(1, false);
+            .with_attempt(Attempt::new(1, false));
         router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://fallback.example.com/v1/items");
     }
@@ -537,12 +504,12 @@ mod tests {
         // Second attempt: fallback endpoint, not stacked on the previously-routed path.
         let ctx = RouterContext::new()
             .with_previous_recovery(recoverable::RecoveryInfo::unavailable())
-            .with_attempt(1, false);
+            .with_attempt(Attempt::new(1, false));
         router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://fallback.example.com/api/items");
 
         // Third attempt: back to primary, still clean.
-        let ctx = RouterContext::new().with_attempt(2, false);
+        let ctx = RouterContext::new().with_attempt(Attempt::new(2, false));
         router.resolve_request_uri(ctx, &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://primary.example.com/api/v1/items");
     }
@@ -553,7 +520,7 @@ mod tests {
             BaseUri::from_static("https://primary.example.com"),
             BaseUri::from_static("https://fallback.example.com"),
         );
-        let ctx = RouterContext::new().with_attempt(1, false);
+        let ctx = RouterContext::new().with_attempt(Attempt::new(1, false));
         let resolved = router.resolve_uri(ctx, target_without_base()).unwrap();
         assert_eq!(resolved.to_string().declassify_into(), "https://primary.example.com/v1/items");
     }
@@ -596,32 +563,36 @@ mod tests {
     }
 
     #[test]
-    fn resolve_request_uri_falls_back_to_request_uri_without_request_uris_extension() {
+    fn resolve_request_uri_falls_back_to_request_uri_without_request_info_extension() {
         // Hand-built requests (constructed directly via `http::Request::new`)
-        // do not carry the `RequestUris` extension that
+        // do not carry the `RequestInfo` extension that
         // `HttpRequestBuilder::build` attaches. In that case
         // `resolve_request_uri` must fall back to converting the request's
         // current `http::Uri` and route from that, and then attach a
-        // `RequestUris` so subsequent calls remain idempotent.
+        // `RequestInfo` so subsequent calls remain idempotent.
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let body = crate::HttpBodyBuilder::new_fake().empty();
         let mut request = http::Request::new(body);
         *request.uri_mut() = http::Uri::from_static("/v1/items");
         assert!(
-            request.extensions().get::<RequestUris>().is_none(),
-            "precondition: no RequestUris extension"
+            request.extensions().get::<RequestInfo>().is_none(),
+            "precondition: no RequestInfo extension"
         );
 
         router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
-        let uris = request
+        let info = request
             .extensions()
-            .get::<RequestUris>()
-            .expect("resolve_request_uri must attach a RequestUris extension for hand-built requests");
-        assert_eq!(uris.original().to_string().declassify_ref(), "/v1/items");
+            .get::<RequestInfo>()
+            .expect("resolve_request_uri must attach a RequestInfo extension for hand-built requests");
+        assert_eq!(info.original_uri.as_ref().unwrap().to_string().declassify_ref(), "/v1/items");
         assert_eq!(
-            uris.routed().expect("routed must be populated").to_string().declassify_ref(),
+            info.routed_uri
+                .as_ref()
+                .expect("routed must be populated")
+                .to_string()
+                .declassify_ref(),
             "https://api.example.com/v1/items"
         );
     }
@@ -638,22 +609,26 @@ mod tests {
 
     #[test]
     fn resolve_request_uri_attaches_resolved_uri_extension() {
-        // After `resolve_request_uri`, the `RequestUris` extension's `routed`
+        // After `resolve_request_uri`, the `RequestInfo` extension's `routed_uri`
         // field carries the resolved `Uri` (with the routed `BaseUri`
-        // applied), while `original` preserves the caller's untouched target
+        // applied), while `original_uri` preserves the caller's untouched target
         // so subsequent re-routings (e.g., recovery attempts) start from it.
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
 
         router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
-        let uris = request
+        let info = request
             .extensions()
-            .get::<RequestUris>()
-            .expect("resolve_request_uri must keep the RequestUris extension");
-        assert_eq!(uris.original().to_string().declassify_ref(), "/v1/items");
+            .get::<RequestInfo>()
+            .expect("resolve_request_uri must keep the RequestInfo extension");
+        assert_eq!(info.original_uri.as_ref().unwrap().to_string().declassify_ref(), "/v1/items");
         assert_eq!(
-            uris.routed().expect("routed must be populated").to_string().declassify_ref(),
+            info.routed_uri
+                .as_ref()
+                .expect("routed must be populated")
+                .to_string()
+                .declassify_ref(),
             "https://api.example.com/v1/items"
         );
     }
@@ -692,9 +667,9 @@ mod tests {
         router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
         assert_eq!(request.uri().to_string(), "https://second.example.com/v1/items");
 
-        // And `original` is preserved across calls.
-        let uris = request.extensions().get::<RequestUris>().unwrap();
-        assert_eq!(uris.original().to_string().declassify_ref(), "/v1/items");
+        // And `original_uri` is preserved across calls.
+        let info = request.extensions().get::<RequestInfo>().unwrap();
+        assert_eq!(info.original_uri.as_ref().unwrap().to_string().declassify_ref(), "/v1/items");
     }
 
     #[test]

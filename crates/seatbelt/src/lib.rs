@@ -223,13 +223,12 @@
 //!   resilience middleware.
 
 #[doc(inline)]
-pub use recoverable::{Recovery, RecoveryInfo, RecoveryKind};
+pub use recoverable::{Attempt, Recovery, RecoveryInfo, RecoveryKind};
 
 mod context;
 pub use context::ResilienceContext;
 
 pub(crate) mod attempt;
-pub use attempt::Attempt;
 
 pub mod typestates;
 

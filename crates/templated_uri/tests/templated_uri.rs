@@ -110,7 +110,7 @@ fn user_info_uri() {
         format!("{target:?}"),
         r#"Uri { base_uri: BaseUri { origin: Origin { scheme: "https", authority: example.com }, path: BasePath { inner: / } }, path_and_query: Some(PathAndQuery(UserInfo("/users/{user_id}/{+path_fragment}"))) }"#
     );
-    assert_eq!(target.to_path_and_query().unwrap().template(), "/users/{user_id}/{+path_fragment}");
+    assert_eq!(target.path_and_query().unwrap().template(), "/users/{user_id}/{+path_fragment}");
     assert_eq!(
         target.to_redacted_string(&RedactionEngine::builder().set_fallback_redactor(SimpleRedactor::new()).build(),),
         "https://example.com/users/************************************/************",

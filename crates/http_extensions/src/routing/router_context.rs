@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use recoverable::RecoveryInfo;
+use recoverable::{Attempt, RecoveryInfo};
 
 use crate::HttpRequest;
 
@@ -19,31 +19,19 @@ use crate::HttpRequest;
 /// bigger picture: where this information comes from, who is responsible for
 /// providing it, and how resolver like [`Router::fallback`](super::Router::fallback)
 /// consume it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RouterContext<'a> {
-    attempt: u32,
-    is_last_attempt: bool,
+    attempt: Attempt,
     previous_recovery: Option<RecoveryInfo>,
     request: Option<&'a HttpRequest>,
-}
-
-impl Default for RouterContext<'_> {
-    fn default() -> Self {
-        Self {
-            attempt: 0,
-            is_last_attempt: true,
-            previous_recovery: None,
-            request: None,
-        }
-    }
 }
 
 impl<'a> RouterContext<'a> {
     /// Creates a new [`RouterContext`] for the first (and only) attempt.
     ///
-    /// The returned context reports attempt index `0` and `is_last_attempt = true`.
-    /// Use [`RouterContext::with_attempt`] to override these values when the
-    /// request is part of a multi-attempt flow.
+    /// The returned context reports the default [`Attempt`] (index `0`,
+    /// [`is_last`](Attempt::is_last) `true`). Use [`RouterContext::with_attempt`]
+    /// to override it when the request is part of a multi-attempt flow.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -56,18 +44,15 @@ impl<'a> RouterContext<'a> {
         self
     }
 
-    /// Sets the zero-based index of the current attempt and whether it is the
-    /// last one that will be performed.
-    ///
-    /// The first attempt has index `0`, the second `1`, and so on.
+    /// Sets the [`Attempt`] describing the current attempt index and whether it
+    /// is the last one that will be performed.
     ///
     /// This is typically called by the resilience layer driving the recovery
     /// loop. See the [module-level "Recovery Context" section](super#recovery-context)
     /// for context.
     #[must_use]
-    pub fn with_attempt(mut self, attempt: u32, is_last_attempt: bool) -> Self {
+    pub fn with_attempt(mut self, attempt: Attempt) -> Self {
         self.attempt = attempt;
-        self.is_last_attempt = is_last_attempt;
         self
     }
 
@@ -83,16 +68,10 @@ impl<'a> RouterContext<'a> {
         self
     }
 
-    /// Returns the zero-based index of the current attempt.
+    /// Returns the [`Attempt`] describing the current attempt.
     #[must_use]
-    pub fn attempt(&self) -> u32 {
+    pub fn attempt(&self) -> Attempt {
         self.attempt
-    }
-
-    /// Returns `true` when the current attempt is the last one that will be performed.
-    #[must_use]
-    pub fn is_last_attempt(&self) -> bool {
-        self.is_last_attempt
     }
 
     /// Returns the [`RecoveryInfo`] produced by the previous attempt, if any.
@@ -117,8 +96,8 @@ mod tests {
     #[test]
     fn defaults() {
         let ctx = RouterContext::new();
-        assert_eq!(ctx.attempt(), 0);
-        assert!(ctx.is_last_attempt());
+        assert_eq!(ctx.attempt().index(), 0);
+        assert!(ctx.attempt().is_last());
         assert!(ctx.previous_recovery().is_none());
         assert!(ctx.request().is_none());
         // Exercise Debug + Clone for coverage.
@@ -135,19 +114,19 @@ mod tests {
 
         let ctx = RouterContext::new()
             .with_request(&request)
-            .with_attempt(2, true)
+            .with_attempt(Attempt::new(2, true))
             .with_previous_recovery(recovery);
 
-        assert_eq!(ctx.attempt(), 2);
-        assert!(ctx.is_last_attempt());
+        assert_eq!(ctx.attempt().index(), 2);
+        assert!(ctx.attempt().is_last());
         assert!(ctx.previous_recovery().is_some());
         assert!(ctx.request().is_some());
     }
 
     #[test]
     fn with_attempt_can_set_is_last_attempt_to_false() {
-        let ctx = RouterContext::new().with_attempt(1, false);
-        assert_eq!(ctx.attempt(), 1);
-        assert!(!ctx.is_last_attempt());
+        let ctx = RouterContext::new().with_attempt(Attempt::new(1, false));
+        assert_eq!(ctx.attempt().index(), 1);
+        assert!(!ctx.attempt().is_last());
     }
 }

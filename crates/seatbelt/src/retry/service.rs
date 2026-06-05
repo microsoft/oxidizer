@@ -94,7 +94,7 @@ where
             return self.inner.execute(input).await;
         }
 
-        let mut attempt = Attempt::first(self.shared.max_attempts);
+        let mut attempt = crate::attempt::first(self.shared.max_attempts);
         let mut delays = self.shared.backoff.delays();
         let mut previous_recovery = None;
 
@@ -150,7 +150,7 @@ impl<In, Out> RetryShared<In, Out> {
             return ControlFlow::Break(out);
         }
 
-        let Some(next_attempt) = attempt.increment(self.max_attempts) else {
+        let Some(next_attempt) = crate::attempt::increment(attempt, self.max_attempts) else {
             self.emit_telemetry(attempt, Duration::ZERO, recovery.kind());
             return ControlFlow::Break(out);
         };
@@ -322,7 +322,7 @@ where
             inner: Box::pin(async move {
                 let mut input = req;
                 let mut inner = inner;
-                let mut attempt = Attempt::first(shared.max_attempts);
+                let mut attempt = crate::attempt::first(shared.max_attempts);
                 let mut delays = shared.backoff.delays();
                 let mut previous_recovery = None;
 

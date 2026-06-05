@@ -187,7 +187,7 @@ impl<In, Out> HedgingShared<In, Out> {
         let mut last_result: Option<Out> = None;
 
         loop {
-            if let Some(next_attempt) = attempt.increment(total_attempts) {
+            if let Some(next_attempt) = crate::attempt::increment(attempt, total_attempts) {
                 let delay = self.delay_fn.call(input, HedgingDelayArgs { attempt: next_attempt });
 
                 let outcome = {

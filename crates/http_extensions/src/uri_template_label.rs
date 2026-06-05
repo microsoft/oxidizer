@@ -3,14 +3,17 @@
 
 use std::borrow::Cow;
 
-/// A label for the URL template that can be attached to HTTP requests as an extension.
+/// A label for the URL template associated with an HTTP request.
 ///
 /// This type is a **workaround** for cases where a templated URI cannot be used.
 /// When possible, prefer using templated URIs via the `#[templated]` macro from
 /// `templated_uri`, as they provide better type safety and automatic template extraction.
 ///
-/// When both a templated URI and a `UriTemplateLabel` are present on a request,
-/// the explicit `UriTemplateLabel` takes precedence.
+/// Set an explicit label with
+/// [`HttpRequestBuilder::uri_template_label`][crate::HttpRequestBuilder::uri_template_label];
+/// it is stored in the [`RequestInfo`][crate::RequestInfo] extension. When both a
+/// templated URI and an explicit `UriTemplateLabel` are present on a request, the explicit
+/// `UriTemplateLabel` takes precedence.
 ///
 /// # Example
 ///
@@ -21,7 +24,7 @@ use std::borrow::Cow;
 ///
 /// let request = HttpRequestBuilder::new_fake()
 ///     .get("https://example.com/api/users/123")
-///     .extension(UriTemplateLabel::new("/api/users/{id}"))
+///     .uri_template_label(UriTemplateLabel::new("/api/users/{id}"))
 ///     .build()
 ///     .unwrap();
 /// # }

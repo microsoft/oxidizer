@@ -15,7 +15,7 @@ use templated_uri::Uri;
 use crate::error_labels::LABEL_URI_MISSING;
 use crate::http_utils::{CONTENT_TYPE_TEXT, try_content_length_header, try_header};
 use crate::timeout::{BodyTimeout, ResponseTimeout};
-use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result};
+use crate::{HttpBody, HttpBodyBuilder, HttpBodyOptions, HttpError, HttpRequest, HttpResponse, RequestHandler, Result, UriTemplateLabel};
 
 /// A fluent builder for creating HTTP requests.
 ///
@@ -80,6 +80,7 @@ pub struct HttpRequestBuilder<'a, R = ()> {
     uri: Option<Result<Uri>>,
     body: Option<Result<HttpBody>>,
     content_type: Option<HeaderValue>,
+    uri_template_label: Option<UriTemplateLabel>,
     request_handler: &'a R,
 }
 
@@ -117,6 +118,7 @@ impl HttpRequestBuilder<'static> {
             uri: None,
             body: None,
             content_type: None,
+            uri_template_label: None,
             request_handler: &(),
         }
     }
@@ -131,6 +133,7 @@ impl<'a> HttpRequestBuilder<'a> {
             uri: None,
             body: None,
             content_type: None,
+            uri_template_label: None,
             request_handler: &(),
         }
     }
@@ -145,6 +148,7 @@ impl<'a, R> HttpRequestBuilder<'a, R> {
             uri: None,
             body: None,
             content_type: None,
+            uri_template_label: None,
             request_handler,
         }
     }
@@ -254,6 +258,17 @@ impl<R> HttpRequestBuilder<'_, R> {
         T: Clone + Send + Sync + 'static,
     {
         self.builder = self.builder.extension(extension);
+        self
+    }
+
+    /// Sets an explicit [`UriTemplateLabel`] for the request.
+    ///
+    /// The label is folded into the [`RequestInfo`][crate::RequestInfo] extension
+    /// attached by [`build`](Self::build) and takes precedence over any label or template
+    /// derived from the request's URI when resolving
+    /// [`RequestExt::uri_template_label`][crate::RequestExt::uri_template_label].
+    pub fn uri_template_label(mut self, label: impl Into<UriTemplateLabel>) -> Self {
+        self.uri_template_label = Some(label.into());
         self
     }
 
@@ -371,19 +386,19 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        // Attach both a `RequestUris` carrying the caller's templated target
-        // and its `PathAndQuery`:
-        //   - `RequestUris::original` preserves the unrouted target so
-        //     `Router::resolve_request_uri` can re-route from it on every retry.
-        //   - `PathAndQuery` backs `RequestExt::path_and_query` and
-        //     `ExtensionsExt::uri_template_label`.
-        let path = uri.to_path_and_query();
+        // Attach a single `RequestInfo` consolidating the routing metadata:
+        //   - `original_uri` preserves the unrouted target so
+        //     `Router::resolve_request_uri` can re-route from it on every retry, and it
+        //     also backs `RequestExt::path_and_query` and `ExtensionsExt::uri_template_label`.
+        //   - `uri_template_label` carries any explicit label set via
+        //     `HttpRequestBuilder::uri_template_label`.
         let http_uri = http::Uri::try_from(uri.clone())?;
         let mut request = self.builder.uri(http_uri).body(body)?;
-        request.extensions_mut().insert(crate::routing::RequestUris::new(uri));
-        if let Some(path) = path {
-            request.extensions_mut().insert(path);
-        }
+        request.extensions_mut().insert(crate::RequestInfo {
+            original_uri: Some(uri),
+            uri_template_label: self.uri_template_label.take(),
+            ..Default::default()
+        });
 
         Ok(request)
     }
@@ -1446,35 +1461,63 @@ mod tests {
 
     #[test]
     fn extension_attaches_to_request() {
-        use crate::UriTemplateLabel;
+        #[derive(Clone, PartialEq, Debug)]
+        struct RequestTag(&'static str);
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")
-            .extension(UriTemplateLabel::new("/api/users/{id}"))
+            .extension(RequestTag("api"))
             .build()
             .unwrap();
 
-        let label = request.extensions().get::<UriTemplateLabel>().expect("extension should be present");
-        assert_eq!(label.as_str(), "/api/users/{id}");
+        let tag = request.extensions().get::<RequestTag>().expect("extension should be present");
+        assert_eq!(tag, &RequestTag("api"));
     }
 
     #[test]
-    fn build_attaches_request_uris_extension() {
-        // The templated `Uri` is stashed on the request inside a `RequestUris`
+    fn build_attaches_request_info_extension() {
+        // The templated `Uri` is stashed on the request inside a `RequestInfo`
         // extension so `Router` can re-route from the original target on retries.
-        use crate::routing::RequestUris;
+        use crate::RequestInfo;
 
         let request = HttpRequestBuilder::new_fake()
             .get("https://example.com/api/users/123")
             .build()
             .unwrap();
 
-        let uris = request
+        let info = request
             .extensions()
-            .get::<RequestUris>()
-            .expect("RequestUris extension should be present");
-        assert_eq!(uris.original().to_string().declassify_ref(), "https://example.com/api/users/123");
-        assert!(uris.routed().is_none(), "routed should be None before any router runs");
+            .get::<RequestInfo>()
+            .expect("RequestInfo extension should be present");
+        assert_eq!(
+            info.original_uri.as_ref().unwrap().to_string().declassify_ref(),
+            "https://example.com/api/users/123"
+        );
+        assert!(info.routed_uri.is_none(), "routed_uri should be None before any router runs");
+    }
+
+    #[test]
+    fn uri_template_label_setter_populates_request_info() {
+        let request = HttpRequestBuilder::new_fake()
+            .get("https://example.com/api/users/123")
+            .uri_template_label("/api/users/{id}")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            request.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
+            Some("/api/users/{id}")
+        );
+    }
+
+    #[test]
+    fn uri_template_label_falls_back_to_path_when_unset() {
+        let request = HttpRequestBuilder::new_fake().get("https://example.com/api/users").build().unwrap();
+
+        assert_eq!(
+            request.uri_template_label().as_ref().map(UriTemplateLabel::as_str),
+            Some("/api/users")
+        );
     }
 
     #[test]

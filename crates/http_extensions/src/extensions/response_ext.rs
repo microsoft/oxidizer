@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use http::header::RETRY_AFTER;
 use http::{HeaderMap, Response};
-use recoverable::{RecoveryInfo, RecoveryKind};
+use recoverable::{Attempt, RecoveryInfo, RecoveryKind};
 use tick::Clock;
 use tick::fmt::Rfc2822;
 
@@ -17,6 +17,18 @@ use crate::{HeaderMapExt, StatusExt};
 pub trait ResponseExt: sealed::Sealed {
     /// Returns recovery classification of the response, considering `Retry-After` header.
     fn recovery_with_clock(&self, clock: &Clock) -> RecoveryInfo;
+
+    /// Returns the [`Attempt`] recorded on this response, if any.
+    ///
+    /// Resilience middleware can attach the [`Attempt`] that produced a response
+    /// so downstream consumers can correlate the response with the attempt.
+    /// Returns `None` when no attempt has been recorded.
+    fn attempt(&self) -> Option<Attempt>;
+
+    /// Records the [`Attempt`] that produced this response.
+    ///
+    /// Replaces any attempt previously attached to the response's extensions.
+    fn set_attempt(&mut self, attempt: Attempt);
 }
 
 impl<B> ResponseExt for Response<B> {
@@ -35,6 +47,14 @@ impl<B> ResponseExt for Response<B> {
             }
             _ => recovery,
         }
+    }
+
+    fn attempt(&self) -> Option<Attempt> {
+        self.extensions().get::<Attempt>().copied()
+    }
+
+    fn set_attempt(&mut self, attempt: Attempt) {
+        let _ = self.extensions_mut().insert(attempt);
     }
 }
 
@@ -141,5 +161,34 @@ mod tests {
         // Non-transient status
         let response = Response::builder().status(400).body(()).unwrap();
         assert_eq!(response.recovery_with_clock(&Clock::new_frozen()).kind(), RecoveryKind::Never);
+    }
+
+    #[test]
+    fn attempt_returns_none_without_extension() {
+        let response = Response::builder().status(200).body(()).unwrap();
+        assert!(response.attempt().is_none());
+    }
+
+    #[test]
+    fn set_attempt_then_attempt_round_trips() {
+        let mut response = Response::builder().status(200).body(()).unwrap();
+
+        response.set_attempt(Attempt::new(2, true));
+
+        let attempt = response.attempt().expect("attempt should be recorded");
+        assert_eq!(attempt.index(), 2);
+        assert!(attempt.is_last());
+    }
+
+    #[test]
+    fn set_attempt_overwrites_previous_attempt() {
+        let mut response = Response::builder().status(200).body(()).unwrap();
+
+        response.set_attempt(Attempt::new(0, false));
+        response.set_attempt(Attempt::new(3, true));
+
+        let attempt = response.attempt().expect("attempt should be recorded");
+        assert_eq!(attempt.index(), 3);
+        assert!(attempt.is_last());
     }
 }

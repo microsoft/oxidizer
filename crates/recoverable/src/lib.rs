@@ -20,6 +20,7 @@
 //! - [`RecoveryInfo`]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
 //! - [`Recovery`]: A trait for types that can provide their own recovery information.
 //! - [`RecoveryKind`]: An enum representing the kind of recovery that can be attempted.
+//! - [`Attempt`]: Tracks the current attempt within a resilience operation.
 //!
 //! # Examples
 //!
@@ -75,6 +76,9 @@
 
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
+
+mod attempt;
+pub use attempt::Attempt;
 
 mod io;
 

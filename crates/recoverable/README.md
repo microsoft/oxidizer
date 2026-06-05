@@ -27,6 +27,7 @@ operation succeeded or failed. Both successful operations and permanent failures
 * [`RecoveryInfo`][__link1]: Classifies conditions as recoverable (transient) or non-recoverable (permanent/successful).
 * [`Recovery`][__link2]: A trait for types that can provide their own recovery information.
 * [`RecoveryKind`][__link3]: An enum representing the kind of recovery that can be attempted.
+* [`Attempt`][__link4]: Tracks the current attempt within a resilience operation.
 
 ## Examples
 
@@ -86,8 +87,9 @@ assert_eq!(immediate.get_delay(), Some(Duration::ZERO));
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/recoverable">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbxaQaV3R0B1MbWgDMOblL7IUbuaxOIQfTtggbdNk5pSVLORFhZIGCa3JlY292ZXJhYmxlZTAuMS40
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbqbijI29d6TgbTQ5HI0C7LUMbRqpf5zs4IjobT-YIBQQZLsNhZIGCa3JlY292ZXJhYmxlZTAuMS40
  [__link0]: https://docs.rs/recoverable/0.1.4/recoverable/?search=RecoveryInfo::never
  [__link1]: https://docs.rs/recoverable/0.1.4/recoverable/struct.RecoveryInfo.html
  [__link2]: https://docs.rs/recoverable/0.1.4/recoverable/trait.Recovery.html
  [__link3]: https://docs.rs/recoverable/0.1.4/recoverable/enum.RecoveryKind.html
+ [__link4]: https://docs.rs/recoverable/0.1.4/recoverable/?search=Attempt

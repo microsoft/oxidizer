@@ -148,14 +148,28 @@ pub struct HttpBody {
     #[pin]
     #[thread_aware(skip)]
     kind: Kind,
-    builder: HttpBodyBuilder,
 }
 
 // Implementations for HttpBody
 
 impl HttpBody {
-    const fn new(kind: Kind, builder: HttpBodyBuilder) -> Self {
-        Self { kind, builder }
+    /// Creates an empty body (zero bytes).
+    pub(crate) const fn empty() -> Self {
+        Self { kind: Kind::Empty }
+    }
+
+    /// Creates a body backed by an in-memory byte sequence.
+    pub(crate) fn from_bytes(bytes: BytesView) -> Self {
+        Self {
+            kind: Kind::Bytes(Some(bytes)),
+        }
+    }
+
+    /// Creates a streaming body backed by a boxed [`Body`] implementation.
+    pub(crate) fn from_streaming(body: Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, options: HttpBodyOptions) -> Self {
+        Self {
+            kind: Kind::Body(body, options),
+        }
     }
 
     /// Converts the body into a memory-efficient view over a byte sequence.
@@ -275,19 +289,17 @@ impl HttpBody {
     /// # }
     /// ```
     pub async fn into_buffered(self) -> Result<Self> {
-        let builder = self.builder;
-
         match self.kind {
-            Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
+            Kind::Bytes(Some(data)) => Ok(Self::from_bytes(data)),
             Kind::Bytes(None) => Err(HttpError::validation_with_label(
                 "body cannot be buffered because it is already consumed",
                 LABEL_BODY_CONSUMED,
             )),
-            Kind::Empty => Ok(builder.empty()),
+            Kind::Empty => Ok(Self::empty()),
             Kind::Body(b, options) => {
                 let limit = options.buffer_limit;
                 let data = collect_with_limit(b.into_data_stream(), limit).await?;
-                Ok(builder.bytes(data))
+                Ok(Self::from_bytes(data))
             }
         }
     }
@@ -464,8 +476,8 @@ impl HttpBody {
     #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.kind {
-            Kind::Bytes(Some(bytes)) => Some(self.builder.bytes(bytes.clone())),
-            Kind::Empty => Some(self.builder.empty()),
+            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone())),
+            Kind::Empty => Some(Self::empty()),
             Kind::Body(..) | Kind::Bytes(None) => None,
         }
     }

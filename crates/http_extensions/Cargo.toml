@@ -33,6 +33,7 @@ allowed_external_types = [
     "ohno::error_ext::ErrorExt",
     "ohno::error_label::ErrorLabel",
     "ohno::error_label::Labeled",
+    "recoverable::attempt::Attempt",
     "recoverable::Recovery",
     "recoverable::RecoveryInfo",
     "recoverable::RecoveryKind",

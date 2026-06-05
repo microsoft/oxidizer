@@ -48,10 +48,10 @@ pub trait HttpHedgingLayerExt<S1, S2>: sealed::Sealed {
     /// If the method is not eligible under the chosen strategy or the body
     /// cannot be cloned, the hedging attempt is skipped.
     ///
-    /// The current [`Attempt`][seatbelt::Attempt] is inserted into the
-    /// request's extensions. If the extensions contain a
-    /// [`Router`][http_extensions::routing::Router], it re-resolves the
-    /// request URI on every hedged attempt after the first.
+    /// The current [`Attempt`][seatbelt::Attempt] is recorded on the request's
+    /// [`RequestInfo`][http_extensions::RequestInfo] extension. If the
+    /// extensions contain a [`Router`][http_extensions::routing::Router], it
+    /// re-resolves the request URI on every hedged attempt after the first.
     fn http_clone(self, clone_strategy: HttpClone) -> HttpHedgingLayer<Set, S2>;
 
     /// Configures recovery classification for transient HTTP failures.
@@ -130,9 +130,8 @@ mod tests {
     use futures::executor::block_on;
     use http::{Method, StatusCode};
     use http_extensions::routing::{BaseUriConflict, Router};
-    use http_extensions::{FakeHandler, HttpRequestBuilder, HttpResponseBuilder};
+    use http_extensions::{FakeHandler, HttpRequestBuilder, HttpResponseBuilder, RequestExt};
     use layered::{Service, Stack};
-    use seatbelt::Attempt;
     use templated_uri::BaseUri;
     use tick::ClockControl;
 
@@ -194,7 +193,7 @@ mod tests {
                 .expect("mutex is only accessed in single-threaded test")
                 .push(request.uri().to_string());
 
-            let attempt = request.extensions().get::<Attempt>().unwrap();
+            let attempt = request.attempt().unwrap();
             let status = if attempt.is_last() {
                 StatusCode::OK
             } else {
@@ -209,7 +208,7 @@ mod tests {
         // URI stays the original "primary" target.
         let router = Router::custom(
             |ctx| {
-                Some(match ctx.attempt() {
+                Some(match ctx.attempt().index() {
                     1 => BaseUri::from_static("https://hedge-1.example.com"),
                     _ => BaseUri::from_static("https://hedge-2.example.com"),
                 })

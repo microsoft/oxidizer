@@ -234,6 +234,9 @@ pub use extensions::{ExtensionsExt, HeaderMapExt, HeaderValueExt, HttpRequestExt
 mod uri_template_label;
 pub use uri_template_label::UriTemplateLabel;
 
+mod request_info;
+pub use request_info::RequestInfo;
+
 pub mod timeout;
 
 pub mod routing;

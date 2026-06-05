@@ -3,7 +3,7 @@
 
 use http::Method;
 use http_extensions::routing::{Router, RouterContext};
-use http_extensions::{HttpRequest, HttpRequestExt};
+use http_extensions::{HttpRequest, HttpRequestExt, RequestExt};
 use seatbelt::{Attempt, RecoveryInfo};
 
 /// A strategy for cloning HTTP requests for retries or hedging.
@@ -86,7 +86,7 @@ fn update_request_uri(request: &mut HttpRequest, attempt: Attempt, previous_reco
         _ => return true,
     };
 
-    let mut context = RouterContext::new().with_attempt(attempt.index(), attempt.is_last());
+    let mut context = RouterContext::new().with_attempt(attempt);
     if let Some(previous_recovery) = previous_recovery {
         context = context.with_previous_recovery(previous_recovery.clone());
     }
@@ -104,7 +104,7 @@ enum Inner {
 }
 
 fn attach_attempt(request: &mut HttpRequest, attempt: Attempt) {
-    request.extensions_mut().insert(attempt);
+    request.set_attempt(attempt);
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -213,10 +213,7 @@ mod tests {
         let cloned = clone.try_clone(&mut request, attempt, None);
 
         let cloned = cloned.expect("cloneable request should produce Some");
-        let attached = cloned
-            .extensions()
-            .get::<Attempt>()
-            .expect("attempt should be attached to the cloned request");
+        let attached = cloned.attempt().expect("attempt should be attached to the cloned request");
         assert_eq!(attached.index(), 3);
         assert!(!attached.is_last());
     }
@@ -260,10 +257,7 @@ mod tests {
         let result = clone.try_clone(&mut request, attempt, None);
 
         assert!(result.is_none(), "unsafe method should not be cloned");
-        let attached = request
-            .extensions()
-            .get::<Attempt>()
-            .expect("attempt should be attached to the original request");
+        let attached = request.attempt().expect("attempt should be attached to the original request");
         assert_eq!(attached.index(), 1);
         assert!(attached.is_last());
     }
