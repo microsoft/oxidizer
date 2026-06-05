@@ -10,3 +10,9 @@
 #   Under tree-borrows the per-byte provenance tracking exceeds
 #   the 16 GB runner memory limit.
 arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
+
+# arena::tests::try_alloc_uninit_slice_arc_at_max_normal_uses_fast_path
+#   Shared-chunk sibling of the above. The Arc-based allocation path
+#   with atomic refcounting creates additional provenance nodes under
+#   tree-borrows, also exceeding 16 GB.
+arena::tests::try_alloc_uninit_slice_arc_at_max_normal_uses_fast_path
