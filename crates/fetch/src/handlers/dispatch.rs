@@ -98,7 +98,7 @@ impl Service<HttpRequest> for Dispatch {
     type Out = Result<HttpResponse>;
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
-        // Preserve the requets info.
+        // Preserve the request info so it can be forwarded to the response or error.
         let request_info = input.extensions().get::<RequestInfo>().cloned().unwrap_or_default();
 
         if let Err(err) = validate(&self.request_filter, &input) {
@@ -176,6 +176,7 @@ mod tests {
     use http::{Request, StatusCode, Uri};
     use http_extensions::{FakeHandler, RequestExt, ResponseExt};
     use ohno::ErrorExt;
+    use seatbelt::retry::Attempt;
     use seatbelt::{Recovery, RecoveryKind};
 
     use super::*;
@@ -265,7 +266,9 @@ mod tests {
             .unwrap();
 
         let response = handler.execute(request).await.unwrap();
-        assert!(response.attempt().unwrap_or_default());
+        // No attempt was recorded on the request, so the forwarded `RequestInfo`
+        // carries no attempt either.
+        assert!(response.attempt().is_none());
 
         let mut request = Request::get(Uri::from_static("http://dummy.org/relative-path"))
             .body(HttpBodyBuilder::new_fake().empty())
@@ -274,7 +277,80 @@ mod tests {
         request.set_attempt(Attempt::new(4, false));
 
         let response = handler.execute(request).await.unwrap();
-        assert_eq!(response.attempt().unwrap_or_default(), Attempt::new(4, false));
+        assert_eq!(
+            response.attempt().expect("attempt should be forwarded to the response"),
+            Attempt::new(4, false)
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn request_info_forwarded_to_response() {
+        let handler = Dispatch::new(
+            DispatchMode::single(TransportHandler::new(FakeHandler::from(StatusCode::OK))),
+            RequestFilter::HttpAndHttps,
+        );
+
+        let mut request = Request::get(Uri::from_static("http://dummy.org/v1/items"))
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+        request.request_info_mut().original_uri = Some(templated_uri::Uri::from_static("http://dummy.org/v1/items"));
+        request.set_attempt(Attempt::new(2, true));
+
+        let response = handler.execute(request).await.unwrap();
+
+        let info = response.request_info().expect("RequestInfo should be forwarded to the response");
+        assert_eq!(
+            info.original_uri.as_ref().unwrap().to_string().declassify_ref(),
+            "http://dummy.org/v1/items"
+        );
+        assert_eq!(info.attempt, Some(Attempt::new(2, true)));
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn request_info_attached_to_error_on_validation_failure() {
+        let handler = Dispatch::new(
+            DispatchMode::single(TransportHandler::new(FakeHandler::default())),
+            RequestFilter::Https,
+        );
+
+        // Relative URI fails validation (no scheme/authority).
+        let mut request = Request::get(Uri::from_static("/relative-path"))
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+        request.request_info_mut().original_uri = Some(templated_uri::Uri::from_static("/relative-path"));
+
+        let error = handler.execute(request).await.unwrap_err();
+
+        let info = error
+            .request_info()
+            .expect("RequestInfo should be attached to the validation error");
+        assert_eq!(info.original_uri.as_ref().unwrap().to_string().declassify_ref(), "/relative-path");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn request_info_attached_to_error_on_transport_failure() {
+        let handler = Dispatch::new(
+            DispatchMode::single(TransportHandler::new(FakeHandler::from_http_error(|_req| {
+                HttpError::unavailable("boom")
+            }))),
+            RequestFilter::HttpAndHttps,
+        );
+
+        let mut request = Request::get(Uri::from_static("http://dummy.org/v1/items"))
+            .body(HttpBodyBuilder::new_fake().empty())
+            .unwrap();
+        request.request_info_mut().original_uri = Some(templated_uri::Uri::from_static("http://dummy.org/v1/items"));
+
+        let error = handler.execute(request).await.unwrap_err();
+
+        let info = error.request_info().expect("RequestInfo should be attached to the transport error");
+        assert_eq!(
+            info.original_uri.as_ref().unwrap().to_string().declassify_ref(),
+            "http://dummy.org/v1/items"
+        );
     }
 
     #[cfg_attr(miri, ignore)]

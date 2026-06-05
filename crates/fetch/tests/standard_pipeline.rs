@@ -14,6 +14,7 @@ use fetch::fake::{FakeDeps, FakeHandler};
 use fetch::pipeline::RecoveryMode;
 use fetch::{HttpClient, HttpError, HttpResponseBuilder};
 use http::StatusCode;
+use http_extensions::ResponseExt;
 use http_extensions::routing::Router;
 use ohno::ErrorExt;
 use seatbelt::retry::Attempt;
@@ -156,7 +157,7 @@ async fn retries_happen_before_breaker_trips() {
     let response = client.get("https://example.com").fetch().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let attempt = response.extensions().get::<Attempt>().copied().unwrap();
+    let attempt = response.attempt().unwrap();
     assert_eq!(attempt, Attempt::new(3, true));
     assert_eq!(calls.get(), 4);
 }
@@ -387,7 +388,7 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     assert_eq!(response.status(), StatusCode::OK);
     // One retry was needed: the initial attempt hit the primary (unavailable),
     // the second attempt hit the fallback and succeeded.
-    let attempt = response.extensions().get::<Attempt>().copied().unwrap();
+    let attempt = response.attempt().unwrap();
     assert_eq!(attempt, Attempt::new(1, false));
     assert_eq!(
         calls.primary.load(Ordering::Relaxed),

@@ -10,7 +10,7 @@ use fetch::resilience::breaker::{HttpBreaker, HttpBreakerLayerExt};
 use fetch::resilience::retry::{HttpRetry, HttpRetryLayerExt};
 use fetch::{HttpClient, HttpResponseBuilder};
 use http::{Method, StatusCode};
-use http_extensions::HttpError;
+use http_extensions::{HttpError, RequestExt, ResponseExt};
 use layered::Stack;
 use ohno::ErrorExt;
 use seatbelt::Recovery;
@@ -39,7 +39,7 @@ async fn retry_defaults_for_methods() {
     for method in ALL_HTTP_METHODS {
         let response = client.request(method, "https://example.com").fetch().await.unwrap();
 
-        let attempt = response.extensions().get::<Attempt>().copied();
+        let attempt = response.attempt();
 
         if method.is_safe() {
             assert_eq!(attempt.unwrap(), Attempt::new(3, true));
@@ -55,14 +55,14 @@ async fn retry_defaults_non_transient_codes() {
     let client = create_retry_client(StatusCode::BAD_REQUEST);
     let response = client.get("https://example.com").fetch().await.unwrap();
 
-    assert_eq!(response.extensions().get::<Attempt>().copied().unwrap(), Attempt::new(0, false));
+    assert_eq!(response.attempt().unwrap(), Attempt::new(0, false));
 }
 
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn retry_defaults_restore_requests() {
     let handler = FakeHandler::from_http_error(|req| {
-        let index = req.extensions().get::<Attempt>().copied().unwrap().index();
+        let index = req.attempt().unwrap().index();
         HttpError::unavailable(format!("unavailable-{index}")).with_request(req)
     });
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
@@ -97,7 +97,7 @@ async fn retry_defaults_non_cloneable_body() {
         .await
         .unwrap();
 
-    assert_eq!(response.extensions().get::<Attempt>().unwrap().index(), 0);
+    assert_eq!(response.attempt().unwrap().index(), 0);
 }
 
 fn create_retry_client(status: StatusCode) -> HttpClient {
