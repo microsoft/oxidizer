@@ -149,15 +149,15 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
-    fn record_debug_with_duration(&self, event: &'static str, duration: Duration) {
+    fn record_debug_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            tracing::debug!(cache.event = event, cache.duration_ns = duration_ns);
+            tracing::debug!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
-            let _ = (event, duration);
+            let _ = (cache_name, event, duration);
         }
     }
 
@@ -165,15 +165,15 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
-    fn record_info_with_duration(&self, event: &'static str, duration: Duration) {
+    fn record_info_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            tracing::info!(cache.event = event, cache.duration_ns = duration_ns);
+            tracing::info!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
-            let _ = (event, duration);
+            let _ = (cache_name, event, duration);
         }
     }
 
@@ -181,35 +181,35 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
-    fn record_error_with_duration(&self, event: &'static str, duration: Duration) {
+    fn record_error_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
             let duration_ns = saturating_nanos(duration);
-            tracing::error!(cache.event = event, cache.duration_ns = duration_ns);
+            tracing::error!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
-            let _ = (event, duration);
+            let _ = (cache_name, event, duration);
         }
     }
 
     pub(crate) fn record_hit(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_debug_with_duration(attributes::EVENT_HIT, duration);
+        self.record_debug_with_duration(tier_name, attributes::EVENT_HIT, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_HIT, duration, fallback);
     }
 
     pub(crate) fn record_miss(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_debug_with_duration(attributes::EVENT_MISS, duration);
+        self.record_debug_with_duration(tier_name, attributes::EVENT_MISS, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_MISS, duration, fallback);
     }
 
     pub(crate) fn record_expired(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_info_with_duration(attributes::EVENT_EXPIRED, duration);
+        self.record_info_with_duration(tier_name, attributes::EVENT_EXPIRED, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_EXPIRED, duration, fallback);
     }
 
     pub(crate) fn record_get_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_error_with_duration(attributes::EVENT_GET_ERROR, duration);
+        self.record_error_with_duration(tier_name, attributes::EVENT_GET_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -220,7 +220,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_inserted(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_info_with_duration(attributes::EVENT_INSERTED, duration);
+        self.record_info_with_duration(tier_name, attributes::EVENT_INSERTED, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -231,7 +231,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_insert_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_error_with_duration(attributes::EVENT_INSERT_ERROR, duration);
+        self.record_error_with_duration(tier_name, attributes::EVENT_INSERT_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -242,7 +242,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_invalidated(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_info_with_duration(attributes::EVENT_INVALIDATED, duration);
+        self.record_info_with_duration(tier_name, attributes::EVENT_INVALIDATED, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -253,7 +253,7 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_invalidate_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_error_with_duration(attributes::EVENT_INVALIDATE_ERROR, duration);
+        self.record_error_with_duration(tier_name, attributes::EVENT_INVALIDATE_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -264,12 +264,12 @@ impl CacheTelemetry {
     }
 
     pub(crate) fn record_cleared(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_debug_with_duration(attributes::EVENT_CLEARED, duration);
+        self.record_debug_with_duration(tier_name, attributes::EVENT_CLEARED, duration);
         self.emit_tier_event(Self::current_request_id(), tier_name, attributes::EVENT_CLEARED, duration, fallback);
     }
 
     pub(crate) fn record_clear_error(&self, tier_name: CacheName, duration: Duration, fallback: bool) {
-        self.record_error_with_duration(attributes::EVENT_CLEAR_ERROR, duration);
+        self.record_error_with_duration(tier_name, attributes::EVENT_CLEAR_ERROR, duration);
         self.emit_tier_event(
             Self::current_request_id(),
             tier_name,
@@ -279,18 +279,18 @@ impl CacheTelemetry {
         );
     }
 
-    pub(crate) fn record_refresh_hit(&self, duration: Duration) {
-        self.record_debug_with_duration(attributes::EVENT_REFRESH_HIT, duration);
+    pub(crate) fn record_refresh_hit(&self, cache_name: CacheName, duration: Duration) {
+        self.record_debug_with_duration(cache_name, attributes::EVENT_REFRESH_HIT, duration);
     }
 
-    pub(crate) fn record_refresh_miss(&self, duration: Duration) {
-        self.record_info_with_duration(attributes::EVENT_REFRESH_MISS, duration);
+    pub(crate) fn record_refresh_miss(&self, cache_name: CacheName, duration: Duration) {
+        self.record_info_with_duration(cache_name, attributes::EVENT_REFRESH_MISS, duration);
     }
 
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            tracing::info!(cache.event = attributes::EVENT_INSERT_REJECTED);
+            tracing::info!(cache.name = tier_name, cache.event = attributes::EVENT_INSERT_REJECTED);
         }
         self.emit_tier_event(
             Self::current_request_id(),
@@ -308,7 +308,7 @@ impl CacheTelemetry {
     pub(crate) fn record_fallback(&self) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            tracing::info!(cache.event = "cache.fallback", cache.fallback = true);
+            tracing::info!(cache.event = attributes::EVENT_FALLBACK, cache.fallback = true);
         }
     }
 
@@ -562,12 +562,16 @@ mod tests {
         });
         assert_emits(attributes::EVENT_REFRESH_HIT, |t, request_id| {
             futures::executor::block_on(async {
-                async { t.record_refresh_hit(Duration::ZERO) }.with_request_id(request_id).await;
+                async { t.record_refresh_hit("c", Duration::ZERO) }
+                    .with_request_id(request_id)
+                    .await;
             });
         });
         assert_emits(attributes::EVENT_REFRESH_MISS, |t, request_id| {
             futures::executor::block_on(async {
-                async { t.record_refresh_miss(Duration::ZERO) }.with_request_id(request_id).await;
+                async { t.record_refresh_miss("c", Duration::ZERO) }
+                    .with_request_id(request_id)
+                    .await;
             });
         });
         assert_emits(attributes::EVENT_INSERTED, |t, request_id| {

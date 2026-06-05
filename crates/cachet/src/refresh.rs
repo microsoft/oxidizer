@@ -155,7 +155,7 @@ where
     }
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {
-        self.telemetry.record_refresh_hit(fetch_duration);
+        self.telemetry.record_refresh_hit(self.name, fetch_duration);
 
         self.promote_to_primary(key, value).await;
     }
@@ -168,7 +168,7 @@ where
     }
 
     fn handle_fallback_miss(&self, duration: Duration) {
-        self.telemetry.record_refresh_miss(duration);
+        self.telemetry.record_refresh_miss(self.name, duration);
     }
 }
 

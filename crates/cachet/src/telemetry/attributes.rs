@@ -4,8 +4,13 @@
 //! Public constants for cachet telemetry field names and event values.
 //!
 //! Use these constants to filter or match cachet telemetry events in a custom
-//! `tracing_subscriber::Layer`. Cache operations emit structured events with
-//! `FIELD_NAME`, `FIELD_EVENT`, `FIELD_DURATION_NS`, and additional fields when applicable.
+//! `tracing_subscriber::Layer`.
+//!
+//! **Tier events** (hit, miss, expired, etc.) carry `FIELD_NAME`, `FIELD_EVENT`,
+//! and `FIELD_DURATION_NS`.
+//!
+//! **Operation-complete events** carry `FIELD_NAME`, `FIELD_OPERATION`,
+//! `FIELD_DURATION_NS`, and `FIELD_COALESCED`.
 //!
 //! # Example
 //!
@@ -95,13 +100,16 @@ pub const EVENT_REFRESH_MISS: &str = "cache.refresh_miss";
 /// Only emitted when eviction telemetry is enabled.
 pub const EVENT_EVICTION: &str = "cache.eviction";
 
+/// The operation used a fallback tier after the primary tier missed.
+pub const EVENT_FALLBACK: &str = "cache.fallback";
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn field_constants_match_tracing_field_names() {
-        // These constants must match the field names used in tracing macros in cache.rs.
+        // These constants must match the field names used in tracing macros in telemetry/cache.rs.
         assert_eq!(FIELD_NAME, "cache.name");
         assert_eq!(FIELD_EVENT, "cache.event");
         assert_eq!(FIELD_DURATION_NS, "cache.duration_ns");
@@ -127,6 +135,7 @@ mod tests {
             EVENT_REFRESH_HIT,
             EVENT_REFRESH_MISS,
             EVENT_EVICTION,
+            EVENT_FALLBACK,
         ];
 
         for (i, a) in events.iter().enumerate() {
