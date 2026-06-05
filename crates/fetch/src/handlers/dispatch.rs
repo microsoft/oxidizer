@@ -7,8 +7,8 @@ use std::sync::Arc;
 use futures::TryFutureExt;
 use futures::future::Either;
 use http::uri::Scheme;
+use http_extensions::RequestInfo;
 use layered::Service;
-use seatbelt::retry::Attempt;
 
 use crate::handlers::TransportHandler;
 use crate::options::{PoolIndex, PoolSelection, RequestFilter};
@@ -98,9 +98,8 @@ impl Service<HttpRequest> for Dispatch {
     type Out = Result<HttpResponse>;
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
-        // Preserve the attempt information from the request so it can be
-        // forwarded to the response after dispatch.
-        let attempt = input.extensions().get::<Attempt>().copied();
+        // Preserve the requets info.
+        let request_info = input.extensions().get::<RequestInfo>().cloned();
 
         if let Err(err) = validate(&self.request_filter, &input) {
             return Either::Right(ready(Err(err)));
@@ -135,8 +134,8 @@ impl Service<HttpRequest> for Dispatch {
             // allows inspecting the attempt used to get this response. In
             // healthy scenarios this is always the first attempt, but in
             // degraded scenarios it may be higher.
-            if let Some(attempt) = attempt {
-                res.extensions_mut().insert(attempt);
+            if let Some(info) = request_info {
+                res.extensions_mut().insert(info);
             }
 
             res

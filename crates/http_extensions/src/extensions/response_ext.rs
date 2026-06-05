@@ -9,7 +9,7 @@ use recoverable::{Attempt, RecoveryInfo, RecoveryKind};
 use tick::Clock;
 use tick::fmt::Rfc2822;
 
-use crate::{HeaderMapExt, StatusExt};
+use crate::{HeaderMapExt, RequestInfo, StatusExt};
 
 /// Response recovery classification with `Retry-After` support.
 ///
@@ -18,16 +18,33 @@ pub trait ResponseExt: sealed::Sealed {
     /// Returns recovery classification of the response, considering `Retry-After` header.
     fn recovery_with_clock(&self, clock: &Clock) -> RecoveryInfo;
 
+    /// Returns the [`RequestInfo`] attached to this response, if any.
+    ///
+    /// [`RequestInfo`] aggregates per-request metadata (URIs, template label,
+    /// attempt). Resilience middleware can carry it onto the response so
+    /// downstream consumers can correlate the response with the originating
+    /// request. Returns `None` when no [`RequestInfo`] has been attached.
+    fn request_info(&self) -> Option<&RequestInfo>;
+
+    /// Returns a mutable reference to this response's [`RequestInfo`].
+    ///
+    /// Attaches a default [`RequestInfo`] first if none is present, so the
+    /// returned reference can always be used to record metadata.
+    fn request_info_mut(&mut self) -> &mut RequestInfo;
+
     /// Returns the [`Attempt`] recorded on this response, if any.
     ///
-    /// Resilience middleware can attach the [`Attempt`] that produced a response
-    /// so downstream consumers can correlate the response with the attempt.
-    /// Returns `None` when no attempt has been recorded.
+    /// Reads the [`attempt`](RequestInfo::attempt) field of the [`RequestInfo`]
+    /// extension. Resilience middleware can record the [`Attempt`] that produced
+    /// a response so downstream consumers can correlate the two. Returns `None`
+    /// when no attempt has been recorded.
     fn attempt(&self) -> Option<Attempt>;
 
     /// Records the [`Attempt`] that produced this response.
     ///
-    /// Replaces any attempt previously attached to the response's extensions.
+    /// Stores it in the [`attempt`](RequestInfo::attempt) field of the
+    /// [`RequestInfo`] extension, attaching a [`RequestInfo`] if none is present
+    /// and preserving any other fields.
     fn set_attempt(&mut self, attempt: Attempt);
 }
 
@@ -49,12 +66,20 @@ impl<B> ResponseExt for Response<B> {
         }
     }
 
+    fn request_info(&self) -> Option<&RequestInfo> {
+        self.extensions().get::<RequestInfo>()
+    }
+
+    fn request_info_mut(&mut self) -> &mut RequestInfo {
+        self.extensions_mut().get_or_insert_with(RequestInfo::default)
+    }
+
     fn attempt(&self) -> Option<Attempt> {
-        self.extensions().get::<Attempt>().copied()
+        self.request_info().and_then(|info| info.attempt)
     }
 
     fn set_attempt(&mut self, attempt: Attempt) {
-        let _ = self.extensions_mut().insert(attempt);
+        self.request_info_mut().attempt = Some(attempt);
     }
 }
 
@@ -190,5 +215,40 @@ mod tests {
         let attempt = response.attempt().expect("attempt should be recorded");
         assert_eq!(attempt.index(), 3);
         assert!(attempt.is_last());
+    }
+
+    #[test]
+    fn request_info_returns_none_without_extension() {
+        let response = Response::builder().status(200).body(()).unwrap();
+        assert!(response.request_info().is_none());
+    }
+
+    #[test]
+    fn request_info_mut_inserts_default_when_absent() {
+        let mut response = Response::builder().status(200).body(()).unwrap();
+
+        assert!(response.request_info().is_none());
+
+        response.request_info_mut().attempt = Some(Attempt::new(4, true));
+
+        let attempt = response.attempt().expect("attempt should be recorded");
+        assert_eq!(attempt.index(), 4);
+    }
+
+    #[test]
+    fn set_attempt_preserves_other_request_info_fields() {
+        let original = templated_uri::Uri::from_static("https://example.com/path");
+        let mut response = Response::builder().status(200).body(()).unwrap();
+        response.extensions_mut().insert(RequestInfo {
+            original_uri: Some(original),
+            ..Default::default()
+        });
+
+        response.set_attempt(Attempt::new(1, false));
+
+        let attempt = response.attempt().expect("attempt should be recorded");
+        assert_eq!(attempt.index(), 1);
+        // The previously attached `original_uri` is still present.
+        assert!(response.request_info().unwrap().original_uri.is_some());
     }
 }

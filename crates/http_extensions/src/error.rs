@@ -14,12 +14,12 @@ use recoverable::{Recovery, RecoveryInfo};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 
-use crate::HttpRequest;
 use crate::error_labels::{
     LABEL_BODY_SIZE_LIMIT_REACHED, LABEL_BODY_TIMEOUT, LABEL_HEADER_VALUE_INVALID, LABEL_HTTP_ERROR, LABEL_IO, LABEL_METHOD_INVALID,
     LABEL_RESPONSE_TIMEOUT, LABEL_RESPONSE_UNSUCCESSFUL, LABEL_STATUS_CODE_INVALID, LABEL_UNAVAILABLE, LABEL_URI_INVALID, LABEL_VALIDATION,
 };
 use crate::http_utils::SyncHolder;
+use crate::{HttpRequest, RequestInfo};
 
 /// A convenient type alias for results in this crate.
 pub type Result<T> = std::result::Result<T, HttpError>;
@@ -121,6 +121,9 @@ pub struct HttpError {
     // NOTE: Boxed to keep the size of HttpError small and wrapped
     // in SyncHolder to make HttpError Sync even if HttpRequest is not Sync.
     request: Option<SyncHolder<Box<HttpRequest>>>,
+    // NOTE: Boxed to keep the size of HttpError small. `RequestInfo` is `Sync`,
+    // so it does not need a `SyncHolder`.
+    request_info: Option<Box<RequestInfo>>,
 }
 
 impl ThreadAware for HttpError {
@@ -136,7 +139,7 @@ impl HttpError {
     /// The `label` accepts anything that implements `Into<ErrorLabel>`.
     /// See [`ErrorLabel`] docs for cardinality requirements.
     pub fn other(error: impl Into<Box<dyn std::error::Error + Send + Sync>>, recovery: RecoveryInfo, label: impl Into<ErrorLabel>) -> Self {
-        Self::caused_by(label, recovery, None, error)
+        Self::caused_by(label, recovery, None, None, error)
     }
 
     /// Wraps an error that implements [`Recovery`] into an [`HttpError`],
@@ -261,6 +264,26 @@ impl HttpError {
         self.request.take().map(|holder| *holder.into_inner())
     }
 
+    /// Attaches [`RequestInfo`] metadata to this error.
+    ///
+    /// Carries routing and resilience metadata (URIs, template label, attempt)
+    /// alongside the error for diagnostics and telemetry. This is independent of
+    /// the full request attached via [`with_request`](Self::with_request), so the
+    /// metadata remains available even after [`take_request`](Self::take_request).
+    #[must_use]
+    pub fn with_request_info(mut self, info: RequestInfo) -> Self {
+        self.request_info = Some(Box::new(info));
+        self
+    }
+
+    /// Returns the [`RequestInfo`] attached to this error, if any.
+    ///
+    /// Attach it with [`HttpError::with_request_info`].
+    #[must_use]
+    pub fn request_info(&self) -> Option<&RequestInfo> {
+        self.request_info.as_deref()
+    }
+
     /// Resolves the error label for pre-defined set of errors.
     ///
     /// This method recognizes the following error types:
@@ -316,7 +339,7 @@ mod tests {
     #[test]
     fn assert_size_small() {
         // Keep the size of HttpError small to avoid excessive stack usage.
-        assert_eq!(size_of::<HttpError>(), 64);
+        assert_eq!(size_of::<HttpError>(), 72);
     }
 
     #[test]
@@ -477,6 +500,40 @@ mod tests {
 
         // Later calls should return None
         assert!(error.take_request().is_none());
+    }
+
+    #[test]
+    fn request_info_none_by_default() {
+        let error = HttpError::validation("no info");
+        assert!(error.request_info().is_none());
+    }
+
+    #[test]
+    fn with_request_info_round_trips() {
+        let info = RequestInfo {
+            attempt: Some(recoverable::Attempt::new(2, true)),
+            ..Default::default()
+        };
+        let error = HttpError::validation("with info").with_request_info(info);
+
+        let stored = error.request_info().expect("request info should be attached");
+        let attempt = stored.attempt.expect("attempt should be present");
+        assert_eq!(attempt.index(), 2);
+    }
+
+    #[test]
+    fn request_info_outlives_take_request() {
+        let request = HttpRequestBuilder::new_fake().uri("https://dummy").build().unwrap();
+        let info = RequestInfo {
+            uri_template_label: Some(crate::UriTemplateLabel::new_static("/items")),
+            ..Default::default()
+        };
+
+        let mut error = HttpError::unavailable("rejected").with_request(request).with_request_info(info);
+
+        // Taking the request must not clear the metadata.
+        assert!(error.take_request().is_some());
+        assert!(error.request_info().is_some());
     }
 
     #[test]
