@@ -206,7 +206,7 @@ impl<K, V, CT> CacheBuilder<K, V, CT> {
     /// If not set, a name is derived from the storage type.
     ///
     /// Requires `&'static str` because the name is embedded in every telemetry
-    /// event (metric labels, log fields). A static reference avoids cloning the
+    /// event (tracing fields, handler callbacks). A static reference avoids cloning the
     /// name into a new allocation on each cache operation, which matters at high
     /// throughput. In practice, cache names are always string literals.
     #[must_use]

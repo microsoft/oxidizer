@@ -101,20 +101,16 @@ where
     ///
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        async {
-            self.inner.telemetry.record_fallback();
-            let fallback_value = self.inner.fallback.get(key).await?;
+        let fallback_value = self.inner.fallback.get(key).await?;
 
-            if let Some(ref v) = fallback_value {
-                // Insert errors are intentionally swallowed - a failed promotion should not
-                // fail the overall get. The CacheWrapper around the primary tier already
-                // records telemetry for the insert (Inserted, Rejected, or Error).
-                let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
-            }
-
-            Ok(fallback_value)
+        if let Some(ref v) = fallback_value {
+            // Insert errors are intentionally swallowed - a failed promotion should not
+            // fail the overall get. The CacheWrapper around the primary tier already
+            // records telemetry for the insert (Inserted, Rejected, or Error).
+            let _ = self.inner.primary.insert(key.clone(), v.clone()).await;
         }
-        .await
+
+        Ok(fallback_value)
     }
 }
 

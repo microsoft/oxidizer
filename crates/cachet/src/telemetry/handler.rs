@@ -31,11 +31,11 @@ pub struct CacheOperationEvent<'a> {
     pub request_id: RequestId,
     /// Name of the cache.
     pub cache_name: &'a str,
-    /// The span/operation name (e.g., "cache.get", "cache.insert").
+    /// The operation name (e.g., "cache.get", "cache.insert").
     pub operation: &'a str,
     /// Total duration of the operation.
     pub duration: Duration,
-    /// Whether the request was coalesced via stampede protection.
+    /// Whether this operation ran with stampede protection enabled.
     pub coalesced: bool,
 }
 

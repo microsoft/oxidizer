@@ -301,17 +301,6 @@ impl CacheTelemetry {
         );
     }
 
-    #[cfg_attr(
-        not(feature = "logs"),
-        expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
-    )]
-    pub(crate) fn record_fallback(&self) {
-        #[cfg(any(feature = "logs", test))]
-        if self.logging_enabled {
-            tracing::info!(cache.event = attributes::EVENT_FALLBACK, cache.fallback = true);
-        }
-    }
-
     /// Records that an entry was evicted from the cache due to capacity limits.
     ///
     /// When moka evicts during an `insert()`, the eviction listener runs
@@ -346,7 +335,7 @@ impl CacheTelemetry {
     pub(crate) fn record_background_expired(&self, cache_name: CacheName) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            tracing::debug!(cache.name = cache_name, cache.event = attributes::EVENT_EXPIRED);
+            tracing::info!(cache.name = cache_name, cache.event = attributes::EVENT_EXPIRED);
         }
 
         self.emit_tier_event(
@@ -429,7 +418,6 @@ mod tests {
             async {
                 telemetry.record_hit("my_test_cache", Duration::from_nanos(12345), false);
                 telemetry.complete_operation(request_id, "my_test_cache", "cache.get", Duration::from_nanos(12345), true);
-                telemetry.record_fallback();
             }
             .with_request_id(request_id)
             .await;
@@ -440,12 +428,10 @@ mod tests {
         capture.assert_contains(attributes::FIELD_DURATION_NS);
         capture.assert_contains(attributes::FIELD_OPERATION);
         capture.assert_contains(attributes::FIELD_COALESCED);
-        capture.assert_contains(attributes::FIELD_FALLBACK);
         capture.assert_contains("my_test_cache");
         capture.assert_contains(attributes::EVENT_HIT);
         capture.assert_contains("cache.get");
         capture.assert_contains("12345");
-        capture.assert_contains("cache.fallback");
         capture.assert_contains("true");
     }
 
@@ -513,7 +499,6 @@ mod tests {
                 telemetry.record_hit("c", Duration::ZERO, false);
                 telemetry.record_get_error("c", Duration::ZERO, false);
                 telemetry.record_insert_rejected("c", false);
-                telemetry.record_fallback();
                 telemetry.complete_operation(request_id, "c", "cache.get", Duration::ZERO, true);
             }
             .with_request_id(request_id),

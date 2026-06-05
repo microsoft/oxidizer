@@ -7,7 +7,8 @@
 //! `tracing_subscriber::Layer`.
 //!
 //! **Tier events** (hit, miss, expired, etc.) carry `FIELD_NAME`, `FIELD_EVENT`,
-//! and `FIELD_DURATION_NS`.
+//! and `FIELD_DURATION_NS`. The exception is `EVENT_INSERT_REJECTED`, which
+//! omits `FIELD_DURATION_NS` (rejection is instantaneous, not timed).
 //!
 //! **Operation-complete events** carry `FIELD_NAME`, `FIELD_OPERATION`,
 //! `FIELD_DURATION_NS`, and `FIELD_COALESCED`.
@@ -49,11 +50,8 @@ pub const FIELD_DURATION_NS: &str = "cache.duration_ns";
 /// Field name for the cache operation name.
 pub const FIELD_OPERATION: &str = "cache.operation";
 
-/// Field name recording whether request coalescing was used.
+/// Field name recording whether stampede protection was enabled for the operation.
 pub const FIELD_COALESCED: &str = "cache.coalesced";
-
-/// Field name recording whether a fallback tier was consulted.
-pub const FIELD_FALLBACK: &str = "cache.fallback";
 
 // -- Event values (emitted in the `cache.event` field) --
 
@@ -100,9 +98,6 @@ pub const EVENT_REFRESH_MISS: &str = "cache.refresh_miss";
 /// Only emitted when eviction telemetry is enabled.
 pub const EVENT_EVICTION: &str = "cache.eviction";
 
-/// The operation used a fallback tier after the primary tier missed.
-pub const EVENT_FALLBACK: &str = "cache.fallback";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +110,6 @@ mod tests {
         assert_eq!(FIELD_DURATION_NS, "cache.duration_ns");
         assert_eq!(FIELD_OPERATION, "cache.operation");
         assert_eq!(FIELD_COALESCED, "cache.coalesced");
-        assert_eq!(FIELD_FALLBACK, "cache.fallback");
     }
 
     #[test]
@@ -135,7 +129,6 @@ mod tests {
             EVENT_REFRESH_HIT,
             EVENT_REFRESH_MISS,
             EVENT_EVICTION,
-            EVENT_FALLBACK,
         ];
 
         for (i, a) in events.iter().enumerate() {
