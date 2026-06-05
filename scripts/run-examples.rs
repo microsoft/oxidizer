@@ -31,7 +31,7 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// Examples that are expected to panic, hang, or require user interaction
 /// and so must be skipped by this runner.
 const EXCLUDED_EXAMPLES: &[&str] = &[
-    // Interactive — requires user input from stdin.
+    // Interactive - requires user input from stdin.
     "employees",
 ];
 

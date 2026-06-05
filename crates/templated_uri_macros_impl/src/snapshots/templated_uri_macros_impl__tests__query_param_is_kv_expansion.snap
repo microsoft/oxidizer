@@ -72,19 +72,19 @@ impl ::std::fmt::Debug for QueryTest {
 impl ::data_privacy::RedactedDisplay for QueryTest {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/api/")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, engine, f)?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, redactor, f)?;
         f.write_str("?")?;
         f.write_str("page")?;
         f.write_str("=")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, engine, f)?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, redactor, f)?;
         f.write_str("&")?;
         f.write_str("limit")?;
         f.write_str("=")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, engine, f)?;
+        <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, redactor, f)?;
         ::std::result::Result::Ok(())
     }
 }

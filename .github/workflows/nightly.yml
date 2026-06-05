@@ -15,7 +15,7 @@ jobs:
     outputs:
       should_skip: ${{ steps.check.outputs.should_skip }}
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.0.3
         with:
           fetch-depth: 0
 
@@ -38,7 +38,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -55,10 +55,19 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    # Suppression file: .miri-tree-borrows-skip
+    #
+    # Miri's tree-borrows mode tracks per-byte aliasing provenance,
+    # which can cause certain tests to exceed the runner's 16 GB memory
+    # limit even though the allocations under test are small. Tests
+    # listed in .miri-tree-borrows-skip (one fully-qualified path per
+    # line, # comments for justification) are passed as --skip arguments
+    # and reported as a ::warning annotation at the end of the run.
+    # These tests are functionally correct and pass on 32+ GB machines.
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -70,7 +79,32 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        run: |
+          # Build --skip arguments from the suppression file.
+          # See .miri-tree-borrows-skip for the list and justifications.
+          SKIP_ARGS=""
+          SKIPPED_TESTS=()
+          if [[ -f .miri-tree-borrows-skip ]]; then
+            while IFS= read -r line; do
+              line="${line%%#*}"    # strip inline comments
+              line="${line// /}"    # trim whitespace
+              [[ -z "$line" ]] && continue
+              SKIP_ARGS="$SKIP_ARGS --skip $line"
+              SKIPPED_TESTS+=("$line")
+            done < .miri-tree-borrows-skip
+          fi
+
+          cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests \
+            -- $SKIP_ARGS
+
+          # Report skipped tests clearly at the end
+          if [[ ${#SKIPPED_TESTS[@]} -gt 0 ]]; then
+            echo ""
+            echo "::warning::${#SKIPPED_TESTS[@]} test(s) skipped via .miri-tree-borrows-skip (tree-borrows provenance tracking exceeds runner memory):"
+            for t in "${SKIPPED_TESTS[@]}"; do
+              echo "  - $t"
+            done
+          fi
         timeout-minutes: 240
 
   miri-strict-provenance:
@@ -80,7 +114,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -103,7 +137,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6.0.3
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -156,3 +190,4 @@ jobs:
               --body "$ISSUE_BODY" \
               --label "bug"
           fi
+

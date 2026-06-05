@@ -92,11 +92,11 @@ impl ::std::fmt::Debug for OptionalTest {
 impl ::data_privacy::RedactedDisplay for OptionalTest {
     fn fmt(
         &self,
-        engine: &::data_privacy::RedactionEngine,
+        redactor: &dyn ::data_privacy::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/items/")?;
-        <u32 as ::data_privacy::RedactedDisplay>::fmt(&self.id, engine, f)?;
+        <u32 as ::data_privacy::RedactedDisplay>::fmt(&self.id, redactor, f)?;
         {
             let mut __first = true;
             {
@@ -109,7 +109,7 @@ impl ::data_privacy::RedactedDisplay for OptionalTest {
                 f.write_str("=")?;
                 <String as ::data_privacy::RedactedDisplay>::fmt(
                     &self.filter,
-                    engine,
+                    redactor,
                     f,
                 )?;
                 __first = false;
@@ -122,7 +122,7 @@ impl ::data_privacy::RedactedDisplay for OptionalTest {
                 }
                 f.write_str("limit")?;
                 f.write_str("=")?;
-                <u32 as ::data_privacy::RedactedDisplay>::fmt(__val, engine, f)?;
+                <u32 as ::data_privacy::RedactedDisplay>::fmt(__val, redactor, f)?;
                 __first = false;
             }
         }

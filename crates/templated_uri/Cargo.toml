@@ -18,10 +18,13 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/templated_u
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
-    "data_privacy::data_class::DataClass",
-    "data_privacy::redacted::RedactedDebug",
-    "data_privacy::redacted::RedactedDisplay",
-    "data_privacy::redaction_engine::RedactionEngine",
+    "data_privacy_core::classified::Classified",
+    "data_privacy_core::data_class::DataClass",
+    "data_privacy_core::data_class::IntoDataClass",
+    "data_privacy_core::redacted::RedactedDebug",
+    "data_privacy_core::redacted::RedactedDisplay",
+    "data_privacy_core::redacted::RedactedToString",
+    "data_privacy_core::redactor::Redactor",
     "data_privacy::sensitive::Sensitive",
     "http::error::Error",
     "http::uri::authority::Authority",
