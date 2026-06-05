@@ -184,6 +184,8 @@
 //! and servers based on [`hyper`](https://docs.rs/hyper/latest/hyper/) like [`reqwest`](https://docs.rs/reqwest/latest/reqwest/).
 
 pub mod _documentation;
+#[doc(hidden)]
+pub mod __private;
 
 mod base_path;
 mod base_uri;
@@ -198,11 +200,6 @@ mod uri;
 
 pub use base_path::BasePath;
 pub use base_uri::BaseUri;
-// Re-export the `data_privacy` traits used by macro-generated code so that
-// downstream crates using the `templated` macro do not need a direct
-// dependency on `data_privacy` (mirrors the `http` re-export below).
-#[doc(hidden)]
-pub use data_privacy::{RedactedDisplay, Redactor};
 pub use error::UriError;
 pub use escape::{Escape, Raw};
 pub use escaped::{EscapeError, Escaped, EscapedString};

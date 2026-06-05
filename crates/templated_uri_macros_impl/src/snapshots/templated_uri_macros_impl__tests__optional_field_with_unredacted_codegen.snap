@@ -81,10 +81,10 @@ impl ::std::fmt::Debug for OptionalUnredactedTest {
         f.debug_tuple("OptionalUnredactedTest").field(&"/items{?filter,limit}").finish()
     }
 }
-impl ::templated_uri::RedactedDisplay for OptionalUnredactedTest {
+impl ::templated_uri::__private::RedactedDisplay for OptionalUnredactedTest {
     fn fmt(
         &self,
-        redactor: &dyn ::templated_uri::Redactor,
+        redactor: &dyn ::templated_uri::__private::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/items")?;
