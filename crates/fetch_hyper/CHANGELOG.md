@@ -6,10 +6,6 @@
 
   - bump `ohno_macros` to 0.3.3
 
-- ✨ Features
-
-  - introduce fetch_options ([#469](https://github.com/microsoft/oxidizer/pull/469))
-
 ## [0.3.1] - 2026-06-04
 
 - 🔧 Maintenance
