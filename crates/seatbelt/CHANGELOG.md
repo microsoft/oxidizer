@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.4] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
+
 ## [0.5.3] - 2026-06-02
 
 - 🔧 Maintenance

@@ -199,20 +199,20 @@ This crate provides several optional features that can be enabled in your `Cargo
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/seatbelt">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYvFWrvv8310bVH74l03n0WQbkisnDrQ6OyIbDoEzq0lVXmRhZIWCZ2xheWVyZWRlMC4zLjKCa3JlY292ZXJhYmxlZTAuMS40gmhzZWF0YmVsdGUwLjUuM4JkdGlja2UwLjMuMoJtdG93ZXJfc2VydmljZWUwLjMuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYvFWrvv8310bVH74l03n0WQbkisnDrQ6OyIbDoEzq0lVXmRhZIWCZ2xheWVyZWRlMC4zLjKCa3JlY292ZXJhYmxlZTAuMS40gmhzZWF0YmVsdGUwLjUuNIJkdGlja2UwLjMuM4JtdG93ZXJfc2VydmljZWUwLjMuMw
  [__link0]: https://crates.io/crates/layered/0.3.2
  [__link1]: https://docs.rs/layered/0.3.2/layered/?search=Stack
- [__link10]: https://docs.rs/seatbelt/0.5.3/seatbelt/hedging/index.html
- [__link11]: https://docs.rs/seatbelt/0.5.3/seatbelt/breaker/index.html
- [__link12]: https://docs.rs/seatbelt/0.5.3/seatbelt/fallback/index.html
- [__link13]: https://docs.rs/seatbelt/0.5.3/seatbelt/chaos/index.html
- [__link14]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=chaos::injection
- [__link15]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=chaos::latency
+ [__link10]: https://docs.rs/seatbelt/0.5.4/seatbelt/hedging/index.html
+ [__link11]: https://docs.rs/seatbelt/0.5.4/seatbelt/breaker/index.html
+ [__link12]: https://docs.rs/seatbelt/0.5.4/seatbelt/fallback/index.html
+ [__link13]: https://docs.rs/seatbelt/0.5.4/seatbelt/chaos/index.html
+ [__link14]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=chaos::injection
+ [__link15]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=chaos::latency
  [__link16]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout.rs
  [__link17]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/timeout_advanced.rs
  [__link18]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry.rs
  [__link19]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_advanced.rs
- [__link2]: https://docs.rs/tick/0.3.2/tick/?search=Clock
+ [__link2]: https://docs.rs/tick/0.3.3/tick/?search=Clock
  [__link20]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/retry_outage.rs
  [__link21]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/breaker.rs
  [__link22]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/hedging.rs
@@ -223,19 +223,19 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link27]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/config.json
  [__link28]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection.rs
  [__link29]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_injection_advanced.rs
- [__link3]: https://crates.io/crates/tick/0.3.2
+ [__link3]: https://crates.io/crates/tick/0.3.3
  [__link30]: https://github.com/microsoft/oxidizer/blob/main/crates/seatbelt/examples/chaos_latency.rs
- [__link31]: https://docs.rs/seatbelt/0.5.3/seatbelt/timeout/index.html
- [__link32]: https://docs.rs/seatbelt/0.5.3/seatbelt/retry/index.html
- [__link33]: https://docs.rs/seatbelt/0.5.3/seatbelt/hedging/index.html
- [__link34]: https://docs.rs/seatbelt/0.5.3/seatbelt/breaker/index.html
- [__link35]: https://docs.rs/seatbelt/0.5.3/seatbelt/fallback/index.html
- [__link36]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=chaos::injection
- [__link37]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=chaos::latency
+ [__link31]: https://docs.rs/seatbelt/0.5.4/seatbelt/timeout/index.html
+ [__link32]: https://docs.rs/seatbelt/0.5.4/seatbelt/retry/index.html
+ [__link33]: https://docs.rs/seatbelt/0.5.4/seatbelt/hedging/index.html
+ [__link34]: https://docs.rs/seatbelt/0.5.4/seatbelt/breaker/index.html
+ [__link35]: https://docs.rs/seatbelt/0.5.4/seatbelt/fallback/index.html
+ [__link36]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=chaos::injection
+ [__link37]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=chaos::latency
  [__link38]: https://docs.rs/tower_service/0.3.3/tower_service/?search=Service
- [__link4]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=ResilienceContext
- [__link5]: https://docs.rs/seatbelt/0.5.3/seatbelt/?search=ResilienceContext
+ [__link4]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=ResilienceContext
+ [__link5]: https://docs.rs/seatbelt/0.5.4/seatbelt/?search=ResilienceContext
  [__link6]: https://docs.rs/recoverable/0.1.4/recoverable/?search=RecoveryInfo
  [__link7]: https://docs.rs/recoverable/0.1.4/recoverable/?search=Recovery
- [__link8]: https://docs.rs/seatbelt/0.5.3/seatbelt/timeout/index.html
- [__link9]: https://docs.rs/seatbelt/0.5.3/seatbelt/retry/index.html
+ [__link8]: https://docs.rs/seatbelt/0.5.4/seatbelt/timeout/index.html
+ [__link9]: https://docs.rs/seatbelt/0.5.4/seatbelt/retry/index.html
