@@ -789,3 +789,200 @@ publish = true
         $rootContent | Should -Match '(?m)^foo_bar\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"' -Because 'A sibling crate whose name ends in the target name must not be rewritten.'
     }
 }
+
+# --------------------------------------------------------------------------
+# Invoke-ResolvedRelease — atomic multi-package on-disk product.
+#
+# Pins the contract that, when a multi-package plan executes successfully,
+# every artefact for every release-set member is written: per-package
+# Cargo.toml (new [package] version), workspace root Cargo.toml (new
+# inline-dep version in [workspace.dependencies]), per-package CHANGELOG
+# (new version section prepended, with cascade-from-dependency bullets on
+# cascade-source members), and Update-Readme invoked once per member.
+#
+# Unit-level coverage of each helper proves the helpers work in isolation;
+# this test pins that Invoke-ResolvedRelease wires them all into the per-
+# folder loop so a regression that wrote Cargo.toml but skipped CHANGELOG
+# (or vice versa) is caught — the regression mode the test-suite review
+# identified as the most plausible silent-correctness gap.
+# --------------------------------------------------------------------------
+
+Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
+    BeforeAll {
+        . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+    }
+
+    It 'writes Cargo.toml + workspace Cargo.toml + CHANGELOG + Update-Readme call for every plan member' {
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'invoke-resolved-release-atomic')
+
+        # Replace the bare `## [Unreleased]` placeholder (no trailing newline)
+        # with a body that the Extract-UnreleasedSection regex can actually
+        # match, so the new version section folds the manually-curated note
+        # in — exercising the most common production shape.
+        $upstreamChangelog   = Join-Path $ws.Path 'crates\upstream\CHANGELOG.md'
+        $downstreamChangelog = Join-Path $ws.Path 'crates\downstream\CHANGELOG.md'
+        $changelogBody = @(
+            '# Changelog',
+            '',
+            '## [Unreleased]',
+            '',
+            '- manually curated note',
+            ''
+        ) -join "`n"
+        Set-Content -LiteralPath $upstreamChangelog   -Value $changelogBody -NoNewline
+        Set-Content -LiteralPath $downstreamChangelog -Value $changelogBody -NoNewline
+
+        # Touch each package with a conventional-commit-formatted message so
+        # Write-Changelog has something to fold into the new section — also
+        # proves Write-Changelog ran (a no-modification call would early-
+        # return with a warning and leave the CHANGELOG untouched).
+        $ws.ModifySource('upstream',   '// upstream feature')
+        $ws.AddCommit('feat(upstream): add upstream feature')
+        $ws.ModifySource('downstream', '// downstream tweak')
+        $ws.AddCommit('feat(downstream): use new upstream feature')
+
+        $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+
+        # Hand-build the ResolvedReleaseSet that Resolve-ReleaseSet would
+        # produce for: -Packages upstream@non-breaking. On 0.x, non-breaking
+        # collapses to a patch bump (0.2.0 -> 0.2.1). Cascade reaches
+        # downstream as 'non-breaking' (no cargo_check_external_types declared
+        # on either side, so the dep is treated as exposing; the upstream
+        # non-breaking is not breaking, so the exposing change type carries
+        # through to downstream non-breaking → 0.1.0 -> 0.1.1).
+        $upstreamCascadeReasons   = New-Object 'System.Collections.Generic.List[object]'
+        $downstreamCascadeReasons = New-Object 'System.Collections.Generic.List[object]'
+        [void]$downstreamCascadeReasons.Add([pscustomobject]@{
+            Target   = 'upstream'
+            Version  = '0.2.1'
+            Breaking = $false
+        })
+
+        $resolved = [ordered]@{
+            upstream = [pscustomobject]@{
+                Folder                   = 'upstream'
+                Name                     = 'upstream'
+                CurrentVersion           = '0.2.0'
+                EffectiveTargetVersion   = '0.2.1'
+                EffectiveChangeType      = 'non-breaking'
+                Source                   = 'user'
+                AutoUpgraded             = $false
+                PinHonoredAgainstCascade = $false
+                CascadeReasons           = $upstreamCascadeReasons
+            }
+            downstream = [pscustomobject]@{
+                Folder                   = 'downstream'
+                Name                     = 'downstream'
+                CurrentVersion           = '0.1.0'
+                EffectiveTargetVersion   = '0.1.1'
+                EffectiveChangeType      = 'non-breaking'
+                Source                   = 'cascade'
+                AutoUpgraded             = $false
+                PinHonoredAgainstCascade = $false
+                CascadeReasons           = $downstreamCascadeReasons
+            }
+        }
+
+        # Mock Update-Readme so we can assert it was invoked once per member
+        # without depending on cargo-doc2readme being installed or a real
+        # README.j2 template existing in the synthetic workspace. The other
+        # helpers (Update-PackageVersion / Write-Changelog) are exercised
+        # for real so their on-disk side effects are observable.
+        Mock -CommandName Update-Readme -MockWith { } -Verifiable:$false
+
+        Push-Location $ws.Path
+        try {
+            $releases = @(Invoke-ResolvedRelease `
+                -RepoRoot $ws.Path `
+                -RootCargoToml $rootCargo `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $workspaceBaseline)
+        } finally {
+            Pop-Location
+        }
+
+        # --- Returned records: topo order (deps first), one per release-set member.
+        $releases.Count | Should -Be 2
+        $releases[0].Package    | Should -Be 'upstream'
+        $releases[0].OldVersion | Should -Be '0.2.0'
+        $releases[0].NewVersion | Should -Be '0.2.1'
+        $releases[1].Package    | Should -Be 'downstream'
+        $releases[1].OldVersion | Should -Be '0.1.0'
+        $releases[1].NewVersion | Should -Be '0.1.1'
+
+        # --- Per-package Cargo.toml: the [package] version line is rewritten,
+        # other [package] fields are preserved verbatim.
+        $upstreamCargo   = Get-Content (Join-Path $ws.Path 'crates\upstream\Cargo.toml') -Raw
+        $downstreamCargo = Get-Content (Join-Path $ws.Path 'crates\downstream\Cargo.toml') -Raw
+        $upstreamCargo   | Should -Match '(?m)^version\s*=\s*"0\.2\.1"'
+        $upstreamCargo   | Should -Not -Match '(?m)^version\s*=\s*"0\.2\.0"'
+        $upstreamCargo   | Should -Match '(?m)^name\s*=\s*"upstream"'
+        $downstreamCargo | Should -Match '(?m)^version\s*=\s*"0\.1\.1"'
+        $downstreamCargo | Should -Not -Match '(?m)^version\s*=\s*"0\.1\.0"'
+        $downstreamCargo | Should -Match '(?m)^name\s*=\s*"downstream"'
+        # Dependency declaration in downstream Cargo.toml is preserved (workspace inheritance).
+        $downstreamCargo | Should -Match '(?m)^upstream\.workspace\s*=\s*true'
+
+        # --- Root Cargo.toml: both [workspace.dependencies] entries are updated.
+        $rootContent = Get-Content $rootCargo -Raw
+        $rootContent | Should -Match '(?m)^upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.1"'
+        $rootContent | Should -Match '(?m)^downstream\s*=\s*\{[^}]*version\s*=\s*"0\.1\.1"'
+        $rootContent | Should -Not -Match '(?m)^upstream\s*=\s*\{[^}]*version\s*=\s*"0\.2\.0"'
+        $rootContent | Should -Not -Match '(?m)^downstream\s*=\s*\{[^}]*version\s*=\s*"0\.1\.0"'
+
+        # --- Per-package CHANGELOG: new version section was prepended.
+        $today = (Get-Date).ToString('yyyy-MM-dd')
+        $upstreamChangelogText   = Get-Content $upstreamChangelog   -Raw
+        $downstreamChangelogText = Get-Content $downstreamChangelog -Raw
+
+        # Top-level `# Changelog` header is preserved.
+        $upstreamChangelogText   | Should -Match '(?m)^# Changelog'
+        $downstreamChangelogText | Should -Match '(?m)^# Changelog'
+
+        # New version section header (with today's date) appears in both.
+        $upstreamChangelogText   | Should -Match ('(?m)^## \[0\.2\.1\] - ' + [regex]::Escape($today))
+        $downstreamChangelogText | Should -Match ('(?m)^## \[0\.1\.1\] - ' + [regex]::Escape($today))
+
+        # The manually-curated `## [Unreleased]` body line was folded into
+        # the new version section (and the now-empty Unreleased heading was
+        # stripped — Extract-UnreleasedSection consumed it).
+        $upstreamChangelogText   | Should -Match 'manually curated note'
+        $downstreamChangelogText | Should -Match 'manually curated note'
+        $upstreamChangelogText   | Should -Not -Match '(?m)^## \[Unreleased\]'
+        $downstreamChangelogText | Should -Not -Match '(?m)^## \[Unreleased\]'
+
+        # Conventional-commit bullets from the feat(...) commits are grouped
+        # under a `Features` section header.
+        $upstreamChangelogText   | Should -Match 'Features'
+        $upstreamChangelogText   | Should -Match 'add upstream feature'
+        $downstreamChangelogText | Should -Match 'Features'
+        $downstreamChangelogText | Should -Match 'use new upstream feature'
+
+        # downstream is cascade-from-dependency: a Maintenance section with
+        # a `Now requires <version> of <target>` bullet must be emitted even
+        # though the package only had a feat commit (cascade bullets live in
+        # their own section, separate from the conventional-commit ones).
+        $downstreamChangelogText | Should -Match '🔧 Maintenance'
+        $downstreamChangelogText | Should -Match 'Now requires `0\.2\.1` of `upstream`'
+
+        # --- Update-Readme: invoked once per release-set member, with the
+        # right per-package arguments. This is the README half of the
+        # atomicity contract — Update-Readme is the only per-folder side
+        # effect that doesn't produce an on-disk artefact in this fixture
+        # (no README.j2 template, so the real implementation warns and
+        # returns), and asserting the call count + arguments closes the
+        # "wrote Cargo.toml but skipped README regen" regression mode.
+        Should -Invoke -CommandName Update-Readme -Times 2 -Exactly
+        Should -Invoke -CommandName Update-Readme -Times 1 -Exactly `
+            -ParameterFilter { $packageName -eq 'upstream' }
+        Should -Invoke -CommandName Update-Readme -Times 1 -Exactly `
+            -ParameterFilter { $packageName -eq 'downstream' }
+
+        # No README.md was written by the real path either (no template).
+        (Test-Path (Join-Path $ws.Path 'crates\upstream\README.md'))   | Should -BeFalse
+        (Test-Path (Join-Path $ws.Path 'crates\downstream\README.md')) | Should -BeFalse
+    }
+}
+

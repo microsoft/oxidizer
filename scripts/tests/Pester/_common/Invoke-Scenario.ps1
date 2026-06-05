@@ -104,6 +104,15 @@ function Invoke-Scenario {
         $caught = $null
 
         $runMode = if ($scenario.Run.Mode) { $scenario.Run.Mode } else { 'targeted' }
+        # Run.Force is only meaningful in targeted mode — production rejects
+        # `-Force` for changed/all because those modes don't accept explicit
+        # version pins, so the pin-vs-cascade rejection that -Force overrides
+        # cannot fire. Mirror that contract here so scenario PSD1s can't
+        # accidentally exercise a code path production also rejects.
+        $useForce = [bool]$scenario.Run.Force
+        if ($useForce -and $runMode -ne 'targeted') {
+            throw "Scenario '$($scenario.Name)' sets Run.Force but Run.Mode='$runMode'; -Force is only valid in targeted mode (it overrides the pin-vs-cascade rejection that only applies to explicit version pins)."
+        }
         if ($runMode -in @('changed', 'all')) {
             if ($null -ne $scenario.Run.Packages -or $null -ne $scenario.Run.PackageName) {
                 throw "Scenario '$($scenario.Name)' uses Run.Mode='$runMode' but also sets Run.Packages/Run.PackageName; choose one."
@@ -144,7 +153,9 @@ function Invoke-Scenario {
             }
 
             try {
-                $releases = Invoke-ReleasePackagesMain -Mode 'targeted' -Packages $packageTokens 6> $null
+                $invokeArgs = @{ Mode = 'targeted'; Packages = $packageTokens }
+                if ($useForce) { $invokeArgs.Force = $true }
+                $releases = Invoke-ReleasePackagesMain @invokeArgs 6> $null
             } catch {
                 $caught = $_
                 $releases = @()
