@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Release-flow library: helpers and orchestration for scripts/release-packages.ps1.

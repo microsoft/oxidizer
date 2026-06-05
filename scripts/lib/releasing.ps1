@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Shared helpers for package-release tooling. Dot-source from other scripts; never run directly.

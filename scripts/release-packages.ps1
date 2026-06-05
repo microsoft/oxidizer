@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Releases one or more workspace packages from a single bundled plan.

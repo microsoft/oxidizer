@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Flags for reviewer attention any workspace packages with unreleased

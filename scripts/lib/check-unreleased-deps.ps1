@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Library backing scripts/check-unreleased-dependencies.ps1. Holds the
@@ -22,10 +24,10 @@
 
 # Appends "$Name=$Value" to $env:GITHUB_OUTPUT, when defined. A no-op outside
 # GitHub Actions so local invocations don't blow up. -LiteralPath bypasses
-# wildcard interpretation in case $env:GITHUB_OUTPUT contains characters PowerShell
-# would otherwise treat as glob metacharacters; -Encoding utf8 is pinned explicitly so
-# the file format is deterministic across PowerShell versions (Windows PowerShell 5.1
-# defaults to UTF-8 with BOM, which GitHub Actions accepts but is needlessly fragile).
+# wildcard interpretation in case $env:GITHUB_OUTPUT contains characters
+# PowerShell would otherwise treat as glob metacharacters. PowerShell 7
+# (required by the #Requires above) defaults Add-Content to utf8NoBOM, which
+# is exactly what GitHub Actions expects.
 function Set-StepOutput {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -33,7 +35,7 @@ function Set-StepOutput {
     )
 
     if ([string]::IsNullOrEmpty($env:GITHUB_OUTPUT)) { return }
-    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value" -Encoding utf8
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$Name=$Value"
 }
 
 # Returns the absolute repo root by asking git. Anchors the git call to this
@@ -232,7 +234,7 @@ function Invoke-CheckUnreleasedDependencies {
             -NotReleasedFindings  $notReleased `
             -ElevationCandidates  $elevationCandidates
 
-        Set-Content -LiteralPath $OutputFile -Value $content -Encoding utf8 -NoNewline
+        Set-Content -LiteralPath $OutputFile -Value $content -NoNewline
 
         $findingCount = $findings.Count
         $findingNoun = if ($findingCount -eq 1) { 'finding' } else { 'findings' }
