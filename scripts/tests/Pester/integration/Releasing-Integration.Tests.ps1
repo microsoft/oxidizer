@@ -27,14 +27,17 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.ModifySource('upstream')
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('PR commit')
+        # downstream's release artefact must have source modifications past its
+        # baseline for the LIVE filter to use it as a BFS root.
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
-        $findings.Count | Should -Be 1
-        $findings[0].Folder | Should -Be 'upstream'
-        $findings[0].DependencyChains[0] | Should -Be @('downstream', 'upstream')
+        $up = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $up | Should -Not -BeNullOrEmpty
+        $up.DependencyChains[0] | Should -Be @('downstream', 'upstream')
         # CurrentVersion threads through from cargo metadata so the menu can
         # render concrete version transitions (e.g. "0.2.0 -> 0.3.0").
-        $findings[0].CurrentVersion | Should -Be '0.2.0'
+        $up.CurrentVersion | Should -Be '0.2.0'
     }
 
     It 'N2 — earlier-PR upstream edit + current-PR downstream change is flagged' {
@@ -46,6 +49,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # Current PR changes downstream only:
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('current PR: downstream version change')
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
@@ -77,6 +81,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # Current PR: change downstream only.
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('release downstream')
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
@@ -91,6 +96,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # Current PR: change 'a' only. Middle 'b' is unchanged.
         $ws.SetVersion('a', '0.1.1')
         $ws.AddCommit('current PR: change a')
+        $ws.ModifySource('a')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'c'
@@ -106,6 +112,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.AddCommit('previous PR: upstream changelog tweak')
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('current PR: change downstream')
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
@@ -148,8 +155,10 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         # Current PR: change downstream (committed).
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('change downstream')
-        # Uncommitted: tweak upstream source.
+        # Uncommitted: tweak upstream source AND downstream source so downstream
+        # qualifies as a BFS root under the LIVE filter.
         $ws.ModifySource('upstream')
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
@@ -161,6 +170,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('change downstream')
         Set-Content -Path (Join-Path $ws.Path 'crates\upstream\src\extra.rs') -Value '// new'
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $findings.Folder | Should -Contain 'upstream'
@@ -202,6 +212,10 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('left',  '0.2.1')
         $ws.SetVersion('right', '0.3.1')
         $ws.AddCommit('current PR: change left + right')
+        # Both release-set members must have source mods past their baselines
+        # for the LIVE filter to use them as BFS roots.
+        $ws.ModifySource('left')
+        $ws.ModifySource('right')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $bottom = $findings | Where-Object { $_.Folder -eq 'bottom' }
@@ -234,9 +248,13 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.SetVersion('a', '0.1.1')
         $ws.SetVersion('b', '0.2.1')
         $ws.AddCommit('current PR: change a + b')
+        # Release-set members must have source mods past their baselines for the
+        # LIVE filter to use them as BFS roots.
+        $ws.ModifySource('a')
+        $ws.ModifySource('b')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
-        $findings.Folder | Should -Be 'c'
+        $findings.Folder | Should -Contain 'c'
         $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
         @($cFinding.DependencyChains).Count | Should -Be 1
         @($cFinding.DependencyChains)[0] -join ',' | Should -Be 'a,b,c'
@@ -248,6 +266,7 @@ Describe 'Get-UnreleasedModifiedDependencies: BFS / topology' {
         $ws.ModifySource('upstream')
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('mod upstream + change downstream')
+        $ws.ModifySource('downstream')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
@@ -371,6 +390,108 @@ Describe 'Get-UnreleasedModifiedDependencies: release-set elevation (Invariant B
     }
 }
 
+# --------------------------------------------------------------------------
+# Get-UnreleasedModifiedDependencies — LIVE-flow filter contract:
+#   A release-set member is only treated as a BFS root when it ALSO has its
+#   own source modifications past its per-package baseline. Pure-cascade
+#   members (version bump only, no source changes) cannot have started
+#   consuming new features in their dependencies, so BFS from them would
+#   only produce false positives.
+# --------------------------------------------------------------------------
+
+Describe 'Get-UnreleasedModifiedDependencies: LIVE-flow BFS-root filter' {
+
+    # Helper: build a Linear2 workspace where 'upstream' has source mods,
+    # 'downstream' depends on 'upstream', and provide a ResolvedReleaseSet
+    # parameterised by 'downstream's Source ('cascade' or 'user') and
+    # whether 'downstream' has its own modifications.
+    function script:NewLiveFilterFixture {
+        param(
+            [string]$Path,
+            [switch]$ModifyDownstream
+        )
+        $ws = New-SyntheticWorkspace -Preset Linear2 -Path $Path
+        $ws.ModifySource('upstream')
+        if ($ModifyDownstream) { $ws.ModifySource('downstream') }
+        $ws.AddCommit('mods')
+        return $ws
+    }
+
+    function script:NewSyntheticReleaseSet {
+        param([string]$Folder, [string]$Name, [string]$Source)
+        @{ $Folder = [pscustomobject]@{
+                Folder                  = $Folder
+                Name                    = $Name
+                CurrentVersion          = '0.1.0'
+                EffectiveChangeType     = 'patch'
+                EffectiveTargetVersion  = '0.1.1'
+                Source                  = $Source
+                AutoUpgraded            = $false
+                CascadeReasons          = New-Object 'System.Collections.Generic.List[object]'
+            } }
+    }
+
+    It 'does NOT BFS from a cascade-source release-set member with no own modifications (so its modified deps are not surfaced)' {
+        Reset-ReleaseScriptCaches
+        # 'downstream' is in the release set but only because of a
+        # mechanical cascade bump; it has no source changes of its own.
+        # 'upstream' IS modified. Under the LIVE filter, 'downstream' is
+        # NOT a BFS root, so 'upstream' is never reached and no findings
+        # surface — the user is not pestered about an unreachable dep.
+        $ws = NewLiveFilterFixture -Path (Join-Path $TestDrive 'live-cascade-no-mods')
+        $set = NewSyntheticReleaseSet -Folder 'downstream' -Name 'downstream' -Source 'cascade'
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet $set)
+        $findings | Should -BeNullOrEmpty
+    }
+
+    It 'DOES BFS from a cascade-source release-set member that has its own modifications (its modified deps surface for review)' {
+        Reset-ReleaseScriptCaches
+        # Same shape but 'downstream' has its OWN modifications. Under the
+        # LIVE filter it IS a BFS root, so 'upstream' is reachable and
+        # surfaces as a dep finding. 'downstream' itself also surfaces via
+        # the Phase B sweep (Invariant B: cascade-source, below-breaking,
+        # with own mods → elevation candidate).
+        $ws = NewLiveFilterFixture -Path (Join-Path $TestDrive 'live-cascade-with-mods') -ModifyDownstream
+        $set = NewSyntheticReleaseSet -Folder 'downstream' -Name 'downstream' -Source 'cascade'
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet $set)
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet | Should -BeFalse
+    }
+
+    It 'does NOT BFS from a user-source release-set member without its own modifications (the precondition is mods, regardless of Source)' {
+        Reset-ReleaseScriptCaches
+        # The LIVE filter is source-agnostic: a user-source release-set
+        # member with no source modifications past its baseline is also
+        # not a BFS root. (In production this case is rare because the
+        # user typically only releases packages they have edited, but the
+        # filter is intentionally symmetric — a user-source release-set
+        # entry without source mods cannot have started depending on
+        # unreleased upstream features either.)
+        $ws = NewLiveFilterFixture -Path (Join-Path $TestDrive 'live-user-no-mods')
+        $set = NewSyntheticReleaseSet -Folder 'downstream' -Name 'downstream' -Source 'user'
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet $set)
+        $findings | Should -BeNullOrEmpty
+    }
+
+    It 'DOES BFS from a user-source release-set member that has its own modifications' {
+        Reset-ReleaseScriptCaches
+        $ws = NewLiveFilterFixture -Path (Join-Path $TestDrive 'live-user-with-mods') -ModifyDownstream
+        $set = NewSyntheticReleaseSet -Folder 'downstream' -Name 'downstream' -Source 'user'
+
+        $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet $set)
+        $u = $findings | Where-Object { $_.Folder -eq 'upstream' }
+        $u | Should -Not -BeNullOrEmpty
+        $u.InReleaseSet | Should -BeFalse
+        # User-source members are excluded from Phase B Invariant B sweep,
+        # so 'downstream' itself must NOT appear in findings.
+        $findings | Where-Object { $_.Folder -eq 'downstream' } | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invariant A)' {
 
     It 'uses the caller-provided snapshot instead of querying the working tree' {
@@ -385,9 +506,12 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
         $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $live.Folder | Should -Not -Contain 'upstream'
 
-        # With a synthetic snapshot claiming upstream IS modified, the BFS
-        # surfaces it as a classic (non-release-set) finding.
-        $snap = @{ 'upstream' = 3 }
+        # With a synthetic snapshot claiming both upstream IS modified AND the
+        # release-set member 'downstream' has source modifications past its
+        # baseline (required by the LIVE filter for downstream to be a BFS
+        # root), the BFS surfaces upstream as a classic (non-release-set)
+        # finding.
+        $snap = @{ 'upstream' = 3; 'downstream' = 1 }
         $with = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1') -ModifiedSnapshot $snap)
         $u = $with | Where-Object { $_.Folder -eq 'upstream' }
         $u | Should -Not -BeNullOrEmpty
@@ -402,6 +526,8 @@ Describe 'Get-UnreleasedModifiedDependencies: -ModifiedSnapshot honored (Invaria
         $ws.ModifySource('upstream')
         $ws.SetVersion('downstream', '0.1.1')
         $ws.AddCommit('mod upstream + change downstream')
+        # downstream needs source mods past its baseline to be a BFS root.
+        $ws.ModifySource('downstream')
 
         # Sanity check that the live query DOES find it.
         $live = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
@@ -528,17 +654,19 @@ Describe 'Get-UnreleasedModifiedDependencies: -IncludeAllModifiedAsRoots' {
 
     It 'behaves identically with or without the switch when no extra changed packages exist beyond the release set' {
         Reset-ReleaseScriptCaches
-        # Linear2: only upstream changed; downstream is a release-set member
-        # (cascade-source patch) by hand. Without the switch, upstream surfaces
-        # via downstream's BFS. With the switch, upstream is also a BFS root
-        # (no deps, no extra chains) and Phase B skips it (already a finding).
-        # Both calls should produce the same single finding with the same
-        # chain.
+        # Linear2: only upstream changed; downstream is a user-source release-set
+        # member (the user has already decided to release it). Both members carry
+        # modifications past their baselines. Without the switch, only downstream
+        # is a BFS root and surfaces upstream via 'downstream -> upstream'. With
+        # the switch, upstream is also a BFS root (no deps, no extra chains) and
+        # Phase B skips it (already a finding). downstream is excluded from the
+        # Phase B sweep in both modes because it is user-source. Both calls
+        # should produce the same single finding with the same chain.
         $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'iamar-regression')
         $rs = @{
             downstream = [pscustomobject]@{
                 Folder                = 'downstream'
-                Source                = 'cascade'
+                Source                = 'user'
                 EffectiveChangeType   = 'patch'
                 EffectiveTargetVersion = '0.1.1'
                 CurrentVersion        = '0.1.0'
@@ -546,7 +674,7 @@ Describe 'Get-UnreleasedModifiedDependencies: -IncludeAllModifiedAsRoots' {
                 CascadeReasons        = @()
             }
         }
-        $snap = @{ upstream = 1 }
+        $snap = @{ upstream = 1; downstream = 1 }
         $without = @(Get-UnreleasedModifiedDependencies `
             -RepoRoot $ws.Path -ResolvedReleaseSet $rs -ModifiedSnapshot $snap)
         $with = @(Get-UnreleasedModifiedDependencies `
@@ -585,6 +713,7 @@ Describe 'WorkspaceDependencyChains on findings' {
         $ws.AddCommit('previous PR: c edit')
         $ws.SetVersion('a', '0.1.1')
         $ws.AddCommit('current PR: change a')
+        $ws.ModifySource('a')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $cFinding = $findings | Where-Object { $_.Folder -eq 'c' }
@@ -607,6 +736,7 @@ Describe 'WorkspaceDependencyChains on findings' {
         $ws.AddCommit('previous PR: bottom edit')
         $ws.SetVersion('top', '0.1.1')
         $ws.AddCommit('current PR: change top')
+        $ws.ModifySource('top')
 
         $findings = @(Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~1'))
         $bottom = $findings | Where-Object { $_.Folder -eq 'bottom' }

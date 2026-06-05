@@ -5,6 +5,7 @@
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
     History = @(
+        @{ Op = 'ModifySource'; Package = 'a' }
         @{ Op = 'ModifySource'; Package = 'b' }
         @{ Op = 'ModifySource'; Package = 'c' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }

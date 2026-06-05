@@ -5,6 +5,7 @@
     Workspace = @{ Preset = 'Linear2' }   # downstream -> upstream
 
     History = @(
+        @{ Op = 'ModifySource'; Package = 'downstream' }
         @{ Op = 'ModifySource'; Package = 'upstream' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )

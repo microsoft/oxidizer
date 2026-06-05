@@ -24,7 +24,7 @@
 # --- DOT-SOURCE SHARED LIBRARY ---
 #
 # scripts/lib/releasing.ps1 owns the lower-level reusable building blocks used by
-# both the release flow below and scripts/check-unreleased-dependencies.ps1:
+# the release flow below:
 #   - Compiled regex patterns ($script:ConventionalCommitRegex, $script:PrReferenceRegex,
 #     $script:SemanticVersionRegex, $script:CargoPackageVersionRegex, $script:GitHubRepoRegex,
 #     $script:RegexEscapeRegex).

@@ -19,12 +19,15 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('upstream edit')
             $ws.SetVersion('downstream', '0.1.1')
             $ws.AddCommit('change downstream')
+            # downstream's release artefact must have source modifications past
+            # its baseline for the LIVE filter to use it as a BFS root.
+            $ws.ModifySource('downstream')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings | Should -HaveCount 1
-            $findings[0].Folder | Should -Be 'upstream'
-            $findings[0].DependencyChains | Should -HaveCount 1
-            $findings[0].DependencyChains[0] -join ',' | Should -Be 'downstream,upstream'
+            $up = $findings | Where-Object { $_.Folder -eq 'upstream' }
+            $up | Should -Not -BeNullOrEmpty
+            $up.DependencyChains | Should -HaveCount 1
+            $up.DependencyChains[0] -join ',' | Should -Be 'downstream,upstream'
         }
     }
 
@@ -35,10 +38,12 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('c edit')
             $ws.SetVersion('a', '0.1.1')
             $ws.AddCommit('change a')
+            $ws.ModifySource('a')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings.Folder | Should -Be 'c'
-            $findings[0].DependencyChains[0] -join ',' | Should -Be 'a,b,c'
+            $cf = $findings | Where-Object { $_.Folder -eq 'c' }
+            $cf | Should -Not -BeNullOrEmpty
+            $cf.DependencyChains[0] -join ',' | Should -Be 'a,b,c'
         }
     }
 
@@ -49,10 +54,12 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('d edit')
             $ws.SetVersion('a', '0.1.1')
             $ws.AddCommit('change a')
+            $ws.ModifySource('a')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings.Folder | Should -Be 'd'
-            $findings[0].DependencyChains[0] -join ',' | Should -Be 'a,b,c,d'
+            $df = $findings | Where-Object { $_.Folder -eq 'd' }
+            $df | Should -Not -BeNullOrEmpty
+            $df.DependencyChains[0] -join ',' | Should -Be 'a,b,c,d'
         }
     }
 
@@ -63,10 +70,12 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('bottom edit')
             $ws.SetVersion('top', '0.1.1')
             $ws.AddCommit('change top')
+            $ws.ModifySource('top')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings.Folder | Should -Be 'bottom'
-            $findings[0].DependencyChains.Count | Should -BeGreaterOrEqual 1
+            $bf = $findings | Where-Object { $_.Folder -eq 'bottom' }
+            $bf | Should -Not -BeNullOrEmpty
+            $bf.DependencyChains.Count | Should -BeGreaterOrEqual 1
         }
     }
 
@@ -77,10 +86,12 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('macros_impl edit')
             $ws.SetVersion('user', '0.1.1')
             $ws.AddCommit('change user')
+            $ws.ModifySource('user')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings.Folder | Should -Be 'macros_impl'
-            $findings[0].DependencyChains[0] -join ',' | Should -Be 'user,macros,macros_impl'
+            $mf = $findings | Where-Object { $_.Folder -eq 'macros_impl' }
+            $mf | Should -Not -BeNullOrEmpty
+            $mf.DependencyChains[0] -join ',' | Should -Be 'user,macros,macros_impl'
         }
     }
 
@@ -93,10 +104,14 @@ Describe 'Topology presets (smoke)' {
             $ws.SetVersion('user2', '0.2.1')
             $ws.SetVersion('user3', '0.3.1')
             $ws.AddCommit('change users')
+            $ws.ModifySource('user1')
+            $ws.ModifySource('user2')
+            $ws.ModifySource('user3')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $findings.Folder | Should -Be 'shared_upstream'
-            $findings.DependencyChains.Count | Should -BeGreaterOrEqual 3
+            $sh = $findings | Where-Object { $_.Folder -eq 'shared_upstream' }
+            $sh | Should -Not -BeNullOrEmpty
+            $sh.DependencyChains.Count | Should -BeGreaterOrEqual 3
         }
     }
 
@@ -108,10 +123,12 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('upstream edits')
             $ws.SetVersion('target', '0.3.1')
             $ws.AddCommit('change target')
+            $ws.ModifySource('target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            @($findings).Count | Should -Be 2
-            ($findings | ForEach-Object Folder | Sort-Object) -join ',' | Should -Be 'upstream_a,upstream_b'
+            $folders = @($findings | ForEach-Object Folder)
+            $folders | Should -Contain 'upstream_a'
+            $folders | Should -Contain 'upstream_b'
 
             $dependents = Get-AllTransitiveDependents -packageName 'target' -repoRoot $ws.Path
             ($dependents | Sort-Object) -join ',' | Should -Be 'downstream_x,downstream_y'
@@ -127,9 +144,13 @@ Describe 'Topology presets (smoke)' {
             $ws.AddCommit('upstream edits')
             $ws.SetVersion('target', '0.1.1')
             $ws.AddCommit('change target')
+            $ws.ModifySource('target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            ($findings | ForEach-Object Folder) | Should -Be 'upstream_b'
+            $folders = @($findings | ForEach-Object Folder)
+            $folders | Should -Contain 'upstream_b'
+            $folders | Should -Not -Contain 'upstream_a'  # dev-dep, not surfaced
+            $folders | Should -Not -Contain 'utility'     # publish=false
         }
     }
 

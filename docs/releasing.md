@@ -35,10 +35,6 @@ This document is the reference for the human-driven release tooling in
   atomic application of all version-number increments, changelog
   updates, README regeneration, and `Cargo.toml` rewrites.
 
-- `scripts/check-unreleased-dependencies.ps1` — CI helper that flags for
-  reviewer attention any workspace packages with unreleased modifications
-  that are transitively pulled in by a package this PR is releasing.
-
 Maintainers SHOULD read the **Glossary** below before making changes to
 the release tooling; the rest of the codebase, the PR comments, the
 script output, and the unit tests all use these terms with the precise
@@ -123,9 +119,7 @@ meanings defined here.
   publish to crates.io. The local driver (`release-packages.ps1`)
   materialises it as the **resolved release set**: the caller's
   `-Packages` tokens plus everything pulled in by the cascade toward
-  dependents. The CI helper (`check-unreleased-dependencies.ps1`) has
-  no `-Packages` input, so it derives the same conceptual set from the
-  diff against the base ref.
+  dependents.
 
 - **Pending release** — a member of the release set that has not yet
   reached crates.io. Committed-vs-uncommitted is irrelevant: a
@@ -420,41 +414,6 @@ A package with no in-workspace dependents is shown with the hint
 "No in-workspace dependents".
 
 If you skip every prompt, the script exits without writing any files.
-
----
-
-## How `check-unreleased-dependencies.ps1` works
-
-The check script runs in CI on every pull request (the `release-deps`
-job in `.github/workflows/main.yml` has no path filter — every PR pays
-the cost of one dep-scan analysis). It computes the same dep-scan
-analysis as the interactive loop and posts a PR comment with two
-tables:
-
-- **Modifications not part of this release** — packages with unreleased
-  modifications transitively pulled in by something in the release set
-  but NOT themselves in the release set. The author may have
-  deliberately left them out because the modifications are immaterial;
-  the comment is advisory only.
-- **Elevation candidates** — release-set members with pre-existing
-  modifications whose cascade-applied change type is less than breaking.
-  Reviewers should confirm the cascade-applied change type is adequate.
-
-To act on a finding, re-run `release-packages.ps1` locally with a
-corrected `-Packages` argument that:
-
-- Adds any previously-skipped package as a new token (the planner will
-  fold it into the release set on top of any cascade-applied changes).
-- Strengthens the change type for any elevation candidate (the planner
-  re-stamps the cascade-applied version to match the elevated change
-  type).
-
-Because the planner reads on-disk state, you typically want to discard
-the prior run's changes first via `git reset` / `git restore` and then
-re-invoke from a clean tree. Re-running on top of existing on-disk
-increments would compound version-number increments rather than replace
-them — see
-[Re-running on the same branch](#re-running-on-the-same-branch).
 
 ---
 

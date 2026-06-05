@@ -15,6 +15,7 @@
     }
 
     History = @(
+        @{ Op = 'ModifySource'; Package = 'downstream' }
         @{ Op = 'ModifySource'; Package = 'upstream' }
         @{ Op = 'AddCommit';    Message = 'upstream edits' }
     )

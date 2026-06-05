@@ -251,54 +251,6 @@ jobs:
           header: semver-check
           delete: true
 
-  release-deps:
-    # Informational check: flags workspace packages that have unreleased modifications
-    # (changes newer than the package's own last `version =` / `publish =` commit) and
-    # are transitively depended on by a package this PR is releasing. The release set
-    # is derived from a PR-vs-base-ref version diff; the modification baseline is
-    # per-package, so previously-merged-but-unreleased changes are flagged too. See
-    # scripts/check-unreleased-dependencies.ps1.
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.3
-        with:
-          fetch-depth: 0
-      - name: Setup
-        uses: ./.github/actions/setup
-        with:
-          rust-toolchain: RUST_LATEST
-
-      - name: Fetch base ref
-        shell: bash
-        run: |
-          git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-
-      - name: Analyze unreleased dependencies
-        id: analyze
-        shell: pwsh
-        run: |
-          ./scripts/check-unreleased-dependencies.ps1 `
-            -BaseRef "origin/${{ github.base_ref }}" `
-            -OutputFile release-deps-comment.md
-
-      - name: Post Unreleased-Dependency Comment
-        if: steps.analyze.outputs.has_findings == 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: release-deps-check
-          path: release-deps-comment.md
-
-      - name: Remove Unreleased-Dependency Comment
-        if: steps.analyze.outputs.has_findings != 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: release-deps-check
-          delete: true
-
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
@@ -505,7 +457,7 @@ jobs:
 
   script-tests:
     # Pester test suite for the release-related PowerShell scripts
-    # (release-packages.ps1, lib/releasing.ps1, check-unreleased-dependencies.ps1).
+    # (release-packages.ps1, lib/releasing.ps1, lib/release-flow.ps1).
     # Always runs (no delta gate) because script-level changes don't move any
     # Rust crates so delta would mark the PR skippable, but the scripts
     # themselves may still need validation. Cross-platform matrix mirrors the

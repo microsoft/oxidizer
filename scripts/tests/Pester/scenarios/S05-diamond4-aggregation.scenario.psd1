@@ -5,6 +5,7 @@
     Workspace = @{ Preset = 'Diamond4' }
 
     History = @(
+        @{ Op = 'ModifySource'; Package = 'top' }
         @{ Op = 'ModifySource'; Package = 'bottom' }
         @{ Op = 'AddCommit';    Message = 'bottom edits' }
     )

@@ -31,8 +31,7 @@ See [docs/releasing.md](docs/releasing.md) for the release tooling
 reference: glossary (direct/transitive dependent vs dependency, cascade
 direction, change type vs version component, release set, pending
 release, elevation), the cascade-organisation invariants, and the
-workflow for `scripts/release-packages.ps1` and
-`scripts/check-unreleased-dependencies.ps1`.
+workflow for `scripts/release-packages.ps1`.
 
 ## Pull Requests
 

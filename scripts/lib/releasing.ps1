@@ -787,9 +787,10 @@ function Get-PendingReleases {
 }
 
 # Builds a ResolvedReleaseSet (folder -> resolved entry) from base-ref vs disk
-# version diffing. Used by callers that have no explicit user-input release
-# plan to feed Get-UnreleasedModifiedDependencies — currently
-# scripts/check-unreleased-dependencies.ps1 (CI scan, no user input).
+# version diffing. Used as a test utility to synthesise a release set from a
+# synthetic-workspace git diff without having to construct one entry-by-entry;
+# production code uses Resolve-ReleaseSet in release-flow.ps1 (driven by
+# explicit user input).
 #
 # Every member is marked Source='cascade' so the elevation-surface predicate
 # in Get-UnreleasedModifiedDependencies treats every release-set member as
@@ -872,6 +873,13 @@ function New-ResolvedReleaseSetFromBaseRef {
 #
 # along with the shortest dependency chain that reaches it from a released package.
 #
+# A BFS root only counts as "released" for this analysis when the release-set
+# member itself has source modifications past its release baseline (i.e. is
+# in the modifications map). A pure-cascade member (version bump only, no
+# source changes of its own) cannot have started consuming unreleased
+# features in its dependencies because nothing in its source changed — BFS
+# from such a member would only produce false positives, so it is skipped.
+#
 # Per-package baselines (rather than a global PR-vs-base-ref diff) are required to
 # detect transitive dependency changes that were merged to main in earlier PRs without
 # a version change and are now being depended on by a release-set package in this PR.
@@ -891,8 +899,9 @@ function New-ResolvedReleaseSetFromBaseRef {
 #                       - chains rooted in release-set members (or, in
 #                       -IncludeAllModifiedAsRoots mode, also in other
 #                       modified-published packages) that transitively reach
-#                       `this_dep`. Used by the PR sticky comment to highlight
-#                       what is at risk in the current release plan specifically.
+#                       `this_dep`. Used by the interactive review prompt to
+#                       highlight what is at risk in the current release plan
+#                       specifically.
 #   WorkspaceDependencyChains  - @( @('top_dependent', ..., 'this_dep'), ... )
 #                       - every path in the workspace dep graph ending at
 #                       `this_dep`, irrespective of release-set membership.
@@ -971,20 +980,31 @@ function Get-UnreleasedModifiedDependencies {
     $findings = [ordered]@{}
 
     # Compute BFS roots. In the default (targeted) mode they're the
-    # release-set members. When -IncludeAllModifiedAsRoots is set we also add
-    # every modified-published package so chains between changed packages can
-    # be recorded (e.g. 'bytesbuf_io -> bytesbuf' when both are changed and
+    # release-set members WHOSE SOURCE/FILES HAVE BEEN MODIFIED past their
+    # per-package release baseline. Pure-cascade members (no source changes
+    # of their own, version bump only) cannot have started consuming
+    # unreleased features in their dependencies, so BFS from them is
+    # categorically incapable of producing a real finding — only false
+    # positives — and is skipped. The same modified-precondition applies in
+    # -IncludeAllModifiedAsRoots mode, where it's redundant with the
+    # modifiedMap union below (release-set membership adds nothing once
+    # modified-published already covers it) but kept for symmetry / clarity.
+    # When -IncludeAllModifiedAsRoots is set we also add every
+    # modified-published package so chains between changed packages can be
+    # recorded (e.g. 'bytesbuf_io -> bytesbuf' when both are changed and
     # bytesbuf_io depends on bytesbuf). Sorted for deterministic prompt order.
     $rootFolders = if ($IncludeAllModifiedAsRoots) {
         $set = [System.Collections.Generic.HashSet[string]]::new()
-        foreach ($k in $ResolvedReleaseSet.Keys) { [void]$set.Add($k) }
+        foreach ($k in $ResolvedReleaseSet.Keys) {
+            if ($modifiedMap.ContainsKey($k)) { [void]$set.Add($k) }
+        }
         foreach ($k in $modifiedMap.Keys) {
             $pkg = $byFolder[$k]
             if ($null -ne $pkg -and $pkg.Published) { [void]$set.Add($k) }
         }
         @($set | Sort-Object)
     } else {
-        @($ResolvedReleaseSet.Keys | Sort-Object)
+        @($ResolvedReleaseSet.Keys | Where-Object { $modifiedMap.ContainsKey($_) } | Sort-Object)
     }
 
     foreach ($releasedFolder in $rootFolders) {
@@ -1041,25 +1061,38 @@ function Get-UnreleasedModifiedDependencies {
         }
     }
 
-    # Phase B sweep (all-changed mode only): every modified-published package
-    # the surfacing predicate accepts but no BFS run reached as a dep gets
-    # added as a stub finding (empty chains). This is what implements the
-    # "imaginary `*` package depends on every changed package" UX without
-    # introducing a sentinel: a stub-with-empty-chains finding renders as
-    # "No dependents in release set" in the menu.
-    if ($IncludeAllModifiedAsRoots) {
-        foreach ($folder in @($modifiedMap.Keys | Sort-Object)) {
-            if ($findings.Contains($folder)) { continue }
-            if (-not (& $shouldSurface $folder)) { continue }
-            $pkg = $byFolder[$folder]
-            $findings[$folder] = [pscustomobject]@{
-                Folder           = $folder
-                PackageName      = $pkg.Name
-                CurrentVersion   = $pkg.Version
-                InReleaseSet     = $ResolvedReleaseSet.ContainsKey($folder)
-                ChangedFileCount = $modifiedMap[$folder]
-                DependencyChains = @()
-            }
+    # Phase B sweep: every BFS root the surfacing predicate accepts but no
+    # BFS run reached as a dep gets added as a stub finding (empty chains).
+    # Two reasons this matters:
+    #
+    #   1. -IncludeAllModifiedAsRoots mode: every modified-published package
+    #      that isn't BFS-reachable from another root surfaces as a stub.
+    #      Renders as "No dependents in release set" in the menu — the
+    #      "imaginary `*` package depends on every changed package" UX
+    #      without introducing a sentinel.
+    #
+    #   2. Targeted mode (Invariant B — release-set elevation review):
+    #      release-set members that are themselves modified BUT whose
+    #      cascade-applied change type is below "breaking" need to surface
+    #      for elevation review. With the LIVE filter applied to BFS root
+    #      selection, only release-set members IN modifiedMap are roots,
+    #      so this sweep over rootFolders is exactly the set of candidates
+    #      that qualify for Invariant B. The shouldSurface predicate
+    #      filters out user-source members and breaking-cascade members,
+    #      leaving only cascade-source below-breaking entries — i.e.
+    #      release-set members the user may want to elevate after diff
+    #      review.
+    foreach ($folder in $rootFolders) {
+        if ($findings.Contains($folder)) { continue }
+        if (-not (& $shouldSurface $folder)) { continue }
+        $pkg = $byFolder[$folder]
+        $findings[$folder] = [pscustomobject]@{
+            Folder           = $folder
+            PackageName      = $pkg.Name
+            CurrentVersion   = $pkg.Version
+            InReleaseSet     = $ResolvedReleaseSet.ContainsKey($folder)
+            ChangedFileCount = $modifiedMap[$folder]
+            DependencyChains = @()
         }
     }
 
