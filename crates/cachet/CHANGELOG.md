@@ -4,13 +4,13 @@
 
 - 🔧 Maintenance
 
-  - bump `ohno_macros` to 0.3.3
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
 
 ## [0.6.3] - 2026-06-04
 
 - 🔧 Maintenance
 
-  - bump `thread_aware_macros_impl` to 0.7.2
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
 
 ## [0.6.2] - 2026-06-02
 

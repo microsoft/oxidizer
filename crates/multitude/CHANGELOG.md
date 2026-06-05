@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - bump `thread_aware_macros_impl` to 0.7.2
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
 
 ## [0.1.2] - 2026-06-02
 

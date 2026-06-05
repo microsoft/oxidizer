@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - bump `ohno_macros` to 0.3.3
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
 
 ## [0.2.1] - 2026-06-02
 
