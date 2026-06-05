@@ -262,10 +262,10 @@
 //!
 //! ## Event handler callback API
 //!
-//! Register a [`CacheEventHandler`](telemetry::handler::CacheEventHandler) via
+//! Register a [`CacheEventHandler`] via
 //! `.event_handler(handler)` on the cache builder to receive typed
-//! [`CacheTierEvent`](telemetry::handler::CacheTierEvent) and
-//! [`CacheOperationEvent`](telemetry::handler::CacheOperationEvent) callbacks.
+//! [`CacheTierEvent`] and
+//! [`CacheOperationEvent`] callbacks.
 //! Events carry a `request_id` for correlating tier outcomes with their parent
 //! operation. Works independently of the `logs` feature.
 //!
