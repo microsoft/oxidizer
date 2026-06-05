@@ -1,7 +1,16 @@
-# Tests to skip in the miri-tree-borrows CI job.
-# One fully-qualified test name per line. Blank lines and lines
-# starting with '#' are ignored. Names are passed as --skip
-# arguments (substring match).
+# Miri tree-borrows test suppression list
+#
+# Tests listed here are skipped during the `miri-tree-borrows` nightly
+# CI job. Each entry is passed as a `--skip` argument to `cargo miri
+# test` (substring match). Use fully-qualified test paths to avoid
+# accidentally suppressing unrelated tests.
+#
+# These tests are functionally correct but exceed the 16 GB memory
+# limit of the GitHub Actions runner due to Miri's tree-borrows
+# per-byte provenance tracking. They pass locally on machines with
+# 32+ GB RAM.
+#
+# To run all tests (e.g. on a larger runner), delete or empty this file.
 #
 # arena::tests::alloc_slice_local_with_or_panic_at_max_normal_uses_fast_path
 #   Although the allocation itself is only 4 KiB (512 u64s), the

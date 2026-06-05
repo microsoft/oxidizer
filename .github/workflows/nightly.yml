@@ -31,9 +31,25 @@ jobs:
             echo "should_skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # mutation-testing: disabled for debugging
-  # miri-strict-provenance: disabled for debugging
-  # miri-race-coverage: disabled for debugging
+  mutation-testing:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          enable-wild-linker: true
+          rust-toolchain: RUST_NIGHTLY
+          cargo-tools: CARGO_MUTANTS_VERSION
+
+      # execute
+      - name: Mutate All
+        run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/mutants.rs
 
   miri-tree-borrows:
     needs: [nightly-gatekeeper]
@@ -55,17 +71,109 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
         run: |
+          # Build --skip arguments from the suppression file.
+          # See .miri-tree-borrows-skip for the list and justifications.
           SKIP_ARGS=""
+          SKIPPED_TESTS=()
           if [[ -f .miri-tree-borrows-skip ]]; then
             while IFS= read -r line; do
               line="${line%%#*}"    # strip inline comments
               line="${line// /}"    # trim whitespace
               [[ -z "$line" ]] && continue
               SKIP_ARGS="$SKIP_ARGS --skip $line"
-              echo "Skipping: $line"
+              SKIPPED_TESTS+=("$line")
             done < .miri-tree-borrows-skip
           fi
+
           cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests \
             -- $SKIP_ARGS
+
+          # Report skipped tests clearly at the end
+          if [[ ${#SKIPPED_TESTS[@]} -gt 0 ]]; then
+            echo ""
+            echo "::warning::${#SKIPPED_TESTS[@]} test(s) skipped via .miri-tree-borrows-skip (tree-borrows provenance tracking exceeds runner memory):"
+            for t in "${SKIPPED_TESTS[@]}"; do
+              echo "  - $t"
+            done
+          fi
         timeout-minutes: 240
+
+  miri-strict-provenance:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+
+      # execute
+      - name: Miri (strict provenance)
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+
+  miri-race-coverage:
+    needs: [nightly-gatekeeper]
+    if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          enable-sccache: true
+          rust-toolchain: RUST_NIGHTLY
+          rust-components: miri
+
+      # execute
+      - name: Miri (race coverage)
+        env:
+          MIRIFLAGS: -Zmiri-many-seeds=0..32
+        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
+
+  report-failure:
+    needs:
+      - nightly-gatekeeper
+      - mutation-testing
+      - miri-tree-borrows
+      - miri-strict-provenance
+      - miri-race-coverage
+    # `always()` ensures we still run when a dependency fails; the
+    # gatekeeper guard skips the report on no-op nights.
+    if: ${{ always() && needs.nightly-gatekeeper.outputs.should_skip != 'true' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-slim
+    permissions:
+      issues: write
+    steps:
+      - name: Create or Update Issue on Failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE_TITLE="🚨 Nightly Build Failed"
+          ISSUE_DATE="$(date +'%Y-%m-%d')"
+          ISSUE_FULL_TITLE="$ISSUE_TITLE: $ISSUE_DATE"
+          ISSUE_BODY="The nightly scheduled build failed. Please check the logs here: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Search for open issues with the same base title and label
+          EXISTING_ISSUE=$(gh issue list --label "bug" --state open --search "$ISSUE_TITLE" --json number,title | jq -r '.[] | select(.title | startswith("'"$ISSUE_TITLE"'")) | .number' | head -n 1)
+          if [[ -n "$EXISTING_ISSUE" ]]; then
+            # Add a comment to the existing issue
+            gh issue comment "$EXISTING_ISSUE" --body "$ISSUE_BODY"
+          else
+            # Create a new issue
+            gh issue create \
+              --title "$ISSUE_FULL_TITLE" \
+              --body "$ISSUE_BODY" \
+              --label "bug"
+          fi
 
