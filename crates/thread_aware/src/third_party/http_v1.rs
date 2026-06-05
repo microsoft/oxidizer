@@ -52,8 +52,25 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
+    use crate::affinity::Affinity;
     #[cfg(feature = "threads")]
     use crate::affinity::pinned_affinities;
+
+    /// Counts how many times `relocate` has been called.
+    ///
+    /// Used by mutation-testing-killing tests to detect that container impls
+    /// actually delegate to their inner elements rather than no-op'ing —
+    /// otherwise mutants that replace the body of `relocate` with `()` would
+    /// survive when the inner type's `relocate` itself has no observable
+    /// effect (as it does for `HeaderValue` or `Vec<u8>`).
+    #[derive(Default)]
+    struct Counter(u32);
+
+    impl ThreadAware for Counter {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.0 += 1;
+        }
+    }
 
     assert_impl_all!(StatusCode: ThreadAware, Send, Sync, Copy);
     assert_impl_all!(Version: ThreadAware, Send, Sync, Copy);
@@ -105,5 +122,35 @@ mod tests {
         resp.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(resp.body(), &vec![4_u8, 5, 6]);
         assert_eq!(resp.headers().get("x-trace").unwrap(), "xyz");
+    }
+
+    #[test]
+    #[cfg(feature = "threads")]
+    fn header_map_relocate_calls_relocate_on_every_value() {
+        let affinities = pinned_affinities(&[2]);
+        let mut map: HeaderMap<Counter> = HeaderMap::default();
+        map.insert(HeaderName::from_static("x-one"), Counter::default());
+        map.insert(HeaderName::from_static("x-two"), Counter::default());
+        map.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(map.get("x-one").unwrap().0, 1);
+        assert_eq!(map.get("x-two").unwrap().0, 1);
+    }
+
+    #[test]
+    #[cfg(feature = "threads")]
+    fn request_relocate_calls_relocate_on_body() {
+        let affinities = pinned_affinities(&[2]);
+        let mut req = Request::new(Counter::default());
+        req.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(req.body().0, 1);
+    }
+
+    #[test]
+    #[cfg(feature = "threads")]
+    fn response_relocate_calls_relocate_on_body() {
+        let affinities = pinned_affinities(&[2]);
+        let mut resp = Response::new(Counter::default());
+        resp.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(resp.body().0, 1);
     }
 }
