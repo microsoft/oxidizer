@@ -34,7 +34,7 @@ async fn main() -> Result<(), ohno::AppError> {
     let body_builder = HttpBodyBuilder::new(GlobalPool::new(), &clock);
     let body_builder_clone = body_builder.clone();
 
-    // Define an execution stack of middlewares
+    // Define an execution stack of middleware
     let stack = (
         Intercept::layer()
             .on_input(|req: &HttpRequest| println!("received request, uri: {}", req.uri()))

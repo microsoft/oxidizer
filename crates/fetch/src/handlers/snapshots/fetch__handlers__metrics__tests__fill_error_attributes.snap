@@ -1,0 +1,10 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: sorted_attrs(attributes.values())
+---
+[
+    (
+        "error.type",
+        "io.connection_refused",
+    ),
+]

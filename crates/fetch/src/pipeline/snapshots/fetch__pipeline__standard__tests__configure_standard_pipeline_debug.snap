@@ -1,0 +1,5 @@
+---
+source: crates/fetch/src/pipeline/standard.rs
+expression: configure
+---
+fetch::pipeline::standard::ConfigureStandardPipeline
