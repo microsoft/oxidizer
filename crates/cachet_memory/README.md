@@ -91,17 +91,17 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGzdJKUZVPxvUG1gu9d6GuCo7G0RugSLFtwVPG8yNtTYrxAVaYWSCgm1jYWNoZXRfbWVtb3J5ZTAuMy4xgmtjYWNoZXRfdGllcmUwLjIuMQ
- [__link0]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCache
- [__link1]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder
- [__link10]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheEntry::expires_after
- [__link11]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::time_to_live
- [__link12]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::time_to_idle
- [__link2]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=policy::EvictionPolicy
- [__link3]: https://docs.rs/cachet_tier/0.2.1/cachet_tier/?search=CacheEntry::expires_after
- [__link4]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
- [__link5]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
- [__link6]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
- [__link7]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=notification::RemovalCause
- [__link8]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
- [__link9]: https://docs.rs/cachet_memory/0.3.1/cachet_memory/?search=InMemoryCache
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbN0kpRlU_G9QbWC713oa4KjsbRG6BIsW3BU8bzI21NivEBVphZIKCbWNhY2hldF9tZW1vcnllMC4zLjOCa2NhY2hldF90aWVyZTAuMi4y
+ [__link0]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCache
+ [__link1]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder
+ [__link10]: https://docs.rs/cachet_tier/0.2.2/cachet_tier/?search=CacheEntry::expires_after
+ [__link11]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::time_to_live
+ [__link12]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::time_to_idle
+ [__link2]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=policy::EvictionPolicy
+ [__link3]: https://docs.rs/cachet_tier/0.2.2/cachet_tier/?search=CacheEntry::expires_after
+ [__link4]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
+ [__link5]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
+ [__link6]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::on_eviction
+ [__link7]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=notification::RemovalCause
+ [__link8]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCacheBuilder::with_eviction_telemetry
+ [__link9]: https://docs.rs/cachet_memory/0.3.3/cachet_memory/?search=InMemoryCache

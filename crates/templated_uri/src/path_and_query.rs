@@ -7,7 +7,7 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use data_privacy::{Classified, RedactedDebug, RedactedDisplay, RedactedToString, RedactionEngine, Sensitive};
+use data_privacy::{Classified, RedactedDebug, RedactedDisplay, RedactedToString, Redactor, Sensitive};
 use http::uri::PathAndQuery as HttpPathAndQuery;
 
 use crate::error::UriError;
@@ -80,15 +80,15 @@ impl PathAndQuery {
 
 impl RedactedDisplay for PathAndQuery {
     #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.0 {
             PathAndQueryInner::Static(classified_pq) => {
                 // We can't use to_string in redaction because it automatically prepends a slash if the path doesn't start with one.
                 // as_str doesn't do that, so we declassify to get the inner PathAndQuery and then use as_str.
                 let reclassified = Sensitive::new(classified_pq.declassify_ref().as_str(), classified_pq.data_class().clone());
-                RedactedDisplay::fmt(&reclassified, engine, f)
+                RedactedDisplay::fmt(&reclassified, redactor, f)
             }
-            PathAndQueryInner::Templated(templated) => RedactedDisplay::fmt(&**templated, engine, f),
+            PathAndQueryInner::Templated(templated) => RedactedDisplay::fmt(&**templated, redactor, f),
         }
     }
 }
@@ -105,12 +105,12 @@ impl fmt::Debug for PathAndQuery {
 
 impl RedactedDebug for PathAndQuery {
     #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
-    fn fmt(&self, engine: &RedactionEngine, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
         let mut tuple = f.debug_tuple("PathAndQuery");
         match &self.0 {
             PathAndQueryInner::Static(_) => tuple.finish(),
             PathAndQueryInner::Templated(templated) => {
-                let rendered = templated.deref().to_redacted_string(engine);
+                let rendered = templated.deref().to_redacted_string(redactor);
                 tuple.field(&rendered).finish()
             }
         }
@@ -203,6 +203,23 @@ impl From<PathAndQuery> for Uri {
     }
 }
 
+/// Deserializes a [`PathAndQuery`] from a string, validating it via [`PathAndQuery::try_from`].
+///
+/// Deserialization always yields the static variant; a [`PathAndQueryTemplate`]
+/// is never reconstructed from serialized data. Brace characters are accepted as
+/// literal path content, so a string like `/users/{id}` deserializes into a
+/// static path whose text is `/users/{id}` verbatim - it is *not* interpreted as
+/// a template placeholder. Only a [`Deserialize`](serde::Deserialize) impl is
+/// provided: [`PathAndQuery`] is privacy-classified and intentionally has no
+/// plain [`Display`](std::fmt::Display)/[`Serialize`](serde::Serialize).
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PathAndQuery {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -286,5 +303,47 @@ mod tests {
         use ohno::Labeled;
         let err = PathAndQuery::try_from(String::from("api/v1/users")).unwrap_err();
         assert_eq!(err.label(), "uri_invalid");
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::PathAndQuery;
+
+    #[test]
+    fn deserialize_static_path_and_query() {
+        let paq: PathAndQuery = serde_json::from_str(r#""/api/v1/users?active=true""#).unwrap();
+        assert_eq!(paq.to_string().declassify_ref(), "/api/v1/users?active=true");
+    }
+
+    #[test]
+    fn deserialize_rejects_missing_leading_slash() {
+        serde_json::from_str::<PathAndQuery>(r#""api/v1/users""#).unwrap_err();
+    }
+
+    #[test]
+    fn deserialize_error_does_not_leak_input() {
+        // `UriError` must never echo the raw input, preserving the privacy posture.
+        let err = serde_json::from_str::<PathAndQuery>(r#""SECRETPATH_no_slash""#).unwrap_err();
+        assert!(
+            !err.to_string().contains("SECRETPATH"),
+            "deserialize error must not leak the raw input"
+        );
+    }
+
+    #[test]
+    fn path_and_query_does_not_implement_serialize() {
+        // Deserialize-only is intentional for this privacy-classified type.
+        static_assertions::assert_not_impl_any!(PathAndQuery: serde::Serialize);
+    }
+
+    #[test]
+    fn deserialize_braces_are_literal_static_content() {
+        // A `PathAndQueryTemplate` is never reconstructed from serialized data.
+        // Braces are valid path characters, so `/users/{id}` deserializes into a
+        // static path containing the literal text `{id}`, not a template placeholder.
+        let paq: PathAndQuery = serde_json::from_str(r#""/users/{id}""#).unwrap();
+        assert_eq!(paq.to_string().declassify_ref(), "/users/{id}");
+        assert!(paq.label().is_none(), "deserialized value must be a static path, not a template");
     }
 }

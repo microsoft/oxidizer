@@ -54,11 +54,11 @@ contention-free, NUMA-friendly task dispatch.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5RxOwZfGEjeG2_e5NBDlvq5G2UGvhnaHUvnGwpHmIxmYGfgYWSCgmhhbnlzcGF3bmUwLjUuMoJsdGhyZWFkX2F3YXJlZTAuNy4y
- [__link0]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=Spawner
- [__link1]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=SpawnCustom
- [__link2]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=CustomSpawnerBuilder
- [__link3]: https://docs.rs/thread_aware/0.7.2/thread_aware/?search=ThreadAware
- [__link4]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=SpawnCustom
- [__link5]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=Spawner::new_tokio
- [__link6]: https://docs.rs/anyspawn/0.5.2/anyspawn/?search=Spawner::new_tokio_with_handle
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQblHE7Bl8YSN4bb97k0EOW-rkbZQa-GdodS-cbCkeYjGZgZ-BhZIKCaGFueXNwYXduZTAuNS4zgmx0aHJlYWRfYXdhcmVlMC43LjM
+ [__link0]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=Spawner
+ [__link1]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=SpawnCustom
+ [__link2]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=CustomSpawnerBuilder
+ [__link3]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=ThreadAware
+ [__link4]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=SpawnCustom
+ [__link5]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=Spawner::new_tokio
+ [__link6]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=Spawner::new_tokio_with_handle

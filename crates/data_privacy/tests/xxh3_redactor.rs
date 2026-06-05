@@ -124,6 +124,13 @@ fn test_clone_produces_identical_redactor() {
 }
 
 #[test]
+fn test_redacts_returns_true() {
+    let redactor = get_test_redactor();
+    let data_class = DataClass::new("test_taxonomy", "test_class");
+    assert!(redactor.redacts(&data_class));
+}
+
+#[test]
 fn test_data_class_does_not_affect_output() {
     let redactor = get_test_redactor();
     let data_class1 = DataClass::new("test_taxonomy", "class1");

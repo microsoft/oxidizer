@@ -27,6 +27,10 @@ impl RapidHashRedactor {
 }
 
 impl Redactor for RapidHashRedactor {
+    fn redacts(&self, _data_class: &DataClass) -> bool {
+        true
+    }
+
     fn redact(&self, _: &DataClass, value: &str, output: &mut dyn Write) -> core::fmt::Result {
         let hash = rapidhash_v3_seeded(value.as_bytes(), &self.secrets);
         let buffer = crate::redactors::u64_to_hex_array::<REDACTED_LEN>(hash);

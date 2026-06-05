@@ -58,7 +58,7 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                 }
             }
 
-            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::http::uri::PathAndQuery, ::templated_uri::UriError> {
+            fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::__private::http::uri::PathAndQuery, ::templated_uri::UriError> {
                 match self {
                     #(#variant_matches => template_variant.to_path_and_query()),*
                 }
@@ -79,10 +79,10 @@ pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
             }
         }
 
-        impl ::data_privacy::RedactedDisplay for #ident {
-            fn fmt(&self, engine: &::data_privacy::RedactionEngine, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        impl ::templated_uri::__private::RedactedDisplay for #ident {
+            fn fmt(&self, redactor: &dyn ::templated_uri::__private::Redactor, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 match self {
-                    #(#variant_matches => ::data_privacy::RedactedDisplay::fmt(template_variant, engine, f)?),*
+                    #(#variant_matches => ::templated_uri::__private::RedactedDisplay::fmt(template_variant, redactor, f)?),*
                 }
                 Ok(())
             }

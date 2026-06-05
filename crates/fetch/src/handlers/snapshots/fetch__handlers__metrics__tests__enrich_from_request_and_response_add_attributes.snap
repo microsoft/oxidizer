@@ -1,0 +1,50 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: sorted_attrs(&attrs)
+---
+[
+    (
+        "http.request.method",
+        "GET",
+    ),
+    (
+        "http.response.status_code",
+        "200",
+    ),
+    (
+        "network.protocol.name",
+        "http",
+    ),
+    (
+        "network.protocol.version",
+        "1.1",
+    ),
+    (
+        "request.custom",
+        "req_val",
+    ),
+    (
+        "request.method",
+        "GET",
+    ),
+    (
+        "response.is_err",
+        "false",
+    ),
+    (
+        "response.status",
+        "200",
+    ),
+    (
+        "server.address",
+        "example.com",
+    ),
+    (
+        "server.port",
+        "443",
+    ),
+    (
+        "url.scheme",
+        "https",
+    ),
+]

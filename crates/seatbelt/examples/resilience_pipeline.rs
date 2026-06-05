@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to combine multiple resilience middlewares
+//! This example demonstrates how to combine multiple resilience middleware
 //! using the `seatbelt` crate to create a robust execution pipeline with basic
 //! resilience capabilities.
 
@@ -27,7 +27,7 @@ async fn main() -> Result<(), AppError> {
     // Shared options for resilience middleware
     let context = ResilienceContext::new(&clock).use_metrics(&meter_provider).name("my_pipeline");
 
-    // Define stack with retry and timeout middlewares
+    // Define stack with retry and timeout middleware
     let stack = (
         Retry::layer("my_retry", &context)
             // automatically clones the input for retries

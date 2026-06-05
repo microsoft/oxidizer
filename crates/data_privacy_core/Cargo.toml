@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "data_privacy_core"
+description = "Core data classification types and traits for the data_privacy ecosystem."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "compliance", "privacy", "classification"]
+categories = ["data-structures"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_core"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["serde_core::de::*", "serde_core::ser::*"]
+
+[features]
+default = ["serde"]
+serde = ["dep:serde_core"]
+
+[dependencies]
+serde_core = { workspace = true, optional = true, default-features = false, features = ["std"] }
+
+[dev-dependencies]
+insta.workspace = true
+mutants.workspace = true
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

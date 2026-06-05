@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Mechanisms to classify, manipulate, and redact sensitive data.
@@ -45,9 +46,10 @@
 //!
 //! * The [`Classified`] trait is used to mark types that hold sensitive data.
 //!
-//! * The [`Redactor`] trait defines the logic needed by an individual redactor. This crate provides a
-//!   few implementations of this trait, such as [`SimpleRedactor`](simple_redactor::SimpleRedactor), but others can
-//!   be implemented and used by applications as well.
+//! * The [`Redactor`] trait defines the interface for applying redaction. Both
+//!   [`RedactionEngine`] (the high-level engine that routes data classes to
+//!   strategies) and individual redaction strategies (e.g. hash-based or
+//!   replacement-based redactors) implement this trait.
 //!
 //! This crate also exposes additional traits which are usually, but not necessarily, implemented by types that implement the
 //! [`Classified`] trait:
@@ -177,29 +179,27 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/data_privacy/favicon.ico")]
 
-// Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples
-// Workaround for https://github.com/bkchr/proc-macro-crate/issues/14
+// Needed for the `taxonomy` macro to be able to use `data_privacy` instead of `crate` in examples.
 extern crate self as data_privacy;
 
-mod classified;
-mod data_class;
-mod macros;
-mod redacted;
+// Re-export types and traits from data_privacy_core.
+#[doc(inline)]
+pub use data_privacy_core::{Classified, DataClass, IntoDataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
+// Re-export derive macros and attribute macros.
+#[doc(inline)]
+pub use data_privacy_macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
+
 mod redaction_engine;
 mod redaction_engine_builder;
 mod redaction_engine_inner;
 mod redactors;
 mod sensitive;
 
-pub use classified::Classified;
-pub use data_class::{DataClass, IntoDataClass};
-pub use macros::{RedactedDebug, RedactedDisplay, classified, taxonomy};
-pub use redacted::{RedactedDebug, RedactedDisplay, RedactedToString};
 pub use redaction_engine::RedactionEngine;
 pub use redaction_engine_builder::RedactionEngineBuilder;
 #[cfg(feature = "rapidhash")]
 pub use redactors::rapidhash_redactor;
+pub use redactors::simple_redactor;
 #[cfg(feature = "xxh3")]
 pub use redactors::xxh3_redactor;
-pub use redactors::{Redactor, simple_redactor};
 pub use sensitive::Sensitive;
