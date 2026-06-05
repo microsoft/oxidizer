@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - bump `recoverable` to 0.1.5
+  - bump `seatbelt` to 0.5.5 (transitively updates `recoverable` to 0.1.5)
 
 ## [0.3.0] - 2026-06-04
 
