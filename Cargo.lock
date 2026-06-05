@@ -3520,7 +3520,6 @@ name = "thread_aware"
 version = "0.7.3"
 dependencies = [
  "bytes",
- "chrono",
  "futures",
  "http",
  "jiff",
@@ -3528,7 +3527,6 @@ dependencies = [
  "mutants",
  "static_assertions",
  "thread_aware_macros",
- "time",
  "uuid",
 ]
 

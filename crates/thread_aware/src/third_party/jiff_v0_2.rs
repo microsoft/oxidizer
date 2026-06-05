@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`jiff`] types.
+//! `ThreadAware` impls for [`jiff`] (0.2.x) types.
 //!
-//! Enable with the `jiff` Cargo feature.
+//! Enable with the `jiff_v0_2` Cargo feature.
 //!
 //! `jiff::Zoned` is intentionally omitted because it carries an internal
 //! reference to a `TimeZone`, whose semantics around relocation deserve a

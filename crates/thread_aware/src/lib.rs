@@ -94,18 +94,19 @@
 //!
 //! ## 3rd-party crate impls
 //!
-//! The following opt-in features provide no-op [`ThreadAware`] implementations
-//! for inert value types from popular 3rd-party crates. Each feature adds only
-//! its named crate as an optional dependency; by default none are enabled and
-//! the crate brings in no extra dependencies. See [`third_party`] for the list
-//! of types covered by each feature.
+//! The following opt-in features provide [`ThreadAware`] implementations for
+//! inert value types from popular 3rd-party crates. Each feature is suffixed
+//! with the major (or 0.x minor) of the wrapped crate; enabling a feature
+//! pulls that crate in as a dependency. By default none are enabled and this
+//! crate brings in no extra dependencies. See [`third_party`] for the list of
+//! types covered by each feature.
 //!
-//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-//! * **`chrono`**: Impls for `chrono::NaiveDate`, `chrono::DateTime`, etc.
-//! * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`.
-//! * **`jiff`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
-//! * **`time`**: Impls for `time::OffsetDateTime`, `time::Date`, etc.
-//! * **`uuid`**: Impl for `uuid::Uuid`.
+//! * **`bytes_v1`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+//! * **`http_v1`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
+//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap`,
+//!   `http::Request`, `http::Response`.
+//! * **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+//! * **`uuid_v1`**: Impl for `uuid::Uuid`.
 //!
 //! [`third_party`]: third_party
 //!

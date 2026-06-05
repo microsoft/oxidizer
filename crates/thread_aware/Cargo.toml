@@ -19,24 +19,19 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "thread_aware_macros::ThreadAware",
-    # `bytes` feature
+    # `bytes_v1` feature
     "bytes::bytes::Bytes",
     "bytes::bytes_mut::BytesMut",
-    # `chrono` feature
-    "chrono::datetime::DateTime",
-    "chrono::month::Month",
-    "chrono::naive::date::NaiveDate",
-    "chrono::naive::datetime::NaiveDateTime",
-    "chrono::naive::time::NaiveTime",
-    "chrono::offset::fixed::FixedOffset",
-    "chrono::offset::utc::Utc",
-    "chrono::time_delta::TimeDelta",
-    "chrono::weekday::Weekday",
-    # `http` feature
+    # `http_v1` feature
+    "http::header::map::HeaderMap",
+    "http::header::name::HeaderName",
+    "http::header::value::HeaderValue",
     "http::method::Method",
+    "http::request::Request",
+    "http::response::Response",
     "http::status::StatusCode",
     "http::version::Version",
-    # `jiff` feature
+    # `jiff_v0_2` feature
     "jiff::civil::date::Date",
     "jiff::civil::datetime::DateTime",
     "jiff::civil::iso_week_date::ISOWeekDate",
@@ -44,16 +39,7 @@ allowed_external_types = [
     "jiff::signed_duration::SignedDuration",
     "jiff::span::Span",
     "jiff::timestamp::Timestamp",
-    # `time` feature
-    "time::date::Date",
-    "time::duration::Duration",
-    "time::month::Month",
-    "time::offset_date_time::OffsetDateTime",
-    "time::primitive_date_time::PrimitiveDateTime",
-    "time::time::Time",
-    "time::utc_offset::UtcOffset",
-    "time::weekday::Weekday",
-    # `uuid` feature
+    # `uuid_v1` feature
     "uuid::Uuid",
 ]
 
@@ -65,14 +51,15 @@ default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
 
-# Optional `ThreadAware` impls for 3rd-party crate types. Each feature pulls in
-# only that one crate as an optional dependency. See `third_party::*` modules.
-bytes = ["dep:bytes"]
-chrono = ["dep:chrono"]
-http = ["dep:http"]
-jiff = ["dep:jiff"]
-time = ["dep:time"]
-uuid = ["dep:uuid"]
+# Optional `ThreadAware` impls for 3rd-party crate types. Each feature is
+# suffixed with the major (or 0.x minor) of the wrapped crate so that new
+# breaking versions of those crates can be supported additively (e.g. a
+# future `bytes_v2`) without forcing a breaking release of this crate.
+# See the `third_party` module for the list of types each feature covers.
+bytes_v1 = ["dep:bytes"]
+http_v1 = ["dep:http"]
+jiff_v0_2 = ["dep:jiff"]
+uuid_v1 = ["dep:uuid"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
@@ -80,18 +67,20 @@ many_cpus = { workspace = true, optional = true }
 thread_aware_macros = { workspace = true, optional = true }
 
 bytes = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 jiff = { workspace = true, optional = true }
-time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+http = { workspace = true }
+jiff = { workspace = true }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

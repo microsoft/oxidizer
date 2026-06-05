@@ -100,12 +100,28 @@ from types that implement [`ThreadAware`][__link23].
   environments: `default-features = false`.
 * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 
+### 3rd-party crate impls
+
+The following opt-in features provide [`ThreadAware`][__link24] implementations for
+inert value types from popular 3rd-party crates. Each feature is suffixed
+with the major (or 0.x minor) of the wrapped crate; enabling a feature
+pulls that crate in as a dependency. By default none are enabled and this
+crate brings in no extra dependencies. See [`third_party`][__link25] for the list of
+types covered by each feature.
+
+* **`bytes_v1`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+* **`http_v1`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
+  `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap`,
+  `http::Request`, `http::Response`.
+* **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+* **`uuid_v1`**: Impl for `uuid::Uuid`.
+
 ## Examples
 
-### Deriving [`ThreadAware`][__link24]
+### Deriving [`ThreadAware`][__link26]
 
 When the `derive` feature (enabled by default) is active you can simply
-derive [`ThreadAware`][__link25] instead of writing the implementation manually.
+derive [`ThreadAware`][__link27] instead of writing the implementation manually.
 
 ```rust
 use thread_aware::ThreadAware;
@@ -117,10 +133,10 @@ struct Point {
 }
 ```
 
-### Enabling [`ThreadAware`][__link26] via `Arc<T, S>`
+### Enabling [`ThreadAware`][__link28] via `Arc<T, S>`
 
-For types containing fields not [`ThreadAware`][__link27], you can use [`Arc`][__link28] to specify a
-strategy, and wrap them in an [`Arc`][__link29] that implements the trait.
+For types containing fields not [`ThreadAware`][__link29], you can use [`Arc`][__link30] to specify a
+strategy, and wrap them in an [`Arc`][__link31] that implements the trait.
 
 ```rust
 use thread_aware::{Arc, PerCore, ThreadAware};
@@ -147,7 +163,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbSQ5poud34xIbuapoDTNMsOwbP9Moo-1_UfQblZcvmMWsNThhZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbLOorTMjqaKobjNyud31kjrIbj7wmC3pX_6EbLN3Va7Tez8phZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
  [__link0]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
@@ -166,12 +182,14 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link22]: https://doc.rust-lang.org/stable/std/?search=sync::Arc
  [__link23]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link24]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
- [__link25]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
+ [__link25]: https://docs.rs/thread_aware/0.7.3/thread_aware/third_party/index.html
  [__link26]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link27]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
- [__link28]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=Arc
- [__link29]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=Arc
+ [__link28]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
+ [__link29]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link3]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
+ [__link30]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=Arc
+ [__link31]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=Arc
  [__link4]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link5]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=Arc
  [__link6]: https://doc.rust-lang.org/stable/std/?search=sync::Arc

@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`bytes`] types.
+//! `ThreadAware` impls for [`bytes`] (1.x) types.
 //!
-//! Enable with the `bytes` Cargo feature.
+//! Enable with the `bytes_v1` Cargo feature.
 //!
 //! `Bytes` and `BytesMut` internally use reference counting to share the
 //! underlying allocation, but they expose an immutable / single-writer

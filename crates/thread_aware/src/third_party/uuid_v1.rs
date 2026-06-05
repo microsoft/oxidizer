@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`uuid`] types.
+//! `ThreadAware` impls for [`uuid`] (1.x) types.
 //!
-//! Enable with the `uuid` Cargo feature.
+//! Enable with the `uuid_v1` Cargo feature.
 
 impl_noop_thread_aware!(::uuid::Uuid);
 
