@@ -55,6 +55,15 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    # Suppression file: .miri-tree-borrows-skip
+    #
+    # Miri's tree-borrows mode tracks per-byte aliasing provenance,
+    # which can cause certain tests to exceed the runner's 16 GB memory
+    # limit even though the allocations under test are small. Tests
+    # listed in .miri-tree-borrows-skip (one fully-qualified path per
+    # line, # comments for justification) are passed as --skip arguments
+    # and reported as a ::warning annotation at the end of the run.
+    # These tests are functionally correct and pass on 32+ GB machines.
     steps:
       # prep
       - name: Checkout
