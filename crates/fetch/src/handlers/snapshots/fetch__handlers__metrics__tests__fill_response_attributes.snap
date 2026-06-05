@@ -1,0 +1,22 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: sorted_attrs(attributes.values())
+---
+[
+    (
+        "extra",
+        "extra_val",
+    ),
+    (
+        "http.response.status_code",
+        "200",
+    ),
+    (
+        "network.protocol.name",
+        "http",
+    ),
+    (
+        "network.protocol.version",
+        "1.1",
+    ),
+]

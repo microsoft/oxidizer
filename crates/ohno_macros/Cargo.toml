@@ -4,7 +4,7 @@
 [package]
 name = "ohno_macros"
 description = "Macros for the ohno crate."
-version = "0.3.2"
+version = "0.3.3"
 readme = "README.md"
 keywords = ["oxidizer", "error", "backtrace"]
 categories = ["data-structures"]

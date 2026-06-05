@@ -1,9 +1,23 @@
 # Changelog
 
+## [0.3.2] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
+
+## [0.3.1] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
+
 ## [0.3.0] - 2026-06-04
 
 - 🔧 Maintenance
 
+  - bump `http_extensions` to 0.5.0
+  - bump `templated_uri` to 0.3.0
   - bump `fetch_tls` to 0.2.1
   - depends on `fetch_options` and drop duplicate types
 
@@ -67,7 +81,6 @@
 - 🧩 Miscellaneous
 
   - Update tool versions ([#462](https://github.com/microsoft/oxidizer/pull/462))
->>>>>>> origin/main
 
 ## [0.1.2] - 2026-06-01
 
