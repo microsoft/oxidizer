@@ -6,6 +6,7 @@
 
   - bump `templated_uri` to 0.3.0
   - bump `data_privacy` to 0.12.0
+
 ## [0.4.4] - 2026-06-02
 
 - 🔧 Maintenance
