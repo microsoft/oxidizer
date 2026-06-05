@@ -20,6 +20,7 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper
 allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::spawner::Spawner",
+    "fetch_options::*",
     "fetch_tls::*",
     "http_extensions::*",
     "layered::*",
@@ -51,6 +52,7 @@ native-tls = [
 # internal
 anyspawn = { workspace = true }
 bytesbuf = { workspace = true }
+fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
 http_extensions = { workspace = true }
 layered = { workspace = true, features = ["dynamic-service"] }
@@ -83,6 +85,7 @@ tokio-native-tls = { workspace = true, optional = true }
 [dev-dependencies]
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 bytes = { workspace = true }
+fetch_options = { path = "../fetch_options" }
 fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["std", "executor"] }
 http_extensions = { path = "../http_extensions", features = ["test-util"] }

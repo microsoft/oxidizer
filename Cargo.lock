@@ -1076,6 +1076,7 @@ dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "fetch_options",
  "fetch_tls",
  "futures",
  "http",
@@ -1108,8 +1109,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "fetch_tls"
+name = "fetch_options"
 version = "0.2.0"
+dependencies = [
+ "http",
+ "insta",
+ "mutants",
+ "static_assertions",
+]
+
+[[package]]
+name = "fetch_tls"
+version = "0.2.1"
 dependencies = [
  "base64",
  "http",

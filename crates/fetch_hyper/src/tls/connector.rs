@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! An enum that wraps the `TLS` connector, dispatching to the configured backend.
+//! The internal `TLS` connector, dispatching to the configured backend.
 
 use std::marker::PhantomData;
+use std::pin::Pin;
 #[cfg(any(feature = "rustls", test))]
 use std::sync::Arc;
 
+use fetch_options::RequestFilter;
 use fetch_tls::TlsBackend;
 use http::Version;
 use templated_uri::BaseUri;
@@ -15,10 +17,9 @@ use tower::Service as _;
 
 #[cfg(any(feature = "rustls", feature = "native-tls", test))]
 use crate::connection::hyper_connector_adapter::HyperConnectorAdapter;
-use crate::options::RequestFilter;
 use crate::{Connect, HyperIo};
 
-/// An enum that wraps the `TLS` connector, dispatching to the correct backend at runtime.
+/// Wraps the `TLS` connector, dispatching to the active backend at runtime.
 pub(crate) enum TlsConnector<C, S>
 where
     C: Connect<S>,
@@ -67,11 +68,11 @@ where
         match backend {
             #[cfg(any(feature = "rustls", test))]
             TlsBackend::Rustls(config) => Self::Rustls(
-                build_rustls_connector(Arc::unwrap_or_clone(config), connector, request_filter, supported_versions),
+                build_rustls_connector(Arc::unwrap_or_clone(config), connector, &request_filter, supported_versions),
                 PhantomData,
             ),
             #[cfg(any(feature = "native-tls", test))]
-            TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, request_filter), PhantomData),
+            TlsBackend::NativeTls(native) => Self::NativeTls(build_native_tls_connector(native, connector, &request_filter), PhantomData),
 
             // When `fetch_hyper` is built without any TLS feature but feature
             // unification (e.g. during `cargo test --doc` across the workspace)
@@ -100,7 +101,7 @@ fn no_tls_backend_unreachable() -> ! {
 fn build_rustls_connector<C, S>(
     mut config: rustls::ClientConfig,
     connector: C,
-    request_filter: RequestFilter,
+    request_filter: &RequestFilter,
     supported_versions: &[Version],
 ) -> hyper_rustls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
@@ -134,7 +135,7 @@ where
 fn build_native_tls_connector<C, S>(
     native: native_tls::TlsConnector,
     connector: C,
-    request_filter: RequestFilter,
+    request_filter: &RequestFilter,
 ) -> hyper_tls::HttpsConnector<HyperConnectorAdapter<C, S>>
 where
     C: Connect<S>,
@@ -152,9 +153,13 @@ where
 impl<C, S> layered::Service<BaseUri> for TlsConnector<C, S>
 where
     C: Connect<S>,
-    S: HyperIo,
+    // `hyper-rustls`/`hyper-tls` only implement `Service` for their
+    // `HttpsConnector` when the wrapped transport stream is `Unpin`, so the
+    // inner stream type must be `Unpin` here even though `HyperIo` itself no
+    // longer requires it (the erased `Pin<Box<dyn HyperIo>>` output does not).
+    S: HyperIo + Unpin,
 {
-    type Out = http_extensions::Result<Box<dyn HyperIo>>;
+    type Out = http_extensions::Result<Pin<Box<dyn HyperIo>>>;
 
     async fn execute(&self, input: BaseUri) -> Self::Out {
         match self {
@@ -164,7 +169,7 @@ where
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
-                    .map(|s| Box::new(s) as Box<dyn HyperIo>)
+                    .map(|s| Box::pin(s) as Pin<Box<dyn HyperIo>>)
                     .map_err(handle_tls_error)
             }
             #[cfg(any(feature = "native-tls", test))]
@@ -173,7 +178,7 @@ where
                 std::future::poll_fn(|cx| c.poll_ready(cx)).await.map_err(handle_tls_error)?;
                 c.call(input.into())
                     .await
-                    .map(|s| Box::new(s) as Box<dyn HyperIo>)
+                    .map(|s| Box::pin(s) as Pin<Box<dyn HyperIo>>)
                     .map_err(handle_tls_error)
             }
             #[cfg(not(any(feature = "rustls", feature = "native-tls", test)))]

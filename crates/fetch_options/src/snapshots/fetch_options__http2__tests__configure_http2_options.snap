@@ -1,0 +1,10 @@
+---
+source: crates/fetch_options/src/http2.rs
+expression: options
+---
+Http2Options {
+    initial_max_send_streams: Some(
+        100,
+    ),
+    adaptive_window: true,
+}

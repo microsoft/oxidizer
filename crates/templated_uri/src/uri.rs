@@ -280,6 +280,20 @@ impl TryFrom<String> for Uri {
     }
 }
 
+/// Deserializes a [`Uri`] from a string, validating it via [`Uri::try_from`].
+///
+/// Only a [`Deserialize`](serde::Deserialize) impl is provided: [`Uri`] is a
+/// privacy-classified type with no plain [`Display`](std::fmt::Display)/[`Serialize`](serde::Serialize),
+/// so values are read in but never serialized back out as plain text. Use the
+/// redaction APIs to render a [`Uri`].
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Uri {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
 impl TryFrom<Uri> for http::Uri {
     type Error = UriError;
 
@@ -617,5 +631,46 @@ mod tests {
         let redacted = uri.to_redacted_string(&redaction_engine);
 
         assert_eq!(redacted, "https://example.com/api/v1/");
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::Uri;
+
+    #[test]
+    fn deserialize_full_uri() {
+        let uri: Uri = serde_json::from_str(r#""https://example.com/path?query=1""#).unwrap();
+        assert_eq!(uri.to_string().declassify_ref(), "https://example.com/path?query=1");
+    }
+
+    #[test]
+    fn deserialize_path_only_uri() {
+        let uri: Uri = serde_json::from_str(r#""/path?query=1""#).unwrap();
+        assert_eq!(uri.to_string().declassify_ref(), "/path?query=1");
+    }
+
+    #[test]
+    fn deserialize_rejects_invalid_uri() {
+        serde_json::from_str::<Uri>(r#""http://[::1:invalid""#).unwrap_err();
+    }
+
+    #[test]
+    fn deserialize_error_does_not_leak_input() {
+        // The privacy posture relies on `UriError` never echoing the raw input.
+        // Guard that invariant: a distinctive invalid host must not appear in the
+        // serde error message.
+        let err = serde_json::from_str::<Uri>(r#""http://[::SECRETHOST_invalid""#).unwrap_err();
+        assert!(
+            !err.to_string().contains("SECRETHOST"),
+            "deserialize error must not leak the raw input"
+        );
+    }
+
+    #[test]
+    fn uri_does_not_implement_serialize() {
+        // The deserialize-only posture is intentional: serializing back out would
+        // defeat the redaction guarantee on this privacy-classified type.
+        static_assertions::assert_not_impl_any!(Uri: serde::Serialize);
     }
 }
