@@ -1,0 +1,5 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: on_record
+---
+OnRecordCallback(..)
