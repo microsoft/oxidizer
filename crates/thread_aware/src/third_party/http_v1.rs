@@ -45,6 +45,7 @@ mod tests {
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
+    #[cfg(feature = "threads")]
     use crate::affinity::pinned_affinities;
 
     assert_impl_all!(StatusCode: ThreadAware, Send, Sync, Copy);

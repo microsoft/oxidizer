@@ -27,6 +27,7 @@
 /// The bodies of the implementations are empty because the listed types are
 /// inert value types: they hold no thread-local state, perform no I/O, and
 /// participate in no cross-thread sharing that would benefit from relocation.
+#[cfg(any(test, feature = "bytes_v1", feature = "http_v1", feature = "jiff_v0_2", feature = "uuid_v1",))]
 macro_rules! impl_noop_thread_aware {
     ($($t:ty),+ $(,)?) => {
         $(
