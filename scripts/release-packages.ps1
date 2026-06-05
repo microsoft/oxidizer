@@ -34,6 +34,14 @@
        set and cascade so the next iteration surfaces only newly-relevant
        elevation candidates.
 
+       The change scan only sees files under `crates/<package>/`. Modifications
+       to anything outside a package directory — for example the workspace-level
+       `Cargo.toml`, `.cargo/`, `deny.toml`, or shared CI configuration — do
+       NOT surface a package as "modified" even if they affect how the package
+       builds or behaves. If you suspect such a cross-cutting change matters,
+       use `-All` (which walks every publishable package regardless of detected
+       changes) or list the affected packages explicitly via `-Packages`.
+
     3. All (-All).
        Same guided walk as -Changed, but the change-detection scan is
        skipped: every publishable workspace package is surfaced for review,
@@ -94,6 +102,12 @@
     modifications (changes newer than its last `version =` / `publish =`
     commit) and prompt for a per-package release decision. Mutually
     exclusive with -Packages and -All.
+
+    The change scan only sees files under `crates/<package>/`; it cannot
+    detect impactful changes elsewhere in the repository (e.g. the
+    workspace-level `Cargo.toml`, `.cargo/`, `deny.toml`, or shared CI
+    configuration). If a cross-cutting change matters, use -All instead or
+    pass the affected packages explicitly via -Packages.
 
 .PARAMETER All
     Switch: walk through every publishable workspace package, even ones

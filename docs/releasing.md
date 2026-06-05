@@ -12,7 +12,12 @@ This document is the reference for the human-driven release tooling in
     unreleased modifications (changes newer than the package's last
     `version =` / `publish =` commit). The script prompts for a
     per-package decision (view diff / ignore / release as breaking,
-    non-breaking, or patch).
+    non-breaking, or patch). Note: the change scan only sees files
+    under `crates/<package>/`; modifications elsewhere in the
+    repository (e.g. the workspace-level `Cargo.toml`, `.cargo/`,
+    `deny.toml`, or shared CI configuration) do NOT surface a package
+    even if they affect how it builds or behaves — use `-All` or
+    `-Packages` to cover that case.
   - `-All` — guided walk through every publishable workspace package,
     even ones with no on-disk modifications. Use to force-walk the
     workspace when a refactor may have touched packages the change scan
@@ -363,6 +368,13 @@ packages get surfaced:
   needs releasing" but do not yet have the full `-Packages` list ready.
   If the scan finds no packages with unreleased modifications, the
   script prints a confirmation and exits without prompting.
+
+  The change scan only inspects files under `crates/<package>/`. Edits
+  to anything outside a package directory — the workspace-level
+  `Cargo.toml`, `.cargo/`, `deny.toml`, shared CI workflows, top-level
+  scripts — are invisible to the scan even if they affect how the
+  package builds or behaves. Switch to `-All` (or pass the affected
+  packages with `-Packages`) when a cross-cutting change matters.
 
 - `-All` surfaces every published workspace package, regardless of
   whether the on-disk content has been modified. Use this when you want
