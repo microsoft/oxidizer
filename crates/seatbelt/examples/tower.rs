@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! This example demonstrates how to combine multiple resilience middlewares
+//! This example demonstrates how to combine multiple resilience middleware
 //! using the `seatbelt` crate with Tower's `ServiceBuilder` to create a robust
 //! execution pipeline compatible with the Tower ecosystem.
 
@@ -21,7 +21,7 @@ async fn main() -> Result<(), ohno::AppError> {
     // Shared context for resilience middleware
     let context = ResilienceContext::new(Clock::new_tokio()).name("tower_pipeline");
 
-    // Build a Tower service with retry and timeout middlewares using ServiceBuilder.
+    // Build a Tower service with retry and timeout middleware using ServiceBuilder.
     // Layers are applied bottom-to-top: timeout wraps the inner service first,
     // then retry wraps the timeout layer.
     let mut service = ServiceBuilder::new()

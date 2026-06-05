@@ -1,0 +1,5 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: response_enricher
+---
+ResponseEnricher(..)

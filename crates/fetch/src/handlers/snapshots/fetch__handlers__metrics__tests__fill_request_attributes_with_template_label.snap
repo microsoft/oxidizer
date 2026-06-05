@@ -1,0 +1,18 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: sorted_attrs(attributes.values())
+---
+[
+    (
+        "http.request.method",
+        "GET",
+    ),
+    (
+        "url.scheme",
+        "_OTHER",
+    ),
+    (
+        "url.template",
+        "crates_api",
+    ),
+]
