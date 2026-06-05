@@ -7,9 +7,14 @@
 //!
 //! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
 //! `HeaderValue`) get a no-op `relocate`. Container types (`HeaderMap<T>`,
-//! `Request<T>`, `Response<T>`) propagate `relocate` to every element they own;
-//! `Request<T>` and `Response<T>` relocate both their header values and body,
-//! mirroring how this crate handles `Vec<T>` and `Box<T>`.
+//! `Request<T>`, `Response<T>`) propagate `relocate` to their headers and (for
+//! `Request`/`Response`) their body, mirroring how this crate handles `Vec<T>`
+//! and `Box<T>`.
+//!
+//! Note: `http::Extensions` (carried by `Request<T>` and `Response<T>`) holds
+//! arbitrary `Any` values whose concrete types are erased at runtime, so this
+//! impl cannot relocate them. Callers that stash thread-affine state in
+//! extensions must relocate it explicitly.
 
 use ::http::header::{HeaderMap, HeaderName, HeaderValue};
 use ::http::{Method, Request, Response, StatusCode, Version};
@@ -104,7 +109,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "threads")]
-    fn request_relocate_propagates_to_body() {
+    fn request_relocate_propagates_to_body_and_headers() {
         let affinities = pinned_affinities(&[2]);
         let mut req = Request::new(vec![1_u8, 2, 3]);
         req.headers_mut().insert("x-trace", HeaderValue::from_static("abc"));

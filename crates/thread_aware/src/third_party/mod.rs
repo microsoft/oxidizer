@@ -7,8 +7,8 @@
 //! (or 0.x minor) of the wrapped crate — for example `bytes_v1`, `http_v1`,
 //! `jiff_v0_2`, `uuid_v1`. Enabling a feature pulls in that crate as a
 //! dependency and exposes `ThreadAware` impls for inert, self-contained types
-//! from it. By default no such features are enabled, so the crate stays
-//! dependency-free.
+//! from it. By default no such features are enabled, so this crate does not
+//! pull in any of these wrapped crates as additional dependencies.
 //!
 //! The version-suffixed naming lets us support a future major of any of these
 //! crates additively: when, say, `bytes 2.0` ships we can add a `bytes_v2`
