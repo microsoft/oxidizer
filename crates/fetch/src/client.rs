@@ -12,7 +12,7 @@ use futures::future::Either;
 use http::Method;
 use http_extensions::routing::{BaseUriConflict, Router, RouterContext};
 use http_extensions::timeout::ResponseTimeout;
-use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt};
+use http_extensions::{HttpRequestBuilder, HttpRequestBuilderExt, RequestExt};
 use layered::Service;
 use templated_uri::{BaseUri, Uri};
 use thread_aware::{PerCore, ThreadAware};
@@ -355,17 +355,34 @@ impl Service<HttpRequest> for HttpClient {
             input.extensions_mut().insert(self.router.clone());
         }
 
-        match self.router.resolve_request_uri(RouterContext::default(), &mut input) {
-            Err(e) => Either::Left(ready(Err(e))),
-            Ok(()) => Either::Right(
+        if let Err(e) = self.router.resolve_request_uri(RouterContext::default(), &mut input) {
+            // Carry whatever request metadata the builder attached so the
+            // error remains diagnosable even though routing never ran.
+            let request_info = input.request_info().cloned().unwrap_or_default();
+            Either::Left(ready(Err(e.with_request_info(request_info))))
+        } else {
+            // Capture request metadata before the pipeline consumes the
+            // request so it can be attached to errors that are synthesized
+            // without request context (e.g. a response timeout, or an
+            // internal total/attempt timeout produced by the resilience
+            // layers).
+            let request_info = input.request_info().cloned().unwrap_or_default();
+            Either::Right(
                 self.pipeline()
                     .execute(input)
                     .timeout(&self.clock, timeout)
                     .map(move |outcome| match outcome {
-                        Ok(inner) => inner,
-                        Err(_) => Err(HttpError::timeout(timeout)),
+                        // A response timeout fires here, outside the
+                        // pipeline, so the error carries no request context.
+                        Err(_) => Err(HttpError::timeout(timeout).with_request_info(request_info)),
+                        Ok(Ok(response)) => Ok(response),
+                        // Backfill the metadata on any pipeline error that
+                        // did not already carry it, leaving the richer
+                        // dispatch-attached info untouched.
+                        Ok(Err(error)) if error.request_info().is_none() => Err(error.with_request_info(request_info)),
+                        Ok(Err(error)) => Err(error),
                     }),
-            ),
+            )
         }
     }
 }

@@ -274,6 +274,10 @@ name = "resilience"
 required-features = ["test-util"]
 
 [[test]]
+name = "request_info_flow"
+required-features = ["test-util"]
+
+[[test]]
 name = "standard_pipeline"
 required-features = ["test-util"]
 
