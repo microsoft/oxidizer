@@ -18,6 +18,7 @@ use cachet_tier::{CacheEntry, CacheTier};
 use parking_lot::Mutex;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
+use crate::telemetry::cache::{WithRequestIdExt, next_request_id};
 
 /// Configuration for background cache refresh.
 ///
@@ -130,7 +131,8 @@ where
                         }
                     }
                 });
-                inner.fetch_and_promote(key).await;
+                let request_id = next_request_id();
+                inner.fetch_and_promote(key).with_request_id(request_id).await;
             }));
         }
     }

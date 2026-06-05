@@ -279,12 +279,28 @@ impl CacheTelemetry {
         );
     }
 
+    /// Records a successful background refresh from the fallback tier.
     pub(crate) fn record_refresh_hit(&self, cache_name: CacheName, duration: Duration) {
         self.record_debug_with_duration(cache_name, attributes::EVENT_REFRESH_HIT, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_REFRESH_HIT,
+            duration,
+            true,
+        );
     }
 
+    /// Records a background refresh that found no data in the fallback tier.
     pub(crate) fn record_refresh_miss(&self, cache_name: CacheName, duration: Duration) {
         self.record_info_with_duration(cache_name, attributes::EVENT_REFRESH_MISS, duration);
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_REFRESH_MISS,
+            duration,
+            true,
+        );
     }
 
     pub(crate) fn record_insert_rejected(&self, tier_name: CacheName, fallback: bool) {

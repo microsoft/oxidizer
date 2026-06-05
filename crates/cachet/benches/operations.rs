@@ -150,7 +150,7 @@ fn bench_wrapper_overhead(c: &mut Criterion) {
         });
     });
 
-    // With telemetry + active subscriber (measures span processing overhead)
+    // With telemetry + active subscriber (measures event formatting/dispatch overhead)
     group.bench_function("with_telemetry_subscriber", |b| {
         let subscriber = tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_ansi(false));
         let _guard = tracing::subscriber::set_default(subscriber);

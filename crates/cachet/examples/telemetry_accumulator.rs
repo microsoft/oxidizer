@@ -7,7 +7,7 @@
 //! This pattern mirrors how a TVS-style consumer would collect tier
 //! outcomes, latencies, and flags into one log row per request.
 //!
-//! Uses `DashMap` for lock-free concurrent accumulation — safe across
+//! Uses `DashMap` for concurrent, low-contention accumulation — safe across
 //! all async runtimes, including work-stealing (tokio) and thread-per-core
 //! (oxidizer), even if a task migrates between cores mid-operation.
 //!
