@@ -101,6 +101,7 @@ jobs:
           ) + $skipFlags
 
           cargo @cargoArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           # Report skipped tests clearly at the end
           if ($skipArgs.Count -gt 0) {
