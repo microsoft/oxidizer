@@ -120,13 +120,13 @@
 
 .EXAMPLE
     # Release 'bytesbuf_io' as a breaking change. Cascade is automatic.
-    .\release-packages.ps1 -Packages 'bytesbuf_io@breaking'
+    ./scripts/release-packages.ps1 -Packages 'bytesbuf_io@breaking'
 
 .EXAMPLE
     # Release 'bytesbuf' and 'http_extensions' in a single transaction:
     # bytesbuf as breaking, http_extensions as non-breaking. Any cascade
     # between them or onto their dependents is computed automatically.
-    .\release-packages.ps1 -Packages 'bytesbuf@breaking','http_extensions@nonbreaking'
+    ./scripts/release-packages.ps1 -Packages 'bytesbuf@breaking','http_extensions@nonbreaking'
 
 .PARAMETER Force
     Switch (valid only with -Packages): relax the explicit-version-pin
@@ -150,24 +150,24 @@
 
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
-    .\release-packages.ps1 -Packages 'my-package@1.0.0'
+    ./scripts/release-packages.ps1 -Packages 'my-package@1.0.0'
 
 .EXAMPLE
     # Pin a pre-release version.
-    .\release-packages.ps1 -Packages 'my-package@1.0.0-rc.1'
+    ./scripts/release-packages.ps1 -Packages 'my-package@1.0.0-rc.1'
 
 .EXAMPLE
     # Force-honor a pin even when cascade analysis requires a higher version
     # (downstream consumers may break — use with caution).
-    .\release-packages.ps1 -Packages 'my-package@1.0.0' -Force
+    ./scripts/release-packages.ps1 -Packages 'my-package@1.0.0' -Force
 
 .EXAMPLE
     # Guided walk through every workspace package with unreleased modifications.
-    .\release-packages.ps1 -Changed
+    ./scripts/release-packages.ps1 -Changed
 
 .EXAMPLE
     # Guided walk through every publishable workspace package.
-    .\release-packages.ps1 -All
+    ./scripts/release-packages.ps1 -All
 #>
 [CmdletBinding(DefaultParameterSetName = 'ByPackages')]
 param(
