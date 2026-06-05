@@ -4,7 +4,7 @@
 [package]
 name = "seatbelt_http"
 description = "HTTP-specific extensions for the seatbelt crate."
-version = "0.2.6"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "resilience", "seatbelt", "http", "recovery"]
 categories = ["data-structures", "network-programming"]

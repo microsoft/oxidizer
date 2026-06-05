@@ -16,6 +16,8 @@
 
 - 🔧 Maintenance
 
+  - bump `http_extensions` to 0.5.0
+  - bump `templated_uri` to 0.3.0
   - bump `fetch_tls` to 0.2.1
   - depends on `fetch_options` and drop duplicate types
 

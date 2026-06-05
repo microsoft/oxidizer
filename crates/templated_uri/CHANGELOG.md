@@ -1,11 +1,14 @@
 # Changelog
 
-## [0.2.4] - 2026-06-04
+## [0.3.0] - 2026-06-04
+
+- ⚠️ Breaking
+
+  - bump `data_privacy` to 0.12.0
 
 - 🔧 Maintenance
 
   - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
-
 
 - ✨ Features
 
