@@ -54,11 +54,11 @@ impl ::templated_uri::PathAndQueryTemplate for QueryTest {
     fn to_path_and_query(
         &self,
     ) -> ::std::result::Result<
-        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::__private::http::uri::PathAndQuery,
         ::templated_uri::UriError,
     > {
         Ok(
-            ::templated_uri::http::uri::PathAndQuery::try_from(
+            ::templated_uri::__private::http::uri::PathAndQuery::try_from(
                 ::templated_uri::PathAndQueryTemplate::render(self),
             )?,
         )
@@ -69,22 +69,34 @@ impl ::std::fmt::Debug for QueryTest {
         f.debug_tuple("QueryTest").field(&"/api/{resource}{?page,limit}").finish()
     }
 }
-impl ::data_privacy::RedactedDisplay for QueryTest {
+impl ::templated_uri::__private::RedactedDisplay for QueryTest {
     fn fmt(
         &self,
-        redactor: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::templated_uri::__private::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         f.write_str("/api/")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.resource, redactor, f)?;
+        <String as ::templated_uri::__private::RedactedDisplay>::fmt(
+            &self.resource,
+            redactor,
+            f,
+        )?;
         f.write_str("?")?;
         f.write_str("page")?;
         f.write_str("=")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.page, redactor, f)?;
+        <String as ::templated_uri::__private::RedactedDisplay>::fmt(
+            &self.page,
+            redactor,
+            f,
+        )?;
         f.write_str("&")?;
         f.write_str("limit")?;
         f.write_str("=")?;
-        <String as ::data_privacy::RedactedDisplay>::fmt(&self.limit, redactor, f)?;
+        <String as ::templated_uri::__private::RedactedDisplay>::fmt(
+            &self.limit,
+            redactor,
+            f,
+        )?;
         ::std::result::Result::Ok(())
     }
 }
