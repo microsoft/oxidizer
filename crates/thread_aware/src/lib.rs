@@ -159,7 +159,7 @@
 mod cell;
 mod core;
 mod impls;
-mod third_party;
+pub mod third_party;
 mod wrappers;
 
 pub mod closure;

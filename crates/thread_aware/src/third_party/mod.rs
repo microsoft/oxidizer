@@ -40,24 +40,24 @@ macro_rules! impl_noop_thread_aware {
 
 #[cfg(feature = "bytes")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
-mod bytes;
+pub mod bytes;
 
 #[cfg(feature = "chrono")]
 #[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
-mod chrono;
+pub mod chrono;
 
 #[cfg(feature = "http")]
 #[cfg_attr(docsrs, doc(cfg(feature = "http")))]
-mod http;
+pub mod http;
 
 #[cfg(feature = "jiff")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
-mod jiff;
+pub mod jiff;
 
 #[cfg(feature = "time")]
 #[cfg_attr(docsrs, doc(cfg(feature = "time")))]
-mod time;
+pub mod time;
 
 #[cfg(feature = "uuid")]
 #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
-mod uuid;
+pub mod uuid;
