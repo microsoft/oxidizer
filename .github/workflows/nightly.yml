@@ -79,32 +79,35 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
+        shell: pwsh
         run: |
           # Build --skip arguments from the suppression file.
           # See .miri-tree-borrows-skip for the list and justifications.
-          SKIP_ARGS=""
-          SKIPPED_TESTS=()
-          if [[ -f .miri-tree-borrows-skip ]]; then
-            while IFS= read -r line; do
-              line="${line%%#*}"    # strip inline comments
-              line="${line// /}"    # trim whitespace
-              [[ -z "$line" ]] && continue
-              SKIP_ARGS="$SKIP_ARGS --skip $line"
-              SKIPPED_TESTS+=("$line")
-            done < .miri-tree-borrows-skip
-          fi
+          $skipArgs = @()
+          if (Test-Path .miri-tree-borrows-skip) {
+            $skipArgs = @(
+              Get-Content .miri-tree-borrows-skip |
+                ForEach-Object { ($_ -replace '#.*').Trim() } |
+                Where-Object { $_ -ne '' }
+            )
+          }
 
-          cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests \
-            -- $SKIP_ARGS
+          $skipFlags = @($skipArgs | ForEach-Object { "--skip"; $_ })
+          $cargoArgs = @(
+            "+${{ env.RUST_NIGHTLY }}"
+            "miri"; "test"
+            "--all-features"; "--workspace"; "--lib"; "--tests"
+            "--"
+          ) + $skipFlags
+
+          cargo @cargoArgs
 
           # Report skipped tests clearly at the end
-          if [[ ${#SKIPPED_TESTS[@]} -gt 0 ]]; then
-            echo ""
-            echo "::warning::${#SKIPPED_TESTS[@]} test(s) skipped via .miri-tree-borrows-skip (tree-borrows provenance tracking exceeds runner memory):"
-            for t in "${SKIPPED_TESTS[@]}"; do
-              echo "  - $t"
-            done
-          fi
+          if ($skipArgs.Count -gt 0) {
+            Write-Host ""
+            Write-Host "::warning::$($skipArgs.Count) test(s) skipped via .miri-tree-borrows-skip (tree-borrows provenance tracking exceeds runner memory):"
+            $skipArgs | ForEach-Object { Write-Host "  - $_" }
+          }
         timeout-minutes: 240
 
   miri-strict-provenance:
@@ -146,15 +149,16 @@ jobs:
           rust-components: miri
       - name: Setup Miri Flags
         # Rotate seed pairs daily based on day-of-month (1–31) to spread
-        # coverage over time. Each night runs 2 seeds: day 1 → seeds
-        # 1..2, day 2 → seeds 3..4, …, day 31 → seeds 61..62. Over a
-        # full month this covers seeds 1–62 without the memory and time
-        # cost of running all seeds every night.
+        # coverage over time. -Zmiri-many-seeds uses an exclusive upper
+        # bound, so we add 1: day 1 → seeds 1..3 (runs 1,2), day 2 →
+        # seeds 3..5 (runs 3,4), …, day 31 → seeds 61..63 (runs 61,62).
+        # Over a full month this covers seeds 1–62.
+        shell: pwsh
         run: |
-            SEED_BASE=$((10#$(date +%d)))
-            SEED_LOW=$((2 * SEED_BASE - 1))
-            SEED_HIGH=$((2 * SEED_BASE))
-            echo "MIRIFLAGS=-Zmiri-many-seeds=${SEED_LOW}..${SEED_HIGH}" >> "$GITHUB_ENV"
+            $seedBase = [int](Get-Date -Format 'dd')
+            $seedLow  = 2 * $seedBase - 1
+            $seedHigh = 2 * $seedBase + 1
+            "MIRIFLAGS=-Zmiri-many-seeds=${seedLow}..${seedHigh}" >> $env:GITHUB_ENV
 
       # execute
       - name: Miri (race coverage)
