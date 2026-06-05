@@ -1520,10 +1520,15 @@ function Invoke-PlanReview {
     try {
         for ($iter = 0; $iter -lt $runawayCap; $iter++) {
             # State signature: every iteration must mutate at least one of
-            # {userTokens, declined, reviewedCascadeAsIs}. If a full iteration
-            # body completes without changing state, the next iteration would
-            # take the same path forever — abort with a diagnostic rather than
-            # spinning silently.
+            # {userTokens, declined, reviewedCascadeAsIs}. The current control
+            # flow guarantees this — accept appends to userTokens; ignore adds
+            # to declined or reviewedCascadeAsIs; the switch's default arm
+            # throws on any unrecognised action; an empty queue early-returns.
+            # The signature check is therefore unreachable in normal
+            # operation, but kept as defense-in-depth so a future change that
+            # introduces a state-leak path (e.g. a new `continue`-without-
+            # mutate branch) aborts with a clear diagnostic instead of
+            # silently spinning until the runaway cap fires.
             $tokenSig    = (@($userTokens.ToArray()) | ForEach-Object { $_.RawToken }) -join '|'
             $declinedSig = (@($declined) | Sort-Object) -join ','
             $reviewedSig = (@($reviewedCascadeAsIs) | Sort-Object) -join ','

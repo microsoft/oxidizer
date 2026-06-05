@@ -862,8 +862,19 @@ Describe 'Open-PathWithPreferredEditor' {
 }
 
 # ---------------------------------------------------------------------------
-# Invoke-PlanReview (runaway-cap + state-signature progress)
+# Invoke-PlanReview (runaway-cap behaviour)
 # ---------------------------------------------------------------------------
+#
+# The state-signature "no progress" diagnostic that this Describe-block once
+# tried to cover is unreachable through the current control flow: every
+# iteration body either early-returns (queue empty), updates state via
+# ignore (`declined` / `reviewedCascadeAsIs`) or accept (`userTokens`), or
+# throws via the switch `default` arm. A direct unit test would therefore
+# have to inject a buggy state that no real caller can produce — a
+# tautology that adds no signal. The check itself is retained in the
+# production code as defense-in-depth against future changes that could
+# introduce a state-leak path; see the comment on the signature check in
+# Invoke-PlanReview.
 
 Describe 'Invoke-PlanReview iteration-cap behaviour' {
 
@@ -963,35 +974,6 @@ Describe 'Invoke-PlanReview iteration-cap behaviour' {
         $plan.ContainsKey('p1')    | Should -BeTrue
         $plan.ContainsKey('extra') | Should -BeTrue
         $plan['extra'].EffectiveChangeType | Should -Be 'non-breaking'
-    }
-
-    It 'throws a no-progress diagnostic when an iteration body completes without changing state' {
-        # Pathological mock: user always ignores. The first ignore adds 'extra'
-        # to $declined (state change). On iter 2, 'extra' is filtered from the
-        # findings queue (it's in $declined), so the queue is empty and the
-        # function returns BEFORE the signature check sees a no-progress
-        # iteration. So to force the throw, we make Get-PackageReleaseDecision
-        # claim to ignore but the Mock doesn't update state — simulated by
-        # returning a finding that's always pending. The simplest path is to
-        # set Mode = 'all-changed' but with a userTokens path that never accepts.
-        # Easier: make the decision return an unrecognised action to short
-        # the loop... no, that throws. The cleanest path is to mock things
-        # such that the queue is non-empty AND the user's response doesn't
-        # mutate $declined/$reviewedCascadeAsIs/$userTokens. That can't happen
-        # without manipulating the mocks directly, so instead we drive the
-        # check via the signature itself by forcing a re-entrancy: a mock
-        # that returns no findings on the first call (state signature = empty)
-        # then returns a finding on the second call but the user accepts the
-        # SAME token both times (mocked Resolve-ReleaseSet de-dupes), keeping
-        # state identical across iterations.
-        #
-        # Skipping for now: the no-progress path is exercised indirectly by
-        # the runaway-cap test above (10 iterations all change state). A
-        # direct unit test would require deeply contrived mocks that don't
-        # reflect the real call graph. The throw IS reachable from the
-        # function body, just hard to trigger via mocks alone — integration
-        # tests in Pillar 12-13 will exercise it end-to-end if needed.
-        Set-ItResult -Skipped -Because 'no-progress path requires contrived mocks; covered by integration test workflow in Pillar 13'
     }
 }
 
