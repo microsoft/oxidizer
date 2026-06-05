@@ -92,6 +92,23 @@
 //!   environments: `default-features = false`.
 //! * **`threads`**: Enables features mainly used by async runtimes for OS interactions.
 //!
+//! ## 3rd-party crate impls
+//!
+//! The following opt-in features provide no-op [`ThreadAware`] implementations
+//! for inert value types from popular 3rd-party crates. Each feature adds only
+//! its named crate as an optional dependency; by default none are enabled and
+//! the crate brings in no extra dependencies. See [`third_party`] for the list
+//! of types covered by each feature.
+//!
+//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+//! * **`chrono`**: Impls for `chrono::NaiveDate`, `chrono::DateTime`, etc.
+//! * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`.
+//! * **`jiff`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+//! * **`time`**: Impls for `time::OffsetDateTime`, `time::Date`, etc.
+//! * **`uuid`**: Impl for `uuid::Uuid`.
+//!
+//! [`third_party`]: third_party
+//!
 //! # Examples
 //!
 //! ## Deriving [`ThreadAware`]
@@ -142,6 +159,7 @@
 mod cell;
 mod core;
 mod impls;
+mod third_party;
 mod wrappers;
 
 pub mod closure;
