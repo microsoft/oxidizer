@@ -1,4 +1,5 @@
 # Changelog
+
 ## [0.10.2] - 2026-06-05
 
 - 🔧 Maintenance
