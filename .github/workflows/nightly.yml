@@ -155,7 +155,7 @@ jobs:
         # Over a full month this covers seeds 1–62.
         shell: pwsh
         run: |
-            $seedBase = [int](Get-Date -Format 'dd')
+            $seedBase = [int](Get-Date -AsUtc -Format 'dd')
             $seedLow  = 2 * $seedBase - 1
             $seedHigh = 2 * $seedBase + 1
             "MIRIFLAGS=-Zmiri-many-seeds=${seedLow}..${seedHigh}" >> $env:GITHUB_ENV
