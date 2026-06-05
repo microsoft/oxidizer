@@ -7,7 +7,8 @@
 //!
 //! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
 //! `HeaderValue`) get a no-op `relocate`. Container types (`HeaderMap<T>`,
-//! `Request<T>`, `Response<T>`) propagate `relocate` to their element / body,
+//! `Request<T>`, `Response<T>`) propagate `relocate` to every element they own;
+//! `Request<T>` and `Response<T>` relocate both their header values and body,
 //! mirroring how this crate handles `Vec<T>` and `Box<T>`.
 
 use ::http::header::{HeaderMap, HeaderName, HeaderValue};
@@ -28,12 +29,18 @@ impl<T: ThreadAware> ThreadAware for HeaderMap<T> {
 
 impl<T: ThreadAware> ThreadAware for Request<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        for value in self.headers_mut().values_mut() {
+            value.relocate(source, destination);
+        }
         self.body_mut().relocate(source, destination);
     }
 }
 
 impl<T: ThreadAware> ThreadAware for Response<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
+        for value in self.headers_mut().values_mut() {
+            value.relocate(source, destination);
+        }
         self.body_mut().relocate(source, destination);
     }
 }
