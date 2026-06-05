@@ -4,7 +4,7 @@
 use std::future::ready;
 use std::sync::Arc;
 
-use futures::TryFutureExt;
+use futures::FutureExt;
 use futures::future::Either;
 use http::uri::Scheme;
 use http_extensions::RequestInfo;
@@ -99,10 +99,10 @@ impl Service<HttpRequest> for Dispatch {
 
     fn execute(&self, input: HttpRequest) -> impl Future<Output = Self::Out> + Send {
         // Preserve the requets info.
-        let request_info = input.extensions().get::<RequestInfo>().cloned();
+        let request_info = input.extensions().get::<RequestInfo>().cloned().unwrap_or_default();
 
         if let Err(err) = validate(&self.request_filter, &input) {
-            return Either::Right(ready(Err(err)));
+            return Either::Right(ready(Err(err.with_request_info(request_info))));
         }
 
         // Select the transport synchronously *before* entering the async block.
@@ -129,16 +129,12 @@ impl Service<HttpRequest> for Dispatch {
             }
         };
 
-        Either::Left(transport.execute(input).map_ok(move |mut res| {
-            // Forward the attempt information to the response if present. This
-            // allows inspecting the attempt used to get this response. In
-            // healthy scenarios this is always the first attempt, but in
-            // degraded scenarios it may be higher.
-            if let Some(info) = request_info {
-                res.extensions_mut().insert(info);
+        Either::Left(transport.execute(input).map(move |res| match res {
+            Ok(mut res) => {
+                res.extensions_mut().insert(request_info);
+                Ok(res)
             }
-
-            res
+            Err(err) => Err(err.with_request_info(request_info)),
         }))
     }
 }
@@ -178,7 +174,7 @@ fn is_allowed(filter: &RequestFilter, scheme: &Scheme) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::{Request, StatusCode, Uri};
-    use http_extensions::FakeHandler;
+    use http_extensions::{FakeHandler, RequestExt, ResponseExt};
     use ohno::ErrorExt;
     use seatbelt::{Recovery, RecoveryKind};
 
@@ -269,16 +265,16 @@ mod tests {
             .unwrap();
 
         let response = handler.execute(request).await.unwrap();
-        assert!(response.extensions().get::<Attempt>().is_none());
+        assert!(response.attempt().unwrap_or_default());
 
         let mut request = Request::get(Uri::from_static("http://dummy.org/relative-path"))
             .body(HttpBodyBuilder::new_fake().empty())
             .unwrap();
 
-        request.extensions_mut().insert(Attempt::new(4, false));
+        request.set_attempt(Attempt::new(4, false));
 
         let response = handler.execute(request).await.unwrap();
-        assert_eq!(response.extensions().get::<Attempt>().copied().unwrap(), Attempt::new(4, false));
+        assert_eq!(response.attempt().unwrap_or_default(), Attempt::new(4, false));
     }
 
     #[cfg_attr(miri, ignore)]
