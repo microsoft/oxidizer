@@ -151,9 +151,9 @@ jobs:
         # full month this covers seeds 1–62 without the memory and time
         # cost of running all seeds every night.
         run: |
-            SEED_BASE="$(date +%d)"
-            SEED_LOW=$((2 * ${SEED_BASE} - 1))
-            SEED_HIGH=$((2 * ${SEED_BASE}))
+            SEED_BASE=$((10#$(date +%d)))
+            SEED_LOW=$((2 * SEED_BASE - 1))
+            SEED_HIGH=$((2 * SEED_BASE))
             echo "MIRIFLAGS=-Zmiri-many-seeds=${SEED_LOW}..${SEED_HIGH}" >> "$GITHUB_ENV"
 
       # execute
