@@ -36,7 +36,7 @@ allowed_external_types = [
 
 [features]
 default = ["memory"]
-logs = []
+logs = ["dep:tracing"]
 test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
@@ -57,7 +57,7 @@ pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 tick = { workspace = true, features = [] }
-tracing = { workspace = true }
+tracing = { workspace = true, optional = true }
 uniflight = { workspace = true }
 
 [dev-dependencies]
