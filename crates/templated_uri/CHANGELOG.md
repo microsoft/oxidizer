@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2026-06-05
+
+- ⚠️ Breaking
+
+  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
+
+- ✨ Features
+
+  - add serde Deserialize for Uri and PathAndQuery ([#473](https://github.com/microsoft/oxidizer/pull/473))
+  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
+
+- 🐛 Bug Fixes
+
+  - re-export macro support traits via __private ([#476](https://github.com/microsoft/oxidizer/pull/476))
+
 ## [0.2.3] - 2026-06-02
 
 - 🔧 Maintenance
