@@ -16,14 +16,6 @@
 
   - bump `thread_aware_macros_impl` to 0.7.2
 
-- ⚠️ Breaking
-
-  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
-
-- ✨ Features
-
-  - introduce fetch_options ([#469](https://github.com/microsoft/oxidizer/pull/469))
-
 ## [0.3.0] - 2026-06-04
 
 - 🔧 Maintenance

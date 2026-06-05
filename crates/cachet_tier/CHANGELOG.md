@@ -6,14 +6,6 @@
 
   - bump `ohno_macros` to 0.3.3
 
-- ⚠️ Breaking
-
-  - introduce data_privacy_core ([#427](https://github.com/microsoft/oxidizer/pull/427))
-
-- ✨ Features
-
-  - introduce fetch_tls crate ([#450](https://github.com/microsoft/oxidizer/pull/450))
-
 ## [0.2.1] - 2026-06-02
 
 - 🔧 Maintenance
