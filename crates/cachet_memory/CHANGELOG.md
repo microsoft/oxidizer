@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.4] - 2026-06-05
+
+- 🔧 Maintenance
+
+  - bump `cachet_tier` to 0.2.3 (transitively updates `recoverable` to 0.1.5)
+
 ## [0.3.3] - 2026-06-04
 
 - 🔧 Maintenance
