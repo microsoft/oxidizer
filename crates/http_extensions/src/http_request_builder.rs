@@ -888,6 +888,75 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
             .and_then(|response| ready(response.ensure_success()))
             .and_then(|response| response.into_body().into_json_owned::<J>())
     }
+
+    /// Sends the request, validates the response status, and returns the JSON body with optional borrowing.
+    ///
+    /// This is a convenience method equivalent to calling [`fetch`](Self::fetch), then
+    /// [`ensure_success`](crate::StatusExt::ensure_success) on the response, and finally preparing the
+    /// body for borrowed JSON deserialization. The response metadata is discarded, yielding only the
+    /// [`Json<J>`][crate::Json] wrapper.
+    ///
+    /// Like [`fetch_json_ref`](Self::fetch_json_ref), the returned [`Json<J>`][crate::Json] can borrow
+    /// strings and byte arrays directly from the underlying response data, avoiding allocations in
+    /// performance-sensitive code. When you want an owned value instead, prefer
+    /// [`fetch_json_body`](Self::fetch_json_body).
+    ///
+    /// This method requires the `json` feature to be enabled.
+    ///
+    /// # Note
+    ///
+    /// This method only prepares the data for deserialization by downloading all content
+    /// to memory. The actual JSON deserialization happens lazily when you access the data
+    /// through the [`Json<J>`][crate::Json] wrapper.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use serde::Deserialize;
+    /// # use std::borrow::Cow;
+    /// # #[cfg(not(feature = "test-util"))] fn main() {}
+    /// # #[cfg(feature = "test-util")]
+    /// # use http_extensions::{HttpError, HttpRequestBuilder, Json, HttpResponseBuilder,
+    /// #     HttpBodyBuilder, FakeHandler, HttpRequestBuilderExt};
+    /// #
+    /// # #[derive(Deserialize)]
+    /// # struct User<'a> { id: u32, #[serde(borrow)] name: Cow<'a, str> }
+    /// #
+    /// # #[cfg(feature = "test-util")]
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), HttpError> {
+    /// # let bb = HttpBodyBuilder::new_fake();
+    /// # let handler = FakeHandler::from(
+    /// #     HttpResponseBuilder::new(&bb).status(200).text(r#"{"id":42,"name":"Alice"}"#).build()?
+    /// # );
+    /// # let request_builder = handler.request_builder();
+    /// let mut body: Json<User> = request_builder
+    ///     .get("https://example.com/users/42")
+    ///     .fetch_json_ref_body::<User>()
+    ///     .await?;
+    ///
+    /// let user: User = body.read()?;
+    /// println!("User: {}", user.name);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The request couldn't be built
+    /// - The network request failed
+    /// - The response status is not in the `2xx` success range
+    /// - The response body isn't valid UTF-8
+    // Chained `and_then` (rather than `Either` + `ready(Err(..))`) keeps the returned future
+    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json`, which
+    // yields the `Json<J>` wrapper as its final output and never holds it across an await point.
+    #[cfg(any(feature = "json", test))]
+    pub fn fetch_json_ref_body<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<crate::Json<J>>> + Send {
+        self.fetch()
+            .and_then(|response| ready(response.ensure_success()))
+            .and_then(|response| response.into_body().into_json::<J>())
+    }
 }
 
 #[cfg(test)]
@@ -1469,6 +1538,47 @@ mod tests {
         });
 
         let err = block_on(client.request_builder().get("https://example.com").fetch_json_body::<JsonData>()).unwrap_err();
+
+        assert_eq!(err.label(), "response_unsuccessful");
+    }
+
+    #[test]
+    fn fetch_json_ref_body_ok() {
+        let client = FakeHandler::from_sync_handler(|_request| {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::OK)
+                .json(&JsonData { id: 7 })
+                .build()
+        });
+
+        let mut json = block_on(
+            client
+                .request_builder()
+                .get("https://example.com")
+                .fetch_json_ref_body::<JsonData>(),
+        )
+        .unwrap();
+
+        let json_data = json.read().unwrap();
+        assert_eq!(json_data.id, 7);
+    }
+
+    #[test]
+    fn fetch_json_ref_body_ensures_success() {
+        let client = FakeHandler::from_sync_handler(|_request| {
+            HttpResponseBuilder::new_fake()
+                .status(StatusCode::BAD_REQUEST)
+                .json(&JsonData { id: 1 })
+                .build()
+        });
+
+        let err = block_on(
+            client
+                .request_builder()
+                .get("https://example.com")
+                .fetch_json_ref_body::<JsonData>(),
+        )
+        .unwrap_err();
 
         assert_eq!(err.label(), "response_unsuccessful");
     }
