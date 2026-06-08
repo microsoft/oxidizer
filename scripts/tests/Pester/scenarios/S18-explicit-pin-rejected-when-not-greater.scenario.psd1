@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S18-explicit-pin-rejected-when-not-greater'
     Description = 'Bundled-input explicit-pin safety contract: user supplies an explicit ''1.0.0'' semver pin on a package already at >= 1.0.0. The planner throws because explicit version pins must be strictly greater than the current on-disk version. (1.0.0 has no special meaning — this is the same error any not-strictly-greater pin would raise.)'

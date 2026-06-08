@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S19-changed-ignore-everything'
     Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode changed and ignore every prompt; expect no releases and no errors. Validates the early-exit path when the user declines every surfaced finding.'

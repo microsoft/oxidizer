@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S20-changed-accept-with-cascade'
     Description = 'Linear3 (a -> b -> c) with all three packages modified. Run in -Mode changed: user accepts b as non-breaking (which cascades a as non-breaking), then ignores c and the cascade-elevated a. Final release set = {b, a}.'

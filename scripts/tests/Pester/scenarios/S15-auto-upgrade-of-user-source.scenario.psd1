@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S15-auto-upgrade-of-user-source'
     Description = 'Bundled-input cascade behaviour: user requests a weak change type for a package, but a cascade from another user-source package mandates a stronger change type. Resolve-ReleaseSet auto-upgrades the user-source entry and Show-ReleasePlan flags the upgrade with the ''auto-upgraded by cascade'' tag so the user has visibility into what happened. No prompt is raised — the upgrade is silent (no user judgement needed; cascade rules are deterministic).'

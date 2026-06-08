@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S22-all-no-modifications-ignore-all'
     Description = 'Linear3 (a -> b -> c) with NO modifications. Run in -Mode all: the planner surfaces every publishable package for review (despite the empty change set) and the user ignores each in turn. Expect no releases and a prompt per package. Validates that -All bypasses the change-detection filter that -Changed enforces.'

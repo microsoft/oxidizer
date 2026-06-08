@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S07-view-diff-then-decide'
     Description = 'User exercises the View Diff option (menu choice 1) for a finding before deciding. After viewing the diff the script re-prompts on the same package without re-rendering the menu, and the user picks minor (option 4) for b, then ignores c. Validates that choice 1 re-prompts on the same package rather than advancing.'

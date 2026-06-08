@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S03-decline-all'
     Description = 'Linear3 with both upstream packages modified: user declines both. Final release is the originally requested package only; both upstream findings stay unreleased.'

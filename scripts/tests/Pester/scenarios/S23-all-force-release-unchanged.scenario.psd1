@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S23-all-force-release-unchanged'
     Description = 'Linear3 (a -> b -> c) with NO modifications. Run in -Mode all: user ignores b, then accepts c as breaking. The cascade-toward-dependents walk pulls b and a in as cascade-breaking (mirroring c''s change type), which silences the elevation prompt for both (Invariant B: cascade entries that already match the strongest change type are not re-surfaced). Net result: c, b, and a all released at breaking version bumps. Validates that -All can release packages with no on-disk changes, and that cascade-breaking suppresses follow-up prompts.'

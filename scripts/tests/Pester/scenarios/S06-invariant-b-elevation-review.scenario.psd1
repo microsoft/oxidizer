@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S06-invariant-b-elevation-review'
     Description = 'Multi-dependent cascade exercising Invariant B end-to-end. User explicitly releases ''b'' as a non-breaking change. The cascade pulls ''a'' (which depends on ''b''), ''alpha'' (which depends on ''b''), and ''zeta'' (which depends on ''a'') into the release set, all at non-breaking. Because ''a'' ALSO has pre-existing source modifications AND its cascade-applied change type is below breaking, the plan-review surfaces ''a'' for elevation review. The user ignores the elevation; ''a'' stays at the cascade-applied 0.3.1.

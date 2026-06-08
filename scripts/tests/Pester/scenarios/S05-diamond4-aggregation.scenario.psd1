@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S05-diamond4-aggregation'
     Description = 'Diamond4 (top -> left, right; left, right -> bottom): release top, modify bottom only. Bottom is reachable via two paths (top->left->bottom and top->right->bottom); both chains should be aggregated under a single finding. User accepts, bottom releases with a single release.'

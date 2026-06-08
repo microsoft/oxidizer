@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S08-invalid-then-valid-input'
     Description = 'User provides invalid menu inputs (whole-string check) and empty input before settling on a valid choice. The prompt is repeated each time; no answer is consumed without the menu being shown. Validates strict input validation in Get-PackageReleaseDecision.'

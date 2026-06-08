@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S12-multi-package-single-invocation'
     Description = 'Bundled-input core capability: one invocation releases two packages with independent change types. No dependency between the two packages, so no cascade interaction. Validates that Parse-ReleaseTokens and Resolve-ReleaseSet handle multi-token input and that Invoke-ResolvedRelease processes both in topo order without interfering.'

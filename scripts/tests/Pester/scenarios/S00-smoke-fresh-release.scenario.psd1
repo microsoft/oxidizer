@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S00-smoke-fresh-release'
     Description = 'No-cascade smoke test: releasing a leaf package with no dependents and no upstream modifications produces a single release record and raises no prompts. Smoke test for the scenario runner.'

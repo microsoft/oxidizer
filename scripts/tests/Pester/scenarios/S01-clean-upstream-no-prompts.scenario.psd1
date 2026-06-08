@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S01-clean-upstream-no-prompts'
     Description = 'Linear3 with no upstream modifications produces a clean release: only the released package appears, and no prompts are raised.'

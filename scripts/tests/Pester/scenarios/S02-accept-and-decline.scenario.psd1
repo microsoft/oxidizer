@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S02-accept-and-decline'
     Description = 'Linear3 with both upstream packages modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'

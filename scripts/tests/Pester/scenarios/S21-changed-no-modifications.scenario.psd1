@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S21-changed-no-modifications'
     Description = 'Linear3 with NO modifications. Run in -Mode changed; expect the entry point to print "no changed packages detected" and exit cleanly without invoking the review loop or releasing anything.'

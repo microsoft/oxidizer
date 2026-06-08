@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S11-stable-version-minor-distinct'
     Description = 'Companion to S10: same stable workspace, but the user picks option 4 (non-breaking) on upstream. Verifies upstream ends at 1.3.0 (a non-breaking change), confirming that on >=1.x.y packages options 4 and 5 resolve to genuinely different on-disk versions.'

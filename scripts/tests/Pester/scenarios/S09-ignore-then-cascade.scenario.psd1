@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S09-ignore-then-cascade'
     Description = 'User declines b, then accepts c. Releasing c cascade-releases b into the release set at a non-breaking level. Because decisions are final, the planner silently accepts the cascade-applied level for b without re-prompting — the user already expressed their preference not to elevate. The cascade reason for b is surfaced in the final Show-ReleasePlan output for transparency. Confirms the simplified semantics: each package is prompted at most once.'

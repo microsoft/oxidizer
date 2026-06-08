@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 @{
     Name        = 'S16-stable-cascade-elevation'
     Description = 'Stable 1.x topology exercising Invariant B end-to-end. Three-package chain ''top -> middle -> bottom'' where ''middle'' has pre-existing source modifications. User releases ''bottom'' as patch. Cascade pulls ''middle'' (1.0.0 -> 1.0.1) and ''top'' (1.0.0 -> 1.0.1) as patch changes. Because ''middle'' is ALSO modified and its cascade-applied change type is below breaking, the post-release scan surfaces ''middle'' (reached via ''top.Deps = [middle]''). User picks option 4 (non-breaking) → ''middle'' escalates from cascade-applied 1.0.1 to 1.1.0, and the re-cascade lifts ''top'' to 1.1.0 too (exposing-dependent minor cascade).
