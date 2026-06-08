@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Display;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
+use data_privacy::{RedactedDebug, RedactedDisplay, Redactor};
 use http::uri::PathAndQuery;
 
 use crate::UriError;
@@ -150,6 +151,32 @@ impl Display for BasePath {
     }
 }
 
+impl RedactedDisplay for BasePath {
+    /// Formats a [`BasePath`] through the redaction pipeline.
+    ///
+    /// Consistent with the [`Uri`](crate::Uri) [`RedactedDisplay`] impl, the base path is
+    /// considered non-sensitive and is rendered using its [`Display`] representation.
+    /// This impl exists so [`BasePath`] can be used in derive-based redaction without
+    /// altering the rendered text.
+    #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
+impl RedactedDebug for BasePath {
+    /// Formats a [`BasePath`] through the redaction pipeline using its [`Debug`] form.
+    ///
+    /// A [`BasePath`] is considered non-sensitive, so redacted-debug formatting is
+    /// identical to its [`Debug`] output. This impl exists so [`BasePath`] can be
+    /// used as a field in derive-based [`RedactedDebug`] structs without altering
+    /// the rendered text.
+    #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 impl From<BasePath> for PathAndQuery {
     fn from(base_path: BasePath) -> Self {
         base_path.inner
@@ -249,6 +276,31 @@ mod tests {
     #[should_panic(expected = "invalid base path passed to BasePath::from_static")]
     fn from_static_invalid() {
         let _ = BasePath::from_static("/no-trailing-slash");
+    }
+
+    #[test]
+    fn redacted_display_preserves_path() {
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        let path = BasePath::from_static("/api/v1/");
+        let engine = RedactionEngine::builder().build();
+
+        // Consistent with the `Uri` impl, which renders the base portion via plain
+        // `Display`: the base path text is preserved in the redacted form.
+        assert_eq!(path.to_redacted_string(&engine), path.to_string());
+        assert_eq!(path.to_redacted_string(&engine), "/api/v1/");
+    }
+
+    #[test]
+    fn redacted_debug_matches_debug() {
+        use data_privacy::RedactionEngine;
+
+        let path = BasePath::from_static("/api/v1/");
+        let engine = RedactionEngine::builder().build();
+
+        let mut redacted = String::new();
+        engine.redacted_debug(&path, &mut redacted).unwrap();
+        assert_eq!(redacted, format!("{path:?}"));
     }
 
     #[cfg(feature = "serde")]

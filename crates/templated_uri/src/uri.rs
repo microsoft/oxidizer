@@ -171,7 +171,7 @@ impl RedactedDisplay for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
         if let Some(base_uri) = self.base_uri.as_ref() {
-            write!(f, "{base_uri}")?;
+            RedactedDisplay::fmt(base_uri, redactor, f)?;
         }
 
         match self.path_and_query.as_ref().map(|p| p.to_redacted_string(redactor)) {
@@ -187,8 +187,11 @@ impl RedactedDisplay for Uri {
 impl RedactedDebug for Uri {
     #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter) -> fmt::Result {
+        // The base URI is rendered as a URL string (via `RedactedDisplay`), not as a
+        // `Debug` form, so the combined output is a valid URL-shaped string in both
+        // `RedactedDisplay` and `RedactedDebug`.
         if let Some(base_uri) = self.base_uri.as_ref() {
-            write!(f, "{base_uri}")?;
+            RedactedDisplay::fmt(base_uri, redactor, f)?;
         }
 
         match self.path_and_query.as_ref().map(|p| p.to_redacted_string(redactor)) {

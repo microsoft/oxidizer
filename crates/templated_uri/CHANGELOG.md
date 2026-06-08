@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- ✨ Features
+
+  - Implement `RedactedDisplay`/`RedactedDebug` on `BasePath` and `BaseUri` so they compose into derive-based redaction. `Uri` redaction now delegates the base portion to these impls.
+
 ## [0.3.0] - 2026-06-04
 
 - ⚠️ Breaking

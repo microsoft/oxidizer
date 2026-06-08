@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{Debug, Display};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
+use data_privacy::{RedactedDebug, RedactedDisplay, Redactor};
 use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 
 use crate::origin::{HTTP_DEFAULT_PORT, HTTPS_DEFAULT_PORT};
@@ -650,6 +651,32 @@ impl Display for BaseUri {
     }
 }
 
+impl RedactedDisplay for BaseUri {
+    /// Formats a [`BaseUri`] through the redaction pipeline.
+    ///
+    /// Consistent with the [`Uri`](crate::Uri) [`RedactedDisplay`] impl, the base URI is
+    /// considered non-sensitive and is rendered using its [`Display`] representation.
+    /// This impl exists so [`BaseUri`] can be used in derive-based redaction without
+    /// altering the rendered text.
+    #[cfg_attr(test, mutants::skip)] // Do not mutate display output.
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
+
+impl RedactedDebug for BaseUri {
+    /// Formats a [`BaseUri`] through the redaction pipeline using its [`Debug`] form.
+    ///
+    /// A [`BaseUri`] is considered non-sensitive, so redacted-debug formatting is
+    /// identical to its [`Debug`] output. This impl exists so [`BaseUri`] can be
+    /// used as a field in derive-based [`RedactedDebug`] structs without altering
+    /// the rendered text.
+    #[cfg_attr(test, mutants::skip)] // Do not mutate debug output.
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for BaseUri {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -1070,6 +1097,33 @@ mod tests {
             // Catches mutation of the scheme guard for HTTPS_DEFAULT_PORT to `true`.
             let base_uri = BaseUri::from_static("http://example.com:443");
             assert_eq!(base_uri.to_string(), "http://example.com:443/");
+        }
+    }
+
+    mod redaction {
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        use super::*;
+
+        #[test]
+        fn redacted_display_preserves_base_uri() {
+            let base_uri = BaseUri::from_static("https://example.com/api/v1/");
+            let engine = RedactionEngine::builder().build();
+
+            // Consistent with the `Uri` `RedactedDisplay` impl, the base URI is
+            // rendered as-is (not redacted).
+            assert_eq!(base_uri.to_redacted_string(&engine), base_uri.to_string());
+            assert_eq!(base_uri.to_redacted_string(&engine), "https://example.com/api/v1/");
+        }
+
+        #[test]
+        fn redacted_debug_matches_debug() {
+            let base_uri = BaseUri::from_static("https://example.com/api/v1/");
+            let engine = RedactionEngine::builder().build();
+
+            let mut redacted = String::new();
+            engine.redacted_debug(&base_uri, &mut redacted).unwrap();
+            assert_eq!(redacted, format!("{base_uri:?}"));
         }
     }
 
