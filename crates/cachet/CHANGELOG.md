@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.5] - 2026-06-05
+
+- 🔧 Maintenance
+
+  - bump `recoverable` to 0.1.5
+
 ## [0.6.4] - 2026-06-04
 
 - 🔧 Maintenance
