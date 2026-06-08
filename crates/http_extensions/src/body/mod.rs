@@ -17,13 +17,15 @@
 //! All bodies implement the standard `http_body::Body` trait for ecosystem compatibility.
 
 use std::fmt::{Debug, Formatter};
+use std::future::ready;
 use std::io::Read;
 use std::pin::Pin;
 use std::task::Poll::Ready;
 use std::task::{Context, Poll};
 
 use bytesbuf::BytesView;
-use futures::{Stream, TryStreamExt};
+use futures::future::Either;
+use futures::{FutureExt, Stream, TryFutureExt, TryStreamExt};
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use pin_project::pin_project;
@@ -148,14 +150,28 @@ pub struct HttpBody {
     #[pin]
     #[thread_aware(skip)]
     kind: Kind,
-    builder: HttpBodyBuilder,
 }
 
 // Implementations for HttpBody
 
 impl HttpBody {
-    const fn new(kind: Kind, builder: HttpBodyBuilder) -> Self {
-        Self { kind, builder }
+    /// Creates an empty body (zero bytes).
+    pub(crate) const fn empty() -> Self {
+        Self { kind: Kind::Empty }
+    }
+
+    /// Creates a body backed by an in-memory byte sequence.
+    pub(crate) fn from_bytes(bytes: BytesView) -> Self {
+        Self {
+            kind: Kind::Bytes(Some(bytes)),
+        }
+    }
+
+    /// Creates a streaming body backed by a boxed [`Body`] implementation.
+    pub(crate) fn from_streaming(body: Pin<Box<dyn Body<Data = BytesView, Error = HttpError> + Send>>, options: HttpBodyOptions) -> Self {
+        Self {
+            kind: Kind::Body(body, options),
+        }
     }
 
     /// Converts the body into a memory-efficient view over a byte sequence.
@@ -183,11 +199,11 @@ impl HttpBody {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
     /// # }
     /// ```
-    pub async fn into_bytes(self) -> Result<BytesView> {
-        self.into_buffered()
-            .await?
-            .into_bytes_no_buffering()
-            .map_or_else(|| unreachable!("once body is buffered, it must be a view over a byte sequence"), Ok)
+    pub fn into_bytes(self) -> impl Future<Output = Result<BytesView>> + Send {
+        self.into_buffered().map_ok(|body| {
+            body.into_bytes_no_buffering()
+                .unwrap_or_else(|| unreachable!("once body is buffered, it must be a view over a byte sequence"))
+        })
     }
 
     pub(crate) fn into_bytes_no_buffering(self) -> Option<BytesView> {
@@ -224,15 +240,17 @@ impl HttpBody {
     /// # }
     /// ```
     #[expect(clippy::cast_possible_truncation, reason = "size_hint is used for capacity, not exact size")]
-    pub async fn into_text(self) -> Result<String> {
-        let mut text = String::with_capacity(self.size_hint().lower() as usize);
+    pub fn into_text(self) -> impl Future<Output = Result<String>> + Send {
+        let capacity = self.size_hint().lower() as usize;
 
-        self.into_bytes()
-            .await?
-            .read_to_string(&mut text)
-            .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), LABEL_BODY_UTF8_INVALID))?;
+        self.into_bytes().map(move |result| {
+            let mut text = String::with_capacity(capacity);
+            result?
+                .read_to_string(&mut text)
+                .map_err(|e| HttpError::validation_with_label(format!("body contains invalid UTF-8: {e}"), LABEL_BODY_UTF8_INVALID))?;
 
-        Ok(text)
+            Ok(text)
+        })
     }
 
     /// Loads the entire body into memory for easier handling.
@@ -274,20 +292,17 @@ impl HttpBody {
     /// #     example(HttpBodyBuilder::new_fake().text("test")).await.unwrap();
     /// # }
     /// ```
-    pub async fn into_buffered(self) -> Result<Self> {
-        let builder = self.builder;
-
+    pub fn into_buffered(self) -> impl Future<Output = Result<Self>> + Send {
         match self.kind {
-            Kind::Bytes(Some(data)) => Ok(builder.bytes(data)),
-            Kind::Bytes(None) => Err(HttpError::validation_with_label(
+            Kind::Bytes(Some(data)) => Either::Left(ready(Ok(Self::from_bytes(data)))),
+            Kind::Bytes(None) => Either::Left(ready(Err(HttpError::validation_with_label(
                 "body cannot be buffered because it is already consumed",
                 LABEL_BODY_CONSUMED,
-            )),
-            Kind::Empty => Ok(builder.empty()),
+            )))),
+            Kind::Empty => Either::Left(ready(Ok(Self::empty()))),
             Kind::Body(b, options) => {
                 let limit = options.buffer_limit;
-                let data = collect_with_limit(b.into_data_stream(), limit).await?;
-                Ok(builder.bytes(data))
+                Either::Right(collect_with_limit(b.into_data_stream(), limit).map_ok(Self::from_bytes))
             }
         }
     }
@@ -332,9 +347,8 @@ impl HttpBody {
     /// # }
     /// ```
     #[cfg(any(feature = "json", test))]
-    pub async fn into_json_owned<T: serde_core::de::DeserializeOwned>(self) -> Result<T> {
-        let json = self.into_json().await?.read_owned()?;
-        Ok(json)
+    pub fn into_json_owned<T: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<T>> + Send {
+        self.into_json::<T>().map(|json| Ok(json?.read_owned()?))
     }
 
     /// Consumes the body and converts it to a zero-copy JSON parser.
@@ -393,8 +407,8 @@ impl HttpBody {
     ///
     /// For types that don't need borrowing, prefer [`into_json_owned`][HttpBody::into_json_owned] for simpler usage.
     #[cfg(any(feature = "json", test))]
-    pub async fn into_json<'a, T: serde_core::de::Deserialize<'a>>(self) -> Result<crate::json::Json<T>> {
-        Ok(crate::json::Json::<T>::new(self.into_bytes().await?))
+    pub fn into_json<'a, T: serde_core::de::Deserialize<'a>>(self) -> impl Future<Output = Result<crate::json::Json<T>>> + Send {
+        self.into_bytes().map_ok(crate::json::Json::<T>::new)
     }
 
     /// Gets the body's content length in bytes, if known.
@@ -464,8 +478,8 @@ impl HttpBody {
     #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.kind {
-            Kind::Bytes(Some(bytes)) => Some(self.builder.bytes(bytes.clone())),
-            Kind::Empty => Some(self.builder.empty()),
+            Kind::Bytes(Some(bytes)) => Some(Self::from_bytes(bytes.clone())),
+            Kind::Empty => Some(Self::empty()),
             Kind::Body(..) | Kind::Bytes(None) => None,
         }
     }
@@ -576,17 +590,20 @@ impl Debug for Kind {
     }
 }
 
-async fn collect_with_limit(mut data: impl Stream<Item = Result<BytesView>> + Send + Unpin, limit: Option<usize>) -> Result<BytesView> {
-    let mut total_size = 0_usize;
-    let mut fragments = Vec::new();
+fn collect_with_limit(
+    data: impl Stream<Item = Result<BytesView>> + Send + Unpin,
+    limit: Option<usize>,
+) -> impl Future<Output = Result<BytesView>> + Send {
     let limit = limit.unwrap_or(DEFAULT_RESPONSE_BUFFER_LIMIT_BYTES);
 
-    while let Some(bytes) = data.try_next().await? {
-        total_size = check_size_limit(total_size, bytes.len(), limit)?;
-        fragments.push(bytes);
-    }
-
-    Ok(BytesView::from_views(fragments))
+    data.try_fold((0_usize, Vec::new()), move |(total_size, mut fragments), bytes| {
+        let result = check_size_limit(total_size, bytes.len(), limit).map(|total_size| {
+            fragments.push(bytes);
+            (total_size, fragments)
+        });
+        ready(result)
+    })
+    .map_ok(|(_, fragments)| BytesView::from_views(fragments))
 }
 
 fn check_size_limit(current_size: usize, additional: usize, limit: usize) -> Result<usize> {
