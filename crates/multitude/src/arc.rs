@@ -14,6 +14,7 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::{Allocator, Global};
 use ptr_meta::Pointee;
 
+use crate::internal::chunk::Chunk;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::drop_entry::{self, DropFn};
 use crate::internal::shared_chunk::SharedChunk;
@@ -273,7 +274,7 @@ unsafe fn commit_uninit_drop_entry<A: Allocator + Clone>(value: NonNull<u8>, len
     let chunk_ref = unsafe { chunk.as_ref() };
     // SAFETY: `chunk` is live; `payload_ptr` returns its payload start.
     let payload = unsafe { SharedChunk::<A>::payload_ptr(chunk) }.as_ptr();
-    let payload_len = chunk_ref.capacity;
+    let payload_len = chunk_ref.capacity();
     let value_offset = (value.as_ptr() as usize) - (payload as usize);
     // Acquire pairs with the owner thread's Release publish of the count in
     // `ChunkMutator::publish_drop_count`, so the placeholder slot's bytes are

@@ -31,11 +31,11 @@ use super::drop_entry::replay_drops;
 /// [`payload_ptr`](Self::payload_ptr).
 #[repr(C)]
 pub(crate) struct SharedChunk<A: Allocator + Clone> {
-    pub(crate) allocator: A,
-    pub(crate) provider: Weak<ChunkProvider<A>>,
-    pub(crate) capacity: usize,
-    pub(crate) ref_count: AtomicUsize,
-    pub(crate) drop_entry_count: AtomicU16,
+    allocator: A,
+    provider: Weak<ChunkProvider<A>>,
+    capacity: usize,
+    ref_count: AtomicUsize,
+    drop_entry_count: AtomicU16,
     /// Explicit padding so the header size stays a multiple of 8, keeping
     /// the payload start 8-aligned. The payload start must be 8-aligned both
     /// for the `AtomicPtr<u8>` cache link stored there while the chunk is free
@@ -47,10 +47,18 @@ pub(crate) struct SharedChunk<A: Allocator + Clone> {
     /// once those payload-relative accesses are made tolerant of an unaligned
     /// payload base, this padding can be removed and the header shrunk.
     _padding: [u8; 6],
-    pub(crate) data: [UnsafeCell<u8>],
+    data: [UnsafeCell<u8>],
 }
 
 impl<A: Allocator + Clone> SharedChunk<A> {
+    /// Borrow the non-owning back-pointer to the chunk's provider. The
+    /// provider may have been dropped (a shared chunk can outlive its
+    /// arena), so callers must `upgrade()` to use it.
+    #[inline]
+    pub(crate) fn provider(&self) -> &Weak<ChunkProvider<A>> {
+        &self.provider
+    }
+
     #[inline]
     pub(crate) const fn header_size() -> usize {
         mem::offset_of!(Self, _padding) + mem::size_of::<[u8; 6]>()
@@ -230,6 +238,11 @@ impl<A: Allocator + Clone> SharedChunk<A> {
 
 impl<A: Allocator + Clone> Chunk for SharedChunk<A> {
     #[inline]
+    fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    #[inline]
     fn inc_ref(&self) {
         #[cfg_attr(coverage_nightly, coverage(off))]
         #[inline(never)]
@@ -331,9 +344,7 @@ mod tests {
             }));
             chunk.as_ref().set_ref_count_for_test(0);
             SharedChunk::destroy(chunk);
-            if let Err(payload) = result {
-                std::panic::resume_unwind(payload);
-            }
+            std::panic::resume_unwind(result.expect_err("inc_ref must panic"));
         }
     }
 }

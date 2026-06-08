@@ -18,6 +18,9 @@
 /// Implementors are dynamically-sized types: the struct ends with a `[u8]`
 /// payload that holds the actual bump-allocation buffer.
 pub(crate) trait Chunk {
+    /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
+    fn capacity(&self) -> usize;
+
     /// Increments the chunk's reference count by one.
     ///
     /// Called whenever a new handle into this chunk's payload is created.

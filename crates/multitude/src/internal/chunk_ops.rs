@@ -40,13 +40,6 @@ pub(crate) trait ChunkOps: Chunk {
     /// `chunk` must reference a live (non-deallocated) chunk.
     unsafe fn payload_ptr(chunk: NonNull<Self>) -> NonNull<u8>;
 
-    /// Returns the payload's capacity in bytes.
-    ///
-    /// # Safety
-    ///
-    /// `chunk` must reference a live chunk.
-    unsafe fn capacity(chunk: NonNull<Self>) -> usize;
-
     /// Routes `chunk` (refcount zero, drops already replayed) back to the
     /// provider's cache, or deallocates it outright if the provider is dead.
     ///
@@ -69,13 +62,6 @@ impl<A: Allocator + Clone> ChunkOps for LocalChunk<A> {
         LocalChunk::payload_ptr(chunk)
     }
 
-    #[inline]
-    unsafe fn capacity(chunk: NonNull<Self>) -> usize {
-        // SAFETY: caller guarantees liveness; `capacity` is a trivially-typed
-        // field initialized at allocation time.
-        (*chunk.as_ptr()).capacity
-    }
-
     #[cold]
     #[inline(never)]
     unsafe fn teardown_and_release(chunk: NonNull<Self>) {
@@ -87,7 +73,7 @@ impl<A: Allocator + Clone> ChunkOps for LocalChunk<A> {
         let drop_count = chunk_ref.drop_entry_count();
         if drop_count != 0 {
             let payload = LocalChunk::payload_ptr(chunk).as_ptr();
-            let capacity = LocalChunk::capacity(chunk);
+            let capacity = chunk_ref.capacity();
             super::drop_entry::replay_drops(payload, capacity, drop_count);
             chunk_ref.set_drop_entry_count(0);
         }
@@ -100,7 +86,7 @@ impl<A: Allocator + Clone> ChunkOps for LocalChunk<A> {
         // down directly via `LocalChunk::destroy` in `drain_all` and do
         // not reach this code path. See the type-level doc on
         // `LocalChunk`.
-        let provider = chunk_ref.provider;
+        let provider = chunk_ref.provider();
         debug_assert!(!provider.is_null(), "local-chunk provider back-pointer is null in teardown");
         (*provider).release_local(chunk);
     }
@@ -119,12 +105,6 @@ impl<A: Allocator + Clone> ChunkOps for SharedChunk<A> {
         SharedChunk::payload_ptr(chunk)
     }
 
-    #[inline]
-    unsafe fn capacity(chunk: NonNull<Self>) -> usize {
-        // SAFETY: caller guarantees liveness; `capacity` is trivially typed.
-        (*chunk.as_ptr()).capacity
-    }
-
     #[cold]
     #[inline(never)]
     unsafe fn teardown_and_release(chunk: NonNull<Self>) {
@@ -135,14 +115,14 @@ impl<A: Allocator + Clone> ChunkOps for SharedChunk<A> {
         let drop_count = chunk_ref.drop_entry_count();
         if drop_count != 0 {
             let payload = SharedChunk::payload_ptr(chunk).as_ptr();
-            let capacity = SharedChunk::capacity(chunk);
+            let capacity = chunk_ref.capacity();
             super::drop_entry::replay_drops(payload, capacity, drop_count);
             chunk_ref.set_drop_entry_count(0);
         }
         // Shared chunks CAN outlive their provider (an Arc<T> backed by
         // a shared chunk can be held past Arena::drop), so we still need
         // the Weak::upgrade dance here.
-        if let Some(provider) = chunk_ref.provider.upgrade() {
+        if let Some(provider) = chunk_ref.provider().upgrade() {
             provider.release_shared(chunk);
         } else {
             SharedChunk::destroy(chunk);

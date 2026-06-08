@@ -30,7 +30,7 @@ use crate::strings::utf16_str_common::impl_utf16_str_common;
 pub struct BoxUtf16Str<A: Allocator + Clone = Global> {
     /// Thin pointer to the first `u16` of the payload. The element
     /// count lives in the `usize` immediately preceding the payload.
-    pub(crate) ptr: NonNull<u16>,
+    ptr: NonNull<u16>,
     _phantom: PhantomData<(*const Utf16Str, A)>,
 }
 

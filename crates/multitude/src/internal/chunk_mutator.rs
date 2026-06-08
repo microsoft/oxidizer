@@ -68,7 +68,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     pub(crate) unsafe fn from_owned(chunk: NonNull<C>) -> Self {
         // SAFETY: caller asserts `chunk` is live; payload_ptr and capacity
         // are accessible while the chunk is live.
-        let (start, cap) = unsafe { (C::payload_ptr(chunk), C::capacity(chunk)) };
+        let (start, cap) = unsafe { (C::payload_ptr(chunk), chunk.as_ref().capacity()) };
         let start_addr = start.as_ptr() as usize;
         // Align the drop-top down to `align_of::<DropEntry>()`.
         let entry_align = mem::align_of::<DropEntry>();
@@ -123,7 +123,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         let chunk = self.chunk.expect("payload_range: chunk must be set");
         // SAFETY: mutator owns one strong reference to `chunk` for as
         // long as `&self` is borrowed.
-        let (start, cap) = unsafe { (C::payload_ptr(chunk), C::capacity(chunk)) };
+        let (start, cap) = unsafe { (C::payload_ptr(chunk), chunk.as_ref().capacity()) };
         let start_addr = start.as_ptr() as usize;
         // Align the reported end down to match `from_owned`'s drop_top
         // alignment, keeping drop-entry math consistent.

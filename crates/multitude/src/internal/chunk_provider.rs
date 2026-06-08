@@ -55,21 +55,37 @@ use super::shared_chunk::SharedChunk;
 /// Tunable knobs for a [`ChunkProvider`].
 #[derive(Clone, Copy)]
 pub(crate) struct ChunkProviderConfig {
-    /// Maximum total bytes (header + payload) the provider may have
-    /// outstanding at any time. Allocations that would exceed this fail.
-    pub byte_budget: usize,
+    byte_budget: usize,
+    max_normal_alloc: usize,
+}
 
-    /// Largest single allocation routed through normal cache size classes;
-    /// requests above this bypass the cache as one-shot oversized chunks.
-    pub max_normal_alloc: usize,
+impl ChunkProviderConfig {
+    /// Construct a configuration with the given limits.
+    ///
+    /// - `byte_budget`: maximum total bytes (header + payload) the provider
+    ///   may have outstanding at any time. Allocations that would exceed
+    ///   this fail.
+    /// - `max_normal_alloc`: largest single allocation routed through normal
+    ///   cache size classes; requests above this bypass the cache as
+    ///   one-shot oversized chunks.
+    #[inline]
+    pub(crate) fn new(byte_budget: usize, max_normal_alloc: usize) -> Self {
+        Self {
+            byte_budget,
+            max_normal_alloc,
+        }
+    }
+
+    /// Largest single allocation routed through normal cache size classes.
+    #[inline]
+    pub(crate) fn max_normal_alloc(&self) -> usize {
+        self.max_normal_alloc
+    }
 }
 
 impl Default for ChunkProviderConfig {
     fn default() -> Self {
-        Self {
-            byte_budget: usize::MAX,
-            max_normal_alloc: MAX_NORMAL_ALLOC,
-        }
+        Self::new(usize::MAX, MAX_NORMAL_ALLOC)
     }
 }
 
@@ -77,10 +93,37 @@ impl Default for ChunkProviderConfig {
 #[cfg(feature = "stats")]
 #[derive(Clone, Copy)]
 pub(crate) struct ChunkAllocStats {
-    pub normal_local: u64,
-    pub oversized_local: u64,
-    pub normal_shared: u64,
-    pub oversized_shared: u64,
+    normal_local: u64,
+    oversized_local: u64,
+    normal_shared: u64,
+    oversized_shared: u64,
+}
+
+#[cfg(feature = "stats")]
+impl ChunkAllocStats {
+    /// Lifetime count of normal-class local chunks allocated.
+    #[inline]
+    pub(crate) fn normal_local(&self) -> u64 {
+        self.normal_local
+    }
+
+    /// Lifetime count of oversized local chunks allocated.
+    #[inline]
+    pub(crate) fn oversized_local(&self) -> u64 {
+        self.oversized_local
+    }
+
+    /// Lifetime count of normal-class shared chunks allocated.
+    #[inline]
+    pub(crate) fn normal_shared(&self) -> u64 {
+        self.normal_shared
+    }
+
+    /// Lifetime count of oversized shared chunks allocated.
+    #[inline]
+    pub(crate) fn oversized_shared(&self) -> u64 {
+        self.oversized_shared
+    }
 }
 
 /// Allocates and caches chunks for one arena.
@@ -270,7 +313,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                     let fat = LocalChunk::<A>::header_to_fat(cur);
                     let chunk_nn = NonNull::new_unchecked(fat);
                     let next = LocalChunk::read_cached_next(chunk_nn);
-                    let total = LocalChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity;
+                    let total = LocalChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
                     if total >= new_min_total {
                         LocalChunk::write_cached_next(chunk_nn, new_head);
                         new_head = cur;
@@ -380,7 +423,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 let chunk_nn = NonNull::new_unchecked(fat);
                 let link = SharedChunk::cache_link(chunk_nn);
                 let next = (*link).load(Ordering::Acquire);
-                let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity;
+                let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
                 if total >= new_min_total {
                     self.push_shared(chunk_nn);
                 } else {
@@ -425,7 +468,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // duration of this call; we read capacity, then either deallocate
         // outright or push the chunk onto the (single-threaded) cache by
         // writing its cache-link slot.
-        let capacity = (*chunk.as_ptr()).capacity;
+        let capacity = (*chunk.as_ptr()).capacity();
         let total = LocalChunk::<A>::header_size() + capacity;
         // Bypass the cache for non-class-size totals (oversized one-shots
         // whose total isn't a power of two) and for chunks below the
@@ -450,7 +493,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Same as [`release_local`](Self::release_local).
     pub(crate) unsafe fn release_shared(&self, chunk: NonNull<SharedChunk<A>>) {
         // SAFETY: chunk is live and uniquely owned by caller.
-        let capacity = (*chunk.as_ptr()).capacity;
+        let capacity = (*chunk.as_ptr()).capacity();
         let total = SharedChunk::<A>::header_size() + capacity;
         // See `release_local` for the cache-bypass conditions.
         if !is_cacheable_size(total) || total < SizeClass::new(self.shared_cache_class.load(Ordering::Acquire)).bytes() {
@@ -583,7 +626,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             let Ok(popped) = updated else { return None };
             let fat = SharedChunk::<A>::header_to_fat(popped);
             let chunk_nn = NonNull::new_unchecked(fat);
-            let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity;
+            let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
             if total >= floor_min_total {
                 return Some(chunk_nn);
             }
@@ -785,7 +828,7 @@ mod tests {
     fn chunk_provider_config_default_matches_constants() {
         let c = ChunkProviderConfig::default();
         assert_eq!(c.byte_budget, usize::MAX);
-        assert_eq!(c.max_normal_alloc, MAX_NORMAL_ALLOC);
+        assert_eq!(c.max_normal_alloc(), MAX_NORMAL_ALLOC);
     }
 
     // Covers `pop_shared`'s below-floor straggler arm: a cached shared

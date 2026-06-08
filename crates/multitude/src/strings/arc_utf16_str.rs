@@ -25,7 +25,7 @@ pub struct ArcUtf16Str<A: Allocator + Clone = Global> {
     /// Thin pointer to the first `u16` of the payload. The element
     /// count lives in the `usize` immediately preceding the payload
     /// (read with `read_unaligned`).
-    pub(crate) ptr: NonNull<u16>,
+    ptr: NonNull<u16>,
     _phantom: PhantomData<(*const Utf16Str, A)>,
 }
 

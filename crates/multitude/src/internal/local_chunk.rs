@@ -12,7 +12,6 @@
 
 use core::alloc::Layout;
 use core::cell::{Cell, UnsafeCell};
-use core::marker::PhantomData;
 use core::mem;
 use core::ptr::{self, NonNull};
 
@@ -51,10 +50,10 @@ pub(crate) struct LocalChunk<A: Allocator + Clone> {
     /// own drop — supplies the allocator); only read from
     /// [`ChunkOps::teardown_and_release`](super::chunk_ops::ChunkOps::teardown_and_release)
     /// to route the chunk back to the cache.
-    pub(crate) provider: *const ChunkProvider<A>,
-    pub(crate) capacity: usize,
-    pub(crate) ref_count: Cell<u8>,
-    pub(crate) drop_entry_count: Cell<u16>,
+    provider: *const ChunkProvider<A>,
+    capacity: usize,
+    ref_count: Cell<u8>,
+    drop_entry_count: Cell<u16>,
     /// Explicit padding so the header size stays a multiple of 8, keeping
     /// the payload start 8-aligned. The payload start must be 8-aligned both
     /// for the cache link stored there while the chunk is free (see
@@ -67,11 +66,6 @@ pub(crate) struct LocalChunk<A: Allocator + Clone> {
     /// unaligned payload base, this padding can be removed and the header shrunk
     /// from 24 to 20 bytes.
     _padding: [u8; 4],
-    /// Tracks the `A` type parameter without storing a per-chunk copy. The
-    /// allocator that backs this chunk is owned by the provider and reached
-    /// either through the provider back-pointer (`teardown_and_release`) or
-    /// directly through `&self.allocator` in the provider's own methods.
-    _allocator: PhantomData<A>,
     /// Bump-payload tail. `data.len() == capacity`. Declared as
     /// `[UnsafeCell<u8>]` (same layout as `[u8]`) so that shared
     /// borrows of the chunk allow interior-mutable writes into the
@@ -80,7 +74,7 @@ pub(crate) struct LocalChunk<A: Allocator + Clone> {
     /// (essential for Miri's Stacked / Tree Borrows: a sized-struct
     /// header pointer would have provenance for only the header bytes,
     /// making any payload-derivation undefined behavior).
-    pub(crate) data: [UnsafeCell<u8>],
+    data: [UnsafeCell<u8>],
 }
 
 // SAFETY: `LocalChunk` would auto-derive `Send` when `A: Send` but for the
@@ -147,6 +141,16 @@ impl<A: Allocator + Clone> LocalChunk<A> {
             ptr::write(&raw mut (*fat).drop_entry_count, Cell::new(0));
             Ok(NonNull::new_unchecked(fat))
         }
+    }
+
+    /// Non-owning back-pointer to the chunk's provider. See the type-level
+    /// doc for the soundness argument: the provider strictly outlives every
+    /// teardown that calls this. Only used by
+    /// [`ChunkOps::teardown_and_release`](super::chunk_ops::ChunkOps::teardown_and_release)
+    /// to route the chunk back to the cache.
+    #[inline]
+    pub(crate) fn provider(&self) -> *const ChunkProvider<A> {
+        self.provider
     }
 
     /// Pointer to the first byte of the chunk's payload.
@@ -279,6 +283,11 @@ pub(crate) const fn max_bump_extent<A: Allocator + Clone>() -> usize {
 
 impl<A: Allocator + Clone> Chunk for LocalChunk<A> {
     #[inline]
+    fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn inc_ref(&self) {
         // Local chunks host arena-lifetime allocations, which are single-owner:
@@ -384,13 +393,15 @@ mod tests {
     #[should_panic(expected = "LocalChunk refcount is never incremented")]
     fn local_chunk_inc_ref_is_unreachable() {
         let chunk = LocalChunk::<Global>::allocate(&Global, ptr::null(), 64).expect("alloc");
-        // SAFETY: unique owner from a fresh allocation.
+        // SAFETY: unique owner from a fresh allocation. Catch the
+        // expected panic so we can destroy the chunk before resuming
+        // unwinding; without this, Miri reports the chunk as leaked.
         unsafe {
-            let c = chunk.as_ref();
-            // Calling through the trait so the `Chunk` impl is exercised.
-            <LocalChunk<Global> as Chunk>::inc_ref(c);
-            // Unreachable; if `inc_ref` returns we still need to free the chunk.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                <LocalChunk<Global> as Chunk>::inc_ref(chunk.as_ref());
+            }));
             LocalChunk::destroy(chunk, &Global);
+            std::panic::resume_unwind(result.expect_err("inc_ref must panic"));
         }
     }
 }

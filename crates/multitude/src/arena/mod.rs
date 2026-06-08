@@ -210,10 +210,7 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "Result return is part of try_from_config's contract; callers propagate the error"
     )]
     pub(crate) fn try_from_config(allocator: A, max_normal_alloc: usize, byte_budget: Option<usize>) -> Result<Self, AllocError> {
-        let config = ChunkProviderConfig {
-            byte_budget: byte_budget.unwrap_or(usize::MAX),
-            max_normal_alloc,
-        };
+        let config = ChunkProviderConfig::new(byte_budget.unwrap_or(usize::MAX), max_normal_alloc);
         let provider = ChunkProvider::new(allocator, config);
         Ok(Self {
             current_local: CurrentChunk::new(ChunkMutator::<LocalChunk<A>>::empty()),
@@ -269,10 +266,10 @@ impl<A: Allocator + Clone> Arena<A> {
         let chunks = self.provider.chunk_alloc_stats();
         ArenaStats {
             total_bytes_allocated: self.total_bytes_allocated.get(),
-            normal_local_chunks_allocated: chunks.normal_local,
-            oversized_local_chunks_allocated: chunks.oversized_local,
-            normal_shared_chunks_allocated: chunks.normal_shared,
-            oversized_shared_chunks_allocated: chunks.oversized_shared,
+            normal_local_chunks_allocated: chunks.normal_local(),
+            oversized_local_chunks_allocated: chunks.oversized_local(),
+            normal_shared_chunks_allocated: chunks.normal_shared(),
+            oversized_shared_chunks_allocated: chunks.oversized_shared(),
             relocations: self.relocations.get(),
             ..ArenaStats::default()
         }
@@ -350,7 +347,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Requests above this are served by one-shot oversized chunks.
     #[inline]
     pub(crate) fn max_normal_alloc(&self) -> usize {
-        self.provider.config().max_normal_alloc
+        self.provider.config().max_normal_alloc()
     }
 
     /// True iff a shared-chunk allocation request of `min_payload` bytes
