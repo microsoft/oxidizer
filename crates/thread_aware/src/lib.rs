@@ -107,10 +107,6 @@
 //! * **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 //! * **`uuid_v1`**: Impl for `uuid::Uuid`.
 //!
-//! For `Request<T>` and `Response<T>`, `relocate` is forwarded to the body
-//! only; the headers map (`HeaderMap<HeaderValue>`) and `http::Extensions`
-//! are treated as inert.
-//!
 //! # Examples
 //!
 //! ## Deriving [`ThreadAware`]

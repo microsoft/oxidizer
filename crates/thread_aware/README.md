@@ -115,10 +115,6 @@ crate brings in no extra dependencies.
 * **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 * **`uuid_v1`**: Impl for `uuid::Uuid`.
 
-For `Request<T>` and `Response<T>`, `relocate` is forwarded to the body
-only; the headers map (`HeaderMap<HeaderValue>`) and `http::Extensions`
-are treated as inert.
-
 ## Examples
 
 ### Deriving [`ThreadAware`][__link25]
@@ -166,7 +162,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb-pifNXu1YEUb5Mm6TteAlFEb1v4fZZHurH4bQ5aywuVPGohhZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbTOk0mrWhvfUbZB7k77PKo5wb8o1MdGhPS8QbPeGYSL92_BJhZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
  [__link0]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware

@@ -5,21 +5,12 @@
 //!
 //! Enable with the `http_v1` Cargo feature.
 //!
-//! All inert value types in `http` (`StatusCode`, `Method`, `Version`,
-//! `HeaderName`, `HeaderValue`) get a no-op `relocate`. The `HeaderMap`
-//! impl is provided for `HeaderMap<HeaderValue>` only (the default
-//! parameterisation produced by the `http` crate) and is also a no-op,
-//! since `HeaderValue::relocate` is itself no-op — iterating would be
-//! pure waste.
-//!
-//! `Request<T>::relocate` and `Response<T>::relocate` forward to the body
-//! only. Their headers are `HeaderMap<HeaderValue>`, which is inert by the
-//! impl above, so iterating header values would also be wasted work.
-//!
-//! Note: `http::Extensions` (carried by `Request<T>` and `Response<T>`) holds
-//! arbitrary `Any` values whose concrete types are erased at runtime, so this
-//! impl cannot relocate them. Callers that stash thread-affine state in
-//! extensions must relocate it explicitly.
+//! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
+//! `HeaderValue`) get a no-op `relocate`. The `HeaderMap` impl is provided
+//! for `HeaderMap<HeaderValue>` only (the default parameterisation produced
+//! by the `http` crate) and is also a no-op, since `HeaderValue::relocate`
+//! is itself no-op — iterating would be pure waste. See the per-impl docs
+//! on [`Request<T>`] and [`Response<T>`] for their `relocate` semantics.
 
 use ::http_v1::header::{HeaderMap, HeaderName, HeaderValue};
 use ::http_v1::{Method, Request, Response, StatusCode, Version};
@@ -29,12 +20,26 @@ use crate::affinity::Affinity;
 
 impl_noop_thread_aware!(StatusCode, Version, Method, HeaderName, HeaderValue, HeaderMap<HeaderValue>);
 
+/// `relocate` is forwarded to the body only.
+///
+/// Headers (`HeaderMap<HeaderValue>`) are inert per the no-op impl in this
+/// module, so iterating them would be wasted work. `http::Extensions` holds
+/// arbitrary `Any` values whose concrete types are erased at runtime, so this
+/// impl cannot relocate them — callers that stash thread-affine state in
+/// extensions must relocate it explicitly.
 impl<T: ThreadAware> ThreadAware for Request<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.body_mut().relocate(source, destination);
     }
 }
 
+/// `relocate` is forwarded to the body only.
+///
+/// Headers (`HeaderMap<HeaderValue>`) are inert per the no-op impl in this
+/// module, so iterating them would be wasted work. `http::Extensions` holds
+/// arbitrary `Any` values whose concrete types are erased at runtime, so this
+/// impl cannot relocate them — callers that stash thread-affine state in
+/// extensions must relocate it explicitly.
 impl<T: ThreadAware> ThreadAware for Response<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.body_mut().relocate(source, destination);
