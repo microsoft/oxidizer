@@ -330,7 +330,7 @@ mod fetch_and_promote_tests {
 
     use super::*;
     use crate::InsertPolicy;
-    use crate::telemetry::{CacheTelemetry, attributes};
+    use crate::telemetry::attributes;
     use crate::wrapper::CacheWrapper;
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
