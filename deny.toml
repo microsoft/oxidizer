@@ -28,4 +28,9 @@ ignore = [
     # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
     # this for benchmark-only usage.
     "RUSTSEC-2025-0141",
+    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
+    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
+    # upstream and no production code path depends on it. Tracked for removal once the
+    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
+    "RUSTSEC-2026-0173",
 ]
