@@ -492,7 +492,7 @@ where
         let value = f().await;
         let mut entry = CacheEntry::new(value);
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -575,7 +575,7 @@ where
         }
         let mut entry = f().await;
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -656,7 +656,7 @@ where
         }
         let mut entry = f().await.map_err(Error::from_source)?;
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -741,7 +741,7 @@ where
         let value = f().await.map_err(Error::from_source)?;
         let mut entry = CacheEntry::new(value);
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -829,7 +829,7 @@ where
             Some(value) => {
                 let mut entry = CacheEntry::new(value);
                 entry.ensure_cached_at(self.clock.system_time());
-                self.insert(key.clone(), entry.clone()).await?;
+                self.storage.insert(key.clone(), entry.clone()).await?;
                 Ok(Some(entry))
             }
             None => Ok(None),

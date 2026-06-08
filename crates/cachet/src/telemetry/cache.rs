@@ -76,13 +76,6 @@ impl<F: Future> WithRequestIdExt for F {
     }
 }
 
-/// Converts a `Duration` to nanoseconds as `u64`, saturating at `u64::MAX`.
-/// A `u64` of nanoseconds covers around 584 years - overflow is not a practical concern.
-#[cfg(any(feature = "logs", test))]
-fn saturating_nanos(duration: Duration) -> u64 {
-    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
-}
-
 /// Cache telemetry provider.
 ///
 /// This type is created internally by the cache builder and handles
@@ -152,8 +145,11 @@ impl CacheTelemetry {
     fn record_debug_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let duration_ns = saturating_nanos(duration);
-            tracing::debug!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
+            tracing::debug!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -168,8 +164,11 @@ impl CacheTelemetry {
     fn record_info_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let duration_ns = saturating_nanos(duration);
-            tracing::info!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
+            tracing::info!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -184,8 +183,11 @@ impl CacheTelemetry {
     fn record_error_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let duration_ns = saturating_nanos(duration);
-            tracing::error!(cache.name = cache_name, cache.event = event, cache.duration_ns = duration_ns);
+            tracing::error!(
+                cache.name = cache_name,
+                cache.event = event,
+                cache.duration_ns = duration.as_nanos()
+            );
         }
         #[cfg(not(any(feature = "logs", test)))]
         {
@@ -373,11 +375,10 @@ impl CacheTelemetry {
     ) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
-            let duration_ns = saturating_nanos(duration);
             tracing::debug!(
                 cache.name = cache_name,
                 cache.operation = operation,
-                cache.duration_ns = duration_ns,
+                cache.duration_ns = duration.as_nanos(),
                 cache.coalesced = coalesced
             );
         }
