@@ -58,7 +58,7 @@ async fn main() -> Result<(), ohno::AppError> {
         })
         .build();
 
-    let text = client.get("https://example.com").fetch_text().await?.into_body();
+    let text = client.get("https://example.com").fetch_text_body().await?;
 
     println!("response: {text}");
 

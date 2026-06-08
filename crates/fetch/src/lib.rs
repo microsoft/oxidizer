@@ -86,21 +86,18 @@
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
-//! use fetch::{HttpClient, HttpError, Response, StatusExt};
+//! use fetch::{HttpClient, HttpError};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
 //!     // Create a client using the builder
 //!     let client: HttpClient = HttpClient::new_tokio();
 //!
-//!     // Retrieve the response as text
-//!     let response: Response<String> = client
-//!         .get("https://example.com")
-//!         .fetch_text()
-//!         .await?
-//!         .ensure_success()?; // Verifies that the response was successful
+//!     // Retrieve the response body as text. This validates the status (returning an
+//!     // error for `4xx`/`5xx` responses) and hands back the body in a single step.
+//!     let body: String = client.get("https://example.com").fetch_text_body().await?;
 //!
-//!     println!("response: {}", response.body());
+//!     println!("response: {body}");
 //!
 //!     Ok(())
 //! }
@@ -288,6 +285,29 @@
 //!     .ensure_success()? // Ensure the response was successful
 //!     .into_body(); // Discard the response metadata and get the body as a string
 //!
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Body-Only Shortcuts
+//!
+//! When you only need the body of a *successful* response, the `_body` variants go one step further:
+//! they call [`ensure_success`][crate::HttpResponse::ensure_success] for you, discard the response
+//! metadata, and return just the materialized body.
+//!
+//! - [`fetch_text_body`][crate::HttpRequestBuilder::fetch_text_body]: Validates the status and returns the body as a `String`.
+//! - [`fetch_bytes_body`][crate::HttpRequestBuilder::fetch_bytes_body]: Validates the status and returns the body as a `BytesView`.
+//! - [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body]: Validates the status and deserializes the body into an owned value (requires `json` feature).
+//!
+//! ```rust
+//! # use fetch::HttpClient;
+//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! // Fetch, validate the status, and extract the body in a single call
+//! let text: String = client
+//!     .get("https://api.example.com/users")
+//!     .fetch_text_body()
+//!     .await?;
+//! println!("body: {text}");
 //! # Ok(())
 //! # }
 //! ```
@@ -608,9 +628,8 @@
 //! # use bytes::Buf;
 //! #
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Get a response body as a BytesView
-//! let response = client.get("https://example.com").fetch().await?;
-//! let mut body_bytes = response.into_body().into_bytes().await?;
+//! // Fetch the response body directly as a BytesView (validating the status along the way)
+//! let mut body_bytes = client.get("https://example.com").fetch_bytes_body().await?;
 //!
 //! // Work with the BytesView using standard bytes methods
 //! let length = body_bytes.remaining();
@@ -650,8 +669,7 @@
 //! let items_uri: Uri = "https://api.example.com/items".parse()?;
 //!
 //! // 3. Work with raw BytesView to avoid allocations when possible
-//! let response = client.get(users_uri.clone()).fetch().await?;
-//! let bytes = response.into_body().into_bytes().await?;
+//! let bytes = client.get(users_uri.clone()).fetch_bytes_body().await?;
 //! process_binary_data(bytes);
 //! # Ok(())
 //! # }
@@ -785,7 +803,7 @@ pub use http_extensions::routing;
 #[doc(inline)]
 pub use seatbelt::{Recovery, RecoveryInfo};
 #[doc(inline)]
-pub use templated_uri::{BasePath, BaseUri, Origin, Uri};
+pub use templated_uri::{BasePath, BaseUri, Origin, PathAndQuery, Uri};
 
 /// Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
 ///

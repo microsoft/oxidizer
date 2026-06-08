@@ -40,6 +40,9 @@ allowed_external_types = [
     "tower_layer::Layer",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 tls = ["rustls"]
