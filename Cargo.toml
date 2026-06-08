@@ -71,6 +71,7 @@ bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
+bytes_v1 = { version = "1.11.1", default-features = false, package = "bytes" }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
@@ -91,6 +92,7 @@ hashbrown = { version = "0.17.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
 http-body-util = { version = "0.1.3", default-features = false }
+http_v1 = { version = "1.4.1", default-features = false, features = ["std"], package = "http" }
 hyper = { version = "1.10.1", default-features = false }
 hyper-rustls = { version = "0.27.9", default-features = false }
 hyper-tls = { version = "0.6.0", default-features = false }
@@ -98,6 +100,7 @@ hyper-util = { version = "0.1.20", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
+jiff_v0_2 = { version = "0.2.21", default-features = false, package = "jiff" }
 libc = { version = "0.2.178", default-features = false }
 loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
@@ -152,6 +155,7 @@ trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
+uuid_v1 = { version = "1.21.0", default-features = false, package = "uuid" }
 widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
 wiremock = { version = "0.6.5", default-features = false }

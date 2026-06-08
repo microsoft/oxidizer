@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`jiff`] (0.2.x) types.
+//! `ThreadAware` impls for [`jiff`](::jiff_v0_2) (0.2.x) types.
 //!
 //! Enable with the `jiff_v0_2` Cargo feature.
 //!
@@ -9,19 +9,18 @@
 //! reference to a `TimeZone`, whose semantics around relocation deserve a
 //! separate, deliberate design rather than a blanket no-op.
 
-use ::jiff::civil::{Date, DateTime, ISOWeekDate, Time};
-use ::jiff::{SignedDuration, Span, Timestamp};
+use ::jiff_v0_2::civil::{Date, DateTime, ISOWeekDate, Time};
+use ::jiff_v0_2::{SignedDuration, Span, Timestamp};
 
 impl_noop_thread_aware!(Timestamp, Span, SignedDuration, Date, Time, DateTime, ISOWeekDate,);
 
 #[cfg(test)]
 mod tests {
-    use ::jiff::civil::{Date, DateTime, ISOWeekDate, Time};
-    use ::jiff::{SignedDuration, Span, Timestamp};
+    use ::jiff_v0_2::civil::{Date, DateTime, ISOWeekDate, Time};
+    use ::jiff_v0_2::{SignedDuration, Span, Timestamp};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
-    #[cfg(feature = "threads")]
     use crate::affinity::pinned_affinities;
 
     assert_impl_all!(Timestamp: ThreadAware, Send, Sync, Copy);
@@ -33,7 +32,6 @@ mod tests {
     assert_impl_all!(Span: ThreadAware, Send, Sync, Copy);
 
     #[test]
-    #[cfg(feature = "threads")]
     fn timestamp_relocate_is_noop() {
         let affinities = pinned_affinities(&[2]);
         let mut value = Timestamp::from_second(1_700_000_000).unwrap();

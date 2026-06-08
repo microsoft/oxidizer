@@ -1,77 +1,62 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`http`] (1.x) types.
+//! `ThreadAware` impls for [`http`](::http_v1) (1.x) types.
 //!
 //! Enable with the `http_v1` Cargo feature.
 //!
-//! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
-//! `HeaderValue`) get a no-op `relocate`. Container types (`HeaderMap<T>`,
-//! `Request<T>`, `Response<T>`) propagate `relocate` to their headers and (for
-//! `Request`/`Response`) their body, mirroring how this crate handles `Vec<T>`
-//! and `Box<T>`.
+//! All inert value types in `http` (`StatusCode`, `Method`, `Version`,
+//! `HeaderName`, `HeaderValue`) get a no-op `relocate`. `HeaderMap<HeaderValue>`
+//! — the only header map shape the `http` crate produces — is also treated as
+//! inert, so iterating its entries would be wasted work.
+//!
+//! `Request<T>` and `Response<T>` propagate `relocate` to their body only.
+//! Their headers are `HeaderMap<HeaderValue>` and therefore already no-op.
 //!
 //! Note: `http::Extensions` (carried by `Request<T>` and `Response<T>`) holds
 //! arbitrary `Any` values whose concrete types are erased at runtime, so this
 //! impl cannot relocate them. Callers that stash thread-affine state in
 //! extensions must relocate it explicitly.
 
-use ::http::header::{HeaderMap, HeaderName, HeaderValue};
-use ::http::{Method, Request, Response, StatusCode, Version};
+use ::http_v1::header::{HeaderMap, HeaderName, HeaderValue};
+use ::http_v1::{Method, Request, Response, StatusCode, Version};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
 
-impl_noop_thread_aware!(StatusCode, Version, Method, HeaderName, HeaderValue);
-
-impl<T: ThreadAware> ThreadAware for HeaderMap<T> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        for value in self.values_mut() {
-            value.relocate(source, destination);
-        }
-    }
-}
+impl_noop_thread_aware!(StatusCode, Version, Method, HeaderName, HeaderValue, HeaderMap<HeaderValue>);
 
 impl<T: ThreadAware> ThreadAware for Request<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        for value in self.headers_mut().values_mut() {
-            value.relocate(source, destination);
-        }
         self.body_mut().relocate(source, destination);
     }
 }
 
 impl<T: ThreadAware> ThreadAware for Response<T> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        for value in self.headers_mut().values_mut() {
-            value.relocate(source, destination);
-        }
         self.body_mut().relocate(source, destination);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use ::http::header::{HeaderMap, HeaderName, HeaderValue};
-    use ::http::{Method, Request, Response, StatusCode, Version};
+    use ::http_v1::header::{HeaderMap, HeaderName, HeaderValue};
+    use ::http_v1::{Method, Request, Response, StatusCode, Version};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
-    #[cfg(feature = "threads")]
     use crate::affinity::{Affinity, pinned_affinities};
 
     /// Counts how many times `relocate` has been called.
     ///
-    /// Used by mutation-testing-killing tests to detect that container impls
-    /// actually delegate to their inner elements rather than no-op'ing —
-    /// otherwise mutants that replace the body of `relocate` with `()` would
-    /// survive when the inner type's `relocate` itself has no observable
-    /// effect (as it does for `HeaderValue` or `Vec<u8>`).
-    #[cfg(feature = "threads")]
+    /// Used by mutation-testing-killing tests to detect that `Request<T>` and
+    /// `Response<T>` actually delegate to their inner body rather than no-op'ing.
+    /// Without this, mutants that replace the body of `relocate` with `()` would
+    /// survive when the body type is something like `Vec<u8>` whose own
+    /// `relocate` has no observable effect.
     #[derive(Default)]
     struct Counter(u32);
 
-    #[cfg(feature = "threads")]
     impl ThreadAware for Counter {
         fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
             self.0 += 1;
@@ -88,7 +73,6 @@ mod tests {
     assert_impl_all!(Response<Vec<u8>>: ThreadAware, Send, Sync);
 
     #[test]
-    #[cfg(feature = "threads")]
     fn method_relocate_is_noop() {
         let affinities = pinned_affinities(&[2]);
         let mut value = Method::POST;
@@ -97,8 +81,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
-    fn header_map_relocate_propagates_to_values() {
+    fn header_map_relocate_is_noop() {
         let affinities = pinned_affinities(&[2]);
         let mut map: HeaderMap<HeaderValue> = HeaderMap::new();
         map.insert("x-one", HeaderValue::from_static("one"));
@@ -109,54 +92,24 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "threads")]
-    fn request_relocate_propagates_to_body_and_headers() {
+    fn request_relocate_propagates_to_body() {
         let affinities = pinned_affinities(&[2]);
-        let mut req = Request::new(vec![1_u8, 2, 3]);
-        req.headers_mut().insert("x-trace", HeaderValue::from_static("abc"));
+        let mut req = Request::new(Counter::default());
+        req.headers_mut()
+            .insert(HeaderName::from_static("x-trace"), HeaderValue::from_static("abc"));
         req.relocate(Some(affinities[0]), affinities[1]);
-        assert_eq!(req.body(), &vec![1_u8, 2, 3]);
+        assert_eq!(req.body().0, 1);
         assert_eq!(req.headers().get("x-trace").unwrap(), "abc");
     }
 
     #[test]
-    #[cfg(feature = "threads")]
-    fn response_relocate_propagates_to_body_and_headers() {
-        let affinities = pinned_affinities(&[2]);
-        let mut resp = Response::new(vec![4_u8, 5, 6]);
-        resp.headers_mut().insert("x-trace", HeaderValue::from_static("xyz"));
-        resp.relocate(Some(affinities[0]), affinities[1]);
-        assert_eq!(resp.body(), &vec![4_u8, 5, 6]);
-        assert_eq!(resp.headers().get("x-trace").unwrap(), "xyz");
-    }
-
-    #[test]
-    #[cfg(feature = "threads")]
-    fn header_map_relocate_calls_relocate_on_every_value() {
-        let affinities = pinned_affinities(&[2]);
-        let mut map: HeaderMap<Counter> = HeaderMap::default();
-        map.insert(HeaderName::from_static("x-one"), Counter::default());
-        map.insert(HeaderName::from_static("x-two"), Counter::default());
-        map.relocate(Some(affinities[0]), affinities[1]);
-        assert_eq!(map.get("x-one").unwrap().0, 1);
-        assert_eq!(map.get("x-two").unwrap().0, 1);
-    }
-
-    #[test]
-    #[cfg(feature = "threads")]
-    fn request_relocate_calls_relocate_on_body() {
-        let affinities = pinned_affinities(&[2]);
-        let mut req = Request::new(Counter::default());
-        req.relocate(Some(affinities[0]), affinities[1]);
-        assert_eq!(req.body().0, 1);
-    }
-
-    #[test]
-    #[cfg(feature = "threads")]
-    fn response_relocate_calls_relocate_on_body() {
+    fn response_relocate_propagates_to_body() {
         let affinities = pinned_affinities(&[2]);
         let mut resp = Response::new(Counter::default());
+        resp.headers_mut()
+            .insert(HeaderName::from_static("x-trace"), HeaderValue::from_static("xyz"));
         resp.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(resp.body().0, 1);
+        assert_eq!(resp.headers().get("x-trace").unwrap(), "xyz");
     }
 }

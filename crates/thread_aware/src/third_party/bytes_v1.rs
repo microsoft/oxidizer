@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`bytes`] (1.x) types.
+//! `ThreadAware` impls for [`bytes`](::bytes_v1) (1.x) types.
 //!
 //! Enable with the `bytes_v1` Cargo feature.
 //!
@@ -13,24 +13,22 @@
 //! still wrap them in [`crate::Arc`] with an appropriate
 //! [`Strategy`](crate::storage::Strategy).
 
-use ::bytes::{Bytes, BytesMut};
+use ::bytes_v1::{Bytes, BytesMut};
 
 impl_noop_thread_aware!(Bytes, BytesMut);
 
 #[cfg(test)]
 mod tests {
-    use ::bytes::{Bytes, BytesMut};
+    use ::bytes_v1::{Bytes, BytesMut};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
-    #[cfg(feature = "threads")]
     use crate::affinity::pinned_affinities;
 
     assert_impl_all!(Bytes: ThreadAware, Send, Sync);
     assert_impl_all!(BytesMut: ThreadAware, Send, Sync);
 
     #[test]
-    #[cfg(feature = "threads")]
     fn bytes_relocate_is_noop() {
         let affinities = pinned_affinities(&[2]);
         let mut value = Bytes::from_static(b"hello");

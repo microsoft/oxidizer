@@ -56,31 +56,31 @@ threads = ["dep:many_cpus"]
 # breaking versions of those crates can be supported additively (e.g. a
 # future `bytes_v2`) without forcing a breaking release of this crate.
 # See the `third_party` module for the list of types each feature covers.
-bytes_v1 = ["dep:bytes"]
-http_v1 = ["dep:http"]
-jiff_v0_2 = ["dep:jiff"]
-uuid_v1 = ["dep:uuid"]
+bytes_v1 = ["dep:bytes_v1"]
+http_v1 = ["dep:http_v1"]
+jiff_v0_2 = ["dep:jiff_v0_2"]
+uuid_v1 = ["dep:uuid_v1"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
 
 thread_aware_macros = { workspace = true, optional = true }
 
-bytes = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
-jiff = { workspace = true, optional = true }
-uuid = { workspace = true, optional = true }
+bytes_v1 = { workspace = true, optional = true }
+http_v1 = { workspace = true, optional = true }
+jiff_v0_2 = { workspace = true, optional = true }
+uuid_v1 = { workspace = true, optional = true }
 
 [dev-dependencies]
-bytes = { workspace = true }
+bytes_v1 = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-http = { workspace = true }
-jiff = { workspace = true }
+http_v1 = { workspace = true }
+jiff_v0_2 = { workspace = true }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
-uuid = { workspace = true }
+uuid_v1 = { workspace = true }
 
 [lints]
 workspace = true

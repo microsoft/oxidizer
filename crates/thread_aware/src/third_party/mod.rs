@@ -43,17 +43,13 @@ macro_rules! impl_noop_thread_aware {
 }
 
 #[cfg(any(test, feature = "bytes_v1"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "bytes_v1")))]
-pub mod bytes_v1;
+mod bytes_v1;
 
 #[cfg(any(test, feature = "http_v1"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "http_v1")))]
-pub mod http_v1;
+mod http_v1;
 
 #[cfg(any(test, feature = "jiff_v0_2"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "jiff_v0_2")))]
-pub mod jiff_v0_2;
+mod jiff_v0_2;
 
 #[cfg(any(test, feature = "uuid_v1"))]
-#[cfg_attr(docsrs, doc(cfg(feature = "uuid_v1")))]
-pub mod uuid_v1;
+mod uuid_v1;
