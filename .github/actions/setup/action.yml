@@ -94,23 +94,23 @@ runs:
 
     - name: Start Sccache
       if: inputs.enable-sccache == 'true' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
-      uses: mozilla-actions/sccache-action@v0.0.9
+      uses: mozilla-actions/sccache-action@v0.0.10
       with:
         version: ${{ env.SCCACHE_VERSION }}
 
     - name: Install Rust
       if: inputs.rust-toolchain != ''
-      uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+      uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
       with:
         toolchain: ${{ steps.expand.outputs.toolchain }}
         components: ${{ inputs.rust-components }}
 
     - name: Install Cargo Tools
       if: inputs.cargo-tools != ''
-      uses: taiki-e/install-action@v2.65.1
+      uses: taiki-e/install-action@v2.81.8
       with:
         tool: ${{ steps.expand.outputs.cargo_tools }}
 
     - name: Install Wild Linker
       if: inputs.enable-wild-linker == 'true'
-      uses: wild-linker/action@0.8.0
+      uses: wild-linker/action@0.9.0
