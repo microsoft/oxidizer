@@ -20,7 +20,7 @@
 //! unconditional `dev-dependencies`, and the submodules below are gated on
 //! `any(test, feature = "...")`.
 //!
-//! See the workspace `Cargo.toml` for the exact versions used.
+//! See this crate's `Cargo.toml` for the exact versions used.
 
 /// Generates a no-op [`ThreadAware`](crate::ThreadAware) impl for each listed type.
 ///
