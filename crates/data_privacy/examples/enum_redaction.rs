@@ -21,14 +21,17 @@
 use std::fmt::Formatter;
 
 use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-use data_privacy::{RedactedDebug, RedactedDisplay, RedactionEngine, Redactor, taxonomy};
+use data_privacy::{RedactedDebug, RedactedDisplay, RedactionEngine, Redactor};
+
+use crate::example_taxonomy::ExampleTaxonomy;
+
+#[path = "employees/example_taxonomy.rs"]
+mod example_taxonomy;
 
 fn main() {
-    // An engine that replaces every PII value with a fixed marker, keeping the output deterministic
-    // regardless of the underlying value's length.
     let engine = RedactionEngine::builder()
         .add_class_redactor(
-            MyTaxonomy::Pii.data_class(),
+            ExampleTaxonomy::PersonallyIdentifiableInformation.data_class(),
             SimpleRedactor::with_mode(SimpleRedactorMode::Insert("<redacted>".into())),
         )
         .build();
@@ -40,15 +43,14 @@ fn main() {
     for status in statuses {
         status_debug.clear();
         status_display.clear();
-        engine.redacted_debug(&status, &mut status_debug).unwrap();
-        engine.redacted_display(&status, &mut status_display).unwrap();
+        engine
+            .redacted_debug(&status, &mut status_debug)
+            .expect("writing to a String never fails");
+        engine
+            .redacted_display(&status, &mut status_display)
+            .expect("writing to a String never fails");
         println!("enum debug: {status_debug:<12} enum display: {status_display}");
     }
-}
-
-#[taxonomy(myco)]
-enum MyTaxonomy {
-    Pii,
 }
 
 #[derive(Clone, Copy)]
@@ -70,12 +72,12 @@ impl MaritalStatus {
 
 impl RedactedDebug for MaritalStatus {
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> std::fmt::Result {
-        redactor.redact(&MyTaxonomy::Pii.data_class(), self.label(), f)
+        redactor.redact(&ExampleTaxonomy::PersonallyIdentifiableInformation.data_class(), self.label(), f)
     }
 }
 
 impl RedactedDisplay for MaritalStatus {
     fn fmt(&self, redactor: &dyn Redactor, f: &mut Formatter<'_>) -> std::fmt::Result {
-        redactor.redact(&MyTaxonomy::Pii.data_class(), self.label(), f)
+        redactor.redact(&ExampleTaxonomy::PersonallyIdentifiableInformation.data_class(), self.label(), f)
     }
 }

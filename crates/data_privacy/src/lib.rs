@@ -185,10 +185,6 @@ extern crate self as data_privacy;
 // Re-export types and traits from data_privacy_core.
 #[doc(inline)]
 pub use data_privacy_core::{Classified, DataClass, IntoDataClass, RedactedDebug, RedactedDisplay, RedactedToString, Redactor};
-// Re-export attribute macros.
-#[doc(inline)]
-pub use data_privacy_macros::{classified, taxonomy};
-
 /// Derives an implementation of the [`RedactedDebug`](trait@RedactedDebug) trait for a struct.
 ///
 /// The generated implementation mirrors the layout produced by the standard library's
@@ -222,7 +218,7 @@ pub use data_privacy_macros::{classified, taxonomy};
 ///
 /// ```rust
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use data_privacy::{classified, taxonomy, RedactedDebug, RedactionEngine};
+/// use data_privacy::{RedactedDebug, RedactionEngine, classified, taxonomy};
 ///
 /// #[taxonomy(myco)]
 /// enum MyTaxonomy {
@@ -235,7 +231,7 @@ pub use data_privacy_macros::{classified, taxonomy};
 ///
 /// #[derive(RedactedDebug)]
 /// struct User {
-///     email: Email,             // classified: routed through the redactor
+///     email: Email, // classified: routed through the redactor
 ///     #[unredacted]
 ///     department: &'static str, // shown verbatim, using `Debug` formatting (note the quotes)
 /// }
@@ -258,11 +254,13 @@ pub use data_privacy_macros::{classified, taxonomy};
 ///
 /// // The classified `email` is redacted, while the `#[unredacted]` `department` keeps its
 /// // standard `Debug` representation (including the surrounding quotes).
-/// assert_eq!(out, r#"User { email: <redacted>, department: "engineering" }"#);
+/// assert_eq!(
+///     out,
+///     r#"User { email: <redacted>, department: "engineering" }"#
+/// );
 /// ```
 #[doc(inline)]
 pub use data_privacy_macros::RedactedDebug;
-
 /// Derives an implementation of the [`RedactedDisplay`](trait@RedactedDisplay) trait for a struct.
 ///
 /// This derive works exactly like [`RedactedDebug`](derive@RedactedDebug), but it produces
@@ -296,7 +294,7 @@ pub use data_privacy_macros::RedactedDebug;
 ///
 /// ```rust
 /// use data_privacy::simple_redactor::{SimpleRedactor, SimpleRedactorMode};
-/// use data_privacy::{classified, taxonomy, RedactedDisplay, RedactionEngine};
+/// use data_privacy::{RedactedDisplay, RedactionEngine, classified, taxonomy};
 ///
 /// #[taxonomy(myco)]
 /// enum MyTaxonomy {
@@ -309,7 +307,7 @@ pub use data_privacy_macros::RedactedDebug;
 ///
 /// #[derive(RedactedDisplay)]
 /// struct User {
-///     email: Email,             // classified: routed through the redactor
+///     email: Email, // classified: routed through the redactor
 ///     #[unredacted]
 ///     department: &'static str, // shown verbatim, using `Display` formatting (no quotes)
 /// }
@@ -336,6 +334,9 @@ pub use data_privacy_macros::RedactedDebug;
 /// ```
 #[doc(inline)]
 pub use data_privacy_macros::RedactedDisplay;
+// Re-export attribute macros.
+#[doc(inline)]
+pub use data_privacy_macros::{classified, taxonomy};
 
 mod redaction_engine;
 mod redaction_engine_builder;
