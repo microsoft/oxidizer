@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "dynosaur",
  "ohno 0.3.5",
@@ -1109,7 +1109,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch"
-version = "0.10.0"
+version = "0.10.2"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1160,7 +1160,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1199,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_options"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "http",
  "insta",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -2066,8 +2066,8 @@ version = "0.3.2"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "dynosaur",
  "futures",
+ "infinity_pool",
  "mutants",
  "pin-project-lite",
  "static_assertions",
@@ -2883,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "recoverable"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "insta",
  "ohno 0.3.5",
@@ -3115,7 +3115,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "alloc_tracker",
  "criterion",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "futures",
  "http",

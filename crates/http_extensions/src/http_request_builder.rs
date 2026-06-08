@@ -6,8 +6,8 @@ use std::future::ready;
 use std::time::Duration;
 
 use bytesbuf::BytesView;
-use futures::Stream;
 use futures::future::Either;
+use futures::{Stream, TryFutureExt};
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Response, Version};
 use templated_uri::Uri;
@@ -519,13 +519,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The network request failed
     /// - Body processing failed
     /// - The response content exceeds the size limit (default is 2 GB)
-    pub async fn fetch_buffered(self) -> Result<HttpResponse> {
-        let response = self.fetch().await?;
-
-        let (parts, body) = response.into_parts();
-        let body = body.into_buffered().await?;
-
-        Ok(HttpResponse::from_parts(parts, body))
+    pub fn fetch_buffered(self) -> impl Future<Output = Result<HttpResponse>> + Send {
+        self.fetch().and_then(|response| {
+            let (parts, body) = response.into_parts();
+            body.into_buffered().map_ok(move |body| HttpResponse::from_parts(parts, body))
+        })
     }
 
     /// Sends the request and fetches the response as text.
@@ -565,11 +563,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The request couldn't be built because of errors
     /// - The network request failed
     /// - Body processing failed
-    pub async fn fetch_text(self) -> Result<Response<String>> {
-        let (parts, body) = self.fetch().await?.into_parts();
-        let body = body.into_text().await?;
-
-        Ok(Response::from_parts(parts, body))
+    pub fn fetch_text(self) -> impl Future<Output = Result<Response<String>>> + Send {
+        self.fetch().and_then(|response| {
+            let (parts, body) = response.into_parts();
+            body.into_text().map_ok(move |body| Response::from_parts(parts, body))
+        })
     }
 
     /// Sends the request and fetches the response body as a byte sequence.
@@ -616,11 +614,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The request couldn't be built because of errors
     /// - The network request failed
     /// - Body processing failed
-    pub async fn fetch_bytes(self) -> Result<Response<BytesView>> {
-        let (parts, body) = self.fetch().await?.into_parts();
-        let body = body.into_bytes().await?;
-
-        Ok(Response::from_parts(parts, body))
+    pub fn fetch_bytes(self) -> impl Future<Output = Result<Response<BytesView>>> + Send {
+        self.fetch().and_then(|response| {
+            let (parts, body) = response.into_parts();
+            body.into_bytes().map_ok(move |body| Response::from_parts(parts, body))
+        })
     }
 
     /// Sends the request and deserializes the response body as JSON.
@@ -670,11 +668,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The response body isn't valid UTF-8
     /// - JSON deserialization failed
     #[cfg(any(feature = "json", test))]
-    pub async fn fetch_json_owned<J: serde_core::de::DeserializeOwned>(self) -> Result<Response<J>> {
-        let (parts, body) = self.fetch().await?.into_parts();
-        let body = body.into_json_owned().await?;
-
-        Ok(Response::from_parts(parts, body))
+    pub fn fetch_json_owned<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<Response<J>>> + Send {
+        self.fetch().and_then(|response| {
+            let (parts, body) = response.into_parts();
+            body.into_json_owned::<J>().map_ok(move |body| Response::from_parts(parts, body))
+        })
     }
 
     /// Sends the request and deserializes the response body as JSON with optional borrowing.
@@ -731,11 +729,11 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The network request failed
     /// - The response body isn't valid UTF-8
     #[cfg(any(feature = "json", test))]
-    pub async fn fetch_json<'de, J: serde_core::de::Deserialize<'de>>(self) -> Result<Response<crate::Json<J>>> {
-        let (parts, body) = self.fetch().await?.into_parts();
-        let body = body.into_json().await?;
-
-        Ok(Response::from_parts(parts, body))
+    pub fn fetch_json<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
+        self.fetch().and_then(|response| {
+            let (parts, body) = response.into_parts();
+            body.into_json::<J>().map_ok(move |body| Response::from_parts(parts, body))
+        })
     }
 }
 
@@ -1240,6 +1238,36 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json_data = response.into_body().read().unwrap();
         assert_eq!(json_data.id, 42);
+    }
+
+    #[test]
+    fn fetch_future_sizes() {
+        let client = FakeHandler::default();
+
+        let fetch = client.request_builder().get("https://example.com").fetch();
+        let buffered = client.request_builder().get("https://example.com").fetch_buffered();
+        let text = client.request_builder().get("https://example.com").fetch_text();
+        let bytes = client.request_builder().get("https://example.com").fetch_bytes();
+        let json = client.request_builder().get("https://example.com").fetch_json::<JsonData>();
+        let json_owned = client.request_builder().get("https://example.com").fetch_json_owned::<JsonData>();
+
+        let sizes = [
+            ("fetch", size_of_val(&fetch)),
+            ("fetch_buffered", size_of_val(&buffered)),
+            ("fetch_text", size_of_val(&text)),
+            ("fetch_bytes", size_of_val(&bytes)),
+            ("fetch_json", size_of_val(&json)),
+            ("fetch_json_owned", size_of_val(&json_owned)),
+        ];
+
+        for (name, size) in sizes {
+            println!("{name} future size: {size} bytes");
+
+            // The fetch futures are built from `futures` combinators rather than `async fn` state
+            // machines to keep them compact. This guards against accidental regressions that would
+            // reintroduce large generated futures.
+            assert!(size <= 1024, "{name} future grew to {size} bytes");
+        }
     }
 
     #[test]

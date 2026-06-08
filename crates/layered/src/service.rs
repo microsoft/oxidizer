@@ -8,7 +8,6 @@
 /// to wrap closures.
 ///
 /// See the [crate documentation][crate] for usage examples and layer composition.
-#[cfg_attr(any(test, feature = "dynamic-service"), dynosaur::dynosaur(pub DynService = dyn(box) Service, bridge(none)))]
 pub trait Service<In>: Send + Sync {
     /// The output type returned by this service.
     type Out;

@@ -4,7 +4,7 @@
 [package]
 name = "fetch_options"
 description = "Options types for 'fetch' crate."
-version = "0.2.0"
+version = "0.2.1"
 readme = "README.md"
 keywords = ["oxidizer", "http", "options", "fetch", "transport"]
 categories = ["network-programming"]
