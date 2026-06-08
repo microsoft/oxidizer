@@ -33,7 +33,8 @@ use std::hint::black_box;
 use std::str::FromStr;
 
 use bytes_v1::{Bytes, BytesMut};
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 use http_v1::header::{HeaderMap, HeaderName, HeaderValue};
 use http_v1::{Method, Request, Response, StatusCode, Version};
 use jiff_v0_2::civil::{Date, DateTime, ISOWeekDate, Time};
@@ -41,8 +42,6 @@ use jiff_v0_2::{SignedDuration, Span, Timestamp};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
 use uuid_v1::Uuid;
-
-const N: usize = 1_000;
 
 /// Returns a `(src, dst)` pair to feed `ThreadAware::relocate`.
 fn affinities() -> (Affinity, Affinity) {
@@ -88,6 +87,16 @@ fn build_response<T>(body: T, header_count: usize) -> Response<T> {
     resp
 }
 
+/// Registers one `relocate` bench. Criterion handles iteration counting on
+/// its own, so the closure performs exactly one call per sample.
+fn bench_relocate<T: ThreadAware>(g: &mut BenchmarkGroup<'_, WallTime>, name: &str, mut value: T, src: Affinity, dst: Affinity) {
+    g.bench_function(name, |b| {
+        b.iter(|| {
+            black_box(&mut value).relocate(black_box(Some(src)), black_box(dst));
+        });
+    });
+}
+
 // =========================================================================
 // noop_value
 // =========================================================================
@@ -98,37 +107,27 @@ fn bench_noop_value(c: &mut Criterion) {
     let (src, dst) = affinities();
     let mut g = c.benchmark_group("noop_value");
 
-    macro_rules! noop {
-        ($name:literal, $init:expr) => {
-            g.bench_function($name, |b| {
-                let mut v = $init;
-                b.iter(|| {
-                    for _ in 0..N {
-                        black_box(&mut v).relocate(black_box(Some(src)), black_box(dst));
-                    }
-                });
-            });
-        };
-    }
-
-    noop!("status_code", StatusCode::OK);
-    noop!("method", Method::GET);
-    noop!("version", Version::HTTP_11);
-    noop!("header_name", HeaderName::from_static("x-bench"));
-    noop!("header_value", HeaderValue::from_static("bench-value"));
-    noop!("bytes_empty", Bytes::new());
-    noop!("bytes_4kb", Bytes::from(vec![0_u8; 4096]));
-    noop!("bytes_mut_4kb", BytesMut::from(&[0_u8; 4096][..]));
-    noop!("uuid", Uuid::nil());
-    noop!("timestamp", Timestamp::UNIX_EPOCH);
-    noop!("signed_duration", SignedDuration::ZERO);
-    noop!("span", Span::new());
-    noop!("date", Date::constant(2026, 6, 8));
-    noop!("time", Time::constant(12, 0, 0, 0));
-    noop!("datetime", DateTime::constant(2026, 6, 8, 12, 0, 0, 0));
-    noop!(
+    bench_relocate(&mut g, "status_code", StatusCode::OK, src, dst);
+    bench_relocate(&mut g, "method", Method::GET, src, dst);
+    bench_relocate(&mut g, "version", Version::HTTP_11, src, dst);
+    bench_relocate(&mut g, "header_name", HeaderName::from_static("x-bench"), src, dst);
+    bench_relocate(&mut g, "header_value", HeaderValue::from_static("bench-value"), src, dst);
+    bench_relocate(&mut g, "bytes_empty", Bytes::new(), src, dst);
+    bench_relocate(&mut g, "bytes_4kb", Bytes::from(vec![0_u8; 4096]), src, dst);
+    bench_relocate(&mut g, "bytes_mut_4kb", BytesMut::from(&[0_u8; 4096][..]), src, dst);
+    bench_relocate(&mut g, "uuid", Uuid::nil(), src, dst);
+    bench_relocate(&mut g, "timestamp", Timestamp::UNIX_EPOCH, src, dst);
+    bench_relocate(&mut g, "signed_duration", SignedDuration::ZERO, src, dst);
+    bench_relocate(&mut g, "span", Span::new(), src, dst);
+    bench_relocate(&mut g, "date", Date::constant(2026, 6, 8), src, dst);
+    bench_relocate(&mut g, "time", Time::constant(12, 0, 0, 0), src, dst);
+    bench_relocate(&mut g, "datetime", DateTime::constant(2026, 6, 8, 12, 0, 0, 0), src, dst);
+    bench_relocate(
+        &mut g,
         "iso_week_date",
-        ISOWeekDate::new(2026, 23, jiff_v0_2::civil::Weekday::Monday).unwrap()
+        ISOWeekDate::new(2026, 23, jiff_v0_2::civil::Weekday::Monday).unwrap(),
+        src,
+        dst,
     );
 }
 
@@ -141,14 +140,7 @@ fn bench_header_map(c: &mut Criterion) {
     let mut g = c.benchmark_group("header_map");
 
     for (name, count) in [("empty", 0_usize), ("populated_8", 8), ("populated_32", 32)] {
-        g.bench_function(name, |b| {
-            let mut m = build_header_map(count);
-            b.iter(|| {
-                for _ in 0..N {
-                    black_box(&mut m).relocate(black_box(Some(src)), black_box(dst));
-                }
-            });
-        });
+        bench_relocate(&mut g, name, build_header_map(count), src, dst);
     }
 }
 
@@ -160,41 +152,10 @@ fn bench_request(c: &mut Criterion) {
     let (src, dst) = affinities();
     let mut g = c.benchmark_group("request");
 
-    g.bench_function("unit_body_empty_headers", |b| {
-        let mut req = build_request((), 0);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut req).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("unit_body_populated_headers", |b| {
-        let mut req = build_request((), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut req).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("bytes_body", |b| {
-        let mut req = build_request(Bytes::from(vec![0_u8; 4096]), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut req).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("counter_body", |b| {
-        let mut req = build_request(CounterBody::default(), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut req).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
+    bench_relocate(&mut g, "unit_body_empty_headers", build_request((), 0), src, dst);
+    bench_relocate(&mut g, "unit_body_populated_headers", build_request((), 32), src, dst);
+    bench_relocate(&mut g, "bytes_body", build_request(Bytes::from(vec![0_u8; 4096]), 32), src, dst);
+    bench_relocate(&mut g, "counter_body", build_request(CounterBody::default(), 32), src, dst);
 }
 
 // =========================================================================
@@ -205,41 +166,10 @@ fn bench_response(c: &mut Criterion) {
     let (src, dst) = affinities();
     let mut g = c.benchmark_group("response");
 
-    g.bench_function("unit_body_empty_headers", |b| {
-        let mut resp = build_response((), 0);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut resp).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("unit_body_populated_headers", |b| {
-        let mut resp = build_response((), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut resp).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("bytes_body", |b| {
-        let mut resp = build_response(Bytes::from(vec![0_u8; 4096]), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut resp).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
-
-    g.bench_function("counter_body", |b| {
-        let mut resp = build_response(CounterBody::default(), 32);
-        b.iter(|| {
-            for _ in 0..N {
-                black_box(&mut resp).relocate(black_box(Some(src)), black_box(dst));
-            }
-        });
-    });
+    bench_relocate(&mut g, "unit_body_empty_headers", build_response((), 0), src, dst);
+    bench_relocate(&mut g, "unit_body_populated_headers", build_response((), 32), src, dst);
+    bench_relocate(&mut g, "bytes_body", build_response(Bytes::from(vec![0_u8; 4096]), 32), src, dst);
+    bench_relocate(&mut g, "counter_body", build_response(CounterBody::default(), 32), src, dst);
 }
 
 criterion_group!(benches, bench_noop_value, bench_header_map, bench_request, bench_response);
