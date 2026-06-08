@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.1] - 2026-06-05
+
+- 🔧 Maintenance
+
+  - bump `recoverable` to 0.1.5
+
+## [0.5.0] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
+  - bump `templated_uri` to 0.3.0
+  - bump `data_privacy` to 0.12.0
+
 ## [0.4.4] - 2026-06-02
 
 - 🔧 Maintenance

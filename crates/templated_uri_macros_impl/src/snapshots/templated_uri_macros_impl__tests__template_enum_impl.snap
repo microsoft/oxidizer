@@ -28,7 +28,7 @@ impl ::templated_uri::PathAndQueryTemplate for Test {
     fn to_path_and_query(
         &self,
     ) -> ::std::result::Result<
-        ::templated_uri::http::uri::PathAndQuery,
+        ::templated_uri::__private::http::uri::PathAndQuery,
         ::templated_uri::UriError,
     > {
         match self {
@@ -57,18 +57,26 @@ impl ::std::fmt::Debug for Test {
         }
     }
 }
-impl ::data_privacy::RedactedDisplay for Test {
+impl ::templated_uri::__private::RedactedDisplay for Test {
     fn fmt(
         &self,
-        redactor: &dyn ::data_privacy::Redactor,
+        redactor: &dyn ::templated_uri::__private::Redactor,
         f: &mut ::std::fmt::Formatter,
     ) -> ::std::fmt::Result {
         match self {
             Test::FirstTemplate(template_variant) => {
-                ::data_privacy::RedactedDisplay::fmt(template_variant, redactor, f)?
+                ::templated_uri::__private::RedactedDisplay::fmt(
+                    template_variant,
+                    redactor,
+                    f,
+                )?
             }
             Test::SecondTemplate(template_variant) => {
-                ::data_privacy::RedactedDisplay::fmt(template_variant, redactor, f)?
+                ::templated_uri::__private::RedactedDisplay::fmt(
+                    template_variant,
+                    redactor,
+                    f,
+                )?
             }
         }
         Ok(())

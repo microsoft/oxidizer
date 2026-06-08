@@ -2,22 +2,33 @@
 // Licensed under the MIT License.
 
 //! The [`HyperIo`] trait alias plus a [`Connection`] impl for
-//! [`Box<dyn HyperIo>`], so a heap-allocated, type-erased stream can be used
-//! directly wherever a [`HyperIo`] is required. The matching [`Read`]/
-//! [`Write`] impls for `Box<T>` are provided by `hyper` itself.
+//! [`Pin<Box<dyn HyperIo>>`], so a type-erased stream can be used wherever a
+//! [`HyperIo`] is required. The [`Read`]/[`Write`] impls for `Pin<P>` come
+//! from `hyper` itself.
+
+use std::pin::Pin;
 
 use hyper::rt::{Read, Write};
 use hyper_util::client::legacy::connect::{Connected, Connection};
 
 /// A trait alias for any I/O stream usable by hyper.
 ///
-/// A [`Box<dyn HyperIo>`] itself implements [`HyperIo`], which lets a
+/// A [`Pin<Box<dyn HyperIo>>`] itself implements [`HyperIo`], which lets a
 /// connector multiplex over several concrete stream types (e.g. real TCP
 /// plus named pipes) while still exposing a single output type to satisfy
-/// [`Connect<S>`](crate::Connect).
-pub trait HyperIo: Read + Write + Send + Connection + Unpin + 'static {}
+/// [`Connect<S>`](crate::Connect). Pinning the box (rather than using a plain
+/// [`Box<dyn HyperIo>`]) means the erased stream is not required to be
+/// [`Unpin`], because the hyper [`Read`]/[`Write`] impls for [`Pin<P>`] do not
+/// impose that bound.
+pub trait HyperIo: Read + Write + Send + Connection + 'static {}
 
-impl<T: Read + Write + Send + Connection + Unpin + 'static> HyperIo for T {}
+impl<T: Read + Write + Send + Connection + 'static> HyperIo for T {}
+
+impl Connection for Pin<Box<dyn HyperIo>> {
+    fn connected(&self) -> Connected {
+        (**self).connected()
+    }
+}
 
 impl Connection for Box<dyn HyperIo> {
     fn connected(&self) -> Connected {
@@ -31,7 +42,11 @@ mod tests {
     use super::*;
     use crate::testing::PanickingStream;
 
-    fn create() -> Box<dyn HyperIo> {
+    fn create() -> Pin<Box<dyn HyperIo>> {
+        Box::pin(PanickingStream)
+    }
+
+    fn create_boxed() -> Box<dyn HyperIo> {
         Box::new(PanickingStream)
     }
 
@@ -39,5 +54,11 @@ mod tests {
     #[test]
     fn connected_delegates_to_inner() {
         let _ = create().connected();
+    }
+
+    #[should_panic(expected = "connected")]
+    #[test]
+    fn boxed_connected_delegates_to_inner() {
+        let _ = create_boxed().connected();
     }
 }

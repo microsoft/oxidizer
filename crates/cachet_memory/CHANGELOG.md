@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.4] - 2026-06-05
+
+- 🔧 Maintenance
+
+  - bump `cachet_tier` to 0.2.3 (transitively updates `recoverable` to 0.1.5)
+
+## [0.3.3] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `ohno` to 0.3.5 (transitively updates `ohno_macros` to 0.3.3)
+
+## [0.3.2] - 2026-06-04
+
+- 🔧 Maintenance
+
+  - bump `thread_aware` to 0.7.3 (includes derive macro updates via `thread_aware_macros_impl` 0.7.2)
+
 ## [0.3.1] - 2026-06-02
 
 - 🔧 Maintenance

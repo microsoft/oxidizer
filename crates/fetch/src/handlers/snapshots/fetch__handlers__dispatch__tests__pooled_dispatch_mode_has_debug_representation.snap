@@ -1,0 +1,15 @@
+---
+source: crates/fetch/src/handlers/dispatch.rs
+expression: mode
+---
+Pooled {
+    transports: [
+        TransportHandler(
+            DynamicService,
+        ),
+        TransportHandler(
+            DynamicService,
+        ),
+    ],
+    ..
+}

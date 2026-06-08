@@ -1,0 +1,26 @@
+---
+source: crates/fetch/src/handlers/metrics.rs
+expression: sorted_attrs(&attrs)
+---
+[
+    (
+        "error.type",
+        "abandoned",
+    ),
+    (
+        "http.request.method",
+        "GET",
+    ),
+    (
+        "server.address",
+        "example.com",
+    ),
+    (
+        "server.port",
+        "443",
+    ),
+    (
+        "url.scheme",
+        "https",
+    ),
+]
