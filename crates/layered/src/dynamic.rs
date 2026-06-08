@@ -2,10 +2,13 @@
 // Licensed under the MIT License.
 
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+
+use infinity_pool::{BlindPool, BlindPooledMut, define_pooled_dyn_cast};
 
 use crate::Service;
-use crate::service::DynService;
 
 /// Extension trait for converting services to [`DynamicService`].
 ///
@@ -51,22 +54,52 @@ where
 ///     println!("Result: {}", result);
 /// }
 /// ```
-pub struct DynamicService<In, Out>(Arc<DynService<'static, In, Out>>);
+pub struct DynamicService<In, Out> {
+    exec: Arc<dyn Fn(In) -> BlindPooledMut<dyn SendFuture<Out>> + Send + Sync>,
+}
+
+pub(crate) trait SendFuture<Out>: Future<Output = Out> + Send {}
+impl<Out: Send + 'static, F: Future<Output = Out> + Send> SendFuture<Out> for F {}
+define_pooled_dyn_cast!(SendFuture<Out>);
 
 impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
     pub(crate) fn new<T>(strategy: T) -> Self
     where
         T: Service<In, Out = Out> + Send + Sync + 'static,
     {
-        Self(DynService::new_arc(strategy))
+        let pool = BlindPool::new();
+        let service = Arc::new(strategy);
+        // define a delegate that wraps the service execution in a
+        // future and inserts it into the pool
+        let exec = move |input: In| {
+            let cloned = Arc::clone(&service);
+            let fut = async move { cloned.execute(input).await };
+            pool.insert(fut).cast_send_future()
+        };
+
+        Self { exec: Arc::new(exec) }
     }
 }
 
 impl<In: Send, Out: Send> Service<In> for DynamicService<In, Out> {
     type Out = Out;
 
-    async fn execute(&self, input: In) -> Self::Out {
-        self.0.execute(input).await
+    fn execute(&self, input: In) -> impl Future<Output = Self::Out> + Send {
+        ServiceFuture {
+            handle: self.exec.as_ref()(input),
+        }
+    }
+}
+
+struct ServiceFuture<Out> {
+    handle: BlindPooledMut<dyn SendFuture<Out>>,
+}
+
+impl<Out> Future for ServiceFuture<Out> {
+    type Output = Out;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.get_mut().handle.as_pin_mut().poll(cx)
     }
 }
 
@@ -78,7 +111,9 @@ impl<In, Out> Debug for DynamicService<In, Out> {
 
 impl<In, Out> Clone for DynamicService<In, Out> {
     fn clone(&self) -> Self {
-        Self(Arc::clone(&self.0))
+        Self {
+            exec: Arc::clone(&self.exec),
+        }
     }
 }
 
