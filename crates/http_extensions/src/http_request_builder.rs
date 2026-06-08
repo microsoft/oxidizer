@@ -621,11 +621,15 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
         })
     }
 
-    /// Sends the request and deserializes the response body as JSON.
+    /// Sends the request and deserializes the response body as owned JSON.
     ///
     /// Handles the complete request-response cycle and JSON deserialization. Consumes the
     /// [`HttpRequestBuilder`] and automatically sets headers like `Content-Length` and `Content-Type`.
-    /// Use this when you need owned data that can outlive the response.
+    /// This is the most common way to read a JSON response: it deserializes directly into an owned
+    /// value that can outlive the response and cross thread boundaries.
+    ///
+    /// For performance-sensitive scenarios where you want to borrow string and byte data directly from
+    /// the response buffer, use [`fetch_json_ref`](Self::fetch_json_ref) instead.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -652,7 +656,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # let request_builder = handler.request_builder();
     /// let response: Response<User> = request_builder
     ///     .get("https://example.com/users/42")
-    ///     .fetch_json_owned::<User>()
+    ///     .fetch_json::<User>()
     ///     .await?;
     ///
     /// println!("User: {}", response.body().name);
@@ -668,7 +672,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The response body isn't valid UTF-8
     /// - JSON deserialization failed
     #[cfg(any(feature = "json", test))]
-    pub fn fetch_json_owned<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<Response<J>>> + Send {
+    pub fn fetch_json<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<Response<J>>> + Send {
         self.fetch().and_then(|response| {
             let (parts, body) = response.into_parts();
             body.into_json_owned::<J>().map_ok(move |body| Response::from_parts(parts, body))
@@ -679,7 +683,10 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     ///
     /// Handles the complete request-response cycle and JSON deserialization. Consumes the
     /// [`HttpRequestBuilder`] and automatically sets headers like `Content-Length` and `Content-Type`.
-    /// Returns a [`Json<T>`][crate::Json] wrapper that can borrow from the underlying response data.
+    /// Returns a [`Json<T>`][crate::Json] wrapper that can borrow strings and byte arrays directly from
+    /// the underlying response data, avoiding allocations in performance-sensitive code.
+    ///
+    /// For the common case where you want owned data, prefer [`fetch_json`](Self::fetch_json).
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -712,7 +719,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// # let request_builder = handler.request_builder();
     /// let mut response: Json<User> = request_builder
     ///     .get("https://example.com/users/42")
-    ///     .fetch_json::<User>()
+    ///     .fetch_json_ref::<User>()
     ///     .await?
     ///     .into_body();
     ///
@@ -729,7 +736,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The network request failed
     /// - The response body isn't valid UTF-8
     #[cfg(any(feature = "json", test))]
-    pub fn fetch_json<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
+    pub fn fetch_json_ref<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
         self.fetch().and_then(|response| {
             let (parts, body) = response.into_parts();
             body.into_json::<J>().map_ok(move |body| Response::from_parts(parts, body))
@@ -828,9 +835,9 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// the body into an owned value of type `J`. The response metadata is discarded, yielding only the
     /// materialized body.
     ///
-    /// Like [`fetch_json_owned`](Self::fetch_json_owned), this deserializes into an owned type that can
+    /// Like [`fetch_json`](Self::fetch_json), this deserializes into an owned type that can
     /// outlive the response. When you want to borrow from the response buffer for zero-copy parsing, use
-    /// [`fetch_json`](Self::fetch_json) and read from the returned [`Json<J>`][crate::Json] instead.
+    /// [`fetch_json_ref`](Self::fetch_json_ref) and read from the returned [`Json<J>`][crate::Json] instead.
     ///
     /// This method requires the `json` feature to be enabled.
     ///
@@ -1256,7 +1263,7 @@ mod tests {
                 .request_builder()
                 .uri("https://example.com/user")
                 .method(Method::GET)
-                .fetch_json::<BorrowedJsonData>(),
+                .fetch_json_ref::<BorrowedJsonData>(),
         )
         .unwrap()
         .into_body();
@@ -1289,7 +1296,7 @@ mod tests {
                 .request_builder()
                 .uri("https://example.com")
                 .method(Method::GET)
-                .fetch_json_owned::<JsonData>(),
+                .fetch_json::<JsonData>(),
         );
 
         assert!(result.is_err());
@@ -1364,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_json_ok() {
+    fn fetch_json_ref_ok() {
         let client = FakeHandler::from_sync_handler(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
@@ -1377,7 +1384,7 @@ mod tests {
                 .request_builder()
                 .uri("https://example.com")
                 .method(Method::GET)
-                .fetch_json::<JsonData>(),
+                .fetch_json_ref::<JsonData>(),
         )
         .unwrap();
 
@@ -1475,7 +1482,7 @@ mod tests {
         let text = client.request_builder().get("https://example.com").fetch_text();
         let bytes = client.request_builder().get("https://example.com").fetch_bytes();
         let json = client.request_builder().get("https://example.com").fetch_json::<JsonData>();
-        let json_owned = client.request_builder().get("https://example.com").fetch_json_owned::<JsonData>();
+        let json_ref = client.request_builder().get("https://example.com").fetch_json_ref::<JsonData>();
         let text_body = client.request_builder().get("https://example.com").fetch_text_body();
         let bytes_body = client.request_builder().get("https://example.com").fetch_bytes_body();
         let json_body = client.request_builder().get("https://example.com").fetch_json_body::<JsonData>();
@@ -1486,7 +1493,7 @@ mod tests {
             ("fetch_text", size_of_val(&text)),
             ("fetch_bytes", size_of_val(&bytes)),
             ("fetch_json", size_of_val(&json)),
-            ("fetch_json_owned", size_of_val(&json_owned)),
+            ("fetch_json_ref", size_of_val(&json_ref)),
             ("fetch_text_body", size_of_val(&text_body)),
             ("fetch_bytes_body", size_of_val(&bytes_body)),
             ("fetch_json_body", size_of_val(&json_body)),
@@ -1503,7 +1510,7 @@ mod tests {
     }
 
     #[test]
-    fn fetch_json_owned_ok() {
+    fn fetch_json_ok() {
         let client = FakeHandler::from_sync_handler(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
@@ -1516,7 +1523,7 @@ mod tests {
                 .request_builder()
                 .uri("https://example.com")
                 .method(Method::GET)
-                .fetch_json_owned::<JsonData>(),
+                .fetch_json::<JsonData>(),
         )
         .unwrap();
 

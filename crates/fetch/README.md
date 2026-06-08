@@ -89,21 +89,18 @@ This client runs on the Tokio runtime by default. (Other runtimes can be plugged
 custom transport — see the [`custom`][__link7] module.)
 
 ```rust
-use fetch::{HttpClient, HttpError, Response, StatusExt};
+use fetch::{HttpClient, HttpError};
 
 #[tokio::main]
 async fn main() -> Result<(), HttpError> {
     // Create a client using the builder
     let client: HttpClient = HttpClient::new_tokio();
 
-    // Retrieve the response as text
-    let response: Response<String> = client
-        .get("https://example.com")
-        .fetch_text()
-        .await?
-        .ensure_success()?; // Verifies that the response was successful
+    // Retrieve the response body as text. This validates the status (returning an
+    // error for `4xx`/`5xx` responses) and hands back the body in a single step.
+    let body: String = client.get("https://example.com").fetch_text_body().await?;
 
-    println!("response: {}", response.body());
+    println!("response: {body}");
 
     Ok(())
 }
@@ -229,8 +226,8 @@ convenient shortcut methods:
 
 * [`fetch_text`][__link28]: Gets the response body as a string in one step.
 * [`fetch_bytes`][__link29]: Gets the body as a memory-efficient `BytesView`.
-* [`fetch_json`][__link30]: Gets the response body as zero-copy JSON (requires `json` feature).
-* [`fetch_json_owned`][__link31]: Gets the response body as owned JSON (requires `json` feature).
+* [`fetch_json`][__link30]: Gets the response body as owned JSON (requires `json` feature).
+* [`fetch_json_ref`][__link31]: Gets the response body as zero-copy JSON (requires `json` feature).
 
 These methods automatically convert the response body to the format you want (string, JSON, etc.),
 saving you from handling the raw [`HttpBody`][__link32] type directly. They return a [`Response<T>`][__link33] where `T`
@@ -255,23 +252,42 @@ let text: String = response
 
 ```
 
+### Body-Only Shortcuts
+
+When you only need the body of a *successful* response, the `_body` variants go one step further:
+they call [`ensure_success`][__link34] for you, discard the response
+metadata, and return just the materialized body.
+
+* [`fetch_text_body`][__link35]: Validates the status and returns the body as a `String`.
+* [`fetch_bytes_body`][__link36]: Validates the status and returns the body as a `BytesView`.
+* [`fetch_json_body`][__link37]: Validates the status and deserializes the body into an owned value (requires `json` feature).
+
+```rust
+// Fetch, validate the status, and extract the body in a single call
+let text: String = client
+    .get("https://api.example.com/users")
+    .fetch_text_body()
+    .await?;
+println!("body: {text}");
+```
+
 ## URL Handling
 
-The HTTP client uses the [`templated_uri`][__link34] crate for
+The HTTP client uses the [`templated_uri`][__link38] crate for
 URL handling, which provides a powerful and flexible way to work with URIs.
 
-You can use the [`Uri`][__link35] type to build URIs with templated paths and queries, allowing you to
+You can use the [`Uri`][__link39] type to build URIs with templated paths and queries, allowing you to
 create URLs with dynamic segments and query parameters.
-The template format follows [RFC 6570][__link36] level 3,
+The template format follows [RFC 6570][__link40] level 3,
 which means you can use it to easily template more complex paths and queries as well.
 
-You can also use the [`Uri`][__link37] type or string types to represent URIs for backwards compatibility, or
+You can also use the [`Uri`][__link41] type or string types to represent URIs for backwards compatibility, or
 if you don’t need templated paths. In that case, the whole `PathAndQuery` string is treated as a template.
 
-[`handlers::Logging`][__link38] will log the used URL template as
+[`handlers::Logging`][__link42] will log the used URL template as
 `url.path.template`
 
-For example, you can create a [`Uri`][__link39] with a templated path like this:
+For example, you can create a [`Uri`][__link43] with a templated path like this:
 
 ```rust
 use templated_uri::{BaseUri, EscapedString, PathAndQueryTemplate, Uri, templated};
@@ -301,7 +317,7 @@ client
 
 `templated_uri` supports classification of URL paths and queries using the `data_privacy` crate.
 
-You can also use the `classified` attribute to mark [`PathAndQueryTemplate`][__link40]
+You can also use the `classified` attribute to mark [`PathAndQueryTemplate`][__link44]
 structs as classified, allowing you to use classified types from `data_privacy` in your URL templates.
 
 ```rust
@@ -320,18 +336,56 @@ struct UserPath {
 
 Working with JSON APIs is straightforward with the `json` feature, which offers:
 
-* **Send JSON data**: [`HttpRequestBuilder::json`][__link41] serializes any Rust type to JSON.
-* **Receive zero-copy JSON**: [`HttpRequestBuilder::fetch_json`][__link42] returns a
-  [`Json<T>`][__link43] wrapper that borrows strings and byte arrays directly from the response buffer for maximum
-  performance. Use it when you can work with borrowed data.
-* **Receive owned JSON**: [`HttpRequestBuilder::fetch_json_owned`][__link44]
-  deserializes directly into owned Rust types. Use it when the data must outlive the response or cross thread boundaries.
-* **Convert bodies to JSON**: [`HttpBody::into_json`][__link45] transforms response bodies into JSON values.
+* **Send JSON data**: [`HttpRequestBuilder::json`][__link45] serializes any Rust type to JSON.
+* **Receive owned JSON**: [`HttpRequestBuilder::fetch_json`][__link46] deserializes
+  directly into owned Rust types. This is the common case: the data can outlive the response and cross thread boundaries.
+* **Receive zero-copy JSON**: [`HttpRequestBuilder::fetch_json_ref`][__link47] returns a
+  [`Json<T>`][__link48] wrapper that borrows strings and byte arrays directly from the response buffer for maximum
+  performance. Reach for it in hot paths where you can work with borrowed data.
+* **Convert bodies to JSON**: [`HttpBody::into_json`][__link49] transforms response bodies into JSON values.
 
-### Zero-Copy JSON with `fetch_json`
+### Owned JSON with `fetch_json`
 
-Pair `fetch_json` with borrowed string fields (`Cow<'a, str>`) to avoid allocations; the
-[`Json<T>`][__link46] wrapper borrows directly from the response buffer. Prefer `Cow<'a, str>` over
+Use `fetch_json` when you need owned data; it deserializes the JSON directly into your
+target type with owned `String` fields. This is the most common choice:
+
+```rust
+// Define a Person type with owned data
+#[derive(Serialize, Deserialize)]
+struct Person {
+    id: u32,
+    name: String,
+}
+
+let person = Person {
+    id: 1,
+    name: "Alice Johnson".to_owned(),
+};
+
+// Send and receive owned JSON
+let response: Response<Person> = client
+    .put("https://api.company.com/people")
+    .json(&person) // Add JSON payload
+    .fetch_json::<Person>() // Returns Response<Person> directly
+    .await?;
+
+// You can inspect the response metadata if needed
+let response = response.ensure_success()?;
+
+// Extract the deserialized Person directly - no wrapper needed
+let person: Person = response.into_body();
+
+println!("Person retrieved, name: {}", person.name);
+
+```
+
+If you only need the body of a successful response, [`fetch_json_body`][__link50]
+goes one step further and folds the fetch, status check, and owned deserialization into a single call.
+
+### Zero-Copy JSON with `fetch_json_ref`
+
+Pair `fetch_json_ref` with borrowed string fields (`Cow<'a, str>`) to avoid allocations; the
+[`Json<T>`][__link51] wrapper borrows directly from the response buffer. Prefer `Cow<'a, str>` over
 `&'a str`, as it transparently falls back to an owned value when a JSON string was escaped in the buffer
 and cannot be borrowed:
 
@@ -353,7 +407,7 @@ let person = Person {
 let response: Response<Json<Person>> = client
     .put("https://api.company.com/people")
     .json(&person) // Add JSON payload
-    .fetch_json::<Person>() // Returns Response<Json<Person>>
+    .fetch_json_ref::<Person>() // Returns Response<Json<Person>>
     .await?;
 
 // You can inspect the response metadata if needed
@@ -371,50 +425,13 @@ println!("Person retrieved, name: {}", person.name);
 ```
 
 This minimizes heap allocations and copying because string fields borrow directly from the
-response buffer instead of allocating new memory for each string.
-
-### Owned JSON with `fetch_json_owned`
-
-Use `fetch_json_owned` when you need owned data; it deserializes the JSON directly into your
-target type with owned `String` fields:
-
-```rust
-// Define a Person type with owned data
-#[derive(Serialize, Deserialize)]
-struct Person {
-    id: u32,
-    name: String,
-}
-
-let person = Person {
-    id: 1,
-    name: "Alice Johnson".to_owned(),
-};
-
-// Send and receive owned JSON
-let response: Response<Person> = client
-    .put("https://api.company.com/people")
-    .json(&person) // Add JSON payload
-    .fetch_json_owned::<Person>() // Returns Response<Person> directly
-    .await?;
-
-// You can inspect the response metadata if needed
-let response = response.ensure_success()?;
-
-// Extract the deserialized Person directly - no wrapper needed
-let person: Person = response.into_body();
-
-println!("Person retrieved, name: {}", person.name);
-
-```
-
-This performs more allocations than `fetch_json`, but is more convenient when the data must
-outlive the response, cross thread boundaries, or satisfy APIs that require owned types.
+response buffer instead of allocating new memory for each string, at the cost of tying the parsed
+value to the response buffer’s lifetime.
 
 ## Request Pipeline
 
 The HTTP client uses a pipeline architecture to process requests. Think of it like an assembly
-line - every request passes through a sequence of [`RequestHandler`][__link47]s, each handling
+line - every request passes through a sequence of [`RequestHandler`][__link52]s, each handling
 a specific aspect of HTTP communication.
 
 Each handler in the pipeline can:
@@ -424,13 +441,13 @@ Each handler in the pipeline can:
 * Process the response after it’s received
 * Add cross-cutting functionality like logging or metrics
 
-At the very end of the pipeline sits the **transport handler** — the leaf [`RequestHandler`][__link48]
+At the very end of the pipeline sits the **transport handler** — the leaf [`RequestHandler`][__link53]
 that actually performs the I/O and turns a request into a response. This is the seam that makes
 `fetch` transport- and runtime-agnostic: everything above the transport (resilience, telemetry,
 routing, logging, …) is supplied by `fetch`, while the transport itself can be the bundled
 hyper-based implementation, your own runtime/I/O, or a wrapper around an existing HTTP client
-such as [`reqwest`][__link49]. To supply your own transport, see the
-[`custom`][__link50] module and [`custom::create_builder`][__link51].
+such as [`reqwest`][__link54]. To supply your own transport, see the
+[`custom`][__link55] module and [`custom::create_builder`][__link56].
 
 ### Built-in Pipeline Types
 
@@ -443,19 +460,19 @@ The standard pipeline is what you get by default - it includes all the essential
 you’ll want for production use. Handlers are applied in a nested structure, with the outermost
 handler processing the request first and the response last.
 
-See the [`StandardRequestPipeline`][__link52] and [`HttpClientBuilder::standard_pipeline`][__link53]
+See the [`StandardRequestPipeline`][__link57] and [`HttpClientBuilder::standard_pipeline`][__link58]
 for more details and examples.
 
 #### Custom Pipeline
 
 When you need precise control over request processing, you can build a custom pipeline with
-exactly the handlers you want. See the [`HttpClientBuilder::custom_pipeline`][__link54] method for
+exactly the handlers you want. See the [`HttpClientBuilder::custom_pipeline`][__link59] method for
 more details and examples.
 
 #### Minimal Pipeline
 
 For maximum flexibility, you can use the minimal pipeline that includes only the
-essential [`Dispatch`][__link55] handler that actually sends requests to the network.
+essential [`Dispatch`][__link60] handler that actually sends requests to the network.
 This gives you a clean slate to build on:
 
 ```rust
@@ -471,7 +488,7 @@ or integrate with external middleware systems.
 
 ### Creating Custom Handlers
 
-To add your own processing logic, see the [`RequestHandler`][__link56] trait documentation, which covers
+To add your own processing logic, see the [`RequestHandler`][__link61] trait documentation, which covers
 patterns for modifying requests, processing responses, and integrating with the pipeline.
 
 ## Testing with the HTTP Client
@@ -525,21 +542,20 @@ let client = HttpClient::new_fake(fake_handler);
 ## Smart Memory Management with `BytesView`
 
 When handling large HTTP responses or sending big requests, memory usage matters, so `fetch` uses
-[`BytesView`][__link57] for request and response bodies. Its key features:
+[`BytesView`][__link62] for request and response bodies. Its key features:
 
 * **Memory Pooling**: Reuses memory instead of constantly allocating and freeing it.
 * **Less Copying**: Smart buffer management reduces unnecessary data copying.
 * **Multiple Chunks**: Can handle data as multiple pieces that look like a single buffer.
 * **Zero-Copy When Possible**: Avoids copying data when it can for better performance.
-* **Works with Ecosystem**: Fully compatible with the popular [`bytes`][__link58] crate.
+* **Works with Ecosystem**: Fully compatible with the popular [`bytes`][__link63] crate.
 
-You can use [`BytesView`][__link59] just like other byte buffer types because it implements the same
-interfaces ([`Buf`][__link60] and [`BufMut`][__link61]) as the [`bytes`][__link62] crate:
+You can use [`BytesView`][__link64] just like other byte buffer types because it implements the same
+interfaces ([`Buf`][__link65] and [`BufMut`][__link66]) as the [`bytes`][__link67] crate:
 
 ```rust
-// Get a response body as a BytesView
-let response = client.get("https://example.com").fetch().await?;
-let mut body_bytes = response.into_body().into_bytes().await?;
+// Fetch the response body directly as a BytesView (validating the status along the way)
+let mut body_bytes = client.get("https://example.com").fetch_bytes_body().await?;
 
 // Work with the BytesView using standard bytes methods
 let length = body_bytes.remaining();
@@ -567,35 +583,34 @@ let users_uri: Uri = "https://api.example.com/users".parse()?;
 let items_uri: Uri = "https://api.example.com/items".parse()?;
 
 // 3. Work with raw BytesView to avoid allocations when possible
-let response = client.get(users_uri.clone()).fetch().await?;
-let bytes = response.into_body().into_bytes().await?;
+let bytes = client.get(users_uri.clone()).fetch_bytes_body().await?;
 process_binary_data(bytes);
 ```
 
 In detail:
 
-* **Reuse your client**: Creating an [`HttpClient`][__link63] is expensive (connection pooling, security setup).
+* **Reuse your client**: Creating an [`HttpClient`][__link68] is expensive (connection pooling, security setup).
   Create it once and keep using it throughout your application. Share a single instance across
   multiple tasks.
-* **Pre-parse URIs**: If you’re repeatedly calling the same endpoints, parse the [`Uri`][__link64]s once and
+* **Pre-parse URIs**: If you’re repeatedly calling the same endpoints, parse the [`Uri`][__link69]s once and
   reuse them to skip the parsing overhead.
-* **Work with raw [`BytesView`][__link65]**: Converting between formats (like [`BytesView`][__link66] to `String`) creates
-  allocations and copies data. When handling binary data or large responses, work with [`BytesView`][__link67] directly.
+* **Work with raw [`BytesView`][__link70]**: Converting between formats (like [`BytesView`][__link71] to `String`) creates
+  allocations and copies data. When handling binary data or large responses, work with [`BytesView`][__link72] directly.
 
 ## Integration with the HTTP Ecosystem
 
 Instead of creating our own HTTP types from scratch, we use extensions and wrappers around
-the widely adopted [`http`][__link68] crate. These extensions are defined in the [`http_extensions`][__link69] crate
+the widely adopted [`http`][__link73] crate. These extensions are defined in the [`http_extensions`][__link74] crate
 and re-exported here for convenience.
 
 ## Resilience
 
-The HTTP client has built-in resilience features powered by the [`seatbelt`][__link70] crate. These
+The HTTP client has built-in resilience features powered by the [`seatbelt`][__link75] crate. These
 resilience patterns help your application handle failures gracefully and maintain availability
 even when network issues or server problems occur.
 
 The resilience middleware integrates directly into the request pipeline via the
-[`Service`][__link71] trait. Because both the client’s handlers and the seatbelt
+[`Service`][__link76] trait. Because both the client’s handlers and the seatbelt
 middleware implement this trait, they compose seamlessly - no adapter code is needed to mix
 resilience patterns with other request processing logic.
 
@@ -605,21 +620,21 @@ Common resilience patterns available include:
 * **Timeouts**: Prevent requests from hanging indefinitely
 * **Circuit Breakers**: Fail fast when a service is down to avoid cascading failures
 
-These patterns are already configured in the [standard pipeline][__link72] with sensible defaults.
+These patterns are already configured in the [standard pipeline][__link77] with sensible defaults.
 
 ## TLS Support
 
 The HTTP client supports two TLS backends for making HTTPS requests:
 
-* **`rustls`** (default): Uses [`rustls`][__link73] with the
-  [`aws-lc-rs`][__link74] crypto provider. This is the recommended
+* **`rustls`** (default): Uses [`rustls`][__link78] with the
+  [`aws-lc-rs`][__link79] crypto provider. This is the recommended
   backend and is selected by default when the `tls` feature is enabled.
 * **`native-tls`**: Uses the platform’s native TLS implementation (`SChannel` on Windows,
   Security Framework on `macOS`, `OpenSSL` on Linux). This can be explicitly selected, or is
   chosen automatically when the `native-tls` feature is enabled and `rustls` is not.
 
 When using the `rustls` backend, the HTTP client validates server certificates against the
-platform trust store via [`rustls-platform-verifier`][__link75],
+platform trust store via [`rustls-platform-verifier`][__link80],
 which takes care of essential TLS operations:
 
 * Verifies certificates against the operating system’s trusted root `CAs`.
@@ -654,7 +669,7 @@ To use native TLS instead, enable the `native-tls` feature explicitly:
 fetch = { version = "*", features = ["native-tls", "tokio"] }
 ```
 
-You can also select the TLS backend at runtime via [`TlsOptions::builder_rustls()`][__link76] or
+You can also select the TLS backend at runtime via [`TlsOptions::builder_rustls()`][__link81] or
 `TlsOptions::builder_native_tls()` when both features are enabled, allowing different client
 instances to use different backends.
 
@@ -697,7 +712,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbg9gUGftKOZYbOcUidqRvtlIb4jNz0TaSSBQbzELqodjgpHxhZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjOCZWZldGNoZjAuMTAuMoJvaHR0cF9leHRlbnNpb25zZTAuNS4xgmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuNYJtdGVtcGxhdGVkX3VyaWUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbxkEgVi3K7esbSiqQCVICXPsb03rVGNzis1cboVawTWvPmr1hZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjOCZWZldGNoZjAuMTAuMoJvaHR0cF9leHRlbnNpb25zZTAuNS4xgmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuNYJtdGVtcGxhdGVkX3VyaWUwLjMuMA
  [__link0]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient::post
@@ -723,55 +738,60 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link29]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_bytes
  [__link3]: https://docs.rs/fetch/0.10.2/fetch/custom/index.html
  [__link30]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json
- [__link31]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_owned
+ [__link31]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_ref
  [__link32]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=HttpBody
  [__link33]: https://docs.rs/fetch/0.10.2/fetch/?search=http::Response
- [__link34]: https://crates.io/crates/templated_uri/0.3.0
- [__link35]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
- [__link36]: https://datatracker.ietf.org/doc/html/rfc6570
- [__link37]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
- [__link38]: https://docs.rs/fetch/0.10.2/fetch/?search=handlers::Logging
+ [__link34]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpResponse::ensure_success
+ [__link35]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_text_body
+ [__link36]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_bytes_body
+ [__link37]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_body
+ [__link38]: https://crates.io/crates/templated_uri/0.3.0
  [__link39]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
  [__link4]: https://docs.rs/fetch/0.10.2/fetch/?search=custom::create_builder
- [__link40]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=PathAndQueryTemplate
- [__link41]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::json
- [__link42]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json
- [__link43]: https://docs.rs/fetch/0.10.2/fetch/?search=Json
- [__link44]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_owned
- [__link45]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpBody::into_json
- [__link46]: https://docs.rs/fetch/0.10.2/fetch/?search=Json
- [__link47]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
- [__link48]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
- [__link49]: https://docs.rs/reqwest/
+ [__link40]: https://datatracker.ietf.org/doc/html/rfc6570
+ [__link41]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
+ [__link42]: https://docs.rs/fetch/0.10.2/fetch/?search=handlers::Logging
+ [__link43]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
+ [__link44]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=PathAndQueryTemplate
+ [__link45]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::json
+ [__link46]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json
+ [__link47]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_ref
+ [__link48]: https://docs.rs/fetch/0.10.2/fetch/?search=Json
+ [__link49]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpBody::into_json
  [__link5]: https://docs.rs/reqwest/
- [__link50]: https://docs.rs/fetch/0.10.2/fetch/custom/index.html
- [__link51]: https://docs.rs/fetch/0.10.2/fetch/?search=custom::create_builder
- [__link52]: https://docs.rs/fetch/0.10.2/fetch/?search=pipeline::StandardRequestPipeline
- [__link53]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClientBuilder::standard_pipeline
- [__link54]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClientBuilder::custom_pipeline
- [__link55]: https://docs.rs/fetch/0.10.2/fetch/?search=handlers::Dispatch
- [__link56]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
- [__link57]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
- [__link58]: https://docs.rs/bytes
- [__link59]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link50]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpRequestBuilder::fetch_json_body
+ [__link51]: https://docs.rs/fetch/0.10.2/fetch/?search=Json
+ [__link52]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
+ [__link53]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
+ [__link54]: https://docs.rs/reqwest/
+ [__link55]: https://docs.rs/fetch/0.10.2/fetch/custom/index.html
+ [__link56]: https://docs.rs/fetch/0.10.2/fetch/?search=custom::create_builder
+ [__link57]: https://docs.rs/fetch/0.10.2/fetch/?search=pipeline::StandardRequestPipeline
+ [__link58]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClientBuilder::standard_pipeline
+ [__link59]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClientBuilder::custom_pipeline
  [__link6]: https://docs.rs/hyper/
- [__link60]: https://docs.rs/bytes/1.11.1/bytes/?search=Buf
- [__link61]: https://docs.rs/bytes/1.11.1/bytes/?search=BufMut
- [__link62]: https://docs.rs/bytes
- [__link63]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient
- [__link64]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
- [__link65]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
- [__link66]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
- [__link67]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
- [__link68]: https://docs.rs/fetch/0.10.2/fetch/http/index.html
- [__link69]: https://crates.io/crates/http_extensions/0.5.1
+ [__link60]: https://docs.rs/fetch/0.10.2/fetch/?search=handlers::Dispatch
+ [__link61]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
+ [__link62]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link63]: https://docs.rs/bytes
+ [__link64]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link65]: https://docs.rs/bytes/1.11.1/bytes/?search=Buf
+ [__link66]: https://docs.rs/bytes/1.11.1/bytes/?search=BufMut
+ [__link67]: https://docs.rs/bytes
+ [__link68]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient
+ [__link69]: https://docs.rs/templated_uri/0.3.0/templated_uri/?search=Uri
  [__link7]: https://docs.rs/fetch/0.10.2/fetch/custom/index.html
- [__link70]: https://crates.io/crates/seatbelt/0.5.5
- [__link71]: https://docs.rs/layered/0.3.2/layered/?search=Service
- [__link72]: https://docs.rs/fetch/0.10.2/fetch/?search=pipeline::StandardRequestPipeline
- [__link73]: https://docs.rs/rustls
- [__link74]: https://docs.rs/aws-lc-rs
- [__link75]: https://docs.rs/rustls-platform-verifier
- [__link76]: https://docs.rs/fetch/0.10.2/fetch/?search=tls::TlsOptions::builder_rustls
+ [__link70]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link71]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link72]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesView
+ [__link73]: https://docs.rs/fetch/0.10.2/fetch/http/index.html
+ [__link74]: https://crates.io/crates/http_extensions/0.5.1
+ [__link75]: https://crates.io/crates/seatbelt/0.5.5
+ [__link76]: https://docs.rs/layered/0.3.2/layered/?search=Service
+ [__link77]: https://docs.rs/fetch/0.10.2/fetch/?search=pipeline::StandardRequestPipeline
+ [__link78]: https://docs.rs/rustls
+ [__link79]: https://docs.rs/aws-lc-rs
  [__link8]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient::builder_tokio
+ [__link80]: https://docs.rs/rustls-platform-verifier
+ [__link81]: https://docs.rs/fetch/0.10.2/fetch/?search=tls::TlsOptions::builder_rustls
  [__link9]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient::get

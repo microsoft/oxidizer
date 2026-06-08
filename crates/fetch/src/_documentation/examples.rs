@@ -19,7 +19,7 @@
 //! | Example | Description |
 //! |---------|-------------|
 //! | [`http_client_tokio`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_tokio.rs) | Minimal Tokio-runtime client that issues a couple of GET requests, including one from a spawned task. |
-//! | [`http_client_json`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_json.rs) | Deserializes a JSON response into a borrowed struct with [`fetch_json`](crate::HttpRequestBuilder::fetch_json) against a fake handler. |
+//! | [`http_client_json`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_json.rs) | Deserializes a JSON response into a borrowed struct with [`fetch_json_ref`](crate::HttpRequestBuilder::fetch_json_ref) against a fake handler. |
 //! | [`http_client_streaming`](https://github.com/microsoft/oxidizer/blob/main/crates/fetch/examples/http_client_streaming.rs) | Downloads a response incrementally as a [`Stream`](futures::Stream) and writes each chunk to a file. |
 //!
 //! # Configuration & pipelines
