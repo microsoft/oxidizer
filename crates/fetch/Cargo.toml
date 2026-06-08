@@ -57,7 +57,7 @@ native-tls = [
     "fetch_hyper?/native-tls",
     "fetch_tls/native-tls",
 ]
-json = ["dep:serde", "http_extensions/json"]
+json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
     "dep:tokio",
@@ -104,7 +104,6 @@ opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
-serde = { workspace = true, optional = true }
 smallvec = { workspace = true }
 tracing = { workspace = true }
 
