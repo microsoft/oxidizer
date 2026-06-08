@@ -49,9 +49,13 @@ impl AccumulatingHandler {
 
 impl CacheEventHandler for AccumulatingHandler {
     fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
-        // Eviction events have request_id > 0 when triggered synchronously
-        // during an insert (capacity overflow). Background maintenance
-        // evictions have request_id == 0.
+        if event.request_id == 0 {
+            // Background maintenance events (moka housekeeping) have no
+            // associated operation. Log them immediately instead of
+            // accumulating, to avoid unbounded growth under key 0.
+            println!("[background] {} -> {}", event.tier_name, event.outcome);
+            return;
+        }
         self.pending.entry(event.request_id).or_default().push(TierRecord {
             tier_name: event.tier_name.to_owned(),
             outcome: event.outcome.to_owned(),

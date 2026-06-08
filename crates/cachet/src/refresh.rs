@@ -18,6 +18,7 @@ use cachet_tier::{CacheEntry, CacheTier};
 use parking_lot::Mutex;
 
 use crate::fallback::{FallbackCache, FallbackCacheInner};
+use crate::telemetry::CacheTelemetry;
 use crate::telemetry::cache::{WithRequestIdExt, next_request_id};
 
 /// Configuration for background cache refresh.
@@ -147,10 +148,18 @@ where
 {
     pub(crate) async fn fetch_and_promote(&self, key: K) {
         let watch = self.clock.stopwatch();
-        match self.fallback.get(&key).await {
-            Ok(Some(value)) => self.handle_fallback_hit(key, value, watch.elapsed()).await,
-            Ok(None) | Err(_) => self.handle_fallback_miss(watch.elapsed()),
+        if let Ok(Some(value)) = self.fallback.get(&key).await {
+            self.handle_fallback_hit(key, value, watch.elapsed()).await;
+        } else {
+            self.handle_fallback_miss(watch.elapsed());
         }
+        self.telemetry.complete_operation(
+            CacheTelemetry::current_request_id(),
+            self.name,
+            "cache.refresh",
+            watch.elapsed(),
+            false,
+        );
     }
 
     async fn handle_fallback_hit(&self, key: K, value: CacheEntry<V>, fetch_duration: Duration) {
