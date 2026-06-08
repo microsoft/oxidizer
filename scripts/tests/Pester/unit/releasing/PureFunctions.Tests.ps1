@@ -78,14 +78,14 @@ Describe 'Get-NextVersion' {
     }
 
     Context '0.x.y (x >= 1) — Cargo SemVer rules' {
-        It 'breaking increments x and resets y' {
+        It 'breaking increments the minor component and resets the patch component' {
             Get-NextVersion -currentVersion '0.1.5' -ChangeType 'breaking' | Should -Be '0.2.0'
             Get-NextVersion -currentVersion '0.9.99' -ChangeType 'breaking' | Should -Be '0.10.0'
         }
         It 'non-breaking maps to patch in Cargo''s 0.x.y rules' {
             Get-NextVersion -currentVersion '0.1.5' -ChangeType 'non-breaking' | Should -Be '0.1.6'
         }
-        It 'patch increments y' {
+        It 'patch increments the patch component' {
             Get-NextVersion -currentVersion '0.1.5' -ChangeType 'patch' | Should -Be '0.1.6'
         }
     }
