@@ -7,7 +7,7 @@
 //!
 //! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
 //! `HeaderValue`) get a no-op `relocate`. The `HeaderMap` impl is provided
-//! for `HeaderMap<HeaderValue>` only (the default parameterisation produced
+//! for `HeaderMap<HeaderValue>` only (the default type produced
 //! by the `http` crate) and is also a no-op, since `HeaderValue::relocate`
 //! is itself no-op — iterating would be pure waste. See the per-impl docs
 //! on [`Request<T>`] and [`Response<T>`] for their `relocate` semantics.

@@ -73,6 +73,7 @@ uuid_v1 = { version = "1.21.0", default-features = false, package = "uuid", opti
 
 [dev-dependencies]
 bytes_v1 = { version = "1.11.1", default-features = false, package = "bytes" }
+criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 http_v1 = { version = "1.4.1", default-features = false, features = ["std"], package = "http" }
 jiff_v0_2 = { version = "0.2.21", default-features = false, package = "jiff" }
@@ -82,5 +83,25 @@ static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
 uuid_v1 = { version = "1.21.0", default-features = false, package = "uuid" }
 
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux, since
+# gungraun requires Valgrind.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "criterion_third_party"
+harness = false
+required-features = ["bytes_v1", "http_v1", "jiff_v0_2", "uuid_v1"]
+
+# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
+[[bench]]
+name = "gungraun_third_party"
+harness = false
+required-features = ["bytes_v1", "http_v1", "jiff_v0_2", "uuid_v1"]
