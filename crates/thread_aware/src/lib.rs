@@ -98,17 +98,18 @@
 //! inert value types from popular 3rd-party crates. Each feature is suffixed
 //! with the major (or 0.x minor) of the wrapped crate; enabling a feature
 //! pulls that crate in as a dependency. By default none are enabled and this
-//! crate brings in no extra dependencies. See [`third_party`] for the list of
-//! types covered by each feature.
+//! crate brings in no extra dependencies.
 //!
 //! * **`bytes_v1`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
 //! * **`http_v1`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
-//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap`,
-//!   `http::Request`, `http::Response`.
+//!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
+//!   `http::Request<T>`, `http::Response<T>`.
 //! * **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 //! * **`uuid_v1`**: Impl for `uuid::Uuid`.
 //!
-//! [`third_party`]: third_party
+//! For `Request<T>` and `Response<T>`, `relocate` is forwarded to the body
+//! only; the headers map (`HeaderMap<HeaderValue>`) and `http::Extensions`
+//! are treated as inert.
 //!
 //! # Examples
 //!

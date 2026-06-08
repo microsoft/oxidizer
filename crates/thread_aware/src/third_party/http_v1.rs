@@ -6,12 +6,15 @@
 //! Enable with the `http_v1` Cargo feature.
 //!
 //! All inert value types in `http` (`StatusCode`, `Method`, `Version`,
-//! `HeaderName`, `HeaderValue`) get a no-op `relocate`. `HeaderMap<HeaderValue>`
-//! — the only header map shape the `http` crate produces — is also treated as
-//! inert, so iterating its entries would be wasted work.
+//! `HeaderName`, `HeaderValue`) get a no-op `relocate`. The `HeaderMap`
+//! impl is provided for `HeaderMap<HeaderValue>` only (the default
+//! parameterisation produced by the `http` crate) and is also a no-op,
+//! since `HeaderValue::relocate` is itself no-op — iterating would be
+//! pure waste.
 //!
-//! `Request<T>` and `Response<T>` propagate `relocate` to their body only.
-//! Their headers are `HeaderMap<HeaderValue>` and therefore already no-op.
+//! `Request<T>::relocate` and `Response<T>::relocate` forward to the body
+//! only. Their headers are `HeaderMap<HeaderValue>`, which is inert by the
+//! impl above, so iterating header values would also be wasted work.
 //!
 //! Note: `http::Extensions` (carried by `Request<T>` and `Response<T>`) holds
 //! arbitrary `Any` values whose concrete types are erased at runtime, so this
