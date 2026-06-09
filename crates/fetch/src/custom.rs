@@ -268,7 +268,7 @@ mod tests {
 
     #[mutants::skip]
     fn ok_factory(_ctx: CustomContext) -> FakeHandler {
-        FakeHandler::from_sync_handler(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
+        FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
     }
 
     #[cfg_attr(miri, ignore)]
@@ -317,7 +317,7 @@ mod tests {
                 // Touching `extras` during factory invocation proves the value travels
                 // all the way through the transport plumbing.
                 ctx.extras.fetch_add(1, Ordering::Relaxed);
-                FakeHandler::from_sync_handler(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
+                FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
             },
             Isolation::Shared,
             deps,

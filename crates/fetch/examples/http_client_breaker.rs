@@ -26,7 +26,7 @@ const HEALTHY_HOST: &str = "https://healthy.example.com";
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
     // Fake handler: 500 for the failing host, 200 for everything else.
-    let fake_handler = FakeHandler::from_sync_handler(|req| {
+    let fake_handler = FakeHandler::from_fn(|req| {
         let status = if req.uri().host() == Some("failing.example.com") {
             StatusCode::INTERNAL_SERVER_ERROR
         } else {

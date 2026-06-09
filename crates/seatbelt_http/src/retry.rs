@@ -208,7 +208,7 @@ mod tests {
     fn restore_request_from_unavailable_error() {
         let call_count = Arc::new(AtomicU32::new(0));
         let counter = Arc::clone(&call_count);
-        let handler = FakeHandler::from_sync_handler(move |req| {
+        let handler = FakeHandler::from_fn(move |req| {
             let n = counter.fetch_add(1, Ordering::Relaxed);
             if n < 2 {
                 Err(HttpError::unavailable("service down").with_request(req))
@@ -262,7 +262,7 @@ mod tests {
         let captured_uris: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_uris_for_handler = Arc::clone(&captured_uris);
 
-        let handler = FakeHandler::from_sync_handler(move |request: HttpRequest| {
+        let handler = FakeHandler::from_fn(move |request: HttpRequest| {
             captured_uris_for_handler
                 .lock()
                 .expect("mutex is only accessed in single-threaded test")
