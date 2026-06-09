@@ -45,7 +45,7 @@ fn main() {
     let arena = Arena::new_in(alloc);
 
     for i in 0..50_000_u64 {
-        let _ = arena.alloc_rc(i);
+        let _ = arena.alloc_arc(i);
     }
 
     println!(

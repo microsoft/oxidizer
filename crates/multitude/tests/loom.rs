@@ -424,7 +424,7 @@ mod loom_arc {
     #[test]
     fn arc_str_clone_drop_race() {
         // Same pattern as `arc_clone_drop_race` but on the str path.
-        // ArcStr uses the same atomic refcount machinery as Arc<T>
+        // Arc<str> uses the same atomic refcount machinery as Arc<T>
         // (fetch_add/Relaxed + fetch_sub/Release + Acquire fence) but
         // through a different allocation/teardown shape (no DropEntry,
         // payload is non-Drop bytes). Verifies the str path's orderings.

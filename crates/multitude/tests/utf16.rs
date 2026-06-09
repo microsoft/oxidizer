@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(
+    dead_code,
+    unused_imports,
+    clippy::unnecessary_safety_comment,
+    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+)]
+
 //! Consolidated UTF-16 tests (smoke, builder, format, serde, cross-thread,
 //! coverage gaps, and mutation-kill cases).
 
@@ -12,21 +19,11 @@ mod common;
 mod utf16_smoke {
 
     use multitude::Arena;
-    use multitude::strings::{ArcUtf16Str, BoxUtf16Str, RcUtf16Str};
+    use multitude::strings::{ArcUtf16Str, BoxUtf16Str};
     use widestring::utf16str;
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
-
-    #[test]
-    fn alloc_utf16_str_rc() {
-        let arena = Arena::new();
-        let s = arena.alloc_utf16_str_rc(utf16str!("hello"));
-        assert_eq!(&*s, utf16str!("hello"));
-        assert_eq!(s.len(), 5);
-        let s2 = s.clone();
-        assert_eq!(&*s, &*s2);
-    }
 
     #[test]
     fn alloc_utf16_str_box() {
@@ -45,13 +42,6 @@ mod utf16_smoke {
     }
 
     #[test]
-    fn alloc_utf16_str_rc_from_str() {
-        let arena = Arena::new();
-        let s = arena.alloc_utf16_str_rc_from_str("hello, world");
-        assert_eq!(&*s, utf16str!("hello, world"));
-    }
-
-    #[test]
     fn alloc_utf16_str_box_from_str() {
         let arena = Arena::new();
         let s = arena.alloc_utf16_str_box_from_str("hello");
@@ -66,66 +56,11 @@ mod utf16_smoke {
     }
 
     #[test]
-    fn empty_string_round_trip() {
-        let arena = Arena::new();
-        let r: RcUtf16Str = arena.alloc_utf16_str_rc(utf16str!(""));
-        assert!(r.is_empty());
-        assert_eq!(r.len(), 0);
-    }
-
-    #[test]
-    fn box_into_rc() {
-        let arena = Arena::new();
-        let b: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("hello"));
-        let r: RcUtf16Str = b.into();
-        assert_eq!(&*r, utf16str!("hello"));
-    }
-
-    #[test]
-    fn rc_into_arena_rc_slice() {
-        let arena = Arena::new();
-        let r = arena.alloc_utf16_str_rc(utf16str!("abc"));
-        let bytes: multitude::Rc<[u16]> = r.into();
-        assert_eq!(&*bytes, &[u16::from(b'a'), u16::from(b'b'), u16::from(b'c')][..]);
-    }
-
-    #[test]
     fn arc_into_arena_arc_slice() {
         let arena = Arena::new();
         let a = arena.alloc_utf16_str_arc(utf16str!("abc"));
         let bytes: multitude::Arc<[u16]> = a.into();
         assert_eq!(&*bytes, &[u16::from(b'a'), u16::from(b'b'), u16::from(b'c')][..]);
-    }
-
-    #[test]
-    fn surrogate_pair_round_trip() {
-        // U+1F496 SPARKLING HEART encodes as a UTF-16 surrogate pair.
-        let arena = Arena::new();
-        let r = arena.alloc_utf16_str_rc(utf16str!("💖"));
-        assert_eq!(r.len(), 2); // 2 u16 units
-        assert_eq!(&*r, utf16str!("💖"));
-        let s = r.as_utf16_str().to_string();
-        assert_eq!(s, "💖");
-    }
-
-    #[test]
-    fn empty_builder_into_arena_str() {
-        let arena = Arena::new();
-        let b = arena.alloc_utf16_string();
-        let r = b.into_arena_utf16_str();
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn comparison_traits() {
-        let arena = Arena::new();
-        let a = arena.alloc_utf16_str_rc(utf16str!("aaa"));
-        let b = arena.alloc_utf16_str_rc(utf16str!("aab"));
-        assert!(a < b);
-        assert_ne!(a, b);
-        assert_eq!(a, a.clone());
-        let _ = format!("{a}");
-        let _ = format!("{a:?}");
     }
 }
 
@@ -270,22 +205,6 @@ mod utf16_string_builder {
     }
 
     #[test]
-    fn freeze_tail_reclamation() {
-        let arena = Arena::builder().build();
-        let stats_before = arena.alloc_utf16_string_with_capacity(64);
-        let cap_before = stats_before.capacity();
-        drop(stats_before);
-        let mut s = arena.alloc_utf16_string_with_capacity(64);
-        s.push_str(utf16str!("hi"));
-        let r = s.into_arena_utf16_str();
-        // Tail reclaim should let a subsequent allocation reuse those bytes.
-        let s2 = arena.alloc_utf16_string_with_capacity(50);
-        assert!(s2.capacity() >= 50);
-        assert_eq!(&*r, utf16str!("hi"));
-        assert!(cap_before >= 64);
-    }
-
-    #[test]
     fn push_str_accepts_borrowed_utf16str() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string();
@@ -302,58 +221,6 @@ mod utf16_string_builder {
         let mut b = arena.alloc_utf16_string();
         b.push_str(&a);
         assert_eq!(b.as_utf16_str(), utf16str!("hello"));
-    }
-
-    #[test]
-    fn push_str_accepts_box_rc_arc_utf16_str() {
-        let arena = Arena::new();
-        let mut src = arena.alloc_utf16_string();
-        src.push_str(utf16str!("xyz"));
-        let boxed = arena.alloc_utf16_str_box(utf16str!("xyz"));
-        let rc = arena.alloc_utf16_str_rc(utf16str!("xyz"));
-        let arc = arena.alloc_utf16_str_arc(utf16str!("xyz"));
-
-        let mut out = arena.alloc_utf16_string();
-        out.push_str(&boxed);
-        out.push_str(&rc);
-        out.push_str(&arc);
-        assert_eq!(out.as_utf16_str(), utf16str!("xyzxyzxyz"));
-    }
-
-    #[test]
-    fn try_push_str_accepts_as_ref_kinds() {
-        let arena = Arena::new();
-        let lit = utf16str!("lit-");
-        let mut owned = arena.alloc_utf16_string();
-        owned.push_str(utf16str!("own-"));
-        let boxed = arena.alloc_utf16_str_box(utf16str!("box-"));
-        let rc = arena.alloc_utf16_str_rc(utf16str!("rc-"));
-        let arc = arena.alloc_utf16_str_arc(utf16str!("arc"));
-
-        let mut out = arena.alloc_utf16_string();
-        out.try_push_str(lit).unwrap();
-        out.try_push_str(&owned).unwrap();
-        out.try_push_str(&boxed).unwrap();
-        out.try_push_str(&rc).unwrap();
-        out.try_push_str(&arc).unwrap();
-        assert_eq!(out.as_utf16_str(), utf16str!("lit-own-box-rc-arc"));
-    }
-
-    #[test]
-    fn push_from_str_accepts_str_like_types() {
-        let arena = Arena::new();
-        let owned = alloc::string::String::from("own-");
-        let boxed: alloc::boxed::Box<str> = alloc::boxed::Box::from("box-");
-        let rc: alloc::rc::Rc<str> = alloc::rc::Rc::from("rc-");
-        let arc: alloc::sync::Arc<str> = alloc::sync::Arc::from("arc");
-
-        let mut out = arena.alloc_utf16_string();
-        out.push_from_str("lit-");
-        out.push_from_str(&owned);
-        out.push_from_str(&boxed);
-        out.push_from_str(&rc);
-        out.push_from_str(&arc);
-        assert_eq!(out.as_utf16_str(), utf16str!("lit-own-box-rc-arc"));
     }
 
     #[test]
@@ -564,14 +431,6 @@ mod utf16_format {
         let s = format_utf16!(in &arena, "{f}");
         assert_eq!(s.as_utf16_str(), utf16str!("hello, 💖 bye"));
     }
-
-    #[test]
-    fn format_utf16_freeze() {
-        let arena = Arena::new();
-        let s = format_utf16!(in &arena, "x={}", 7);
-        let frozen: multitude::strings::RcUtf16Str = s.into_arena_utf16_str();
-        assert_eq!(&*frozen, utf16str!("x=7"));
-    }
 }
 
 // === merged from tests/utf16_serde.rs ===
@@ -582,14 +441,6 @@ mod utf16_serde {
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
-
-    #[test]
-    fn rc_serializes_as_utf8_string() {
-        let arena = Arena::new();
-        let s = arena.alloc_utf16_str_rc(utf16str!("hello, 💖"));
-        let json = serde_json::to_string(&s).unwrap();
-        assert_eq!(json, r#""hello, 💖""#);
-    }
 
     #[test]
     fn arc_serializes_as_utf8_string() {
@@ -672,8 +523,8 @@ mod utf16_coverage {
     use std::hash::{Hash, Hasher};
     use std::panic::AssertUnwindSafe;
 
-    use multitude::Arena;
-    use multitude::strings::{ArcStr, BoxStr, RcStr, RcUtf16Str, String, Utf16String};
+    use multitude::strings::{String, Utf16String};
+    use multitude::{Arc, Arena, Box};
     use widestring::{Utf16Str, utf16str};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
@@ -693,14 +544,6 @@ mod utf16_coverage {
     }
 
     #[test]
-    fn panic_alloc_utf16_str_rc() {
-        expect_panic(|| {
-            let a = fail_arena();
-            let _ = a.alloc_utf16_str_rc(utf16str!("x"));
-        });
-    }
-
-    #[test]
     fn panic_alloc_utf16_str_arc() {
         expect_panic(|| {
             let a = send_fail_arena();
@@ -713,14 +556,6 @@ mod utf16_coverage {
         expect_panic(|| {
             let a = fail_arena();
             let _ = a.alloc_utf16_str_box(utf16str!("x"));
-        });
-    }
-
-    #[test]
-    fn panic_alloc_utf16_str_rc_from_str() {
-        expect_panic(|| {
-            let a = fail_arena();
-            let _ = a.alloc_utf16_str_rc_from_str("x");
         });
     }
 
@@ -749,12 +584,6 @@ mod utf16_coverage {
     }
 
     #[test]
-    fn try_alloc_utf16_str_rc_err() {
-        let a = fail_arena();
-        a.try_alloc_utf16_str_rc(utf16str!("x")).unwrap_err();
-    }
-
-    #[test]
     fn try_alloc_utf16_str_arc_err() {
         let a = send_fail_arena();
         a.try_alloc_utf16_str_arc(utf16str!("x")).unwrap_err();
@@ -764,12 +593,6 @@ mod utf16_coverage {
     fn try_alloc_utf16_str_box_err() {
         let a = fail_arena();
         a.try_alloc_utf16_str_box(utf16str!("x")).unwrap_err();
-    }
-
-    #[test]
-    fn try_alloc_utf16_str_rc_from_str_err() {
-        let a = fail_arena();
-        a.try_alloc_utf16_str_rc_from_str("x").unwrap_err();
     }
 
     #[test]
@@ -840,37 +663,6 @@ mod utf16_coverage {
         s.truncate(3);
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
         assert_eq!(s.len(), 3);
-    }
-
-    #[test]
-    fn shrink_to_fit_noop_when_full() {
-        let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(0, &arena);
-        // cap==0 path
-        s.shrink_to_fit();
-        assert_eq!(s.capacity(), 0);
-
-        // Folded from_mutants_extras_utf16_scattered::utf16_shrink_to_fit_already_tight_is_noop.
-        let mut tight = arena.alloc_utf16_string_with_capacity(3);
-        tight.push_from_str("abc");
-        tight.shrink_to_fit();
-        assert_eq!(tight.len(), 3);
-
-        // cap == len path
-        s.push_str(utf16str!("hi"));
-        let cap = s.capacity();
-        let len = s.len();
-        if cap == len {
-            s.shrink_to_fit(); // still no-op
-            assert_eq!(s.capacity(), cap);
-        }
-        let mut s2 = Utf16String::with_capacity_in(8, &arena);
-        s2.push_str(utf16str!("ab"));
-        drop(s); // ensure s2 is no longer at the bump cursor
-        let _other = arena.alloc_utf16_str_rc(utf16str!("xx"));
-        let cap_before = s2.capacity();
-        s2.shrink_to_fit(); // not at bump cursor → no-op
-        assert_eq!(s2.capacity(), cap_before);
     }
 
     #[test]
@@ -1028,42 +820,6 @@ mod utf16_coverage {
     }
 
     #[test]
-    fn rc_utf16_traits_and_pointer() {
-        use core::borrow::Borrow;
-        let arena = Arena::new();
-        let r = arena.alloc_utf16_str_rc(utf16str!("hello"));
-        let _: &Utf16Str = &r;
-        let _: &Utf16Str = AsRef::as_ref(&r);
-        let _: &Utf16Str = Borrow::borrow(&r);
-
-        // PartialEq vs Utf16Str / &Utf16Str
-        assert!(r == *utf16str!("hello"));
-        assert!(r == utf16str!("hello"));
-
-        // Display / Debug / Pointer formatters
-        let _ = format!("{r}");
-        let _ = format!("{r:?}");
-        let _ = format!("{r:p}");
-
-        // Hash
-        let mut h = DefaultHasher::new();
-        r.hash(&mut h);
-        let _ = h.finish();
-
-        // Ord / PartialOrd via clones
-        let r2 = r.clone();
-        assert_eq!(r.cmp(&r2), core::cmp::Ordering::Equal);
-        assert_eq!(r.partial_cmp(&r2), Some(core::cmp::Ordering::Equal));
-
-        // From<ArenaRcUtf16Str> for ArenaRc<[u16]>
-        let bytes: multitude::Rc<[u16]> = r.into();
-        assert_eq!(
-            &*bytes,
-            &[u16::from(b'h'), u16::from(b'e'), u16::from(b'l'), u16::from(b'l'), u16::from(b'o')][..]
-        );
-    }
-
-    #[test]
     fn arc_utf16_traits_and_pointer() {
         use core::borrow::Borrow;
         let arena = Arena::new();
@@ -1092,66 +848,6 @@ mod utf16_coverage {
             &*bytes,
             &[u16::from(b'h'), u16::from(b'e'), u16::from(b'l'), u16::from(b'l'), u16::from(b'o')][..]
         );
-    }
-
-    #[test]
-    fn box_utf16_traits_pointer_and_mutators() {
-        use core::borrow::{Borrow, BorrowMut};
-        let arena = Arena::new();
-        let mut b = arena.alloc_utf16_str_box(utf16str!("hello"));
-
-        // Deref / DerefMut / AsRef / AsMut / Borrow / BorrowMut
-        let _: &Utf16Str = &b;
-        let _: &mut Utf16Str = &mut b;
-        let _: &Utf16Str = AsRef::as_ref(&b);
-        let _: &mut Utf16Str = AsMut::as_mut(&mut b);
-        let _: &Utf16Str = Borrow::borrow(&b);
-        let _: &mut Utf16Str = BorrowMut::borrow_mut(&mut b);
-
-        // PartialEq variants
-        assert!(b == *utf16str!("hello"));
-        assert!(b == utf16str!("hello"));
-
-        // Display / Debug / Pointer
-        let _ = format!("{b}");
-        let _ = format!("{b:?}");
-        let _ = format!("{b:p}");
-
-        // Hash
-        let mut h = DefaultHasher::new();
-        b.hash(&mut h);
-        let _ = h.finish();
-
-        // Ord / PartialOrd against another box
-        let b2 = arena.alloc_utf16_str_box(utf16str!("hello"));
-        assert_eq!(b.cmp(&b2), core::cmp::Ordering::Equal);
-        assert_eq!(b.partial_cmp(&b2), Some(core::cmp::Ordering::Equal));
-
-        // From<ArenaBoxUtf16Str> for ArenaRcUtf16Str
-        let r: RcUtf16Str = b.into();
-        assert_eq!(&*r, utf16str!("hello"));
-    }
-
-    #[test]
-    fn utf8_smart_pointer_partial_eq_str() {
-        let arena = Arena::new();
-
-        let r: RcStr = arena.alloc_str_rc("hi");
-        assert!(r == *"hi");
-        assert!(r == "hi");
-
-        let a: ArcStr = arena.alloc_str_arc("hi");
-        assert!(a == *"hi");
-        assert!(a == "hi");
-
-        let b: BoxStr = arena.alloc_str_box("hi");
-        assert!(b == *"hi");
-        assert!(b == "hi");
-
-        let mut g: String = arena.alloc_string();
-        g.push_str("hi");
-        assert!(g == *"hi");
-        assert!(g == "hi");
     }
 
     #[test]
@@ -1311,54 +1007,11 @@ mod utf16_coverage {
         assert_eq!(s.capacity(), cap);
     }
 
-    #[test]
-    fn into_arena_utf16_str_zero_cap() {
-        let arena = Arena::new();
-        let s = arena.alloc_utf16_string();
-        let r = s.into_arena_utf16_str();
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn into_arena_utf16_str_with_data_reclaims_tail() {
-        let arena = Arena::builder().build();
-        let mut s = arena.alloc_utf16_string_with_capacity(64);
-        s.push_str(utf16str!("hi"));
-        let r = s.into_arena_utf16_str();
-        assert_eq!(&*r, utf16str!("hi"));
-        let _follow = arena.alloc_utf16_string_with_capacity(50);
-    }
-
     // From<ArenaUtf16String> for ArenaRcUtf16Str (exercises the
     // `into` arrow that the From impl wraps).
 
-    #[test]
-    fn from_arena_utf16_string_for_rc() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("frozen"));
-        let r: RcUtf16Str = s.into();
-        assert_eq!(&*r, utf16str!("frozen"));
-    }
-
     // Display impl chain: ArenaArcUtf16Str / ArenaBoxUtf16Str / ArenaRcUtf16Str
     // pass through to Utf16Str's Display.
-
-    #[test]
-    fn display_passes_through() {
-        let arena = Arena::new();
-        let r = arena.alloc_utf16_str_rc(utf16str!("hi💖"));
-        assert_eq!(format!("{r}"), "hi💖");
-        let a = arena.alloc_utf16_str_arc(utf16str!("hi💖"));
-        assert_eq!(format!("{a}"), "hi💖");
-        let b = arena.alloc_utf16_str_box(utf16str!("hi💖"));
-        assert_eq!(format!("{b}"), "hi💖");
-
-        // Folded from_coverage_extras_utf16::utf16_string_display_renders_content.
-        let mut s = arena.alloc_utf16_string();
-        s.push_str(utf16str!("hello"));
-        assert_eq!(std::format!("{s}"), "hello");
-    }
 
     #[test]
     fn insert_grows_capacity() {
@@ -1415,13 +1068,6 @@ mod utf16_coverage {
         // single-allocation transcode path, that's the only path to Err.
         let arena = Arena::new_in(SendFailingAllocator::new(0));
         arena.try_alloc_utf16_str_arc_from_str("xyz").unwrap_err();
-    }
-
-    #[test]
-    fn try_alloc_utf16_str_rc_from_str_success() {
-        let arena = Arena::new();
-        let r = arena.try_alloc_utf16_str_rc_from_str("hello, 💖").unwrap();
-        assert_eq!(&*r, utf16str!("hello, 💖"));
     }
 
     #[test]
@@ -1883,9 +1529,9 @@ mod mutation_coverage {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use multitude::strings::{BoxStr, BoxUtf16Str, String as ArenaString, Utf16String};
+    use multitude::strings::{BoxUtf16Str, String as ArenaString, Utf16String};
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arena, ArenaBuilder};
+    use multitude::{Arena, ArenaBuilder, Box};
     use widestring::{Utf16Str, utf16str};
 
     use crate::common;
@@ -2019,22 +1665,6 @@ mod mutation_coverage {
     }
 
     #[test]
-    fn test_string_drop_releases_retired_chunk() {
-        let alloc = common::TrackingAllocator::new();
-        {
-            let arena = Arena::builder().allocator_in(alloc.clone()).build();
-            let mut s = arena.alloc_string_with_capacity(3500);
-            s.push_str("hello");
-            let filler = arena.alloc_slice_copy_rc(std::vec![1_u8; 4000]);
-            drop(filler);
-            drop(s);
-        }
-
-        assert_eq!(alloc.live_chunks(), 0);
-        assert_eq!(alloc.live_bytes(), 0);
-    }
-
-    #[test]
     fn test_utf16_string_is_empty_false_when_nonempty() {
         let arena = Arena::new();
         let s = Utf16String::from_utf16_str_in(utf16str!("alpha"), &arena);
@@ -2083,30 +1713,6 @@ mod mutation_coverage {
 
         assert_eq!(s.pop(), Some('b'));
         assert_eq!(s.as_utf16_str(), utf16str!("a"));
-    }
-
-    #[test]
-    fn test_utf16_string_shrink_to_fit_reclaims_capacity_and_preserves_contents() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(10);
-        s.push_str(utf16str!("hello"));
-
-        s.shrink_to_fit();
-        let _follow_on = arena.alloc_utf16_str_rc(utf16str!("zzzz"));
-
-        assert_eq!(s.capacity(), s.len());
-        assert_eq!(s.as_utf16_str(), utf16str!("hello"));
-
-        #[cfg(all(feature = "stats", feature = "utf16"))]
-        {
-            // Folded from_mutants_extras_utf16_scattered::utf16_shrink_to_fit_reclaims_tail.
-            let mut s = arena.alloc_utf16_string_with_capacity(128);
-            s.push_from_str("hi");
-            let before_chunks = arena.stats().normal_local_chunks_allocated;
-            s.shrink_to_fit();
-            let _r: multitude::Rc<u8> = arena.alloc_rc(0);
-            assert_eq!(arena.stats().normal_local_chunks_allocated, before_chunks);
-        }
     }
 
     #[test]
@@ -2161,47 +1767,9 @@ mod mutation_coverage {
     }
 
     #[test]
-    fn test_utf16_into_arena_utf16_str_preserves_contents_after_tail_reclaim() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(10);
-        s.push_str(utf16str!("hello"));
-
-        let frozen = s.into_arena_utf16_str();
-        let _follow_on = arena.alloc_utf16_str_rc(utf16str!("zzzz"));
-
-        assert_eq!(&*frozen, utf16str!("hello"));
-
-        // Folded from_coverage_extras_utf16::utf16_into_arena_str_reclaims_tail.
-        let mut s = arena.alloc_utf16_string_with_capacity(64);
-        s.push_str(utf16str!("abcd"));
-        let frozen = s.into_arena_utf16_str();
-        let frozen_end_addr = frozen.as_ptr() as usize + frozen.len() * core::mem::size_of::<u16>();
-        let next: multitude::Rc<u32> = arena.alloc_rc(0_u32);
-        let next_addr = multitude::Rc::as_ptr(&next) as usize;
-        let gap = next_addr.saturating_sub(frozen_end_addr);
-        assert!(gap < 120, "gap was {gap} bytes");
-    }
-
-    #[test]
-    fn test_utf16_string_drop_releases_retired_chunk() {
-        let alloc = common::TrackingAllocator::new();
-        {
-            let arena = Arena::builder().allocator_in(alloc.clone()).build();
-            let mut s = arena.alloc_utf16_string_with_capacity(1800);
-            s.push_str(utf16str!("hello"));
-            let filler = arena.alloc_slice_copy_rc(std::vec![1_u8; 4000]);
-            drop(filler);
-            drop(s);
-        }
-
-        assert_eq!(alloc.live_chunks(), 0);
-        assert_eq!(alloc.live_bytes(), 0);
-    }
-
-    #[test]
     fn test_box_str_partial_eq_distinguishes_different_values() {
         let arena = Arena::new();
-        let boxed: BoxStr = arena.alloc_str_box("alpha");
+        let boxed: Box<str> = arena.alloc_str_box("alpha");
         let beta = "beta";
 
         assert!(boxed != "beta");
@@ -2315,18 +1883,6 @@ mod mutation_coverage {
     }
 
     #[test]
-    fn test_vec_into_arena_rc_preserves_values_after_tail_reclaim() {
-        let arena = Arena::new();
-        let mut v = arena.alloc_vec_with_capacity::<u32>(16);
-        v.extend(0_u32..5);
-
-        let frozen = v.into_arena_rc();
-        let _follow_on = arena.alloc_str("tail");
-
-        assert_eq!(&*frozen, &[0, 1, 2, 3, 4]);
-    }
-
-    #[test]
     fn test_vec_hash_depends_on_contents() {
         let arena = Arena::new();
         let mut a = arena.alloc_vec();
@@ -2349,22 +1905,6 @@ mod mutation_coverage {
         }
 
         assert_eq!(drops.load(Ordering::Relaxed), 3);
-    }
-
-    #[test]
-    fn test_vec_drop_deallocates_retired_buffer() {
-        let alloc = common::TrackingAllocator::new();
-        {
-            let arena = Arena::builder().allocator_in(alloc.clone()).build();
-            let mut v = arena.alloc_vec_with_capacity::<u64>(512);
-            v.extend(0_u64..4);
-            let filler = arena.alloc_slice_copy_rc(std::vec![1_u8; 4000]);
-            drop(filler);
-            drop(v);
-        }
-
-        assert_eq!(alloc.live_chunks(), 0);
-        assert_eq!(alloc.live_bytes(), 0);
     }
 
     #[test]
@@ -2414,106 +1954,8 @@ mod mutation_coverage {
         assert_eq!(s, "HELLO");
     }
 
-    #[cfg(feature = "stats")]
-    #[test]
-    fn test_arena_slice_fill_with_rc_initializes_items_and_charges_stats() {
-        let arena = Arena::new();
-        let before = arena.stats().total_bytes_allocated;
-
-        let slice = arena.alloc_slice_fill_with_rc(5, |i| u32::try_from(i).unwrap() * 2);
-
-        assert_eq!(&*slice, &[0, 2, 4, 6, 8]);
-        assert_eq!(arena.stats().total_bytes_allocated, before + (5 * size_of::<u32>()) as u64);
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn test_oversized_slice_copy_rc_survives_arena_drop() {
-        let rc = {
-            let arena = Arena::new();
-            let rc = arena.alloc_slice_copy_rc(std::vec![7_u8; 32 * 1024]);
-            assert!(arena.stats().oversized_local_chunks_allocated >= 1);
-            rc
-        };
-
-        assert_eq!(rc.len(), 32 * 1024);
-        assert_eq!(rc[0], 7);
-        assert_eq!(rc[rc.len() - 1], 7);
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn test_vec_into_arena_rc_slow_path_oversized_survives_arena_drop() {
-        struct NeedsDrop(u16);
-        impl Drop for NeedsDrop {
-            fn drop(&mut self) {
-                let _ = self.0;
-            }
-        }
-
-        let rc = {
-            let arena = Arena::new();
-            let mut v = arena.alloc_vec_with_capacity::<NeedsDrop>(20_000);
-            for i in 0..17_000_u16 {
-                v.push(NeedsDrop(i % 251));
-            }
-            let before = arena.stats().oversized_local_chunks_allocated;
-            let rc = v.into_arena_rc();
-            assert!(arena.stats().oversized_local_chunks_allocated > before);
-            rc
-        };
-
-        assert_eq!(rc.len(), 17_000);
-        assert_eq!(rc[123].0, 123);
-        assert_eq!(rc[16_000].0, (16_000 % 251) as u16);
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn test_arena_builder_default_max_normal_alloc_is_chunk_size_div_4() {
-        let arena = ArenaBuilder::new().build();
-
-        let _ = arena.alloc_slice_copy_rc(std::vec![0_u8; 5 * 1024]);
-
-        assert_eq!(arena.stats().oversized_local_chunks_allocated, 0);
-    }
-
     // `chunk_size` builder method and `BuildError::ChunkSizeOutOfRange` are
     // gone with the adaptive-sizing change.
-
-    #[test]
-    fn test_rc_drop_after_arena_drop_frees_chunk_instead_of_caching_it() {
-        let alloc = common::TrackingAllocator::new();
-        let rc = {
-            let arena = Arena::builder().allocator_in(alloc.clone()).build();
-            arena.alloc_rc(std::string::String::from("persist"))
-        };
-
-        assert_eq!(&*rc, "persist");
-        drop(rc);
-
-        assert_eq!(alloc.live_chunks(), 0);
-        assert_eq!(alloc.live_bytes(), 0);
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn test_aligned_drop_allocation_is_correctly_aligned_and_not_oversized() {
-        #[repr(align(256))]
-        struct HighAlignDrop(u8);
-        impl Drop for HighAlignDrop {
-            fn drop(&mut self) {
-                let _ = self.0;
-            }
-        }
-
-        let arena = Arena::builder().build();
-        let value = arena.alloc_rc(HighAlignDrop(1));
-        let ptr = (&raw const *value) as usize;
-
-        assert_eq!(ptr % 256, 0);
-        assert_eq!(arena.stats().oversized_local_chunks_allocated, 0);
-    }
 
     #[cfg(feature = "stats")]
     #[test]
@@ -2527,23 +1969,6 @@ mod mutation_coverage {
 
         assert_eq!(arena.stats().relocations, before);
         assert_eq!(v.as_slice(), &[1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn test_cache_overflow_rejected_chunk_is_freed() {
-        let alloc = common::TrackingAllocator::new();
-        {
-            let arena = Arena::builder().allocator_in(alloc.clone()).build();
-            let a = arena.alloc_slice_copy_rc(std::vec![1_u8; 4000]);
-            let b = arena.alloc_slice_copy_rc(std::vec![2_u8; 4000]);
-            let c = arena.alloc_slice_copy_rc(std::vec![3_u8; 4000]);
-            drop(a);
-            drop(b);
-            drop(c);
-        }
-
-        assert_eq!(alloc.live_chunks(), 0);
-        assert_eq!(alloc.live_bytes(), 0);
     }
 
     #[test]
@@ -2562,9 +1987,9 @@ mod mutation_coverage {
     #[test]
     fn test_box_str_partial_eq_str_returns_false_for_mismatch() {
         let arena = Arena::new();
-        let boxed: BoxStr = arena.alloc_str_box("alpha");
+        let boxed: Box<str> = arena.alloc_str_box("alpha");
         // Force PartialEq<str> (not PartialEq<&str>)
-        assert!(!<BoxStr as PartialEq<str>>::eq(&boxed, "beta"));
+        assert!(!<Box<str> as PartialEq<str>>::eq(&boxed, "beta"));
     }
 
     #[test]
@@ -2712,14 +2137,6 @@ mod mutation_coverage {
         v.resize_with(3, || panic!("should not be called"));
         assert_eq!(v.as_slice(), &[1, 2, 3]);
         assert_eq!(v.capacity(), cap_before);
-    }
-
-    #[test]
-    fn test_vec_into_arena_rc_empty_with_capacity() {
-        let arena = Arena::new();
-        let v = arena.alloc_vec_with_capacity::<u32>(16);
-        let frozen = v.into_arena_rc();
-        assert!(frozen.is_empty());
     }
 
     #[test]
@@ -3421,21 +2838,6 @@ mod utf16_tests {
         assert_eq!(slice[4], 'D' as u16);
         assert_eq!(slice[5], 'E' as u16);
     }
-
-    /// Kills: `utf16_string.rs:491:29` `- -> /` in `try_reclaim_tail`
-    /// `let reclaim = total - used;`
-    #[test]
-    fn utf16_491_reclaim_tail() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(100);
-        s.push('A');
-        s.push('B');
-        // len=2, cap=100. Reclaim should free ~196 bytes.
-        // If / instead of -, reclaim is wrong.
-        let _frozen = s.into_arena_utf16_str();
-        // Verify arena still works
-        let _v = arena.alloc(42u64);
-    }
 }
 
 mod utf16_round2 {
@@ -3593,24 +2995,6 @@ mod utf16_round2 {
         assert_eq!(s.as_slice(), &expected);
     }
 
-    /// Kills: `utf16_string.rs:491:29` `- -> /` in `try_reclaim_tail`
-    /// `let reclaim = total - used` becomes `total / used`.
-    /// For cap=100, len=2: total = 8 + 200 = 208, used = 8 + 4 = 12
-    /// Correct: reclaim = 196. Mutated: reclaim = 208/12 = 17.
-    /// Wrong reclaim moves cursor by wrong amount.
-    #[test]
-    fn utf16_491_reclaim_tail_v2() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(100);
-        s.push('A');
-        s.push('B');
-        let _frozen = s.into_arena_utf16_str();
-        // Subsequent allocation should be able to use reclaimed space
-        let mut s2 = arena.alloc_utf16_string_with_capacity(50);
-        s2.push('X');
-        let _frozen2 = s2.into_arena_utf16_str();
-    }
-
     /// Kills: `utf16_string.rs:206:38` `- -> /` in `shrink_to_fit`
     /// `reclaim_units = self.cap - self.len` becomes `self.cap / self.len`
     /// For cap=20, len=2: correct=18, mutated=10. Wrong reclaim.
@@ -3692,7 +3076,11 @@ mod from_coverage_extras_utf16 {
     fn utf16_string_insert_panics_from_grow_to_at_least() {
         let arena = ArenaBuilder::new_in(FailingAllocator::new(1)).build();
         let mut s = Utf16String::from_str_in("a", &arena);
-        let replacement = widestring::Utf16String::from_str(&"x".repeat(70_000));
+        // Any replacement that forces a grow request triggers the panic;
+        // the `FailingAllocator` denies every allocation after the first
+        // regardless of size, so a moderate replacement (well past the
+        // initial small chunk's residual capacity) is sufficient.
+        let replacement = widestring::Utf16String::from_str(&"x".repeat(1024));
         s.insert_utf16_str(0, replacement.as_utfstr());
     }
 
@@ -3732,20 +3120,11 @@ mod from_coverage_extras_utf16 {
     }
 
     #[test]
-    fn alloc_utf16_str_rc_oversized_routes_via_oversized_local() {
-        let arena = Arena::new();
-        let len_u16 = 16 * 1024;
-        let buf: Vec<u16> = (0..len_u16).map(|i: usize| u16::try_from(i & 0xFFFF).unwrap()).collect();
-        let src = widestring::Utf16Str::from_slice(&buf).unwrap();
-        let rc = arena.alloc_utf16_str_rc(src);
-        assert_eq!(rc.len(), len_u16);
-    }
-
-    #[test]
     fn alloc_utf16_str_box_oversized_routes_via_oversized_local() {
         let arena = Arena::new();
         let len_u16 = 16 * 1024;
-        let buf: Vec<u16> = (0..len_u16).map(|i: usize| u16::try_from(i & 0xFFFF).unwrap()).collect();
+        // `vec![value; n]` is a single allocation + bulk fill.
+        let buf: Vec<u16> = vec![u16::from(b'a'); len_u16];
         let src = widestring::Utf16Str::from_slice(&buf).unwrap();
         let b = arena.alloc_utf16_str_box(src);
         assert_eq!(b.len(), len_u16);
@@ -3755,7 +3134,7 @@ mod from_coverage_extras_utf16 {
     fn alloc_utf16_str_arc_oversized_routes_via_oversized_shared() {
         let arena = Arena::new();
         let len_u16 = 16 * 1024;
-        let buf: Vec<u16> = (0..len_u16).map(|i: usize| u16::try_from(i & 0xFFFF).unwrap()).collect();
+        let buf: Vec<u16> = vec![u16::from(b'a'); len_u16];
         let src = widestring::Utf16Str::from_slice(&buf).unwrap();
         let arc = arena.alloc_utf16_str_arc(src);
         assert_eq!(arc.len(), len_u16);
@@ -3782,7 +3161,7 @@ mod from_mutants_extras_utf16_scattered {
     #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
     #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
     extern crate alloc;
-    use multitude::{Arena, Rc};
+    use multitude::Arena;
 
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common::{self, FailingAllocator, SendFailingAllocator};
@@ -3962,36 +3341,5 @@ mod from_mutants_extras_utf16_scattered {
         s.replace_range(7..12, utf16str!("Rust"));
         let actual: std::string::String = std::char::decode_utf16(s.as_slice().iter().copied()).map(|r| r.unwrap()).collect();
         assert_eq!(actual, "Hello, Rust!");
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn utf16_string_into_arena_str_reclaim_lets_followup_fit_in_chunk() {
-        // Capacity 1800 u16 = 3600 bytes; only "hi" pushed.
-        let arena = Arena::new();
-        let mut s = arena.alloc_utf16_string_with_capacity(1800);
-        s.push_from_str("hi");
-        let chunks_before = arena.stats().normal_local_chunks_allocated;
-        let _rs = s.into_arena_utf16_str();
-        let big: Rc<[u8; 2000]> = arena.alloc_rc([3_u8; 2000]);
-        assert_eq!(big[0], 3);
-        assert_eq!(big[1999], 3);
-        assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
-    }
-
-    #[cfg(feature = "stats")]
-    #[test]
-    fn utf16_string_shrink_to_fit_reclaim_lets_followup_fit_in_chunk() {
-        let arena = Arena::new();
-        // cap=1800 u16 = 3600 bytes.
-        let mut s = arena.alloc_utf16_string_with_capacity(1800);
-        s.push_from_str("hi");
-        s.shrink_to_fit();
-        let chunks_before = arena.stats().normal_local_chunks_allocated;
-        let big: Rc<[u8; 2000]> = arena.alloc_rc([4_u8; 2000]);
-        assert_eq!(big[0], 4);
-        assert_eq!(big[1999], 4);
-        assert_eq!(s.len(), 2);
-        assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
     }
 }

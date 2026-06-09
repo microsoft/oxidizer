@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::undocumented_unsafe_blocks,
-    reason = "the unsafe block is governed by the precondition documented on the surrounding function — the caller has a fresh allocation from a shared chunk under refcount discipline"
-)]
-
 //! `bytesbuf::mem::Memory` support backed by arena shared chunks.
 //!
 //! # Usage
@@ -24,23 +19,18 @@
 //! # }
 //! ```
 
-use alloc::alloc::{alloc, dealloc, handle_alloc_error};
-use core::alloc::Layout;
+use alloc::boxed::Box as StdBox;
+use core::fmt;
 use core::mem::MaybeUninit;
 use core::num::NonZero;
-use core::ptr::{NonNull, drop_in_place, write};
-// Use the real `AtomicUsize` here, not the loom shim: `reserve`
-// writes a fresh `ArenaBlockState` into heap memory with `ptr::write`,
-// and loom atomics cannot be moved that way. The orderings match `Arc`.
-use core::sync::atomic::{AtomicUsize, Ordering, fence};
+use core::ptr::NonNull;
+use core::sync::atomic::{self, AtomicUsize};
 
 use allocator_api2::alloc::Allocator;
 use bytesbuf::BytesBuf;
-use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, Memory};
+use bytesbuf::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Memory};
 
-use crate::Arena;
-use crate::internal::in_chunk::InSharedChunk;
-use crate::internal::shared_chunk::SharedChunk;
+use crate::{Arc, Arena};
 
 impl<A: Allocator + Clone + Send + Sync + 'static> Memory for Arena<A> {
     /// Reserve `min_bytes` of arena-backed buffer space as a [`BytesBuf`].
@@ -54,151 +44,134 @@ impl<A: Allocator + Clone + Send + Sync + 'static> Memory for Arena<A> {
     /// request themselves. Also panics if the arena's underlying
     /// allocator fails.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
-        if min_bytes == 0 {
+        let Some(min_bytes_nz) = NonZero::new(min_bytes) else {
             return BytesBuf::new();
-        }
-
-        let block_len = u32::try_from(min_bytes)
-            .expect("min_bytes exceeds u32::MAX bytes (just under 4 GiB), the per-reservation cap imposed by bytesbuf's BlockSize");
-        let block_len_nz = NonZero::new(block_len).expect("min_bytes is non-zero (handled above)");
-
-        // Reserve `min_bytes` and take the block's single chunk hold.
-        let layout = Layout::from_size_align(min_bytes, 1).expect("byte layout with align 1 is always valid");
-        let data = self.allocate_shared_layout(layout).expect("arena allocation failed");
-
-        // Heap-allocate per-block state for `BlockRef` clones.
-        let state_layout = Layout::new::<ArenaBlockState>();
-        let raw_state = unsafe { alloc(state_layout) };
-        let state_nn = NonNull::new(raw_state).unwrap_or_else(|| abort_oom(state_layout));
-        let state_ptr: NonNull<ArenaBlockState> = state_nn.cast();
-        // SAFETY: state_ptr is freshly allocated, exclusive, properly aligned.
-        unsafe {
-            write(
-                state_ptr.as_ptr(),
-                ArenaBlockState {
-                    data_ptr: data,
-                    ref_count: AtomicUsize::new(1),
-                    release_fn: release_chunk_ref_shared::<A>,
-                },
-            );
         };
 
-        // SAFETY: `state_ptr` stays valid until the last `BlockRef` drops.
-        let block_ref = unsafe { BlockRef::new(state_ptr, &ARENA_BLOCK_VTABLE) };
+        let len_u32 = BlockSize::try_from(min_bytes_nz.get())
+            .expect("multitude::Arena::reserve: min_bytes exceeds u32::MAX, which is the bytesbuf block size limit");
+        // SAFETY: `min_bytes_nz` is non-zero, and `len_u32` came from a successful
+        // conversion of that non-zero `usize`, so it is non-zero as well.
+        let len_nz = unsafe { NonZero::new_unchecked(len_u32) };
 
-        // SAFETY: `data` covers `min_bytes` bytes of exclusive capacity,
-        // and the block's chunk hold keeps them alive.
-        let block = unsafe { Block::new(data.cast::<MaybeUninit<u8>>(), block_len_nz, block_ref) };
+        let arc: Arc<[MaybeUninit<u8>], A> = self.alloc_uninit_slice_arc::<u8>(min_bytes_nz.get());
+
+        // The pointer is to the first element of the arena-resident slice. The
+        // `Arc` is moved into the state below, keeping the slice (and its hosting
+        // chunk) alive until the last `BlockRef` is dropped. We obtain the raw
+        // pointer via `Arc::as_ptr` rather than `&*arc` to avoid creating a
+        // `SharedReadOnly` retag on the slice — bytesbuf later writes into the
+        // returned buffer, which requires a `Unique`-compatible tag.
+        let ptr = {
+            let slice_ptr: *const [MaybeUninit<u8>] = Arc::as_ptr(&arc);
+            // SAFETY: slice_ptr is non-null (returned by a valid Arc).
+            unsafe { NonNull::new_unchecked(slice_ptr.cast::<MaybeUninit<u8>>().cast_mut()) }
+        };
+
+        let state = StdBox::new(ArenaBlockState::<A> {
+            _arc: arc,
+            ref_count: AtomicUsize::new(1),
+        });
+        let state_ptr = NonNull::from(StdBox::leak(state));
+
+        // SAFETY: `state_ptr` was just produced by `Box::leak` and remains valid for
+        // reads (and ultimately for the `Box::from_raw` reclamation in
+        // `BlockRefDynamic::drop`) until that final drop runs.
+        let block_ref = unsafe { BlockRef::new(state_ptr, vtable::<A>()) };
+
+        // SAFETY: We hold the only `BlockRef` (refcount initialized to 1) and the
+        // `Arc` stored inside the state keeps the backing memory alive for as long
+        // as any clone of `block_ref` exists.
+        let block = unsafe { Block::new(ptr, len_nz, block_ref) };
+
         BytesBuf::from_blocks([block])
     }
 }
 
-#[cold]
-#[inline(never)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-// OOM tests abort before llvm-cov can flush counters.
-fn abort_oom(layout: Layout) -> ! {
-    handle_alloc_error(layout);
-}
-
-/// Type-erased release function for the arena chunk refcount.
-type ReleaseFn = unsafe fn(NonNull<u8>);
-
-/// Per-block state allocated on the heap. Manages a reference count for
-/// `BlockRef` cloning and releases the arena chunk when the last ref drops.
-#[repr(C)]
-struct ArenaBlockState {
-    /// Pointer into the arena chunk's data region. Used to locate the
-    /// chunk header for refcount release.
-    data_ptr: NonNull<u8>,
-    /// `BlockRef` clone count.
+/// Per-block state holding the arena `Arc` that keeps the backing memory alive,
+/// plus an atomic refcount shared by all clones of the issued [`BlockRef`].
+struct ArenaBlockState<A: Allocator + Clone + Send + Sync + 'static> {
+    /// The `Arc` is kept alive by the state so that the underlying arena chunk
+    /// remains live for the entire lifetime of any [`BlockRef`] clone.
+    _arc: Arc<[MaybeUninit<u8>], A>,
     ref_count: AtomicUsize,
-    /// Type-erased function to release the arena chunk refcount.
-    release_fn: ReleaseFn,
 }
 
-// SAFETY: `data_ptr` points into an atomically refcounted shared chunk,
-// `ref_count` is atomic, and `release_fn` is a plain function pointer.
-unsafe impl Send for ArenaBlockState {}
-// SAFETY: Same rationale as Send — all fields are either atomic or plain data.
-unsafe impl Sync for ArenaBlockState {}
+impl<A: Allocator + Clone + Send + Sync + 'static> fmt::Debug for ArenaBlockState<A> {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ArenaBlockState")
+            .field("ref_count", &self.ref_count.load(atomic::Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
 
-/// Static vtable for arena-backed blocks.
-static ARENA_BLOCK_VTABLE: BlockRefVTable<ArenaBlockState> = BlockRefVTable::from_trait();
-
-// SAFETY: state refcounts and backing chunk refcounts are both atomic.
-unsafe impl BlockRefDynamic for ArenaBlockState {
+// SAFETY: All shared state mutation goes through atomic operations on `ref_count`,
+// and the `Arc<[MaybeUninit<u8>], A>` is itself `Send + Sync` under the trait bounds
+// on `A`, so dropping the state on any thread is sound.
+unsafe impl<A: Allocator + Clone + Send + Sync + 'static> BlockRefDynamic for ArenaBlockState<A> {
     type State = Self;
 
     fn clone(state_ptr: NonNull<Self::State>) -> NonNull<Self::State> {
-        // SAFETY: `state_ptr` is live while we hold this clone, and
-        // `ref_count` is atomic.
-        let prev = unsafe { (*state_ptr.as_ptr()).ref_count.fetch_add(1, Ordering::Relaxed) };
-        check_arena_block_state_refcount(prev);
-        debug_assert!(prev > 0, "BlockRef::clone on a dead state");
+        #[cfg_attr(coverage_nightly, coverage(off))]
+        #[inline(never)]
+        #[cold]
+        fn refcount_overflow() -> ! {
+            crate::internal::constants::refcount_overflow_abort()
+        }
+        // SAFETY: `state_ptr` is valid for reads for as long as any `BlockRef`
+        // referencing this state is alive, and we only access it via shared refs.
+        let state = unsafe { state_ptr.as_ref() };
+        let prev = state.ref_count.fetch_add(1, atomic::Ordering::Relaxed);
+        // A refcount that wraps back to zero would let a live `BlockRef` race
+        // with the teardown in `drop`, causing a use-after-free. Mirror the
+        // crate's chunk refcounts (see `SharedChunk::inc_ref`) and abort.
+        if prev == usize::MAX {
+            refcount_overflow();
+        }
         state_ptr
     }
 
     fn drop(state_ptr: NonNull<Self::State>) {
-        // SAFETY: `state_ptr` is live while we drop this clone.
-        let prev = unsafe { (*state_ptr.as_ptr()).ref_count.fetch_sub(1, Ordering::Release) };
-        debug_assert!(prev > 0, "BlockRef::drop on a dead state");
-        if prev == 1 {
-            // Synchronize with prior `Release` decrements before the final read.
-            fence(Ordering::Acquire);
-
-            // SAFETY: refcount zero gives exclusive access to the state.
-            let (data_ptr, release_fn) = unsafe {
-                let s = &*state_ptr.as_ptr();
-                (s.data_ptr, s.release_fn)
-            };
-
-            // SAFETY: each `ArenaBlockState` owns exactly one chunk hold,
-            // released here before freeing the state.
-            unsafe { release_fn(data_ptr) };
-
-            // SAFETY: refcount zero gives exclusive access for drop and free.
-            unsafe { drop_in_place(state_ptr.as_ptr()) };
-            let layout = Layout::new::<Self>();
-            // SAFETY: matches the original allocation layout.
-            unsafe { dealloc(state_ptr.as_ptr().cast::<u8>(), layout) };
+        // SAFETY: `state_ptr` is valid for reads while this drop runs.
+        let state = unsafe { state_ptr.as_ref() };
+        if state.ref_count.fetch_sub(1, atomic::Ordering::Release) != 1 {
+            return;
         }
+        // Ensure we observe all writes from other threads before tearing down.
+        atomic::fence(atomic::Ordering::Acquire);
+        // SAFETY: The state was created via `Box::leak`, this is the last
+        // outstanding reference (refcount just dropped to zero), and the
+        // pointer has not been freed yet.
+        drop(unsafe { StdBox::from_raw(state_ptr.as_ptr()) });
     }
 }
 
-/// Cold-path refcount overflow guard for `ArenaBlockState::clone`.
-///
-/// Mirrors `check_local_refcount` / `check_shared_refcount`: if more
-/// than `usize::MAX / 2` concurrent clones were ever observed (which
-/// would require an absurd number of live `BlockRef` wrappers — one
-/// per byte of address space), abort to prevent the `fetch_add` from
-/// wrapping through zero and triggering an unintended drop. This path
-/// is physically unreachable in tested configurations, so it is
-/// excluded from coverage and mutation testing per crate convention.
-#[inline(always)]
-#[allow(
-    clippy::inline_always,
-    reason = "must inline at every clone site to avoid a per-call function-call overhead on the BlockRef::clone hot path"
-)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Refcount overflow requires physically unreachable outstanding refs.
-fn check_arena_block_state_refcount(prev: usize) {
-    use crate::internal::constants::{LARGE, refcount_overflow_abort};
-    if prev >= LARGE.saturating_add(LARGE) {
-        refcount_overflow_abort();
-    }
+fn vtable<A: Allocator + Clone + Send + Sync + 'static>() -> &'static BlockRefVTable<ArenaBlockState<A>> {
+    &const { BlockRefVTable::<ArenaBlockState<A>>::from_trait() }
 }
 
-/// Releases one shared-chunk refcount given a pointer into that chunk's
-/// data region.
-///
-/// # Safety
-///
-/// `data_ptr` must point into a live shared-flavor arena chunk for which
-/// the caller holds one outstanding refcount that this call consumes.
-unsafe fn release_chunk_ref_shared<A: Allocator + Clone>(data_ptr: NonNull<u8>) {
-    // SAFETY: caller's invariant — `data_ptr` is in a live shared chunk.
-    let chunk = unsafe { InSharedChunk::<_, A>::new(data_ptr) }.chunk_ptr();
-    // SAFETY: caller guarantees we own one refcount on `chunk`.
-    unsafe { SharedChunk::dec_ref(chunk) };
+#[cfg(test)]
+mod tests {
+    use allocator_api2::alloc::Global;
+
+    use super::*;
+
+    /// Drives `ArenaBlockState::clone` with the refcount pre-set to
+    /// `usize::MAX` so the next increment wraps to zero and the overflow guard
+    /// fires (covering the `refcount_overflow()` call site). Under `cfg(test)`
+    /// `refcount_overflow_abort` panics instead of aborting, letting
+    /// `#[should_panic]` observe this otherwise process-terminating path.
+    #[test]
+    #[should_panic(expected = "refcount overflow")]
+    fn clone_aborts_on_refcount_overflow() {
+        let arena = Arena::new();
+        let arc: Arc<[MaybeUninit<u8>], Global> = arena.alloc_uninit_slice_arc::<u8>(4);
+        let mut state = StdBox::new(ArenaBlockState::<Global> {
+            _arc: arc,
+            ref_count: AtomicUsize::new(usize::MAX),
+        });
+        let state_ptr = NonNull::from(&mut *state);
+        let _ = <ArenaBlockState<Global> as BlockRefDynamic>::clone(state_ptr);
+    }
 }

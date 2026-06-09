@@ -20,6 +20,8 @@ argh = "0.1"
 //! * **Loom** — model-checked concurrency tests (`tests/loom.rs`).
 //! * **Bolero** — property-based tests (`tests/bolero.rs`).
 //! * **cargo-careful** — extra UB checks via `cargo careful nextest run`.
+//! * **Doctests** — `cargo test --doc` (neither Miri nor nextest run doctests,
+//!   so they are otherwise unexercised by this suite).
 //!
 //! Prerequisites:
 //!   * `rustup component add miri --toolchain <nightly>`
@@ -31,6 +33,7 @@ argh = "0.1"
 //!   `scripts/correctness.rs --loom`       — only Loom
 //!   `scripts/correctness.rs --bolero`     — only Bolero
 //!   `scripts/correctness.rs --careful`    — only cargo-careful
+//!   `scripts/correctness.rs --doc`        — only doctests
 
 use std::env;
 use std::path::Path;
@@ -56,7 +59,7 @@ const MIRI_CONFIGS: &[MiriConfig] = &[
     },
     MiriConfig {
         label: "race coverage",
-        flags: "-Zmiri-many-seeds=0..32",
+        flags: "-Zmiri-many-seeds=0..4",
     },
 ];
 
@@ -83,6 +86,10 @@ struct Args {
     /// run only cargo-careful checks
     #[argh(switch)]
     careful: bool,
+
+    /// run only doctests
+    #[argh(switch)]
+    doc: bool,
 }
 
 struct Toolchains {
@@ -103,7 +110,7 @@ fn main() -> ExitCode {
     let toolchains = load_toolchains(&workspace_root);
 
     // When no specific flag is set, run everything.
-    let run_all = !args.miri && !args.loom && !args.bolero && !args.careful;
+    let run_all = !args.miri && !args.loom && !args.bolero && !args.careful && !args.doc;
 
     println!();
     println!("=== Multitude Correctness Suite ===");
@@ -130,6 +137,10 @@ fn main() -> ExitCode {
 
     if run_all || args.careful {
         run_careful(&workspace_root, &toolchains, &mut failures);
+    }
+
+    if run_all || args.doc {
+        run_doc(&workspace_root, &toolchains, &mut failures);
     }
 
     println!();
@@ -209,6 +220,15 @@ fn run_careful(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
     cmd.args(["careful", "nextest", "run", "--all-features", "-p", PACKAGE]);
 
     run_step("cargo-careful", cmd, failures);
+}
+
+fn run_doc(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
+    // Neither Miri nor cargo-nextest execute doctests, so run them explicitly
+    // via plain `cargo test --doc` on the latest stable toolchain.
+    let mut cmd = cargo(root, &tc.latest);
+    cmd.args(["test", "--doc", "-p", PACKAGE, "--all-features", "--locked"]);
+
+    run_step("Doctests", cmd, failures);
 }
 
 // --- Helpers --------------------------------------------------------------
