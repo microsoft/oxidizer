@@ -17,77 +17,6 @@ use core::cmp::Ordering;
 
 use multitude::Arena;
 use multitude::vec::{CollectIn, Vec};
-#[test]
-fn basic_push_index_freeze() {
-    let arena = Arena::new();
-    let mut v = arena.alloc_vec();
-    for i in 0..100 {
-        v.push(i);
-    }
-    assert_eq!(v.len(), 100);
-    assert_eq!(v[42], 42);
-
-    let frozen = v.into_arena_rc();
-    assert_eq!(frozen.len(), 100);
-    assert_eq!(&frozen[..3], &[0, 1, 2]);
-}
-
-#[cfg(feature = "stats")]
-#[test]
-fn freeze_in_place_for_copy_types() {
-    // ArenaVec::into_arena_rc should not copy when T: !Drop and the
-    // buffer is at the chunk's bump cursor.
-    let arena = Arena::new();
-    let mut v = arena.alloc_vec();
-    // 256 pushes still require several growth steps before freezing, which is
-    // enough to verify the in-place path.
-    for i in 0..256_u32 {
-        v.push(i);
-    }
-    let chunks_before_freeze = arena.stats().normal_local_chunks_allocated;
-    let frozen = v.into_arena_rc();
-    let chunks_after_freeze = arena.stats().normal_local_chunks_allocated;
-    assert_eq!(chunks_after_freeze, chunks_before_freeze);
-    assert_eq!(frozen.len(), 256);
-    assert_eq!(frozen[42], 42);
-    assert_eq!(frozen[255], 255);
-}
-
-#[test]
-fn freeze_with_drop_type_uses_slow_path() {
-    // T: Drop forces the slow path in into_arena_rc.
-    let arena = Arena::new();
-    let mut v = arena.alloc_vec::<String>();
-    v.push(std::string::String::from("a"));
-    v.push(std::string::String::from("b"));
-    v.push(std::string::String::from("c"));
-    let frozen = v.into_arena_rc();
-    assert_eq!(frozen.len(), 3);
-    assert_eq!(&*frozen[0], "a");
-    assert_eq!(&*frozen[2], "c");
-}
-
-#[test]
-fn freeze_empty_uses_slow_path() {
-    let arena = Arena::new();
-    let v = arena.alloc_vec::<u32>();
-    let frozen = v.into_arena_rc();
-    assert_eq!(frozen.len(), 0);
-}
-
-#[test]
-fn freeze_buffer_not_at_cursor_uses_slow_path() {
-    // Allocate something between the vec creation and freeze so the
-    // vec's buffer isn't at the chunk's cursor anymore.
-    let arena = Arena::new();
-    let mut v = arena.alloc_vec::<u32>();
-    v.push(1);
-    v.push(2);
-    let _decoy = arena.alloc_rc(0_u8);
-    v.push(3);
-    let frozen = v.into_arena_rc();
-    assert_eq!(&*frozen, &[1, 2, 3]);
-}
 
 #[test]
 fn pop_and_clear() {
@@ -176,43 +105,6 @@ fn traits_compile() {
     assert_eq!(a.cmp(&c), Ordering::Less);
     assert_eq!(a.partial_cmp(&c), Some(Ordering::Less));
     assert_eq!(common::hash_of(&a), common::hash_of(&b));
-}
-
-#[test]
-fn into_arena_rc_zst_element() {
-    // ApiVec for ZST T uses NonNull::dangling() as its buffer; the
-    // in-place fast path of into_arena_rc must skip ZSTs (header_for
-    // on a dangling pointer would produce a null chunk header).
-    let arena = Arena::new();
-    let mut v = arena.alloc_vec::<()>();
-    for _ in 0..7 {
-        v.push(());
-    }
-    let rc = v.into_arena_rc();
-    assert_eq!(rc.len(), 7);
-}
-
-#[test]
-fn into_arena_rc_zst_drop_element() {
-    // ZST that needs drop forces the slow path.
-    use core::sync::atomic::{AtomicUsize, Ordering as Ord};
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    struct DropZst;
-    impl Drop for DropZst {
-        fn drop(&mut self) {
-            let _ = COUNT.fetch_add(1, Ord::Relaxed);
-        }
-    }
-    {
-        let arena = Arena::new();
-        let mut v = arena.alloc_vec::<DropZst>();
-        for _ in 0..3 {
-            v.push(DropZst);
-        }
-        let rc = v.into_arena_rc();
-        assert_eq!(rc.len(), 3);
-    }
-    assert_eq!(COUNT.load(Ord::Relaxed), 3);
 }
 
 #[test]
@@ -1407,15 +1299,6 @@ mod io_write {
         let s = std::str::from_utf8(v.as_slice()).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(s).unwrap();
         assert_eq!(parsed, value);
-    }
-
-    #[test]
-    fn write_then_into_arena_rc_preserves_bytes() {
-        let arena = Arena::new();
-        let mut v = arena.alloc_vec::<u8>();
-        write!(&mut v, "frozen-{}", 42).unwrap();
-        let frozen = v.into_arena_rc();
-        assert_eq!(&*frozen, b"frozen-42");
     }
 }
 

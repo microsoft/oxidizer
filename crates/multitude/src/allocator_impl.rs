@@ -2,13 +2,20 @@
 // Licensed under the MIT License.
 
 use core::alloc::Layout;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use crate::Arena;
-use crate::internal::in_chunk::InLocalChunk;
-use crate::internal::local_chunk::LocalChunk;
+use crate::arena::alloc_value::acquire_shared_chunk_ref;
+use crate::internal::chunk_ref::ChunkRef;
+use crate::internal::constants::max_smart_ptr_align;
+
+/// Maximum `layout.align()` accepted by `Allocator::allocate`: the
+/// returned pointer must lie strictly inside the first `CHUNK_ALIGN`
+/// bytes of its chunk so the header-recovery mask used by
+/// `deallocate` can recover the chunk pointer.
+const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 /// `&Arena<A>` is the allocator handle: cheap to copy and backed by
 /// local chunks. `allocate` bumps the chunk refcount; `deallocate`
@@ -22,43 +29,89 @@ use crate::internal::local_chunk::LocalChunk;
 // matching `deallocate`.
 unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        let ptr = self.allocate_layout(layout)?;
-        let fat: *mut [u8] = core::ptr::slice_from_raw_parts_mut(ptr.as_ptr(), layout.size());
-        // SAFETY: `ptr.as_ptr()` is non-null.
-        Ok(unsafe { NonNull::new_unchecked(fat) })
+        // Allocations routed through the foreign-collection allocator
+        // surface always go through the shared-chunk path so that the
+        // returned pointer can outlive the current mutator borrow via a
+        // per-allocation +1 refcount on the chunk.
+        //
+        // Alignments at or above the smart-pointer ceiling are rejected
+        // for the same reason as `alloc_box` / `alloc_arc`: the chunk
+        // header-from-mask helper requires the value to lie strictly
+        // inside the first `CHUNK_ALIGN` bytes of the chunk.
+        if layout.align() >= MAX_SMART_PTR_ALIGN {
+            return Err(AllocError);
+        }
+        // Zero-byte allocations need a non-null, well-aligned pointer.
+        // Mirror `std::alloc::Global` and synthesize one from the layout
+        // alignment without touching any chunk state. Use
+        // `without_provenance_mut` so the synthesized pointer is
+        // strict-provenance-clean — ZST allocations never get
+        // dereferenced, so they don't need real provenance.
+        if layout.size() == 0 {
+            // SAFETY: `layout.align()` is a non-zero power of two.
+            let dangling = unsafe { NonNull::new_unchecked(ptr::without_provenance_mut::<u8>(layout.align())) };
+            return Ok(NonNull::slice_from_raw_parts(dangling, 0));
+        }
+        // Refill / oversized hint includes one alignment slack so
+        // `try_alloc(size, align)` always succeeds inside a chunk sized
+        // for this allocation, regardless of the bump cursor's pre-alignment.
+        let refill_hint = layout.size().saturating_add(layout.align());
+        loop {
+            if let Some((slot, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(layout.size(), layout.align()) {
+                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let ptr = slot.as_non_null();
+                let _ = chunk_ref.forget();
+                return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
+            }
+            if self.is_oversized_shared(refill_hint) {
+                return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
+                    let (slot, _chunk) = mutator
+                        .try_alloc_with_chunk(layout.size(), layout.align())
+                        .expect("dedicated oversized chunk sized to fit allocation + alignment slack");
+                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let ptr = slot.as_non_null();
+                    let _ = chunk_ref.forget();
+                    NonNull::slice_from_raw_parts(ptr, layout.size())
+                });
+            }
+            self.refill_shared(refill_hint)?;
+        }
     }
 
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, _layout: Layout) {
-        // SAFETY: chunk-header invariant — `ptr` was returned by
-        // `allocate` above, which only hands out pointers into chunks
-        // produced by this arena.
-        let in_chunk = unsafe { InLocalChunk::<_, A>::new(ptr) };
-        let chunk = in_chunk.chunk_ptr();
-        // SAFETY: refcount-positive — `allocate` left a +1 for this
-        // pointer.
-        unsafe { LocalChunk::dec_ref(chunk) };
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // Zero-byte allocations don't own any chunk refcount (see
+        // `allocate`); nothing to release.
+        if layout.size() == 0 {
+            return;
+        }
+        // SAFETY: caller guarantees `ptr` was returned by `Self::allocate`
+        // on the same arena, so it is hosted in a `SharedChunk<A>` we hold
+        // a +1 strong reference on. `ChunkRef::from_value_ptr` adopts that
+        // +1 and releases it on drop.
+        let _ref: ChunkRef<A> = unsafe { ChunkRef::from_value_ptr(ptr) };
     }
 
     unsafe fn grow(&self, ptr: NonNull<u8>, old_layout: Layout, new_layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        // Grow in place when the buffer still reaches the bump cursor;
-        // otherwise fall back to allocate-copy-deallocate.
-        if old_layout.align() == new_layout.align() && new_layout.size() >= old_layout.size() {
-            // SAFETY: `ptr` was previously returned by `self.allocate`
-            // and `old_layout` is the layout it was allocated with.
-            if let Some(grown) = unsafe { self.try_grow_in_place(ptr, old_layout, new_layout) } {
-                let fat: *mut [u8] = core::ptr::slice_from_raw_parts_mut(grown.as_ptr(), new_layout.size());
-                // SAFETY: `grown.as_ptr()` is non-null.
-                return Ok(unsafe { NonNull::new_unchecked(fat) });
+        // Bump-allocators can't reliably extend in place across chunks
+        // and don't need to: fall back to allocate-copy-deallocate. The
+        // new allocation acquires its own +1 chunk refcount; the old
+        // refcount is released by `deallocate` below. We copy only the
+        // overlapping prefix (`min(old, new)`) so the fallback stays
+        // sound even if a caller passes a smaller `new_layout`.
+        let new = self.allocate(new_layout)?;
+        let copy_bytes = old_layout.size().min(new_layout.size());
+        if copy_bytes != 0 {
+            // SAFETY: the old allocation is initialized for
+            // `old_layout.size()` bytes and the new allocation has
+            // `new_layout.size()` bytes; copying their `min` stays in
+            // bounds of both. The new allocation is non-overlapping
+            // arena storage we just acquired.
+            unsafe {
+                ptr::copy_nonoverlapping(ptr.as_ptr(), new.cast::<u8>().as_ptr(), copy_bytes);
             }
         }
-        let new_ptr = self.allocate(new_layout)?;
-        // SAFETY: `ptr` is valid for old_layout.size() bytes; new_ptr
-        // is fresh and has at least new_layout.size() bytes.
-        unsafe {
-            core::ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.as_ptr().cast::<u8>(), old_layout.size());
-            self.deallocate(ptr, old_layout);
-        }
-        self.bump_relocation();
-        Ok(new_ptr)
+        // SAFETY: caller upholds `deallocate`'s contract for `ptr`.
+        unsafe { self.deallocate(ptr, old_layout) };
+        Ok(new)
     }
 }

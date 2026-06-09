@@ -11,7 +11,7 @@ fn json_response(value: &Value) -> Result<HttpResponse, HttpError> {
 }
 
 pub(super) fn crates_io_fake_handler(crate_name: String) -> FakeHandler {
-    FakeHandler::from_sync_handler(move |request| {
+    FakeHandler::from_fn(move |request| {
         let path = request.uri().path();
         let query = request.uri().query();
         if path == format!("/api/v1/crates/{crate_name}") {

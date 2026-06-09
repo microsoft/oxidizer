@@ -4,8 +4,8 @@
 /// `format!`-style macro that writes into a fresh arena-backed
 /// [`Utf16String`](crate::strings::Utf16String).
 ///
-/// Freeze the result with [`Utf16String::into_arena_utf16_str`](crate::strings::Utf16String::into_arena_utf16_str)
-/// if you want an immutable [`RcUtf16Str`](crate::strings::RcUtf16Str).
+/// Freeze the result with [`Utf16String::into_arena_box_utf16_str`](crate::strings::Utf16String::into_arena_box_utf16_str)
+/// if you want an immutable [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
 ///
 /// # Panics
 ///

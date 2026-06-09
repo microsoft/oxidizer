@@ -556,7 +556,7 @@ mod tests {
             .on_record(move |_duration, _result, attrs| {
                 attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
             })
-            .layer(FakeHandler::from_async_handler(|_req| async {
+            .layer(FakeHandler::from_async_fn(|_req| async {
                 // This future will never complete because it pends forever.
                 std::future::pending::<Result<HttpResponse>>().await
             }));

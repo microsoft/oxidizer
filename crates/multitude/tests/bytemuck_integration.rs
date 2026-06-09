@@ -57,27 +57,6 @@ fn try_alloc_box_scalar_ok() {
 }
 
 #[test]
-fn alloc_rc_scalar_is_zeroed() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().alloc_rc::<u128>();
-    assert_eq!(*v, 0);
-}
-
-#[test]
-fn alloc_rc_struct_is_zeroed() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().alloc_rc::<Pixel>();
-    assert_eq!(*v, Pixel { r: 0, g: 0, b: 0, a: 0 });
-}
-
-#[test]
-fn try_alloc_rc_scalar_ok() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().try_alloc_rc::<u64>().unwrap();
-    assert_eq!(*v, 0);
-}
-
-#[test]
 fn alloc_arc_scalar_is_zeroed() {
     let arena = Arena::new();
     let v = arena.bytemuck().alloc_arc::<u64>();
@@ -131,29 +110,6 @@ fn try_alloc_slice_box_ok() {
     let arena = Arena::new();
     let v = arena.bytemuck().try_alloc_slice_box::<u8>(16).unwrap();
     assert_eq!(v.len(), 16);
-    assert!(v.iter().all(|&x| x == 0));
-}
-
-#[test]
-fn alloc_slice_rc_is_zeroed() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().alloc_slice_rc::<u64>(4);
-    assert_eq!(v.len(), 4);
-    assert!(v.iter().all(|&x| x == 0));
-}
-
-#[test]
-fn alloc_slice_rc_empty() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().alloc_slice_rc::<u32>(0);
-    assert_eq!(v.len(), 0);
-}
-
-#[test]
-fn try_alloc_slice_rc_ok() {
-    let arena = Arena::new();
-    let v = arena.bytemuck().try_alloc_slice_rc::<u16>(32).unwrap();
-    assert_eq!(v.len(), 32);
     assert!(v.iter().all(|&x| x == 0));
 }
 
@@ -218,13 +174,6 @@ fn try_alloc_box_over_aligned_returns_err() {
 }
 
 #[test]
-fn try_alloc_rc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_rc::<OverAligned>();
-    assert!(result.is_err());
-}
-
-#[test]
 fn try_alloc_arc_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_arc::<OverAligned>();
@@ -235,13 +184,6 @@ fn try_alloc_arc_over_aligned_returns_err() {
 fn try_alloc_slice_box_over_aligned_returns_err() {
     let arena = Arena::new();
     let result = arena.bytemuck().try_alloc_slice_box::<OverAligned>(4);
-    assert!(result.is_err());
-}
-
-#[test]
-fn try_alloc_slice_rc_over_aligned_returns_err() {
-    let arena = Arena::new();
-    let result = arena.bytemuck().try_alloc_slice_rc::<OverAligned>(4);
     assert!(result.is_err());
 }
 
@@ -263,14 +205,6 @@ fn alloc_box_panics_on_over_aligned() {
 #[test]
 #[cfg(not(target_os = "windows"))]
 #[should_panic = "arena allocation failed"]
-fn alloc_rc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_rc::<OverAligned>();
-}
-
-#[test]
-#[cfg(not(target_os = "windows"))]
-#[should_panic = "arena allocation failed"]
 fn alloc_arc_panics_on_over_aligned() {
     let arena = Arena::new();
     let _ = arena.bytemuck().alloc_arc::<OverAligned>();
@@ -287,27 +221,9 @@ fn alloc_slice_box_panics_on_over_aligned() {
 #[test]
 #[cfg(not(target_os = "windows"))]
 #[should_panic = "arena allocation failed"]
-fn alloc_slice_rc_panics_on_over_aligned() {
-    let arena = Arena::new();
-    let _ = arena.bytemuck().alloc_slice_rc::<OverAligned>(4);
-}
-
-#[test]
-#[cfg(not(target_os = "windows"))]
-#[should_panic = "arena allocation failed"]
 fn alloc_slice_arc_panics_on_over_aligned() {
     let arena = Arena::new();
     let _ = arena.bytemuck().alloc_slice_arc::<OverAligned>(4);
-}
-
-#[test]
-fn multiple_allocations_no_leak() {
-    let arena = Arena::new();
-    let bm = arena.bytemuck();
-    for _ in 0..100 {
-        let _ = bm.alloc_rc::<u64>();
-        let _ = bm.alloc_slice_rc::<u32>(8);
-    }
 }
 
 #[test]
@@ -455,23 +371,9 @@ mod from_coverage_extras_bytemuck {
 
     #[test]
     #[should_panic(expected = "bytemuck: arena allocation failed")]
-    fn bytemuck_view_alloc_rc_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
-        let _ = arena.bytemuck().alloc_rc::<u32>();
-    }
-
-    #[test]
-    #[should_panic(expected = "bytemuck: arena allocation failed")]
     fn bytemuck_view_alloc_arc_panics_on_failing_allocator() {
         let arena: Arena<SendFailingAllocator> = ArenaBuilder::new_in(SendFailingAllocator::new(0)).build();
         let _ = arena.bytemuck().alloc_arc::<u32>();
-    }
-
-    #[test]
-    #[should_panic(expected = "bytemuck: arena allocation failed")]
-    fn bytemuck_view_alloc_slice_rc_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
-        let _ = arena.bytemuck().alloc_slice_rc::<u32>(4);
     }
 
     #[test]

@@ -29,49 +29,6 @@ impl Drop for DropCounter {
     }
 }
 
-/// Audit finding #3: `arena.alloc_rc(MaybeUninit::new(x)).assume_init()`
-/// previously silently leaked `x`'s `Drop`. After the fix it panics
-/// with a clear message rather than silently failing.
-///
-/// `alloc_rc::<T>` reserves a trailing `DropEntry` only when
-/// `needs_drop::<T>()` is true. For `T = MaybeUninit<U>` that is
-/// always false, even if `U: Drop`, so no entry is installed. The
-/// fixed `assume_init` detects the missing entry and panics; users
-/// must use `alloc_uninit_rc::<U>()` for this pattern.
-///
-/// The misuse scenario inherently leaks the inner value (no drop
-/// entry was installed and the chunk teardown can't run `T::drop`),
-/// so `#[cfg(not(miri))]` keeps Miri's leak-checker out of these
-/// `#[should_panic]` reproducers.
-#[cfg(not(miri))]
-#[test]
-#[should_panic(expected = "no drop entry reserved")]
-fn alloc_rc_of_maybeuninit_assume_init_panics_when_unsupported() {
-    let counter = StdArc::new(AtomicUsize::new(0));
-    let arena = Arena::new();
-    let rc_uninit = arena.alloc_rc(MaybeUninit::new(DropCounter(counter.clone())));
-    let _rc = unsafe { rc_uninit.assume_init() };
-}
-
-/// `arena.alloc_uninit_rc::<U>()` followed by `assume_init` reserves the
-/// drop entry up front, so this pattern works correctly.
-#[test]
-fn alloc_uninit_rc_assume_init_drops_inner() {
-    let counter = StdArc::new(AtomicUsize::new(0));
-    {
-        let arena = Arena::new();
-        let rc_uninit = arena.alloc_uninit_rc::<DropCounter>();
-        unsafe {
-            multitude::Rc::as_ptr(&rc_uninit)
-                .cast_mut()
-                .write(MaybeUninit::new(DropCounter(counter.clone())));
-        }
-        let rc = unsafe { rc_uninit.assume_init() };
-        drop(rc);
-    }
-    assert_eq!(counter.load(Ordering::Relaxed), 1);
-}
-
 /// Same leak, Box variant: `arena.alloc_box(MaybeUninit::new(x)).assume_init()`.
 ///
 /// `Box::drop` calls `drop_in_place::<T>(ptr)`, so for `T = U` after
@@ -98,20 +55,6 @@ fn alloc_arc_of_maybeuninit_assume_init_panics_when_unsupported() {
     let arena = Arena::new();
     let arc_uninit = arena.alloc_arc(MaybeUninit::new(DropCounter(counter.clone())));
     let _arc = unsafe { arc_uninit.assume_init() };
-}
-
-/// `Box::into_rc` on a `Box` obtained via `alloc_box(MaybeUninit::new(x)).assume_init()`
-/// also panics rather than silently leaking (the chunk has no entry to
-/// retarget). Use `alloc_uninit_box::<T>()` for this pattern.
-#[cfg(not(miri))]
-#[test]
-#[should_panic(expected = "no drop entry reserved")]
-fn box_into_rc_panics_when_drop_entry_missing() {
-    let counter = StdArc::new(AtomicUsize::new(0));
-    let arena = Arena::new();
-    let b = arena.alloc_box(MaybeUninit::new(DropCounter(counter.clone())));
-    let b = unsafe { b.assume_init() };
-    let _rc = b.into_rc();
 }
 
 /// `arena.alloc_uninit_arc::<U>()` followed by `assume_init` reserves the

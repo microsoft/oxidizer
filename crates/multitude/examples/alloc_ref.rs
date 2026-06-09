@@ -66,7 +66,7 @@ fn main() {
     // simple references and `ArenaRc` smart pointers share the same chunk
     // pool. Use the cheap one when you don't need the smart pointer to outlive
     // the arena; use ArenaRc when you do.
-    let rc = arena.alloc_rc(Point { x: 3.0, y: 4.0 });
+    let rc = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
     let bump_ref: &mut Vec<i32> = arena.alloc(vec![1, 2, 3]);
     bump_ref.push(4);
     println!("rc = {:?}, bump_ref = {bump_ref:?}", &*rc);
