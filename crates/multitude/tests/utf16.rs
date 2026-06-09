@@ -3139,6 +3139,52 @@ mod from_coverage_extras_utf16 {
         let arc = arena.alloc_utf16_str_arc(src);
         assert_eq!(arc.len(), len_u16);
     }
+
+    #[test]
+    fn alloc_utf16_str_arc_from_str_oversized_routes_via_oversized_shared() {
+        let len = 16 * 1024;
+        let src = "a".repeat(len);
+
+        // First exercise the default arena so any default-config code paths
+        // remain covered.
+        let arena = Arena::new();
+        let arc = arena.alloc_utf16_str_arc_from_str(&src);
+        assert_eq!(arc.len(), len);
+
+        // Then force a small `max_normal_alloc` (in bytes) so the ~32 KiB
+        // UTF-16 payload transcoded from a 16 KiB ASCII string (2 bytes per
+        // code unit, plus the length prefix) deterministically takes the
+        // oversized-shared branch regardless of any future change to the
+        // default threshold.
+        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let arc = arena.alloc_utf16_str_arc_from_str(&src);
+        assert_eq!(arc.len(), len);
+        #[cfg(feature = "stats")]
+        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
+    }
+
+    #[test]
+    fn alloc_utf16_str_box_from_str_oversized_routes_via_oversized_shared() {
+        let len = 16 * 1024;
+        let src = "a".repeat(len);
+
+        // First exercise the default arena so any default-config code paths
+        // remain covered.
+        let arena = Arena::new();
+        let b = arena.alloc_utf16_str_box_from_str(&src);
+        assert_eq!(b.len(), len);
+
+        // Then force a small `max_normal_alloc` (in bytes) so the ~32 KiB
+        // UTF-16 payload transcoded from a 16 KiB ASCII string (2 bytes per
+        // code unit, plus the length prefix) deterministically takes the
+        // oversized-shared branch regardless of any future change to the
+        // default threshold.
+        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let b = arena.alloc_utf16_str_box_from_str(&src);
+        assert_eq!(b.len(), len);
+        #[cfg(feature = "stats")]
+        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
+    }
 }
 
 // === relocated from mutants_extras.rs (utf16-gated tests) ===
