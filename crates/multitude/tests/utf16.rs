@@ -3147,7 +3147,7 @@ mod from_coverage_extras_utf16 {
         // regardless of any future change to the default threshold.
         let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
         let len = 16 * 1024;
-        let src: String = "a".repeat(len);
+        let src = "a".repeat(len);
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
         #[cfg(feature = "stats")]
@@ -3161,7 +3161,7 @@ mod from_coverage_extras_utf16 {
         // regardless of any future change to the default threshold.
         let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
         let len = 16 * 1024;
-        let src: String = "a".repeat(len);
+        let src = "a".repeat(len);
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
         #[cfg(feature = "stats")]
