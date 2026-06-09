@@ -526,7 +526,7 @@ let client = HttpClient::new_fake(response);
 
 // Create a fake HTTP client that uses a custom handler. The handler can be
 // synchronous or asynchronous. Usually for testing, the synchronous handler is sufficient.
-let fake_handler = FakeHandler::from_sync_handler(|req| {
+let fake_handler = FakeHandler::from_fn(|req| {
     println!("Fake handler called for request, url: {}", req.uri());
 
     HttpResponseBuilder::new_fake()
@@ -712,7 +712,7 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbxkEgVi3K7esbSiqQCVICXPsb03rVGNzis1cboVawTWvPmr1hZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjOCZWZldGNoZjAuMTAuMoJvaHR0cF9leHRlbnNpb25zZTAuNS4xgmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuNYJtdGVtcGxhdGVkX3VyaWUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTEuMYJoYnl0ZXNidWZlMC41LjOCZWZldGNoZjAuMTAuMoJvaHR0cF9leHRlbnNpb25zZTAuNS4xgmdsYXllcmVkZTAuMy4ygmhzZWF0YmVsdGUwLjUuNYJtdGVtcGxhdGVkX3VyaWUwLjMuMA
  [__link0]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient
  [__link1]: https://docs.rs/http_extensions/0.5.1/http_extensions/?search=RequestHandler
  [__link10]: https://docs.rs/fetch/0.10.2/fetch/?search=HttpClient::post

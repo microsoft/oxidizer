@@ -20,7 +20,7 @@ async fn main() -> Result<(), ohno::AppError> {
     utils::init_tracing();
 
     // Simulate issues with the request by using a fake handler.
-    let fake_handler = FakeHandler::from_sync_handler(|req| {
+    let fake_handler = FakeHandler::from_fn(|req| {
         let status_code = match fastrand::u32(0..10) {
             0..5 => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::OK,

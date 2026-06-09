@@ -514,7 +514,7 @@ mod tests {
         #[derive(Debug, Deserialize)]
         struct Person;
 
-        let handler = FakeHandler::from_sync_handler(|_| HttpResponseBuilder::new_fake().text("invalid json").build());
+        let handler = FakeHandler::from_fn(|_| HttpResponseBuilder::new_fake().text("invalid json").build());
 
         let err = block_on(handler.request_builder().uri("https://dummy.com").fetch_json::<Person>()).unwrap_err();
 

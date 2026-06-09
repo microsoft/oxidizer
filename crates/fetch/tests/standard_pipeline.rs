@@ -60,7 +60,7 @@ async fn send_requests(client: &HttpClient, uri: &str, count: usize) {
 /// `failing.example.com` → 500 Internal Server Error
 /// everything else       → 200 OK
 fn create_per_host_client(calls: Calls) -> HttpClient {
-    let handler = FakeHandler::from_sync_handler(move |req| {
+    let handler = FakeHandler::from_fn(move |req| {
         calls.increment();
 
         let status = if req.uri().host() == Some("failing.example.com") {
@@ -93,7 +93,7 @@ fn create_per_host_client(calls: Calls) -> HttpClient {
 
 /// Creates a client where every request returns the given status code.
 fn create_uniform_client(status: StatusCode, calls: Calls) -> HttpClient {
-    let handler = FakeHandler::from_sync_handler(move |_req| {
+    let handler = FakeHandler::from_fn(move |_req| {
         calls.increment();
         HttpResponseBuilder::new_fake().status(status).build()
     });
@@ -287,7 +287,7 @@ fn create_hedging_client(calls: Calls, responses: Vec<StatusCode>) -> HttpClient
     let clock = ClockControl::default().auto_advance_timers(true).to_clock();
     let responses = Arc::new(std::sync::Mutex::new(responses.into_iter()));
 
-    let handler = FakeHandler::from_sync_handler(move |_req| {
+    let handler = FakeHandler::from_fn(move |_req| {
         calls.increment();
         let status = responses.lock().unwrap().next().unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
         HttpResponseBuilder::new_fake().status(status).build()
@@ -356,7 +356,7 @@ async fn fallback_router_recovers_when_primary_is_unavailable() {
     // Primary always fails with an `unavailable` error so the retry layer in
     // the standard pipeline (which enables `handle_unavailable` whenever the
     // router exposes alternatives) routes the next attempt to the fallback.
-    let handler = FakeHandler::from_sync_handler(move |req| match req.uri().host() {
+    let handler = FakeHandler::from_fn(move |req| match req.uri().host() {
         Some(PRIMARY_HOST) => {
             handler_calls.primary.fetch_add(1, Ordering::Relaxed);
             Err(HttpError::unavailable("primary is down").with_request(req))

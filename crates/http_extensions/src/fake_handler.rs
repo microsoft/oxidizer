@@ -67,7 +67,7 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 /// use http::StatusCode;
 /// use http_extensions::{FakeHandler, HttpResponseBuilder};
 ///
-/// let handler = FakeHandler::from_sync_handler(|request| {
+/// let handler = FakeHandler::from_fn(|request| {
 ///     if request.uri().path() == "/api/users" {
 ///         HttpResponseBuilder::new_fake()
 ///             .status(StatusCode::OK)
@@ -87,7 +87,7 @@ type PinnedFuture = Pin<Box<dyn Future<Output = Result<HttpResponse>> + Send>>;
 /// # Working with [`HttpResponseBuilder`][crate::HttpResponseBuilder]
 ///
 /// Use [`HttpResponseBuilder::new_fake`][crate::HttpResponseBuilder::new_fake] to generate tailored test responses
-/// with a fluent API. This is especially useful with [`FakeHandler::from_sync_handler`]
+/// with a fluent API. This is especially useful with [`FakeHandler::from_fn`]
 /// to create responses that react to request data:
 #[derive(Clone, Debug)]
 pub struct FakeHandler {
@@ -129,7 +129,7 @@ impl FakeHandler {
     /// use http::StatusCode;
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
-    /// let handler = FakeHandler::from_sync_handler(|request| {
+    /// let handler = FakeHandler::from_fn(|request| {
     ///     HttpResponseBuilder::new_fake()
     ///         .status(StatusCode::OK)
     ///         .text("Hello World")
@@ -138,12 +138,12 @@ impl FakeHandler {
     /// # }
     /// # }
     /// ```
-    pub fn from_sync_handler<H>(handler: H) -> Self
+    pub fn from_fn<H>(handler: H) -> Self
     where
         H: Fn(HttpRequest) -> Result<HttpResponse> + 'static + Send + Sync,
     {
         let handler = Arc::new(handler);
-        Self::from_async_handler(move |req| {
+        Self::from_async_fn(move |req| {
             let cloned = Arc::clone(&handler);
             async move { cloned(req) }
         })
@@ -165,7 +165,7 @@ impl FakeHandler {
     /// # }
     /// ```
     pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
-        Self::from_sync_handler(move |req| Err(error(req)))
+        Self::from_fn(move |req| Err(error(req)))
     }
 
     /// Creates a handler from an asynchronous function.
@@ -181,7 +181,7 @@ impl FakeHandler {
     /// use http::StatusCode;
     /// use http_extensions::{FakeHandler, HttpResponseBuilder};
     ///
-    /// let handler = FakeHandler::from_async_handler(|request| async move {
+    /// let handler = FakeHandler::from_async_fn(|request| async move {
     ///     // Simulate network delay
     ///     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     ///
@@ -193,7 +193,7 @@ impl FakeHandler {
     /// # }
     /// # }
     /// ```
-    pub fn from_async_handler<H, F>(handler: H) -> Self
+    pub fn from_async_fn<H, F>(handler: H) -> Self
     where
         H: Fn(HttpRequest) -> F + 'static + Send + Sync,
         F: Future<Output = Result<HttpResponse>> + Send + 'static,
@@ -323,7 +323,7 @@ impl From<HttpResponse> for FakeHandler {
         let (parts, body) = value.into_parts();
         let body = MaybeUnbufferedBody(Mutex::new(body));
 
-        Self::from_sync_handler(move |_| {
+        Self::from_fn(move |_| {
             let data = body.get_data()?;
             Ok(Response::from_parts(parts.clone(), data))
         })
@@ -456,9 +456,9 @@ mod tests {
     }
 
     #[test]
-    fn from_sync_handler_ok() -> std::result::Result<(), ohno::AppError> {
+    fn from_fn_ok() -> std::result::Result<(), ohno::AppError> {
         let handler =
-            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Sync response").build());
+            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Sync response").build());
 
         assert_eq!(get_response_text(&handler)?, "Sync response");
 
@@ -466,8 +466,8 @@ mod tests {
     }
 
     #[test]
-    fn from_async_handler_ok() -> std::result::Result<(), ohno::AppError> {
-        let handler = FakeHandler::from_async_handler(|_request| async move {
+    fn from_async_fn_ok() -> std::result::Result<(), ohno::AppError> {
+        let handler = FakeHandler::from_async_fn(|_request| async move {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .text("Async response")
@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn async_handler_returns_error() {
         let handler =
-            FakeHandler::from_async_handler(|_request| async { Err(HttpError::validation("this is a test error from async handler")) });
+            FakeHandler::from_async_fn(|_request| async { Err(HttpError::validation("this is a test error from async handler")) });
 
         // Next call should produce a specific error message
         let error = get_response(&handler).unwrap_err();
@@ -601,7 +601,7 @@ mod tests {
         assert!(
             format!(
                 "{:?}",
-                FakeHandler::from_sync_handler(|_| Ok(Response::new(HttpBodyBuilder::new_fake().empty())))
+                FakeHandler::from_fn(|_| Ok(Response::new(HttpBodyBuilder::new_fake().empty())))
             )
             .contains("Custom")
         );

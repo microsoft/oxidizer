@@ -595,7 +595,7 @@
 //!
 //! // Create a fake HTTP client that uses a custom handler. The handler can be
 //! // synchronous or asynchronous. Usually for testing, the synchronous handler is sufficient.
-//! let fake_handler = FakeHandler::from_sync_handler(|req| {
+//! let fake_handler = FakeHandler::from_fn(|req| {
 //!     println!("Fake handler called for request, url: {}", req.uri());
 //!
 //!     HttpResponseBuilder::new_fake()

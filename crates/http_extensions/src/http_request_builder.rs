@@ -1317,7 +1317,7 @@ mod tests {
         // JSON with escaped characters that should be properly deserialized into Cow
         let json_response = r#"{"id":123,"name":"John Doe","description":"A person with \"special\" characters: \n\t\\"}"#;
 
-        let client = FakeHandler::from_sync_handler(move |_request| {
+        let client = FakeHandler::from_fn(move |_request| {
             let json_response = json_response.to_string();
 
             HttpResponseBuilder::new_fake()
@@ -1353,7 +1353,7 @@ mod tests {
 
     #[test]
     fn json_deserialization_error() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .text("corrupted json")
@@ -1376,7 +1376,7 @@ mod tests {
     #[test]
     fn fetch_ok() {
         let client =
-            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("response body").build());
+            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("response body").build());
 
         let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch()).unwrap();
 
@@ -1386,7 +1386,7 @@ mod tests {
 
     #[test]
     fn fetch_buffered_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .text("buffered response")
@@ -1409,7 +1409,7 @@ mod tests {
     #[test]
     fn fetch_text_ok() {
         let client =
-            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text response").build());
+            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text response").build());
 
         let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch_text()).unwrap();
 
@@ -1419,7 +1419,7 @@ mod tests {
 
     #[test]
     fn fetch_bytes_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .bytes(BytesView::copied_from_slice(b"BytesView response", &HttpBodyBuilder::new_fake()))
@@ -1441,7 +1441,7 @@ mod tests {
 
     #[test]
     fn fetch_json_ref_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .json(&JsonData { id: 42 })
@@ -1465,7 +1465,7 @@ mod tests {
     #[test]
     fn fetch_text_body_ok() {
         let client =
-            FakeHandler::from_sync_handler(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text body").build());
+            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text body").build());
 
         let body = block_on(client.request_builder().get("https://example.com").fetch_text_body()).unwrap();
 
@@ -1474,7 +1474,7 @@ mod tests {
 
     #[test]
     fn fetch_bytes_body_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .bytes(BytesView::copied_from_slice(b"bytes body", &HttpBodyBuilder::new_fake()))
@@ -1488,7 +1488,7 @@ mod tests {
 
     #[test]
     fn fetch_json_body_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .json(&JsonData { id: 7 })
@@ -1502,7 +1502,7 @@ mod tests {
 
     #[test]
     fn fetch_text_body_ensures_success() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .text("boom")
@@ -1516,7 +1516,7 @@ mod tests {
 
     #[test]
     fn fetch_bytes_body_ensures_success() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::NOT_FOUND)
                 .text("missing")
@@ -1530,7 +1530,7 @@ mod tests {
 
     #[test]
     fn fetch_json_body_ensures_success() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::BAD_REQUEST)
                 .json(&JsonData { id: 1 })
@@ -1544,7 +1544,7 @@ mod tests {
 
     #[test]
     fn fetch_json_ref_body_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .json(&JsonData { id: 7 })
@@ -1565,7 +1565,7 @@ mod tests {
 
     #[test]
     fn fetch_json_ref_body_ensures_success() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::BAD_REQUEST)
                 .json(&JsonData { id: 1 })
@@ -1621,7 +1621,7 @@ mod tests {
 
     #[test]
     fn fetch_json_ok() {
-        let client = FakeHandler::from_sync_handler(|_request| {
+        let client = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .json(&JsonData { id: 123 })
@@ -1643,7 +1643,7 @@ mod tests {
 
     #[test]
     fn fetch_with_request_validation() {
-        let client = FakeHandler::from_async_handler(|request| {
+        let client = FakeHandler::from_async_fn(|request| {
             async move {
                 // Validate the request that was sent
                 assert_eq!(request.method(), Method::POST);
@@ -1672,7 +1672,7 @@ mod tests {
 
     #[test]
     fn fetch_with_empty_body() {
-        let client = FakeHandler::from_async_handler(|request| async move {
+        let client = FakeHandler::from_async_fn(|request| async move {
             assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, -1), 0);
             assert!(request.headers().get(CONTENT_TYPE).is_none());
             let body_len = request.into_body().into_bytes().await.unwrap().len();
@@ -1686,7 +1686,7 @@ mod tests {
 
     #[test]
     fn fetch_with_json_body_validation() {
-        let client = FakeHandler::from_sync_handler(|request| {
+        let client = FakeHandler::from_fn(|request| {
             // Both Content-Length and Content-Type should be set
             assert_eq!(request.headers().get_value_or(CONTENT_LENGTH, 0), 9);
             assert_eq!(request.headers().get_str_value_or(CONTENT_TYPE, ""), "application/json");
@@ -1707,7 +1707,7 @@ mod tests {
 
     #[test]
     fn fetch_with_multiple_headers() {
-        let client = FakeHandler::from_sync_handler(|request| {
+        let client = FakeHandler::from_fn(|request| {
             assert_eq!(request.headers().get_str_value_or("x-first", ""), "first");
             assert_eq!(request.headers().get_str_value_or("x-second", ""), "second");
             assert_eq!(request.version(), http::Version::HTTP_11);
@@ -1809,7 +1809,7 @@ mod tests {
 
     #[test]
     fn method_convenience_with_fetch() {
-        let client = FakeHandler::from_sync_handler(|request| {
+        let client = FakeHandler::from_fn(|request| {
             assert_eq!(request.method(), Method::POST);
             assert_eq!(request.uri(), "https://example.com/api");
 
@@ -1934,7 +1934,7 @@ mod tests {
 
     #[test]
     fn fetch_returns_error_when_build_fails() {
-        let handler = FakeHandler::from_sync_handler(|_request| {
+        let handler = FakeHandler::from_fn(|_request| {
             HttpResponseBuilder::new_fake()
                 .status(StatusCode::OK)
                 .text("should not reach")

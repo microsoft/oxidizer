@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn server_errors_trip_breaker() {
         let handler =
-            FakeHandler::from_sync_handler(|_req| HttpResponseBuilder::new_fake().status(StatusCode::INTERNAL_SERVER_ERROR).build());
+            FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::INTERNAL_SERVER_ERROR).build());
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn success_does_not_trip_breaker() {
-        let handler = FakeHandler::from_sync_handler(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build());
+        let handler = FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::OK).build());
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn client_errors_do_not_trip_breaker() {
-        let handler = FakeHandler::from_sync_handler(|_req| HttpResponseBuilder::new_fake().status(StatusCode::BAD_REQUEST).build());
+        let handler = FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::BAD_REQUEST).build());
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 
