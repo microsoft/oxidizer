@@ -9,7 +9,7 @@
 
 .DESCRIPTION
     The driver supports three mutually-exclusive modes for selecting which
-    workspace packages to release. In every mode the same downstream pipeline
+    workspace packages to release. In every mode the same pipeline
     runs: plan resolution + cascade toward dependents, an elevation review for
     any modified-but-unreleased dependencies, a final plan display, and atomic
     execution of all Cargo.toml / CHANGELOG.md / README.md / workspace
@@ -68,7 +68,7 @@
     is specified for a package and cascade logic requires a higher
     version number than the pin allows, the release plan is rejected
     (or, with -Force, the pin is honored verbatim and a warning is
-    printed flagging that downstream consumers may break).
+    printed flagging that consumers may break).
 
 .PARAMETER Packages
     The list of workspace packages to release, in the form
@@ -136,8 +136,8 @@
     silently override an explicit pin). With -Force, the explicit pin
     is honored verbatim, the package's EffectiveChangeType tag is
     upgraded to match the cascade so any further cascade decisions are
-    correct, and a warning is printed flagging that downstream
-    consumers may break.
+    correct, and a warning is printed flagging that consumers
+    may break.
 
     -Force does NOT relax the always-fatal "pin is not strictly greater
     than the current on-disk version" check, and has no effect on
@@ -158,7 +158,7 @@
 
 .EXAMPLE
     # Force-honor a pin even when cascade analysis requires a higher version
-    # (downstream consumers may break — use with caution).
+    # (consumers may break — use with caution).
     ./scripts/release-packages.ps1 -Packages 'my-package@1.0.0' -Force
 
 .EXAMPLE

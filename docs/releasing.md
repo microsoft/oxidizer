@@ -29,7 +29,7 @@ This document is the reference for the human-driven release tooling in
   requested packages are detected. The script must be run from an
   interactive terminal.
 
-  In every mode the same downstream pipeline runs: plan resolution,
+  In every mode the same pipeline runs: plan resolution,
   cascade toward dependents, an interactive elevation review for any
   modified-but-unreleased dependencies, a final plan display, then
   atomic application of all version-number increments, changelog
@@ -228,7 +228,7 @@ of the review, but cannot suppress a cascade-imposed change type.
   `-Force` to override: the pin is honored verbatim, the package's
   effective change-type tag is still upgraded so further cascade
   decisions are correct, and a warning is printed flagging that
-  downstream consumers may break.)
+  consumers may break.)
 
 ---
 
@@ -295,8 +295,8 @@ The user-review queue therefore contains two categories of finding:
    answer — review the cumulative diff being released (source + dependency
    edits) and decide whether each package's change is breaking,
    backward-compatible, a pure internal patch, or whether to pin to an
-   explicit version. Picking too weak a change type causes downstream
-   consumers to silently get incompatible behaviour after `cargo update`;
+   explicit version. Picking too weak a change type causes consumers
+   to silently get incompatible behaviour after `cargo update`;
    picking too strong a change type is harmless except it forces direct
    dependents to bump as well.
 

@@ -261,7 +261,7 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #   -Force            : if set, an explicit version pin that numerically
 #                       undershoots the cascade-required version is honored
 #                       verbatim instead of throwing. EffectiveChangeType is
-#                       still upgraded so downstream cascade decisions are
+#                       still upgraded so dependent cascade decisions are
 #                       correct; PinHonoredAgainstCascade is set so callers
 #                       (and Show-ReleasePlan) can warn the user. -Force does
 #                       NOT relax the always-fatal "pin is not strictly
@@ -317,7 +317,7 @@ function Get-TransitivePublishedDependentsFromBaseline {
 # EffectiveTargetVersion. This is necessary because the version captured
 # during a target's outer-loop iteration may be superseded later if that
 # same target is also a dependent of yet another user-source target whose
-# iteration strengthens it. Without normalisation, downstream consumers
+# iteration strengthens it. Without normalisation, consumers
 # (Write-Changelog "Now requires <v> of <pkg>" bullets) would print the
 # stale pre-bump version. The companion Breaking flag is intentionally
 # left untouched — recomputing it without also re-iterating the dependent
@@ -331,7 +331,7 @@ function Resolve-ReleaseSet {
     )
 
     if ($null -eq $ParsedTokens -or @($ParsedTokens).Count -eq 0) {
-        throw "Resolve-ReleaseSet: ParsedTokens is empty. Parse-ReleaseTokens should reject empty input upstream."
+        throw "Resolve-ReleaseSet: ParsedTokens is empty. Parse-ReleaseTokens should reject empty input earlier."
     }
 
     $baselineByFolder = @{}
@@ -359,7 +359,7 @@ function Resolve-ReleaseSet {
         }
 
         if ($resolved.Contains($pkg.Folder)) {
-            throw "Internal error: package '$($pkg.Folder)' resolved twice from -Packages (token '$($req.RawToken)'). Parse-ReleaseTokens should have rejected the duplicate upstream."
+            throw "Internal error: package '$($pkg.Folder)' resolved twice from -Packages (token '$($req.RawToken)'). Parse-ReleaseTokens should have rejected the duplicate earlier."
         }
 
         $currentVersion = $pkg.Version
@@ -455,12 +455,12 @@ function Resolve-ReleaseSet {
                         if ($cmpPin -lt 0) {
                             if ($Force) {
                                 $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                                Write-Warning "-Force: honoring explicit pin v$($existing.RequestedTargetVersion) on '$($existing.Folder)' even though cascade requires at least v$cascadeRequiredVersion (cascade sources: $reasonsNames). The package's EffectiveChangeType tag is upgraded to '$dependentChangeType' but the version on disk will be v$($existing.RequestedTargetVersion). Downstream consumers may break."
+                                Write-Warning "-Force: honoring explicit pin v$($existing.RequestedTargetVersion) on '$($existing.Folder)' even though cascade requires at least v$cascadeRequiredVersion (cascade sources: $reasonsNames). The package's EffectiveChangeType tag is upgraded to '$dependentChangeType' but the version on disk will be v$($existing.RequestedTargetVersion). Consumers may break."
                                 $existing.EffectiveChangeType       = $dependentChangeType
                                 $existing.PinHonoredAgainstCascade  = $true
                             } else {
                                 $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                                throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (downstream consumers may break)."
+                                throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (consumers may break)."
                             }
                         } else {
                             # Pin still satisfies. Bump the EffectiveChangeType tag
@@ -1542,7 +1542,7 @@ function Invoke-PlanReview {
             # in-memory operation; no caching/snapshot invalidation needed.
             # In all-changed mode the user may have accepted nothing yet, in
             # which case Resolve-ReleaseSet throws on empty input — handle
-            # that here rather than relaxing the upstream guard, which would
+            # that here rather than relaxing the earlier guard, which would
             # weaken targeted-mode validation.
             if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
                 $resolvedHash = @{}
@@ -1786,7 +1786,7 @@ function Invoke-ResolvedRelease {
     }
 
     # The on-disk workspace metadata is now stale (we just rewrote Cargo.tomls);
-    # downstream operations that rely on cargo metadata (e.g. Invoke-WorkspaceCheck)
+    # later operations that rely on cargo metadata (e.g. Invoke-WorkspaceCheck)
     # must observe the new state.
     Invalidate-WorkspaceMetadataCache
 
@@ -1861,9 +1861,9 @@ function Show-ReleasePlan {
     $forcedPins = @($userEntries | Where-Object { $_.PinHonoredAgainstCascade })
     if ($forcedPins.Count -gt 0) {
         $forcedPinsLine = if ($forcedPins.Count -eq 1) {
-            "Item above tagged '-Force: pin honored over cascade' kept its explicit version pin even though cascade required a higher version — downstream consumers may break."
+            "Item above tagged '-Force: pin honored over cascade' kept its explicit version pin even though cascade required a higher version — consumers may break."
         } else {
-            "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin even though cascade required a higher version — downstream consumers may break."
+            "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin even though cascade required a higher version — consumers may break."
         }
         Write-Host $forcedPinsLine -ForegroundColor Yellow
     }

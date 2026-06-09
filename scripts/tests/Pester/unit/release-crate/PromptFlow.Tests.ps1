@@ -1193,7 +1193,7 @@ Describe 'Show-ReleasePlan: cascade-upgrade footer' {
         Show-ReleasePlan -ResolvedReleaseSet $plan
 
         ($script:Captured -join "`n") | Should -Match "'-Force: pin honored over cascade'"
-        ($script:Captured -join "`n") | Should -Match 'downstream consumers may break'
+        ($script:Captured -join "`n") | Should -Match 'consumers may break'
     }
 
     It "uses singular 'Item above' wording when exactly one entry was forced" {
