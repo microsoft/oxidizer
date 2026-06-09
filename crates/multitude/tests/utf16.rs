@@ -3139,6 +3139,24 @@ mod from_coverage_extras_utf16 {
         let arc = arena.alloc_utf16_str_arc(src);
         assert_eq!(arc.len(), len_u16);
     }
+
+    #[test]
+    fn alloc_utf16_str_arc_from_str_oversized_routes_via_oversized_shared() {
+        let arena = Arena::new();
+        let len = 16 * 1024;
+        let src: String = "a".repeat(len);
+        let arc = arena.alloc_utf16_str_arc_from_str(&src);
+        assert_eq!(arc.len(), len);
+    }
+
+    #[test]
+    fn alloc_utf16_str_box_from_str_oversized_routes_via_oversized_shared() {
+        let arena = Arena::new();
+        let len = 16 * 1024;
+        let src: String = "a".repeat(len);
+        let b = arena.alloc_utf16_str_box_from_str(&src);
+        assert_eq!(b.len(), len);
+    }
 }
 
 // === relocated from mutants_extras.rs (utf16-gated tests) ===
