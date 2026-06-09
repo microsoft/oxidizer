@@ -61,7 +61,7 @@ async fn retry_defaults_non_transient_codes() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn retry_defaults_restore_requests() {
-    let handler = FakeHandler::from_http_error(|req| {
+    let handler = FakeHandler::from_error_fn(|req| {
         let index = req.extensions().get::<Attempt>().copied().unwrap().index();
         HttpError::unavailable(format!("unavailable-{index}")).with_request(req)
     });

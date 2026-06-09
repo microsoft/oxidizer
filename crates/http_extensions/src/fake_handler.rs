@@ -158,13 +158,13 @@ impl FakeHandler {
     /// # #[cfg(feature = "test-util")] {
     /// use http_extensions::{FakeHandler, HttpError, HttpRequest};
     ///
-    /// let handler = FakeHandler::from_http_error(|_request: HttpRequest| {
+    /// let handler = FakeHandler::from_error_fn(|_request: HttpRequest| {
     ///     HttpError::validation("simulated error")
     /// });
     /// # }
     /// # }
     /// ```
-    pub fn from_http_error(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
+    pub fn from_error_fn(error: impl Fn(HttpRequest) -> HttpError + Send + Sync + 'static) -> Self {
         Self::from_fn(move |req| Err(error(req)))
     }
 
@@ -575,8 +575,8 @@ mod tests {
     }
 
     #[test]
-    fn from_http_error() {
-        let handler = FakeHandler::from_http_error(|_request| HttpError::validation("simulated error"));
+    fn from_error_fn() {
+        let handler = FakeHandler::from_error_fn(|_request| HttpError::validation("simulated error"));
 
         let error = get_response(&handler).unwrap_err();
         assert_eq!(error.message(), "simulated error");
