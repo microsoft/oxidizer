@@ -34,7 +34,7 @@ async fn main() -> Result<(), ohno::AppError> {
             crate_name: crate_name.clone(),
         })
         .header("User-Agent", "http-client")
-        .fetch_json::<CrateResponse>()
+        .fetch_json_ref::<CrateResponse>()
         .await?
         .into_body();
 

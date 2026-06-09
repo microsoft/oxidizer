@@ -188,7 +188,7 @@ mod tests {
         let captured_uris: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_uris_for_handler = Arc::clone(&captured_uris);
 
-        let handler = FakeHandler::from_sync_handler(move |request: HttpRequest| {
+        let handler = FakeHandler::from_fn(move |request: HttpRequest| {
             captured_uris_for_handler
                 .lock()
                 .expect("mutex is only accessed in single-threaded test")

@@ -330,7 +330,7 @@ impl HttpBody {
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
     ///     // Parse the JSON body into a structured type
-    ///     let user: User = body.into_json_owned().await?;
+    ///     let user: User = body.into_json().await?;
     ///
     ///     println!("Received user: {} (ID: {})", user.name, user.id);
     ///
@@ -347,14 +347,14 @@ impl HttpBody {
     /// # }
     /// ```
     #[cfg(any(feature = "json", test))]
-    pub fn into_json_owned<T: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<T>> + Send {
-        self.into_json::<T>().map(|json| Ok(json?.read_owned()?))
+    pub fn into_json<T: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<T>> + Send {
+        self.into_json_ref::<T>().map(|json| Ok(json?.read_owned()?))
     }
 
     /// Consumes the body and converts it to a zero-copy JSON parser.
     ///
     /// This method provides zero-copy JSON parsing by working directly with the underlying
-    /// memory buffer. Unlike [`into_json_owned`][HttpBody::into_json_owned], this method can work with borrowed data
+    /// memory buffer. Unlike [`into_json`][HttpBody::into_json], this method can work with borrowed data
     /// and types that use `Cow<str>` for efficient string handling.
     ///
     /// The returned [`Json<T>`][crate::Json] allows you to deserialize into types that can borrow from
@@ -386,7 +386,7 @@ impl HttpBody {
     ///
     /// async fn example(body: HttpBody) -> Result<(), HttpError> {
     ///     // Parse JSON while potentially borrowing string data
-    ///     let mut json = body.into_json::<User>().await?;
+    ///     let mut json = body.into_json_ref::<User>().await?;
     ///     let user = json.read()?;
     ///
     ///     println!("User: {} <{}> (ID: {})", user.name, user.email, user.id);
@@ -405,9 +405,9 @@ impl HttpBody {
     /// # }
     /// ```
     ///
-    /// For types that don't need borrowing, prefer [`into_json_owned`][HttpBody::into_json_owned] for simpler usage.
+    /// For types that don't need borrowing, prefer [`into_json`][HttpBody::into_json] for simpler usage.
     #[cfg(any(feature = "json", test))]
-    pub fn into_json<'a, T: serde_core::de::Deserialize<'a>>(self) -> impl Future<Output = Result<crate::json::Json<T>>> + Send {
+    pub fn into_json_ref<'a, T: serde_core::de::Deserialize<'a>>(self) -> impl Future<Output = Result<crate::json::Json<T>>> + Send {
         self.into_bytes().map_ok(crate::json::Json::<T>::new)
     }
 
@@ -660,7 +660,7 @@ mod tests {
 
         assert_eq!(Some(22), body.content_length());
 
-        let result: Model = block_on(body.into_json_owned()).unwrap();
+        let result: Model = block_on(body.into_json()).unwrap();
 
         assert_eq!(data, result);
     }
@@ -672,12 +672,12 @@ mod tests {
         let body = builder.text("{invalid json}");
 
         // Attempt to deserialize to our model, which should fail
-        let result: Result<Model> = block_on(body.into_json_owned());
+        let result: Result<Model> = block_on(body.into_json());
         result.unwrap_err();
     }
 
     #[test]
-    fn into_json_with_cow_strings() {
+    fn into_json_ref_with_cow_strings() {
         use std::borrow::Cow;
 
         #[derive(Debug, Deserialize, PartialEq)]
@@ -694,7 +694,7 @@ mod tests {
         let builder = HttpBodyBuilder::new_fake();
         let body = builder.text(json_data);
 
-        let mut json_result = block_on(body.into_json::<User>()).unwrap();
+        let mut json_result = block_on(body.into_json_ref::<User>()).unwrap();
         let user = json_result.read().unwrap();
 
         assert_eq!(user.id, 42);
@@ -1049,11 +1049,11 @@ mod tests {
     }
 
     #[test]
-    fn external_body_into_json_owned() {
+    fn external_body_into_json() {
         let builder = HttpBodyBuilder::new_fake();
         let json_bytes = br#"{"id":42,"name":"alice"}"#;
         let body = create_stream_body(&builder, json_bytes, &HttpBodyOptions::default());
-        let model: Model = block_on(body.into_json_owned()).unwrap();
+        let model: Model = block_on(body.into_json()).unwrap();
         assert_eq!(
             model,
             Model {

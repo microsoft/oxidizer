@@ -86,21 +86,18 @@
 //! ```rust,no_run
 //! # #[cfg(all(feature = "tokio", any(feature = "rustls", feature = "native-tls")))]
 //! # {
-//! use fetch::{HttpClient, HttpError, Response, StatusExt};
+//! use fetch::{HttpClient, HttpError};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), HttpError> {
 //!     // Create a client using the builder
 //!     let client: HttpClient = HttpClient::new_tokio();
 //!
-//!     // Retrieve the response as text
-//!     let response: Response<String> = client
-//!         .get("https://example.com")
-//!         .fetch_text()
-//!         .await?
-//!         .ensure_success()?; // Verifies that the response was successful
+//!     // Retrieve the response body as text. This validates the status (returning an
+//!     // error for `4xx`/`5xx` responses) and hands back the body in a single step.
+//!     let body: String = client.get("https://example.com").fetch_text_body().await?;
 //!
-//!     println!("response: {}", response.body());
+//!     println!("response: {body}");
 //!
 //!     Ok(())
 //! }
@@ -260,8 +257,8 @@
 //!
 //! - [`fetch_text`][crate::HttpRequestBuilder::fetch_text]: Gets the response body as a string in one step.
 //! - [`fetch_bytes`][crate::HttpRequestBuilder::fetch_bytes]: Gets the body as a memory-efficient `BytesView`.
-//! - [`fetch_json`][crate::HttpRequestBuilder::fetch_json]: Gets the response body as zero-copy JSON (requires `json` feature).
-//! - [`fetch_json_owned`][crate::HttpRequestBuilder::fetch_json_owned]: Gets the response body as owned JSON (requires `json` feature).
+//! - [`fetch_json`][crate::HttpRequestBuilder::fetch_json]: Gets the response body as owned JSON (requires `json` feature).
+//! - [`fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref]: Gets the response body as zero-copy JSON (requires `json` feature).
 //!
 //! These methods automatically convert the response body to the format you want (string, JSON, etc.),
 //! saving you from handling the raw [`HttpBody`] type directly. They return a [`Response<T>`] where `T`
@@ -288,6 +285,29 @@
 //!     .ensure_success()? // Ensure the response was successful
 //!     .into_body(); // Discard the response metadata and get the body as a string
 //!
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Body-Only Shortcuts
+//!
+//! When you only need the body of a *successful* response, the `_body` variants go one step further:
+//! they call [`ensure_success`][crate::HttpResponse::ensure_success] for you, discard the response
+//! metadata, and return just the materialized body.
+//!
+//! - [`fetch_text_body`][crate::HttpRequestBuilder::fetch_text_body]: Validates the status and returns the body as a `String`.
+//! - [`fetch_bytes_body`][crate::HttpRequestBuilder::fetch_bytes_body]: Validates the status and returns the body as a `BytesView`.
+//! - [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body]: Validates the status and deserializes the body into an owned value (requires `json` feature).
+//!
+//! ```rust
+//! # use fetch::HttpClient;
+//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! // Fetch, validate the status, and extract the body in a single call
+//! let text: String = client
+//!     .get("https://api.example.com/users")
+//!     .fetch_text_body()
+//!     .await?;
+//! println!("body: {text}");
 //! # Ok(())
 //! # }
 //! ```
@@ -360,16 +380,60 @@
 //! Working with JSON APIs is straightforward with the `json` feature, which offers:
 //!
 //! - **Send JSON data**: [`HttpRequestBuilder::json`][crate::HttpRequestBuilder::json] serializes any Rust type to JSON.
-//! - **Receive zero-copy JSON**: [`HttpRequestBuilder::fetch_json`][crate::HttpRequestBuilder::fetch_json] returns a
+//! - **Receive owned JSON**: [`HttpRequestBuilder::fetch_json`][crate::HttpRequestBuilder::fetch_json] deserializes
+//!   directly into owned Rust types. This is the common case: the data can outlive the response and cross thread boundaries.
+//! - **Receive zero-copy JSON**: [`HttpRequestBuilder::fetch_json_ref`][crate::HttpRequestBuilder::fetch_json_ref] returns a
 //!   [`Json<T>`][crate::Json] wrapper that borrows strings and byte arrays directly from the response buffer for maximum
-//!   performance. Use it when you can work with borrowed data.
-//! - **Receive owned JSON**: [`HttpRequestBuilder::fetch_json_owned`][crate::HttpRequestBuilder::fetch_json_owned]
-//!   deserializes directly into owned Rust types. Use it when the data must outlive the response or cross thread boundaries.
+//!   performance. Reach for it in hot paths where you can work with borrowed data.
 //! - **Convert bodies to JSON**: [`HttpBody::into_json`][crate::HttpBody::into_json] transforms response bodies into JSON values.
 //!
-//! ## Zero-Copy JSON with `fetch_json`
+//! ## Owned JSON with `fetch_json`
 //!
-//! Pair `fetch_json` with borrowed string fields (`Cow<'a, str>`) to avoid allocations; the
+//! Use `fetch_json` when you need owned data; it deserializes the JSON directly into your
+//! target type with owned `String` fields. This is the most common choice:
+//!
+//! ```rust
+//! # use fetch::{HttpClient, Response, StatusExt};
+//! # use serde::{Deserialize, Serialize};
+//! # #[cfg(feature = "json")]
+//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
+//! // Define a Person type with owned data
+//! #[derive(Serialize, Deserialize)]
+//! struct Person {
+//!     id: u32,
+//!     name: String,
+//! }
+//!
+//! let person = Person {
+//!     id: 1,
+//!     name: "Alice Johnson".to_owned(),
+//! };
+//!
+//! // Send and receive owned JSON
+//! let response: Response<Person> = client
+//!     .put("https://api.company.com/people")
+//!     .json(&person) // Add JSON payload
+//!     .fetch_json::<Person>() // Returns Response<Person> directly
+//!     .await?;
+//!
+//! // You can inspect the response metadata if needed
+//! let response = response.ensure_success()?;
+//!
+//! // Extract the deserialized Person directly - no wrapper needed
+//! let person: Person = response.into_body();
+//!
+//! println!("Person retrieved, name: {}", person.name);
+//!
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! If you only need the body of a successful response, [`fetch_json_body`][crate::HttpRequestBuilder::fetch_json_body]
+//! goes one step further and folds the fetch, status check, and owned deserialization into a single call.
+//!
+//! ## Zero-Copy JSON with `fetch_json_ref`
+//!
+//! Pair `fetch_json_ref` with borrowed string fields (`Cow<'a, str>`) to avoid allocations; the
 //! [`Json<T>`][crate::Json] wrapper borrows directly from the response buffer. Prefer `Cow<'a, str>` over
 //! `&'a str`, as it transparently falls back to an owned value when a JSON string was escaped in the buffer
 //! and cannot be borrowed:
@@ -399,7 +463,7 @@
 //! let response: Response<Json<Person>> = client
 //!     .put("https://api.company.com/people")
 //!     .json(&person) // Add JSON payload
-//!     .fetch_json::<Person>() // Returns Response<Json<Person>>
+//!     .fetch_json_ref::<Person>() // Returns Response<Json<Person>>
 //!     .await?;
 //!
 //! // You can inspect the response metadata if needed
@@ -419,51 +483,8 @@
 //! ```
 //!
 //! This minimizes heap allocations and copying because string fields borrow directly from the
-//! response buffer instead of allocating new memory for each string.
-//!
-//! ## Owned JSON with `fetch_json_owned`
-//!
-//! Use `fetch_json_owned` when you need owned data; it deserializes the JSON directly into your
-//! target type with owned `String` fields:
-//!
-//! ```rust
-//! # use fetch::{HttpClient, Response, StatusExt};
-//! # use serde::{Deserialize, Serialize};
-//! # #[cfg(feature = "json")]
-//! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Define a Person type with owned data
-//! #[derive(Serialize, Deserialize)]
-//! struct Person {
-//!     id: u32,
-//!     name: String,
-//! }
-//!
-//! let person = Person {
-//!     id: 1,
-//!     name: "Alice Johnson".to_owned(),
-//! };
-//!
-//! // Send and receive owned JSON
-//! let response: Response<Person> = client
-//!     .put("https://api.company.com/people")
-//!     .json(&person) // Add JSON payload
-//!     .fetch_json_owned::<Person>() // Returns Response<Person> directly
-//!     .await?;
-//!
-//! // You can inspect the response metadata if needed
-//! let response = response.ensure_success()?;
-//!
-//! // Extract the deserialized Person directly - no wrapper needed
-//! let person: Person = response.into_body();
-//!
-//! println!("Person retrieved, name: {}", person.name);
-//!
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! This performs more allocations than `fetch_json`, but is more convenient when the data must
-//! outlive the response, cross thread boundaries, or satisfy APIs that require owned types.
+//! response buffer instead of allocating new memory for each string, at the cost of tying the parsed
+//! value to the response buffer's lifetime.
 //!
 //! # Request Pipeline
 //!
@@ -574,7 +595,7 @@
 //!
 //! // Create a fake HTTP client that uses a custom handler. The handler can be
 //! // synchronous or asynchronous. Usually for testing, the synchronous handler is sufficient.
-//! let fake_handler = FakeHandler::from_sync_handler(|req| {
+//! let fake_handler = FakeHandler::from_fn(|req| {
 //!     println!("Fake handler called for request, url: {}", req.uri());
 //!
 //!     HttpResponseBuilder::new_fake()
@@ -608,9 +629,8 @@
 //! # use bytes::Buf;
 //! #
 //! # async fn example(client: &HttpClient) -> Result<(), Box<dyn std::error::Error>> {
-//! // Get a response body as a BytesView
-//! let response = client.get("https://example.com").fetch().await?;
-//! let mut body_bytes = response.into_body().into_bytes().await?;
+//! // Fetch the response body directly as a BytesView (validating the status along the way)
+//! let mut body_bytes = client.get("https://example.com").fetch_bytes_body().await?;
 //!
 //! // Work with the BytesView using standard bytes methods
 //! let length = body_bytes.remaining();
@@ -650,8 +670,7 @@
 //! let items_uri: Uri = "https://api.example.com/items".parse()?;
 //!
 //! // 3. Work with raw BytesView to avoid allocations when possible
-//! let response = client.get(users_uri.clone()).fetch().await?;
-//! let bytes = response.into_body().into_bytes().await?;
+//! let bytes = client.get(users_uri.clone()).fetch_bytes_body().await?;
 //! process_binary_data(bytes);
 //! # Ok(())
 //! # }
@@ -785,7 +804,7 @@ pub use http_extensions::routing;
 #[doc(inline)]
 pub use seatbelt::{Recovery, RecoveryInfo};
 #[doc(inline)]
-pub use templated_uri::{BasePath, BaseUri, Origin, Uri};
+pub use templated_uri::{BasePath, BaseUri, Origin, PathAndQuery, Uri};
 
 /// Re-exports of the [`http`](https://docs.rs/http) crate's submodules.
 ///

@@ -84,8 +84,8 @@ impl Recovery for JsonError {
 /// - **Owned parsing** via [`read_owned`](Self::read_owned): For types that own their data, the parser consumes itself
 ///   and returns an owned deserialized value.
 ///
-/// See the [`HttpBody::into_json`](crate::HttpBody::into_json) and
-/// [`HttpBody::into_json_owned`](crate::HttpBody::into_json_owned) methods for more details and
+/// See the [`HttpBody::into_json_ref`](crate::HttpBody::into_json_ref) and
+/// [`HttpBody::into_json`](crate::HttpBody::into_json) methods for more details and
 /// examples on how to use this type.
 #[derive(Debug)]
 pub struct Json<T> {
@@ -137,7 +137,7 @@ impl<'a, T: Deserialize<'a>> Json<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
-    /// #     let mut json = body.into_json::<Person>().await.unwrap();
+    /// #     let mut json = body.into_json_ref::<Person>().await.unwrap();
     /// #     handle_json(&mut json).unwrap();
     /// # }
     /// ```
@@ -188,7 +188,7 @@ impl<T: DeserializeOwned> Json<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #     let body = HttpBodyBuilder::new_fake().text(r#"{"name":"Alice","age":30}"#);
-    /// #     handle_json(body.into_json().await.unwrap()).unwrap();
+    /// #     handle_json(body.into_json_ref().await.unwrap()).unwrap();
     /// # }
     /// ```
     ///
