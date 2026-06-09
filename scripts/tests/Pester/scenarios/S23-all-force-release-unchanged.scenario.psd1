@@ -18,7 +18,7 @@
             # We have no decision for b yet; ignore so c is reached as the
             # breaking trigger. 'b' is recorded in $declined for this run
             # (b is not InReleaseSet at this point: no tokens, no cascade).
-            @{ Match = "Choose option for 'b'"; Reply = '2' }
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
             # Accept c as breaking (option 3). c: 0.3.0 -> 0.4.0. The
             # cascade-toward-dependents walk mirrors c's change type onto b
             # and onto a (transitively), so both arrive in the release set
@@ -28,7 +28,7 @@
             # initial queue (it was a Phase-B stub before c's acceptance;
             # the next iteration sees it as cascade-breaking and filters it
             # out).
-            @{ Match = "Choose option for 'c'"; Reply = '3' }
+            @{ Match = "Choose option for 'c'"; Reply = '3' } # Breaking
         )
     }
 

@@ -28,7 +28,7 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
             # Invariant B: middle was cascade-pulled with a patch change
             # AND has pre-existing modifications. User elevates to
             # non-breaking (option 4 = minor on 1.x).
-            @{ Match = "Choose option for 'middle'"; Reply = '4' }
+            @{ Match = "Choose option for 'middle'"; Reply = '4' } # Non-breaking
         )
     }
 

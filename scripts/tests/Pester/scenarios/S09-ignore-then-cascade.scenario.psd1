@@ -11,20 +11,20 @@
         @{ Op = 'ModifySource'; Package = 'a' }
         @{ Op = 'ModifySource'; Package = 'b' }
         @{ Op = 'ModifySource'; Package = 'c' }
-        @{ Op = 'AddCommit';    Message = 'upstream edits' }
+        @{ Op = 'AddCommit';    Message = 'dependency edits' }
     )
 
     Run = @{
         Packages = @('a@patch')
         Answers   = @(
             # Iter 0 of the scan: ignore b.
-            @{ Match = "Choose option for 'b'"; Reply = '2' }
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
             # Iter 1: accept c via option 4 (non-breaking). Option 5 (patch) is hidden
             # on 0.x.y because it would produce the same numeric increment.
             # c's cascade then pulls b into the release set at non-breaking
             # (0.2.0 → 0.2.1). Because b was previously declined, the planner
             # silently accepts the cascade-applied level and does NOT re-prompt.
-            @{ Match = "Choose option for 'c'"; Reply = '4' }
+            @{ Match = "Choose option for 'c'"; Reply = '4' } # Non-breaking
         )
     }
 

@@ -5,38 +5,38 @@
     Name        = 'S08-invalid-then-valid-input'
     Description = 'User provides invalid menu inputs (whole-string check) and empty input before settling on a valid choice. The prompt is repeated each time; no answer is consumed without the menu being shown. Validates strict input validation in Get-PackageReleaseDecision.'
 
-    Workspace = @{ Preset = 'Linear2' }   # downstream -> upstream
+    Workspace = @{ Preset = 'Linear2' }   # dependent -> dependency
 
     History = @(
-        @{ Op = 'ModifySource'; Package = 'downstream' }
-        @{ Op = 'ModifySource'; Package = 'upstream' }
-        @{ Op = 'AddCommit';    Message = 'upstream edits' }
+        @{ Op = 'ModifySource'; Package = 'dependent' }
+        @{ Op = 'ModifySource'; Package = 'dependency' }
+        @{ Op = 'AddCommit';    Message = 'dependency edits' }
     )
 
     Run = @{
-        Packages = @('downstream@patch')
+        Packages = @('dependent@patch')
         Answers   = @(
             # "12" starts with valid digit but is a multi-character non-option — must be rejected as a whole.
-            @{ Match = "Choose option for 'upstream'"; Reply = '12' }
+            @{ Match = "Choose option for 'dependency'"; Reply = '12' } # Invalid (re-prompts)
             # Empty input silently re-prompts.
-            @{ Match = "Choose option for 'upstream'"; Reply = '' }
+            @{ Match = "Choose option for 'dependency'"; Reply = '' } # Empty (re-prompts)
             # Finally a valid choice. On 0.x.y the menu offers [1-4] only (option 5
             # is hidden because it would be numerically identical to option 4), so
             # we drive the accept path via '4'.
-            @{ Match = "Choose option for 'upstream'"; Reply = '4' }
+            @{ Match = "Choose option for 'dependency'"; Reply = '4' } # Non-breaking
         )
     }
 
     Expect = @{
-        # upstream accepted as patch → 0.2.0 → 0.2.1. downstream cascade bullet-only at 0.1.1.
+        # dependency accepted as patch → 0.2.0 → 0.2.1. dependent cascade bullet-only at 0.1.1.
         Released = @(
-            @{ Package = 'downstream'; To = '0.1.1' }
-            @{ Package = 'upstream';   To = '0.2.1' }
+            @{ Package = 'dependent'; To = '0.1.1' }
+            @{ Package = 'dependency';   To = '0.2.1' }
         )
         PromptsRaised = @(
-            "Choose option for 'upstream'"
-            "Choose option for 'upstream'"
-            "Choose option for 'upstream'"
+            "Choose option for 'dependency'"
+            "Choose option for 'dependency'"
+            "Choose option for 'dependency'"
         )
         UnconsumedAnswers = @()
     }

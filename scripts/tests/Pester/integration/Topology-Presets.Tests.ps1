@@ -13,21 +13,21 @@ Describe 'Topology presets (smoke)' {
     }
 
     Context 'Linear2' {
-        It 'detects modified upstream' {
+        It 'detects modified dependency' {
             $ws = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'linear2')
-            $ws.ModifySource('upstream')
-            $ws.AddCommit('upstream edit')
-            $ws.SetVersion('downstream', '0.1.1')
-            $ws.AddCommit('change downstream')
-            # downstream's release artefact must have source modifications past
+            $ws.ModifySource('dependency')
+            $ws.AddCommit('dependency edit')
+            $ws.SetVersion('dependent', '0.1.1')
+            $ws.AddCommit('change dependent')
+            # dependent's release artefact must have source modifications past
             # its baseline for the LIVE filter to use it as a BFS root.
-            $ws.ModifySource('downstream')
+            $ws.ModifySource('dependent')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $up = $findings | Where-Object { $_.Folder -eq 'upstream' }
+            $up = $findings | Where-Object { $_.Folder -eq 'dependency' }
             $up | Should -Not -BeNullOrEmpty
             $up.DependencyChains | Should -HaveCount 1
-            $up.DependencyChains[0] -join ',' | Should -Be 'downstream,upstream'
+            $up.DependencyChains[0] -join ',' | Should -Be 'dependent,dependency'
         }
     }
 
@@ -48,7 +48,7 @@ Describe 'Topology presets (smoke)' {
     }
 
     Context 'Linear4' {
-        It 'BFS depth 4 reaches leaf 3 hops upstream' {
+        It 'BFS depth 4 reaches leaf 3 hops dependency' {
             $ws = New-SyntheticWorkspace -Preset Linear4 -Path (Join-Path $TestDrive 'linear4')
             $ws.ModifySource('d')
             $ws.AddCommit('d edit')
@@ -96,9 +96,9 @@ Describe 'Topology presets (smoke)' {
     }
 
     Context 'FanOut5' {
-        It 'one shared upstream reported once across multiple version-changed dependents' {
+        It 'one shared dependency reported once across multiple version-changed dependents' {
             $ws = New-SyntheticWorkspace -Preset FanOut5 -Path (Join-Path $TestDrive 'fanout5')
-            $ws.ModifySource('shared_upstream')
+            $ws.ModifySource('shared_dependency')
             $ws.AddCommit('shared edit')
             $ws.SetVersion('user1', '0.1.1')
             $ws.SetVersion('user2', '0.2.1')
@@ -109,47 +109,47 @@ Describe 'Topology presets (smoke)' {
             $ws.ModifySource('user3')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
-            $sh = $findings | Where-Object { $_.Folder -eq 'shared_upstream' }
+            $sh = $findings | Where-Object { $_.Folder -eq 'shared_dependency' }
             $sh | Should -Not -BeNullOrEmpty
             $sh.DependencyChains.Count | Should -BeGreaterOrEqual 3
         }
     }
 
-    Context 'UpDown5' {
-        It 'detects upstream above target while target has downstream relations' {
-            $ws = New-SyntheticWorkspace -Preset UpDown5 -Path (Join-Path $TestDrive 'updown5')
-            $ws.ModifySource('upstream_a')
-            $ws.ModifySource('upstream_b')
-            $ws.AddCommit('upstream edits')
+    Context 'FanInOut5' {
+        It 'detects dependency above target while target has dependent relations' {
+            $ws = New-SyntheticWorkspace -Preset FanInOut5 -Path (Join-Path $TestDrive 'faninout5')
+            $ws.ModifySource('dependency_a')
+            $ws.ModifySource('dependency_b')
+            $ws.AddCommit('dependency edits')
             $ws.SetVersion('target', '0.3.1')
             $ws.AddCommit('change target')
             $ws.ModifySource('target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $folders = @($findings | ForEach-Object Folder)
-            $folders | Should -Contain 'upstream_a'
-            $folders | Should -Contain 'upstream_b'
+            $folders | Should -Contain 'dependency_a'
+            $folders | Should -Contain 'dependency_b'
 
             $dependents = Get-AllTransitiveDependents -packageName 'target' -repoRoot $ws.Path
-            ($dependents | Sort-Object) -join ',' | Should -Be 'downstream_x,downstream_y'
+            ($dependents | Sort-Object) -join ',' | Should -Be 'dependent_x,dependent_y'
         }
     }
 
     Context 'Mixed6' {
         It 'filters dev-deps and publish=false but keeps normal deps' {
             $ws = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'mixed6')
-            $ws.ModifySource('upstream_a')
-            $ws.ModifySource('upstream_b')
+            $ws.ModifySource('dependency_a')
+            $ws.ModifySource('dependency_b')
             $ws.ModifySource('utility')
-            $ws.AddCommit('upstream edits')
+            $ws.AddCommit('dependency edits')
             $ws.SetVersion('target', '0.1.1')
             $ws.AddCommit('change target')
             $ws.ModifySource('target')
 
             $findings = Get-UnreleasedModifiedDependencies -RepoRoot $ws.Path -ResolvedReleaseSet (New-ResolvedReleaseSetFromBaseRef -RepoRoot $ws.Path -BaseRef 'HEAD~2')
             $folders = @($findings | ForEach-Object Folder)
-            $folders | Should -Contain 'upstream_b'
-            $folders | Should -Not -Contain 'upstream_a'  # dev-dep, not surfaced
+            $folders | Should -Contain 'dependency_b'
+            $folders | Should -Not -Contain 'dependency_a'  # dev-dep, not surfaced
             $folders | Should -Not -Contain 'utility'     # publish=false
         }
     }

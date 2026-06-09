@@ -402,7 +402,7 @@ Describe 'Resolve-ReleaseSet' {
     }
 
     Context 'diamond dependency with two user-source roots' {
-        It 'accumulates one cascade reason per upstream into the diamond bottom and strengthens correctly' {
+        It 'accumulates one cascade reason per dependency into the diamond bottom and strengthens correctly' {
             # diamond:  a, x are roots;  both depended on by mid;  c depends on mid.
             # Actually:  c depends on a (patch) and c depends on b (breaking).
             $baseline = @(

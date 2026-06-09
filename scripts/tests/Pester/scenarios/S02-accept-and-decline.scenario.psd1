@@ -3,7 +3,7 @@
 
 @{
     Name        = 'S02-accept-and-decline'
-    Description = 'Linear3 with both upstream packages modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
+    Description = 'Linear3 with both dependency packages modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
 
     Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
 
@@ -11,14 +11,14 @@
         @{ Op = 'ModifySource'; Package = 'a' }
         @{ Op = 'ModifySource'; Package = 'b' }
         @{ Op = 'ModifySource'; Package = 'c' }
-        @{ Op = 'AddCommit';    Message = 'upstream edits' }
+        @{ Op = 'AddCommit';    Message = 'dependency edits' }
     )
 
     Run = @{
         Packages = @('a@patch')
         Answers   = @(
-            @{ Match = "Choose option for 'b'"; Reply = '4' }
-            @{ Match = "Choose option for 'c'"; Reply = '2' }
+            @{ Match = "Choose option for 'b'"; Reply = '4' } # Non-breaking
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
         )
     }
 

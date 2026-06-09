@@ -11,19 +11,19 @@
         @{ Op = 'ModifySource'; Package = 'a' }
         @{ Op = 'ModifySource'; Package = 'b' }
         @{ Op = 'ModifySource'; Package = 'c' }
-        @{ Op = 'AddCommit';    Message = 'upstream edits' }
+        @{ Op = 'AddCommit';    Message = 'dependency edits' }
     )
 
     Run = @{
         Packages = @('a@patch')
         Answers   = @(
             # First prompt for b: view the diff.
-            @{ Match = "Choose option for 'b'"; Reply = '1' }
+            @{ Match = "Choose option for 'b'"; Reply = '1' } # View diff
             # Script re-prompts for b after diff (without re-rendering the
             # menu); this time choose minor.
-            @{ Match = "Choose option for 'b'"; Reply = '4' }
+            @{ Match = "Choose option for 'b'"; Reply = '4' } # Non-breaking
             # Next iteration prompts for c; user ignores.
-            @{ Match = "Choose option for 'c'"; Reply = '2' }
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
         )
     }
 

@@ -4,7 +4,7 @@
 # Unit tests for Write-Changelog. Pinpoints two paths:
 #   1. The cascade-emission path — introduced when cascadeReasons changed
 #      from a single hashtable to an array of objects (so a single
-#      downstream package can record being pulled in by multiple released
+#      dependent package can record being pulled in by multiple released
 #      dependencies in one PR).
 #   2. The unreleased-section folding path — Write-Changelog folds any
 #      pre-existing `## Unreleased` / `## [Unreleased]` body into the new

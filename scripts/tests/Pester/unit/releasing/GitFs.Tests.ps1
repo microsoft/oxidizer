@@ -44,7 +44,7 @@ Describe 'Get-CurrentVersion' {
     }
 
     It 'reads the version from a package Cargo.toml' {
-        $cargo = Join-Path $script:Ws.Path 'crates\upstream\Cargo.toml'
+        $cargo = Join-Path $script:Ws.Path 'crates\dependency\Cargo.toml'
         Get-CurrentVersion -cargoTomlPath $cargo | Should -Be '0.2.0'
     }
 
@@ -327,10 +327,10 @@ Describe 'Get-WorkspacePackages' {
     It 'excludes dev-deps from Deps' {
         $packages = Get-WorkspacePackages -repoRoot $script:Ws.Path
         $target = $packages | Where-Object { $_.Name -eq 'target' }
-        # Mixed6 wires a normal dep on upstream_b and a dev dep on upstream_a;
+        # Mixed6 wires a normal dep on dependency_b and a dev dep on dependency_a;
         # Get-WorkspacePackages flattens to normal/build only.
-        $target.Deps | Should -Contain 'upstream_b'
-        $target.Deps | Should -Not -Contain 'upstream_a'
+        $target.Deps | Should -Contain 'dependency_b'
+        $target.Deps | Should -Not -Contain 'dependency_a'
     }
 }
 
@@ -353,11 +353,11 @@ Describe 'Get-AllTransitiveDependents' {
     }
 
     It 'excludes publish=false packages from the result' {
-        # Use Mixed6 — utility is publish=false and depends on downstream_y.
+        # Use Mixed6 — utility is publish=false and depends on dependent_y.
         Reset-ReleaseScriptCaches
         $mixed = New-SyntheticWorkspace -Preset Mixed6 -Path (Join-Path $TestDrive 'transitive-mixed')
-        $deps = Get-AllTransitiveDependents -packageName 'downstream_y' -repoRoot $mixed.Path
-        # utility depends on downstream_y but is publish=false; should not appear.
+        $deps = Get-AllTransitiveDependents -packageName 'dependent_y' -repoRoot $mixed.Path
+        # utility depends on dependent_y but is publish=false; should not appear.
         $deps | Should -Not -Contain 'utility'
     }
 }

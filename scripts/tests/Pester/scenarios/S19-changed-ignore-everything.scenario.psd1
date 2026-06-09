@@ -22,9 +22,9 @@
         # a comes last as a Phase-B stub (no in-release-set dependents).
         Mode    = 'changed'
         Answers = @(
-            @{ Match = "Choose option for 'b'"; Reply = '2' }
-            @{ Match = "Choose option for 'c'"; Reply = '2' }
-            @{ Match = "Choose option for 'a'"; Reply = '2' }
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'a'"; Reply = '2' } # Skip
         )
     }
 

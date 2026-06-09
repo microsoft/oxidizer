@@ -9,7 +9,7 @@
 .DESCRIPTION
     Creates a temporary on-disk Cargo workspace under a chosen path, initialised as
     a Git repo with a single baseline commit. Exposes named topology presets
-    (Linear2, Linear3, Linear4, Diamond4, Macros3, FanOut5, UpDown5, Mixed6,
+    (Linear2, Linear3, Linear4, Diamond4, Macros3, FanOut5, FanInOut5, Mixed6,
     Detached) and a `-Spec` parameter for ad-hoc topologies.
 
     The returned object exposes mutation helpers (ModifySource, SetVersion,
@@ -34,7 +34,7 @@ function Get-PresetSpec {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateSet('Linear2', 'Linear3', 'Linear4', 'Diamond4', 'Macros3',
-                     'FanOut5', 'UpDown5', 'Mixed6', 'Detached')]
+                     'FanOut5', 'FanInOut5', 'Mixed6', 'Detached')]
         [string]$Name
     )
 
@@ -42,8 +42,8 @@ function Get-PresetSpec {
         'Linear2' {
             return @{
                 Packages = @(
-                    @{ Name = 'downstream'; Version = '0.1.0'; Deps = @(@{ Name = 'upstream' }) }
-                    @{ Name = 'upstream';   Version = '0.2.0' }
+                    @{ Name = 'dependent'; Version = '0.1.0'; Deps = @(@{ Name = 'dependency' }) }
+                    @{ Name = 'dependency';   Version = '0.2.0' }
                 )
             }
         }
@@ -91,19 +91,19 @@ function Get-PresetSpec {
                     @{ Name = 'user1';           Version = '0.1.0'; Deps = @(@{ Name = 'hub' }) }
                     @{ Name = 'user2';           Version = '0.2.0'; Deps = @(@{ Name = 'hub' }) }
                     @{ Name = 'user3';           Version = '0.3.0'; Deps = @(@{ Name = 'hub' }) }
-                    @{ Name = 'hub';             Version = '0.4.0'; Deps = @(@{ Name = 'shared_upstream' }) }
-                    @{ Name = 'shared_upstream'; Version = '0.5.0' }
+                    @{ Name = 'hub';             Version = '0.4.0'; Deps = @(@{ Name = 'shared_dependency' }) }
+                    @{ Name = 'shared_dependency'; Version = '0.5.0' }
                 )
             }
         }
-        'UpDown5' {
+        'FanInOut5' {
             return @{
                 Packages = @(
-                    @{ Name = 'downstream_x'; Version = '0.1.0'; Deps = @(@{ Name = 'target' }) }
-                    @{ Name = 'downstream_y'; Version = '0.2.0'; Deps = @(@{ Name = 'target' }) }
-                    @{ Name = 'target';       Version = '0.3.0'; Deps = @(@{ Name = 'upstream_a' }, @{ Name = 'upstream_b' }) }
-                    @{ Name = 'upstream_a';   Version = '0.4.0' }
-                    @{ Name = 'upstream_b';   Version = '0.5.0' }
+                    @{ Name = 'dependent_x'; Version = '0.1.0'; Deps = @(@{ Name = 'target' }) }
+                    @{ Name = 'dependent_y'; Version = '0.2.0'; Deps = @(@{ Name = 'target' }) }
+                    @{ Name = 'target';       Version = '0.3.0'; Deps = @(@{ Name = 'dependency_a' }, @{ Name = 'dependency_b' }) }
+                    @{ Name = 'dependency_a';   Version = '0.4.0' }
+                    @{ Name = 'dependency_b';   Version = '0.5.0' }
                 )
             }
         }
@@ -111,13 +111,13 @@ function Get-PresetSpec {
             return @{
                 Packages = @(
                     @{ Name = 'target';       Version = '0.1.0'; Deps = @(
-                        @{ Name = 'upstream_b' }
-                        @{ Name = 'upstream_a'; Kind = 'dev' }
+                        @{ Name = 'dependency_b' }
+                        @{ Name = 'dependency_a'; Kind = 'dev' }
                     ) }
-                    @{ Name = 'upstream_a';   Version = '0.3.0' }
-                    @{ Name = 'upstream_b';   Version = '0.2.0' }
-                    @{ Name = 'downstream_x'; Version = '0.4.0'; Deps = @(@{ Name = 'target' }) }
-                    @{ Name = 'downstream_y'; Version = '0.5.0'; Deps = @(@{ Name = 'target' }, @{ Name = 'utility' }) }
+                    @{ Name = 'dependency_a';   Version = '0.3.0' }
+                    @{ Name = 'dependency_b';   Version = '0.2.0' }
+                    @{ Name = 'dependent_x'; Version = '0.4.0'; Deps = @(@{ Name = 'target' }) }
+                    @{ Name = 'dependent_y'; Version = '0.5.0'; Deps = @(@{ Name = 'target' }, @{ Name = 'utility' }) }
                     @{ Name = 'utility';      Version = '0.6.0'; Published = $false }
                 )
             }
@@ -276,7 +276,7 @@ function New-SyntheticWorkspace {
     param(
         [Parameter(Mandatory = $true, ParameterSetName = 'Preset')]
         [ValidateSet('Linear2', 'Linear3', 'Linear4', 'Diamond4', 'Macros3',
-                     'FanOut5', 'UpDown5', 'Mixed6', 'Detached')]
+                     'FanOut5', 'FanInOut5', 'Mixed6', 'Detached')]
         [string]$Preset,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'Spec')]
