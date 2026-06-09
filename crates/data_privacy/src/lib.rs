@@ -204,16 +204,6 @@ pub use data_privacy_core::{Classified, DataClass, IntoDataClass, RedactedDebug,
 /// regular [`Debug`](core::fmt::Debug) implementation, exactly as `#[derive(Debug)]` would do. Use
 /// this only for fields that are known to never carry sensitive data.
 ///
-/// # Generated output
-///
-/// The shape of the output depends on the kind of struct:
-///
-/// - Named structs render as `Name { field: value, ... }`.
-/// - Tuple structs render as `Name(value, ...)`.
-/// - Unit structs render as `Name`.
-///
-/// Deriving on an enum or union is not supported and produces a compile-time error.
-///
 /// # Example
 ///
 /// ```rust
@@ -279,16 +269,6 @@ pub use data_privacy_macros::RedactedDebug;
 /// Mark a field with `#[unredacted]` to opt it out of redaction. Such a field is formatted with its
 /// regular [`Display`](core::fmt::Display) implementation. Use this only for fields that are known
 /// to never carry sensitive data.
-///
-/// # Generated output
-///
-/// The shape of the output depends on the kind of struct:
-///
-/// - Named structs render as `Name { field: value, ... }`.
-/// - Tuple structs render as `Name(value, ...)`.
-/// - Unit structs render as `Name`.
-///
-/// Deriving on an enum or union is not supported and produces a compile-time error.
 ///
 /// # Example
 ///
