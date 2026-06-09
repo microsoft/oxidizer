@@ -3142,20 +3142,30 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_arc_from_str_oversized_routes_via_oversized_shared() {
-        let arena = Arena::new();
+        // Force a small `max_normal_alloc` so the 16 KiB transcoded
+        // payload is guaranteed to take the oversized-shared branch
+        // regardless of any future change to the default threshold.
+        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
         let len = 16 * 1024;
         let src: String = "a".repeat(len);
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
+        #[cfg(feature = "stats")]
+        assert!(arena.stats().oversized_shared_chunks_allocated >= 1);
     }
 
     #[test]
     fn alloc_utf16_str_box_from_str_oversized_routes_via_oversized_shared() {
-        let arena = Arena::new();
+        // Force a small `max_normal_alloc` so the 16 KiB transcoded
+        // payload is guaranteed to take the oversized-shared branch
+        // regardless of any future change to the default threshold.
+        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
         let len = 16 * 1024;
         let src: String = "a".repeat(len);
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
+        #[cfg(feature = "stats")]
+        assert!(arena.stats().oversized_shared_chunks_allocated >= 1);
     }
 }
 
