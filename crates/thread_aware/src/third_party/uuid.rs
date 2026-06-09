@@ -1,15 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`uuid`](::uuid_v1) (1.x) types.
+//! `ThreadAware` impls for [`uuid`](::uuid) (1.x) types.
 //!
-//! Enable with the `uuid_v1` Cargo feature.
+//! Enable with the `uuid` Cargo feature.
 
-impl_noop_thread_aware!(::uuid_v1::Uuid);
+impl_noop_thread_aware!(::uuid::Uuid);
 
 #[cfg(test)]
 mod tests {
-    use ::uuid_v1::Uuid;
+    use ::uuid::Uuid;
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;

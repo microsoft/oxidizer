@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`bytes`](::bytes_v1) (1.x) types.
+//! `ThreadAware` impls for [`bytes`](::bytes) (1.x) types.
 //!
-//! Enable with the `bytes_v1` Cargo feature.
+//! Enable with the `bytes` Cargo feature.
 //!
 //! `Bytes` and `BytesMut` internally use reference counting to share the
 //! underlying allocation, but they expose an immutable / single-writer
@@ -13,13 +13,13 @@
 //! still wrap them in [`crate::Arc`] with an appropriate
 //! [`Strategy`](crate::storage::Strategy).
 
-use ::bytes_v1::{Bytes, BytesMut};
+use ::bytes::{Bytes, BytesMut};
 
 impl_noop_thread_aware!(Bytes, BytesMut);
 
 #[cfg(test)]
 mod tests {
-    use ::bytes_v1::{Bytes, BytesMut};
+    use ::bytes::{Bytes, BytesMut};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;

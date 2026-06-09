@@ -4,15 +4,15 @@
 use core::hint::black_box;
 use std::str::FromStr;
 
-use bytes_v1::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use gungraun::{library_benchmark, library_benchmark_group};
-use http_v1::header::{HeaderMap, HeaderName, HeaderValue};
-use http_v1::{Method, Request, Response, StatusCode, Version};
-use jiff_v0_2::civil::{Date, DateTime, ISOWeekDate, Time};
-use jiff_v0_2::{SignedDuration, Span, Timestamp};
+use http::header::{HeaderMap, HeaderName, HeaderValue};
+use http::{Method, Request, Response, StatusCode, Version};
+use jiff::civil::{Date, DateTime, ISOWeekDate, Time};
+use jiff::{SignedDuration, Span, Timestamp};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
-use uuid_v1::Uuid;
+use uuid::Uuid;
 
 const N: usize = 1_000;
 
@@ -90,7 +90,7 @@ noop_bench!(noop_value_datetime, DateTime, DateTime::constant(2026, 6, 8, 12, 0,
 noop_bench!(
     noop_value_iso_week_date,
     ISOWeekDate,
-    ISOWeekDate::new(2026, 23, jiff_v0_2::civil::Weekday::Monday).expect("valid ISO week date")
+    ISOWeekDate::new(2026, 23, jiff::civil::Weekday::Monday).expect("valid ISO week date")
 );
 
 // ===== header_map — cost must be identical across sizes =====

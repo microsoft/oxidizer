@@ -100,12 +100,12 @@
 //! pulls that crate in as a dependency. By default none are enabled and this
 //! crate brings in no extra dependencies.
 //!
-//! * **`bytes_v1`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
-//! * **`http_v1`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
+//! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+//! * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
 //!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
 //!   `http::Request<T>`, `http::Response<T>`.
-//! * **`jiff_v0_2`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
-//! * **`uuid_v1`**: Impl for `uuid::Uuid`.
+//! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+//! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
 //! # Examples
 //!

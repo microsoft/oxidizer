@@ -7,7 +7,7 @@
 //! `<group>_<variant>` corresponds to a criterion benchmark `<group>/<variant>`.
 //!
 //! Run with: `cargo bench -p thread_aware --bench gungraun_third_party \
-//!     --features "bytes_v1 http_v1 jiff_v0_2 uuid_v1"` on a Linux host
+//!     --features "bytes http jiff02 uuid"` on a Linux host
 //! with Valgrind installed.
 
 #![allow(missing_docs, reason = "benchmark code")]

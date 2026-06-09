@@ -3,17 +3,19 @@
 
 //! `ThreadAware` implementations for selected 3rd-party crate types.
 //!
-//! Each submodule is gated behind a Cargo feature whose name embeds the major
-//! (or 0.x minor) of the wrapped crate — for example `bytes_v1`, `http_v1`,
-//! `jiff_v0_2`, `uuid_v1`. Enabling a feature pulls in that crate as a
-//! dependency and exposes `ThreadAware` impls for inert, self-contained types
-//! from it. By default no such features are enabled, so this crate does not
-//! pull in any of these wrapped crates as additional dependencies.
+//! Each submodule is gated behind a Cargo feature named after the wrapped
+//! crate (and its major / 0.x minor where applicable): `bytes`, `http`,
+//! `jiff02`, `uuid`. Enabling a feature pulls in that crate as a dependency
+//! and exposes `ThreadAware` impls for inert, self-contained types from it.
+//! By default no such features are enabled, so this crate does not pull in
+//! any of these wrapped crates as additional dependencies.
 //!
-//! The version-suffixed naming lets us support a future major of any of these
-//! crates additively: when, say, `bytes 2.0` ships we can add a `bytes_v2`
-//! feature without removing `bytes_v1`, avoiding a breaking release of this
-//! crate purely because of an upstream major bump.
+//! Naming follows a convention agreed during PR review (see this crate's
+//! `Cargo.toml` for the full rules): stable `1.x` crates get their bare
+//! name (`bytes`, `http`, `uuid`); pre-`1.0` crates encode their `0.x`
+//! version (`jiff02`); and a future major (e.g. `bytes 2.0`) would be
+//! added additively as a separate feature (e.g. `bytes2`), avoiding a
+//! breaking release of this crate purely because of an upstream major bump.
 //!
 //! Tests in this module are compiled and run as part of `cargo test` without
 //! needing the features enabled — the wrapped crates are also listed as
@@ -27,7 +29,7 @@
 /// The bodies of the implementations are empty because the listed types are
 /// inert value types: they hold no thread-local state, perform no I/O, and
 /// participate in no cross-thread sharing that would benefit from relocation.
-#[cfg(any(test, feature = "bytes_v1", feature = "http_v1", feature = "jiff_v0_2", feature = "uuid_v1",))]
+#[cfg(any(test, feature = "bytes", feature = "http", feature = "jiff02", feature = "uuid",))]
 macro_rules! impl_noop_thread_aware {
     ($($t:ty),+ $(,)?) => {
         $(
@@ -42,14 +44,14 @@ macro_rules! impl_noop_thread_aware {
     };
 }
 
-#[cfg(any(test, feature = "bytes_v1"))]
-mod bytes_v1;
+#[cfg(any(test, feature = "bytes"))]
+mod bytes;
 
-#[cfg(any(test, feature = "http_v1"))]
-mod http_v1;
+#[cfg(any(test, feature = "http"))]
+mod http;
 
-#[cfg(any(test, feature = "jiff_v0_2"))]
-mod jiff_v0_2;
+#[cfg(any(test, feature = "jiff02"))]
+mod jiff02;
 
-#[cfg(any(test, feature = "uuid_v1"))]
-mod uuid_v1;
+#[cfg(any(test, feature = "uuid"))]
+mod uuid;

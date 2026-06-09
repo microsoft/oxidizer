@@ -21,7 +21,7 @@
 //! map.
 //!
 //! Run with: `cargo bench -p thread_aware --bench criterion_third_party \
-//!     --features "bytes_v1 http_v1 jiff_v0_2 uuid_v1"`
+//!     --features "bytes http jiff02 uuid"`
 
 #![allow(missing_docs, reason = "benchmark code")]
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
@@ -32,16 +32,16 @@
 use std::hint::black_box;
 use std::str::FromStr;
 
-use bytes_v1::{Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
-use http_v1::header::{HeaderMap, HeaderName, HeaderValue};
-use http_v1::{Method, Request, Response, StatusCode, Version};
-use jiff_v0_2::civil::{Date, DateTime, ISOWeekDate, Time};
-use jiff_v0_2::{SignedDuration, Span, Timestamp};
+use http::header::{HeaderMap, HeaderName, HeaderValue};
+use http::{Method, Request, Response, StatusCode, Version};
+use jiff::civil::{Date, DateTime, ISOWeekDate, Time};
+use jiff::{SignedDuration, Span, Timestamp};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::{Affinity, pinned_affinities};
-use uuid_v1::Uuid;
+use uuid::Uuid;
 
 /// Returns a `(src, dst)` pair to feed `ThreadAware::relocate`.
 fn affinities() -> (Affinity, Affinity) {
@@ -125,7 +125,7 @@ fn bench_noop_value(c: &mut Criterion) {
     bench_relocate(
         &mut g,
         "iso_week_date",
-        ISOWeekDate::new(2026, 23, jiff_v0_2::civil::Weekday::Monday).unwrap(),
+        ISOWeekDate::new(2026, 23, jiff::civil::Weekday::Monday).unwrap(),
         src,
         dst,
     );

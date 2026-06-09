@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `ThreadAware` impls for [`http`](::http_v1) (1.x) types.
+//! `ThreadAware` impls for [`http`](::http) (1.x) types.
 //!
-//! Enable with the `http_v1` Cargo feature.
+//! Enable with the `http` Cargo feature.
 //!
 //! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
 //! `HeaderValue`) get a no-op `relocate`. The `HeaderMap` impl is provided
@@ -12,8 +12,8 @@
 //! is itself no-op — iterating would be pure waste. See the per-impl docs
 //! on [`Request<T>`] and [`Response<T>`] for their `relocate` semantics.
 
-use ::http_v1::header::{HeaderMap, HeaderName, HeaderValue};
-use ::http_v1::{Method, Request, Response, StatusCode, Version};
+use ::http::header::{HeaderMap, HeaderName, HeaderValue};
+use ::http::{Method, Request, Response, StatusCode, Version};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
@@ -48,8 +48,8 @@ impl<T: ThreadAware> ThreadAware for Response<T> {
 
 #[cfg(test)]
 mod tests {
-    use ::http_v1::header::{HeaderMap, HeaderName, HeaderValue};
-    use ::http_v1::{Method, Request, Response, StatusCode, Version};
+    use ::http::header::{HeaderMap, HeaderName, HeaderValue};
+    use ::http::{Method, Request, Response, StatusCode, Version};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;

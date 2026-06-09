@@ -19,10 +19,10 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "thread_aware_macros::ThreadAware",
-    # `bytes_v1` feature
+    # `bytes` feature
     "bytes::bytes::Bytes",
     "bytes::bytes_mut::BytesMut",
-    # `http_v1` feature
+    # `http` feature
     "http::header::map::HeaderMap",
     "http::header::name::HeaderName",
     "http::header::value::HeaderValue",
@@ -31,7 +31,7 @@ allowed_external_types = [
     "http::response::Response",
     "http::status::StatusCode",
     "http::version::Version",
-    # `jiff_v0_2` feature
+    # `jiff02` feature
     "jiff::civil::date::Date",
     "jiff::civil::datetime::DateTime",
     "jiff::civil::iso_week_date::ISOWeekDate",
@@ -39,7 +39,7 @@ allowed_external_types = [
     "jiff::signed_duration::SignedDuration",
     "jiff::span::Span",
     "jiff::timestamp::Timestamp",
-    # `uuid_v1` feature
+    # `uuid` feature
     "uuid::Uuid",
 ]
 
@@ -51,37 +51,50 @@ default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
 
-# Optional `ThreadAware` impls for 3rd-party crate types. Each feature is
-# suffixed with the major (or 0.x minor) of the wrapped crate so that new
-# breaking versions of those crates can be supported additively (e.g. a
-# future `bytes_v2`) without forcing a breaking release of this crate.
+# Optional `ThreadAware` impls for 3rd-party crate types. By default no such
+# features are enabled, so this crate does not pull in any additional
+# dependencies. Enabling a feature pulls in that crate and exposes the impls.
+#
+# Feature naming convention (agreed during PR review):
+#
+# * Crate at `1.x` (or any other stable major)
+#     → bare crate name (e.g. `bytes`, `http`, `uuid`)
+# * Crate at `N.x` for N >= 2
+#     → `<crate><N>` (e.g. `bytes2` if we ever added bytes 2.x)
+# * Crate at `0.x`
+#     → `<crate>0<x>` (e.g. `jiff02` for jiff 0.2.x, `jiff03` for 0.3.x)
+#
+# A future breaking version of any of these crates can therefore be supported
+# additively (e.g. add a new `bytes2` feature alongside `bytes`) without forcing
+# a breaking release of this crate.
+#
 # See the `third_party` module for the list of types each feature covers.
-bytes_v1 = ["dep:bytes_v1"]
-http_v1 = ["dep:http_v1"]
-jiff_v0_2 = ["dep:jiff_v0_2"]
-uuid_v1 = ["dep:uuid_v1"]
+bytes = ["dep:bytes"]
+http = ["dep:http"]
+jiff02 = ["dep:jiff"]
+uuid = ["dep:uuid"]
 
 [dependencies]
 many_cpus = { workspace = true, optional = true }
 
 thread_aware_macros = { workspace = true, optional = true }
 
-bytes_v1 = { version = "1.11.1", default-features = false, package = "bytes", optional = true }
-http_v1 = { version = "1.4.1", default-features = false, features = ["std"], package = "http", optional = true }
-jiff_v0_2 = { version = "0.2.21", default-features = false, package = "jiff", optional = true }
-uuid_v1 = { version = "1.21.0", default-features = false, package = "uuid", optional = true }
+bytes = { version = "1.11.1", default-features = false, optional = true }
+http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
+jiff = { version = "0.2.21", default-features = false, optional = true }
+uuid = { version = "1.21.0", default-features = false, optional = true }
 
 [dev-dependencies]
-bytes_v1 = { version = "1.11.1", default-features = false, package = "bytes" }
+bytes = { version = "1.11.1", default-features = false }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-http_v1 = { version = "1.4.1", default-features = false, features = ["std"], package = "http" }
-jiff_v0_2 = { version = "0.2.21", default-features = false, package = "jiff" }
+http = { version = "1.4.1", default-features = false, features = ["std"] }
+jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
-uuid_v1 = { version = "1.21.0", default-features = false, package = "uuid" }
+uuid = { version = "1.21.0", default-features = false }
 
 # Workspace dep declares `default-features = false`; we re-enable `default` here
 # (which pulls in the `benchmark` feature with `library_benchmark`,
@@ -96,7 +109,7 @@ workspace = true
 [[bench]]
 name = "criterion_third_party"
 harness = false
-required-features = ["bytes_v1", "http_v1", "jiff_v0_2", "uuid_v1"]
+required-features = ["bytes", "http", "jiff02", "uuid"]
 
 # Callgrind benches require Linux (Valgrind). The bench file is gated to compile
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
@@ -104,4 +117,4 @@ required-features = ["bytes_v1", "http_v1", "jiff_v0_2", "uuid_v1"]
 [[bench]]
 name = "gungraun_third_party"
 harness = false
-required-features = ["bytes_v1", "http_v1", "jiff_v0_2", "uuid_v1"]
+required-features = ["bytes", "http", "jiff02", "uuid"]
