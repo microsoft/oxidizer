@@ -675,7 +675,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     pub fn fetch_json<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<Response<J>>> + Send {
         self.fetch().and_then(|response| {
             let (parts, body) = response.into_parts();
-            body.into_json_owned::<J>().map_ok(move |body| Response::from_parts(parts, body))
+            body.into_json::<J>().map_ok(move |body| Response::from_parts(parts, body))
         })
     }
 
@@ -739,7 +739,7 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     pub fn fetch_json_ref<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<Response<crate::Json<J>>>> + Send {
         self.fetch().and_then(|response| {
             let (parts, body) = response.into_parts();
-            body.into_json::<J>().map_ok(move |body| Response::from_parts(parts, body))
+            body.into_json_ref::<J>().map_ok(move |body| Response::from_parts(parts, body))
         })
     }
 
@@ -880,13 +880,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The response body isn't valid UTF-8
     /// - JSON deserialization failed
     // Chained `and_then` (rather than `Either` + `ready(Err(..))`) keeps the returned future
-    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json_owned`,
+    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json`,
     // which never stores the value in its future state, so no `J` is held across the chain.
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_body<J: serde_core::de::DeserializeOwned>(self) -> impl Future<Output = Result<J>> + Send {
         self.fetch()
             .and_then(|response| ready(response.ensure_success()))
-            .and_then(|response| response.into_body().into_json_owned::<J>())
+            .and_then(|response| response.into_body().into_json::<J>())
     }
 
     /// Sends the request, validates the response status, and returns the JSON body with optional borrowing.
@@ -949,13 +949,13 @@ impl<R: RequestHandler> HttpRequestBuilder<'_, R> {
     /// - The response status is not in the `2xx` success range
     /// - The response body isn't valid UTF-8
     // Chained `and_then` (rather than `Either` + `ready(Err(..))`) keeps the returned future
-    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json`, which
+    // `Send` without requiring `J: Send`: the only stage that mentions `J` is `into_json_ref`, which
     // yields the `Json<J>` wrapper as its final output and never holds it across an await point.
     #[cfg(any(feature = "json", test))]
     pub fn fetch_json_ref_body<'de, J: serde_core::de::Deserialize<'de>>(self) -> impl Future<Output = Result<crate::Json<J>>> + Send {
         self.fetch()
             .and_then(|response| ready(response.ensure_success()))
-            .and_then(|response| response.into_body().into_json::<J>())
+            .and_then(|response| response.into_body().into_json_ref::<J>())
     }
 }
 
