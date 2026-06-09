@@ -3160,7 +3160,7 @@ mod from_coverage_extras_utf16 {
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
         #[cfg(feature = "stats")]
-        assert!(arena.stats().oversized_shared_chunks_allocated >= 1);
+        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
     }
 
     #[test]
@@ -3183,7 +3183,7 @@ mod from_coverage_extras_utf16 {
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
         #[cfg(feature = "stats")]
-        assert!(arena.stats().oversized_shared_chunks_allocated >= 1);
+        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
     }
 }
 
