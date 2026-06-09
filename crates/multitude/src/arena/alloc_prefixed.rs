@@ -1,0 +1,156 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Length-prefixed shared-chunk allocator for thin string smart pointers
+//! ([`Arc<str>`](crate::Arc), [`Box<str>`](crate::Box),
+//! [`ArcUtf16Str`](crate::strings::ArcUtf16Str),
+//! [`BoxUtf16Str`](crate::strings::BoxUtf16Str)) and the generic thin
+//! DST `Arc<[T]>` / `Box<[T]>` family.
+//!
+//! Layout: `[usize len (unaligned)][len * T payload]`. The payload is
+//! T-aligned because the reservation itself is T-aligned and
+//! `PREFIX_BYTES` is a multiple of any supported T's align. The leading
+//! `usize` is read unaligned, so consecutive prefixed allocations pack
+//! without per-allocation alignment padding for the length field.
+//!
+//! Restriction: `align_of::<T>() <= align_of::<usize>()` (statically
+//! asserted). All current callers use `u8`, `u16`, or `usize`.
+
+use core::mem;
+use core::ptr::{self, NonNull};
+
+use allocator_api2::alloc::{AllocError, Allocator};
+
+use super::Arena;
+use super::alloc_value::acquire_shared_chunk_ref;
+use crate::internal::chunk_ref::ChunkRef;
+
+/// Byte size of the inline element-count prefix written immediately
+/// before every prefixed-shared payload.
+pub(crate) const PREFIX_BYTES: usize = mem::size_of::<usize>();
+
+/// Worst-case byte budget for a thin-pointer smart-slice allocation of
+/// `len` elements of type `T` (used by [`Arc<[T]>`](crate::Arc) /
+/// [`Box<[T]>`](crate::Box) refill hints).
+///
+/// Includes the length prefix + payload alignment slack + payload
+/// bytes + (if `T: Drop`) one drop-entry slot. Saturates at
+/// `usize::MAX` on overflow.
+#[inline]
+#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
+pub(crate) fn worst_case_thin_slice_payload<T>(len: usize) -> usize {
+    let elem_size = mem::size_of::<T>();
+    let elem_align = mem::align_of::<T>();
+    let payload_offset = PREFIX_BYTES.max(elem_align);
+    let value_bytes = elem_size.saturating_mul(len);
+    let base = payload_offset
+        .saturating_add(value_bytes)
+        // Account for try_alloc's possible alignment padding (one
+        // worst-case align-up at the front of the reservation).
+        .saturating_add(elem_align);
+    if mem::needs_drop::<T>() {
+        base.saturating_add(mem::size_of::<crate::internal::drop_entry::DropEntry>())
+            .saturating_add(mem::align_of::<crate::internal::drop_entry::DropEntry>())
+    } else {
+        base
+    }
+}
+
+impl<A: Allocator + Clone> Arena<A> {
+    /// Reserves `PREFIX_BYTES + max(src.len() * size_of::<T>(),
+    /// align_of::<T>())` bytes in the current shared chunk, writes the
+    /// length prefix (unaligned) and the payload, bumps the chunk's
+    /// strong refcount by one for the new smart pointer, and returns a
+    /// thin `NonNull<T>` to the first payload element.
+    ///
+    /// `T` must have `align_of::<T>() <= align_of::<usize>()`; see
+    /// module docs.
+    #[inline(always)]
+    pub(crate) fn impl_alloc_prefixed_shared<T: Copy>(&self, src: &[T]) -> Result<NonNull<T>, AllocError> {
+        const {
+            assert!(
+                mem::align_of::<T>() <= mem::align_of::<usize>(),
+                "impl_alloc_prefixed_shared: T's align must not exceed usize's align (PREFIX_BYTES would otherwise not guarantee payload alignment)",
+            );
+        }
+        let elem_size = mem::size_of::<T>();
+        let elem_align = mem::align_of::<T>();
+        let len = src.len();
+        // Payload is at least `elem_align` bytes so the returned payload
+        // pointer is strictly inside the chunk (never one-past-end at
+        // `chunk_base + CHUNK_ALIGN`), preserving the mask-based chunk
+        // recovery invariant used by the smart pointers' `Drop`.
+        let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError)?.max(elem_align);
+        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
+        loop {
+            // Allocate `total` bytes aligned to `align_of::<T>()` so the
+            // payload (at offset PREFIX_BYTES, a multiple of any align
+            // ≤ usize's) ends up naturally aligned for `T` reads/writes.
+            if let Some((uninit, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, elem_align) {
+                let chunk_ref: ChunkRef<A> = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let payload = write_prefixed_payload::<T>(uninit.as_non_null(), src);
+                // Hand the +1 over to the caller's smart pointer.
+                let _ = chunk_ref.forget();
+                #[cfg(feature = "stats")]
+                self.record_alloc(len.saturating_mul(elem_size));
+                return Ok(payload);
+            }
+            if self.is_oversized_shared(total) {
+                return self.alloc_oversized_shared_with(total, |mutator, chunk_ptr| {
+                    let (base, _chunk_unused) = mutator
+                        .try_alloc_with_chunk(total, elem_align)
+                        .expect("dedicated oversized chunk sized to fit prefixed payload");
+                    let chunk_ref: ChunkRef<A> = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let payload = write_prefixed_payload::<T>(base.as_non_null(), src);
+                    let _ = chunk_ref.forget();
+                    #[cfg(feature = "stats")]
+                    self.record_alloc(len.saturating_mul(elem_size));
+                    payload
+                });
+            }
+            self.refill_shared(total)?;
+        }
+    }
+}
+
+/// Write the length prefix (unaligned `usize`) at `base` and copy
+/// `src` immediately after, returning a thin pointer to the first
+/// payload element.
+///
+/// Shared between the in-arena fast path and the dedicated-oversized
+/// path in [`Arena::impl_alloc_prefixed_shared`]; isolating the
+/// unsafe write to one place keeps the call sites trivial.
+#[inline(always)]
+fn write_prefixed_payload<T: Copy>(base: NonNull<u8>, src: &[T]) -> NonNull<T> {
+    let len = src.len();
+    // SAFETY: `base` references at least `PREFIX_BYTES + len * size_of::<T>()`
+    // bytes of exclusively-owned chunk storage aligned to `align_of::<T>()`
+    // (caller's reservation). `write_unaligned::<usize>` needs only u8
+    // alignment. `base + PREFIX_BYTES` is T-aligned because PREFIX_BYTES
+    // is a multiple of any align ≤ usize's. The payload slot covers
+    // `len * elem_size` bytes (the empty-`src` floor in the caller only
+    // matters when no copy happens).
+    unsafe {
+        ptr::write_unaligned(base.as_ptr().cast::<usize>(), len);
+        let payload_ptr = base.as_ptr().add(PREFIX_BYTES).cast::<T>();
+        ptr::copy_nonoverlapping(src.as_ptr(), payload_ptr, len);
+        NonNull::new_unchecked(payload_ptr)
+    }
+}
+
+/// Read the inline element-count prefix from a length-prefixed thin
+/// payload pointer, using an unaligned `usize` load.
+///
+/// # Safety
+///
+/// `payload_ptr` must point at the first payload element of a region
+/// previously produced by [`Arena::impl_alloc_prefixed_shared`]; the
+/// prefix word is read at `payload_ptr - PREFIX_BYTES`.
+#[inline]
+#[cfg(feature = "utf16")]
+pub(crate) unsafe fn read_prefix_len<T>(payload_ptr: NonNull<T>) -> usize {
+    // SAFETY: caller's contract — the prefix word is initialized and
+    // kept alive by the smart pointer's chunk refcount; `read_unaligned`
+    // tolerates any alignment.
+    unsafe { ptr::read_unaligned(payload_ptr.as_ptr().cast::<u8>().sub(PREFIX_BYTES).cast::<usize>()) }
+}

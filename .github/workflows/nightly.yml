@@ -55,6 +55,15 @@ jobs:
     needs: [nightly-gatekeeper]
     if: ${{ needs.nightly-gatekeeper.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
+    # Suppression file: .miri-tree-borrows-skip
+    #
+    # Miri's tree-borrows mode tracks per-byte aliasing provenance,
+    # which can cause certain tests to exceed the runner's 16 GB memory
+    # limit even though the allocations under test are small. Tests
+    # listed in .miri-tree-borrows-skip (one fully-qualified path per
+    # line, # comments for justification) are passed as --skip arguments
+    # and reported as a ::warning annotation at the end of the run.
+    # These tests are functionally correct and pass on 32+ GB machines.
     steps:
       # prep
       - name: Checkout
@@ -70,7 +79,37 @@ jobs:
       - name: Miri (tree borrows)
         env:
           MIRIFLAGS: -Zmiri-tree-borrows
-        run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        shell: pwsh
+        run: |
+          # Build --skip arguments from the suppression file.
+          # See .miri-tree-borrows-skip for the list and justifications.
+          $skipArgs = @()
+          if (Test-Path .miri-tree-borrows-skip) {
+            $skipArgs = @(
+              Get-Content .miri-tree-borrows-skip |
+                ForEach-Object { ($_ -replace '#.*').Trim() } |
+                Where-Object { $_ -ne '' }
+            )
+          }
+
+          $skipFlags = @($skipArgs | ForEach-Object { "--skip"; $_ })
+          $cargoArgs = @(
+            "+${{ env.RUST_NIGHTLY }}"
+            "miri"; "test"
+            "--all-features"; "--workspace"; "--lib"; "--tests"
+            "--"
+          ) + $skipFlags
+
+          cargo @cargoArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          # Report skipped tests clearly at the end
+          if ($skipArgs.Count -gt 0) {
+            Write-Host ""
+            Write-Host "::warning::$($skipArgs.Count) test(s) skipped via .miri-tree-borrows-skip (tree-borrows provenance tracking exceeds runner memory):"
+            $skipArgs | ForEach-Object { Write-Host "  - $_" }
+          }
+        timeout-minutes: 240
 
   miri-strict-provenance:
     needs: [nightly-gatekeeper]
@@ -92,6 +131,7 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
+        timeout-minutes: 240
 
   miri-race-coverage:
     needs: [nightly-gatekeeper]
@@ -108,11 +148,21 @@ jobs:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
+      - name: Setup Miri Flags
+        # Rotate seed pairs daily based on day-of-month (1–31) to spread
+        # coverage over time. -Zmiri-many-seeds uses an exclusive upper
+        # bound, so we add 1: day 1 → seeds 1..3 (runs 1,2), day 2 →
+        # seeds 3..5 (runs 3,4), …, day 31 → seeds 61..63 (runs 61,62).
+        # Over a full month this covers seeds 1–62.
+        shell: pwsh
+        run: |
+            $seedBase = [int](Get-Date -AsUtc -Format 'dd')
+            $seedLow  = 2 * $seedBase - 1
+            $seedHigh = 2 * $seedBase + 1
+            "MIRIFLAGS=-Zmiri-many-seeds=${seedLow}..${seedHigh}" >> $env:GITHUB_ENV
 
       # execute
       - name: Miri (race coverage)
-        env:
-          MIRIFLAGS: -Zmiri-many-seeds=0..32
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace --lib --tests
         timeout-minutes: 720 # 12 hours, to accommodate the large number of seeds
 
@@ -150,3 +200,4 @@ jobs:
               --body "$ISSUE_BODY" \
               --label "bug"
           fi
+

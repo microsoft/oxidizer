@@ -218,35 +218,6 @@ fn alloc_slice_fill_with_drop_runs_at_arena_drop() {
 }
 
 #[test]
-fn bump_ref_coexists_with_arena_rc() {
-    let arena = Arena::new();
-    let rc = arena.alloc_rc(std::string::String::from("refcounted"));
-    let bump_ref: &mut std::vec::Vec<i32> = arena.alloc(vec![1, 2, 3]);
-    bump_ref.push(4);
-    assert_eq!(*rc, "refcounted");
-    assert_eq!(bump_ref.as_slice(), &[1, 2, 3, 4]);
-    let rc2 = rc.clone();
-    assert_eq!(*rc2, "refcounted");
-}
-
-#[test]
-fn arena_rc_can_outlive_arena_with_pinned_chunk() {
-    // An ArenaRc allocated alongside bump-refs in the same chunk:
-    // when the arena drops, the pinned-list release brings the
-    // chunk's refcount to 1 (just the rc); the rc keeps the chunk
-    // alive past arena drop. When the rc drops, the chunk tears
-    // down.
-    let rc = {
-        let arena = Arena::new();
-        let _bump_ref: &mut u32 = arena.alloc(99);
-        arena.alloc_rc(std::string::String::from("outlives the arena"))
-    };
-    // arena dropped; bump-ref's lifetime expired; rc still valid.
-    assert_eq!(*rc, "outlives the arena");
-    drop(rc);
-}
-
-#[test]
 fn alloc_lifetime_bound_by_arena_borrow() {
     // Compile-time check: this compiles because the bump-ref's
     // lifetime is bounded by the arena reference.
@@ -304,30 +275,3 @@ fn pinned_chunk_with_allocator_api2_vec_drops_cleanly() {
 
 // Slack reclamation interaction with cache: cached chunk should NOT be
 // pinned (cache reuse must reset the flag).
-
-#[cfg(feature = "stats")]
-#[test]
-fn cache_revive_resets_pinned_flag() {
-    // If the pinned flag weren't reset on cache revive, a
-    // subsequently-cached chunk that gets reused for a non-bump
-    // allocation would behave as pinned and leak. Verify chunks
-    // recycle correctly.
-    let arena: Arena = Arena::builder().build();
-    {
-        let _bump_ref: &mut u32 = arena.alloc(1);
-        // The chunk holding the bump-ref is now pinned. It can't go
-        // to the cache while pinned (it goes to the pinned list at
-        // rotation, then to free at arena drop).
-        let _filler = arena.alloc_slice_copy([0_u8; 3 * 1024]);
-        // The chunk is now full and bump-pinned.
-    }
-    // Allocate a (non-bump) ArenaRc so a fresh non-pinned chunk is created
-    // and might end up in the cache later.
-    let mut handles = std::vec::Vec::new();
-    for i in 0..10_u32 {
-        handles.push(arena.alloc_rc(i));
-    }
-    drop(handles);
-    // Stats sanity: chunks were used as expected.
-    assert!(arena.stats().normal_local_chunks_allocated >= 1);
-}

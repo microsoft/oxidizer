@@ -19,36 +19,37 @@ use core::mem::MaybeUninit;
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use multitude::strings::{ArcStr, BoxStr, RcStr};
-use multitude::{Arc, Arena, Box, Rc};
+use multitude::{Arc, Arena, Box};
 
 const N: usize = 1_000;
 const SLICE_LEN: usize = 8;
 
-/// Build an [`Arena`] sized for the timed region's full working set.
+/// Build an [`Arena`] sized for the timed region's full working set
+/// **and fully primed** so the timed region exercises only the warm
+/// bump cursor — no cold `refill_*` call on the first inner iteration.
 ///
-/// We want every bench iteration to run **entirely** against the bump
-/// hot path — no system-allocator traffic, no chunk rotation, no class
-/// promotion. Two pieces:
-///
-/// 1. `min_chunk_size(64 KiB)` pins the very first chunk to the largest
-///    size class. The arena's adaptive `1 KiB → 64 KiB` ramp would
-///    otherwise call into the system allocator several times growing
-///    through the smaller classes during the timed region.
-/// 2. We preallocate **both** flavors of cache so Arc-flavor benches
-///    (`alloc_arc`, `alloc_str_arc`, `alloc_slice_*_arc`, etc.) also
-///    run entirely against the hot path. The two caches are
-///    independent: `with_capacity_local` only seeds local; the shared
-///    cache is empty unless we also call `with_capacity_shared`.
-///
-/// 64 KiB minus chunk header overhead (~256 B) gives ~64 KB of usable
-/// bump space — well above the worst-case for any criterion bench at
-/// `N = 1000` with the largest payload (a 64-byte slice = 64 KB).
+/// 1. `with_capacity_local(64 KiB) + with_capacity_shared(64 KiB)` pin
+///    the very first chunk for each flavor to the largest size class.
+///    The arena's adaptive `1 KiB → 64 KiB` ramp would otherwise call
+///    into the system allocator several times growing through the
+///    smaller classes during the timed region.
+/// 2. The arena's `current_local` / `current_shared` slots start in
+///    the empty-mutator state (lazy first-chunk install — see the
+///    design doc). A single throwaway allocation of each flavor pops
+///    the preallocated chunk from the provider cache and installs it
+///    in the `current_*` slot, so the timed region's very first
+///    allocation hits the warm bump path. This matches bumpalo's
+///    `warm_bump` (which similarly primes its cursor with a no-op
+///    alloc) and isolates the comparison to "in-chunk bump cost
+///    only" with no cold refill amortized into the per-op number.
 fn warm_arena() -> Arena {
-    Arena::builder()
+    let arena = Arena::builder()
         .with_capacity_local(64 * 1024)
         .with_capacity_shared(64 * 1024)
-        .build()
+        .build();
+    let _: &mut u64 = arena.alloc(0_u64);
+    let _ = arena.alloc_arc(0_u64);
+    arena
 }
 
 /// Build a [`bumpalo::Bump`] pre-sized to fit the timed region.
@@ -155,55 +156,6 @@ fn bench_alloc_u64(c: &mut Criterion) {
         );
     });
 
-    g.bench_function("alloc_rc", |b| {
-        b.iter_batched(
-            || (warm_arena(), Vec::<Rc<u64>>::with_capacity(N)),
-            |(arena, mut h)| {
-                for i in 0..N {
-                    h.push(arena.alloc_rc(black_box(i as u64)));
-                }
-                (h, arena)
-            },
-            BatchSize::SmallInput,
-        );
-    });
-    g.bench_function("alloc_rc_with", |b| {
-        b.iter_batched(
-            || (warm_arena(), Vec::<Rc<u64>>::with_capacity(N)),
-            |(arena, mut h)| {
-                for i in 0..N {
-                    h.push(arena.alloc_rc_with(|| black_box(i as u64)));
-                }
-                (h, arena)
-            },
-            BatchSize::SmallInput,
-        );
-    });
-    g.bench_function("alloc_uninit_rc", |b| {
-        b.iter_batched(
-            || (warm_arena(), Vec::<Rc<MaybeUninit<u64>>>::with_capacity(N)),
-            |(arena, mut h)| {
-                for _ in 0..N {
-                    h.push(arena.alloc_uninit_rc::<u64>());
-                }
-                (h, arena)
-            },
-            BatchSize::SmallInput,
-        );
-    });
-    g.bench_function("alloc_zeroed_rc", |b| {
-        b.iter_batched(
-            || (warm_arena(), Vec::<Rc<MaybeUninit<u64>>>::with_capacity(N)),
-            |(arena, mut h)| {
-                for _ in 0..N {
-                    h.push(arena.alloc_zeroed_rc::<u64>());
-                }
-                (h, arena)
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
     g.bench_function("alloc_arc", |b| {
         b.iter_batched(
             || (warm_arena(), Vec::<Arc<u64>>::with_capacity(N)),
@@ -253,7 +205,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
         );
     });
 
-    g.bench_function("bumpalo", |b| {
+    g.bench_function("bumpalo_alloc", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -265,7 +217,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo_with", |b| {
+    g.bench_function("bumpalo_alloc_with", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -302,7 +254,7 @@ fn bench_alloc_str(c: &mut Criterion) {
     });
     g.bench_function("alloc_str_box", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<BoxStr>::with_capacity(N)),
+            || (warm_arena(), Vec::<Box<str>>::with_capacity(N)),
             |(arena, mut o)| {
                 for w in &words {
                     o.push(arena.alloc_str_box(black_box(w)));
@@ -312,21 +264,9 @@ fn bench_alloc_str(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("alloc_str_rc", |b| {
-        b.iter_batched(
-            || (warm_arena(), Vec::<RcStr>::with_capacity(N)),
-            |(arena, mut o)| {
-                for w in &words {
-                    o.push(arena.alloc_str_rc(black_box(w)));
-                }
-                (o, arena)
-            },
-            BatchSize::SmallInput,
-        );
-    });
     g.bench_function("alloc_str_arc", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<ArcStr>::with_capacity(N)),
+            || (warm_arena(), Vec::<Arc<str>>::with_capacity(N)),
             |(arena, mut o)| {
                 for w in &words {
                     o.push(arena.alloc_str_arc(black_box(w)));
@@ -336,7 +276,7 @@ fn bench_alloc_str(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo", |b| {
+    g.bench_function("bumpalo_alloc_str", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -464,44 +404,6 @@ fn bench_alloc_slice(c: &mut Criterion) {
         }
     });
 
-    // rc
-    bench_arena_collect!("alloc_slice_copy_rc", Rc<[u64]>, |arena: &Arena, o: &mut Vec<Rc<[u64]>>| {
-        for s in &slices {
-            o.push(arena.alloc_slice_copy_rc(black_box(s)));
-        }
-    });
-    bench_arena_collect!("alloc_slice_clone_rc", Rc<[u64]>, |arena: &Arena, o: &mut Vec<Rc<[u64]>>| {
-        for s in &slices {
-            o.push(arena.alloc_slice_clone_rc(black_box(s.as_slice())));
-        }
-    });
-    bench_arena_collect!("alloc_slice_fill_with_rc", Rc<[u64]>, |arena: &Arena, o: &mut Vec<Rc<[u64]>>| {
-        for _ in 0..N {
-            o.push(arena.alloc_slice_fill_with_rc::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
-        }
-    });
-    bench_arena_collect!("alloc_slice_fill_iter_rc", Rc<[u64]>, |arena: &Arena, o: &mut Vec<Rc<[u64]>>| {
-        for _ in 0..N {
-            o.push(arena.alloc_slice_fill_iter_rc((0..SLICE_LEN).map(|j| black_box(j as u64))));
-        }
-    });
-    bench_arena_collect!("alloc_uninit_slice_rc", Rc<[MaybeUninit<u64>]>, |arena: &Arena,
-                                                                           o: &mut Vec<
-        Rc<[MaybeUninit<u64>]>,
-    >| {
-        for _ in 0..N {
-            o.push(arena.alloc_uninit_slice_rc::<u64>(SLICE_LEN));
-        }
-    });
-    bench_arena_collect!("alloc_zeroed_slice_rc", Rc<[MaybeUninit<u64>]>, |arena: &Arena,
-                                                                           o: &mut Vec<
-        Rc<[MaybeUninit<u64>]>,
-    >| {
-        for _ in 0..N {
-            o.push(arena.alloc_zeroed_slice_rc::<u64>(SLICE_LEN));
-        }
-    });
-
     // arc
     bench_arena_collect!("alloc_slice_copy_arc", Arc<[u64]>, |arena: &Arena, o: &mut Vec<Arc<[u64]>>| {
         for s in &slices {
@@ -541,22 +443,22 @@ fn bench_alloc_slice(c: &mut Criterion) {
     });
 
     // bumpalo
-    bench_bumpalo!("bumpalo_copy", |bump: &bumpalo::Bump| {
+    bench_bumpalo!("bumpalo_alloc_slice_copy", |bump: &bumpalo::Bump| {
         for s in &slices {
             let _: &mut [u64] = black_box(bump.alloc_slice_copy(black_box(s.as_slice())));
         }
     });
-    bench_bumpalo!("bumpalo_clone", |bump: &bumpalo::Bump| {
+    bench_bumpalo!("bumpalo_alloc_slice_clone", |bump: &bumpalo::Bump| {
         for s in &slices {
             let _: &mut [u64] = black_box(bump.alloc_slice_clone(black_box(s.as_slice())));
         }
     });
-    bench_bumpalo!("bumpalo_fill_with", |bump: &bumpalo::Bump| {
+    bench_bumpalo!("bumpalo_alloc_slice_fill_with", |bump: &bumpalo::Bump| {
         for _ in 0..N {
             let _: &mut [u64] = black_box(bump.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
         }
     });
-    bench_bumpalo!("bumpalo_fill_iter", |bump: &bumpalo::Bump| {
+    bench_bumpalo!("bumpalo_alloc_slice_fill_iter", |bump: &bumpalo::Bump| {
         for _ in 0..N {
             let _: &mut [u64] = black_box(bump.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
         }
@@ -580,7 +482,7 @@ fn bench_string_builder(c: &mut Criterion) {
                 for w in &words {
                     s.push_str(black_box(w.as_str()));
                 }
-                let frozen = s.into_arena_str();
+                let frozen = s.into_arena_box_str();
                 (frozen, arena)
             },
             BatchSize::SmallInput,
@@ -594,13 +496,13 @@ fn bench_string_builder(c: &mut Criterion) {
                 for w in &words {
                     s.push_str(black_box(w.as_str()));
                 }
-                let frozen = s.into_arena_str();
+                let frozen = s.into_arena_box_str();
                 (frozen, arena)
             },
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo_grow", |b| {
+    g.bench_function("bumpalo_string_new_in", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -615,7 +517,7 @@ fn bench_string_builder(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo_with_cap", |b| {
+    g.bench_function("bumpalo_string_with_capacity_in", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -649,7 +551,7 @@ fn bench_vec_builder(c: &mut Criterion) {
                 for &i in &ints {
                     v.push(black_box(i));
                 }
-                let frozen = v.into_arena_rc();
+                let frozen = v.into_arena_arc();
                 (frozen, arena)
             },
             BatchSize::SmallInput,
@@ -663,13 +565,13 @@ fn bench_vec_builder(c: &mut Criterion) {
                 for &i in &ints {
                     v.push(black_box(i));
                 }
-                let frozen = v.into_arena_rc();
+                let frozen = v.into_arena_arc();
                 (frozen, arena)
             },
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo_grow", |b| {
+    g.bench_function("bumpalo_vec_new_in", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -684,7 +586,7 @@ fn bench_vec_builder(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("bumpalo_with_cap", |b| {
+    g.bench_function("bumpalo_vec_with_capacity_in", |b| {
         b.iter_batched(
             warm_bump,
             |bump| {
@@ -718,7 +620,7 @@ fn bench_arena_creation(c: &mut Criterion) {
         });
     });
 
-    g.bench_function("bumpalo", |b| {
+    g.bench_function("bumpalo_new", |b| {
         b.iter(|| {
             let bump = bumpalo::Bump::new();
             black_box(&bump);

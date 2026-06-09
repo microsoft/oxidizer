@@ -25,19 +25,19 @@ allowed_external_types = ["tower_layer::Layer", "tower_service::Service"]
 [features]
 default = []
 intercept = []
-dynamic-service = ["dep:dynosaur"]
+dynamic-service = ["dep:infinity_pool"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
-dynosaur = { workspace = true, optional = true }
+infinity_pool = { workspace = true, optional = true }
 tower-layer = { workspace = true }
 tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
-dynosaur = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+infinity_pool = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 static_assertions = { workspace = true }

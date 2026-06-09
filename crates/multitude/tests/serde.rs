@@ -18,14 +18,6 @@ mod common;
 use multitude::Arena;
 
 #[test]
-fn arena_rc_str_serializes_to_string() {
-    let arena = Arena::new();
-    let s = arena.alloc_str_rc("hello world");
-    let json = serde_json::to_string(&s).unwrap();
-    assert_eq!(json, "\"hello world\"");
-}
-
-#[test]
 fn arena_arc_str_serializes_to_string() {
     let arena = Arena::new();
     let s = arena.alloc_str_arc("shared");
@@ -77,28 +69,6 @@ fn arena_vec_of_strings_serializes() {
     v.push("b".to_string());
     let json = serde_json::to_string(&v).unwrap();
     assert_eq!(json, "[\"a\",\"b\"]");
-}
-
-#[test]
-fn nested_serialization_in_struct() {
-    use serde::Serialize;
-
-    #[derive(Serialize)]
-    struct Wrapper<'a> {
-        name: multitude::strings::RcStr,
-        items: multitude::vec::Vec<'a, i32>,
-    }
-
-    let arena = Arena::new();
-    let mut items = arena.alloc_vec::<i32>();
-    items.push(10);
-    items.push(20);
-    let w = Wrapper {
-        name: arena.alloc_str_rc("widget"),
-        items,
-    };
-    let json = serde_json::to_string(&w).unwrap();
-    assert_eq!(json, "{\"name\":\"widget\",\"items\":[10,20]}");
 }
 
 // === relocated from coverage_extras.rs (serde-gated tests) ===

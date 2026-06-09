@@ -13,7 +13,7 @@ mod common;
 
 use core::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
-use multitude::{Arena, Box, Rc};
+use multitude::{Arena, Box};
 #[test]
 fn alloc_box_runs_drop_immediately() {
     static COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -210,18 +210,6 @@ fn arena_box_as_ref_borrow_pointer() {
     assert_eq!(*b, 9);
     let s = format!("{b:p}");
     assert!(s.starts_with("0x"), "Pointer format: {s}");
-}
-
-#[test]
-fn arena_box_into_rc_via_from() {
-    let arena = Arena::new();
-    let b: Box<u32> = arena.alloc_box(42);
-    let r: Rc<u32> = b.into();
-    assert_eq!(*r, 42);
-    let r2: Rc<u32> = r.clone();
-    assert_eq!(*r2, 42);
-    drop(r);
-    assert_eq!(*r2, 42);
 }
 
 use core::mem::MaybeUninit;

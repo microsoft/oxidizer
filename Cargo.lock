@@ -2066,8 +2066,8 @@ version = "0.3.2"
 dependencies = [
  "alloc_tracker",
  "criterion",
- "dynosaur",
  "futures",
+ "infinity_pool",
  "mutants",
  "pin-project-lite",
  "static_assertions",

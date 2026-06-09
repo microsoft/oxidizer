@@ -4,8 +4,8 @@
 /// `format!`-style macro that writes into a fresh arena-backed
 /// [`String`](crate::strings::String).
 ///
-/// Freeze the result with [`String::into_arena_str`](crate::strings::String::into_arena_str)
-/// if you want an immutable [`RcStr`](crate::strings::RcStr).
+/// Freeze the result with [`String::into_arena_box_str`](crate::strings::String::into_arena_box_str)
+/// if you want an immutable [`Box<str>`](crate::Box).
 ///
 /// # Panics
 ///
@@ -40,13 +40,19 @@ use allocator_api2::alloc::Allocator;
 use crate::strings::String;
 
 impl<A: Allocator + Clone> fmt::Write for String<'_, A> {
+    #[allow(
+        clippy::map_err_ignore,
+        reason = "fmt::Error carries no payload; the original AllocError has no useful information to preserve"
+    )]
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.push_str(s);
-        Ok(())
+        self.try_push_str(s).map_err(|_| fmt::Error)
     }
 
+    #[allow(
+        clippy::map_err_ignore,
+        reason = "fmt::Error carries no payload; the original AllocError has no useful information to preserve"
+    )]
     fn write_char(&mut self, c: char) -> fmt::Result {
-        self.push(c);
-        Ok(())
+        self.try_push(c).map_err(|_| fmt::Error)
     }
 }
