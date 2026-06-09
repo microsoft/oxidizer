@@ -214,9 +214,7 @@ mod tests {
         let clock = Clock::new_tokio();
 
         let mut client = HttpClient::builder_tokio(TokioDeps::with_clock(&clock))
-            .custom_pipeline(|_root, _ctx| {
-                FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).build())
-            })
+            .custom_pipeline(|_root, _ctx| FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).build()))
             .build();
 
         // Verify the client works before relocation.

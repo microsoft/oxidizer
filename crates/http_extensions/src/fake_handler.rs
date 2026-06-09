@@ -457,8 +457,7 @@ mod tests {
 
     #[test]
     fn from_fn_ok() -> std::result::Result<(), ohno::AppError> {
-        let handler =
-            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Sync response").build());
+        let handler = FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("Sync response").build());
 
         assert_eq!(get_response_text(&handler)?, "Sync response");
 

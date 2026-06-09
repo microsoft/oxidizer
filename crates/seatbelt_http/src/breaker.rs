@@ -204,8 +204,7 @@ mod tests {
 
     #[test]
     fn server_errors_trip_breaker() {
-        let handler =
-            FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::INTERNAL_SERVER_ERROR).build());
+        let handler = FakeHandler::from_fn(|_req| HttpResponseBuilder::new_fake().status(StatusCode::INTERNAL_SERVER_ERROR).build());
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();
         let context = crate::HttpResilienceContext::new(&clock);
 

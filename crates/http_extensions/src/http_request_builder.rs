@@ -1375,8 +1375,7 @@ mod tests {
 
     #[test]
     fn fetch_ok() {
-        let client =
-            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("response body").build());
+        let client = FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("response body").build());
 
         let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch()).unwrap();
 
@@ -1408,8 +1407,7 @@ mod tests {
 
     #[test]
     fn fetch_text_ok() {
-        let client =
-            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text response").build());
+        let client = FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text response").build());
 
         let response = block_on(client.request_builder().uri("https://example.com").method(Method::GET).fetch_text()).unwrap();
 
@@ -1464,8 +1462,7 @@ mod tests {
 
     #[test]
     fn fetch_text_body_ok() {
-        let client =
-            FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text body").build());
+        let client = FakeHandler::from_fn(|_request| HttpResponseBuilder::new_fake().status(StatusCode::OK).text("text body").build());
 
         let body = block_on(client.request_builder().get("https://example.com").fetch_text_body()).unwrap();
 
