@@ -1101,7 +1101,7 @@ function Format-PackageMenu {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
-    [void]$sb.AppendLine('  2. Skip package')
+    [void]$sb.AppendLine('  2. No material changes - release only if required by cascade logic')
     [void]$sb.AppendLine("  3. Release as breaking change $($changeTypeHints['breaking'])")
     if (-not $hideNonBreaking) {
         [void]$sb.AppendLine("  4. Release as non-breaking change $($changeTypeHints['non-breaking'])")

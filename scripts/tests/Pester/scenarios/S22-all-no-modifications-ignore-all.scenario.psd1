@@ -18,9 +18,9 @@
         # is empty, and Phase-B sweep adds a as a stub finding).
         Mode    = 'all'
         Answers = @(
-            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
-            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
-            @{ Match = "Choose option for 'a'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # No material changes
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # No material changes
+            @{ Match = "Choose option for 'a'"; Reply = '2' } # No material changes
         )
     }
 

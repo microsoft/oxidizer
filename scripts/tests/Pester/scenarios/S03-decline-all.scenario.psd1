@@ -17,8 +17,8 @@
     Run = @{
         Packages = @('a@patch')
         Answers   = @(
-            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
-            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # No material changes
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # No material changes
         )
     }
 

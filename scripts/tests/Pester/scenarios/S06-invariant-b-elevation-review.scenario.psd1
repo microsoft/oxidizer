@@ -31,7 +31,7 @@ Validates two contracts simultaneously: (1) cascade-only members with no modific
             # has pre-existing modifications, so plan-review surfaces it for
             # elevation review. User answers '2' (ignore — keep the
             # cascade-applied change type).
-            @{ Match = "Choose option for 'a'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'a'"; Reply = '2' } # No material changes
         )
     }
 

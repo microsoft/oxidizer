@@ -18,7 +18,7 @@
         Packages = @('a@patch')
         Answers   = @(
             @{ Match = "Choose option for 'b'"; Reply = '4' } # Non-breaking
-            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # No material changes
         )
     }
 

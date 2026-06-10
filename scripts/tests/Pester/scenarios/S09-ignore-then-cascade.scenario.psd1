@@ -18,7 +18,7 @@
         Packages = @('a@patch')
         Answers   = @(
             # Iter 0 of the scan: ignore b.
-            @{ Match = "Choose option for 'b'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'b'"; Reply = '2' } # No material changes
             # Iter 1: accept c via option 4 (non-breaking). Option 5 (patch) is hidden
             # on 0.x.y because it would produce the same numeric increment.
             # c's cascade then pulls b into the release set at non-breaking

@@ -29,11 +29,11 @@
             # 'a' in as a cascade non-breaking. Findings now surface c (still
             # modified+unreleased) and a (Source='cascade' + non-breaking, so
             # eligible for elevation review). User ignores c.
-            @{ Match = "Choose option for 'c'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # No material changes
             # User leaves a at its cascade-applied non-breaking level (ignore
             # = "keep cascade-applied level"; recorded into $reviewedCascadeAsIs
             # so it does not re-surface on the next iteration).
-            @{ Match = "Choose option for 'a'"; Reply = '2' } # Skip
+            @{ Match = "Choose option for 'a'"; Reply = '2' } # No material changes
         )
     }
 
