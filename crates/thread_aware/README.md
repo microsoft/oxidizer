@@ -103,16 +103,28 @@ from types that implement [`ThreadAware`][__link23].
 ### 3rd-party crate impls
 
 The following opt-in features provide [`ThreadAware`][__link24] implementations for
-inert value types from popular 3rd-party crates. Each feature is suffixed
-with the major (or 0.x minor) of the wrapped crate; enabling a feature
-pulls that crate in as a dependency. By default none are enabled and this
-crate brings in no extra dependencies.
+inert value types from popular 3rd-party crates. Enabling a feature pulls
+that crate in as a dependency. By default none are enabled and this crate
+brings in no extra dependencies.
+
+Feature names follow this convention so that future breaking versions of
+the wrapped crate can be supported additively:
+
+* Stable `1.x` (or any other stable major) → bare crate name
+  (e.g. `bytes`, `http`, `uuid`).
+
+* `N.x` for `N >= 2` → `<crate><N>` (e.g. `bytes2` if `bytes 2.x` ever lands).
+
+* `0.x` → `<crate>0<minor>` (e.g. `jiff02` for `jiff 0.2.x`).
 
 * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
+
 * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
   `http::Request<T>`, `http::Response<T>`.
+
 * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+
 * **`uuid`**: Impl for `uuid::Uuid`.
 
 ## Examples
@@ -162,7 +174,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEGyK2CfGZtm7rG3gxKSqlgxs9Gz6IaeWbTZvZGxcx34xK5ktUYWSCgmx0aHJlYWRfYXdhcmVlMC43LjOCc3RocmVhZF9hd2FyZV9tYWNyb3NlMC43LjM
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbNwCmAlaBkPsbNngIRBvGzoMb9DRwtcyYP9Ab5go6UV6NTA1hZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
  [__link0]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
