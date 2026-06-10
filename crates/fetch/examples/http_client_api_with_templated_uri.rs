@@ -33,14 +33,14 @@ mod api {
         where
             T: serde::de::DeserializeOwned,
         {
-            let mut result = self
+            let result = self
                 .client
                 .get(templated_uri::Uri::from(api_endpoint))
                 .header("User-Agent", "http-client")
                 .fetch_json::<T>()
                 .await?
                 .into_body();
-            Ok(result.read()?)
+            Ok(result)
         }
 
         pub async fn get_crate(&self, crate_name: EscapedString) -> Result<CrateResponse> {

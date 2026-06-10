@@ -1,187 +1,181 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Shared constants for the chunk and smart-pointer machinery.
-//!
-//! The `64 KiB` alignment is what makes header recovery by masking work.
+//! Shared sizing constants for the chunk allocator.
 
-/// Alignment (and minimum size) of every chunk allocation in bytes.
+/// Smallest cacheable chunk total allocation size in bytes (header + payload).
+pub(crate) const MIN_CHUNK_BYTES: usize = 512;
+
+/// Largest cacheable chunk total allocation size in bytes (header + payload).
 ///
-/// Smart pointers recover their chunk header by masking the value
-/// pointer with `!(CHUNK_ALIGN - 1)`, which assumes every allocation
-/// produced by the arena lives within the 64 KiB tile that starts at
-/// the chunk's header.
-pub const CHUNK_ALIGN: usize = 65_536;
+/// Anything strictly larger is "oversized": sized exactly to fit the request
+/// (plus header and drop-list rounding) and bypasses the cache entirely.
+pub(crate) const MAX_CHUNK_BYTES: usize = 65_536;
 
-/// Maximum supported alignment for any value allocated through a
-/// smart pointer. Values aligned at `CHUNK_ALIGN` or higher would let
-/// the masking trick collide with a neighboring chunk's header.
-pub const MAX_SMART_PTR_ALIGN: usize = CHUNK_ALIGN / 2;
-
-/// Default minimum capacity for a fresh chunk's payload.
-pub const DEFAULT_MIN_PAYLOAD: usize = 512;
-
-/// Smallest cacheable chunk **total allocation** size, in bytes
-/// (header + payload). The smallest class's *payload* is
-/// `MIN_CHUNK_BYTES - header_size::<A>()`, which depends on `A`.
-pub const MIN_CHUNK_BYTES: usize = 512;
-
-/// Largest cacheable chunk **total allocation** size, in bytes
-/// (header + payload). Anything strictly larger is "oversized" and
-/// bypasses the cache entirely; oversized chunks are sized to fit
-/// exactly the requested payload (plus header, plus drop-list
-/// alignment rounding). The largest cached class's payload is
-/// `MAX_CHUNK_BYTES - header_size::<A>()`, which depends on `A`.
-pub const MAX_CHUNK_BYTES: usize = 65_536;
-
-/// Number of cacheable size classes (powers of two from
-/// [`MIN_CHUNK_BYTES`] up to [`MAX_CHUNK_BYTES`] inclusive).
-pub const NUM_CHUNK_CLASSES: u8 = 8;
-
-/// Default value of the per-arena `max_normal_alloc` knob (see
-/// [`crate::ArenaBuilder::max_normal_alloc`]). Drives the
-/// chunk-acquisition decision in [`crate::Arena`]'s slow paths:
-/// requests strictly larger than this trigger a one-shot oversized
-/// chunk *when a new chunk is needed*, but do not preempt the
-/// bump-fast-path when the current chunk already has the tail space.
-pub const MAX_NORMAL_ALLOC: usize = 16 * 1024;
-
-/// Minimum permitted value of the `max_normal_alloc` builder knob.
-pub const MIN_MAX_NORMAL_ALLOC: usize = 4 * 1024;
-
-/// Inflated initial refcount for `SharedChunk`s while they are
-/// "current" on an arena.
+/// Required alignment for every [`SharedChunk`](super::shared_chunk::SharedChunk)
+/// allocation. Matches [`MAX_CHUNK_BYTES`] so that for any pointer to a
+/// non-oversized value in the chunk, the chunk header's address can be
+/// recovered by subtracting the low `CHUNK_ALIGN - 1` bits of the pointer.
 ///
-/// While a chunk is the arena's current shared chunk, every
-/// `alloc_arc` call only bumps a non-atomic counter on the arena
-/// (`arcs_issued`); the chunk's atomic refcount is held at this
-/// large value so cross-thread `Arc::drop`s can never drive it to
-/// zero in the meantime. On chunk swap-out the arena reconciles in
-/// one atomic op.
-pub const LARGE: usize = (isize::MAX as usize) / 2;
+/// This in turn allows [`Box`](crate::Box) and similar smart pointers
+/// to store a single value pointer without separately tracking the
+/// chunk header.
+pub(crate) const CHUNK_ALIGN: usize = MAX_CHUNK_BYTES;
 
-/// Returns `true` if a chunk allocation starting at `start_addr` and
-/// spanning `total` bytes lies entirely within the user-space portion
-/// of the address space (i.e. its end address fits in `isize`).
-///
-/// This is the runtime precondition for the `assert_unchecked` hints
-/// the hot-path bump-cursor arithmetic uses to prove that
-/// `data_addr + bumped + entry_size` fits in `isize`.
-///
-/// # Mutation testing
-///
-/// The five comparison-operator mutations on this expression fall into
-/// two groups:
-///   * `>` → `==` and `||` → `&&` are killable: a pathological
-///     allocator returning a chunk in the upper half of the address
-///     space exposes the difference. The test
-///     `local_chunk_allocate_rejects_high_address_from_pathological_allocator`
-///     covers them.
-///   * `>` → `>=`, `<` → `==`, `<` → `<=` are equivalent: the
-///     distinguishing inputs (`end_addr == isize::MAX` exactly, or
-///     `end_addr == start_addr` which requires `total == 0`) cannot
-///     be produced by any real allocator, and the chunk-allocation
-///     callers reject `total_bytes < header_bytes` (a strictly
-///     positive lower bound) before reaching this helper, so `total
-///     == 0` is unreachable on the production path. Skipping mutation
-///     testing for this helper is the cleanest way to record that
-///     observation; both arms of the check are still exercised by the
-///     regression test above and by every successful chunk allocation
-///     in the test suite.
+/// Maximum alignment accepted by smart-pointer / `Allocator::allocate`
+/// allocations. Values at or above this cap can no longer be guaranteed
+/// to lie strictly inside the first [`CHUNK_ALIGN`] bytes of their
+/// chunk, which would break the header-recovery mask used by
+/// `Drop` / `deallocate`.
+#[cfg_attr(test, mutants::skip)] // `/ → *` lets over-aligned requests spin → OOM
 #[inline]
-#[must_use]
-#[cfg_attr(test, mutants::skip)]
-pub(crate) fn chunk_end_addr_fits_in_isize(start_addr: usize, total: usize) -> bool {
-    let end_addr = start_addr.wrapping_add(total);
-    isize::try_from(end_addr).is_ok() && end_addr >= start_addr
+pub(crate) const fn max_smart_ptr_align() -> usize {
+    CHUNK_ALIGN / 2
 }
 
-/// (header + payload).
-///
-/// The class's usable *payload* is `class_to_bytes(class) -
-/// header_size::<A>()`, which depends on the chunk type and `A`.
-///
-/// `class` must be `< NUM_CHUNK_CLASSES`.
-#[inline]
-#[must_use]
-pub const fn class_to_bytes(class: u8) -> usize {
-    debug_assert!(class < NUM_CHUNK_CLASSES, "class out of range");
-    MIN_CHUNK_BYTES << class
-}
+/// Number of cacheable size classes (powers of two from [`MIN_CHUNK_BYTES`]
+/// up to [`MAX_CHUNK_BYTES`] inclusive).
+pub(crate) const NUM_CHUNK_CLASSES: u8 = 8;
 
-/// Smallest size class whose **total allocation** is at least `bytes`.
+/// Default value of the per-arena `max_normal_alloc` knob.
+pub(crate) const MAX_NORMAL_ALLOC: usize = 16 * 1024;
+
+/// Cache size-class index, range `0..NUM_CHUNK_CLASSES`.
 ///
-/// Saturates at `NUM_CHUNK_CLASSES - 1` for `bytes > MAX_CHUNK_BYTES`;
-/// callers that care about oversized requests must test against
-/// [`MAX_NORMAL_ALLOC`] separately.
-///
-/// Callers that have a *payload* requirement (rather than a total)
-/// must add `header_size::<A>()` before calling: the routing
-/// decision must include the header so the picked class's payload
-/// actually fits the request.
-#[inline]
-#[must_use]
-#[cfg_attr(test, mutants::skip)] // Boundary arithmetic mutations can still satisfy the contract.
-pub const fn min_class_for_bytes(bytes: usize) -> u8 {
-    if bytes <= MIN_CHUNK_BYTES {
-        return 0;
+/// Wraps the raw `u8` to make invalid classes harder to construct
+/// accidentally and to centralize the
+/// [`bytes`](Self::bytes)/[`saturating_inc`](Self::saturating_inc)
+/// helpers. `#[repr(transparent)]` so that `AtomicU8` cache slots in
+/// [`ChunkProvider`](super::chunk_provider::ChunkProvider) can keep
+/// storing the raw byte without conversion.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[repr(transparent)]
+pub(crate) struct SizeClass(u8);
+
+impl SizeClass {
+    pub(crate) const ZERO: Self = Self(0);
+    pub(crate) const MAX: Self = Self(NUM_CHUNK_CLASSES - 1);
+
+    /// Construct a `SizeClass` from a raw index, checking the range in
+    /// debug builds.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn new(c: u8) -> Self {
+        debug_assert!(c < NUM_CHUNK_CLASSES, "class out of range");
+        Self(c)
     }
-    if bytes >= MAX_CHUNK_BYTES {
-        return NUM_CHUNK_CLASSES - 1;
+
+    /// Raw class index.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn raw(self) -> u8 {
+        self.0
     }
-    // Smallest `c` with `(MIN_CHUNK_BYTES << c) >= bytes`.
-    let ratio = bytes.div_ceil(MIN_CHUNK_BYTES);
-    // Equivalently: smallest `c` with `(1 << c) >= ratio`.
-    let mut c: u8 = 0;
-    let mut v: usize = 1;
-    while v < ratio {
-        v <<= 1;
-        c += 1;
+
+    /// Total allocation size in bytes for this class (header + payload).
+    #[inline]
+    #[must_use]
+    pub(crate) const fn bytes(self) -> usize {
+        MIN_CHUNK_BYTES << self.0
     }
-    c
+
+    /// Smallest size class whose total allocation is at least `bytes`.
+    /// Saturates at [`Self::MAX`] when `bytes > MAX_CHUNK_BYTES`.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn min_for_bytes(bytes: usize) -> Self {
+        if bytes <= MIN_CHUNK_BYTES {
+            return Self::ZERO;
+        }
+        if bytes >= MAX_CHUNK_BYTES {
+            return Self::MAX;
+        }
+        let ratio = bytes.div_ceil(MIN_CHUNK_BYTES);
+        let mut c: u8 = 0;
+        let mut v: usize = 1;
+        while v < ratio {
+            v <<= 1;
+            c += 1;
+        }
+        Self(c)
+    }
+
+    /// Saturating increment, clamped at [`Self::MAX`].
+    #[inline]
+    #[must_use]
+    pub(crate) const fn saturating_inc(self) -> Self {
+        let next = self.0.saturating_add(1);
+        if next >= NUM_CHUNK_CLASSES { Self::MAX } else { Self(next) }
+    }
+
+    /// Returns the larger of two classes.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn max(self, other: Self) -> Self {
+        if self.0 >= other.0 { self } else { other }
+    }
+
+    /// Clamp to at most `cap`.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn min(self, cap: Self) -> Self {
+        if self.0 <= cap.0 { self } else { cap }
+    }
 }
 
 /// Aborts the process on chunk-refcount overflow.
 ///
-/// Mirrors the behavior of `std::sync::Arc::clone`: a refcount that
-/// wraps to zero would let live pointers race with a free, so the
-/// only sound response is to terminate the process. Marked
-/// `#[cold]` and `#[inline(never)]` so the call site stays small on
-/// the hot path.
+/// A refcount that wraps to zero would let live pointers race with a free,
+/// so the only sound response is to terminate the process.
 #[cold]
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[cfg_attr(test, mutants::skip)] // Abort paths terminate the test process before coverage can observe them.
-pub fn refcount_overflow_abort() -> ! {
-    // Prefer `process::abort`: unwinding through user destructors is no longer sound.
-    #[cfg(all(not(loom), feature = "std"))]
+#[cfg_attr(test, mutants::skip)] // unreachable: refcount overflow requires usize::MAX live refs
+pub(crate) fn refcount_overflow_abort() -> ! {
+    // Under `cfg(test)` we panic instead of aborting so the overflow-guard
+    // call sites (otherwise unreachable without `usize::MAX` live references)
+    // can be exercised by `#[should_panic]` unit tests. Production builds are
+    // never compiled with `cfg(test)`, so the abort behavior below is the only
+    // one that ships.
+    #[cfg(test)]
+    {
+        panic!("multitude: refcount overflow (test)");
+    }
+    #[cfg(all(feature = "std", not(test)))]
     {
         std::process::abort();
     }
-    #[cfg(all(not(loom), not(feature = "std")))]
+    #[cfg(all(not(feature = "std"), not(test)))]
     {
-        // On stable no_std, double-panic is the closest abort equivalent.
         struct ForceAbort;
         impl Drop for ForceAbort {
             fn drop(&mut self) {
-                #[expect(clippy::panic, reason = "fatal-error path; no recovery path through user destructors is safe")]
-                {
-                    panic!("multitude: chunk refcount overflow (abort)");
-                }
+                panic!("multitude: chunk refcount overflow (abort)");
             }
         }
         let _force = ForceAbort;
-        #[expect(clippy::panic, reason = "fatal-error path; no recovery path through user destructors is safe")]
-        {
-            panic!("multitude: chunk refcount overflow");
-        }
+        panic!("multitude: chunk refcount overflow");
     }
-    #[cfg(loom)]
-    {
-        // loom does not model `process::abort`; panic marks this path unreachable.
-        #[expect(clippy::panic, reason = "loom-only test path")]
-        {
-            panic!("multitude: chunk refcount overflow")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Invokes `max_smart_ptr_align` at runtime (not in a const context)
+    // so coverage instrumentation records its body.
+    #[test]
+    fn max_smart_ptr_align_is_half_chunk_align() {
+        assert_eq!(max_smart_ptr_align(), CHUNK_ALIGN / 2);
+    }
+
+    /// `raw()` must return the same byte that was passed to `new()` for every
+    /// valid class — pins the trivial accessor so mutants that hard-code a
+    /// constant (e.g. always-1) are caught.
+    #[test]
+    fn size_class_raw_round_trips_every_index() {
+        for i in 0..NUM_CHUNK_CLASSES {
+            assert_eq!(SizeClass::new(i).raw(), i);
         }
     }
 }

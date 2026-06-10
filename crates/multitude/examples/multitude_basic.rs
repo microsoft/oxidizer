@@ -7,17 +7,16 @@
 #![allow(clippy::missing_panics_doc, reason = "example code")]
 #![allow(clippy::std_instead_of_core, reason = "example uses std::thread")]
 
-use multitude::strings::RcStr;
 use multitude::vec::{CollectIn, Vec};
-use multitude::{Arc, Arena, Box, Rc};
+use multitude::{Arc, Arena, Box};
 
 fn main() {
     let arena = Arena::new();
 
     // -- Reference-counted local smart pointer --------------------------------
-    let a: Rc<u32> = arena.alloc_rc(42);
+    let a: Arc<u32> = arena.alloc_arc(42);
     let b = a.clone();
-    println!("a = {}, b = {}, ptr_eq = {}", *a, *b, Rc::ptr_eq(&a, &b));
+    println!("a = {}, b = {}, ptr_eq = {}", *a, *b, Arc::ptr_eq(&a, &b));
 
     // -- Owned single smart pointer (mutable, immediate Drop) ----------------
     let mut owned: Box<std::vec::Vec<i32>> = arena.alloc_box(vec![1, 2, 3]);
@@ -32,10 +31,10 @@ fn main() {
     println!("bump_ref = {bump_ref}, bump_str = {bump_str}");
 
     // -- Single-pointer immutable string smart pointer -----------------------
-    let name: RcStr = arena.alloc_str_rc("Alice");
+    let name: Arc<str> = arena.alloc_str_arc("Alice");
     println!("name = {} (len = {})", &*name, name.len());
 
-    // -- format! macro returning ArenaRcStr -----------------------------
+    // -- format! macro returning ArenaString ----------------------------
     let greeting = multitude::strings::format!(in &arena, "Hello, {name}!");
     println!("greeting = {}", &*greeting);
 
@@ -45,7 +44,7 @@ fn main() {
         v.push(i * 100);
     }
     println!("v = {v:?}");
-    let frozen: Rc<[u64], _> = v.into_arena_rc();
+    let frozen: Arc<[u64], _> = v.into_arena_arc();
     println!("frozen = {frozen:?}");
 
     // -- Collect from an iterator -------------------------------------

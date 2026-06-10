@@ -39,5 +39,15 @@ install-tools:
     # This tool is not well maintained and fails to actually build if using locked dependencies. Okay then.
     cargo install cargo-spellcheck@$env:CARGO_SPELLCHECK_VERSION
 
+    # Pester powers the release-script test suite (just test-scripts). Skip the
+    # install if the user already has a compatible version, otherwise install the
+    # current-user copy.
+    $pester = Get-Module Pester -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if ($null -eq $pester -or $pester.Version -lt [version]'5.7.0') {
+        Install-Module -Name Pester -MinimumVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+    } else {
+        Write-Host "Pester $($pester.Version) already installed; skipping."
+    }
+
     # Install platform-specific benchmark toolchain (Callgrind, Linux-only).
     & (Join-Path $PSScriptRoot ".." "scripts" "install-callgrind-tools.ps1")

@@ -1,0 +1,80 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+//! Single-slot interior-mutable holder for a [`ChunkMutator`].
+//!
+//! [`CurrentChunk`] is a `repr(transparent)` newtype over
+//! `UnsafeCell<ChunkMutator<C>>` that encapsulates the `unsafe` access
+//! patterns needed by [`Arena`](crate::Arena)'s hot path.
+//!
+//! # Soundness contract
+//!
+//! `CurrentChunk` does **not** track borrows at runtime. The holder
+//! (currently [`Arena`](crate::Arena)) must obey two invariants:
+//!
+//! 1. *Single-threaded access*: the holder is `!Sync`.
+//! 2. *No re-entry during borrow*: the shared reference returned by
+//!    [`borrow`](CurrentChunk::borrow) must not be held across any
+//!    `replace`/`drop_replace` on the same cell.
+
+use core::cell::UnsafeCell;
+use core::ptr;
+
+use super::chunk_mutator::ChunkMutator;
+use super::chunk_ops::ChunkOps;
+
+/// Interior-mutable single-slot holder for a [`ChunkMutator`]. See
+/// module docs for the soundness contract.
+#[repr(transparent)]
+pub(crate) struct CurrentChunk<C: ?Sized + ChunkOps>(UnsafeCell<ChunkMutator<C>>);
+
+impl<C: ?Sized + ChunkOps> CurrentChunk<C> {
+    /// Wrap an owned mutator.
+    #[inline]
+    pub(crate) const fn new(mutator: ChunkMutator<C>) -> Self {
+        Self(UnsafeCell::new(mutator))
+    }
+
+    /// Borrow the contained mutator. Hot-path entry; inlines fully.
+    ///
+    /// The returned reference is valid only until the next
+    /// `replace`/`drop_replace` on this cell. See module docs for the
+    /// soundness contract.
+    #[expect(clippy::inline_always, reason = "hot-path entry; must inline fully for arena performance")]
+    #[inline(always)]
+    pub(crate) fn borrow(&self) -> &ChunkMutator<C> {
+        // SAFETY: The holder is !Sync (single-threaded access) and the
+        // documented "no re-entry during borrow" contract ensures no
+        // overlapping mutable access via `replace`/`drop_replace`.
+        unsafe { &*self.0.get() }
+    }
+
+    /// Replace the contained mutator and return the previous one.
+    #[inline]
+    pub(crate) fn replace(&self, new: ChunkMutator<C>) -> ChunkMutator<C> {
+        // SAFETY: Single-threaded access (see module docs); the caller
+        // must not hold any reference handed out by `borrow` across this
+        // call.
+        unsafe {
+            let slot = self.0.get();
+            let prev = ptr::read(slot);
+            ptr::write(slot, new);
+            prev
+        }
+    }
+
+    /// Replace the contained mutator, dropping the previous one in
+    /// place. Equivalent to `let _ = self.replace(new);`.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // body→() leaks chunk refcount → OOM
+    pub(crate) fn drop_replace(&self, new: ChunkMutator<C>) {
+        let _old = self.replace(new);
+    }
+
+    /// Get a mutable reference to the contained mutator. Requires
+    /// `&mut self`, so the borrow checker enforces exclusion.
+    #[inline]
+    pub(crate) fn get_mut(&mut self) -> &mut ChunkMutator<C> {
+        self.0.get_mut()
+    }
+}

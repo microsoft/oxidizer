@@ -5,15 +5,18 @@
 //!
 //! Public docs live on [`Arena`] itself.
 
+use core::mem;
+use core::pin::Pin;
+
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::{Arena, expect_alloc};
+use super::alloc_prefixed::worst_case_thin_slice_payload;
+use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_shared_chunk_ref};
+use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Copy `slice` into a `Shared`-flavor chunk and return an [`Arc`].
-    ///
-    /// The returned [`Arc`] is safe for cross-thread sharing.
     ///
     /// # Panics
     ///
@@ -24,17 +27,11 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let slice = slice.as_ref();
-        let ptr = expect_alloc(self.try_alloc_slice_shared_copy::<_, true>(slice));
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        let owned = unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) };
-        Arc::from_owned_in_chunk(owned)
+        let s = slice.as_ref();
+        (self.impl_alloc_slice_arc_copy::<T>(s)).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_slice_copy_arc`].
-    ///
-    /// Returns Err([`AllocError`]) instead of panicking if the backing
-    /// allocator fails.
     ///
     /// # Errors
     ///
@@ -45,23 +42,14 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let slice = slice.as_ref();
-        let ptr = self.try_alloc_slice_shared_copy::<_, false>(slice)?;
-        // SAFETY: helper initialized the slice and accounted for this Arc;
-        // OwnedInSharedChunk records both invariants for the safe Arc constructor.
-        let owned = unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) };
-        Ok(Arc::from_owned_in_chunk(owned))
+        self.impl_alloc_slice_arc_copy::<T>(slice.as_ref())
     }
 
     /// Clone every element of `slice` into a `Shared`-flavor chunk and return an [`Arc`].
     ///
-    /// The returned [`Arc`] is safe for cross-thread sharing.
-    ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
-    /// Use [`Self::try_alloc_slice_clone_arc`] for a fallible variant.
-    ///
     /// May panic if `T::clone` panics; already-cloned elements are dropped before the
     /// panic propagates.
     #[inline]
@@ -69,9 +57,8 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        let ptr = expect_alloc(self.try_alloc_slice_shared_clone_inner::<_, true>(slice.as_ref()));
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
+        let s = slice.as_ref();
+        (self.impl_alloc_slice_arc_with::<T, _>(s.len(), |i| s[i].clone())).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_slice_clone_arc`].
@@ -80,33 +67,20 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `T::clone` panics; already-cloned elements are
-    /// dropped before the panic propagates.
     #[inline]
     pub fn try_alloc_slice_clone_arc<T: Clone + Send + Sync>(&self, slice: impl AsRef<[T]>) -> Result<Arc<[T], A>, AllocError>
     where
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_clone_inner::<_, false>(slice.as_ref())?;
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Ok(Arc::from_owned_in_chunk(unsafe {
-            crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)
-        }))
+        let s = slice.as_ref();
+        self.impl_alloc_slice_arc_with::<T, _>(s.len(), |i| s[i].clone())
     }
 
     /// Allocate a slice of `len` elements in a `Shared`-flavor chunk via `f(i)`.
     ///
-    /// Element `i` is produced by `f(i)`. The returned [`Arc`] is safe
-    /// for cross-thread sharing.
-    ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
-    /// Use [`Self::try_alloc_slice_fill_with_arc`] for a fallible variant.
-    ///
     /// If `f` panics, already-initialized elements are dropped (drop guard) and the
     /// panic propagates.
     #[inline]
@@ -116,9 +90,7 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync,
     {
-        let ptr = expect_alloc(self.try_alloc_slice_shared_fill_with_inner::<_, _, true>(len, f));
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
+        (self.impl_alloc_slice_arc_with::<T, F>(len, f)).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_arc`].
@@ -127,11 +99,6 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    ///
-    /// # Panics
-    ///
-    /// If `f` panics, already-initialized elements are dropped and the
-    /// panic propagates.
     #[inline]
     pub fn try_alloc_slice_fill_with_arc<T, F>(&self, len: usize, f: F) -> Result<Arc<[T], A>, AllocError>
     where
@@ -139,22 +106,14 @@ impl<A: Allocator + Clone> Arena<A> {
         F: FnMut(usize) -> T,
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_fill_with_inner::<_, _, false>(len, f)?;
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Ok(Arc::from_owned_in_chunk(unsafe {
-            crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)
-        }))
+        self.impl_alloc_slice_arc_with::<T, F>(len, f)
     }
 
     /// Allocate a slice in a `Shared`-flavor chunk and fill it from `iter`.
     ///
-    /// Returns an [`Arc`] safe for cross-thread sharing.
-    ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
-    /// Use [`Self::try_alloc_slice_fill_iter_arc`] for a fallible variant.
-    ///
     /// May also panic if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
     #[inline]
@@ -165,9 +124,9 @@ impl<A: Allocator + Clone> Arena<A> {
         I::IntoIter: ExactSizeIterator,
         A: Send + Sync,
     {
-        let ptr = expect_alloc(self.try_alloc_slice_shared_fill_iter_inner::<_, _, true>(iter));
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Arc::from_owned_in_chunk(unsafe { crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr) })
+        let it = iter.into_iter();
+        let len = it.len();
+        (self.impl_alloc_slice_arc_iter::<T, _>(len, it)).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_iter_arc`].
@@ -176,11 +135,6 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the iterator yields fewer elements than its
-    /// `ExactSizeIterator::len()` reported.
     #[inline]
     pub fn try_alloc_slice_fill_iter_arc<T, I>(&self, iter: I) -> Result<Arc<[T], A>, AllocError>
     where
@@ -189,31 +143,142 @@ impl<A: Allocator + Clone> Arena<A> {
         I::IntoIter: ExactSizeIterator,
         A: Send + Sync,
     {
-        let ptr = self.try_alloc_slice_shared_fill_iter_inner::<_, _, false>(iter)?;
-        // SAFETY: helper initialized the slice and accounted for this Arc.
-        Ok(Arc::from_owned_in_chunk(unsafe {
-            crate::internal::owned_in_chunk::OwnedInSharedChunk::from_raw_alloc(ptr)
-        }))
+        let it = iter.into_iter();
+        let len = it.len();
+        self.impl_alloc_slice_arc_iter::<T, _>(len, it)
+    }
+
+    /// Arc + Copy: no element-drop runs, but we still take an Arc-owned
+    /// refcount on the chunk.
+    #[inline]
+    fn impl_alloc_slice_arc_copy<T: Copy>(&self, src: &[T]) -> Result<Arc<[T], A>, AllocError> {
+        check_slice_arc_layout::<T>(src.len())?;
+        let len = src.len();
+        // Copy is never `Drop`, so use the no-drop reservation.
+        #[cfg(feature = "stats")]
+        let payload_bytes = mem::size_of::<T>().saturating_mul(len);
+        let bytes_needed = worst_case_thin_slice_payload::<T>(len);
+        loop {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
+                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let slice_ptr = uninit.init_copy_from_slice_ptr(src);
+                let _ = chunk_ref.forget();
+                #[cfg(feature = "stats")]
+                self.record_alloc(payload_bytes);
+                // SAFETY: `slice_ptr` points to `len` initialized `T`s in a
+                // shared chunk with a fresh +1; `Arc::from_raw` adopts that
+                // +1. Chunk-wide provenance preserved via `init_copy_from_slice_ptr`.
+                return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
+            }
+            if self.is_oversized_shared(bytes_needed) {
+                return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
+                    let ticket = mutator
+                        .try_alloc_uninit_slice_prefixed::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit slice");
+                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let slice_ptr = ticket.init_copy_from_slice_ptr(src);
+                    let _ = chunk_ref.forget();
+                    #[cfg(feature = "stats")]
+                    self.record_alloc(payload_bytes);
+                    // SAFETY: see the non-oversized branch.
+                    unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
+                });
+            }
+            self.refill_shared(bytes_needed)?;
+        }
+    }
+
+    /// Arc + closure fill: records a chunk drop entry when `T: Drop`,
+    /// so the chunk's teardown runs `T::drop` on each element after the
+    /// last `Arc` releases.
+    #[inline]
+    fn impl_alloc_slice_arc_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Arc<[T], A>, AllocError> {
+        check_slice_arc_layout::<T>(len)?;
+        #[cfg(feature = "stats")]
+        let payload_bytes = mem::size_of::<T>().saturating_mul(len);
+        // Refill hint accounts for the length prefix, payload alignment
+        // slack, payload bytes, and (for `T: Drop`) a drop-entry slot.
+        let bytes_needed = worst_case_thin_slice_payload::<T>(len);
+        let mut f = Some(f);
+        loop {
+            // Branch on needs_drop at const time so monomorphizations
+            // pick the right reservation helper.
+            if const { mem::needs_drop::<T>() } {
+                if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice_with_drop::<T>(len) {
+                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let f = f.take().expect("with closure taken twice");
+                    let slice_ptr = uninit.init_with_ptr(f);
+                    let _ = chunk_ref.forget();
+                    #[cfg(feature = "stats")]
+                    self.record_alloc(payload_bytes);
+                    // SAFETY: see `impl_alloc_slice_arc_copy`; the drop entry
+                    // was committed by `init_with_ptr` for the chunk-teardown
+                    // path. `slice_ptr` carries chunk-wide provenance so the
+                    // Arc's later `byte_sub` to the chunk header is sound.
+                    return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
+                }
+            } else if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
+                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let f = f.take().expect("with closure taken twice");
+                let slice_ptr = uninit.init_with_ptr(f);
+                let _ = chunk_ref.forget();
+                #[cfg(feature = "stats")]
+                self.record_alloc(payload_bytes);
+                // SAFETY: see `impl_alloc_slice_arc_copy`; chunk-wide
+                // provenance preserved via `init_with_ptr`.
+                return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
+            }
+            if self.is_oversized_shared(bytes_needed) {
+                let fclosure = f.take().expect("with closure taken twice");
+                return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
+                    let slice_ptr = if const { mem::needs_drop::<T>() } {
+                        let ticket = mutator
+                            .try_alloc_uninit_slice_with_drop_prefixed::<T>(len)
+                            .expect("dedicated oversized chunk sized to fit slice + drop entry");
+                        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                        let p = ticket.init_with_ptr(fclosure);
+                        let _ = chunk_ref.forget();
+                        p
+                    } else {
+                        let ticket = mutator
+                            .try_alloc_uninit_slice_prefixed::<T>(len)
+                            .expect("dedicated oversized chunk sized to fit slice");
+                        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                        let p = ticket.init_with_ptr(fclosure);
+                        let _ = chunk_ref.forget();
+                        p
+                    };
+                    #[cfg(feature = "stats")]
+                    self.record_alloc(payload_bytes);
+                    // SAFETY: see the non-oversized branches above.
+                    unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
+                });
+            }
+            self.refill_shared(bytes_needed)?;
+        }
+    }
+
+    #[inline]
+    fn impl_alloc_slice_arc_iter<T, I: Iterator<Item = T>>(&self, len: usize, mut iter: I) -> Result<Arc<[T], A>, AllocError> {
+        self.impl_alloc_slice_arc_with::<T, _>(len, move |_| {
+            iter.next()
+                .expect("caller violated ExactSizeIterator contract: iterator yielded fewer elements than reported")
+        })
     }
 }
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate `len` slots and fill each via `f(i)`, returning a
-    /// [`Pin<Arc<[T], A>>`](core::pin::Pin). Pin is preserved across
-    /// `Arc::clone` and across threads.
-    ///
-    /// # Panics
-    ///
-    /// See [`Self::alloc_slice_fill_with_arc`].
+    /// [`Pin<Arc<[T], A>>`](core::pin::Pin).
     #[must_use]
     #[inline]
-    pub fn alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> core::pin::Pin<Arc<[T], A>>
+    pub fn alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> Pin<Arc<[T], A>>
     where
         T: Send + Sync,
         F: FnMut(usize) -> T,
         A: Send + Sync + 'static,
     {
-        crate::arc::Arc::into_pin(self.alloc_slice_fill_with_arc(len, f))
+        Arc::into_pin(self.alloc_slice_fill_with_arc::<T, F>(len, f))
     }
 
     /// Fallible variant of [`Self::alloc_slice_fill_with_arc_pin`].
@@ -222,12 +287,35 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// See [`Self::try_alloc_slice_fill_with_arc`].
     #[inline]
-    pub fn try_alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> Result<core::pin::Pin<Arc<[T], A>>, AllocError>
+    pub fn try_alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> Result<Pin<Arc<[T], A>>, AllocError>
     where
         T: Send + Sync,
         F: FnMut(usize) -> T,
         A: Send + Sync + 'static,
     {
-        self.try_alloc_slice_fill_with_arc(len, f).map(crate::arc::Arc::into_pin)
+        self.try_alloc_slice_fill_with_arc::<T, F>(len, f).map(Arc::into_pin)
     }
+}
+
+/// Common up-front checks for the `Arc<[T]>` slice family. Rejects
+/// over-aligned `T` (would break the smart-pointer header recovery) and
+/// `T: Drop` slices whose `len > u16::MAX` (the chunk drop entry packs
+/// the element count into a `u16`).
+//
+// Mutation testing is suppressed here: any mutation that bypasses the
+// `len > u16::MAX` rejection (e.g. `&&`→`||`, `>`→`==`) sends the
+// caller's refill loop into an unbounded chunk-allocation spin (see the
+// detailed note in `alloc_slice_ref::reject_drop_slice_too_long`).
+// Correctness is exercised by integration tests in `coverage_gaps.rs`,
+// `arena.rs`, and `mutants_extras.rs`.
+#[cfg_attr(test, mutants::skip)]
+#[inline]
+fn check_slice_arc_layout<T>(len: usize) -> Result<(), AllocError> {
+    if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
+        return Err(AllocError);
+    }
+    if mem::needs_drop::<T>() && len > u16::MAX as usize {
+        return Err(AllocError);
+    }
+    Ok(())
 }

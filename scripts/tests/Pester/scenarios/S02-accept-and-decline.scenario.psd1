@@ -1,0 +1,40 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+@{
+    Name        = 'S02-accept-and-decline'
+    Description = 'Linear3 with both dependency packages modified: user accepts b (which releases as minor) and declines c. Final release set = a + b; c stays unreleased.'
+
+    Workspace = @{ Preset = 'Linear3' }   # a -> b -> c
+
+    History = @(
+        @{ Op = 'ModifySource'; Package = 'a' }
+        @{ Op = 'ModifySource'; Package = 'b' }
+        @{ Op = 'ModifySource'; Package = 'c' }
+        @{ Op = 'AddCommit';    Message = 'dependency edits' }
+    )
+
+    Run = @{
+        Packages = @('a@patch')
+        Answers   = @(
+            @{ Match = "Choose option for 'b'"; Reply = '4' } # Non-breaking
+            @{ Match = "Choose option for 'c'"; Reply = '2' } # No material changes
+        )
+    }
+
+    Expect = @{
+        # In 0.x semver convention (per Get-NextVersion), a "non-breaking" change
+        # on 0.2.0 is patch-style → 0.2.1 (true breaking is "breaking" → 0.3.0).
+        # b's cascade to a requires 0.1.1 which a already satisfies (from the
+        # initial patch), so a stays at 0.1.1 (bullet-only).
+        Released = @(
+            @{ Package = 'a'; To = '0.1.1' }
+            @{ Package = 'b'; To = '0.2.1' }
+        )
+        PromptsRaised = @(
+            "Choose option for 'b'"
+            "Choose option for 'c'"
+        )
+        UnconsumedAnswers = @()
+    }
+}

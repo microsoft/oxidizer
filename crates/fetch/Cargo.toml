@@ -4,7 +4,7 @@
 [package]
 name = "fetch"
 description = "HTTP client with resilience, observability, and Tokio runtime support."
-version = "0.10.2"
+version = "0.11.0"
 readme = "README.md"
 keywords = ["http", "client", "async", "resilience", "observability"]
 categories = ["network-programming"]
@@ -40,6 +40,9 @@ allowed_external_types = [
     "tower_layer::Layer",
 ]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 tls = ["rustls"]
@@ -54,7 +57,7 @@ native-tls = [
     "fetch_hyper?/native-tls",
     "fetch_tls/native-tls",
 ]
-json = ["dep:serde", "http_extensions/json"]
+json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
     "dep:tokio",
@@ -101,7 +104,6 @@ opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
-serde = { workspace = true, optional = true }
 smallvec = { workspace = true }
 tracing = { workspace = true }
 

@@ -457,7 +457,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn test_request_method_with_string_params() {
-        let fake = FakeHandler::from_sync_handler(|request| {
+        let fake = FakeHandler::from_fn(|request| {
             assert_eq!(request.method(), http::Method::DELETE);
             assert_eq!(request.uri().to_string(), "https://example.com/path");
             HttpResponseBuilder::new_fake().status(StatusCode::IM_A_TEAPOT).build()
@@ -569,7 +569,7 @@ mod tests {
         let uri = Uri::from_static("https://example.com/test");
         let uri_cloned = uri.clone();
 
-        let client = HttpClient::new_fake(FakeHandler::from_sync_handler(move |request| {
+        let client = HttpClient::new_fake(FakeHandler::from_fn(move |request| {
             assert_eq!(request.method(), method);
             assert_eq!(request.uri().path(), "/test");
             HttpResponseBuilder::new_fake().build()

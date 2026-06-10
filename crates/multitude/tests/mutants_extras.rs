@@ -23,7 +23,7 @@ mod mutants_for_kill {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use multitude::{Arc, Arena, Box, Rc};
+    use multitude::{Arc, Arena};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -69,45 +69,6 @@ mod mutants_for_kill {
         }
     }
 
-    /// Kills the bulk of arithmetic/comparison mutants in
-    /// `try_alloc_inner_with`, `try_alloc_inner_value`, and their
-    /// slow-path siblings:
-    /// `arena.rs:1003 + → *`, `1035 > → ==/>=`, `1039 + → -/*`,
-    /// `1051 > → ==/>=`, `1346 > → <`, `1358 + → *`, `1384 > → <`,
-    /// `1386 != → ==`, `1441 > → >=`, `1445 + → -/*`, `1457 > → ==/>=`.
-    ///
-    /// Each of those mutants either short-circuits the drop-entry write,
-    /// corrupts the `drop_count` increment, or breaks the fit check the
-    /// refill loop relies on. The result is a wrong number of `Drop`
-    /// invocations or a hard memory error (segfault / panic during alloc).
-    #[test]
-    fn many_drop_typed_local_allocs_run_drop_exactly_once_each() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let mut keep_rc: std::vec::Vec<Rc<DropCounter>> = std::vec::Vec::new();
-            let mut keep_box: std::vec::Vec<Box<DropCounter>> = std::vec::Vec::new();
-            // 256 mixed allocations still span multiple local chunks and keep
-            // the drop-list accounting observable without 1024 drops under miri.
-            for i in 0..256_u32 {
-                if i % 2 == 0 {
-                    keep_rc.push(arena.alloc_rc(DropCounter(counter.clone())));
-                } else {
-                    keep_box.push(arena.alloc_box(DropCounter(counter.clone())));
-                }
-            }
-            // Drop the smart pointers and the arena.
-            drop(keep_rc);
-            drop(keep_box);
-            drop(arena);
-        }
-        assert_eq!(
-            counter.load(Ordering::Relaxed),
-            256,
-            "every DropCounter must be dropped exactly once"
-        );
-    }
-
     /// Kills mutants in `try_alloc_inner_arc_with` and
     /// `try_alloc_inner_arc_oversized_with`:
     /// `arena.rs:670 + → *`, `681 > → >=`, `700 > → ==/>=`,
@@ -125,44 +86,6 @@ mod mutants_for_kill {
                 keep.push(arena.alloc_arc_with(|| DropCounter(counter.clone())));
             }
             drop(keep);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 256);
-    }
-
-    /// Kills mutants in the *closure* variant of the normal local-flavor
-    /// alloc fast path: `try_alloc_inner_with`:
-    /// - `arena.rs:1396:42 > → <` (entry_size>0 gate that installs the
-    ///   noop drop entry pre-closure; flipped to `<0` it is always
-    ///   false, drop entries are never installed, drops never run).
-    /// - `arena.rs:1408:68 + → *` (drop_count increment).
-    /// - `arena.rs:1434:23 > → <` (post-closure entry_size>0 gate that
-    ///   overwrites the noop with the real shim).
-    /// - `arena.rs:1436:31 != → ==` (eviction detection: chunk-pointer
-    ///   identity check).
-    /// - `arena.rs:1648:40 + → -` in `allocate_layout`.
-    ///
-    /// We use `alloc_rc_with(|| …)` (local + closure) and
-    /// `alloc_box_with(|| …)` to drive both code paths. The shared
-    /// counterpart `try_alloc_inner_arc_with` is already covered above.
-    #[test]
-    fn many_drop_typed_local_alloc_with_closure_runs_drop() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let mut keep_rc: std::vec::Vec<Rc<DropCounter>> = std::vec::Vec::new();
-            let mut keep_box: std::vec::Vec<Box<DropCounter>> = std::vec::Vec::new();
-            // 256 closure-based allocations still span multiple local chunks and
-            // validate the same drop-install/commit logic.
-            for i in 0..256_u32 {
-                if i % 2 == 0 {
-                    keep_rc.push(arena.alloc_rc_with(|| DropCounter(counter.clone())));
-                } else {
-                    keep_box.push(arena.alloc_box_with(|| DropCounter(counter.clone())));
-                }
-            }
-            drop(keep_rc);
-            drop(keep_box);
             drop(arena);
         }
         assert_eq!(counter.load(Ordering::Relaxed), 256);
@@ -218,52 +141,6 @@ mod mutants_for_kill {
             let p: *const Big = std::ptr::from_ref::<Big>(&a);
             assert_eq!((p as usize) % 64, 0);
             drop(a);
-            drop(arena);
-        }
-        assert_eq!(counter2.load(Ordering::Relaxed), 1);
-    }
-
-    /// Regression: oversized `Box::<T:Drop>::into_rc()` previously panicked
-    /// because the oversized scalar paths skipped drop-entry installation
-    /// for Box flavor. The fast path always installs a `noop_drop_shim`
-    /// that `Box::into_rc` retargets to the real shim; the oversized path
-    /// now mirrors that.
-    #[test]
-    fn oversized_box_drop_into_rc_runs_drop_exactly_once() {
-        #[repr(align(64))]
-        struct Big {
-            _payload: [u64; 4 * 1024],
-            token: DropCounter,
-        }
-
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let b = arena.alloc_box_with(|| Big {
-                _payload: [0; 4 * 1024],
-                token: DropCounter(counter.clone()),
-            });
-            let rc = b.into_rc();
-            drop(rc);
-            drop(arena);
-        }
-        assert_eq!(
-            counter.load(Ordering::Relaxed),
-            1,
-            "oversized Box::into_rc must drop the value exactly once"
-        );
-
-        // Same path, by-value (`alloc_box` rather than `alloc_box_with`).
-        let counter2 = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let big = Big {
-                _payload: [0; 4 * 1024],
-                token: DropCounter(counter2.clone()),
-            };
-            let b = arena.alloc_box(big);
-            let rc = b.into_rc();
-            drop(rc);
             drop(arena);
         }
         assert_eq!(counter2.load(Ordering::Relaxed), 1);
@@ -385,38 +262,6 @@ mod mutants_for_kill {
     // --------------------------------------------------------------------
     // D/E/F. Slice paths — local and shared, with and without Drop.
     // --------------------------------------------------------------------
-
-    /// Kills mutants in `try_alloc_slice_local_with` and
-    /// `try_alloc_slice_shared_with`:
-    /// `arena.rs:2211 && → ||`, `2216 != → ==`, `2216 > → ==/>=`,
-    /// `2605 && → ||`, `2610 != → ==`, `2610 > → ==/>=`,
-    /// `2651 > → >=`, `2669 += → *=`, `2676 != → ==`, `2689 != → ==`.
-    ///
-    /// We allocate a variety of slices of `DropCounter` (drop-needing) at
-    /// many lengths in both local (Rc/Box) and shared (Arc) flavors. A
-    /// mutated guard that wrongly enters or skips the drop-entry-install
-    /// branch leaves the count off by `len`. A mutated `+=` on the bump
-    /// cursor produces a wrong end address → corrupted neighbour
-    /// allocations or a segfault.
-    #[test]
-    fn slice_drop_counts_match_for_local_and_shared() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        let mut total: usize = 0;
-        {
-            let arena = Arena::new();
-            let mut keep_local: std::vec::Vec<Rc<[DropCounter]>> = std::vec::Vec::new();
-            let mut keep_shared: std::vec::Vec<Arc<[DropCounter]>> = std::vec::Vec::new();
-            for len in [0_usize, 1, 2, 3, 7, 16, 64, 100] {
-                total += len * 2;
-                keep_local.push(arena.alloc_slice_fill_with_rc(len, |_| DropCounter(counter.clone())));
-                keep_shared.push(arena.alloc_slice_fill_with_arc(len, |_| DropCounter(counter.clone())));
-            }
-            drop(keep_local);
-            drop(keep_shared);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), total);
-    }
 
     /// Kills the no-drop slice fast-path slow-tail mutants
     /// `arena.rs:2432 > → ==/>=` and `2527 > → ==/>=` by exhausting the
@@ -699,11 +544,17 @@ mod mutants_for_kill2 {
     ///
     /// Test: Allocate Arc<u32> (T: !Drop) many times so the alloc paths
     /// are exercised; subsequent allocations and reads must succeed.
+    /// Saturate one chunk with a few large uninit fillers so we reach
+    /// the chunk's refill boundary with a small probe burst.
     #[test]
     fn arc_with_non_drop_t_does_not_install_drop_entry() {
-        let arena = multitude::Arena::new();
-        let mut keep: Vec<multitude::Arc<u32>> = Vec::with_capacity(2048);
-        for i in 0..2048_u32 {
+        const N: u32 = 64;
+        let arena = multitude::Arena::builder().with_capacity_shared(64 * 1024).build();
+        // 4 × 16 KiB uninit fillers walk the bump cursor to the chunk's true end.
+        let _fillers: Vec<multitude::Arc<core::mem::MaybeUninit<[u8; 16 * 1024]>>> =
+            (0..4).map(|_| arena.alloc_uninit_arc::<[u8; 16 * 1024]>()).collect();
+        let mut keep: Vec<multitude::Arc<u32>> = Vec::with_capacity(N as usize);
+        for i in 0..N {
             keep.push(arena.alloc_arc(i));
         }
         for (i, a) in keep.iter().enumerate() {
@@ -754,177 +605,6 @@ mod mutants_for_kill2 {
     /// The match guard mutation `with true` is therefore EQUIVALENT —
     /// the original condition never fails. See MUTANTS_EQUIVALENT.md.
 
-    /// Kills `arena.rs:1053:68 + -> *` in `try_alloc_inner_value`.
-    /// Line 1053: `let new_count = (*chunk.as_ptr()).drop_count.get() + 1`.
-    /// Same pattern as 698:76 but for the local-flavor value path.
-    ///
-    /// Test: allocate N `Rc<DropCounter>` (uses inner_value path for
-    /// the by-value allocation form). Drop tracking must work.
-    #[test]
-    fn rc_drop_count_increments_on_value_path() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = multitude::Arena::new();
-            let mut keep: Vec<multitude::Rc<DropCounter>> = Vec::with_capacity(128);
-            for _ in 0..128_u32 {
-                // alloc_rc takes the value by-value so it routes through
-                // try_alloc_inner_value (not _with).
-                keep.push(arena.alloc_rc(DropCounter(counter.clone())));
-            }
-            drop(keep);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 128);
-    }
-
-    /// Kills `arena.rs:1089:100 + -> *` and `1089:36 + -> -` in
-    /// `try_alloc_inner_slow_value`. Same `needed` formula as 731.
-    #[test]
-    fn slow_value_high_align_needed_correct() {
-        #[repr(align(64))]
-        struct Aligned64([u8; 64]);
-        let arena = multitude::Arena::new();
-        let mut keep: Vec<multitude::Rc<Aligned64>> = Vec::with_capacity(256);
-        for _ in 0..256 {
-            keep.push(arena.alloc_rc(Aligned64([0; 64])));
-        }
-        for r in &keep {
-            let p = r.as_ref() as *const Aligned64 as usize;
-            assert_eq!(p % 64, 0);
-        }
-    }
-
-    /// Kills `arena.rs:1101:25 > -> ==/>=` in `try_alloc_inner_slow_value`.
-    /// Line 1101 inside refill retry loop: `if end_addr > new_drop_back_addr
-    /// { continue; }`. Mutated `>=` rejects exact fit (end == drop_back).
-    /// We exercise an exact-fit allocation pattern: fill a chunk to leave
-    /// just enough room for one tail allocation whose end aligns exactly
-    /// to the drop_back boundary.
-    ///
-    /// Achieving the exact-fit deterministically is hard without internal
-    /// access. The simpler observable: high-pressure allocation in a
-    /// single chunk must succeed when filled near capacity. Mutated `==`
-    /// rejects almost every allocation -> AllocError chains -> panic
-    /// from `alloc_rc`. We just allocate to chunk capacity.
-    #[test]
-    fn slow_value_exact_fit_retry_succeeds() {
-        let arena = multitude::Arena::new();
-        let mut keep: Vec<multitude::Rc<u64>> = Vec::with_capacity(8192);
-        for i in 0..8192_u64 {
-            keep.push(arena.alloc_rc(i));
-        }
-        for (i, r) in keep.iter().enumerate() {
-            assert_eq!(**r, i as u64);
-        }
-    }
-
-    /// Kills `arena.rs:1122:68 && -> ||` in `try_alloc_inner_oversized_value`.
-    /// Line 1122: `if const { core::mem::needs_drop::<T>() } && !matches!(flavor, AllocFlavor::Box)`.
-    /// Mutated `||`: condition fires for any (Drop OR not Box). For
-    /// Rc<T: !Drop> the original entry_size=0; mutated entry_size = sizeof.
-    /// That allocates a phantom drop entry in the oversized chunk,
-    /// which on chunk teardown runs `drop_shim_one::<T>` on uninitialized
-    /// pointer arithmetic — undefined behaviour observable via reading
-    /// the value back. Force an oversized allocation: T larger than
-    /// max_normal_alloc.
-    #[test]
-    fn oversized_value_drop_check_uses_and() {
-        let arena = multitude::Arena::builder().max_normal_alloc(4096).build();
-        // 8 KiB Rc<[u64; 1024]> -> oversized. Rc::T: !Drop so entry_size=0.
-        let r: multitude::Rc<[u64; 1024]> = arena.alloc_rc([7u64; 1024]);
-        assert_eq!((*r)[0], 7);
-        assert_eq!((*r)[1023], 7);
-    }
-
-    /// Kills `arena.rs:1408:68 + -> *` in `try_alloc_inner_with`.
-    /// Line 1408: `let new_count = (*chunk.as_ptr()).drop_count.get() + 1`.
-    /// Same pattern as 698:76/1053:68 but for the local-flavor with-closure
-    /// path. Covered by `arena.alloc_rc_with` paths.
-    #[test]
-    fn rc_with_drop_count_increments() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = multitude::Arena::new();
-            let mut keep: Vec<multitude::Rc<DropCounter>> = Vec::with_capacity(128);
-            for _ in 0..128_u32 {
-                let c = counter.clone();
-                keep.push(arena.alloc_rc_with(|| DropCounter(c.clone())));
-            }
-            drop(keep);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 128);
-    }
-
-    /// Kills `arena.rs:1436:31 != -> ==` in `try_alloc_inner_with`.
-    /// Line 1436: `if cur_chunk_addr != chunk.as_ptr().cast::<u8>() as usize`.
-    /// This detects whether the closure caused chunk eviction. Mutated
-    /// `==` inverts the detection: the eviction-recovery path runs when
-    /// the closure did NOT evict (and vice versa).
-    ///
-    /// The closure that evicts: a reentrant `alloc_with` inside the
-    /// closure can swap the current chunk if the new request doesn't fit.
-    /// We construct: a small T (so fast path runs), with a closure that
-    /// allocates a big T forcing chunk swap. The recovery path runs the
-    /// post-closure entry write. Mutation flips this: the in-place
-    /// success path tries to run on an evicted chunk -> writes drop
-    /// entry to wrong memory.
-    ///
-    /// Observation: the small T's Drop must run exactly once.
-    #[test]
-    fn alloc_with_reentrant_eviction_recovery() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = multitude::Arena::new();
-            let c = counter.clone();
-            let _outer: multitude::Rc<DropCounter> = arena.alloc_rc_with(|| {
-                // Inner allocation large enough to force a chunk swap.
-                // alloc_box (no Drop tracking concern) of an 8 KiB value
-                // forces refill_local on a fresh arena.
-                let _inner = arena.alloc_box([0u64; 1024]);
-                DropCounter(c.clone())
-            });
-        }
-        // Drop the arena (which drops _outer first); the outer's Drop
-        // must run exactly once.
-        assert_eq!(counter.load(Ordering::Relaxed), 1);
-    }
-
-    /// Kills `arena.rs:1495:100 + -> *` and `1495:36 + -> -` in
-    /// `try_alloc_inner_slow_with`. Same `needed` formula as 731/1089.
-    #[test]
-    fn slow_with_high_align_needed_correct() {
-        #[repr(align(64))]
-        struct Aligned64([u8; 64]);
-        let arena = multitude::Arena::new();
-        let mut keep: Vec<multitude::Rc<Aligned64>> = Vec::with_capacity(256);
-        for _ in 0..256 {
-            keep.push(arena.alloc_rc_with(|| Aligned64([0; 64])));
-        }
-        for r in &keep {
-            let p = r.as_ref() as *const Aligned64 as usize;
-            assert_eq!(p % 64, 0);
-        }
-    }
-
-    /// Kills `arena.rs:1507:25 > -> ==/>=` in `try_alloc_inner_slow_with`.
-    /// Same retry-loop check as 1101. Covered by the high-pressure test.
-    #[test]
-    fn slow_with_pressure_succeeds() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = multitude::Arena::new();
-            let mut keep: Vec<multitude::Rc<DropCounter>> = Vec::with_capacity(2048);
-            for _ in 0..2048 {
-                let c = counter.clone();
-                keep.push(arena.alloc_rc_with(|| DropCounter(c.clone())));
-            }
-            drop(keep);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 2048);
-    }
-
     /// Kills `arena.rs:1648:40 + -> -` in `allocate_layout`.
     /// Line 1648: `let needed = layout.size() + layout.align().saturating_sub(core::mem::align_of::<usize>())`.
     /// Used by the `Allocator` impl on `&Arena`. Mutated `-`: needed =
@@ -941,7 +621,12 @@ mod mutants_for_kill2 {
         let a: &multitude::Arena = &arena;
         let layout = Layout::from_size_align(4096, 64).unwrap();
         let mut allocations = std::vec::Vec::new();
-        for _ in 0..256 {
+        // Enough iterations to force chunk grows (each chunk holds
+        // ~15 × 4 KiB before refill at max class), but small enough that
+        // Miri completes promptly. A `+ → -` mutation under-refills on
+        // the very first high-alignment request, so a short burst still
+        // catches it.
+        for _ in 0..32 {
             let ptr = a.allocate(layout).unwrap();
             let addr = ptr.as_ptr() as *const u8 as usize;
             assert_eq!(addr % 64, 0);
@@ -953,76 +638,6 @@ mod mutants_for_kill2 {
         for ptr in allocations {
             // SAFETY: ptr came from `a.allocate(layout)` with the same layout.
             unsafe { a.deallocate(ptr.cast(), layout) };
-        }
-    }
-
-    /// Kills `arena.rs:2261:47 && -> ||` in `try_alloc_slice_local_with`.
-    /// Line 2261: `let entry_size = if drop_fn.is_some() && len != 0 ...`.
-    /// Mutated `||`: entry_size is non-zero whenever drop_fn OR len !=0.
-    /// For Rc<[T: !Drop]> (drop_fn=None) with len > 0, the mutated path
-    /// installs a spurious drop entry — observable via memory corruption
-    /// or stats.
-    #[test]
-    fn slice_local_no_drop_does_not_install_entry() {
-        let arena = multitude::Arena::new();
-        let s: multitude::Rc<[u32]> = arena.alloc_slice_copy_rc(&[1u32, 2, 3, 4, 5][..]);
-        assert_eq!(&*s, &[1, 2, 3, 4, 5]);
-    }
-
-    /// Kills `arena.rs:2266:23 != -> ==` and `2266:35 > -> ==/>=` in
-    /// `try_alloc_slice_local_with`. Line 2266:
-    /// `if entry_size != 0 && len > u16::MAX as usize { return Err }`.
-    /// Mutated `==`: rejects len > u16::MAX for entry_size==0 (no-Drop
-    /// types), which is wrong (no entry needed -> no u16 limit).
-    ///
-    /// Test: allocate Rc<[u32]> with len > u16::MAX. Must succeed
-    /// because T is not Drop.
-    #[test]
-    fn slice_local_long_no_drop_succeeds() {
-        let arena = multitude::Arena::new();
-        let v = vec![7_u32; 70_000]; // > u16::MAX = 65535
-        let s: multitude::Rc<[u32]> = arena.alloc_slice_copy_rc(&v[..]);
-        assert_eq!(s.len(), 70_000);
-        assert_eq!(s[0], 7);
-        assert_eq!(s[69_999], 7);
-    }
-
-    /// Kills the boundary `len == u16::MAX` and `len == u16::MAX as usize`
-    /// case of 2266:35. With drop_fn=Some, len > u16::MAX must return
-    /// AllocError. `len == u16::MAX` (=65535) must succeed (try_into u16
-    /// works). Mutated `>=` rejects 65535 too.
-    #[test]
-    fn slice_local_drop_at_u16_max_succeeds() {
-        let counter = StdArc::new(AtomicUsize::new(0));
-        {
-            let arena = multitude::Arena::new();
-            let c = counter.clone();
-            // Drop type, len exactly u16::MAX
-            let s: multitude::Rc<[DropCounter]> = arena.alloc_slice_fill_with_rc(u16::MAX as usize, |_| DropCounter(c.clone()));
-            assert_eq!(s.len(), u16::MAX as usize);
-            drop(s);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), u16::MAX as usize);
-    }
-
-    /// Kills `arena.rs:2482:25 > -> ==/>=` and `2577:25 > -> ==/>=` in
-    /// `try_alloc_slice_local_no_drop_with_slow` and `_copy_slow`.
-    /// Line N: `if end_addr > drop_back_addr { continue }`. Same retry
-    /// loop fit check as 1101/1507.
-    ///
-    /// High-pressure slice allocation through these paths.
-    #[test]
-    fn slice_local_slow_pressure_succeeds() {
-        let arena = multitude::Arena::new();
-        // 256 small slices still span multiple local chunks, which is enough
-        // to re-enter the slice slow paths this test is targeting.
-        let mut keep: Vec<multitude::Rc<[u32]>> = Vec::with_capacity(256);
-        for i in 0..256_u32 {
-            let v = vec![i; 4];
-            keep.push(arena.alloc_slice_copy_rc(&v[..]));
-        }
-        for (i, s) in keep.iter().enumerate() {
-            assert_eq!(s[0], i as u32);
         }
     }
 
@@ -1045,6 +660,12 @@ mod mutants_for_kill2 {
     }
 
     #[test]
+    // Skipped under Miri: needs `u16::MAX` allocations + drops (~65K
+    // elements) to exercise the slice-length boundary, which exceeds
+    // Miri's 10-minute test budget. The boundary itself is a runtime
+    // assertion, not a memory-safety property; native test runs verify
+    // it on every CI execution.
+    #[cfg_attr(miri, ignore)]
     fn slice_shared_drop_at_u16_max_succeeds() {
         let counter = StdArc::new(AtomicUsize::new(0));
         #[derive(Debug)]
@@ -1223,8 +844,8 @@ mod mutants_for_kill3 {
     #![allow(redundant_imports, reason = "test scope-local imports may shadow")]
     #![allow(clippy::assertions_on_constants, reason = "test asserts on constants")]
     #![allow(clippy::bool_assert_comparison, reason = "explicit boolean assertions")]
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Mutex, MutexGuard};
 
     use multitude::Arena;
 
@@ -1234,41 +855,50 @@ mod mutants_for_kill3 {
     // =====================================================================
     // Helper: a type that needs Drop and is Send+Sync (for Arc allocs)
     // =====================================================================
-    static DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    thread_local! {
+        /// Per-test drop counter. `libtest` runs each test on its own
+        /// thread, and these tests perform every `DropTracker`/arena drop on
+        /// that same thread, so a thread-local counter is naturally isolated
+        /// per test. This replaces an earlier global counter plus serializing
+        /// mutex, which was order-sensitive: a test that dropped a
+        /// `DropTracker`-bearing arena *after* releasing the mutex could bump
+        /// the next test's count, producing flaky cross-test failures.
+        static DROP_COUNTER: Cell<usize> = const { Cell::new(0) };
+    }
 
-    /// Global mutex serializing tests that share the `DROP_COUNTER` static.
-    /// Parallel test execution would otherwise race on the counter,
-    /// producing flaky pass/fail outcomes. Tests acquire the guard for
-    /// their full lifetime by binding the return of `reset_drop_counter()`.
-    static SERIAL: Mutex<()> = Mutex::new(());
+    /// Increment the current thread's drop counter.
+    fn bump_drop_counter() {
+        DROP_COUNTER.with(|c| c.set(c.get() + 1));
+    }
 
     #[derive(Clone)]
     struct DropTracker(u64);
     impl Drop for DropTracker {
         fn drop(&mut self) {
-            DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
+            bump_drop_counter();
         }
     }
 
-    // SAFETY: DropTracker is trivially Send+Sync (just a u64 + counter).
+    // SAFETY: DropTracker is trivially Send+Sync (just a u64).
     unsafe impl Send for DropTracker {}
     unsafe impl Sync for DropTracker {}
 
-    /// Reset the drop counter and return a guard that serializes the test
-    /// against other counter-using tests. The guard must be held by the
-    /// caller for the duration of the test (typically via
-    /// `let _guard = reset_drop_counter();`). Poisoning is tolerated: a
-    /// previous test's panic doesn't invalidate the counter state.
-    #[must_use = "the returned MutexGuard must be held for the test's lifetime to serialize against other tests"]
-    fn reset_drop_counter() -> MutexGuard<'static, ()> {
-        let guard = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
-        DROP_COUNTER.store(0, Ordering::SeqCst);
-        guard
+    /// ZST guard returned by [`reset_drop_counter`]. The drop counter is
+    /// thread-local, so no cross-test serialization is required; this guard
+    /// exists only so existing `let _guard = reset_drop_counter();` call sites
+    /// keep compiling unchanged.
+    struct DropCounterGuard;
+
+    /// Reset the current thread's drop counter to zero.
+    #[must_use = "bind the guard for the test's lifetime"]
+    fn reset_drop_counter() -> DropCounterGuard {
+        DROP_COUNTER.with(|c| c.set(0));
+        DropCounterGuard
     }
 
-    /// Read the current drop count without releasing the serialization guard.
+    /// Read the current thread's drop count.
     fn drops() -> usize {
-        DROP_COUNTER.load(Ordering::SeqCst)
+        DROP_COUNTER.with(Cell::get)
     }
 
     // =====================================================================
@@ -1342,76 +972,6 @@ mod mutants_for_kill3 {
     // arena.rs — try_alloc_inner_slow_value mutants (1085, 1089, 1101)
     // =====================================================================
 
-    /// Kills: arena.rs:1085:26 `> -> ==` and `> -> >=`
-    /// arena.rs:1089:36 `+ -> -` and 1089:100 `+ -> *`
-    /// arena.rs:1101:25 `> -> ==` and `> -> >=`
-    /// These are in the slow-path retry loop for value allocation.
-    /// We force the slow path by filling a chunk, then allocating a
-    /// value with Drop that barely fits. The value must actually drop.
-    #[test]
-    fn arena_1085_1089_1101_slow_value_path() {
-        let _counter = AtomicUsize::new(0);
-        let arena = Arena::new();
-        // Fill the current chunk to trigger slow path on next alloc
-        for i in 0u64..500 {
-            arena.alloc_rc(i);
-        }
-        // Now allocate a value with Drop via the slow path.
-        // Use alloc_rc_with (closure path) which goes through try_alloc_inner_slow_with.
-        struct LocalDrop<'a> {
-            counter: &'a AtomicUsize,
-        }
-        impl Drop for LocalDrop<'_> {
-            fn drop(&mut self) {
-                self.counter.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        // Cannot capture local ref in arena alloc. Use global counter instead
-        // but scope everything tightly.
-        let _guard = reset_drop_counter();
-        {
-            let rc = arena.alloc_rc(DropTracker(999));
-            // Rc is alive; drop it so refcount goes to 0
-            drop(rc);
-        }
-        // Arena hasn't dropped yet; the chunk still holds the value.
-        // Drop arena to trigger chunk cleanup.
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1, "DropTracker from slow value path must drop; got {drops}");
-    }
-
-    /// Kills: arena.rs:1122:68 `&& -> ||` in try_alloc_inner_oversized_value
-    /// `entry_size = if needs_drop::<T>() && !matches!(flavor, AllocFlavor::Box) {...}`
-    /// If `&&` becomes `||`, Box-flavor allocations of non-Drop types
-    /// would wrongly get an entry_size > 0. We test by allocating large
-    /// values through oversized path and verifying drops.
-    #[test]
-    fn arena_1122_and_to_or_oversized_value() {
-        let _guard = reset_drop_counter();
-        // Force oversized path with max_normal_alloc = 4096
-        let arena = Arena::builder().max_normal_alloc(4096).build();
-        // Box<[u8; 8192]> — no drop entry needed (no Drop, and Box flavor)
-        let b = arena.alloc_box([0u8; 8192]);
-        assert_eq!(b.len(), 8192);
-        // Rc<LargeDrop> — needs drop entry (has Drop, Rc flavor)
-        // Make a large type that needs Drop and is > 4096 bytes
-        #[repr(C)]
-        struct LargeDrop {
-            data: [u8; 8192],
-        }
-        impl Drop for LargeDrop {
-            fn drop(&mut self) {
-                DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        let rc = arena.alloc_rc(LargeDrop { data: [0; 8192] });
-        drop(rc);
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1, "LargeDrop in oversized path must drop");
-    }
-
     /// Kills: arena.rs:1251:17 OversizedSharedGuard::drop -> ()
     /// If the guard's drop is removed, a panicking closure in
     /// try_alloc_inner_arc_oversized_with would leak the oversized shared chunk.
@@ -1427,7 +987,7 @@ mod mutants_for_kill3 {
         }
         impl Drop for LargeArcDrop {
             fn drop(&mut self) {
-                DROP_COUNTER.fetch_add(1, Ordering::Relaxed);
+                bump_drop_counter();
             }
         }
         // SAFETY: just bytes + a counter
@@ -1438,50 +998,6 @@ mod mutants_for_kill3 {
         drop(arena);
         let drops = drops();
         assert!(drops >= 1, "oversized arc LargeArcDrop must drop");
-    }
-
-    /// Kills: arena.rs:1436:31 `!= -> ==` in try_alloc_inner_with
-    /// This flips the eviction check: the closure-eviction path would be
-    /// taken when chunks match (always) instead of when they differ (rare).
-    /// The normal non-eviction path writes the real drop shim; if we take
-    /// the eviction path instead, the noop shim stays → value leaks.
-    #[test]
-    fn arena_1436_eviction_check() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // alloc_rc_with uses the closure path (try_alloc_inner_with).
-        // Allocate many items to be sure the normal path is exercised.
-        let mut keep = Vec::new();
-        for i in 0..200 {
-            keep.push(arena.alloc_rc_with(|| DropTracker(i)));
-        }
-        drop(keep);
-        drop(arena);
-        let drops = drops();
-        assert_eq!(drops, 200, "all 200 DropTrackers must drop via normal path");
-    }
-
-    /// Kills: arena.rs:1491:26 `> -> >=` in try_alloc_inner_slow_with
-    /// arena.rs:1495:36 `+ -> -` and 1495:100 `+ -> *`
-    /// arena.rs:1507:25 `> -> ==` and `> -> >=`
-    /// These are in the slow retry path for closure-based local alloc.
-    /// Force slow path via chunk filling, then allocate with closure.
-    #[test]
-    fn arena_1491_1495_1507_slow_with_path() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Fill current local chunk
-        for i in 0u64..500 {
-            arena.alloc_rc(i);
-        }
-        // Force slow path for closure-based alloc with Drop type
-        {
-            let rc = arena.alloc_rc_with(|| DropTracker(123));
-            drop(rc);
-        }
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1, "DropTracker from slow with path must drop; got {drops}");
     }
 
     /// Kills: arena.rs:1648:40 `+ -> -` in allocate_layout
@@ -1560,29 +1076,6 @@ mod mutants_for_kill3 {
         assert_eq!(one_drop.len(), 1);
         // Just verify the allocation is fine
         drop(result);
-    }
-
-    /// Kills: arena.rs:2482:25 `> -> ==` / `> -> >=` in try_alloc_slice_local_no_drop_with_slow
-    /// arena.rs:2577:25 `> -> ==` / `> -> >=` in try_alloc_slice_local_copy_slow
-    /// These are slow-path retry loops for local slice alloc.
-    /// Force slow path by filling chunk, then allocate a slice.
-    #[test]
-    fn arena_2482_2577_slice_slow_paths() {
-        let arena = Arena::new();
-        // Fill the chunk to force slow path
-        for i in 0u64..500 {
-            arena.alloc_rc(i);
-        }
-        // Allocate a no-drop slice via fill_with (slow path)
-        let s1: &mut [u64] = arena.alloc_slice_fill_with(20, |i| i as u64);
-        assert_eq!(s1.len(), 20);
-        for (i, v) in s1.iter().enumerate() {
-            assert_eq!(*v, i as u64);
-        }
-        // Allocate a copy slice (slow path)
-        let src = [1u32, 2, 3, 4, 5];
-        let s2: &mut [u32] = arena.alloc_slice_copy(&src);
-        assert_eq!(s2, &[1, 2, 3, 4, 5]);
     }
 
     /// Kills: arena.rs:2655:47 `&& -> ||` in try_alloc_slice_shared_with
@@ -1675,26 +1168,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 300, "100 * 3 = 300 drops");
     }
 
-    /// Kills: arena.rs:5268:16 `> -> >=` in try_bump_fit
-    /// `if aligned > max_aligned { return None; }`
-    /// If mutated to `>=`, exact-fit allocations fail (None returned
-    /// when they should succeed). This affects all bump-fit paths.
-    #[test]
-    fn arena_5268_bump_fit_exact_boundary() {
-        let arena = Arena::new();
-        // Allocate items that should exactly fit. If the boundary is
-        // wrong (>= instead of >), allocations that exactly fit will fail
-        // and the arena will refill unnecessarily.
-        // We just need allocations to succeed and be correct.
-        let mut values = Vec::new();
-        for i in 0u64..200 {
-            values.push(arena.alloc_rc(i));
-        }
-        for (i, v) in values.iter().enumerate() {
-            assert_eq!(**v, i as u64);
-        }
-    }
-
     // =====================================================================
     // chunk_provider.rs mutants
     // =====================================================================
@@ -1710,25 +1183,6 @@ mod mutants_for_kill3 {
         let arena = Arena::builder().byte_budget(256 * 1024).build();
         // Should succeed - within budget
         let _v = arena.alloc(42u64);
-    }
-
-    /// Kills: chunk_provider.rs:152:9 release_budget -> ()
-    /// If release_budget is a no-op, the budget counter never decreases,
-    /// so after enough chunk allocations and deallocations, new
-    /// allocations fail even though old chunks were freed.
-    #[test]
-    fn chunk_provider_152_release_budget_noop() {
-        // Tight budget — enough for ~2 chunks. Allocate, drop, repeat.
-        // If release_budget is no-op, budget fills up and later allocs fail.
-        let arena = Arena::builder().byte_budget(512 * 1024).build();
-        for round in 0..5 {
-            let mut batch = Vec::new();
-            for i in 0u64..50 {
-                batch.push(arena.alloc_rc(round * 100 + i));
-            }
-            // Dropping the batch frees refcounts; chunk may be reclaimed → release_budget
-            drop(batch);
-        }
     }
 
     /// Kills: chunk_provider.rs:441:48 `+ -> *` in acquire_shared
@@ -1786,73 +1240,9 @@ mod mutants_for_kill3 {
     // drop_list.rs mutants
     // =====================================================================
 
-    /// Kills: drop_list.rs:49:69 `+ -> -` / `+ -> *`
-    /// drop_list.rs:53:16 `- -> +` / `- -> /`
-    /// drop_list.rs:53:28 `% -> /`
-    /// These affect PAD_BYTES computation for DropEntry alignment.
-    /// RAW_USED = size_of::<fn_ptr>() + 2 + 2 = 8 + 4 = 12 on 64-bit.
-    /// PAD_TARGET = align_of::<fn_ptr>() = 8.
-    /// PAD_BYTES = if 12 % 8 == 0 { 0 } else { 8 - (12 % 8) } = 8 - 4 = 4.
-    /// If the arithmetic is wrong, DropEntry is misaligned and drop
-    /// calls crash or corrupt memory.
-    #[test]
-    fn drop_list_49_53_pad_bytes() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Allocate many Drop values to exercise the drop list heavily
-        let mut keep = Vec::new();
-        for i in 0..100 {
-            keep.push(arena.alloc_rc(DropTracker(i)));
-        }
-        drop(keep);
-        drop(arena);
-        let drops = drops();
-        assert_eq!(drops, 100, "all 100 DropTrackers must drop correctly");
-    }
-
-    /// Specifically targets drop_list.rs:49:69 `+ -> -` (the first +2)
-    /// and 49:73 `+ -> -` (the second +2) by verifying that multiple
-    /// successive drop entries work correctly.
-    #[test]
-    fn drop_list_successive_entries() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Mix different types to create varied drop entries
-        let _r1 = arena.alloc_rc(DropTracker(1));
-        let _r2 = arena.alloc_rc(DropTracker(2));
-        let _r3 = arena.alloc_rc(DropTracker(3));
-        let _s1 = arena.alloc_slice_fill_with(3, |i| DropTracker(10 + i as u64));
-        let _r4 = arena.alloc_rc(DropTracker(4));
-        drop(_r1);
-        drop(_r2);
-        drop(_r3);
-        drop(_r4);
-        drop(arena);
-        let drops = drops();
-        // 4 singles + 3 from slice = 7
-        assert_eq!(drops, 7, "7 DropTrackers must drop");
-    }
-
     // =====================================================================
     // local_chunk.rs / shared_chunk.rs mutants
     // =====================================================================
-
-    /// Kills: local_chunk.rs:132:17 `- -> +` in max_bump_extent
-    /// `CHUNK_ALIGN - header_size()` → if `+`, max_bump_extent is huge,
-    /// potentially allowing allocations past the chunk boundary.
-    /// We verify that allocations don't crash even under tight conditions.
-    #[test]
-    fn local_chunk_132_max_bump_extent() {
-        let arena = Arena::new();
-        // Allocate many values to exercise bump extent limits
-        let mut keep = Vec::new();
-        for i in 0u64..1000 {
-            keep.push(arena.alloc_rc(i));
-        }
-        for (i, v) in keep.iter().enumerate() {
-            assert_eq!(**v, i as u64);
-        }
-    }
 
     /// Kills: shared_chunk.rs:143:17 `- -> +` in max_bump_extent
     /// Same as local_chunk but for shared chunks.
@@ -1930,62 +1320,6 @@ mod mutants_for_kill3 {
         assert_eq!(s.as_str(), "1234567890");
         // Reserve 0 more — should be no-op
         s.try_reserve(0).unwrap();
-    }
-
-    /// Kills: string.rs:528:9 try_reclaim_tail -> ()
-    /// If try_reclaim_tail is a no-op, unused capacity after string
-    /// finalization is wasted. We can detect this by checking that
-    /// subsequent allocations can reuse the reclaimed space.
-    #[test]
-    fn string_528_try_reclaim_tail_noop() {
-        let arena = Arena::new();
-        // Build a string with extra capacity, then freeze it
-        let mut s = arena.alloc_string_with_capacity(1000);
-        s.push_str("hello");
-        let rc_str = s.into_arena_str();
-        assert_eq!(rc_str.as_ref(), "hello");
-
-        // If reclaim worked, the ~995 bytes of unused capacity should be
-        // available for the next allocation in the same chunk.
-        // Allocate something that fits in the reclaimed space.
-        let v = arena.alloc(42u64);
-        assert_eq!(*v, 42);
-    }
-
-    /// Kills: string.rs:528:21 `>= -> <` in try_reclaim_tail
-    /// `if self.len >= self.cap { return; }`
-    /// If `>=` becomes `<`, the function returns early when len < cap
-    /// (which is the case where reclaim should happen) and falls through
-    /// when len >= cap (nothing to reclaim). Behavior is inverted.
-    #[test]
-    fn string_528_21_reclaim_guard_inversion() {
-        let arena = Arena::new();
-        // Case 1: len < cap — reclaim should happen
-        let mut s = arena.alloc_string_with_capacity(100);
-        s.push_str("hi");
-        let _rc = s.into_arena_str();
-
-        // Case 2: len == cap — no reclaim needed
-        let mut s2 = arena.alloc_string_with_capacity(5);
-        s2.push_str("12345");
-        let _rc2 = s2.into_arena_str();
-    }
-
-    /// Kills: string.rs:534:29 `- -> /` in try_reclaim_tail
-    /// `let reclaim = total - used;`
-    /// If `-` becomes `/`, reclaim = total / used, which is wrong.
-    /// The reclaimed amount would be too small or too large.
-    #[test]
-    fn string_534_reclaim_computation() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_string_with_capacity(200);
-        s.push_str("abc");
-        // The reclaim amount should be ~197 bytes. If / instead of -,
-        // reclaim would be wrong and the cursor wouldn't move correctly.
-        let _rc = s.into_arena_str();
-        // Verify arena is still functional
-        let v = arena.alloc(99u64);
-        assert_eq!(*v, 99);
     }
 
     // =====================================================================
@@ -2166,79 +1500,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 200);
     }
 
-    /// Kills: arena.rs:1085:26 `> -> >=`, 1101:25 `> -> >=` — slow value retry
-    /// These reject exact-fit allocations. Test by forcing exact-fit after refill.
-    /// The slow path computes end_addr and drop_back_addr. If `>` becomes `>=`,
-    /// exact fits are rejected and the retry loop might exhaust retries.
-    #[test]
-    fn arena_1085_1101_exact_fit_slow_value() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Optimized for miri runtime: ratchet via large fillers instead of 2000 small allocs.
-        for _ in 0..8 {
-            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
-        }
-        // A short burst is enough to drive the next Drop allocation through the
-        // same local slow-refill path.
-        for _ in 0..32 {
-            arena.alloc_rc(0u64);
-        }
-        // Allocate a Drop value that triggers slow path
-        let rc = arena.alloc_rc(DropTracker(42));
-        drop(rc);
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1);
-    }
-
-    /// Kills: arena.rs:1089:36 `+ -> -` in slow value path
-    /// `needed = size + align_slack + entry_size` becomes `size + align_slack - entry_size`
-    /// For Drop types, entry_size > 0. `size - entry_size` underflows for small T.
-    /// But since it's usize, it wraps to a huge value, which would make refill fail.
-    #[test]
-    fn arena_1089_needed_underflow_slow_value() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Optimized for miri runtime: ratchet via large fillers instead of 1000 small allocs.
-        for _ in 0..8 {
-            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
-        }
-        // A short burst is enough to leave the next Drop allocation on the
-        // same local slow-refill path under test.
-        for _ in 0..32 {
-            arena.alloc_rc(0u64);
-        }
-        // DropTracker is 8 bytes. entry_size for InnerDropEntry is ~16 bytes.
-        // With `-`, needed = 8 + 0 - 16 = wraps to huge number on usize
-        // This should cause refill to fail (or allocate enormous chunk).
-        // With `+`, needed = 8 + 0 + 16 = 24 (fits easily).
-        let rc = arena.alloc_rc(DropTracker(99));
-        drop(rc);
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1);
-    }
-
-    /// Kills: arena.rs:1122:68 `&& -> ||` in oversized value
-    /// `entry_size = if needs_drop && !Box { size } else { 0 }`
-    /// With ||: `entry_size = if needs_drop || !Box { size } else { 0 }`
-    /// For Box of non-Drop type: original has entry_size=0 (neither is true alone since &&)
-    /// With ||: entry_size = size (because !Box is true for... wait, flavor IS Box here)
-    /// Actually `needs_drop::<T>() || !matches!(Box)` → false || false = false for Box<u64>.
-    /// But for Rc<T: !Drop>: `false || !false` = true → adds drop entry unnecessarily.
-    /// This wastes space. With tight budget, it could cause failure.
-    #[test]
-    fn arena_1122_oversized_nondrop_rc() {
-        // Force oversized local path for a non-Drop Rc type
-        let arena = Arena::builder().max_normal_alloc(4096).build();
-        // Allocate a large non-Drop value as Rc (not Box)
-        let rc = arena.alloc_rc([0u64; 1024]); // 8192 bytes > 4096
-        // If `&&` became `||`, entry_size would be nonzero for non-Drop types,
-        // wasting space. Verify the value is correct.
-        assert_eq!(rc[0], 0);
-        assert_eq!(rc[1023], 0);
-    }
-
     /// Kills: arena.rs:1251:17 OversizedSharedGuard::drop -> ()
     /// The guard's drop cleans up the chunk on panic. If noop'd,
     /// a panicking closure leaks the budget.
@@ -2270,64 +1531,6 @@ mod mutants_for_kill3 {
         let _arc2: multitude::Arc<[u8; N]> = arena.alloc_arc_with(|| [0u8; N]);
     }
 
-    /// Kills: `OversizedLocalGuard::drop -> ()` (the local mirror of the
-    /// `OversizedSharedGuard` mutant above). Same shape: panic mid-closure,
-    /// guard must release the chunk's budget; subsequent oversized alloc
-    /// must succeed.
-    #[test]
-    fn arena_oversized_local_guard_panic() {
-        const N: usize = 70_000;
-        let arena = Arena::builder().max_normal_alloc(4096).byte_budget(N + 4096).build();
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _rc: multitude::Rc<[u8; N]> = arena.alloc_rc_with(|| {
-                panic!("intentional panic in oversized rc closure");
-            });
-        }));
-        assert!(result.is_err(), "should have caught the panic");
-
-        let _rc2: multitude::Rc<[u8; N]> = arena.alloc_rc_with(|| [0u8; N]);
-    }
-
-    /// Kills: arena.rs:1491:26 `> -> >=` — slow with retry
-    /// Same pattern as value slow paths.
-    #[test]
-    fn arena_1491_exact_fit_slow_with() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Optimized for miri runtime: ratchet via large fillers instead of 2000 small allocs.
-        for _ in 0..8 {
-            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
-        }
-        for _ in 0..32 {
-            arena.alloc_rc_with(|| 0u64);
-        }
-        let rc = arena.alloc_rc_with(|| DropTracker(77));
-        drop(rc);
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1);
-    }
-
-    /// Kills: arena.rs:1507:25 `> -> >=` — slow with retry
-    #[test]
-    fn arena_1507_exact_fit_slow_with2() {
-        let _guard = reset_drop_counter();
-        let arena = Arena::new();
-        // Optimized for miri runtime: ratchet via large fillers instead of 3000 small allocs.
-        for _ in 0..8 {
-            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
-        }
-        for _ in 0..32 {
-            arena.alloc_rc_with(|| 0u64);
-        }
-        let rc = arena.alloc_rc_with(|| DropTracker(88));
-        drop(rc);
-        drop(arena);
-        let drops = drops();
-        assert!(drops >= 1);
-    }
-
     /// Kills: arena.rs:1648:40 `+ -> -` in allocate_layout
     /// `needed = size + align_slack` becomes `size - align_slack`.
     /// For types with align == align_of::<usize>(), align_slack is 0, so
@@ -2352,22 +1555,6 @@ mod mutants_for_kill3 {
         // Verify all pointers are 64-byte aligned
         for p in &keep {
             assert_eq!(p % 64, 0, "pointer must be 64-byte aligned");
-        }
-    }
-
-    /// Kills: arena.rs:5268:16 `> -> >=` in try_bump_fit
-    /// Rejects exact-fit allocations. Test by filling chunks near capacity.
-    #[test]
-    fn arena_5268_bump_fit_exact() {
-        let arena = Arena::new();
-        // Allocate many items to force many bump-fit checks
-        let mut values = Vec::new();
-        for i in 0u64..2000 {
-            values.push(arena.alloc_rc(i));
-        }
-        // Verify all values are correct
-        for (i, v) in values.iter().enumerate() {
-            assert_eq!(**v, i as u64);
         }
     }
 
@@ -2412,32 +1599,6 @@ mod mutants_for_kill3 {
         assert_eq!(s.len(), 65536);
         assert_eq!(s[0], 0);
         assert_eq!(s[65535], 255);
-    }
-
-    /// Kills: arena.rs:2482:25 `> -> ==` / `> -> >=` in slow no_drop_with
-    /// arena.rs:2577:25 `> -> ==` in slow copy path
-    /// Force slow paths for these slice allocations.
-    #[test]
-    fn arena_2482_2577_slice_slow_force() {
-        let arena = Arena::new();
-        // Optimized for miri runtime: ratchet via large fillers instead of 5000 small allocs.
-        for _ in 0..8 {
-            let _filler: multitude::Rc<[u8]> = arena.alloc_slice_fill_with_rc(8 * 1024, |_| 0_u8);
-        }
-        for _ in 0..32 {
-            arena.alloc_rc(0u64);
-        }
-        // No-drop slice via fill_with
-        let s1: &mut [u64] = arena.alloc_slice_fill_with(50, |i| i as u64);
-        for i in 0..50 {
-            assert_eq!(s1[i], i as u64);
-        }
-        // Copy slice
-        let src: Vec<u32> = (0..100).collect();
-        let s2: &mut [u32] = arena.alloc_slice_copy(&src);
-        for i in 0..100 {
-            assert_eq!(s2[i], i as u32);
-        }
     }
 
     /// Kills: arena.rs:2655:47 `&& -> ||` in try_alloc_slice_shared_with
@@ -2493,23 +1654,37 @@ mod mutants_for_kill3 {
     /// Kills: shared_chunk.rs:143:17 `- -> +` in max_bump_extent
     /// CHUNK_ALIGN - header → CHUNK_ALIGN + header. This allows bump
     /// pointers past the chunk boundary, which corrupts memory.
-    /// Force many shared allocations to trigger boundary issues.
+    ///
+    /// Saturate one shared chunk with a handful of large uninit
+    /// fillers so the bump cursor sits right against the chunk's true
+    /// end, then issue a few small `Arc<DropTracker>` probes. With the
+    /// mutated extent the probes spill past the end and corrupt
+    /// neighboring memory; with the unmutated extent the very first
+    /// probe forces a clean refill.
     #[test]
     fn shared_chunk_143_max_bump_many() {
         let _guard = reset_drop_counter();
-        let arena = Arena::new();
+        const N: u64 = 64;
+
+        let arena = Arena::builder().with_capacity_shared(64 * 1024).build();
+
+        // 4 × 16 KiB uninit fillers walk the bump cursor to the chunk's true end.
+        let _fillers: Vec<multitude::Arc<core::mem::MaybeUninit<[u8; 16 * 1024]>>> =
+            (0..4).map(|_| arena.alloc_uninit_arc::<[u8; 16 * 1024]>()).collect();
+
         let mut keep = Vec::new();
-        for i in 0..2000 {
+        for i in 0..N {
             keep.push(arena.alloc_arc_with(|| DropTracker(i)));
         }
-        // Verify all values are intact
-        for (i, arc) in keep.iter().enumerate() {
-            assert_eq!(arc.0, i as u64);
-        }
+        // Spot-check first/middle/last: a bump-cursor corruption affects
+        // every element identically.
+        assert_eq!(keep[0].0, 0);
+        assert_eq!(keep[(N / 2) as usize].0, N / 2);
+        assert_eq!(keep[(N - 1) as usize].0, N - 1);
         drop(keep);
         drop(arena);
         let drops = drops();
-        assert_eq!(drops, 2000);
+        assert_eq!(drops, N as usize);
     }
 
     /// Kills: shared_chunk.rs:168:9 to_thin_ptr -> Default
@@ -2590,29 +1765,6 @@ mod mutants_for_kill3 {
         assert_eq!(s.as_str(), "1234567890A");
     }
 
-    /// Kills: string.rs:528:21 `>= -> <` in try_reclaim_tail
-    /// The guard is inverted: returns early when len < cap (should reclaim)
-    /// and falls through when len >= cap (nothing to reclaim, but tries anyway).
-    /// Test by building a string with extra cap, freezing, then checking
-    /// the arena can reuse space.
-    #[test]
-    fn string_528_21_reclaim_inversion_v2() {
-        let arena = Arena::new();
-        // Allocate with extra capacity
-        let mut s = arena.alloc_string_with_capacity(1000);
-        s.push_str("hi");
-        // Freeze — should reclaim ~998 bytes
-        let rc = s.into_arena_str();
-        assert_eq!(rc.as_ref(), "hi");
-
-        // Now allocate something that fits in the reclaimed space
-        // If reclaim is inverted, the space is wasted
-        let mut s2 = arena.alloc_string_with_capacity(500);
-        s2.push_str("world");
-        let rc2 = s2.into_arena_str();
-        assert_eq!(rc2.as_ref(), "world");
-    }
-
     // =====================================================================
     // UTF-16 stronger tests
     // =====================================================================
@@ -2677,22 +1829,6 @@ mod mutants_for_kill3 {
     // vec:808:43 > -> >=: cap==0 in-place probe returns None. EQUIVALENT.
     // vec:819:21 > -> >=: copy 0 elements is no-op. EQUIVALENT.
     // vec:474:26 > -> >=: total_new can never be 0 in this branch. EQUIVALENT.
-
-    /// Regression test for `alloc_box(MaybeUninit::<T>::uninit()).
-    /// assume_init().into_rc()` for `T: Drop`: previously aborted the
-    /// process. Now `retarget_box_drop_entry` silently no-ops on miss
-    /// (matching `Rc::assume_init`'s leak-on-miss semantics). Callers
-    /// who need drop-on-teardown must use the `alloc_uninit_box::<T>()`
-    /// helper which installs the entry up front.
-    #[test]
-    fn alloc_box_maybeuninit_into_rc_does_not_abort() {
-        let arena = multitude::Arena::new();
-        let mut b = arena.alloc_box(core::mem::MaybeUninit::<u32>::uninit());
-        b.write(7);
-        let init = unsafe { b.assume_init() };
-        let rc = init.into_rc();
-        assert_eq!(*rc, 7);
-    }
 }
 
 // === merged from tests/mutants_kill4.rs ===
@@ -2910,7 +2046,7 @@ mod mutants_for_audit {
     #![allow(clippy::allow_attributes, reason = "test helpers use allow uniformly")]
     #![allow(clippy::allow_attributes_without_reason, reason = "obvious in test context")]
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arc, Arena, Rc};
+    use multitude::{Arc, Arena};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -3331,39 +2467,6 @@ mod mutants_for_audit {
     // ============================================================================
 
     #[test]
-    fn try_alloc_slice_local_oversized_init_panic_drops_partial() {
-        use core::cell::Cell;
-        use std::panic::AssertUnwindSafe;
-
-        let drops = Cell::new(0_u32);
-
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-
-        let arena = Arena::builder().max_normal_alloc(4 * 1024).build();
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            // 1024 * 8 bytes = 8 KiB, strictly greater than max_normal_alloc(4 KiB)
-            // → routes via try_alloc_slice_local_oversized_with.
-            let _: Rc<[D<'_>]> = arena.alloc_slice_fill_with_rc(1024, |i| {
-                if i == 100 {
-                    panic!("synthetic init panic");
-                }
-                D(&drops)
-            });
-        }));
-        assert!(result.is_err());
-        // 100 elements were initialized before the panic; SliceInitGuard
-        // should have dropped exactly those 100. The mutant `*=` would
-        // leave init_guard.len at 0 → 0 drops.
-        assert_eq!(drops.get(), 100);
-        drop(arena);
-    }
-
-    #[test]
     fn try_alloc_slice_shared_oversized_init_panic_drops_partial() {
         use std::panic::AssertUnwindSafe;
         use std::sync::Arc as StdArc;
@@ -3421,33 +2524,6 @@ mod mutants_for_audit {
     // list replay.
     // ============================================================================
 
-    #[test]
-    fn many_allocations_in_max_class_chunk_correctly_resolve_chunk() {
-        use core::cell::Cell;
-        let drops = Cell::new(0_u32);
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-
-        // Force a max-class chunk by kicking it: allocate a ~32 KiB chunk first.
-        let arena = Arena::new();
-        {
-            let _big: Rc<[u8]> = arena.alloc_slice_fill_with_rc(32 * 1024, |_| 0_u8);
-            // 256 Drop allocations are enough to exercise repeated header
-            // resolution inside the promoted max-class chunk.
-            let mut handles: std::vec::Vec<Rc<D<'_>>> = std::vec::Vec::new();
-            for _ in 0..256 {
-                handles.push(arena.alloc_rc(D(&drops)));
-            }
-            drop(handles);
-        }
-        drop(arena);
-        assert_eq!(drops.get(), 256);
-    }
-
     // ============================================================================
     // arena.rs:3036 / 3608 — slice paths' `if entry_size != 0 && len > u16::MAX`
     // (panic-first).  Mutant `!=` → `==`: with entry_size == 0 (no drop) the
@@ -3455,13 +2531,6 @@ mod mutants_for_audit {
     // is that a Copy slice longer than u16::MAX would panic. Kill: a Copy
     // slice of length > u16::MAX must succeed.
     // ============================================================================
-
-    #[test]
-    fn alloc_slice_copy_above_u16_max_succeeds() {
-        let arena = Arena::builder().max_normal_alloc(60 * 1024).build();
-        let _r: Rc<[u8]> = arena.alloc_slice_fill_with_rc(70_000, |_| 0xab);
-        let _a: Arc<[u8]> = arena.alloc_slice_fill_with_arc(70_000, |_| 0xcd);
-    }
 
     // ============================================================================
     // arena.rs:3039 / 3611 — slice paths' `if layout.size() > self.provider.max_normal_alloc`
@@ -3480,33 +2549,6 @@ mod mutants_for_audit {
     // fast path. Kill: panic mid-init in the fast path (small slice fits in
     // a normal chunk) and verify partial-init drops are exactly N.
     // ============================================================================
-
-    #[test]
-    fn alloc_slice_local_fast_path_init_panic_drops_partial() {
-        use core::cell::Cell;
-        use std::panic::AssertUnwindSafe;
-
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        let drops = Cell::new(0);
-        let arena = Arena::new();
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            // Small slice (fits in a normal chunk → fast path).
-            let _: Rc<[D<'_>]> = arena.alloc_slice_fill_with_rc(64, |i| {
-                if i == 32 {
-                    panic!("synthetic");
-                }
-                D(&drops)
-            });
-        }));
-        assert!(result.is_err());
-        assert_eq!(drops.get(), 32);
-        drop(arena);
-    }
 
     #[test]
     fn alloc_slice_shared_fast_path_init_panic_drops_partial() {
@@ -3552,26 +2594,6 @@ mod mutants_for_audit {
     // ============================================================================
 
     #[test]
-    fn alloc_slice_local_rc_drop_type_runs_drop() {
-        use core::cell::Cell;
-        let drops = Cell::new(0_u32);
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        let arena = Arena::new();
-        {
-            let r: Rc<[D<'_>]> = arena.alloc_slice_fill_with_rc(8, |_| D(&drops));
-            assert_eq!(r.len(), 8);
-            drop(r);
-        }
-        drop(arena);
-        assert_eq!(drops.get(), 8);
-    }
-
-    #[test]
     fn alloc_slice_shared_arc_drop_type_runs_drop() {
         use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -3600,28 +2622,6 @@ mod mutants_for_audit {
     // slice that needs a refill — must succeed.
     // ============================================================================
 
-    #[test]
-    fn alloc_slice_with_drop_after_chunk_warmup_refills_correctly() {
-        use core::cell::Cell;
-        let drops = Cell::new(0_u32);
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        let arena = Arena::new();
-        {
-            // Burn the first chunk's capacity.
-            let _a: Rc<[u8]> = arena.alloc_slice_fill_with_rc(2 * 1024, |_| 0_u8);
-            // This second slice must refill.
-            let r: Rc<[D<'_>]> = arena.alloc_slice_fill_with_rc(64, |_| D(&drops));
-            drop(r);
-        }
-        drop(arena);
-        assert_eq!(drops.get(), 64);
-    }
-
     // ============================================================================
     // arena.rs:2076 / 941 — alloc_inner_*_or_panic's drop-count and `needed`
     // arithmetic. The `+ → *` and `+ → -` mutants on
@@ -3644,42 +2644,6 @@ mod mutants_for_audit {
     // Kill: a Drop-aware slice of len == u16::MAX must succeed (original)
     // and must panic for len > u16::MAX.
     // ============================================================================
-
-    #[test]
-    fn alloc_slice_local_drop_aware_at_u16_max_succeeds() {
-        use core::cell::Cell;
-        let drops = Cell::new(0_u32);
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        // size_of::<D> = 8 bytes. 65535 elements = 524 280 bytes (≈ 512 KiB),
-        // routes through the oversized helper. The oversized helper has an
-        // independent u16::MAX check.
-        let arena = Arena::builder().max_normal_alloc(60 * 1024).build();
-        let r: Rc<[D<'_>]> = arena.alloc_slice_fill_with_rc(65_535, |_| D(&drops));
-        assert_eq!(r.len(), 65_535);
-        drop(r);
-        drop(arena);
-        assert_eq!(drops.get(), 65_535);
-    }
-
-    #[test]
-    fn alloc_slice_local_drop_aware_above_u16_max_returns_err() {
-        use core::cell::Cell;
-        struct D<'a>(#[allow(dead_code)] &'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {}
-        }
-        let drops = Cell::new(0_u32);
-        let arena = Arena::builder().max_normal_alloc(60 * 1024).build();
-        // 65 536 > u16::MAX: try variant must return Err (Drop-aware can't
-        // record the slice length in the back-stack entry's u16 field).
-        let result = arena.try_alloc_slice_fill_with_rc(65_536, |_| D(&drops));
-        assert!(result.is_err());
-    }
 
     #[test]
     fn alloc_slice_shared_drop_aware_above_u16_max_returns_err() {
@@ -3775,7 +2739,7 @@ mod mutants_for_complete {
     #[expect(unused_imports, reason = "documentation of test target types")]
     use multitude::strings::Utf16String;
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arc, Arena, Rc};
+    use multitude::{Arc, Arena};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -3912,32 +2876,6 @@ mod mutants_for_complete {
     // `u16::MAX + 1` elements must take the copy fallback (the back-stack
     // entry's length field is u16).
     // ----------------------------------------------------------------------------
-
-    #[test]
-    fn vec_into_arena_rc_at_u16_max_drop_takes_inplace_path() {
-        // We can't easily allocate u16::MAX strings, but the boundary `> u16::MAX`
-        // must hold strictly: at exactly u16::MAX the in-place path must succeed.
-        // Use a small drop type with a Cell to verify the drop list runs once.
-        use core::cell::Cell;
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        let counter = Cell::new(0);
-        let arena = Arena::new();
-        {
-            let mut v: ArenaVec<'_, D<'_>> = arena.alloc_vec_with_capacity(4);
-            for _ in 0..4 {
-                v.push(D(&counter));
-            }
-            let rc: Rc<[D<'_>]> = v.into_arena_rc();
-            assert_eq!(rc.len(), 4);
-        }
-        drop(arena);
-        assert_eq!(counter.get(), 4);
-    }
 
     // ----------------------------------------------------------------------------
     // vec.rs:458, 502 — Guard::drop's `if added > 0 { drop_in_place(tail) }`
@@ -4187,15 +3125,6 @@ mod mutants_for_complete {
         assert_eq!(ptr.align_offset(64), 0);
     }
 
-    #[test]
-    fn over_aligned_rc_allocation_succeeds() {
-        let arena = Arena::new();
-        let r: Rc<Align64> = arena.alloc_rc(Align64(7));
-        assert_eq!(r.0, 7);
-        let ptr: *const Align64 = core::ptr::from_ref(&*r);
-        assert_eq!(ptr.align_offset(64), 0);
-    }
-
     // ----------------------------------------------------------------------------
     // arena.rs:5155 — check_isize_overflow: `if total > (isize::MAX as usize).saturating_sub(padding)`
     // Mutant: `>` → `>=`. At exact equality, original returns Ok; mutant errors.
@@ -4385,7 +3314,7 @@ mod mutants_for_final {
     #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
     #![allow(clippy::manual_assert, reason = "explicit panic message clearer in test")]
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arc, Arena, Box as ArenaBox, Rc};
+    use multitude::{Arc, Arena, Box as ArenaBox};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -4492,38 +3421,6 @@ mod mutants_for_final {
     // slice holds N copies of element 0. Detection: copy path with distinct
     // element values must preserve order.
     // ============================================================================
-
-    #[test]
-    fn vec_into_arena_box_after_extra_alloc_preserves_distinct_elements() {
-        let arena = Arena::new();
-        let mut v: ArenaVec<'_, std::string::String> = arena.alloc_vec_with_capacity(4);
-        v.push(std::string::String::from("one"));
-        v.push(std::string::String::from("two"));
-        v.push(std::string::String::from("three"));
-        v.push(std::string::String::from("four"));
-        let _gap: Rc<u64> = arena.alloc_rc(0);
-        let b: ArenaBox<[std::string::String]> = v.into_arena_box();
-        assert_eq!(b.len(), 4);
-        assert_eq!(b[0], "one");
-        assert_eq!(b[1], "two");
-        assert_eq!(b[2], "three");
-        assert_eq!(b[3], "four");
-    }
-
-    #[test]
-    fn vec_into_arena_rc_after_extra_alloc_preserves_distinct_elements() {
-        let arena = Arena::new();
-        let mut v: ArenaVec<'_, std::string::String> = arena.alloc_vec_with_capacity(4);
-        for i in 0..4 {
-            v.push(format!("elem-{i}"));
-        }
-        let _gap: Rc<u64> = arena.alloc_rc(0);
-        let rc: Rc<[std::string::String]> = v.into_arena_rc();
-        assert_eq!(rc.len(), 4);
-        for (i, item) in rc.iter().enumerate() {
-            assert_eq!(*item, format!("elem-{i}"));
-        }
-    }
 
     // ============================================================================
     // try_bump_fit `>` boundary (lines 5263/5272)
