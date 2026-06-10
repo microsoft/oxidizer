@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.1] - 2026-06-10
+
+- ✔️ Tasks
+
+  - technical release
+
 ## [0.10.0] - 2026-06-03
 
 - ✨ Features
@@ -71,4 +77,3 @@
 - ✨ Features
 
   - Improve data_privacy UX ([#89](https://github.com/microsoft/oxidizer/pull/89))
-
