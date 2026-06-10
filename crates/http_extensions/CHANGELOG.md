@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] - 2026-06-10
+
+- 🔧 Maintenance
+
+  - Now requires `0.12.1` of `data_privacy`
+  - Now requires `0.10.1` of `data_privacy_macros_impl`
+  - Now requires `0.3.3` of `layered`
+
+- ⚠️ Breaking
+
+  - improve working with response bodies ([#485](https://github.com/microsoft/oxidizer/pull/485))
+
+- ⚡ Performance
+
+  - reduce future sizes (up to 7x less) ([#483](https://github.com/microsoft/oxidizer/pull/483))
+
 ## [0.5.1] - 2026-06-05
 
 - 🔧 Maintenance
