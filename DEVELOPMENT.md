@@ -47,6 +47,7 @@ After installing the Rust toolchain, we setup repository-specific tooling:
 
 1. Execute `just build` to build the workspace. Verify that the build is successful.
 1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
+1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
 1. Validate that debugging works by opening `crates/tick/examples/tick_basic.rs` and pressing the `Debug` link that appears above `main()`. This should successfully launch the example app under the debugger.
 
 # Linux (WSL) environment setup
@@ -91,6 +92,7 @@ After installing the Rust toolchains, we setup the build target directory for fa
 
 1. Execute `just build` to build the workspace. Verify that the build is successful.
 1. Execute `just test` to execute all tests in the workspace. Verify that all tests pass.
+1. Execute `just test-scripts` to run the Pester suite for the release-related PowerShell scripts. Verify that all tests pass.
 
 ## Setup Visual Studio Code integration
 
