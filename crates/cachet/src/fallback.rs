@@ -18,7 +18,6 @@ use crate::Error;
 use crate::cache::CacheName;
 use crate::refresh::TimeToRefresh;
 use crate::telemetry::CacheTelemetry;
-use crate::telemetry::ext::ClockExt;
 
 pub(crate) struct FallbackCacheInner<K, V, P, F> {
     pub(crate) name: CacheName,
@@ -102,11 +101,7 @@ where
     ///
     /// Separated from [`get`](Self::get) to keep the hot path (primary hits) small.
     async fn get_from_fallback(&self, key: &K) -> Result<Option<CacheEntry<V>>, Error> {
-        let timed = self.inner.clock.timed_async(self.inner.fallback.get(key)).await;
-        self.inner.telemetry.cache_fallback(self.inner.name, timed.duration);
-
-        // Propagate any error from fallback
-        let fallback_value = timed.result?;
+        let fallback_value = self.inner.fallback.get(key).await?;
 
         if let Some(ref v) = fallback_value {
             // Insert errors are intentionally swallowed - a failed promotion should not
@@ -193,7 +188,7 @@ mod tests {
     fn make_primary() -> TestPrimary {
         let clock = Clock::new_frozen();
         let telemetry = CacheTelemetry::new();
-        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default())
+        CacheWrapper::new("primary", MockCache::new(), clock, None, telemetry, InsertPolicy::default(), false)
     }
 
     fn make_fallback_cache() -> TestFallbackCache {
@@ -446,6 +441,7 @@ mod tests {
             None,
             telemetry.clone(),
             InsertPolicy::default(),
+            false,
         );
         let fc = FallbackCache::new("test", primary, fallback_mock, clock, Some(refresh), telemetry);
 

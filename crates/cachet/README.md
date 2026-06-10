@@ -14,7 +14,7 @@
 </div>
 
 A composable, multi-tier caching library with stampede protection, background
-refresh, and built-in OpenTelemetry telemetry.
+refresh, and structured telemetry.
 
 ## Why Multi-Tier Caching?
 
@@ -89,7 +89,7 @@ builds on top of them and adds:
 |Stampede protection|❌|✅|
 |Background refresh|❌|✅|
 |Service middleware integration|❌|✅|
-|Structured telemetry (tracing)|❌|✅|
+|Structured telemetry|❌|✅|
 |Pluggable storage backends|❌|✅|
 |Clock injection for testing|❌|✅|
 
@@ -228,12 +228,16 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 ## Telemetry
 
+Cachet provides two complementary telemetry channels:
+
+### Tracing events
+
 Enable with the `logs` feature and `.enable_logs()` on the cache builder.
+Each tier outcome and operation completion emits a structured [`tracing`][__link20] event.
 
-Each cache operation emits a structured [`tracing`][__link20] event with fields
-`cache.name`, `cache.event`, and `cache.duration_ns`.
-
-### Subscribing to events
+**Tier events** carry `cache.name`, `cache.event`, and `cache.duration_ns`.
+**Operation-complete events** carry `cache.name`, `cache.operation`,
+`cache.duration_ns`, and `cache.coalesced`.
 
 Use [`telemetry::attributes`][__link21] constants to filter and match events in a
 custom `tracing_subscriber::Layer`:
@@ -251,13 +255,24 @@ if event_value == attributes::EVENT_HIT { /* cache hit */ }
 
 See the `telemetry_subscriber` example for a complete demonstration.
 
-### Event types
+#### Event types
 
 |Level|Events|
 |-----|------|
 |ERROR|`cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error`|
-|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`, `cache.eviction`|
+|INFO|`cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction`|
 |DEBUG|`cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared`|
+
+### Event handler callback API
+
+Register a [`CacheEventHandler`][__link22] via
+`.event_handler(handler)` on the cache builder to receive typed
+[`CacheTierEvent`][__link23] and
+[`CacheOperationEvent`][__link24] callbacks.
+Events carry a `request_id` for correlating tier outcomes with their parent
+operation. Works independently of the `logs` feature.
+
+See the `telemetry_accumulator` example for a DashMap-based accumulation pattern.
 
 
 <hr/>
@@ -265,7 +280,7 @@ See the `telemetry_subscriber` example for a complete demonstration.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbg_hDqE88LP4bMh0J5Y4y4Osb0zDJ1kwqOsoblCGrm49Rx2thZIiCaGJ5dGVzYnVmZTAuNS4zgmZjYWNoZXRlMC42LjaCbWNhY2hldF9tZW1vcnllMC4zLjSCbmNhY2hldF9zZXJ2aWNlZTAuMi41gmtjYWNoZXRfdGllcmUwLjIuM4JkdGlja2UwLjMuM4JndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjIuMw
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG_8ZSA792uloG6CGM3YZObWMG5vDWjb2V8K3G4SF7NHmnsnBYWSIgmhieXRlc2J1ZmUwLjUuM4JmY2FjaGV0ZTAuNi42gm1jYWNoZXRfbWVtb3J5ZTAuMy40gm5jYWNoZXRfc2VydmljZWUwLjIuNYJrY2FjaGV0X3RpZXJlMC4yLjOCZHRpY2tlMC4zLjOCZ3RyYWNpbmdmMC4xLjQ0gml1bmlmbGlnaHRlMC4yLjM
  [__link0]: https://docs.rs/cachet/0.6.6/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.3
  [__link10]: https://docs.rs/cachet_tier/0.2.3/cachet_tier/?search=CacheTier
@@ -281,6 +296,9 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link2]: https://docs.rs/cachet/0.6.6/cachet/?search=CacheBuilder::stampede_protection
  [__link20]: https://crates.io/crates/tracing/0.1.44
  [__link21]: https://docs.rs/cachet/0.6.6/cachet/?search=telemetry::attributes
+ [__link22]: https://docs.rs/cachet/0.6.6/cachet/?search=telemetry::handler::CacheEventHandler
+ [__link23]: https://docs.rs/cachet/0.6.6/cachet/?search=telemetry::handler::CacheTierEvent
+ [__link24]: https://docs.rs/cachet/0.6.6/cachet/?search=telemetry::handler::CacheOperationEvent
  [__link3]: https://docs.rs/cachet_tier/0.2.3/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.2.3/cachet_tier/?search=DynamicCache
  [__link5]: https://docs.rs/cachet/0.6.6/cachet/?search=InsertPolicy
