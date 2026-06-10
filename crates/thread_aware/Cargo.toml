@@ -23,6 +23,7 @@ allowed_external_types = [
     "bytes::bytes::Bytes",
     "bytes::bytes_mut::BytesMut",
     # `http` feature
+    "http::error::Error",
     "http::header::map::HeaderMap",
     "http::header::name::HeaderName",
     "http::header::value::HeaderValue",
@@ -30,6 +31,12 @@ allowed_external_types = [
     "http::request::Request",
     "http::response::Response",
     "http::status::StatusCode",
+    "http::uri::Uri",
+    "http::uri::authority::Authority",
+    "http::uri::path::PathAndQuery",
+    "http::uri::port::Port",
+    "http::uri::scheme::Scheme",
+    "http::uri::InvalidUri",
     "http::version::Version",
     # `jiff02` feature
     "jiff::civil::date::Date",

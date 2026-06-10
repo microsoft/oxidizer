@@ -6,19 +6,42 @@
 //! Enable with the `http` Cargo feature.
 //!
 //! Inert value types (`StatusCode`, `Method`, `Version`, `HeaderName`,
-//! `HeaderValue`) get a no-op `relocate`. The `HeaderMap` impl is provided
+//! `HeaderValue`, and the URI components `Uri`, `Authority`, `Scheme`,
+//! `PathAndQuery`, `Port<T>`, plus the error types `Error`, `InvalidUri`)
+//! get a no-op `relocate`. The `HeaderMap` impl is provided
 //! for `HeaderMap<HeaderValue>` only (the default type produced
 //! by the `http` crate) and is also a no-op, since `HeaderValue::relocate`
 //! is itself no-op — iterating would be pure waste. See the per-impl docs
 //! on [`Request<T>`] and [`Response<T>`] for their `relocate` semantics.
 
 use ::http::header::{HeaderMap, HeaderName, HeaderValue};
-use ::http::{Method, Request, Response, StatusCode, Version};
+use ::http::uri::{Authority, InvalidUri, PathAndQuery, Port, Scheme};
+use ::http::{Error, Method, Request, Response, StatusCode, Uri, Version};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;
 
-impl_noop_thread_aware!(StatusCode, Version, Method, HeaderName, HeaderValue, HeaderMap<HeaderValue>);
+impl_noop_thread_aware!(
+    StatusCode,
+    Version,
+    Method,
+    HeaderName,
+    HeaderValue,
+    HeaderMap<HeaderValue>,
+    Uri,
+    Authority,
+    Scheme,
+    PathAndQuery,
+    Error,
+    InvalidUri,
+);
+
+/// `Port<T>` is inert regardless of its representation parameter `T`:
+/// the port number is stored as a `u16` and `T` is only used for the textual
+/// representation accessor. `relocate` is therefore a no-op for all `T`.
+impl<T: Send> ThreadAware for Port<T> {
+    fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {}
+}
 
 /// `relocate` is forwarded to the body only.
 ///
@@ -49,7 +72,8 @@ impl<T: ThreadAware> ThreadAware for Response<T> {
 #[cfg(test)]
 mod tests {
     use ::http::header::{HeaderMap, HeaderName, HeaderValue};
-    use ::http::{Method, Request, Response, StatusCode, Version};
+    use ::http::uri::{Authority, InvalidUri, PathAndQuery, Port, Scheme};
+    use ::http::{Error, Method, Request, Response, StatusCode, Uri, Version};
     use static_assertions::assert_impl_all;
 
     use crate::ThreadAware;
@@ -77,6 +101,13 @@ mod tests {
     assert_impl_all!(HeaderName: ThreadAware, Send, Sync);
     assert_impl_all!(HeaderValue: ThreadAware, Send, Sync);
     assert_impl_all!(HeaderMap<HeaderValue>: ThreadAware, Send, Sync);
+    assert_impl_all!(Uri: ThreadAware, Send, Sync);
+    assert_impl_all!(Authority: ThreadAware, Send, Sync);
+    assert_impl_all!(Scheme: ThreadAware, Send, Sync);
+    assert_impl_all!(PathAndQuery: ThreadAware, Send, Sync);
+    assert_impl_all!(Port<&'static str>: ThreadAware, Send, Sync);
+    assert_impl_all!(Error: ThreadAware, Send, Sync);
+    assert_impl_all!(InvalidUri: ThreadAware, Send, Sync);
     assert_impl_all!(Request<Vec<u8>>: ThreadAware, Send, Sync);
     assert_impl_all!(Response<Vec<u8>>: ThreadAware, Send, Sync);
 
@@ -86,6 +117,67 @@ mod tests {
         let mut value = Method::POST;
         value.relocate(Some(affinities[0]), affinities[1]);
         assert_eq!(value, Method::POST);
+    }
+
+    #[test]
+    fn uri_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let mut uri: Uri = "https://example.com:8443/path?q=1".parse().unwrap();
+        uri.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(uri.to_string(), "https://example.com:8443/path?q=1");
+    }
+
+    #[test]
+    fn authority_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let mut authority: Authority = "example.org:80".parse().unwrap();
+        authority.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(authority.as_str(), "example.org:80");
+    }
+
+    #[test]
+    fn scheme_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let mut scheme: Scheme = "https".parse().unwrap();
+        scheme.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(scheme.as_str(), "https");
+    }
+
+    #[test]
+    fn path_and_query_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let mut pq: PathAndQuery = "/foo/bar?baz=1".parse().unwrap();
+        pq.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(pq.as_str(), "/foo/bar?baz=1");
+    }
+
+    #[test]
+    fn port_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let authority: Authority = "example.org:8080".parse().unwrap();
+        let mut port = authority.port().unwrap();
+        port.relocate(Some(affinities[0]), affinities[1]);
+        assert_eq!(port.as_u16(), 8080);
+    }
+
+    #[test]
+    fn error_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        // `http::Error` cannot be constructed directly; obtain one via a
+        // failing conversion that bubbles up through `http::Error: From<_>`.
+        let invalid: InvalidUri = "::not a uri::".parse::<Uri>().unwrap_err();
+        let mut err: Error = invalid.into();
+        err.relocate(Some(affinities[0]), affinities[1]);
+        // Just assert the value survives the call.
+        let _ = err.to_string();
+    }
+
+    #[test]
+    fn invalid_uri_relocate_is_noop() {
+        let affinities = pinned_affinities(&[2]);
+        let mut invalid: InvalidUri = "::not a uri::".parse::<Uri>().unwrap_err();
+        invalid.relocate(Some(affinities[0]), affinities[1]);
+        let _ = invalid.to_string();
     }
 
     #[test]

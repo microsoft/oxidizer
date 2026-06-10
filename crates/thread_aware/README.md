@@ -121,7 +121,9 @@ the wrapped crate can be supported additively:
 
 * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
-  `http::Request<T>`, `http::Response<T>`.
+  `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
+  `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
+  `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
 
 * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 
@@ -174,7 +176,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbNwCmAlaBkPsbNngIRBvGzoMb9DRwtcyYP9Ab5go6UV6NTA1hZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbN-qa6ScfeXYbpUaqiTirDJMb-9jGY2W0shYbe4CUzbbLbn5hZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuMw
  [__link0]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.3/thread_aware_macros/?search=ThreadAware

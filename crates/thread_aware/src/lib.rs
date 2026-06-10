@@ -110,7 +110,9 @@
 //! * **`bytes`**: Impls for `bytes::Bytes`, `bytes::BytesMut`.
 //! * **`http`**: Impls for `http::StatusCode`, `http::Method`, `http::Version`,
 //!   `http::HeaderName`, `http::HeaderValue`, `http::HeaderMap<HeaderValue>`,
-//!   `http::Request<T>`, `http::Response<T>`.
+//!   `http::Uri`, `http::uri::Authority`, `http::uri::Scheme`,
+//!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
+//!   `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
 //! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 //! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
