@@ -7,9 +7,9 @@
 # invalidated between tests so a previous fixture cannot pollute the next.
 
 BeforeAll {
-    . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
+    . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\releasing.ps1')
-    . (Join-Path $env:OXI_TEST_COMMON 'New-SyntheticWorkspace.ps1')
+    . (Join-Path $PSScriptRoot '..\..\_common\New-SyntheticWorkspace.ps1')
 }
 
 Describe 'Test-GitRef' {

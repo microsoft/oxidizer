@@ -77,9 +77,6 @@ if ($OutputPath) {
     $config.TestResult.OutputPath = $OutputPath
 }
 
-# Make fixture builder discoverable to every test via $script:Common.
-$env:OXI_TEST_COMMON = (Join-Path $PSScriptRoot '_common')
-
 $result = Invoke-Pester -Configuration $config
 
 if ($PassThru) {

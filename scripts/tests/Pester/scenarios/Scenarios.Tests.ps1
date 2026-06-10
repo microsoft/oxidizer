@@ -14,9 +14,9 @@
 #>
 
 BeforeAll {
-    . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
-    . (Join-Path $env:OXI_TEST_COMMON 'New-SyntheticWorkspace.ps1')
-    . (Join-Path $env:OXI_TEST_COMMON 'Invoke-Scenario.ps1')
+    . (Join-Path $PSScriptRoot '..\_common\TestHelpers.ps1')
+    . (Join-Path $PSScriptRoot '..\_common\New-SyntheticWorkspace.ps1')
+    . (Join-Path $PSScriptRoot '..\_common\Invoke-Scenario.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
 }
 

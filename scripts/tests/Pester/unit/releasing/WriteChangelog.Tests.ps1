@@ -16,7 +16,7 @@
 # scenario suite under scripts/tests/Pester/scenarios/.
 
 BeforeAll {
-    . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
+    . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
 }
 

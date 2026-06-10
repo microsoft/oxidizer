@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 BeforeAll {
-    . (Join-Path $env:OXI_TEST_COMMON 'TestHelpers.ps1')
+    . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
     . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
 
     # Helper that builds a baseline package record. Underscore-only cargo
