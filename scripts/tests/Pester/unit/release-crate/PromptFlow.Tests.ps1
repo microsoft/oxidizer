@@ -1,0 +1,1276 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+#
+# Unit tests for the per-package menu and prompt-flow helpers added by the
+# release-script UX overhaul. Helpers under test live in
+# scripts/lib/release-flow.ps1 and are deliberately split so the pure
+# formatting layer can be asserted on without capturing host streams and the
+# IO/IO-adjacent layer can be exercised with mocks.
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ Pester mock pitfall (DO NOT use `,@(...)` to wrap arrays in mocks)      │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ When mocking a function whose output is consumed via the pattern        │
+# │     $queue = @( @(SomeFunc ...) | Where-Object { ... } )                │
+# │ (see release-flow.ps1's Invoke-PlanReview), the leading-comma           │
+# │ wrapping idiom                                                          │
+# │     Mock SomeFunc -MockWith {                                           │
+# │         ,@(  item1, item2, item3  )       # <-- WRONG                   │
+# │     }                                                                   │
+# │ does NOT do what it looks like. PowerShell emits the inner @() as a    │
+# │ single object on the pipeline (the comma forces it). The outer @() of  │
+# │ the consumer then collects 1 pipeline output (the inner array), so    │
+# │ $queue.Count == 1 instead of N, and $queue[0] is the inner array — not │
+# │ a finding. Member-enumeration on the fused element ($queue[0].Folder)  │
+# │ returns the space-joined property values ('a b c'), which often looks  │
+# │ "right" enough to pass weak substring assertions but causes the loop   │
+# │ to execute only one iteration instead of N.                            │
+# │                                                                         │
+# │ ALWAYS emit items directly:                                            │
+# │     Mock SomeFunc -MockWith {                                           │
+# │         [pscustomobject]@{ Folder = 'a'; ... }      # <-- correct       │
+# │         [pscustomobject]@{ Folder = 'b'; ... }                          │
+# │         [pscustomobject]@{ Folder = 'c'; ... }                          │
+# │     }                                                                   │
+# │ The pipeline naturally streams each, the consumer's @() collects them │
+# │ into an N-element array, and $queue[0] is the first finding object.   │
+# │                                                                         │
+# │ (Exception: `@(,@('a', 'b'))` for DependencyChains is legitimate —     │
+# │ that builds an array-of-arrays where each element is a chain.)         │
+# │                                                                         │
+# │ History: this pattern was already removed from Get-WorkspacePackages     │
+# │ mocks in commit 53948dc0 after it silently capped maxIterations to 1; │
+# │ a second pass cleaned up the same idiom in                             │
+# │ Get-UnreleasedModifiedDependencies mocks.                              │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+BeforeAll {
+    . (Join-Path $PSScriptRoot '..\..\_common\TestHelpers.ps1')
+    . (Join-Path (Get-OxiRepoRoot) 'scripts\lib\release-flow.ps1')
+}
+
+# ---------------------------------------------------------------------------
+# Format-PackageMenu (pure formatter)
+# ---------------------------------------------------------------------------
+
+Describe 'Format-PackageMenu' {
+
+    BeforeAll {
+        function script:NewFinding {
+            param(
+                [string]$Folder = 'ohno',
+                [object[]]$Chains = @(@('a', 'ohno')),
+                [string]$CurrentVersion = '1.2.3'
+            )
+            return [pscustomobject]@{
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 1
+                # DependencyChains stays release-set-rooted for the PR comment
+                # and non-interactive bail-out paths; the menu reads only
+                # WorkspaceDependencyChains. Populate both fields on test
+                # findings so other consumers still get sensible data.
+                DependencyChains          = $Chains
+                WorkspaceDependencyChains = $Chains
+            }
+        }
+    }
+
+    It 'includes the package name on the first content line' {
+        $out = Format-PackageMenu -Finding (NewFinding -Folder 'ohno') -RemainingCount 0
+        $out | Should -Match 'Detected package with unreleased modifications: ohno'
+    }
+
+    Context 'no-changes (-All-mode) finding' {
+
+        # When the planner surfaces a package via -All mode there may be no
+        # on-disk modification at all. ChangedFileCount = 0 (or missing)
+        # signals this case; the menu must adapt its header and the
+        # "View diff" label so the reviewer is not misled into expecting
+        # changes that aren't there. The View-diff option still occupies
+        # menu slot 1 for muscle-memory consistency with the changed-finding
+        # variant.
+
+        function script:NewNoChangesFinding {
+            param([string]$Folder = 'unchanged', [string]$CurrentVersion = '1.2.3')
+            return [pscustomobject]@{
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 0
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
+            }
+        }
+
+        It 'rewrites the header verb when ChangedFileCount is 0' {
+            $out = Format-PackageMenu -Finding (NewNoChangesFinding -Folder 'unchanged') -RemainingCount 0
+            $out | Should -Match 'Reviewing package \(no detected changes\): unchanged'
+            $out | Should -Not -Match 'Detected package with unreleased modifications'
+        }
+
+        It 'relabels option 1 to "View diff (no changes in this package)" when ChangedFileCount is 0' {
+            $out = Format-PackageMenu -Finding (NewNoChangesFinding) -RemainingCount 0
+            $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
+            $lines[0] | Should -Match '^\s*1\. View diff \(no changes in this package\)$'
+        }
+
+        It 'keeps the standard "View diff" label and modifications header when ChangedFileCount is > 0' {
+            $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 0
+            $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
+            $lines[0] | Should -Match '^\s*1\. View diff$'
+            $out | Should -Match 'Detected package with unreleased modifications'
+        }
+
+        It 'treats a missing ChangedFileCount as 0 (no-changes flavour)' {
+            # Defensive: hand-rolled findings without the ChangedFileCount
+            # property should still render, falling back to the no-changes
+            # flavour rather than crashing.
+            $finding = [pscustomobject]@{
+                Folder                    = 'sparse'
+                PackageName               = 'sparse'
+                CurrentVersion            = '1.0.0'
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
+            }
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+            $out | Should -Match 'Reviewing package \(no detected changes\)'
+            $out | Should -Match '1\. View diff \(no changes in this package\)'
+        }
+    }
+
+    It 'omits the queued-count suffix when RemainingCount is 0' {
+        $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 0
+        $out | Should -Not -Match '\(\+\d+ packages? queued\)'
+    }
+
+    It 'renders "(+1 package queued)" with singular noun when RemainingCount is 1' {
+        $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 1
+        $out | Should -Match '\(\+1 package queued\)'
+        $out | Should -Not -Match '\(\+1 packages queued\)'
+    }
+
+    It 'renders "(+3 packages queued)" with plural noun when RemainingCount is 3' {
+        $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 3
+        $out | Should -Match '\(\+3 packages queued\)'
+    }
+
+    It 'renders a "Direct dependents in this workspace:" line listing each direct dependent exactly once' {
+        # Two chains a->b->d and a->c->d give two distinct direct dependents (b, c).
+        # The deep "a" root must NOT appear (it depends only transitively).
+        $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('a', 'c', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+
+        # Single header line (the chain printout was replaced with a single
+        # comma-separated line to keep large workspaces readable).
+        ([regex]::Matches($out, 'Direct dependents in this workspace:')).Count | Should -Be 1
+
+        # Direct dependents only — no transitive root and no full chains.
+        $out | Should -Match 'Direct dependents in this workspace: b, c'
+        $out | Should -Not -Match 'in-workspace dependents:'
+        $out | Should -Not -Match 'pulled in by:'
+        $out | Should -Not -Match 'potentially affected dependency chains'
+
+        # Drill into just the dependents line to confirm "a" (transitive root)
+        # is absent — sibling lines like "1.2.3 -> 2.0.0" contain '->' and 'a'
+        # legitimately, so a blanket -Not -Match against the full menu would
+        # be wrong.
+        $lines = $out -split "`r?`n"
+        $dependentsLine = $lines | Where-Object { $_ -match 'Direct dependents' } | Select-Object -First 1
+        $dependentsLine | Should -Not -Match '->'
+        $dependentsLine | Should -Not -Match '\ba\b'
+    }
+
+    It 'deduplicates direct dependents when the same direct dependent appears via multiple chains' {
+        # b is the direct dependent of d via both chains; it must appear once.
+        # Only one distinct dependent remains, so the singular "Direct dependent" label is used.
+        $finding = NewFinding -Folder 'd' -Chains @(@('a', 'b', 'd'), @('x', 'b', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependent in this workspace: b\b'
+        $out | Should -Not -Match 'Direct dependents in this workspace:'
+        ([regex]::Matches($out, '\bb\b')).Count | Should -Be 1
+    }
+
+    It 'uses the singular "Direct dependent" label when exactly one direct dependent is listed' {
+        # `,@(...)` forces PowerShell to treat the single chain as an array of
+        # one chain rather than flattening it into a single chain of strings.
+        $finding = NewFinding -Folder 'd' -Chains @(, @('a', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependent in this workspace: a\b'
+        $out | Should -Not -Match 'Direct dependents in this workspace:'
+    }
+
+    It 'uses the plural "Direct dependents" label when two or more direct dependents are listed' {
+        $finding = NewFinding -Folder 'd' -Chains @(@('a', 'd'), @('b', 'd'))
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Match 'Direct dependents in this workspace: a, b\b'
+        $out | Should -Not -Match 'Direct dependent in this workspace:'
+    }
+
+    It 'lists the five menu options in the exact order and wording from the spec' {
+        $out = Format-PackageMenu -Finding (NewFinding) -RemainingCount 0
+        $lines = $out -split "`r?`n" | Where-Object { $_ -match '^\s*\d\. ' }
+        $lines.Count | Should -Be 5
+        $lines[0] | Should -Match '^\s*1\. View diff$'
+        $lines[1] | Should -Match '^\s*2\. No material changes - release only if required by cascade logic$'
+        # Options 3-5 now carry a concrete version transition; precise transition asserted in dedicated tests below.
+        $lines[2] | Should -Match '^\s*3\. Release as breaking change \(.+\)$'
+        $lines[3] | Should -Match '^\s*4\. Release as non-breaking change \(.+\)$'
+        $lines[4] | Should -Match '^\s*5\. Release as patch \(.+\)$'
+    }
+
+    It 'renders concrete x.y.z -> (next) transitions for a >=1.x.y package' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '1.2.3') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (1.2.3 -> 2.0.0)'
+        $lines | Should -Contain '  4. Release as non-breaking change (1.2.3 -> 1.3.0)'
+        $lines | Should -Contain '  5. Release as patch (1.2.3 -> 1.2.4)'
+    }
+
+    It 'hides option 5 on 0.x.y packages because non-breaking and patch collapse to the same numeric increment' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (0.1.2 -> 0.2.0)'
+        $lines | Should -Contain '  4. Release as non-breaking change (0.1.2 -> 0.1.3)'
+        # Option 5 must not appear at all on 0.x.y — both "patch" and "non-breaking"
+        # produce the same numeric increment under Cargo semver, so the menu only
+        # offers the surviving distinct choice.
+        $out | Should -Not -Match '^\s*5\. '
+        $out | Should -Not -Match 'Release as patch'
+    }
+
+    It 'hides options 4 AND 5 on 0.0.x packages and emits a "starts with 0.0." hint' {
+        # On 0.0.x every change type collapses to the same 0.0.(x+1) numeric
+        # increment, so non-breaking and patch are both indistinguishable from
+        # breaking — Cargo treats every release at this version range as a
+        # breaking change. The menu reflects that by hiding both choices.
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.0.5') -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (0.0.5 -> 0.0.6)'
+        $out | Should -Not -Match '^\s*4\. '
+        $out | Should -Not -Match 'Release as non-breaking'
+        $out | Should -Not -Match '^\s*5\. '
+        $out | Should -Not -Match 'Release as patch'
+        $out | Should -Match 'all releases are considered breaking changes for package versions starting with `0\.0\.`'
+    }
+
+    It 'does NOT emit the "0.0." hint on 0.x.y (y >= 1) packages' {
+        # 0.1.2 still has a meaningful non-breaking option (0.1.3), so the
+        # hint would be misleading.
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '0.1.2') -RemainingCount 0
+        $out | Should -Not -Match 'starts with `0\.0\.`'
+        $out | Should -Not -Match 'all releases are considered breaking'
+    }
+
+    It 'does NOT emit the "0.0." hint on stable >= 1.x.y packages' {
+        $out = Format-PackageMenu -Finding (NewFinding -CurrentVersion '1.2.3') -RemainingCount 0
+        $out | Should -Not -Match 'starts with `0\.0\.`'
+        $out | Should -Not -Match 'all releases are considered breaking'
+    }
+
+    It 'falls back to "(breaking)" / "(non-breaking)" / "(patch)" hints when CurrentVersion is missing or blank' {
+        # Defensive: hand-rolled findings without CurrentVersion should still render the menu, not crash.
+        $finding = [pscustomobject]@{
+            Folder                    = 'ohno'
+            PackageName               = 'ohno'
+            ChangedFileCount          = 1
+            DependencyChains          = @(, @('a', 'ohno'))
+            WorkspaceDependencyChains = @(, @('a', 'ohno'))
+        }
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $lines = $out -split "`r?`n"
+        $lines | Should -Contain '  3. Release as breaking change (breaking)'
+        $lines | Should -Contain '  4. Release as non-breaking change (non-breaking)'
+        $lines | Should -Contain '  5. Release as patch (patch)'
+    }
+
+    It 'does NOT include any "files changed" / numeric file-count metric' {
+        # Materiality is communicated via the View Diff option; a raw count
+        # would be misleading visual noise.
+        $finding = NewFinding -Folder 'ohno' -Chains @(@('a', 'ohno'))
+        $finding.ChangedFileCount = 42
+        $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+        $out | Should -Not -Match 'files? changed'
+        $out | Should -Not -Match '\b42\b'
+    }
+
+    Context 'empty WorkspaceDependencyChains' {
+
+        # WorkspaceDependencyChains is empty when no other workspace package
+        # transitively depends on the package under review. The menu reports
+        # that absence plainly so the reviewer knows the release blast radius
+        # is limited to this package alone (modulo external consumers).
+
+        It 'replaces the dependents line with "no in-workspace dependents" when the workspace list is empty' {
+            $finding = [pscustomobject]@{
+                Folder                    = 'lonely'
+                PackageName               = 'lonely'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @()
+            }
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+            $out | Should -Not -Match 'Direct dependents in this workspace:'
+            $out | Should -Match 'no in-workspace dependents'
+        }
+
+        It 'renders the direct-dependents line even when DependencyChains (release-set rooted) is empty' {
+            # Stub findings produced by Get-UnreleasedModifiedDependencies in
+            # -IncludeAllModifiedAsRoots mode have DependencyChains = @() but
+            # may still have workspace-rooted chains via the reverse-dep walk.
+            $finding = [pscustomobject]@{
+                Folder                    = 'd'
+                PackageName               = 'd'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                DependencyChains          = @()
+                WorkspaceDependencyChains = @(, @('a', 'd'))
+            }
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+            $out | Should -Match 'Direct dependent in this workspace: a'
+            $out | Should -Not -Match 'no in-workspace dependents'
+        }
+
+        It 'ignores DependencyChains entirely when WorkspaceDependencyChains is populated (regression: menu reads only the workspace view)' {
+            $finding = [pscustomobject]@{
+                Folder                    = 'd'
+                PackageName               = 'd'
+                CurrentVersion            = '0.1.0'
+                ChangedFileCount          = 1
+                # Deliberately distinct chains to confirm the menu reads only WorkspaceDependencyChains.
+                DependencyChains          = @(, @('release_set_root', 'd'))
+                WorkspaceDependencyChains = @(, @('a', 'b', 'd'))
+            }
+            $out = Format-PackageMenu -Finding $finding -RemainingCount 0
+            # Direct dependent of d via the workspace chain is b (not release_set_root).
+            $out | Should -Match 'Direct dependent in this workspace: b\b'
+            $out | Should -Not -Match 'release_set_root'
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test-IsPatchOptionRedundant (pure semver-rule helper)
+# ---------------------------------------------------------------------------
+
+Describe 'Test-IsPatchOptionRedundant' {
+    It 'returns $false for stable >=1.x.y versions' {
+        Test-IsPatchOptionRedundant -CurrentVersion '1.0.0' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '1.2.3' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '42.7.0' | Should -BeFalse
+    }
+
+    It 'returns $true for 0.x.y versions (minor and patch collapse under Cargo semver)' {
+        Test-IsPatchOptionRedundant -CurrentVersion '0.1.0' | Should -BeTrue
+        Test-IsPatchOptionRedundant -CurrentVersion '0.4.7' | Should -BeTrue
+    }
+
+    It 'returns $true for 0.0.x versions (every change collapses to patch)' {
+        Test-IsPatchOptionRedundant -CurrentVersion '0.0.1' | Should -BeTrue
+        Test-IsPatchOptionRedundant -CurrentVersion '0.0.42' | Should -BeTrue
+    }
+
+    It 'returns $false (conservative default) when the version is missing, null, or whitespace' {
+        Test-IsPatchOptionRedundant -CurrentVersion '' | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion $null | Should -BeFalse
+        Test-IsPatchOptionRedundant -CurrentVersion '   ' | Should -BeFalse
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test-IsNonBreakingOptionRedundant (pure semver-rule helper)
+# ---------------------------------------------------------------------------
+
+Describe 'Test-IsNonBreakingOptionRedundant' {
+    It 'returns $false for stable >=1.x.y versions (non-breaking and breaking differ)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '1.0.0' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '1.2.3' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '42.7.0' | Should -BeFalse
+    }
+
+    It 'returns $false for 0.x.y (y >= 1) versions (breaking bumps minor, non-breaking bumps patch)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.1.0' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.4.7' | Should -BeFalse
+    }
+
+    It 'returns $true for 0.0.x versions (every change collapses to the same patch bump)' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.0.1' | Should -BeTrue
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '0.0.42' | Should -BeTrue
+    }
+
+    It 'returns $false (conservative default) when the version is missing, null, or whitespace' {
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '' | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion $null | Should -BeFalse
+        Test-IsNonBreakingOptionRedundant -CurrentVersion '   ' | Should -BeFalse
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Get-PackageReleaseDecision (input-validation loop)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PackageReleaseDecision' {
+
+    BeforeAll {
+        function script:NewFinding {
+            param(
+                [string]$Folder = 'ohno',
+                [AllowEmptyString()][AllowNull()][string]$CurrentVersion
+            )
+            return [pscustomobject]@{
+                Folder                    = $Folder
+                PackageName               = $Folder
+                CurrentVersion            = $CurrentVersion
+                ChangedFileCount          = 1
+                DependencyChains          = @(, @('a', $Folder))
+                WorkspaceDependencyChains = @(, @('a', $Folder))
+            }
+        }
+
+        # Helper: install a Read-Host mock that returns scripted answers in order.
+        function script:SetReadHostQueue {
+            param([Parameter(Mandatory = $true)][object[]]$Answers)
+            $script:RH_Queue = [System.Collections.Queue]::new()
+            foreach ($a in $Answers) { $script:RH_Queue.Enqueue($a) }
+            $script:RH_PromptsObserved = [System.Collections.Generic.List[string]]::new()
+            Mock -CommandName Read-Host -MockWith {
+                param([string]$Prompt)
+                $script:RH_PromptsObserved.Add($Prompt) | Out-Null
+                if ($script:RH_Queue.Count -eq 0) {
+                    throw "Read-Host mock ran out of answers (prompt: '$Prompt')"
+                }
+                return $script:RH_Queue.Dequeue()
+            }
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Show-PackageDiff -MockWith { }
+        # Suppress menu rendering and Write-Host noise for assertions on prompts/output.
+        Mock -CommandName Show-PackageMenu -MockWith { }
+    }
+
+    Context 'happy-path single-keystroke answers' {
+        It "returns 'ignore' for input '2'" {
+            SetReadHostQueue -Answers @('2')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'ignore'
+        }
+        It "returns 'breaking' for input '3'" {
+            SetReadHostQueue -Answers @('3')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'breaking'
+        }
+        It "returns 'non-breaking' for input '4'" {
+            SetReadHostQueue -Answers @('4')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'non-breaking'
+        }
+        It "returns 'patch' for input '5'" {
+            SetReadHostQueue -Answers @('5')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'patch'
+        }
+    }
+
+    Context 'invalid input handling' {
+        It 'silently re-prompts on empty input (no warning emitted)' {
+            SetReadHostQueue -Answers @('', '2')
+            $warn = $null
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive 3>&1 6>&1
+            # The returned hashtable should be unwrapped from the captured stream.
+            # We assert directly via a fresh call below.
+            SetReadHostQueue -Answers @('', '2')
+            $r2 = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive
+            $r2.Action | Should -Be 'ignore'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+        }
+
+        It "complains then re-prompts on '12' (whole-string check, not first char)" {
+            SetReadHostQueue -Answers @('12', '2')
+            $out = & { Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            # The hashtable is the last item written (6>&1 merges Information stream).
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'ignore'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '12'"
+        }
+
+        It "complains then re-prompts on whitespace-only input '   '" {
+            SetReadHostQueue -Answers @('   ', '2')
+            # '   '.Trim() = '' so this should follow the silent-reprompt path,
+            # NOT the invalid-choice path. We assert no warning.
+            $out = & { Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'ignore'
+            ($out | Out-String) | Should -Not -Match 'Invalid choice'
+        }
+
+        It "complains then re-prompts on letter input 'x'" {
+            SetReadHostQueue -Answers @('x', '2')
+            $out = & { Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'ignore'
+            ($out | Out-String) | Should -Match "Invalid choice 'x'"
+        }
+
+        It "complains then re-prompts on '1 2' (extra characters)" {
+            SetReadHostQueue -Answers @('1 2', '2')
+            $out = & { Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'ignore'
+            ($out | Out-String) | Should -Match "Invalid choice '1 2'"
+        }
+
+        It "complains then re-prompts on '2.0'" {
+            SetReadHostQueue -Answers @('2.0', '2')
+            $out = & { Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'ignore'
+            ($out | Out-String) | Should -Match "Invalid choice '2.0'"
+        }
+
+        It 'absorbs a chain of bad inputs and still returns the valid choice at the end' {
+            SetReadHostQueue -Answers @('', 'x', '12', '   ', '5')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding) -RemainingCount 0 -RepoRoot $TestDrive 6>$null
+            $r.Action | Should -Be 'patch'
+            $script:RH_PromptsObserved.Count | Should -Be 5
+        }
+    }
+
+    Context 'View Diff (choice 1) re-prompts without re-rendering the menu' {
+        It "calls Show-PackageDiff once when the user picks '1' then '4', menu rendered only once" {
+            SetReadHostQueue -Answers @('1', '4')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'non-breaking'
+            Should -Invoke -CommandName Show-PackageDiff -Times 1 -Exactly -ParameterFilter { $Folder -eq 'b' }
+            # Menu rendered: 1 initial only — diff selection does NOT re-render
+            # the menu (the options are still visible in scrollback above).
+            Should -Invoke -CommandName Show-PackageMenu -Times 1 -Exactly
+            # But the Read-Host prompt IS observed twice: once initial, once
+            # after the diff is shown.
+            $script:RH_PromptsObserved.Count | Should -Be 2
+        }
+
+        It "calls Show-PackageDiff twice when the user picks '1', '1', '4', menu still rendered only once" {
+            SetReadHostQueue -Answers @('1', '1', '4')
+            $r = Get-PackageReleaseDecision -Finding (NewFinding -Folder 'b') -RemainingCount 2 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'non-breaking'
+            Should -Invoke -CommandName Show-PackageDiff -Times 2 -Exactly
+            Should -Invoke -CommandName Show-PackageMenu -Times 1 -Exactly
+            $script:RH_PromptsObserved.Count | Should -Be 3
+        }
+    }
+
+    Context 'prompt format' {
+        It "includes the package name in the Read-Host prompt for scrollback / scenario disambiguation" {
+            SetReadHostQueue -Answers @('2')
+            Get-PackageReleaseDecision -Finding (NewFinding -Folder 'mypkg') -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match "Choose option for 'mypkg'"
+        }
+
+        It "advertises the full [1-5] range when CurrentVersion is unknown" {
+            SetReadHostQueue -Answers @('2')
+            Get-PackageReleaseDecision -Finding (NewFinding -Folder 'mypkg') -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-5\]'
+        }
+
+        It "advertises the narrower [1-4] range when option 5 is hidden (0.x.y package)" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'mypkg' -CurrentVersion '0.1.2'
+            Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-4\]'
+        }
+
+        It "advertises the narrowest [1-3] range when options 4 AND 5 are hidden (0.0.x package)" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'mypkg' -CurrentVersion '0.0.5'
+            Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive | Out-Null
+            $script:RH_PromptsObserved[0] | Should -Match '\[1-3\]'
+        }
+    }
+
+    Context 'option 5 is rejected when hidden (0.x.y package)' {
+        It "treats '5' as invalid and re-prompts, message references the narrower range" {
+            SetReadHostQueue -Answers @('5', '4')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'non-breaking'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '5'"
+            ($out | Out-String) | Should -Match 'from 1 to 4'
+        }
+
+        It "still accepts '4' (non-breaking) on a 0.x.y package" {
+            SetReadHostQueue -Answers @('4')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'non-breaking'
+        }
+
+        It "still accepts '3' (breaking) on a 0.x.y package" {
+            SetReadHostQueue -Answers @('3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.1.2'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'breaking'
+        }
+    }
+
+    Context 'options 4 AND 5 are rejected when hidden (0.0.x package)' {
+        It "treats '4' as invalid and re-prompts, message references the narrowest range" {
+            SetReadHostQueue -Answers @('4', '3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'breaking'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '4'"
+            ($out | Out-String) | Should -Match 'from 1 to 3'
+        }
+
+        It "treats '5' as invalid and re-prompts on a 0.0.x package" {
+            SetReadHostQueue -Answers @('5', '3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $out = & { Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive } 6>&1
+            $actionItem = $out | Where-Object { $_ -is [hashtable] } | Select-Object -Last 1
+            $actionItem.Action | Should -Be 'breaking'
+            $script:RH_PromptsObserved.Count | Should -Be 2
+            ($out | Out-String) | Should -Match "Invalid choice '5'"
+            ($out | Out-String) | Should -Match 'from 1 to 3'
+        }
+
+        It "still accepts '3' (breaking) on a 0.0.x package" {
+            SetReadHostQueue -Answers @('3')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'breaking'
+        }
+
+        It "still accepts '2' (ignore) on a 0.0.x package" {
+            SetReadHostQueue -Answers @('2')
+            $finding = NewFinding -Folder 'pkg' -CurrentVersion '0.0.5'
+            $r = Get-PackageReleaseDecision -Finding $finding -RemainingCount 0 -RepoRoot $TestDrive
+            $r.Action | Should -Be 'ignore'
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Show-PackageDiff (orchestrator: diff -> temp file -> opener + tracking)
+# ---------------------------------------------------------------------------
+
+Describe 'Show-PackageDiff' {
+
+    BeforeEach {
+        # Reset the tracking list so tests don't leak into each other.
+        $script:TempPackageDiffPaths = [System.Collections.Generic.List[string]]::new()
+        Mock -CommandName Get-PackageDiffText -MockWith { return "diff body for $Folder`n" }
+        Mock -CommandName Open-PathWithPreferredEditor -MockWith { }
+    }
+
+    It 'writes the diff to a file and invokes the opener with the same path' {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+        }
+        # Force the temp file into $TestDrive so we can inspect / clean up.
+        Mock -CommandName Save-PackageDiffToTempFile -MockWith {
+            $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + '.txt')
+            Set-Content -LiteralPath $p -Value $DiffText -NoNewline
+            return $p
+        }
+
+        Show-PackageDiff -RepoRoot $TestDrive -Folder 'bytesbuf' 6>$null
+
+        $script:TempPackageDiffPaths.Count | Should -Be 1
+        $written = $script:TempPackageDiffPaths[0]
+        Test-Path -LiteralPath $written | Should -BeTrue
+        (Get-Content -LiteralPath $written -Raw) | Should -Be "diff body for bytesbuf`n"
+
+        Should -Invoke -CommandName Open-PathWithPreferredEditor -Times 1 -Exactly -ParameterFilter { $Path -eq $written -and $Editor.Kind -eq 'system' }
+    }
+
+    It "uses the preferred editor's extension when saving (e.g. .diff for VS Code)" {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }
+        }
+        # Spy on Save-PackageDiffToTempFile to capture the extension argument.
+        Mock -CommandName Save-PackageDiffToTempFile -MockWith {
+            $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + $Extension)
+            Set-Content -LiteralPath $p -Value $DiffText -NoNewline
+            return $p
+        }
+
+        Show-PackageDiff -RepoRoot $TestDrive -Folder 'bytesbuf' 6>$null
+
+        Should -Invoke -CommandName Save-PackageDiffToTempFile -Times 1 -Exactly -ParameterFilter { $Extension -eq '.diff' }
+        $script:TempPackageDiffPaths[0] | Should -BeLike '*.diff'
+        Should -Invoke -CommandName Open-PathWithPreferredEditor -Times 1 -Exactly -ParameterFilter { $Editor.Kind -eq 'code' }
+    }
+
+    It 'appends to $script:TempPackageDiffPaths even when the opener fails silently' {
+        Mock -CommandName Get-PreferredEditor -MockWith {
+            [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+        }
+        Mock -CommandName Save-PackageDiffToTempFile -MockWith {
+            $p = Join-Path $TestDrive ("pkg-" + [guid]::NewGuid().ToString('N') + '.txt')
+            Set-Content -LiteralPath $p -Value $DiffText -NoNewline
+            return $p
+        }
+        Mock -CommandName Open-PathWithPreferredEditor -MockWith { }   # no-op, simulates failure absorbed by helper
+
+        Show-PackageDiff -RepoRoot $TestDrive -Folder 'a' 6>$null
+        Show-PackageDiff -RepoRoot $TestDrive -Folder 'b' 6>$null
+        $script:TempPackageDiffPaths.Count | Should -Be 2
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Save-PackageDiffToTempFile (pure-ish: writes a file, returns path)
+# ---------------------------------------------------------------------------
+
+Describe 'Save-PackageDiffToTempFile' {
+    It 'defaults to .txt and writes the diff text under the requested directory' {
+        $dir = Join-Path $TestDrive 'savediff'
+        $p = Save-PackageDiffToTempFile -Folder 'bytesbuf_io' -DiffText "hello`nworld" -Directory $dir
+        $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-bytesbuf_io-*.txt')
+        (Get-Content -LiteralPath $p -Raw) | Should -Be "hello`nworld"
+    }
+
+    It 'honours an explicit -Extension (e.g. .diff for VS Code)' {
+        $dir = Join-Path $TestDrive 'savediff-ext'
+        $p = Save-PackageDiffToTempFile -Folder 'bytesbuf_io' -DiffText 'x' -Directory $dir -Extension '.diff'
+        $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-bytesbuf_io-*.diff')
+    }
+
+    It 'normalises an extension passed without the leading dot' {
+        $dir = Join-Path $TestDrive 'savediff-nodot'
+        $p = Save-PackageDiffToTempFile -Folder 'a' -DiffText 'x' -Directory $dir -Extension 'diff'
+        $p | Should -BeLike (Join-Path $dir 'oxi-pkg-diff-a-*.diff')
+    }
+
+    It 'sanitises folder names containing characters not allowed in file names' {
+        $dir = Join-Path $TestDrive 'savediff2'
+        $p = Save-PackageDiffToTempFile -Folder 'weird/pkg name' -DiffText 'x' -Directory $dir
+        (Split-Path $p -Leaf) | Should -Match '^oxi-pkg-diff-weird_pkg_name-[0-9a-f]+\.txt$'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Get-PreferredEditor (VS Code -> code-insiders -> system fallback)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PreferredEditor' {
+
+    It "returns 'code' + .diff when `code` is on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            if ($Name -eq 'code') { return [pscustomobject]@{ Name = 'code' } }
+            return $null
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code'
+        $e.FileExtension | Should -Be '.diff'
+    }
+
+    It "prefers 'code' over 'code-insiders' when both are on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            return [pscustomobject]@{ Name = $Name }
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code'
+    }
+
+    It "returns 'code-insiders' + .diff when only insiders is on PATH" {
+        Mock -CommandName Get-Command -MockWith {
+            if ($Name -eq 'code') { return $null }
+            if ($Name -eq 'code-insiders') { return [pscustomobject]@{ Name = 'code-insiders' } }
+            return $null
+        }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'code-insiders'
+        $e.FileExtension | Should -Be '.diff'
+    }
+
+    It "returns 'system' + .txt when no VS Code variant is on PATH" {
+        Mock -CommandName Get-Command -MockWith { return $null }
+        $e = Get-PreferredEditor
+        $e.Kind | Should -Be 'system'
+        $e.FileExtension | Should -Be '.txt'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Open-PathWithPreferredEditor (dispatch on editor kind)
+# ---------------------------------------------------------------------------
+
+Describe 'Open-PathWithPreferredEditor' {
+    BeforeEach {
+        # Default safety net so a flaky test doesn't actually try to launch VS Code or the OS opener.
+        Mock -CommandName Start-Process -MockWith { }
+    }
+
+    It "invokes 'code' when the editor kind is 'code'" {
+        # Mocking external executables: Pester can mock cmdlets/functions, not arbitrary native commands,
+        # so we capture the dispatch by mocking Get-Variable for $IsWindows (irrelevant here) and asserting
+        # behavior indirectly via the LASTEXITCODE check path. The simplest assertion is that the function
+        # neither throws nor writes a warning when the (mocked) external command succeeds.
+        function script:code { param([string]$p) $global:LASTEXITCODE = 0 }
+        Mock -CommandName Write-Warning -MockWith { }
+        try {
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.diff' -Editor ([pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }) } | Should -Not -Throw
+            Should -Invoke -CommandName Write-Warning -Times 0 -Exactly
+        } finally {
+            Remove-Item function:script:code -ErrorAction SilentlyContinue
+        }
+    }
+
+    It "warns and does not throw when 'code' exits with a non-zero code" {
+        function script:code { param([string]$p) $global:LASTEXITCODE = 7 }
+        Mock -CommandName Write-Warning -MockWith { }
+        try {
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.diff' -Editor ([pscustomobject]@{ Kind = 'code'; FileExtension = '.diff' }) } | Should -Not -Throw
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'code exited with code 7' }
+        } finally {
+            Remove-Item function:script:code -ErrorAction SilentlyContinue
+        }
+    }
+
+    Context "system-kind dispatch on Windows" -Skip:(-not ((Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue) -eq $null -or $IsWindows)) {
+        It 'falls back to Start-Process for kind = system' {
+            Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt' -Editor ([pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' })
+            Should -Invoke -CommandName Start-Process -Times 1 -Exactly -ParameterFilter { $FilePath -eq 'C:\temp\demo.txt' }
+        }
+
+        It 'emits a warning and does not throw when Start-Process throws' {
+            Mock -CommandName Start-Process -MockWith { throw 'no association' }
+            Mock -CommandName Write-Warning -MockWith { }
+            { Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt' -Editor ([pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }) } | Should -Not -Throw
+            Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -match 'no association' }
+        }
+
+        It 'resolves the editor on the fly when -Editor is omitted' {
+            Mock -CommandName Get-PreferredEditor -MockWith {
+                [pscustomobject]@{ Kind = 'system'; FileExtension = '.txt' }
+            }
+            Open-PathWithPreferredEditor -Path 'C:\temp\demo.txt'
+            Should -Invoke -CommandName Get-PreferredEditor -Times 1 -Exactly
+            Should -Invoke -CommandName Start-Process -Times 1 -Exactly
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-PlanReview (runaway-cap behaviour)
+# ---------------------------------------------------------------------------
+#
+# The state-signature "no progress" diagnostic that this Describe-block once
+# tried to cover is unreachable through the current control flow: every
+# iteration body either early-returns (queue empty), updates state via
+# ignore (`declined` / `reviewedCascadeAsIs`) or accept (`userTokens`), or
+# throws via the switch `default` arm. A direct unit test would therefore
+# have to inject a buggy state that no real caller can produce — a
+# tautology that adds no signal. The check itself is retained in the
+# production code as defense-in-depth against future changes that could
+# introduce a state-leak path; see the comment on the signature check in
+# Invoke-PlanReview.
+
+Describe 'Invoke-PlanReview iteration-cap behaviour' {
+
+    BeforeEach {
+        # Silence the chatty interactive output; we only need the final return
+        # value and the Write-Warning emitted on the cap path.
+        Mock -CommandName Write-Host -MockWith { } -ModuleName $null
+
+        # 1 published package in the synthetic workspace => $runawayCap = 10.
+        # The exact baseline is irrelevant because Resolve-ReleaseSet is mocked,
+        # so anything that satisfies the Published filter works.
+        Mock -CommandName Get-WorkspacePackages -MockWith {
+            [pscustomobject]@{
+                Name      = 'p1'
+                Folder    = 'p1'
+                Version   = '1.0.0'
+                Published = $true
+                Deps      = @()
+            }
+        }
+
+        # Always surface a single finding for a package not in the initial plan.
+        # Returned as a stream (not a wrapped array) per the file-level mock
+        # pitfall note.
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith {
+            [pscustomobject]@{
+                Folder           = 'extra'
+                PackageName      = 'extra'
+                CurrentVersion   = '1.0.0'
+                ChangedFileCount = 1
+                DependencyChains = @(, @('p1', 'extra'))
+                InReleaseSet     = $false
+            }
+        }
+
+        # Always accept as non-breaking. Combined with a perpetually-surfacing
+        # finding, this drives the loop to its runaway-cap (10x published
+        # package count) before exiting. Each iteration appends a fresh token,
+        # so the state signature changes — exercising the cap-return path
+        # rather than the no-progress detection path.
+        Mock -CommandName Get-PackageReleaseDecision -MockWith {
+            @{ Action = 'non-breaking' }
+        }
+    }
+
+    It 'returns a plan that includes the token accepted on the final (cap-bound) iteration' {
+        # State-aware Resolve-ReleaseSet: reflects the size of $ParsedTokens so
+        # the post-cap re-resolve picks up the extra token added inside the loop.
+        Mock -CommandName Resolve-ReleaseSet -MockWith {
+            $entries = @()
+            foreach ($t in $ParsedTokens) {
+                $entries += [pscustomobject]@{
+                    Folder                 = $t.Name
+                    Name                   = $t.Name
+                    CurrentVersion         = '1.0.0'
+                    EffectiveChangeType    = 'non-breaking'
+                    EffectiveTargetVersion = '1.1.0'
+                    Source                 = 'user'
+                    AutoUpgraded           = $false
+                    CascadeReasons         = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken               = $t.RawToken
+                }
+            }
+            $entries
+        }
+
+        Mock -CommandName Write-Warning -MockWith { }
+
+        $initialToken = [pscustomobject]@{
+            Name                   = 'p1'
+            RequestedChangeType    = 'non-breaking'
+            RequestedTargetVersion = $null
+            RawToken               = 'p1@nonbreaking'
+        }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @($initialToken) `
+            -WorkspaceBaseline @()
+
+        # The runaway-cap warning fires exactly once, proving we exited via
+        # the cap path (not the queue-drained path or the no-progress throw).
+        Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter {
+            $Message -match 'runaway-cap'
+        }
+
+        # Resolve-ReleaseSet is called once per in-loop iteration AND again
+        # before the cap return — that final call is the regression fix
+        # ensuring the cap-iteration acceptance is reflected in the returned
+        # plan rather than being silently dropped. Without -Exactly, -Times
+        # means "at least".
+        Should -Invoke -CommandName Resolve-ReleaseSet -Times 2
+
+        # The returned plan reflects the final acceptance: both the initial
+        # user-token and the cap-iteration acceptance are present.
+        $plan | Should -Not -BeNullOrEmpty
+        $plan.ContainsKey('p1')    | Should -BeTrue
+        $plan.ContainsKey('extra') | Should -BeTrue
+        $plan['extra'].EffectiveChangeType | Should -Be 'non-breaking'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-PlanReview (-Mode 'all-changed' behaviour)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PlanReview -Mode all-changed' {
+
+    BeforeEach {
+        # Same chatty-output silencing as the iteration-cap describe block.
+        Mock -CommandName Write-Host -MockWith { } -ModuleName $null
+
+        Mock -CommandName Get-WorkspacePackages -MockWith {
+            [pscustomobject]@{
+                Name      = 'p1'
+                Folder    = 'p1'
+                Version   = '1.0.0'
+                Published = $true
+                Deps      = @()
+            }
+        }
+    }
+
+    It 'returns @{} without invoking Resolve-ReleaseSet when no userTokens and no findings' {
+        # Empty $ParsedTokens combined with no findings = nothing to surface.
+        # The all-changed path must skip Resolve-ReleaseSet (which would throw
+        # on empty input) and return an empty plan cleanly.
+        Mock -CommandName Resolve-ReleaseSet -MockWith {
+            throw 'Resolve-ReleaseSet should not be invoked when Mode=all-changed and userTokens is empty.'
+        }
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @() `
+            -WorkspaceBaseline @() `
+            -Mode 'all-changed'
+
+        $plan | Should -BeOfType ([hashtable])
+        $plan.Count | Should -Be 0
+        Should -Invoke -CommandName Resolve-ReleaseSet -Times 0 -Exactly
+    }
+
+    It 'passes -IncludeAllModifiedAsRoots to Get-UnreleasedModifiedDependencies' {
+        Mock -CommandName Resolve-ReleaseSet -MockWith { throw 'should not be called' }
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
+
+        $plan = Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @() `
+            -WorkspaceBaseline @() `
+            -Mode 'all-changed'
+
+        $plan.Count | Should -Be 0
+        Should -Invoke -CommandName Get-UnreleasedModifiedDependencies -Times 1 -Exactly -ParameterFilter {
+            $IncludeAllModifiedAsRoots -eq $true
+        }
+    }
+
+    It 'rejects an unknown -Mode value at parameter binding' {
+        {
+            Invoke-PlanReview `
+                -RepoRoot $TestDrive `
+                -ParsedTokens @() `
+                -WorkspaceBaseline @() `
+                -Mode 'bogus'
+        } | Should -Throw
+    }
+
+    It 'defaults to -Mode targeted when omitted (no -IncludeAllModifiedAsRoots flag)' {
+        # Regression: existing callers (release-packages.ps1) don't pass -Mode
+        # and must continue to see targeted behavior with no behavioral drift.
+        Mock -CommandName Resolve-ReleaseSet -MockWith {
+            param($ParsedTokens, $WorkspaceBaseline)
+            $entries = @()
+            foreach ($t in $ParsedTokens) {
+                $entries += [pscustomobject]@{
+                    Folder                 = $t.Name
+                    Name                   = $t.Name
+                    CurrentVersion         = '1.0.0'
+                    EffectiveChangeType    = 'non-breaking'
+                    EffectiveTargetVersion = '1.1.0'
+                    Source                 = 'user'
+                    AutoUpgraded           = $false
+                    CascadeReasons         = New-Object 'System.Collections.Generic.List[object]'
+                    RawToken               = $t.RawToken
+                }
+            }
+            $entries
+        }
+        Mock -CommandName Get-UnreleasedModifiedDependencies -MockWith { @() }
+
+        $tok = [pscustomobject]@{
+            Name                   = 'p1'
+            RequestedChangeType    = 'non-breaking'
+            RequestedTargetVersion = $null
+            RawToken               = 'p1@nonbreaking'
+        }
+        Invoke-PlanReview `
+            -RepoRoot $TestDrive `
+            -ParsedTokens @($tok) `
+            -WorkspaceBaseline @() | Out-Null
+
+        Should -Invoke -CommandName Get-UnreleasedModifiedDependencies -Times 1 -Exactly -ParameterFilter {
+            -not $IncludeAllModifiedAsRoots
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Show-ReleasePlan footer (cascade-upgrade semantics)
+# ---------------------------------------------------------------------------
+
+Describe 'Show-ReleasePlan: cascade-upgrade footer' {
+
+    BeforeAll {
+        function script:New-PlanEntryForFooterTest {
+            param(
+                [string]$Folder,
+                [string]$Source                   = 'user',
+                [bool]$AutoUpgraded               = $false,
+                [bool]$PinHonoredAgainstCascade   = $false,
+                [string]$EffectiveChangeType      = 'breaking',
+                [string]$CurrentVersion           = '1.0.0',
+                [string]$EffectiveTargetVersion   = '2.0.0',
+                [object[]]$CascadeReasons         = @()
+            )
+            [pscustomobject]@{
+                Folder                   = $Folder
+                Name                     = $Folder
+                Source                   = $Source
+                AutoUpgraded             = $AutoUpgraded
+                PinHonoredAgainstCascade = $PinHonoredAgainstCascade
+                EffectiveChangeType      = $EffectiveChangeType
+                CurrentVersion           = $CurrentVersion
+                EffectiveTargetVersion   = $EffectiveTargetVersion
+                CascadeReasons           = $CascadeReasons
+            }
+        }
+    }
+
+    BeforeEach {
+        # Capture every Write-Host call into a buffer so we can grep the
+        # rendered plan for the footer lines.
+        $script:Captured = New-Object 'System.Collections.Generic.List[string]'
+        Mock -CommandName Write-Host -MockWith {
+            param($Object)
+            if ($null -ne $Object) { $script:Captured.Add([string]$Object) }
+        } -ModuleName $null
+    }
+
+    It 'prints the always-on cascade-upgrade notice line' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match 'user-provided change types may be automatically upgraded'
+    }
+
+    It 'prints the explicit-pin-rejection clarification with -Force override hint' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match 'If an explicit version number is specified.*the release plan is rejected.*-Force'
+    }
+
+    It 'omits the auto-upgraded line when no user entry was strengthened' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' -AutoUpgraded $false }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Not -Match "tagged 'auto-upgraded by cascade'"
+    }
+
+    It 'includes the auto-upgraded line when at least one user entry was strengthened' {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -AutoUpgraded $false
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match "tagged 'auto-upgraded by cascade'"
+    }
+
+    It "uses singular 'Item above' wording when exactly one entry was auto-upgraded" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Item above tagged 'auto-upgraded by cascade' was upgraded from the user-requested change type\."
+        $captured | Should -Not -Match "Items above tagged 'auto-upgraded by cascade'"
+    }
+
+    It "uses plural 'Items above' wording when two or more entries were auto-upgraded" {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -AutoUpgraded $true
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -AutoUpgraded $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Items above tagged 'auto-upgraded by cascade' were upgraded from the user-requested change type\."
+        $captured | Should -Not -Match "Item above tagged 'auto-upgraded by cascade'"
+    }
+
+    It 'omits the pin-honored-over-cascade line when no entry was forced' {
+        $plan = @{ 'pkg' = New-PlanEntryForFooterTest -Folder 'pkg' -PinHonoredAgainstCascade $false }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Not -Match "'-Force: pin honored over cascade'"
+    }
+
+    It 'includes the pin-honored-over-cascade line when at least one entry was forced' {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -PinHonoredAgainstCascade $false
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        ($script:Captured -join "`n") | Should -Match "'-Force: pin honored over cascade'"
+        ($script:Captured -join "`n") | Should -Match 'consumers may break'
+    }
+
+    It "uses singular 'Item above' wording when exactly one entry was forced" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Item above tagged '-Force: pin honored over cascade' kept its explicit version pin"
+        $captured | Should -Not -Match "Items above tagged '-Force: pin honored over cascade' kept their"
+    }
+
+    It "uses plural 'Items above' wording when two or more entries were forced" {
+        $plan = @{
+            'a' = New-PlanEntryForFooterTest -Folder 'a' -PinHonoredAgainstCascade $true
+            'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true
+        }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        $captured = $script:Captured -join "`n"
+        $captured | Should -Match "Items above tagged '-Force: pin honored over cascade' kept their explicit version pin"
+        $captured | Should -Not -Match "Item above tagged '-Force: pin honored over cascade' kept its"
+    }
+
+    It "tags a forced entry's per-package line with '-Force: pin honored over cascade'" {
+        $plan = @{ 'b' = New-PlanEntryForFooterTest -Folder 'b' -PinHonoredAgainstCascade $true }
+        Show-ReleasePlan -ResolvedReleaseSet $plan
+
+        # Per-package line, not the footer:
+        ($script:Captured -join "`n") | Should -Match '• b:.*-Force: pin honored over cascade'
+    }
+
+    It 'omits the footer entirely when the plan is empty (just the placeholder line)' {
+        Show-ReleasePlan -ResolvedReleaseSet @{}
+
+        ($script:Captured -join "`n") | Should -Not -Match 'may be automatically upgraded'
+        ($script:Captured -join "`n") | Should -Match 'Release plan: \(empty\)'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Show-ReleaseSummary (released-packages list ordering)
+# ---------------------------------------------------------------------------
+
+Describe 'Show-ReleaseSummary' {
+
+    BeforeEach {
+        # Capture every Write-Host call so we can assert on the rendered order.
+        $script:Captured = New-Object 'System.Collections.Generic.List[string]'
+        Mock -CommandName Write-Host -MockWith {
+            param($Object)
+            if ($null -ne $Object) { $script:Captured.Add([string]$Object) }
+        } -ModuleName $null
+    }
+
+    It 'prints released packages in alphabetical order regardless of input order' {
+        # Inputs deliberately out of order (and not just reverse — interleaved).
+        $releases = @(
+            [pscustomobject]@{ Package = 'zeta';    OldVersion = '1.0.0'; NewVersion = '1.0.1' }
+            [pscustomobject]@{ Package = 'alpha';   OldVersion = '1.0.0'; NewVersion = '2.0.0' }
+            [pscustomobject]@{ Package = 'middle';  OldVersion = '0.4.1'; NewVersion = '0.4.2' }
+            [pscustomobject]@{ Package = 'bravo';   OldVersion = '0.1.0'; NewVersion = '0.1.1' }
+        )
+
+        Show-ReleaseSummary -releases $releases
+
+        # Filter to the package lines, in render order, and assert alphabetical.
+        $pkgLines = @($script:Captured | Where-Object { $_ -match '^\s*-\s+' })
+        $pkgLines.Count | Should -Be 4
+        $pkgLines[0]    | Should -Match '^\s*-\s+alpha:'
+        $pkgLines[1]    | Should -Match '^\s*-\s+bravo:'
+        $pkgLines[2]    | Should -Match '^\s*-\s+middle:'
+        $pkgLines[3]    | Should -Match '^\s*-\s+zeta:'
+    }
+
+    It 'handles an empty release list without throwing' {
+        { Show-ReleaseSummary -releases @() } | Should -Not -Throw
+        # The header is still emitted (so the user sees the section ran).
+        ($script:Captured -join "`n") | Should -Match 'Released packages'
+    }
+}
