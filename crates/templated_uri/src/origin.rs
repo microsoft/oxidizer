@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Display;
+use std::fmt::{self, Debug, Display, Formatter};
 
+use data_privacy::{RedactedDebug, RedactedDisplay, Redactor};
 use http::uri::{Authority, Scheme};
 
 use crate::UriError;
@@ -275,11 +276,59 @@ impl Display for Origin {
     }
 }
 
+impl RedactedDisplay for Origin {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        // An origin is static configuration rather than request data, so it is
+        // rendered unredacted, consistently with how `Uri` formats its base components.
+        Display::fmt(self, f)
+    }
+}
+
+impl RedactedDebug for Origin {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
     use super::*;
+
+    mod redaction {
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        use super::*;
+
+        #[test]
+        fn redacted_display_matches_display() {
+            let engine = RedactionEngine::builder().build();
+            let origin = Origin::from_static("https://example.com");
+
+            // An origin carries no request data, so redaction is a no-op and renders
+            // identically to `Display`, consistently with the `Uri` redaction impl.
+            assert_eq!(origin.to_redacted_string(&engine), origin.to_string());
+            assert_eq!(origin.to_redacted_string(&engine), "https://example.com");
+        }
+
+        #[test]
+        fn redacted_display_with_custom_port() {
+            let engine = RedactionEngine::builder().build();
+            let origin = Origin::from_static("https://example.com:8443");
+            assert_eq!(origin.to_redacted_string(&engine), "https://example.com:8443");
+        }
+
+        #[test]
+        fn redacted_debug_matches_debug() {
+            let engine = RedactionEngine::builder().build();
+            let origin = Origin::from_static("https://example.com");
+
+            let mut redacted = String::new();
+            engine.redacted_debug(&origin, &mut redacted).unwrap();
+            assert_eq!(redacted, format!("{origin:?}"));
+        }
+    }
 
     #[test]
     fn test_port() {
