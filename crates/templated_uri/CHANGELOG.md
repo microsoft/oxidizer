@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.2] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.12.2` of `data_privacy`
+  - Now requires `0.1.1` of `data_privacy_core`
+  - Now requires `0.10.2` of `data_privacy_macros`
+  - Now requires `0.10.2` of `data_privacy_macros_impl`
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.2.4` of `templated_uri_macros`
+  - Now requires `0.2.4` of `templated_uri_macros_impl`
+
+- ✨ Features
+
+  - implement RedactedDisplay/RedactedDebug for BasePath and BaseUri ([#489](https://github.com/microsoft/oxidizer/pull/489))
+
 ## [0.3.1] - 2026-06-10
 
 - 🔧 Maintenance
