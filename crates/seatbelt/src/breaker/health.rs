@@ -117,11 +117,11 @@ impl HealthMetrics {
 
     pub fn record(&mut self, result: ExecutionResult, now: Instant) {
         // Remove old windows
-        while let Some(front) = self.windows.front()
-            && now.duration_since(front.started_at) > self.sampling_duration
-        {
-            self.windows.pop_front();
-        }
+        while self
+            .windows
+            .pop_front_if(|front| now.duration_since(front.started_at) > self.sampling_duration)
+            .is_some()
+        {}
 
         // Get or create the current window
         if let Some(back) = self.windows.back_mut()

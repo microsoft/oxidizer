@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use core::fmt::Debug;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::Write;
 use std::sync::Arc;
 
 use crate::redaction_engine_builder::RedactionEngineBuilder;
@@ -83,24 +83,7 @@ impl RedactionEngine {
     /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
     /// has occurred (as a [`std::fmt::Error`]) back up the stack.
     pub fn redacted_debug(&self, value: &impl RedactedDebug, output: &mut impl Write) -> core::fmt::Result {
-        struct DebugFormatter<'a, RD>
-        where
-            RD: RedactedDebug + ?Sized,
-        {
-            engine: &'a RedactionEngine,
-            value: &'a RD,
-        }
-
-        impl<RD> Debug for DebugFormatter<'_, RD>
-        where
-            RD: RedactedDebug + ?Sized,
-        {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                self.value.fmt(self.engine, f)
-            }
-        }
-
-        let d = DebugFormatter { engine: self, value };
+        let d = core::fmt::from_fn(|f| value.fmt(self, f));
         write!(output, "{d:?}")
     }
 
@@ -112,24 +95,7 @@ impl RedactionEngine {
     /// this function only returns a [`std::fmt::Result`] because writing to the underlying sink might fail and it must provide a way to propagate the fact that an error
     /// has occurred (as a [`std::fmt::Error`]) back up the stack.
     pub fn redacted_display(&self, value: &impl RedactedDisplay, output: &mut impl Write) -> core::fmt::Result {
-        struct DisplayFormatter<'a, RD>
-        where
-            RD: RedactedDisplay + ?Sized,
-        {
-            engine: &'a RedactionEngine,
-            value: &'a RD,
-        }
-
-        impl<RD> Display for DisplayFormatter<'_, RD>
-        where
-            RD: RedactedDisplay + ?Sized,
-        {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                self.value.fmt(self.engine, f)
-            }
-        }
-
-        let d = DisplayFormatter { engine: self, value };
+        let d = core::fmt::from_fn(|f| value.fmt(self, f));
         write!(output, "{d}")
     }
 
