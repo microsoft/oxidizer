@@ -50,4 +50,4 @@ install-tools:
     }
 
     # Install platform-specific benchmark toolchain (Callgrind, Linux-only).
-    & (Join-Path $PSScriptRoot ".." "scripts" "install-callgrind-tools.ps1")
+    & (Join-Path '{{justfile_directory()}}' "scripts" "install-callgrind-tools.ps1")
