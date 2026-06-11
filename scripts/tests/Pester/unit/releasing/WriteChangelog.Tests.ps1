@@ -375,3 +375,66 @@ initial
         }
     }
 }
+
+Describe 'Write-Changelog commit filtering' {
+    # Regression: Write-Changelog must not attribute a commit to a package's
+    # changelog when the commit's ONLY change inside the package folder is an
+    # auto-maintained file (README.md / CHANGELOG.md). README.md is regenerated
+    # workspace-wide by `just readme`, so an unrelated commit can "touch" this
+    # package's folder solely through that regeneration.
+
+    BeforeEach {
+        Mock -CommandName Get-Date -MockWith { [datetime]'2026-06-15T00:00:00Z' }
+
+        $script:ChangelogPath = Join-Path $TestDrive ("filter-" + [guid]::NewGuid().Guid.Substring(0, 8) + ".md")
+        Set-Content -LiteralPath $script:ChangelogPath -Value "# Changelog`n`n" -NoNewline -Encoding utf8
+    }
+
+    It 'excludes a commit whose only package-folder change is README.md, but keeps a real source commit' {
+        # Two commits in range: one genuinely changed src/, one only rewrote README.md.
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return @('hReal', 'hDoc') }
+            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '--name-only')) {
+                if ($Arguments -contains 'hReal') { return @('crates/pkg/src/lib.rs') }
+                if ($Arguments -contains 'hDoc') { return @('crates/pkg/README.md') }
+                return @()
+            }
+            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '-s')) {
+                if ($Arguments -contains 'hReal') { return @('feat(pkg): genuine source change (#11)') }
+                if ($Arguments -contains 'hDoc') { return @('feat: introduce unrelated crate (#22)') }
+                return @()
+            }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'genuine source change'
+        $content | Should -Not -Match 'introduce unrelated crate'
+    }
+
+    It 'warns and writes nothing when every in-range commit is README-only' {
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return @('hDoc') }
+            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '--name-only')) { return @('crates/pkg/README.md') }
+            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '-s')) { return @('feat: introduce unrelated crate (#22)') }
+            return @()
+        }
+
+        $before = Get-Content -LiteralPath $script:ChangelogPath -Raw
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $after = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $after | Should -Be $before
+    }
+}
