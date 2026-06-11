@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::Display;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
+use data_privacy::{RedactedDebug, RedactedDisplay, Redactor};
 use http::uri::PathAndQuery;
 
 use crate::UriError;
@@ -150,6 +151,20 @@ impl Display for BasePath {
     }
 }
 
+impl RedactedDisplay for BasePath {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        // A base path is static configuration rather than request data, so it is
+        // rendered unredacted, consistently with how `Uri` formats its base components.
+        Display::fmt(self, f)
+    }
+}
+
+impl RedactedDebug for BasePath {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 impl From<BasePath> for PathAndQuery {
     fn from(base_path: BasePath) -> Self {
         base_path.inner
@@ -243,6 +258,31 @@ mod tests {
     fn from_static_valid() {
         let path = BasePath::from_static("/api/v1/");
         assert_eq!(path.as_str(), "/api/v1/");
+    }
+
+    #[test]
+    fn redacted_display_matches_display() {
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        let engine = RedactionEngine::builder().build();
+        let path = BasePath::from_static("/api/v1/");
+
+        // A base path carries no request data, so redaction is a no-op and renders
+        // identically to `Display`, consistently with the `Uri` redaction impl.
+        assert_eq!(path.to_redacted_string(&engine), path.to_string());
+        assert_eq!(path.to_redacted_string(&engine), "/api/v1/");
+    }
+
+    #[test]
+    fn redacted_debug_matches_debug() {
+        use data_privacy::RedactionEngine;
+
+        let engine = RedactionEngine::builder().build();
+        let path = BasePath::from_static("/api/v1/");
+
+        let mut redacted = String::new();
+        engine.redacted_debug(&path, &mut redacted).unwrap();
+        assert_eq!(redacted, format!("{path:?}"));
     }
 
     #[test]
