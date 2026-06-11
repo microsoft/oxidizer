@@ -433,6 +433,27 @@ Describe 'Write-Changelog commit filtering' {
         $content | Should -Match 'expand examples readme'
     }
 
+    It 'keeps a commit touching a nested file that shares BOTH leaf and parent name (crates/<pkg>/<pkg>/README.md)' {
+        # Edge case: matching on the parent leaf alone would misclassify this as
+        # the crate root. The exact repo-relative path match keeps it.
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hNested${us}docs(pkg): nested same-named readme (#44)`n`ncrates/pkg/pkg/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'nested same-named readme'
+    }
+
     It 'warns and writes nothing when every in-range commit is crate-root README-only' {
         $rs = [char]0x1e; $us = [char]0x1f
         $script:LogText = "${rs}hDoc${us}feat: introduce unrelated crate (#22)`n`ncrates/pkg/README.md"

@@ -795,12 +795,18 @@ function Write-Changelog {
     # release bookkeeping. A commit whose ONLY changes within this folder are such files did not
     # actually change the package, so its subject must not leak into the changelog.
     #
-    # Only the crate-ROOT README.md / CHANGELOG.md are auto-maintained. Nested files that happen to
-    # share the same leaf name (e.g. crates/<pkg>/examples/README.md) are hand-authored docs and
-    # must still count as meaningful changes, so we match on the parent directory being the package
-    # folder itself, not merely on the leaf name.
-    $autoMaintainedFiles = @('README.md', 'CHANGELOG.md')
-    $folderLeaf = Split-Path $packageFolder -Leaf
+    # Only the crate-ROOT README.md / CHANGELOG.md are auto-maintained. Nested files are
+    # hand-authored and must still count as meaningful changes — including ones that merely share
+    # the leaf name (crates/<pkg>/examples/README.md) AND ones that also share the parent leaf
+    # (crates/<pkg>/<pkg>/README.md). Matching on the parent leaf alone misclassifies the latter,
+    # so we build the exact repo-relative crate-root paths and require a full-path match.
+    #
+    # git emits repo-relative, forward-slash paths regardless of platform. The package's
+    # repo-relative directory is its last two path segments (crates/<pkg>); deriving it this way
+    # avoids hard-coding the 'crates' prefix while still anchoring the match to the crate root.
+    $packageSegments = $packageFolder -split '[\\/]' | Where-Object { $_ }
+    $packageRelDir = ($packageSegments | Select-Object -Last 2) -join '/'
+    $autoMaintainedRootPaths = @('README.md', 'CHANGELOG.md') | ForEach-Object { "$packageRelDir/$_" }
 
     $rawCommits = @()
     foreach ($record in ($logText -split $recordSep)) {
@@ -812,12 +818,7 @@ function Write-Changelog {
 
         $hasMeaningfulChange = $false
         foreach ($file in $changedFiles) {
-            # git emits repo-relative, forward-slash paths regardless of platform.
-            $segments = $file -split '/'
-            $leaf = $segments[-1]
-            $parentLeaf = if ($segments.Count -ge 2) { $segments[-2] } else { '' }
-            $isAutoMaintainedRoot = ($autoMaintainedFiles -contains $leaf) -and ($parentLeaf -eq $folderLeaf)
-            if (-not $isAutoMaintainedRoot) {
+            if ($autoMaintainedRootPaths -notcontains $file) {
                 $hasMeaningfulChange = $true
                 break
             }
