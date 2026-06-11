@@ -379,9 +379,13 @@ initial
 Describe 'Write-Changelog commit filtering' {
     # Regression: Write-Changelog must not attribute a commit to a package's
     # changelog when the commit's ONLY change inside the package folder is an
-    # auto-maintained file (README.md / CHANGELOG.md). README.md is regenerated
-    # workspace-wide by `just readme`, so an unrelated commit can "touch" this
-    # package's folder solely through that regeneration.
+    # auto-maintained crate-root file (README.md / CHANGELOG.md). README.md is
+    # regenerated workspace-wide by `just readme`, so an unrelated commit can
+    # "touch" this package's folder solely through that regeneration.
+    #
+    # The single `git log --name-only` invocation is mocked. Its output encodes,
+    # per commit, a record separator (0x1e), the hash, a unit separator (0x1f),
+    # the subject, then the changed-file paths on following lines.
 
     BeforeEach {
         Mock -CommandName Get-Date -MockWith { [datetime]'2026-06-15T00:00:00Z' }
@@ -390,21 +394,13 @@ Describe 'Write-Changelog commit filtering' {
         Set-Content -LiteralPath $script:ChangelogPath -Value "# Changelog`n`n" -NoNewline -Encoding utf8
     }
 
-    It 'excludes a commit whose only package-folder change is README.md, but keeps a real source commit' {
-        # Two commits in range: one genuinely changed src/, one only rewrote README.md.
+    It 'excludes a commit whose only package-folder change is the crate-root README.md, but keeps a real source commit' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hReal${us}feat(pkg): genuine source change (#11)`n`ncrates/pkg/src/lib.rs`n${rs}hDoc${us}feat: introduce unrelated crate (#22)`n`ncrates/pkg/README.md"
+
         Mock -CommandName Invoke-Git -MockWith {
             if ($Arguments -contains 'tag') { return @() }
-            if ($Arguments[0] -eq 'log') { return @('hReal', 'hDoc') }
-            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '--name-only')) {
-                if ($Arguments -contains 'hReal') { return @('crates/pkg/src/lib.rs') }
-                if ($Arguments -contains 'hDoc') { return @('crates/pkg/README.md') }
-                return @()
-            }
-            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '-s')) {
-                if ($Arguments -contains 'hReal') { return @('feat(pkg): genuine source change (#11)') }
-                if ($Arguments -contains 'hDoc') { return @('feat: introduce unrelated crate (#22)') }
-                return @()
-            }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
             return @()
         }
 
@@ -418,12 +414,32 @@ Describe 'Write-Changelog commit filtering' {
         $content | Should -Not -Match 'introduce unrelated crate'
     }
 
-    It 'warns and writes nothing when every in-range commit is README-only' {
+    It 'keeps a commit that touches a NESTED README.md (e.g. examples/README.md), which is hand-authored' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hNested${us}docs(pkg): expand examples readme (#33)`n`ncrates/pkg/examples/README.md"
+
         Mock -CommandName Invoke-Git -MockWith {
             if ($Arguments -contains 'tag') { return @() }
-            if ($Arguments[0] -eq 'log') { return @('hDoc') }
-            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '--name-only')) { return @('crates/pkg/README.md') }
-            if ($Arguments[0] -eq 'show' -and ($Arguments -contains '-s')) { return @('feat: introduce unrelated crate (#22)') }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
+            return @()
+        }
+
+        Write-Changelog -packageName 'pkg' -newVersion '0.2.0' `
+            -packageFolder (Join-Path $TestDrive 'crates\pkg') `
+            -changelogFile $script:ChangelogPath -prBaseUrl 'http://x' `
+            -WarningAction SilentlyContinue
+
+        $content = Get-Content -LiteralPath $script:ChangelogPath -Raw
+        $content | Should -Match 'expand examples readme'
+    }
+
+    It 'warns and writes nothing when every in-range commit is crate-root README-only' {
+        $rs = [char]0x1e; $us = [char]0x1f
+        $script:LogText = "${rs}hDoc${us}feat: introduce unrelated crate (#22)`n`ncrates/pkg/README.md"
+
+        Mock -CommandName Invoke-Git -MockWith {
+            if ($Arguments -contains 'tag') { return @() }
+            if ($Arguments[0] -eq 'log') { return $script:LogText }
             return @()
         }
 
