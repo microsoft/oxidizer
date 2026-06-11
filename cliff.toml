@@ -1,0 +1,80 @@
+# git-cliff configuration — SPIKE / EVALUATION ONLY.
+#
+# This file is an experiment to evaluate whether an upstream changelog generator
+# (git-cliff) could replace the hand-rolled conventional-commit rendering in
+# scripts/lib/release-flow.ps1 (Format-ConventionalCommits + the changelog
+# section assembly). It is NOT wired into the release flow.
+#
+# Run, scoped to a single package, e.g.:
+#   git-cliff --config cliff.toml \
+#             --include-path "crates/templated_uri/**" \
+#             --tag-pattern "templated_uri-v.*" -o -
+#
+# ---------------------------------------------------------------------------
+# KNOWN GAPS vs. the current bespoke tooling (why this is a spike, not a drop-in)
+# ---------------------------------------------------------------------------
+# 1. README-only attribution bug is NOT fixed here.
+#    `just readme` regenerates every crate's README.md workspace-wide, so an
+#    unrelated commit (e.g. #450 "introduce fetch_tls crate", a `feat:`) still
+#    "touches" this package's folder via that regeneration. git-cliff's
+#    --include-path uses the same path-based attribution, so #450 leaks in.
+#    Because it is a `feat:` (not a chore), message-based `skip` cannot drop it
+#    without dropping real features — only the file-level "did this commit
+#    change anything meaningful in THIS folder" check in release-flow.ps1 can.
+#
+# 2. Cascade dependency bullets are impossible here.
+#    Lines like "Now requires `0.12.1` of `data_privacy`" are synthesised from
+#    dependency version bumps during a cascade release — they are not commits,
+#    so git-cliff structurally cannot emit them.
+#
+# These two are exactly the parts that make the current tooling correct for this
+# repo; any real migration must re-implement them around git-cliff.
+
+[changelog]
+# Emit a body that mirrors the repo's emoji-section layout as closely as a
+# template allows: one `## [version] - date` heading, then grouped bullets.
+header = ""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="templated_uri-v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+
+- {{ group }}
+{% for commit in commits %}
+  - {{ commit.message | upper_first | trim }}\
+{% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/microsoft/oxidizer/pull/{{ commit.remote.pr_number }})){% endif %}\
+{% endfor %}\
+{% endfor %}
+"""
+trim = false
+
+[git]
+# Strip the trailing "(#NN)" GitHub appends to squash-merge subjects so the PR
+# reference is not duplicated once git-cliff re-links it from commit metadata.
+commit_preprocessors = [
+    { pattern = '\s*\(#[0-9]+\)\s*$', replace = "" },
+]
+conventional_commits = true
+filter_unconventional = false
+protect_breaking_commits = true
+# Skip release/bookkeeping commits. NOTE: this does NOT solve gap #1 above —
+# it only trims obvious chore(release) noise, not README-only `feat:` leakage.
+commit_parsers = [
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore: release", skip = true },
+    { body = ".*\\[\\*\\*breaking\\*\\*\\]", group = "⚠️ Breaking" },
+    { message = "!:", group = "⚠️ Breaking" },
+    { message = "^feat", group = "✨ Features" },
+    { message = "^fix", group = "🐛 Fixes" },
+    { message = "^doc", group = "📚 Documentation" },
+    { message = "^perf", group = "⚡ Performance" },
+    { message = "^refactor", group = "🚜 Refactor" },
+    { message = "^chore", group = "🔧 Maintenance" },
+    { message = "^.*", group = "🔧 Maintenance" },
+]
+filter_commits = false
+tag_pattern = "templated_uri-v.*"
+sort_commits = "oldest"
