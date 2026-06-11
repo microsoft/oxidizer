@@ -139,6 +139,14 @@ readme:
 readme-check:
     cargo workspaces exec --ignore-private cargo doc2readme --check --lib --template ../README.j2
 
+# Run the Pester test suite for the release-related PowerShell scripts.
+[script]
+test-scripts SCOPE="":
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    & ./scripts/tests/Pester/Run-Tests.ps1 -Path "{{ SCOPE }}"
+
 # Runs unit and integration tests.
 [script]
 test FILTER="":

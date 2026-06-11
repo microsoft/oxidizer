@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
+#![allow(
     clippy::items_after_statements,
     clippy::single_match_else,
     clippy::panic,
@@ -17,23 +17,24 @@
 //! Arena-backed growable vectors and the `vec!` macro.
 //!
 //! [`Vec`] is a transient builder that can be frozen into compact arena
-//! handles such as [`Vec::into_arena_rc`].
+//! handles such as [`Vec::into_arena_arc`] or [`Vec::into_arena_box`].
 //!
 //! For the string equivalents, see [`crate::strings`].
 
-use core::ptr::NonNull;
+use core::marker::PhantomData;
+use core::mem;
 
-use allocator_api2::alloc::{Allocator, Global};
-use allocator_api2::vec::IntoIter as ApiIntoIter;
+use allocator_api2::alloc::{AllocError, Allocator, Global};
 
 use crate::Arena;
+use crate::internal::arena_buf::ArenaBuf;
 
 mod basic;
-mod buffer;
 mod collect_in;
 mod drain;
 mod freeze;
 mod from_iterator_in;
+mod into_iter;
 mod mutate;
 mod traits;
 mod vec_macro;
@@ -41,6 +42,7 @@ mod vec_macro;
 pub use collect_in::CollectIn;
 pub use drain::Drain;
 pub use from_iterator_in::FromIteratorIn;
+pub use into_iter::IntoIter;
 
 #[doc(inline)]
 pub use crate::__multitude_vec as vec;
@@ -49,9 +51,7 @@ pub use crate::__multitude_vec as vec;
 ///
 /// `Vec` is a **transient builder**: 32 bytes on 64-bit (data pointer +
 /// length + capacity + arena reference). Its purpose is to be filled and
-/// then frozen via [`Self::into_arena_rc`] into a 16-byte
-/// [`Rc<[T], A>`](crate::Rc) — immutable, cloneable, refcounted. For
-/// `T: !Drop`, the freeze is **O(1)**.
+/// then frozen via [`Self::into_arena_arc`] or [`Self::into_arena_box`].
 ///
 /// `push`, `pop`, `extend`, `iter`, and other standard vector methods
 /// behave the same as on `std::vec::Vec`.
@@ -66,36 +66,107 @@ pub use crate::__multitude_vec as vec;
 /// v.push(1);
 /// v.push(2);
 /// v.push(3);
-/// let frozen = v.into_arena_rc(); // 32 bytes → 16-byte Rc<[i32]>
+/// let frozen = v.into_arena_box();
 /// assert_eq!(&*frozen, &[1, 2, 3]);
 /// ```
 pub struct Vec<'a, T, A: Allocator + Clone = Global> {
-    arena: &'a Arena<A>,
-    data: NonNull<T>,
-    len: usize,
-    cap: usize,
+    pub(super) buf: ArenaBuf<'a, T>,
+    pub(super) arena: &'a Arena<A>,
+    /// Marker for covariance in `T` and to enforce `!Send`/`!Sync`.
+    _phantom: PhantomData<*const T>,
 }
 
 // `Vec` is `!Send`/`!Sync` because it holds `&Arena<A>` and mutating or drop
 // paths call back into that arena. The reference alone blocks the auto traits.
 
-/// Owning iterator returned by [`Vec::into_iter`].
-pub type IntoIter<'a, T, A> = ApiIntoIter<T, &'a Arena<A>>;
+// `Vec`'s owning iterator is defined in the `into_iter` module and
+// re-exported above.
 
-impl<T, A: Allocator + Clone> Drop for Vec<'_, T, A> {
-    fn drop(&mut self) {
-        // `deallocate_buffer` must still run if an element panics in `clear()`;
-        // use a guard so unwind does not leak the chunk ref.
-        struct DeallocateGuard<'g, 'a, T, A: Allocator + Clone> {
-            v: &'g mut Vec<'a, T, A>,
+impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
+    /// Construct a `Vec` wrapping the given (empty) buffer.
+    #[inline]
+    pub(super) const fn from_buf(buf: ArenaBuf<'a, T>, arena: &'a Arena<A>) -> Self {
+        Self {
+            buf,
+            arena,
+            _phantom: PhantomData,
         }
-        impl<T, A: Allocator + Clone> Drop for DeallocateGuard<'_, '_, T, A> {
-            fn drop(&mut self) {
-                Vec::deallocate_buffer(self.v.arena, self.v.data, self.v.cap);
+    }
+
+    /// Returns the arena this `Vec` borrows from.
+    #[inline]
+    pub(crate) const fn arena(&self) -> &'a Arena<A> {
+        self.arena
+    }
+
+    /// Grows the backing buffer to hold at least `new_cap` elements by
+    /// reserving a fresh slice in the arena and handing it to the
+    /// underlying [`ArenaBuf`], which migrates the live elements and
+    /// abandons the old storage (reclaimed when the arena is torn down).
+    ///
+    /// No-op for ZSTs (their `cap` is `usize::MAX` by construction) and
+    /// for requests below the current capacity.
+    #[cold]
+    #[inline(never)]
+    #[cfg_attr(test, mutants::skip)] // `>` vs `>=` observationally equivalent at old_cap == 0
+    pub(super) fn try_grow_to(&mut self, new_cap: usize) -> Result<(), AllocError> {
+        if const { mem::size_of::<T>() == 0 } {
+            return Ok(());
+        }
+        debug_assert!(new_cap > self.buf.cap(), "try_grow_to: callers must ensure new_cap > current cap");
+        let refill_hint = mem::size_of::<T>()
+            .checked_mul(new_cap)
+            .and_then(|b| b.checked_add(mem::align_of::<T>()))
+            .ok_or(AllocError)?;
+        let old_cap = self.buf.cap();
+        // Fast path: if our storage sits at the chunk's bump cursor and the
+        // chunk has room, extend it in place with no copy and no relocation.
+        if old_cap > 0 {
+            let elem = mem::size_of::<T>();
+            let base = self.buf.as_ptr() as usize;
+            if let (Some(old_bytes), Some(new_bytes)) = (old_cap.checked_mul(elem), new_cap.checked_mul(elem))
+                && self.arena.try_grow_local_in_place(base, old_bytes, new_bytes)
+            {
+                // SAFETY: the bump cursor was advanced to cover `new_cap`
+                // contiguous elements at the same base pointer, so the
+                // capacity can be raised without moving any element.
+                unsafe { self.buf.set_cap(new_cap) };
+                return Ok(());
             }
         }
-        let g = DeallocateGuard { v: self };
-        g.v.clear();
-        // `g.drop()` runs on success or unwind.
+        let uninit = loop {
+            if let Some(u) = self.arena.try_reserve_local_slice::<T>(new_cap) {
+                break u;
+            }
+            if self.arena.is_oversized_local(refill_hint) {
+                let (new_ptr, new_cap_actual) = self.arena.alloc_oversized_local_with(refill_hint, |mutator| {
+                    let ticket = mutator
+                        .try_alloc_uninit_slice::<T>(new_cap)
+                        .expect("dedicated oversized chunk sized to fit growable buffer");
+                    ticket.into_raw_buffer()
+                })?;
+                #[cfg(feature = "stats")]
+                if old_cap > 0 {
+                    self.arena.record_relocation();
+                }
+                // SAFETY: chunk hosting `new_ptr` is retained in
+                // `retired_local` for the lifetime of `&Arena` (and
+                // hence for `'a`); the reservation is fresh and
+                // non-overlapping with the old buffer.
+                unsafe { self.buf.replace_buffer_raw(new_ptr, new_cap_actual) };
+                return Ok(());
+            }
+            self.arena.refill_local(refill_hint)?;
+        };
+        #[cfg(feature = "stats")]
+        if old_cap > 0 {
+            self.arena.record_relocation();
+        }
+        self.buf.replace_buffer(uninit);
+        Ok(())
     }
 }
+
+// `Vec`'s `Drop` is auto-derived: `ArenaBuf::Drop` drops the initialized
+// prefix. Keeping no explicit `Drop` here means `vec/` has zero
+// `unsafe` blocks of its own.

@@ -19,7 +19,7 @@ pub(crate) trait Buildable<K, V> {
 
     fn build(self) -> Cache<K, V>;
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput;
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput;
 }
 
 impl<K, V, CT> Buildable<K, V> for CacheBuilder<K, V, CT>
@@ -36,18 +36,18 @@ where
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
-        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry.clone(), false));
 
-        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, telemetry, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
         let name = type_name::<CT>(self.name);
         #[cfg(feature = "memory")]
         if let Some(hook) = &self.eviction_hook {
             hook.init(telemetry.clone(), name);
         }
-        CacheWrapper::new(name, self.storage, clock, self.ttl, telemetry, self.policy)
+        CacheWrapper::new(name, self.storage, clock, self.ttl, telemetry, self.policy, fallback)
     }
 }
 
@@ -66,14 +66,14 @@ where
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
 
-        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry));
+        let tier = DynamicCache::new(self.build_tier(clock.clone(), telemetry.clone(), false));
 
-        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, stampede_protection)
+        Cache::new(type_name::<Self::TierOutput>(name), tier, clock, telemetry, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
-        let primary = self.primary_builder.build_tier(clock.clone(), telemetry.clone());
-        let fallback = self.fallback_builder.build_tier(clock.clone(), telemetry.clone());
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
+        let primary = self.primary_builder.build_tier(clock.clone(), telemetry.clone(), fallback);
+        let fallback = self.fallback_builder.build_tier(clock.clone(), telemetry.clone(), true);
 
         FallbackCache::new(
             type_name::<Self::TierOutput>(self.name),

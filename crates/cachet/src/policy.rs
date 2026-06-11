@@ -13,7 +13,7 @@ type InsertPredicate<V> = Arc<dyn Fn(&CacheEntry<V>) -> bool + Send + Sync>;
 /// The insert policy applies to all inserts into the tier, including direct
 /// [`Cache::insert`](crate::Cache::insert) calls, [`Cache::get_or_insert`](crate::Cache::get_or_insert), and promotion from a
 /// fallback tier. If the policy rejects an insert, the operation is skipped
-/// and a `cache.rejected` telemetry event is recorded, with the operation recorded as `cache.insert`.
+/// and a `cache.insert_rejected` telemetry event is recorded.
 ///
 /// # Examples
 ///

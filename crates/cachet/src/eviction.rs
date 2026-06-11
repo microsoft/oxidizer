@@ -9,7 +9,6 @@
 //! the cache is finally built.
 
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use cachet_memory::RemovalCause;
 
@@ -42,13 +41,16 @@ impl EvictionHook {
     ///
     /// `Explicit` and `Replaced` are ignored because they are already covered
     /// by the wrapper's `cache.invalidated` / `cache.inserted` events.
+    ///
+    /// These events fire from moka's background thread with no parent span,
+    /// so they emit standalone tracing events rather than recording on a span.
     pub(crate) fn handle(&self, cause: RemovalCause) {
         let Some(state) = self.state.get() else {
             return;
         };
         match cause {
-            RemovalCause::Size => state.telemetry.cache_eviction(state.name, Duration::ZERO),
-            RemovalCause::Expired => state.telemetry.cache_expired(state.name, Duration::ZERO),
+            RemovalCause::Size => state.telemetry.record_eviction(state.name),
+            RemovalCause::Expired => state.telemetry.record_background_expired(state.name),
             RemovalCause::Explicit | RemovalCause::Replaced => {}
         }
     }
@@ -96,5 +98,21 @@ mod tests {
 
         hook.handle(RemovalCause::Expired);
         capture.assert_contains(attributes::EVENT_EXPIRED);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[test]
+    fn handle_without_logging_emits_no_tracing_events() {
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        // Logging disabled — covers the false branch of the logging_enabled check
+        let hook = Arc::new(EvictionHook::new());
+        hook.init(CacheTelemetry::new(), "no_logs");
+
+        hook.handle(RemovalCause::Size);
+        hook.handle(RemovalCause::Expired);
+
+        assert!(capture.output().is_empty(), "no log events should fire without logging enabled");
     }
 }

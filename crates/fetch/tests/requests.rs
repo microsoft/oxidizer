@@ -113,7 +113,7 @@ async fn json_owned() {
 
     let person = client
         .get(server.uri() + "/hello-world")
-        .fetch_json_owned::<Person>()
+        .fetch_json::<Person>()
         .await
         .unwrap()
         .into_body();
@@ -139,7 +139,7 @@ async fn json_borrowed() {
 
     let mut json = client
         .get(server.uri() + "/hello-world")
-        .fetch_json::<Person>()
+        .fetch_json_ref::<Person>()
         .await
         .unwrap()
         .into_body();

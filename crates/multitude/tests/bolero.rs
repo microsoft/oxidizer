@@ -12,13 +12,13 @@
 //!    when the tests themselves are skipped.
 //!
 //! The unsafe lifecycle/drop paths exercised here are independently
-//! covered under Miri by `arena_arc.rs`, `arena_rc.rs`, `arena_box.rs`,
+//! covered under Miri by `arena_arc.rs`, `arena_box.rs`,
 //! `arena_string.rs`, `arena_vec.rs`, and `drop_reentrancy.rs`.
 #![cfg(not(miri))]
 
 mod common;
 
-// === merged from tests/bolero_lifecycle.rs ===
+// === lifecycle property tests ===
 mod bolero_lifecycle {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::std_instead_of_alloc, reason = "test code uses std")]
@@ -29,7 +29,7 @@ mod bolero_lifecycle {
     #![allow(clippy::min_ident_chars, reason = "short names in test loops")]
     #![allow(clippy::single_match_else, reason = "test code")]
     #![allow(clippy::cast_possible_truncation, reason = "test indices are bounded")]
-    #![allow(clippy::similar_names, reason = "str_rcs / str_arcs are parallel container names")]
+    #![allow(clippy::similar_names, reason = "str_boxes / str_arcs are parallel container names")]
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::too_many_lines, reason = "fuzz driver dispatches over a wide Op enum")]
     #![allow(
@@ -41,7 +41,7 @@ mod bolero_lifecycle {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bolero::TypeGenerator;
-    use multitude::{Arc, Arena, Box as ArenaBox, Rc};
+    use multitude::{Arc, Arena, Box as ArenaBox};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -117,7 +117,7 @@ mod bolero_lifecycle {
         }
     }
 
-    /// 32 KiB payload — exceeds the default 16 KiB `max_normal_alloc`,
+    /// 32 KiB payload — exceeds the default `max_normal_alloc`,
     /// forcing routing through the oversized-chunk path.
     struct LargeTracker {
         dropped: Counter,
@@ -148,28 +148,17 @@ mod bolero_lifecycle {
     /// length, so any value is meaningful (no rejection sampling needed).
     #[derive(Clone, Copy, Debug, TypeGenerator)]
     enum Op {
-        /// `alloc_box(Tracker)` — Local-flavor, has a [`DropEntry`].
+        /// `alloc_box(Tracker)` — Box flavor, has a [`DropEntry`].
         AllocBox(u64),
-        /// `alloc_rc(Tracker)` — Local-flavor, no `DropEntry` (`T::drop` runs
-        /// at chunk teardown).
-        AllocRc(u64),
         /// `alloc_arc(Tracker)` — Shared-flavor, deferred-reconciliation
         /// refcount.
         AllocArc(u64),
-        /// `Rc::clone` — bumps refcount on a `Local` chunk.
-        CloneRc {
-            idx: u8,
-        },
         /// `Arc::clone` — atomic increment on a `Shared` chunk.
         CloneArc {
             idx: u8,
         },
         /// Drop the `Box<Tracker>` at this index.
         DropBox {
-            idx: u8,
-        },
-        /// Drop the `Rc<Tracker>` at this index.
-        DropRc {
             idx: u8,
         },
         /// Drop the `Arc<Tracker>` at this index.
@@ -179,38 +168,26 @@ mod bolero_lifecycle {
         /// `Arena::reset` — drains slots + pinned list. Smart pointers
         /// outlive reset (their +1 keeps the chunk alive).
         Reset,
-        /// `alloc_str_box` — non-`Drop` payload, exercises the str path.
+        /// `alloc_str_box` — exercises the str path.
         AllocStrBox {
-            len: u8,
-        },
-        /// `alloc_str_rc` — Local str refcount.
-        AllocStrRc {
             len: u8,
         },
         /// `alloc_str_arc` — Shared str refcount.
         AllocStrArc {
             len: u8,
         },
-        /// Drop a `BoxStr` at this index.
+        /// Drop a `Box<str>` at this index.
         DropStrBox {
             idx: u8,
         },
-        /// Drop an `RcStr` at this index.
-        DropStrRc {
-            idx: u8,
-        },
-        /// Drop an `ArcStr` at this index.
+        /// Drop an `Arc<str>` at this index.
         DropStrArc {
             idx: u8,
         },
 
         AllocZstBox,
-        AllocZstRc,
         AllocZstArc,
         DropZstBox {
-            idx: u8,
-        },
-        DropZstRc {
             idx: u8,
         },
         DropZstArc {
@@ -218,12 +195,8 @@ mod bolero_lifecycle {
         },
 
         AllocAlignedBox,
-        AllocAlignedRc,
         AllocAlignedArc,
         DropAlignedBox {
-            idx: u8,
-        },
-        DropAlignedRc {
             idx: u8,
         },
         DropAlignedArc {
@@ -231,12 +204,8 @@ mod bolero_lifecycle {
         },
 
         AllocLargeBox,
-        AllocLargeRc,
         AllocLargeArc,
         DropLargeBox {
-            idx: u8,
-        },
-        DropLargeRc {
             idx: u8,
         },
         DropLargeArc {
@@ -244,31 +213,38 @@ mod bolero_lifecycle {
         },
 
         /// `arena.alloc_vec()` then push a sequence of trackers, then
-        /// freeze into `Rc<[Tracker]>`. `count` controls how many
+        /// freeze into `Arc<[Tracker]>`. `count` controls how many
         /// elements to push (capped to keep state bounded).
-        BuildVecRc {
+        BuildVecArc {
             count: u8,
             payload: u64,
         },
-        /// Drop a `Rc<[Tracker]>` previously built.
-        DropVecRc {
+        /// Drop an `Arc<[Tracker]>` previously built.
+        DropVecArc {
             idx: u8,
         },
 
-        /// `arena.alloc_string()`, push bytes, freeze to `RcStr`.
-        BuildStringRc {
+        /// `arena.alloc_vec()` then push, then freeze into
+        /// `Box<[Tracker]>`.
+        BuildVecBox {
+            count: u8,
+            payload: u64,
+        },
+        /// Drop a `Box<[Tracker]>` previously built.
+        DropVecBox {
+            idx: u8,
+        },
+
+        /// `arena.alloc_string()`, push bytes, freeze to `Box<str>`.
+        BuildStringBox {
             len: u8,
         },
-        DropBuiltStringRc {
+        DropBuiltStringBox {
             idx: u8,
         },
 
         #[cfg(feature = "utf16")]
         AllocUtf16StrBox {
-            len: u8,
-        },
-        #[cfg(feature = "utf16")]
-        AllocUtf16StrRc {
             len: u8,
         },
         #[cfg(feature = "utf16")]
@@ -280,19 +256,15 @@ mod bolero_lifecycle {
             idx: u8,
         },
         #[cfg(feature = "utf16")]
-        DropUtf16StrRc {
-            idx: u8,
-        },
-        #[cfg(feature = "utf16")]
         DropUtf16StrArc {
             idx: u8,
         },
         #[cfg(feature = "utf16")]
-        BuildUtf16StringRc {
+        BuildUtf16StringBox {
             len: u8,
         },
         #[cfg(feature = "utf16")]
-        DropBuiltUtf16StringRc {
+        DropBuiltUtf16StringBox {
             idx: u8,
         },
     }
@@ -303,53 +275,37 @@ mod bolero_lifecycle {
 
         let mut arena = Arena::new();
         let mut boxes: Vec<ArenaBox<Tracker>> = Vec::new();
-        let mut rcs: Vec<Rc<Tracker>> = Vec::new();
         let mut arcs: Vec<Arc<Tracker>> = Vec::new();
-        let mut str_boxes: Vec<multitude::strings::BoxStr> = Vec::new();
-        let mut str_rcs: Vec<multitude::strings::RcStr> = Vec::new();
-        let mut str_arcs: Vec<multitude::strings::ArcStr> = Vec::new();
+        let mut str_boxes: Vec<multitude::Box<str>> = Vec::new();
+        let mut str_arcs: Vec<multitude::Arc<str>> = Vec::new();
 
         let mut zst_boxes: Vec<ArenaBox<ZstTracker>> = Vec::new();
-        let mut zst_rcs: Vec<Rc<ZstTracker>> = Vec::new();
         let mut zst_arcs: Vec<Arc<ZstTracker>> = Vec::new();
 
         let mut aligned_boxes: Vec<ArenaBox<AlignedTracker>> = Vec::new();
-        let mut aligned_rcs: Vec<Rc<AlignedTracker>> = Vec::new();
         let mut aligned_arcs: Vec<Arc<AlignedTracker>> = Vec::new();
 
         let mut large_boxes: Vec<ArenaBox<LargeTracker>> = Vec::new();
-        let mut large_rcs: Vec<Rc<LargeTracker>> = Vec::new();
         let mut large_arcs: Vec<Arc<LargeTracker>> = Vec::new();
 
-        let mut vec_rcs: Vec<Rc<[Tracker]>> = Vec::new();
-        let mut built_str_rcs: Vec<multitude::strings::RcStr> = Vec::new();
+        let mut vec_arcs: Vec<Arc<[Tracker]>> = Vec::new();
+        let mut vec_boxes: Vec<ArenaBox<[Tracker]>> = Vec::new();
+        let mut built_str_boxes: Vec<multitude::Box<str>> = Vec::new();
 
         #[cfg(feature = "utf16")]
         let mut utf16_str_boxes: Vec<multitude::strings::BoxUtf16Str> = Vec::new();
         #[cfg(feature = "utf16")]
-        let mut utf16_str_rcs: Vec<multitude::strings::RcUtf16Str> = Vec::new();
-        #[cfg(feature = "utf16")]
         let mut utf16_str_arcs: Vec<multitude::strings::ArcUtf16Str> = Vec::new();
         #[cfg(feature = "utf16")]
-        let mut built_utf16_str_rcs: Vec<multitude::strings::RcUtf16Str> = Vec::new();
+        let mut built_utf16_str_boxes: Vec<multitude::strings::BoxUtf16Str> = Vec::new();
 
         for op in ops {
             match *op {
                 Op::AllocBox(payload) => {
                     boxes.push(arena.alloc_box(Tracker::new(&created, &dropped, payload)));
                 }
-                Op::AllocRc(payload) => {
-                    rcs.push(arena.alloc_rc(Tracker::new(&created, &dropped, payload)));
-                }
                 Op::AllocArc(payload) => {
                     arcs.push(arena.alloc_arc(Tracker::new(&created, &dropped, payload)));
-                }
-                Op::CloneRc { idx } => {
-                    if !rcs.is_empty() {
-                        let i = (idx as usize) % rcs.len();
-                        let cloned = rcs[i].clone();
-                        rcs.push(cloned);
-                    }
                 }
                 Op::CloneArc { idx } => {
                     if !arcs.is_empty() {
@@ -362,12 +318,6 @@ mod bolero_lifecycle {
                     if !boxes.is_empty() {
                         let i = (idx as usize) % boxes.len();
                         drop(boxes.swap_remove(i));
-                    }
-                }
-                Op::DropRc { idx } => {
-                    if !rcs.is_empty() {
-                        let i = (idx as usize) % rcs.len();
-                        drop(rcs.swap_remove(i));
                     }
                 }
                 Op::DropArc { idx } => {
@@ -383,10 +333,6 @@ mod bolero_lifecycle {
                     let s = make_str(usize::from(len));
                     str_boxes.push(arena.alloc_str_box(&s));
                 }
-                Op::AllocStrRc { len } => {
-                    let s = make_str(usize::from(len));
-                    str_rcs.push(arena.alloc_str_rc(&s));
-                }
                 Op::AllocStrArc { len } => {
                     let s = make_str(usize::from(len));
                     str_arcs.push(arena.alloc_str_arc(&s));
@@ -395,12 +341,6 @@ mod bolero_lifecycle {
                     if !str_boxes.is_empty() {
                         let i = (idx as usize) % str_boxes.len();
                         drop(str_boxes.swap_remove(i));
-                    }
-                }
-                Op::DropStrRc { idx } => {
-                    if !str_rcs.is_empty() {
-                        let i = (idx as usize) % str_rcs.len();
-                        drop(str_rcs.swap_remove(i));
                     }
                 }
                 Op::DropStrArc { idx } => {
@@ -413,9 +353,6 @@ mod bolero_lifecycle {
                 Op::AllocZstBox => {
                     zst_boxes.push(arena.alloc_box(ZstTracker::new(&created, &dropped)));
                 }
-                Op::AllocZstRc => {
-                    zst_rcs.push(arena.alloc_rc(ZstTracker::new(&created, &dropped)));
-                }
                 Op::AllocZstArc => {
                     zst_arcs.push(arena.alloc_arc(ZstTracker::new(&created, &dropped)));
                 }
@@ -423,12 +360,6 @@ mod bolero_lifecycle {
                     if !zst_boxes.is_empty() {
                         let i = (idx as usize) % zst_boxes.len();
                         drop(zst_boxes.swap_remove(i));
-                    }
-                }
-                Op::DropZstRc { idx } => {
-                    if !zst_rcs.is_empty() {
-                        let i = (idx as usize) % zst_rcs.len();
-                        drop(zst_rcs.swap_remove(i));
                     }
                 }
                 Op::DropZstArc { idx } => {
@@ -441,9 +372,6 @@ mod bolero_lifecycle {
                 Op::AllocAlignedBox => {
                     aligned_boxes.push(arena.alloc_box(AlignedTracker::new(&created, &dropped)));
                 }
-                Op::AllocAlignedRc => {
-                    aligned_rcs.push(arena.alloc_rc(AlignedTracker::new(&created, &dropped)));
-                }
                 Op::AllocAlignedArc => {
                     aligned_arcs.push(arena.alloc_arc(AlignedTracker::new(&created, &dropped)));
                 }
@@ -451,12 +379,6 @@ mod bolero_lifecycle {
                     if !aligned_boxes.is_empty() {
                         let i = (idx as usize) % aligned_boxes.len();
                         drop(aligned_boxes.swap_remove(i));
-                    }
-                }
-                Op::DropAlignedRc { idx } => {
-                    if !aligned_rcs.is_empty() {
-                        let i = (idx as usize) % aligned_rcs.len();
-                        drop(aligned_rcs.swap_remove(i));
                     }
                 }
                 Op::DropAlignedArc { idx } => {
@@ -469,9 +391,6 @@ mod bolero_lifecycle {
                 Op::AllocLargeBox => {
                     large_boxes.push(arena.alloc_box(LargeTracker::new(&created, &dropped)));
                 }
-                Op::AllocLargeRc => {
-                    large_rcs.push(arena.alloc_rc(LargeTracker::new(&created, &dropped)));
-                }
                 Op::AllocLargeArc => {
                     large_arcs.push(arena.alloc_arc(LargeTracker::new(&created, &dropped)));
                 }
@@ -481,12 +400,6 @@ mod bolero_lifecycle {
                         drop(large_boxes.swap_remove(i));
                     }
                 }
-                Op::DropLargeRc { idx } => {
-                    if !large_rcs.is_empty() {
-                        let i = (idx as usize) % large_rcs.len();
-                        drop(large_rcs.swap_remove(i));
-                    }
-                }
                 Op::DropLargeArc { idx } => {
                     if !large_arcs.is_empty() {
                         let i = (idx as usize) % large_arcs.len();
@@ -494,22 +407,37 @@ mod bolero_lifecycle {
                     }
                 }
 
-                Op::BuildVecRc { count, payload } => {
+                Op::BuildVecArc { count, payload } => {
                     let n = (count as usize).min(16);
                     let mut v = arena.alloc_vec::<Tracker>();
                     for i in 0..n {
                         v.push(Tracker::new(&created, &dropped, payload.wrapping_add(i as u64)));
                     }
-                    vec_rcs.push(v.into_arena_rc());
+                    vec_arcs.push(v.into_arena_arc());
                 }
-                Op::DropVecRc { idx } => {
-                    if !vec_rcs.is_empty() {
-                        let i = (idx as usize) % vec_rcs.len();
-                        drop(vec_rcs.swap_remove(i));
+                Op::DropVecArc { idx } => {
+                    if !vec_arcs.is_empty() {
+                        let i = (idx as usize) % vec_arcs.len();
+                        drop(vec_arcs.swap_remove(i));
                     }
                 }
 
-                Op::BuildStringRc { len } => {
+                Op::BuildVecBox { count, payload } => {
+                    let n = (count as usize).min(16);
+                    let mut v = arena.alloc_vec::<Tracker>();
+                    for i in 0..n {
+                        v.push(Tracker::new(&created, &dropped, payload.wrapping_add(i as u64)));
+                    }
+                    vec_boxes.push(v.into_arena_box());
+                }
+                Op::DropVecBox { idx } => {
+                    if !vec_boxes.is_empty() {
+                        let i = (idx as usize) % vec_boxes.len();
+                        drop(vec_boxes.swap_remove(i));
+                    }
+                }
+
+                Op::BuildStringBox { len } => {
                     let mut s = arena.alloc_string();
                     let target = usize::from(len).min(1024);
                     for i in 0..target {
@@ -520,12 +448,12 @@ mod bolero_lifecycle {
                         s.push('!');
                         s.shrink_to_fit();
                     }
-                    built_str_rcs.push(s.into_arena_str());
+                    built_str_boxes.push(s.into_arena_box_str());
                 }
-                Op::DropBuiltStringRc { idx } => {
-                    if !built_str_rcs.is_empty() {
-                        let i = (idx as usize) % built_str_rcs.len();
-                        drop(built_str_rcs.swap_remove(i));
+                Op::DropBuiltStringBox { idx } => {
+                    if !built_str_boxes.is_empty() {
+                        let i = (idx as usize) % built_str_boxes.len();
+                        drop(built_str_boxes.swap_remove(i));
                     }
                 }
 
@@ -533,11 +461,6 @@ mod bolero_lifecycle {
                 Op::AllocUtf16StrBox { len } => {
                     let s = make_utf16_str(usize::from(len));
                     utf16_str_boxes.push(arena.alloc_utf16_str_box(&s));
-                }
-                #[cfg(feature = "utf16")]
-                Op::AllocUtf16StrRc { len } => {
-                    let s = make_utf16_str(usize::from(len));
-                    utf16_str_rcs.push(arena.alloc_utf16_str_rc(&s));
                 }
                 #[cfg(feature = "utf16")]
                 Op::AllocUtf16StrArc { len } => {
@@ -552,13 +475,6 @@ mod bolero_lifecycle {
                     }
                 }
                 #[cfg(feature = "utf16")]
-                Op::DropUtf16StrRc { idx } => {
-                    if !utf16_str_rcs.is_empty() {
-                        let i = (idx as usize) % utf16_str_rcs.len();
-                        drop(utf16_str_rcs.swap_remove(i));
-                    }
-                }
-                #[cfg(feature = "utf16")]
                 Op::DropUtf16StrArc { idx } => {
                     if !utf16_str_arcs.is_empty() {
                         let i = (idx as usize) % utf16_str_arcs.len();
@@ -566,7 +482,7 @@ mod bolero_lifecycle {
                     }
                 }
                 #[cfg(feature = "utf16")]
-                Op::BuildUtf16StringRc { len } => {
+                Op::BuildUtf16StringBox { len } => {
                     let mut s = arena.alloc_utf16_string();
                     let target = usize::from(len).min(1024);
                     for i in 0..target {
@@ -577,42 +493,37 @@ mod bolero_lifecycle {
                         s.push('!');
                         s.shrink_to_fit();
                     }
-                    built_utf16_str_rcs.push(s.into_arena_utf16_str());
+                    built_utf16_str_boxes.push(s.into_arena_box_utf16_str());
                 }
                 #[cfg(feature = "utf16")]
-                Op::DropBuiltUtf16StringRc { idx } => {
-                    if !built_utf16_str_rcs.is_empty() {
-                        let i = (idx as usize) % built_utf16_str_rcs.len();
-                        drop(built_utf16_str_rcs.swap_remove(i));
+                Op::DropBuiltUtf16StringBox { idx } => {
+                    if !built_utf16_str_boxes.is_empty() {
+                        let i = (idx as usize) % built_utf16_str_boxes.len();
+                        drop(built_utf16_str_boxes.swap_remove(i));
                     }
                 }
             }
         }
 
         drop(boxes);
-        drop(rcs);
         drop(str_boxes);
-        drop(str_rcs);
         drop(arcs);
         drop(str_arcs);
 
         drop(zst_boxes);
-        drop(zst_rcs);
         drop(zst_arcs);
         drop(aligned_boxes);
-        drop(aligned_rcs);
         drop(aligned_arcs);
         drop(large_boxes);
-        drop(large_rcs);
         drop(large_arcs);
-        drop(vec_rcs);
-        drop(built_str_rcs);
+        drop(vec_arcs);
+        drop(vec_boxes);
+        drop(built_str_boxes);
         #[cfg(feature = "utf16")]
         {
             drop(utf16_str_boxes);
-            drop(utf16_str_rcs);
             drop(utf16_str_arcs);
-            drop(built_utf16_str_rcs);
+            drop(built_utf16_str_boxes);
         }
 
         #[cfg(feature = "stats")]
@@ -640,9 +551,6 @@ mod bolero_lifecycle {
                     "at least one chunk must have been allocated (created={created_n}, stats={s:?})",
                 );
             }
-            // Each Tracker is at least 16 bytes (Counter pointer + payload),
-            // and oversized payloads are 32 KiB. A loose lower bound that
-            // still catches gross accounting drift:
             assert!(
                 s.total_bytes_allocated >= (created_n as u64).saturating_mul(8),
                 "total_bytes_allocated under-reported (created={created_n}, stats={s:?})",
@@ -684,33 +592,26 @@ mod bolero_lifecycle {
             let normalized: Vec<Op> = ops
                 .iter()
                 .map(|op| match *op {
-                    Op::CloneRc { .. } => Op::CloneRc { idx: 0 },
                     Op::CloneArc { .. } => Op::CloneArc { idx: 0 },
                     Op::DropBox { .. } => Op::DropBox { idx: 0 },
-                    Op::DropRc { .. } => Op::DropRc { idx: 0 },
                     Op::DropArc { .. } => Op::DropArc { idx: 0 },
                     Op::DropStrBox { .. } => Op::DropStrBox { idx: 0 },
-                    Op::DropStrRc { .. } => Op::DropStrRc { idx: 0 },
                     Op::DropStrArc { .. } => Op::DropStrArc { idx: 0 },
                     Op::DropZstBox { .. } => Op::DropZstBox { idx: 0 },
-                    Op::DropZstRc { .. } => Op::DropZstRc { idx: 0 },
                     Op::DropZstArc { .. } => Op::DropZstArc { idx: 0 },
                     Op::DropAlignedBox { .. } => Op::DropAlignedBox { idx: 0 },
-                    Op::DropAlignedRc { .. } => Op::DropAlignedRc { idx: 0 },
                     Op::DropAlignedArc { .. } => Op::DropAlignedArc { idx: 0 },
                     Op::DropLargeBox { .. } => Op::DropLargeBox { idx: 0 },
-                    Op::DropLargeRc { .. } => Op::DropLargeRc { idx: 0 },
                     Op::DropLargeArc { .. } => Op::DropLargeArc { idx: 0 },
-                    Op::DropVecRc { .. } => Op::DropVecRc { idx: 0 },
-                    Op::DropBuiltStringRc { .. } => Op::DropBuiltStringRc { idx: 0 },
+                    Op::DropVecArc { .. } => Op::DropVecArc { idx: 0 },
+                    Op::DropVecBox { .. } => Op::DropVecBox { idx: 0 },
+                    Op::DropBuiltStringBox { .. } => Op::DropBuiltStringBox { idx: 0 },
                     #[cfg(feature = "utf16")]
                     Op::DropUtf16StrBox { .. } => Op::DropUtf16StrBox { idx: 0 },
                     #[cfg(feature = "utf16")]
-                    Op::DropUtf16StrRc { .. } => Op::DropUtf16StrRc { idx: 0 },
-                    #[cfg(feature = "utf16")]
                     Op::DropUtf16StrArc { .. } => Op::DropUtf16StrArc { idx: 0 },
                     #[cfg(feature = "utf16")]
-                    Op::DropBuiltUtf16StringRc { .. } => Op::DropBuiltUtf16StringRc { idx: 0 },
+                    Op::DropBuiltUtf16StringBox { .. } => Op::DropBuiltUtf16StringBox { idx: 0 },
                     other => other,
                 })
                 .collect();
@@ -733,7 +634,7 @@ mod bolero_lifecycle {
     }
 }
 
-// === merged from tests/bolero_panic_safety.rs ===
+// === panic safety property tests ===
 mod bolero_panic_safety {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::std_instead_of_alloc, reason = "test code uses std")]
@@ -870,11 +771,6 @@ mod bolero_panic_safety {
                         continue;
                     }
                     let panic_idx = usize::from(panic_at) % n;
-                    // alloc_slice_clone reads from a slice and clones each
-                    // element. We give it a 1-element source whose Clone
-                    // panics on the `panic_idx`-th invocation. Note: the
-                    // source itself is not counted (only successful clones
-                    // bump `created`).
                     let panic_idx_i32 = i32::try_from(panic_idx).unwrap_or(i32::MAX);
                     let seed = ClonePanicTracker {
                         created: StdArc::clone(&created),

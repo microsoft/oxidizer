@@ -8,7 +8,7 @@
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::{Arena, expect_alloc};
+use super::Arena;
 use crate::strings::String;
 use crate::vec::Vec;
 
@@ -50,7 +50,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     #[inline]
     pub fn alloc_string_with_capacity(&self, cap: usize) -> String<'_, A> {
-        expect_alloc(self.try_alloc_string_with_capacity(cap))
+        String::with_capacity_in(cap, self)
     }
 
     /// Fallible variant of [`Self::alloc_string_with_capacity`].
@@ -103,7 +103,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     #[inline]
     pub fn alloc_vec_with_capacity<T>(&self, cap: usize) -> Vec<'_, T, A> {
-        expect_alloc(self.try_alloc_vec_with_capacity(cap))
+        Vec::with_capacity_in(cap, self)
     }
 
     /// Fallible variant of [`Self::alloc_vec_with_capacity`].

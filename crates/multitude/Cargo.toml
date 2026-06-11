@@ -6,7 +6,7 @@ name = "multitude"
 version = "0.1.3"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
-keywords = ["arena", "memory", "allocator", "bump", "rc"]
+keywords = ["arena", "memory", "allocator", "bump"]
 categories = ["memory-management", "data-structures"]
 
 edition = { workspace = true }
@@ -38,7 +38,7 @@ default = ["std"]
 std = []
 serde = ["dep:serde"]
 stats = []
-dst = ["dep:ptr_meta", "ptr_meta/derive"]
+dst = ["ptr_meta/derive"]
 utf16 = ["dep:widestring"]
 bytes = ["dep:bytes"]
 bytemuck = ["dep:bytemuck", "dst"]
@@ -50,7 +50,7 @@ allocator-api2 = { workspace = true, features = ["alloc"] }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 bytes = { workspace = true, optional = true }
 bytesbuf = { workspace = true, optional = true }
-ptr_meta = { workspace = true, optional = true }
+ptr_meta = { workspace = true }
 serde = { workspace = true, optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
 zerocopy = { workspace = true, optional = true }

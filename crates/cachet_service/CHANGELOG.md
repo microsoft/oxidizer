@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.5] - 2026-06-10
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.3` of `layered`
+
 ## [0.2.4] - 2026-06-05
 
 - 🔧 Maintenance

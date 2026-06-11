@@ -455,6 +455,46 @@ jobs:
       - name: Check External Type Exposure
         run: cargo +${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }} -Zscript scripts/check-external-types.rs ${{ env.RUST_NIGHTLY_EXTERNAL_TYPES }}
 
+  script-tests:
+    # Pester test suite for the release-related PowerShell scripts
+    # (release-packages.ps1, lib/releasing.ps1, lib/release-flow.ps1).
+    # Always runs (no delta gate) because script-level changes don't move any
+    # Rust crates so delta would mark the PR skippable, but the scripts
+    # themselves may still need validation. Cross-platform matrix mirrors the
+    # platforms developers run the scripts on locally.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      # prep
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+      - name: Setup
+        # The synthetic-workspace fixture builder shells out to `cargo metadata`,
+        # so Rust must be available even though no Rust code is compiled.
+        uses: ./.github/actions/setup
+        with:
+          rust-toolchain: RUST_LATEST
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          $existing = Get-Module Pester -ListAvailable |
+              Sort-Object Version -Descending |
+              Select-Object -First 1
+          if ($null -eq $existing -or $existing.Version -lt [version]'5.7.0') {
+              Install-Module -Name Pester -MinimumVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          } else {
+              Write-Host "Pester $($existing.Version) already installed; skipping."
+          }
+
+      # execute
+      - name: Run Pester Suite
+        shell: pwsh
+        run: ./scripts/tests/Pester/Run-Tests.ps1
+
   # Single aggregating ("fan-in") status check. Branch protection should
   # require ONLY this context for the workflow jobs below: it succeeds when
   # every dependency either succeeded or was skipped, and fails if any
@@ -500,6 +540,7 @@ jobs:
       - pr-title
       - license-headers
       - external-type-exposure
+      - script-tests
     runs-on: ubuntu-latest
     steps:
       - name: Validate Dependency Results

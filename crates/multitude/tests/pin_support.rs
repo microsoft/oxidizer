@@ -16,7 +16,7 @@
 use core::marker::PhantomPinned;
 use core::pin::Pin;
 
-use multitude::{Arc, Arena, Box, Rc};
+use multitude::{Arc, Arena, Box};
 
 /// `!Unpin` type. Its address must stay stable for as long as the
 /// pinned smart pointer is live.
@@ -54,18 +54,6 @@ fn alloc_box_pin_with_constructs_in_place() {
     let arena = Arena::new();
     let p: Pin<Box<NotUnpin>> = arena.alloc_box_pin_with(|| NotUnpin::new(7));
     assert_eq!(p.value, 7);
-}
-
-#[test]
-fn alloc_rc_pin_value() {
-    let arena = Arena::new();
-    let p: Pin<Rc<NotUnpin>> = arena.alloc_rc_pin(NotUnpin::new(11));
-    let p2 = p.clone();
-    let addr_p = (&raw const *p) as usize;
-    let addr_p2 = (&raw const *p2) as usize;
-    assert_eq!(addr_p, addr_p2);
-    assert_eq!(p.value, 11);
-    assert_eq!(p2.value, 11);
 }
 
 #[test]
@@ -113,14 +101,6 @@ fn box_from_into_pin_value() {
 }
 
 #[test]
-fn rc_from_into_pin_value() {
-    let arena = Arena::new();
-    let r = arena.alloc_rc(NotUnpin::new(3));
-    let p: Pin<Rc<NotUnpin>> = Rc::into_pin(r);
-    assert_eq!(p.value, 3);
-}
-
-#[test]
 fn arc_from_into_pin_value() {
     let arena = Arena::new();
     let a = arena.alloc_arc(NotUnpin::new(4));
@@ -157,20 +137,6 @@ fn alloc_uninit_box_pin_with_not_unpin_via_unchecked() {
     unpinned.write(NotUnpin::new(99));
     let init: Pin<Box<NotUnpin>> = unsafe { Box::assume_init_pin(Pin::new_unchecked(unpinned)) };
     assert_eq!(init.value, 99);
-}
-
-#[test]
-fn alloc_uninit_rc_pin_then_assume_init_pin() {
-    let arena = Arena::new();
-    let uninit: Pin<Rc<core::mem::MaybeUninit<u32>>> = arena.alloc_uninit_rc_pin::<u32>();
-    // `MaybeUninit<u32>: Unpin`, so we can safely unpin and write.
-    let unpinned = Pin::into_inner(uninit);
-    unsafe {
-        let p = Rc::as_ptr(&unpinned).cast::<core::mem::MaybeUninit<u32>>().cast_mut();
-        (*p).write(60);
-    }
-    let init: Pin<Rc<u32>> = unsafe { Rc::assume_init_pin(Pin::new(unpinned)) };
-    assert_eq!(*init, 60);
 }
 
 #[test]
@@ -211,20 +177,6 @@ fn alloc_slice_fill_with_box_pin() {
     let s2 = s;
     let addrs2: Vec<usize> = (0..s2.len()).map(|i| (&raw const s2[i]) as usize).collect();
     assert_eq!(addrs, addrs2);
-}
-
-#[test]
-fn alloc_slice_fill_with_rc_pin_clones_share_addresses() {
-    let arena = Arena::new();
-    let s: Pin<Rc<[NotUnpin]>> = arena.alloc_slice_fill_with_rc_pin::<NotUnpin, _>(4, |i| NotUnpin::new(i as u64));
-    let addrs: Vec<usize> = (0..s.len()).map(|i| (&raw const s[i]) as usize).collect();
-    let s2 = s.clone();
-    let addrs2: Vec<usize> = (0..s2.len()).map(|i| (&raw const s2[i]) as usize).collect();
-    assert_eq!(addrs, addrs2);
-    drop(s);
-    // After dropping the original, the clone still has the same addresses.
-    let addrs3: Vec<usize> = (0..s2.len()).map(|i| (&raw const s2[i]) as usize).collect();
-    assert_eq!(addrs, addrs3);
 }
 
 #[test]
@@ -290,29 +242,6 @@ fn alloc_dst_arc_pin_slice_cross_thread() {
 
 #[cfg(feature = "dst")]
 #[test]
-fn alloc_dst_rc_pin_slice() {
-    use core::alloc::Layout;
-
-    let arena = Arena::new();
-    let len = 3_usize;
-    let layout = Layout::array::<NotUnpin>(len).unwrap();
-    // SAFETY: init writes `len` valid `NotUnpin` values into the slice.
-    let pinned: Pin<Rc<[NotUnpin]>> = unsafe {
-        arena.alloc_dst_rc_pin::<[NotUnpin]>(layout, len, |fat: *mut [NotUnpin]| {
-            let p = fat.cast::<NotUnpin>();
-            for i in 0..len {
-                p.add(i).write(NotUnpin::new(i as u64 + 300));
-            }
-        })
-    };
-    assert_eq!(pinned.len(), len);
-    for (i, item) in pinned.iter().enumerate() {
-        assert_eq!(item.value, i as u64 + 300);
-    }
-}
-
-#[cfg(feature = "dst")]
-#[test]
 fn try_alloc_dst_box_pin_slice_ok() {
     use core::alloc::Layout;
 
@@ -332,29 +261,6 @@ fn try_alloc_dst_box_pin_slice_ok() {
     };
     assert_eq!(pinned.len(), len);
     assert_eq!(pinned[1].value, 401);
-}
-
-#[cfg(feature = "dst")]
-#[test]
-fn try_alloc_dst_rc_pin_slice_ok() {
-    use core::alloc::Layout;
-
-    let arena = Arena::new();
-    let len = 2_usize;
-    let layout = Layout::array::<NotUnpin>(len).unwrap();
-    // SAFETY: init fills the slice.
-    let pinned: Pin<Rc<[NotUnpin]>> = unsafe {
-        arena
-            .try_alloc_dst_rc_pin::<[NotUnpin]>(layout, len, |fat: *mut [NotUnpin]| {
-                let p = fat.cast::<NotUnpin>();
-                for i in 0..len {
-                    p.add(i).write(NotUnpin::new(i as u64 + 500));
-                }
-            })
-            .unwrap()
-    };
-    assert_eq!(pinned.len(), len);
-    assert_eq!(pinned[0].value, 500);
 }
 
 #[cfg(feature = "dst")]
@@ -441,27 +347,6 @@ fn try_alloc_box_pin_with_succeeds() {
 }
 
 #[test]
-fn try_alloc_rc_pin_succeeds() {
-    let arena = Arena::new();
-    let p = arena.try_alloc_rc_pin(NotUnpin::new(3)).unwrap();
-    assert_eq!(p.value, 3);
-}
-
-#[test]
-fn alloc_rc_pin_with_constructs_in_place() {
-    let arena = Arena::new();
-    let p: Pin<Rc<NotUnpin>> = arena.alloc_rc_pin_with(|| NotUnpin::new(4));
-    assert_eq!(p.value, 4);
-}
-
-#[test]
-fn try_alloc_rc_pin_with_succeeds() {
-    let arena = Arena::new();
-    let p = arena.try_alloc_rc_pin_with(|| NotUnpin::new(5)).unwrap();
-    assert_eq!(p.value, 5);
-}
-
-#[test]
 fn alloc_arc_pin_value() {
     let arena = Arena::new();
     let p: Pin<Arc<NotUnpin>> = arena.alloc_arc_pin(NotUnpin::new(6));
@@ -483,16 +368,6 @@ fn try_alloc_arc_pin_with_succeeds() {
 }
 
 #[test]
-fn alloc_zeroed_rc_pin_yields_zeroed_storage() {
-    let arena = Arena::new();
-    let p: Pin<Rc<core::mem::MaybeUninit<u128>>> = arena.alloc_zeroed_rc_pin::<u128>();
-    // SAFETY: zeroed_rc_pin guarantees the storage is zero-initialized,
-    // and a u128 of all zero bits is a valid u128 value.
-    let p = unsafe { Rc::assume_init_pin(p) };
-    assert_eq!(*p, 0_u128);
-}
-
-#[test]
 fn alloc_zeroed_arc_pin_yields_zeroed_storage() {
     let arena = Arena::new();
     let p: Pin<Arc<core::mem::MaybeUninit<u128>>> = arena.alloc_zeroed_arc_pin::<u128>();
@@ -504,12 +379,6 @@ fn alloc_zeroed_arc_pin_yields_zeroed_storage() {
 fn try_alloc_zeroed_box_pin_succeeds() {
     let arena = Arena::new();
     let _ = arena.try_alloc_zeroed_box_pin::<u32>().unwrap();
-}
-
-#[test]
-fn try_alloc_zeroed_rc_pin_succeeds() {
-    let arena = Arena::new();
-    let _ = arena.try_alloc_zeroed_rc_pin::<u32>().unwrap();
 }
 
 #[test]
@@ -525,12 +394,6 @@ fn try_alloc_uninit_box_pin_succeeds() {
 }
 
 #[test]
-fn try_alloc_uninit_rc_pin_succeeds() {
-    let arena = Arena::new();
-    let _ = arena.try_alloc_uninit_rc_pin::<u32>().unwrap();
-}
-
-#[test]
 fn try_alloc_uninit_arc_pin_succeeds() {
     let arena = Arena::new();
     let _ = arena.try_alloc_uninit_arc_pin::<u32>().unwrap();
@@ -541,15 +404,6 @@ fn try_alloc_slice_fill_with_box_pin_succeeds() {
     let arena = Arena::new();
     let p = arena
         .try_alloc_slice_fill_with_box_pin::<u32, _>(4, |i| u32::try_from(i).unwrap())
-        .unwrap();
-    assert_eq!(&*p, &[0_u32, 1, 2, 3]);
-}
-
-#[test]
-fn try_alloc_slice_fill_with_rc_pin_succeeds() {
-    let arena = Arena::new();
-    let p = arena
-        .try_alloc_slice_fill_with_rc_pin::<u32, _>(4, |i| u32::try_from(i).unwrap())
         .unwrap();
     assert_eq!(&*p, &[0_u32, 1, 2, 3]);
 }
@@ -576,18 +430,6 @@ fn assume_init_pin_slice_box() {
     // SAFETY: all elements are initialized above.
     let p: Pin<Box<[u32]>> = unsafe { Box::assume_init_pin_slice(p) };
     assert_eq!(&*p, &[10_u32, 11, 12]);
-}
-
-#[test]
-fn assume_init_pin_slice_rc() {
-    let arena = Arena::new();
-    let s = arena.alloc_zeroed_slice_rc::<u32>(3);
-    // SAFETY: storage address is stable for the smart pointer's lifetime;
-    // safe to pin a freshly-acquired handle.
-    let p = unsafe { core::pin::Pin::new_unchecked(s) };
-    // SAFETY: zero is a valid u32; assume init.
-    let p = unsafe { Rc::assume_init_pin_slice(p) };
-    assert_eq!(&*p, &[0_u32, 0, 0]);
 }
 
 #[test]

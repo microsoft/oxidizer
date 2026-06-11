@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.0] - 2026-06-10
+
+- ⚠️ Breaking
+
+  - improve working with response bodies ([#485](https://github.com/microsoft/oxidizer/pull/485))
+
 ## [0.10.2] - 2026-06-05
 
 - 🔧 Maintenance
@@ -17,4 +23,3 @@
 - ✨ Features
 
   - introduce fetch crate
-

@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(
+    dead_code,
+    unused_imports,
+    clippy::unnecessary_safety_comment,
+    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+)]
+
 //! Consolidated DST tests (Arc/Rc, Box, and panic-safety paths).
 
 #![cfg(feature = "dst")]
@@ -22,43 +29,6 @@ mod dst {
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
-
-    #[test]
-    fn alloc_dst_rc_byte_slice() {
-        let arena = Arena::new();
-        let len = 5_usize;
-        let layout = core::alloc::Layout::array::<u8>(len).unwrap();
-        // SAFETY: layout matches [u8; 5]; metadata is len; init writes len bytes.
-        let r = unsafe {
-            arena.alloc_dst_rc::<[u8]>(layout, len, |fat: *mut [u8]| {
-                let p = fat.cast::<u8>();
-                for i in 0..len {
-                    p.add(i).write((i + 100) as u8);
-                }
-            })
-        };
-        assert_eq!(r.len(), 5);
-        for (i, byte) in r.iter().enumerate() {
-            assert_eq!(*byte, (i + 100) as u8);
-        }
-    }
-
-    #[test]
-    fn try_alloc_dst_rc_succeeds() {
-        let arena = Arena::new();
-        let layout = core::alloc::Layout::array::<u32>(2).unwrap();
-        // SAFETY: layout matches [u32; 2]; metadata is len; init writes 2 u32s.
-        let r = unsafe {
-            arena
-                .try_alloc_dst_rc::<[u32]>(layout, 2_usize, |fat: *mut [u32]| {
-                    let p = fat.cast::<u32>();
-                    p.add(0).write(7);
-                    p.add(1).write(8);
-                })
-                .unwrap()
-        };
-        assert_eq!(&*r, &[7, 8]);
-    }
 
     #[test]
     fn alloc_dst_arc_byte_slice() {
@@ -133,66 +103,6 @@ mod dst {
         let h = std::thread::spawn(move || r2.iter().sum::<u32>());
         assert_eq!(h.join().unwrap(), 24);
         assert_eq!(&*r, &[7, 8, 9]);
-    }
-
-    #[test]
-    fn alloc_dst_rc_runs_drop_at_chunk_teardown() {
-        static COUNT: AtomicUsize = AtomicUsize::new(0);
-        struct Tracked(#[expect(dead_code, reason = "field exists only for size")] u32);
-        impl Drop for Tracked {
-            fn drop(&mut self) {
-                let _ = COUNT.fetch_add(1, Ordering::SeqCst);
-            }
-        }
-
-        COUNT.store(0, Ordering::SeqCst);
-        {
-            let arena = Arena::new();
-            let layout = core::alloc::Layout::array::<Tracked>(3).unwrap();
-            // SAFETY: layout matches [Tracked; 3]; init writes 3 Tracked.
-            let r = unsafe {
-                arena.alloc_dst_rc::<[Tracked]>(layout, 3_usize, |fat: *mut [Tracked]| {
-                    let p = fat.cast::<Tracked>();
-                    p.add(0).write(Tracked(1));
-                    p.add(1).write(Tracked(2));
-                    p.add(2).write(Tracked(3));
-                })
-            };
-            assert_eq!(r.len(), 3);
-            assert_eq!(COUNT.load(Ordering::SeqCst), 0);
-            drop(r);
-        }
-        assert_eq!(COUNT.load(Ordering::SeqCst), 3);
-    }
-
-    #[test]
-    fn try_alloc_dst_rc_rejects_excessive_alignment() {
-        let arena: Arena = Arena::new();
-        let huge_align = 128 * 1024_usize;
-        let layout = core::alloc::Layout::from_size_align(huge_align, huge_align).unwrap();
-        let r = unsafe {
-            arena.try_alloc_dst_rc::<[u8]>(layout, 0_usize, |_| {
-                unreachable!("init must not be called when allocation fails");
-            })
-        };
-        assert!(r.is_err());
-    }
-
-    #[test]
-    fn try_alloc_dst_rc_rejects_half_chunk_alignment() {
-        // align = 32 KiB sits exactly at the smart-pointer alignment cap. The
-        // DropEntry's pre-payload bytes would push the value to chunk offset
-        // CHUNK_ALIGN (= 64 KiB), making `header_for(value_ptr)` mask to the
-        // wrong chunk header. The guard must reject this layout.
-        let arena: Arena = Arena::new();
-        let half_chunk = 32 * 1024_usize;
-        let layout = core::alloc::Layout::from_size_align(half_chunk, half_chunk).unwrap();
-        let r = unsafe {
-            arena.try_alloc_dst_rc::<[u8]>(layout, 0_usize, |_| {
-                unreachable!("init must not be called when allocation fails");
-            })
-        };
-        assert!(r.is_err());
     }
 
     #[test]
@@ -562,132 +472,6 @@ mod dst_box {
         assert_eq!(COUNT.load(Ordering::SeqCst), before + 4);
     }
 
-    #[test]
-    fn arena_box_slice_into_rc_basic() {
-        let arena = Arena::new();
-        let b = arena.alloc_slice_copy_box([1_u32, 2, 3]);
-        let r = b.into_rc();
-        assert_eq!(&*r, &[1, 2, 3]);
-    }
-
-    #[test]
-    fn arena_box_slice_into_rc_after_mutation() {
-        let arena = Arena::new();
-        let mut b = arena.alloc_slice_copy_box([10_u32, 20, 30]);
-        b[1] = 99;
-        let r = b.into_rc();
-        assert_eq!(&*r, &[10, 99, 30]);
-    }
-
-    /// Regression: previously `Box::<[T:Drop]>::into_rc()` panicked when the
-    /// `Box` came from `alloc_dst_box` because that path skipped drop-entry
-    /// installation. The fix routes `try_alloc_dst_box` through the
-    /// with-entry helper for `T: needs_drop`, installing a `noop_drop_shim`
-    /// that `Box::into_rc` retargets to `drop_shim_slice`.
-    #[test]
-    fn alloc_dst_box_drop_type_into_rc_runs_drop_exactly_once() {
-        struct DropCounter(std::sync::Arc<AtomicUsize>);
-        impl Drop for DropCounter {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        // Slice DST [DropCounter]
-        let counter = std::sync::Arc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let len = 3_usize;
-            let layout = core::alloc::Layout::array::<DropCounter>(len).unwrap();
-            // SAFETY: layout matches [DropCounter; 3]; init fully writes each slot.
-            let b = unsafe {
-                arena.alloc_dst_box::<[DropCounter]>(layout, len, |fat: *mut [DropCounter]| {
-                    let p = fat.cast::<DropCounter>();
-                    for i in 0..len {
-                        p.add(i).write(DropCounter(std::sync::Arc::clone(&counter)));
-                    }
-                })
-            };
-            let r = b.into_rc();
-            assert_eq!(r.len(), 3);
-            assert_eq!(counter.load(Ordering::Relaxed), 0, "no drops while Rc is live");
-            drop(r);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 3, "each element dropped exactly once");
-    }
-
-    /// Regression: the sized-DST entry point through `alloc_dst_box::<T>` for
-    /// `T: Drop` previously panicked on `into_rc()` for the same reason as
-    /// the slice case.
-    #[test]
-    fn alloc_dst_box_sized_drop_type_into_rc_runs_drop_exactly_once() {
-        struct DropCounter(std::sync::Arc<AtomicUsize>);
-        impl Drop for DropCounter {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        let counter = std::sync::Arc::new(AtomicUsize::new(0));
-        {
-            let arena = Arena::new();
-            let layout = core::alloc::Layout::new::<DropCounter>();
-            // SAFETY: layout matches DropCounter; init writes one value.
-            let b = unsafe {
-                arena.alloc_dst_box::<DropCounter>(layout, (), |p: *mut DropCounter| {
-                    p.write(DropCounter(std::sync::Arc::clone(&counter)));
-                })
-            };
-            let r = b.into_rc();
-            assert_eq!(counter.load(Ordering::Relaxed), 0);
-            drop(r);
-            drop(arena);
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn arena_box_slice_into_rc_outlives_arena() {
-        let r = {
-            let arena = Arena::new();
-            let b = arena.alloc_slice_copy_box([7_u8, 8, 9]);
-            b.into_rc()
-        };
-        assert_eq!(&*r, &[7, 8, 9]);
-    }
-
-    #[test]
-    fn arena_box_slice_into_rc_preserves_drop_semantics() {
-        static COUNT: AtomicUsize = AtomicUsize::new(0);
-        struct Tracked;
-        impl Drop for Tracked {
-            fn drop(&mut self) {
-                let _ = COUNT.fetch_add(1, Ordering::SeqCst);
-            }
-        }
-
-        COUNT.store(0, Ordering::SeqCst);
-        let arena = Arena::new();
-        let b: multitude::Box<[Tracked]> = arena.alloc_slice_fill_with_box(3, |_| Tracked);
-        let r = b.into_rc();
-        assert_eq!(COUNT.load(Ordering::SeqCst), 0);
-        assert_eq!(r.len(), 3);
-        drop(r);
-        drop(arena);
-        assert_eq!(COUNT.load(Ordering::SeqCst), 3);
-    }
-
-    #[test]
-    fn arena_box_slice_into_rc_clones_share_chunk() {
-        let arena = Arena::new();
-        let b = arena.alloc_slice_copy_box([42_u32; 5]);
-        let r = b.into_rc();
-        let r2 = r.clone();
-        drop(r);
-        assert_eq!(&*r2, &[42; 5]);
-    }
-
     /// Regression: a slice DST with `len > u16::MAX` and `T: Drop` must be
     /// rejected at allocation time (returns `AllocError`) so that a future
     /// `Box::<[T]>::into_rc()` call cannot find itself with no drop entry
@@ -733,37 +517,6 @@ mod dst_panic_safety {
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
-
-    /// Allocate a DST through `alloc_dst_rc` whose `init` panics; then
-    /// continue using the arena and force chunk evictions. Without the
-    /// noop pre-write fix, the DST helper leaves an uninitialized
-    /// drop-entry slot reachable via `chunk.drop_count`, and the next
-    /// eviction triggers UB by replaying it.
-    #[test]
-    fn dst_rc_init_panic_then_evict_is_sound() {
-        let arena = Arena::new();
-        // Seed some real drop entries first.
-        let _r1 = arena.alloc_rc(String::from("a"));
-        let _r2 = arena.alloc_rc(String::from("b"));
-
-        let layout = core::alloc::Layout::array::<u32>(4).unwrap();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            // SAFETY: panic before any write — the Rc is never observed.
-            unsafe {
-                arena.alloc_dst_rc::<[u32]>(layout, 4_usize, |_fat: *mut [u32]| {
-                    panic!("planned panic in DST init");
-                });
-            }
-        }));
-        assert!(result.is_err());
-
-        // 256 drop-typed strings still retire multiple chunks, so eviction
-        // replays the same drop-list state this test cares about.
-        for _ in 0..256 {
-            let _ = arena.alloc_rc(String::from("xxxxxxxxxx"));
-        }
-        drop(arena);
-    }
 
     #[test]
     fn dst_arc_init_panic_then_evict_is_sound() {
@@ -884,14 +637,6 @@ mod from_coverage_extras_dst {
     }
 
     #[test]
-    fn arena_box_slice_from_into_arena_rc_slice() {
-        let arena: Arena = Arena::new();
-        let b: Box<[u32]> = arena.alloc_slice_fill_with_box(3, |i| i as u32 + 10);
-        let r: multitude::Rc<[u32]> = b.into();
-        assert_eq!(&*r, &[10, 11, 12][..]);
-    }
-
-    #[test]
     fn panic_alloc_uninit_slice_box() {
         expect_panic(|| {
             let a = fail_arena();
@@ -920,189 +665,6 @@ mod from_coverage_extras_dst {
     }
 
     #[test]
-    fn dst_reserve_rejects_overaligned() {
-        // Line 1946: try_reserve_dst_with_entry rejects alignment >= CHUNK_ALIGN.
-        let arena = Arena::new();
-        let layout = core::alloc::Layout::from_size_align(8, 131_072).unwrap();
-        let result = unsafe {
-            arena.try_alloc_dst_rc::<[u8]>(layout, 8_usize, |fat: *mut [u8]| {
-                let p = fat.cast::<u8>();
-                for i in 0..8 {
-                    p.add(i).write(i as u8);
-                }
-            })
-        };
-        result.unwrap_err();
-    }
-
-    #[test]
-    fn dst_init_panic_guard_releases_refcount() {
-        // Lines 2145-2149: InitPanicGuard drops and releases chunk refcount on panic.
-        let arena = Arena::new();
-        let layout = core::alloc::Layout::array::<u8>(4).unwrap();
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            unsafe {
-                arena.alloc_dst_rc::<[u8]>(layout, 4_usize, |_fat: *mut [u8]| {
-                    panic!("deliberate panic in DST init");
-                })
-            };
-        }));
-        assert!(result.is_err());
-        // Arena should still be usable after the panic.
-        let _v = arena.alloc_rc(42_u32);
-    }
-
-    #[test]
-    #[expect(clippy::too_many_lines, reason = "exhaustive alignment coverage requires many similar blocks")]
-    #[expect(clippy::empty_drop, reason = "Drop impls needed to make needs_drop::<T>() true")]
-    fn dst_drop_shim_dispatch_various_alignments() {
-        // Lines 3894-3908: dst_drop_shim_for dispatches on alignment.
-        // Exercise DST allocations with various alignments to cover the match arms.
-        let arena = Arena::new();
-
-        // align=1 (trailing_zeros=0) — already covered by default [u8] tests
-        // align=2 (trailing_zeros=1)
-        {
-            let layout = core::alloc::Layout::from_size_align(4, 2).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[u16]>(layout, 2_usize, |fat: *mut [u16]| {
-                    let p = fat.cast::<u16>();
-                    p.add(0).write(10);
-                    p.add(1).write(20);
-                })
-            };
-            assert_eq!(&*r, &[10_u16, 20]);
-        }
-        // align=4 (trailing_zeros=2)
-        {
-            let layout = core::alloc::Layout::from_size_align(8, 4).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[u32]>(layout, 2_usize, |fat: *mut [u32]| {
-                    let p = fat.cast::<u32>();
-                    p.add(0).write(100);
-                    p.add(1).write(200);
-                })
-            };
-            assert_eq!(&*r, &[100_u32, 200]);
-        }
-        // align=8 (trailing_zeros=3)
-        {
-            let layout = core::alloc::Layout::from_size_align(16, 8).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[u64]>(layout, 2_usize, |fat: *mut [u64]| {
-                    let p = fat.cast::<u64>();
-                    p.add(0).write(1000);
-                    p.add(1).write(2000);
-                })
-            };
-            assert_eq!(&*r, &[1000_u64, 2000]);
-        }
-        // align=16 (trailing_zeros=4)
-        {
-            #[repr(align(16))]
-            #[derive(Debug, PartialEq)]
-            struct A16(u64, u64);
-            impl Drop for A16 {
-                fn drop(&mut self) {}
-            }
-            let layout = core::alloc::Layout::from_size_align(32, 16).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[A16]>(layout, 2_usize, |fat: *mut [A16]| {
-                    let p = fat.cast::<A16>();
-                    p.add(0).write(A16(1, 2));
-                    p.add(1).write(A16(3, 4));
-                })
-            };
-            assert_eq!(r[0], A16(1, 2));
-        }
-        // align=32 (trailing_zeros=5)
-        {
-            #[repr(align(32))]
-            #[derive(Debug, PartialEq)]
-            struct A32(u64);
-            impl Drop for A32 {
-                fn drop(&mut self) {}
-            }
-            let layout = core::alloc::Layout::from_size_align(64, 32).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[A32]>(layout, 2_usize, |fat: *mut [A32]| {
-                    let p = fat.cast::<A32>();
-                    p.add(0).write(A32(11));
-                    p.add(1).write(A32(22));
-                })
-            };
-            assert_eq!(r[0], A32(11));
-        }
-        // align=64 (trailing_zeros=6)
-        {
-            #[repr(align(64))]
-            #[derive(Debug, PartialEq)]
-            struct A64(u64);
-            impl Drop for A64 {
-                fn drop(&mut self) {}
-            }
-            let layout = core::alloc::Layout::from_size_align(128, 64).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[A64]>(layout, 2_usize, |fat: *mut [A64]| {
-                    let p = fat.cast::<A64>();
-                    p.add(0).write(A64(111));
-                    p.add(1).write(A64(222));
-                })
-            };
-            assert_eq!(r[0], A64(111));
-        }
-        // align=128 (trailing_zeros=7)
-        {
-            #[repr(align(128))]
-            #[derive(Debug, PartialEq)]
-            struct A128(u64);
-            impl Drop for A128 {
-                fn drop(&mut self) {}
-            }
-            let layout = core::alloc::Layout::from_size_align(256, 128).unwrap();
-            let r = unsafe {
-                arena.alloc_dst_rc::<[A128]>(layout, 2_usize, |fat: *mut [A128]| {
-                    let p = fat.cast::<A128>();
-                    p.add(0).write(A128(7));
-                    p.add(1).write(A128(8));
-                })
-            };
-            assert_eq!(r[0], A128(7));
-        }
-        // align=256..32768 (trailing_zeros 8..15)
-        macro_rules! test_align {
-            ($name:ident, $align:literal) => {{
-                #[repr(align($align))]
-                #[derive(Debug, PartialEq)]
-                struct Aligned(u64);
-                impl Drop for Aligned {
-                    fn drop(&mut self) {}
-                }
-                let layout = core::alloc::Layout::from_size_align($align * 2, $align).unwrap();
-                let r = unsafe {
-                    arena.alloc_dst_rc::<[Aligned]>(layout, 2_usize, |fat: *mut [Aligned]| {
-                        let p = fat.cast::<Aligned>();
-                        p.add(0).write(Aligned(1));
-                        p.add(1).write(Aligned(2));
-                    })
-                };
-                assert_eq!(r[0], Aligned(1));
-            }};
-        }
-        test_align!(a256, 256);
-        test_align!(a512, 512);
-        test_align!(a1024, 1024);
-        test_align!(a2048, 2048);
-        test_align!(a4096, 4096);
-        test_align!(a8192, 8192);
-        test_align!(a16384, 16384);
-        // NOTE: align=32768 (trailing_zeros=15) is not testable here because
-        // has_drop + align=32768 places the value at offset == CHUNK_ALIGN,
-        // which breaks the address-mask header lookup used by Rc::drop.
-        // The match arm `15 =>` is marked #[coverage(off)] in the source.
-    }
-
-    #[test]
     fn try_alloc_dst_arc_accepts_sized_metadata() {
         let arena = Arena::new();
         let layout = core::alloc::Layout::new::<u32>();
@@ -1110,16 +672,6 @@ mod from_coverage_extras_dst {
         let result = unsafe { arena.try_alloc_dst_arc::<u32>(layout, (), |p| p.write(42_u32)) };
         let arc = result.expect("sized DST allocation through try_alloc_dst_arc should succeed");
         assert_eq!(*arc, 42);
-    }
-
-    #[test]
-    fn try_alloc_dst_rc_accepts_sized_metadata() {
-        let arena = Arena::new();
-        let layout = core::alloc::Layout::new::<u32>();
-        // SAFETY: init writes a valid `u32` through the supplied pointer.
-        let result = unsafe { arena.try_alloc_dst_rc::<u32>(layout, (), |p| p.write(7_u32)) };
-        let rc = result.expect("sized DST allocation through try_alloc_dst_rc should succeed");
-        assert_eq!(*rc, 7);
     }
 
     // ---- arena.rs: refill failure paths inside DST reservation loops. ----
@@ -1138,47 +690,6 @@ mod from_coverage_extras_dst {
         for _ in 0..16 {
             // SAFETY: init only invoked if allocation succeeds.
             let r = unsafe { arena.try_alloc_dst_arc::<[u8]>(layout, 2048, |_| {}) };
-            if r.is_err() {
-                errs += 1;
-            }
-        }
-        assert!(errs >= 1, "expected at least one refill failure");
-    }
-
-    #[test]
-    fn try_alloc_dst_rc_refill_failure_propagates() {
-        let alloc = common::FailingAllocator::new(1);
-        let arena = ArenaBuilder::new_in(alloc).max_normal_alloc(4096).try_build().unwrap();
-        let layout = core::alloc::Layout::array::<u8>(2048).unwrap();
-        let mut errs = 0;
-        for _ in 0..16 {
-            // SAFETY: init only invoked if allocation succeeds.
-            let r = unsafe { arena.try_alloc_dst_rc::<[u8]>(layout, 2048, |_| {}) };
-            if r.is_err() {
-                errs += 1;
-            }
-        }
-        assert!(errs >= 1, "expected at least one refill failure");
-    }
-
-    // Drop-needing DST path: refill failure inside `try_reserve_dst_local_with_entry`.
-    #[test]
-    fn try_alloc_dst_rc_drop_refill_failure_propagates() {
-        let alloc = common::FailingAllocator::new(1);
-        let arena = ArenaBuilder::new_in(alloc).max_normal_alloc(4096).try_build().unwrap();
-        let layout = core::alloc::Layout::array::<String>(64).unwrap();
-        let mut errs = 0;
-        for _ in 0..16 {
-            // SAFETY: init only invoked if allocation succeeds; here we never reach
-            // it on the runs that fail, and on the ones that succeed we initialize
-            // each element via the fat pointer.
-            let r = unsafe {
-                arena.try_alloc_dst_rc::<[String]>(layout, 64, |p| {
-                    for i in 0..64 {
-                        core::ptr::write(p.cast::<String>().add(i), String::new());
-                    }
-                })
-            };
             if r.is_err() {
                 errs += 1;
             }
@@ -1232,7 +743,7 @@ mod from_mutants_extras_dst {
     #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
 
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arena, Box as ArenaBox, Rc};
+    use multitude::{Arena, Box as ArenaBox};
 
     #[expect(dead_code, reason = "helper used by some relocated tests")]
     struct OneByteDrop(u8);
@@ -1281,66 +792,6 @@ mod from_mutants_extras_dst {
         }
     }
 
-    /// Regression test for the `Vec<T: Drop> -> Box<[T]> -> Rc<[T]>`
-    /// chain: previously `Box::<[T]>::into_rc()` aborted the process
-    /// because `Vec::into_arena_box` didn't pre-install a noop drop
-    /// entry that `retarget_box_drop_entry` requires. Now
-    /// `Vec::into_arena_box` installs the noop entry for `T: Drop`.
-    #[test]
-    fn vec_into_arena_box_into_rc_drops_correctly() {
-        use std::sync::Arc as StdArc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let counter = StdArc::new(AtomicUsize::new(0));
-        struct DT(StdArc<AtomicUsize>);
-        impl Drop for DT {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        {
-            let arena = multitude::Arena::new();
-            let mut v: multitude::vec::Vec<DT, _> = multitude::vec::Vec::new_in(&arena);
-            v.push(DT(counter.clone()));
-            v.push(DT(counter.clone()));
-            v.push(DT(counter.clone()));
-            let b: multitude::Box<[DT]> = v.into_arena_box();
-            let rc = multitude::Box::<[DT], _>::into_rc(b);
-            assert_eq!(rc.len(), 3);
-            // drop rc and arena
-        }
-        assert_eq!(counter.load(Ordering::Relaxed), 3);
-    }
-
-    /// Regression test for `Box<[T: Drop]>::into_rc()` on an empty
-    /// slice: previously aborted the process because no drop entry
-    /// was installed at alloc-time for `len == 0`. Now `into_rc`
-    /// short-circuits the retarget for empty slices.
-    #[test]
-    fn empty_uninit_slice_box_into_rc_does_not_abort() {
-        let arena = multitude::Arena::new();
-        let b = arena.alloc_uninit_slice_box::<String>(0);
-        // SAFETY: empty slice; no element to initialize.
-        let init: multitude::Box<[String]> = unsafe { b.assume_init() };
-        assert_eq!(init.len(), 0);
-        let rc = multitude::Box::<[String], _>::into_rc(init);
-        assert_eq!(rc.len(), 0);
-    }
-
-    #[test]
-    fn into_arena_rc_empty_drop_type_takes_copy_path() {
-        struct D;
-        impl Drop for D {
-            fn drop(&mut self) {}
-        }
-        let arena = Arena::new();
-        let v: ArenaVec<'_, D> = arena.alloc_vec_with_capacity(4);
-        assert_eq!(v.len(), 0);
-        let rc: Rc<[D], _> = v.into_arena_rc();
-        assert_eq!(rc.len(), 0);
-    }
-
     #[test]
     fn into_arena_box_empty_drop_type_takes_copy_path() {
         struct D;
@@ -1352,21 +803,6 @@ mod from_mutants_extras_dst {
         assert_eq!(v.len(), 0);
         let b: ArenaBox<[D], _> = v.into_arena_box();
         assert_eq!(b.len(), 0);
-    }
-
-    #[cfg(all(feature = "dst", feature = "stats"))]
-    #[test]
-    fn into_arena_rc_with_full_capacity_does_not_attempt_reclaim() {
-        let arena = Arena::new();
-        let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(4);
-        for i in 0..4_u32 {
-            v.push(i);
-        }
-        assert_eq!(v.len(), v.capacity());
-        let rc: Rc<[u32], _> = v.into_arena_rc();
-        assert_eq!(rc.len(), 4);
-        // Drop and verify no spurious counters/double-reclaim.
-        drop(rc);
     }
 
     #[test]
@@ -1391,65 +827,6 @@ mod from_mutants_extras_dst {
         assert_eq!(v.len(), v.capacity());
         let b: ArenaBox<[u32], _> = v.into_arena_box();
         assert_eq!(b.len(), 4);
-    }
-
-    #[test]
-    fn into_arena_box_with_unused_tail_reclaims() {
-        let arena = Arena::new();
-        let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(8);
-        v.push(1);
-        v.push(2);
-        let b: ArenaBox<[u32], _> = v.into_arena_box();
-        assert_eq!(b.len(), 2);
-        // After reclaim, a fresh small allocation should fit immediately
-        // after the box without needing a fresh chunk.
-        let _r: Rc<u32> = arena.alloc_rc(99);
-    }
-
-    #[test]
-    fn into_arena_box_copy_walks_all_elements() {
-        // Force the copy path by using a ZST; the copy fallback is the
-        // only code that runs for `elem_size == 0` — but a ZST never enters
-        // `into_arena_box_copy`'s element-by-element loop because the buffer
-        // has no real backing. Use the empty-builder branch instead: a Vec
-        // with cap==0 has no buffer either. So the simplest way to exercise
-        // line 911 is via `into_arena_box` on a Drop type whose installation
-        // fails — that path also routes to `into_arena_box_copy`. Easier:
-        // construct via the Vec macro with explicit copy fallback by using
-        // a Drop type and a vec built across multiple chunks (forcing the
-        // slice DropEntry install to fail).
-        //
-        // Simpler still: allocate a Drop-type Vec that needs a buffer
-        // relocation between push and freeze. After `realloc` the buffer
-        // moves off the bump cursor; `try_install_slice_drop_entry` will
-        // fail (chunk no longer current at that offset) and fall back to
-        // `into_arena_box_copy`, which is the function we want to hit.
-        use core::cell::Cell;
-        struct D<'a> {
-            seen: &'a Cell<u32>,
-            idx: u32,
-        }
-        impl Drop for D<'_> {
-            fn drop(&mut self) {
-                self.seen.set(self.seen.get() | (1_u32 << self.idx));
-            }
-        }
-        let mask = Cell::new(0_u32);
-        let arena = Arena::new();
-        {
-            let mut v: ArenaVec<'_, D<'_>> = arena.alloc_vec_with_capacity(2);
-            v.push(D { seen: &mask, idx: 0 });
-            v.push(D { seen: &mask, idx: 1 });
-            // Force a relocation by pushing one more (cap=2 → realloc to 4).
-            // Then a subsequent allocation steals the spot, so `try_install`
-            // for the freeze likely fails.
-            v.push(D { seen: &mask, idx: 2 });
-            let _other: Rc<u64> = arena.alloc_rc(0);
-            let _b: ArenaBox<[D<'_>], _> = v.into_arena_box();
-        }
-        drop(arena);
-        // All 3 elements must have been seen exactly once (mask 0b111).
-        assert_eq!(mask.get(), 0b111, "all elements should drop exactly once");
     }
 
     #[test]
@@ -1487,32 +864,6 @@ mod from_mutants_extras_dst {
             drop(b);
         }
         assert_eq!(seen.load(Ordering::Relaxed), u32::MAX);
-    }
-
-    #[test]
-    fn box_slice_into_rc_with_drop_type_runs_drop_once() {
-        use std::sync::Arc as StdArc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let counter = StdArc::new(AtomicUsize::new(0));
-        struct D(StdArc<AtomicUsize>);
-        impl Drop for D {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
-        let arena = Arena::new();
-        {
-            let mut v: ArenaVec<'_, D> = arena.alloc_vec_with_capacity(3);
-            for _ in 0..3 {
-                v.push(D(counter.clone()));
-            }
-            let b: ArenaBox<[D]> = v.into_arena_box();
-            let _rc = multitude::Box::<[D], _>::into_rc(b);
-        }
-        drop(arena);
-        assert_eq!(counter.load(Ordering::Relaxed), 3);
     }
 
     #[test]

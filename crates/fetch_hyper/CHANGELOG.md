@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-06-10
+
+- ⚠️ Breaking
+
+  - Now requires `0.12.1` of `data_privacy`
+  - Now requires `0.10.1` of `data_privacy_macros_impl`
+  - Now requires `0.6.0` of `http_extensions`
+  - Now requires `0.3.3` of `layered`
+
 ## [0.3.4] - 2026-06-05
 
 - 🔧 Maintenance

@@ -19,7 +19,7 @@
 )]
 #![allow(dead_code, reason = "variance assertion functions are never called at runtime")]
 
-use multitude::{Arc, Arena, Box, Rc};
+use multitude::{Arc, Arena, Box};
 
 // Covariance assertions (compile-only)
 //
@@ -31,19 +31,11 @@ fn _assert_box_covariant<'a, 'b: 'a>(x: Box<&'b str>) -> Box<&'a str> {
     x
 }
 
-fn _assert_rc_covariant<'a, 'b: 'a>(x: Rc<&'b str>) -> Rc<&'a str> {
-    x
-}
-
 fn _assert_arc_covariant<'a, 'b: 'a>(x: Arc<&'b str>) -> Arc<&'a str> {
     x
 }
 
 fn _assert_box_slice_covariant<'a, 'b: 'a>(x: Box<[&'b str]>) -> Box<[&'a str]> {
-    x
-}
-
-fn _assert_rc_slice_covariant<'a, 'b: 'a>(x: Rc<[&'b str]>) -> Rc<[&'a str]> {
     x
 }
 
@@ -57,16 +49,6 @@ fn _assert_arc_slice_covariant<'a, 'b: 'a>(x: Arc<[&'b str]>) -> Arc<[&'a str]> 
 // ZST) computes `end >= 1 > 0 = total_size`, failing the fit-check
 // and routing through the slow path to a real chunk. This means the
 // shared static sentinel is NEVER written to — no data race is possible.
-
-#[test]
-fn zst_alloc_rc_succeeds() {
-    let arena = Arena::new();
-    let a = arena.alloc_rc(());
-    let b = arena.alloc_rc(());
-    // Both allocations succeed; values are accessible.
-    assert_eq!(*a, ());
-    assert_eq!(*b, ());
-}
 
 #[test]
 fn zst_alloc_arc_succeeds() {
@@ -85,13 +67,4 @@ fn zst_alloc_box_succeeds() {
     let b = arena.alloc_box(());
     assert_eq!(*a, ());
     assert_eq!(*b, ());
-}
-
-#[test]
-fn zst_many_allocations_do_not_panic() {
-    let arena = Arena::new();
-    // Allocate enough ZSTs to repeat the sentinel path a bit without spending
-    // 1000 iterations on allocations that do not consume chunk space.
-    let handles: Vec<Rc<()>> = (0..128).map(|_| arena.alloc_rc(())).collect();
-    assert_eq!(handles.len(), 128);
 }

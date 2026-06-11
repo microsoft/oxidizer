@@ -9,7 +9,7 @@ use http::StatusCode;
 
 #[tokio::main]
 async fn main() -> Result<(), ohno::AppError> {
-    let fake_handler = FakeHandler::from_sync_handler(|req| {
+    let fake_handler = FakeHandler::from_fn(|req| {
         println!("fake handler called for request, url: {}", req.uri());
 
         HttpResponseBuilder::new_fake()

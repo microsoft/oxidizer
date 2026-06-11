@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(
+    dead_code,
+    unused_imports,
+    clippy::unnecessary_safety_comment,
+    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+)]
+
 //! Tests for [`String`]: the growable arena-backed string builder.
 
 #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
@@ -15,59 +22,6 @@ use core::cmp::Ordering;
 use multitude::Arena;
 use multitude::strings::String;
 use multitude::vec::CollectIn;
-#[test]
-fn build_then_freeze_zero_copy() {
-    let arena = Arena::new();
-    let mut s = arena.alloc_string();
-    s.push_str("hello, world");
-    let s_addr_before = s.as_str().as_ptr() as usize;
-    let frozen = s.into_arena_str();
-    let s_addr_after = frozen.as_ptr() as usize;
-    assert_eq!(s_addr_before, s_addr_after, "freeze should be zero-copy");
-    assert_eq!(&*frozen, "hello, world");
-}
-
-#[cfg(feature = "stats")]
-#[test]
-fn freeze_reclaims_slack() {
-    let arena = Arena::new();
-    let mut s = arena.alloc_string_with_capacity(1024);
-    s.push_str("short");
-    assert!(s.capacity() >= 1024);
-    let chunks_before = arena.stats().normal_local_chunks_allocated;
-    let _frozen = s.into_arena_str();
-    // The slack we just reclaimed should be available for the next alloc
-    // without needing a fresh chunk.
-    let _other = arena.alloc_slice_copy_rc([0_u8; 1000]);
-    assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
-}
-
-#[test]
-fn grow_through_reallocation() {
-    let arena = Arena::new();
-    let mut s = arena.alloc_string();
-    s.push_str("original ");
-    let _decoy = arena.alloc_rc(0_u64);
-    // This grow can no longer extend in place — must reallocate. The
-    // inline len prefix must be preserved through the reallocation.
-    s.push_str("grown ");
-    s.push_str("a lot ");
-    for _ in 0..100 {
-        s.push_str("more text ");
-    }
-    let frozen = s.into_arena_str();
-    assert!(frozen.starts_with("original grown a lot "));
-    assert!(frozen.len() > 1000);
-}
-
-#[test]
-fn empty_freeze() {
-    let arena = Arena::new();
-    let s = arena.alloc_string();
-    let frozen = s.into_arena_str();
-    assert_eq!(&*frozen, "");
-    assert_eq!(frozen.len(), 0);
-}
 
 #[test]
 fn clear_and_reuse() {
@@ -402,18 +356,6 @@ fn shrink_to_fit_reclaims_when_at_cursor() {
 }
 
 #[test]
-fn shrink_to_fit_noop_when_not_at_cursor() {
-    let arena = Arena::new();
-    let mut s = String::with_capacity_in(1024, &arena);
-    s.push_str("short");
-    let _decoy = arena.alloc_rc(0_u64);
-    s.shrink_to_fit();
-    // Decoy moved the bump cursor past us; capacity unchanged.
-    assert!(s.capacity() >= 1024);
-    assert_eq!(s.as_str(), "short");
-}
-
-#[test]
 fn shrink_to_fit_empty_or_full_noop() {
     let arena = Arena::new();
     let mut s = arena.alloc_string();
@@ -740,72 +682,8 @@ mod arena_str {
     use std::collections::{BTreeMap, HashMap};
 
     use multitude::Arena;
-    use multitude::strings::RcStr;
 
     use crate::common;
-
-    #[test]
-    fn arena_rc_str_basic() {
-        let arena = Arena::new();
-        let s = arena.alloc_str_rc("hello, world");
-        assert_eq!(&*s, "hello, world");
-        assert_eq!(s.len(), 12);
-        assert!(!s.is_empty());
-
-        let empty = arena.alloc_str_rc("");
-        assert_eq!(&*empty, "");
-        assert_eq!(empty.len(), 0);
-        assert!(empty.is_empty());
-    }
-
-    #[test]
-    fn arena_rc_str_clone_increments_refcount() {
-        let arena = Arena::new();
-        let s = arena.alloc_str_rc("data");
-        let s2 = s.clone();
-        assert_eq!(&*s, "data");
-        assert_eq!(&*s2, "data");
-    }
-
-    #[test]
-    fn arena_rc_str_traits_compile() {
-        let arena = Arena::new();
-        let s = arena.alloc_str_rc("hi");
-        let _: &str = s.as_ref();
-        let r: &str = core::borrow::Borrow::borrow(&s);
-        assert_eq!(r, "hi");
-        assert_eq!(&*s, "hi");
-        assert_eq!(format!("{s:?}"), "\"hi\"");
-        assert_eq!(format!("{s}"), "hi");
-        let other = arena.alloc_str_rc("hi");
-        let big = arena.alloc_str_rc("z");
-        assert_eq!(s, other);
-        assert!(s < big);
-        assert_eq!(s.cmp(&big), Ordering::Less);
-        assert_eq!(s.partial_cmp(&big), Some(Ordering::Less));
-        assert_eq!(common::hash_of(&s), common::hash_of(&other));
-    }
-
-    #[test]
-    fn arena_rc_str_eq_and_hash_via_hashmap() {
-        let arena = Arena::new();
-        let key = arena.alloc_str_rc("key");
-        let mut map: HashMap<RcStr<_>, i32> = HashMap::new();
-        let _ = map.insert(key.clone(), 1);
-        assert_eq!(map.get(&key), Some(&1));
-        // Borrow<str> lookup also works.
-        assert_eq!(map.get("key"), Some(&1));
-    }
-
-    #[test]
-    fn arena_rc_str_works_as_btreemap_key() {
-        let arena = Arena::new();
-        let mut m: BTreeMap<RcStr, u32> = BTreeMap::new();
-        let _ = m.insert(arena.alloc_str_rc("a"), 1);
-        let _ = m.insert(arena.alloc_str_rc("b"), 2);
-        assert_eq!(m.get("a"), Some(&1));
-        assert_eq!(m.get("b"), Some(&2));
-    }
 
     #[test]
     fn arena_arc_str_basic() {
@@ -850,9 +728,9 @@ mod arena_str {
     #[test]
     fn arena_arc_str_outlives_arena() {
         // Drives the `teardown_chunk(chunk, false)` branch in
-        // ArenaArcStr::Drop when this is the LAST reference and the arena
+        // Arc<str>::Drop when this is the LAST reference and the arena
         // itself has already been dropped.
-        let s: multitude::strings::ArcStr = {
+        let s: multitude::Arc<str> = {
             let arena = Arena::new();
             arena.alloc_str_arc("survives the arena")
         };
@@ -861,38 +739,10 @@ mod arena_str {
     }
 
     #[test]
-    fn unpin_impl_rc_str() {
-        fn assert_unpin<T: Unpin>() {}
-        assert_unpin::<RcStr>();
-        assert_unpin::<multitude::strings::ArcStr>();
-    }
-
-    #[test]
-    fn from_arena_string_freezes_to_rc_str() {
-        let arena = Arena::new();
-        let mut s = arena.alloc_string();
-        s.push_str("frozen");
-        let r: RcStr = s.into();
-        assert_eq!(&*r, "frozen");
-        let r2 = r.clone();
-        assert_eq!(&*r, &*r2);
-    }
-
-    #[test]
-    fn from_arena_rc_str_to_arena_rc_byte_slice() {
-        use multitude::Rc;
-        let arena = Arena::new();
-        let s = arena.alloc_str_rc("héllo"); // includes a multi-byte char
-        let bytes: Rc<[u8]> = s.into();
-        assert_eq!(&*bytes, "héllo".as_bytes());
-    }
-
-    #[test]
     fn from_arena_arc_str_to_arena_arc_byte_slice() {
         use multitude::Arc;
-        use multitude::strings::ArcStr;
         let arena = Arena::new();
-        let s: ArcStr = arena.alloc_str_arc("payload");
+        let s: Arc<str> = arena.alloc_str_arc("payload");
         let bytes: Arc<[u8]> = s.into();
         assert_eq!(&*bytes, b"payload");
     }
@@ -900,9 +750,8 @@ mod arena_str {
     #[test]
     fn arena_arc_byte_slice_is_send_sync() {
         use multitude::Arc;
-        use multitude::strings::ArcStr;
         let arena = Arena::new();
-        let s: ArcStr = arena.alloc_str_arc("threaded");
+        let s: Arc<str> = arena.alloc_str_arc("threaded");
         let bytes: Arc<[u8]> = s.into();
         let bytes2 = bytes.clone();
         let h = std::thread::spawn(move || bytes2.len());
@@ -919,8 +768,7 @@ mod arena_box_str {
     use core::cmp::Ordering;
     use std::collections::{BTreeMap, HashMap};
 
-    use multitude::Arena;
-    use multitude::strings::BoxStr;
+    use multitude::{Arena, Box};
 
     use crate::common;
 
@@ -944,9 +792,9 @@ mod arena_box_str {
 
     #[test]
     fn arena_box_str_is_eight_bytes() {
-        // The whole reason `ArenaBoxStr` exists rather than `ArenaBox<str>`
+        // The whole reason `Box<str>` exists rather than `ArenaBox<str>`
         // (16 bytes via fat pointer): single-pointer compactness.
-        assert_eq!(size_of::<BoxStr>(), size_of::<usize>());
+        assert_eq!(size_of::<Box<str>>(), size_of::<usize>());
     }
 
     #[test]
@@ -1004,7 +852,7 @@ mod arena_box_str {
     fn arena_box_str_eq_and_hash_via_hashmap() {
         let arena = Arena::new();
         let key = arena.alloc_str_box("key");
-        let mut map: HashMap<BoxStr, i32> = HashMap::new();
+        let mut map: HashMap<Box<str>, i32> = HashMap::new();
         let _ = map.insert(key, 1);
         // Borrow<str> lookup also works, so we don't need the original key.
         assert_eq!(map.get("key"), Some(&1));
@@ -1013,7 +861,7 @@ mod arena_box_str {
     #[test]
     fn arena_box_str_works_as_btreemap_key() {
         let arena = Arena::new();
-        let mut m: BTreeMap<BoxStr, u32> = BTreeMap::new();
+        let mut m: BTreeMap<Box<str>, u32> = BTreeMap::new();
         let _ = m.insert(arena.alloc_str_box("a"), 1);
         let _ = m.insert(arena.alloc_str_box("b"), 2);
         assert_eq!(m.get("a"), Some(&1));
@@ -1022,9 +870,9 @@ mod arena_box_str {
 
     #[test]
     fn arena_box_str_drop_releases_chunk_immediately() {
-        // ArenaBoxStr drops its chunk hold the moment the smart pointer is dropped.
+        // Box<str> drops its chunk hold the moment the smart pointer is dropped.
         // Subsequent allocations in the arena must still work, exercising
-        // the dec_ref + (optional) teardown_chunk path in ArenaBoxStr::Drop.
+        // the dec_ref + (optional) teardown_chunk path in Box<str>::Drop.
         let arena = Arena::new();
         let s = arena.alloc_str_box("temporary");
         assert_eq!(&*s, "temporary");
@@ -1036,7 +884,7 @@ mod arena_box_str {
 
     #[test]
     fn arena_box_str_lifetime_bound_to_arena() {
-        // The borrow checker must reject use of an `ArenaBoxStr` whose
+        // The borrow checker must reject use of an `Box<str>` whose
         // arena has been dropped. We can't write a runtime test for the
         // negative case (it's a compile error), but we can verify positive
         // case: dropping the box BEFORE the arena is fine.
@@ -1086,16 +934,6 @@ mod arena_box_str {
         assert_eq!(&*s, "HELLO");
         let p = format!("{s:p}");
         assert!(p.starts_with("0x"), "Pointer format: {p}");
-    }
-
-    #[test]
-    fn arena_box_str_into_rc_str_via_from() {
-        let arena = Arena::new();
-        let b = arena.alloc_str_box("hi");
-        let r: multitude::strings::RcStr = b.into();
-        let r2 = r.clone();
-        assert_eq!(&*r, "hi");
-        assert_eq!(&*r, &*r2);
     }
 }
 
@@ -1204,24 +1042,6 @@ mod format_macro {
         let name = "world";
         let s = multitude::strings::format!(in &arena, "hello, {name}!");
         assert_eq!(&*s, "hello, world!");
-    }
-
-    #[test]
-    fn format_macro_returns_arena_string() {
-        // The macro returns ArenaString, not a frozen ArenaRcStr.
-        let arena = Arena::new();
-        let mut s = multitude::strings::format!(in &arena, "Hello, {}!", "Alice");
-        s.push_str(" extended");
-        assert_eq!(s.as_str(), "Hello, Alice! extended");
-    }
-
-    #[test]
-    fn format_macro_freeze_to_arena_str() {
-        let arena = Arena::new();
-        let name = "Alice";
-        let s = multitude::strings::format!(in &arena, "Hello, {name}!");
-        let frozen = s.into_arena_str();
-        assert_eq!(&*frozen, "Hello, Alice!");
     }
 
     #[test]

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.3] - 2026-06-10
+
+- ⚡ Performance
+
+  - dynamic service does not allocate anymore ([#480](https://github.com/microsoft/oxidizer/pull/480))
+
 ## [0.3.2] - 2026-06-02
 
 - ✨ Features
