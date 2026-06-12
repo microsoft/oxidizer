@@ -35,8 +35,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytesbuf::BytesView;
-use futures::StreamExt as _;
-use http_body_util::BodyExt as _;
+use futures::{StreamExt as _, TryStreamExt as _};
+use layered::Service as _;
 use typespec_client_core::error::{Error, ErrorKind};
 use typespec_client_core::http::headers::{HeaderName, HeaderValue, Headers};
 use typespec_client_core::http::request::{Body, Request};
@@ -72,6 +72,47 @@ impl FetchHttpClient {
     pub fn into_inner(self) -> fetch::HttpClient {
         self.client
     }
+
+    /// Converts a typespec [`Request`] into a `fetch` request.
+    fn to_fetch_request(&self, request: &Request) -> typespec_client_core::Result<fetch::HttpRequest> {
+        // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
+        // builder parses into an `http::Method`; this avoids matching on the
+        // `#[non_exhaustive]` typespec `Method` enum.
+        let mut builder = self.client.request(request.method().as_str(), request.url().as_str());
+
+        for (name, value) in request.headers().iter() {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+
+        builder.body(self.to_fetch_body(request.body())).build().map_err(|error| {
+            Error::with_error(
+                ErrorKind::DataConversion,
+                error,
+                "failed to convert the Azure request into a fetch request",
+            )
+        })
+    }
+
+    /// Converts a typespec request [`Body`] into a `fetch` [`HttpBody`](fetch::HttpBody).
+    ///
+    /// Empty byte bodies reuse a shared empty body, and non-empty byte bodies are
+    /// wrapped without copying. Seekable streams are forwarded as a chunk stream.
+    fn to_fetch_body(&self, body: &Body) -> fetch::HttpBody {
+        let builder: &fetch::HttpBodyBuilder = self.client.as_ref();
+
+        match body {
+            Body::Bytes(bytes) if bytes.is_empty() => builder.empty(),
+            Body::Bytes(bytes) => builder.bytes(BytesView::from(bytes.clone())),
+            Body::SeekableStream(stream) => {
+                let stream = stream.clone().map(|chunk| {
+                    chunk
+                        .map(BytesView::from)
+                        .map_err(|error| fetch::HttpError::unavailable(format!("failed to read the Azure request body: {error}")))
+                });
+                builder.stream(stream, &fetch::options::HttpBodyOptions::default())
+            }
+        }
+    }
 }
 
 impl From<fetch::HttpClient> for FetchHttpClient {
@@ -92,26 +133,11 @@ pub fn new_http_client(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
 #[async_trait]
 impl HttpClient for FetchHttpClient {
     async fn execute_request(&self, request: &Request) -> typespec_client_core::Result<AsyncRawResponse> {
-        // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
-        // builder parses into an `http::Method`; this avoids matching on the
-        // `#[non_exhaustive]` typespec `Method` enum.
-        let mut builder = self.client.request(request.method().as_str(), request.url().as_str());
+        let request = self.to_fetch_request(request)?;
 
-        for (name, value) in request.headers().iter() {
-            builder = builder.header(name.as_str(), value.as_str());
-        }
-
-        builder = match request.body().clone() {
-            Body::Bytes(bytes) => builder.bytes(bytes),
-            Body::SeekableStream(stream) => builder.stream(stream.map(|chunk| {
-                chunk
-                    .map(BytesView::from)
-                    .map_err(|error| fetch::HttpError::from(std::io::Error::other(error)))
-            })),
-        };
-
-        let response = builder
-            .fetch()
+        let response = self
+            .client
+            .execute(request)
             .await
             .map_err(|error| Error::with_error(ErrorKind::Io, error, "the fetch HTTP client failed to execute the request"))?;
 
@@ -125,13 +151,13 @@ fn to_async_raw_response(response: fetch::HttpResponse) -> AsyncRawResponse {
     let status = parts.status.as_u16().into();
     let headers = to_headers(&parts.headers);
 
-    let stream: PinnedStream = Box::pin(body.into_data_stream().map(|chunk| {
-        chunk
-            .map(|view| view.to_bytes())
-            .map_err(|error| Error::with_error(ErrorKind::Io, error, "failed to read the response body"))
-    }));
+    let body = body
+        .into_stream()
+        .map_ok(|view| view.to_bytes())
+        .map_err(|error| Error::with_error(ErrorKind::Io, error, "failed to read the response body"));
+    let body: PinnedStream = Box::pin(body);
 
-    AsyncRawResponse::new(status, headers, stream)
+    AsyncRawResponse::new(status, headers, body)
 }
 
 /// Converts an [`http::HeaderMap`] into [`Headers`].

@@ -1185,7 +1185,7 @@ dependencies = [
  "fetch",
  "futures",
  "http",
- "http-body-util",
+ "layered",
  "tokio",
  "typespec_client_core",
 ]
