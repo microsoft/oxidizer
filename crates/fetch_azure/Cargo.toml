@@ -41,7 +41,7 @@ typespec_client_core = { workspace = true, features = ["http"] }
 
 [dev-dependencies]
 # internal
-fetch = { path = "../fetch", features = ["test-util"] }
+fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
 
 # external
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
