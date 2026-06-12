@@ -42,18 +42,6 @@ impl AzureHttpClient {
         Self { client }
     }
 
-    /// Returns a reference to the wrapped [`fetch::HttpClient`].
-    #[must_use]
-    pub const fn inner(&self) -> &fetch::HttpClient {
-        &self.client
-    }
-
-    /// Consumes the adapter and returns the wrapped [`fetch::HttpClient`].
-    #[must_use]
-    pub fn into_inner(self) -> fetch::HttpClient {
-        self.client
-    }
-
     /// Converts a typespec [`Request`] into a `fetch` request.
     fn to_fetch_request(&self, request: &Request) -> azure_core::Result<fetch::HttpRequest> {
         // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s

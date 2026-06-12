@@ -3,28 +3,23 @@
 
 //! Integration tests for [`fetch_azure::AzureHttpClient`].
 //!
-//! These exercise the adapter end-to-end using `fetch`'s `FakeHandler`, so no
-//! real network access is required.
+//! These exercise the transport adapter end-to-end using `fetch`'s
+//! `FakeHandler`, so no real network access is required.
 
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use anyspawn::Spawner;
 use async_trait::async_trait;
 use azure_core::Bytes;
-use azure_core::async_runtime::AsyncRuntime;
 use azure_core::http::headers::HeaderName;
 use azure_core::http::request::{Body, Request};
 use azure_core::http::{HttpClient, Method, Url};
 use azure_core::stream::{BytesStream, SeekableStream};
-use azure_core::time::Duration;
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
-use fetch_azure::{AzureHttpClient, Runtime, new_async_runtime};
+use fetch_azure::AzureHttpClient;
 use futures::io::AsyncRead;
-use tick::Clock;
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -152,19 +147,6 @@ async fn azure_http_client_converts_into_dyn_client() {
 }
 
 #[tokio::test]
-async fn from_fetch_client_and_inner_round_trip() {
-    let adapter = AzureHttpClient::from(FetchClient::new_fake(status_handler(200)));
-
-    // `inner` exposes the wrapped client and `into_inner` returns it unchanged.
-    let _ = adapter.inner();
-    let recovered = adapter.into_inner();
-    let adapter = AzureHttpClient::new(recovered);
-
-    let response = adapter.execute_request(&request(Method::Get)).await.unwrap();
-    assert_eq!(response.status(), 200u16);
-}
-
-#[tokio::test]
 async fn execute_request_maps_request_build_failure() {
     let client = AzureHttpClient::new(FetchClient::new_fake(status_handler(200)));
 
@@ -272,59 +254,4 @@ fn error_chain(error: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     chain
-}
-
-#[tokio::test]
-async fn runtime_spawn_runs_task_to_completion() {
-    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
-    let ran = Arc::new(AtomicBool::new(false));
-    let ran_in_task = Arc::clone(&ran);
-
-    let task = runtime.spawn(Box::pin(async move {
-        ran_in_task.store(true, Ordering::SeqCst);
-    }));
-    task.await.unwrap();
-
-    assert!(ran.load(Ordering::SeqCst));
-}
-
-#[tokio::test]
-async fn runtime_abort_resolves_without_waiting() {
-    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
-
-    // The task never completes on its own; aborting must let the await resolve.
-    let task = runtime.spawn(Box::pin(std::future::pending::<()>()));
-    task.abort();
-    task.await.unwrap();
-}
-
-#[tokio::test]
-async fn runtime_sleep_completes() {
-    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
-
-    runtime.sleep(Duration::milliseconds(1)).await;
-}
-
-#[tokio::test]
-async fn runtime_yield_now_completes() {
-    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
-
-    runtime.yield_now().await;
-}
-
-#[tokio::test]
-async fn new_async_runtime_returns_dyn_runtime() {
-    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(Spawner::new_tokio(), Clock::new_tokio());
-
-    runtime.spawn(Box::pin(async {})).await.unwrap();
-}
-
-#[tokio::test]
-async fn runtime_from_spawner_clock_and_accessors_round_trip() {
-    let runtime = Runtime::from((Spawner::new_tokio(), Clock::new_tokio()));
-
-    // `spawner` and `clock` expose the wrapped components; rebuild from them.
-    let runtime = Runtime::new(runtime.spawner().clone(), runtime.clock().clone());
-
-    runtime.yield_now().await;
 }
