@@ -205,7 +205,13 @@ impl<A: Allocator + Clone> Arena<A> {
 /// via `encode_utf16` into the `u16` payload immediately after, and
 /// returns a thin pointer to the first payload element. `exact` must
 /// match `s.chars().map(char::len_utf16).sum()` from a pre-walk.
-#[inline(always)]
+//
+// Skip `inline(always)` under coverage instrumentation so a real
+// out-of-line function body exists for llvm-cov to attribute hits to.
+// With `inline(always)` the source-line mapping for the inlined copies
+// is fragile and shifts with the dep graph (observed: 11 lines went
+// from 100% to missed when PR #478 added optional deps elsewhere).
+#[cfg_attr(not(coverage_nightly), inline(always))]
 #[allow(
     clippy::cast_ptr_alignment,
     reason = "see callers: `base + PREFIX_BYTES` is u16-aligned by construction"
