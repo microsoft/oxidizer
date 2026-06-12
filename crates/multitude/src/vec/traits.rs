@@ -183,12 +183,10 @@ impl<T: serde::ser::Serialize, A: Allocator + Clone> serde::ser::Serialize for V
     }
 }
 
-impl<'a, T, A: Allocator + Clone> crate::vec::FromIteratorIn<T> for Vec<'a, T, A> {
-    type Allocator = &'a Arena<A>;
-
+impl<'a, T, A: Allocator + Clone> crate::vec::FromIteratorIn<'a, T, A> for Vec<'a, T, A> {
     #[inline]
-    fn from_iter_in<I: IntoIterator<Item = T>>(iter: I, allocator: &'a Arena<A>) -> Self {
-        Self::from_iter_in(iter, allocator)
+    fn from_iter_in<I: IntoIterator<Item = T>>(iter: I, arena: &'a Arena<A>) -> Self {
+        Self::from_iter_in(iter, arena)
     }
 }
 
@@ -214,5 +212,56 @@ impl<A: Allocator + Clone> io::Write for Vec<'_, u8, A> {
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+impl<I: slice::SliceIndex<[T]>, T, A: Allocator + Clone> core::ops::Index<I> for Vec<'_, T, A> {
+    type Output = I::Output;
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
+        core::ops::Index::index(&**self, index)
+    }
+}
+
+impl<I: slice::SliceIndex<[T]>, T, A: Allocator + Clone> core::ops::IndexMut<I> for Vec<'_, T, A> {
+    #[inline]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        core::ops::IndexMut::index_mut(&mut **self, index)
+    }
+}
+
+impl<T, A: Allocator + Clone> AsRef<Self> for Vec<'_, T, A> {
+    #[inline]
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
+impl<T, A: Allocator + Clone> AsMut<Self> for Vec<'_, T, A> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
+}
+
+impl<'a, T, A: Allocator + Clone, const N: usize> TryFrom<Vec<'a, T, A>> for [T; N] {
+    type Error = Vec<'a, T, A>;
+
+    /// Consume the `Vec` into an array `[T; N]` when `len == N`; on a length
+    /// mismatch the original `Vec` is returned unchanged. Mirrors `std`'s
+    /// `TryFrom<Vec<T>> for [T; N]`.
+    fn try_from(mut v: Vec<'a, T, A>) -> Result<Self, Self::Error> {
+        if v.len() != N {
+            return Err(v);
+        }
+        // SAFETY: `v` has exactly `N` initialized elements. Read them out as
+        // an array, then set the length to 0 so the `Vec`'s `Drop` does not
+        // re-drop the moved-out elements (the backing buffer is released
+        // without touching them).
+        unsafe {
+            let arr = core::ptr::read(v.as_ptr().cast::<[T; N]>());
+            v.set_len(0);
+            Ok(arr)
+        }
     }
 }

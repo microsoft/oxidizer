@@ -793,7 +793,7 @@ mod from_mutants_extras_dst {
     }
 
     #[test]
-    fn into_arena_box_empty_drop_type_takes_copy_path() {
+    fn into_box_empty_drop_type_takes_copy_path() {
         struct D;
         impl Drop for D {
             fn drop(&mut self) {}
@@ -801,36 +801,36 @@ mod from_mutants_extras_dst {
         let arena = Arena::new();
         let v: ArenaVec<'_, D> = arena.alloc_vec_with_capacity(4);
         assert_eq!(v.len(), 0);
-        let b: ArenaBox<[D], _> = v.into_arena_box();
+        let b: ArenaBox<[D], _> = v.into_boxed_slice();
         assert_eq!(b.len(), 0);
     }
 
     #[test]
-    fn into_arena_box_with_full_capacity_for_drop_type_no_reclaim() {
+    fn into_box_with_full_capacity_for_drop_type_no_reclaim() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, OneByteDrop> = arena.alloc_vec_with_capacity(4);
         for i in 0..4 {
             v.push(OneByteDrop(i));
         }
         assert_eq!(v.len(), v.capacity());
-        let b: ArenaBox<[OneByteDrop], _> = v.into_arena_box();
+        let b: ArenaBox<[OneByteDrop], _> = v.into_boxed_slice();
         assert_eq!(b.len(), 4);
     }
 
     #[test]
-    fn into_arena_box_with_full_capacity_for_non_drop_type_no_reclaim() {
+    fn into_box_with_full_capacity_for_non_drop_type_no_reclaim() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(4);
         for i in 0..4 {
             v.push(i);
         }
         assert_eq!(v.len(), v.capacity());
-        let b: ArenaBox<[u32], _> = v.into_arena_box();
+        let b: ArenaBox<[u32], _> = v.into_boxed_slice();
         assert_eq!(b.len(), 4);
     }
 
     #[test]
-    fn into_arena_box_copy_advances_consumed_index() {
+    fn into_box_advances_consumed_index() {
         use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -849,7 +849,7 @@ mod from_mutants_extras_dst {
             let arena = Arena::new();
             // 16-byte D; default max_normal_alloc = 16 KiB. with_capacity(1100)
             // requests 17.6 KiB > max_normal_alloc → buffer goes to oversized
-            // chunk, install fails, into_arena_box falls back to the copy path.
+            // chunk, install fails, into_box falls back to the copy path.
             let mut v: ArenaVec<'_, D> = arena.alloc_vec_with_capacity(1100);
             for i in 0..1100_u32 {
                 v.push(D {
@@ -857,7 +857,7 @@ mod from_mutants_extras_dst {
                     seen: seen.clone(),
                 });
             }
-            let b: ArenaBox<[D], _> = v.into_arena_box();
+            let b: ArenaBox<[D], _> = v.into_boxed_slice();
             for (i, d) in b.iter().enumerate() {
                 assert_eq!(d.idx, i as u32, "element {i} should have idx {i}");
             }

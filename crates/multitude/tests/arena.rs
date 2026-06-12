@@ -2540,21 +2540,27 @@ mod coverage_arena_gaps {
     #[cfg(feature = "std")]
     #[test]
     fn alloc_with_closure_induced_eviction_commits_drop_entry() {
-        use std::cell::Cell;
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
+        // `Send` drop type (the deferred-drop `alloc_with` path requires
+        // `T: Send`; a `!Send` value here would be a soundness hazard at
+        // cross-thread arena teardown).
+        struct D(StdArc<AtomicU32>);
+        impl Drop for D {
             fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
+                self.0.fetch_add(1, Ordering::Relaxed);
             }
         }
 
-        let drops = Cell::new(0_u32);
+        let drops = StdArc::new(AtomicU32::new(0));
         let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
         // Warm up so the outer `alloc_with` below takes the fast path
         // (the cold slow path bypasses the eviction-commit branch).
         let _ = arena.alloc::<u64>(0);
-        let _outer: &mut D<'_> = arena.alloc_with(|| {
+        let counter = drops.clone();
+        let arena_ref = &arena;
+        let _outer: &mut D = arena.alloc_with(move || {
             // Fill the current_local chunk so the OUTER allocation's
             // reserved slot ends up in a chunk that gets evicted before
             // the closure returns. The outer must then take the
@@ -2562,12 +2568,12 @@ mod coverage_arena_gaps {
             // 2048 u64 allocs still force multiple refills with this 4 KiB
             // normal-allocation cap, so the reserved chunk is evicted.
             for _ in 0..2048_u32 {
-                let _ = arena.alloc::<u64>(0);
+                let _ = arena_ref.alloc::<u64>(0);
             }
-            D(&drops)
+            D(counter)
         });
         drop(arena);
-        assert_eq!(drops.get(), 1, "outer D's drop must run via eviction commit path");
+        assert_eq!(drops.load(Ordering::Relaxed), 1, "outer D's drop must run via eviction commit path");
     }
 
     #[test]
@@ -3169,14 +3175,14 @@ mod from_mutants_extras_stats {
     }
 
     #[test]
-    fn vec_into_arena_box_nonempty_nonzst_takes_inplace_path() {
+    fn vec_into_box_allocates_no_additional_local_chunk() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(8);
         for i in 0..4_u32 {
             v.push(i);
         }
         let chunks_before = arena.stats().normal_local_chunks_allocated;
-        let _b: ArenaBox<[u32]> = v.into_arena_box();
+        let _b: ArenaBox<[u32]> = v.into_boxed_slice();
         assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
     }
 

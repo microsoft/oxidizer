@@ -29,24 +29,17 @@ const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 // matching `deallocate`.
 unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        // Allocations routed through the foreign-collection allocator
-        // surface always go through the shared-chunk path so that the
-        // returned pointer can outlive the current mutator borrow via a
-        // per-allocation +1 refcount on the chunk.
-        //
-        // Alignments at or above the smart-pointer ceiling are rejected
-        // for the same reason as `alloc_box` / `alloc_arc`: the chunk
-        // header-from-mask helper requires the value to lie strictly
-        // inside the first `CHUNK_ALIGN` bytes of the chunk.
+        // Route through the shared-chunk path so the returned pointer can
+        // outlive the current mutator borrow via a per-allocation +1 refcount.
+        // Reject alignments at/above the smart-pointer ceiling (as `alloc_box` /
+        // `alloc_arc` do): the header-from-mask helper requires the value to lie
+        // strictly inside the first `CHUNK_ALIGN` bytes of the chunk.
         if layout.align() >= MAX_SMART_PTR_ALIGN {
             return Err(AllocError);
         }
-        // Zero-byte allocations need a non-null, well-aligned pointer.
-        // Mirror `std::alloc::Global` and synthesize one from the layout
-        // alignment without touching any chunk state. Use
-        // `without_provenance_mut` so the synthesized pointer is
-        // strict-provenance-clean — ZST allocations never get
-        // dereferenced, so they don't need real provenance.
+        // Zero-byte allocations need a non-null, well-aligned pointer but no
+        // chunk state (mirroring `std::alloc::Global`). `without_provenance_mut`
+        // keeps it strict-provenance-clean — ZSTs are never dereferenced.
         if layout.size() == 0 {
             // SAFETY: `layout.align()` is a non-zero power of two.
             let dangling = unsafe { NonNull::new_unchecked(ptr::without_provenance_mut::<u8>(layout.align())) };
@@ -58,7 +51,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         let refill_hint = layout.size().saturating_add(layout.align());
         loop {
             if let Some((slot, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(layout.size(), layout.align()) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let ptr = slot.as_non_null();
                 let _ = chunk_ref.forget();
                 return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));

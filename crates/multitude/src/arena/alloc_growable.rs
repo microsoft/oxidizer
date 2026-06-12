@@ -63,6 +63,192 @@ impl<A: Allocator + Clone> Arena<A> {
         String::try_with_capacity_in(cap, self)
     }
 
+    /// Validate `bytes` as UTF-8 and copy them into a fresh arena
+    /// [`String`]. The arena-bound analog of
+    /// [`std::string::String::from_utf8`] (taking a borrowed slice rather
+    /// than an owning `Vec<u8>`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`Utf8Error`](core::str::Utf8Error) if `bytes` is not valid
+    /// UTF-8.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails. Allocation failure is reported
+    /// via a panic, not the returned `Result`.
+    pub fn alloc_string_from_utf8(&self, bytes: &[u8]) -> Result<String<'_, A>, core::str::Utf8Error> {
+        Ok(String::from_str_in(core::str::from_utf8(bytes)?, self))
+    }
+
+    /// Copy `bytes` into a fresh arena [`String`], replacing any invalid
+    /// UTF-8 sequences with `U+FFFD`. The arena-bound analog of
+    /// [`std::string::String::from_utf8_lossy`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails.
+    #[must_use]
+    pub fn alloc_string_from_utf8_lossy(&self, bytes: &[u8]) -> String<'_, A> {
+        String::from_str_in(&alloc::string::String::from_utf8_lossy(bytes), self)
+    }
+
+    /// Copy `bytes` into a fresh arena [`String`] without validating that
+    /// they are UTF-8. The arena-bound analog of
+    /// [`std::string::String::from_utf8_unchecked`].
+    ///
+    /// # Safety
+    ///
+    /// `bytes` must be valid UTF-8.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails.
+    #[must_use]
+    pub unsafe fn alloc_string_from_utf8_unchecked(&self, bytes: &[u8]) -> String<'_, A> {
+        // SAFETY: the caller guarantees `bytes` is valid UTF-8.
+        String::from_str_in(unsafe { core::str::from_utf8_unchecked(bytes) }, self)
+    }
+
+    /// Decode native-endian UTF-16 `units` into a fresh arena [`String`].
+    /// The arena-bound analog of [`std::string::String::from_utf16`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`DecodeUtf16Error`](core::char::DecodeUtf16Error) on the
+    /// first unpaired surrogate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails. Allocation failure is reported
+    /// via a panic, not the returned `Result`.
+    pub fn alloc_string_from_utf16(&self, units: &[u16]) -> Result<String<'_, A>, core::char::DecodeUtf16Error> {
+        let mut out = self.alloc_string_with_capacity(units.len());
+        for unit in char::decode_utf16(units.iter().copied()) {
+            out.push(unit?);
+        }
+        Ok(out)
+    }
+
+    /// Decode native-endian UTF-16 `units` into a fresh arena [`String`],
+    /// replacing unpaired surrogates with `U+FFFD`. The arena-bound analog
+    /// of [`std::string::String::from_utf16_lossy`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails.
+    #[must_use]
+    pub fn alloc_string_from_utf16_lossy(&self, units: &[u16]) -> String<'_, A> {
+        let mut out = self.alloc_string_with_capacity(units.len());
+        for unit in char::decode_utf16(units.iter().copied()) {
+            out.push(unit.unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+        out
+    }
+
+    /// Decode little-endian UTF-16 `bytes` into a fresh arena [`String`]. The
+    /// arena-bound analog of [`std::string::String::from_utf16le`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`FromUtf16Error`](crate::strings::FromUtf16Error) if `bytes`
+    /// has an odd length or contains an unpaired surrogate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails. Allocation failure is reported
+    /// via a panic, not the returned `Result`.
+    pub fn alloc_string_from_utf16le(&self, bytes: &[u8]) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+        self.alloc_string_from_utf16_bytes(bytes, false)
+    }
+
+    /// Decode big-endian UTF-16 `bytes` into a fresh arena [`String`]. The
+    /// arena-bound analog of [`std::string::String::from_utf16be`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`FromUtf16Error`](crate::strings::FromUtf16Error) if `bytes`
+    /// has an odd length or contains an unpaired surrogate.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails. Allocation failure is reported
+    /// via a panic, not the returned `Result`.
+    pub fn alloc_string_from_utf16be(&self, bytes: &[u8]) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+        self.alloc_string_from_utf16_bytes(bytes, true)
+    }
+
+    /// Decode little-endian UTF-16 `bytes` into a fresh arena [`String`],
+    /// replacing odd trailing bytes and unpaired surrogates with `U+FFFD`. The
+    /// arena-bound analog of [`std::string::String::from_utf16le_lossy`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails.
+    #[must_use]
+    pub fn alloc_string_from_utf16le_lossy(&self, bytes: &[u8]) -> String<'_, A> {
+        self.alloc_string_from_utf16_bytes_lossy(bytes, false)
+    }
+
+    /// Decode big-endian UTF-16 `bytes` into a fresh arena [`String`],
+    /// replacing odd trailing bytes and unpaired surrogates with `U+FFFD`. The
+    /// arena-bound analog of [`std::string::String::from_utf16be_lossy`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails.
+    #[must_use]
+    pub fn alloc_string_from_utf16be_lossy(&self, bytes: &[u8]) -> String<'_, A> {
+        self.alloc_string_from_utf16_bytes_lossy(bytes, true)
+    }
+
+    /// Shared body for the byte-oriented UTF-16 constructors. `big_endian`
+    /// selects the byte order used to assemble each `u16` code unit.
+    #[allow(
+        clippy::map_err_ignore,
+        reason = "FromUtf16Error is intentionally opaque; the DecodeUtf16Error carries no extra recoverable detail"
+    )]
+    fn alloc_string_from_utf16_bytes(&self, bytes: &[u8], big_endian: bool) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+        if !bytes.len().is_multiple_of(2) {
+            return Err(crate::strings::FromUtf16Error::new());
+        }
+        let mut out = self.alloc_string_with_capacity(bytes.len() / 2);
+        let units = bytes.chunks_exact(2).map(|pair| {
+            let raw = [pair[0], pair[1]];
+            if big_endian {
+                u16::from_be_bytes(raw)
+            } else {
+                u16::from_le_bytes(raw)
+            }
+        });
+        for unit in char::decode_utf16(units) {
+            out.push(unit.map_err(|_| crate::strings::FromUtf16Error::new())?);
+        }
+        Ok(out)
+    }
+
+    /// Shared body for the lossy byte-oriented UTF-16 constructors.
+    fn alloc_string_from_utf16_bytes_lossy(&self, bytes: &[u8], big_endian: bool) -> String<'_, A> {
+        let mut out = self.alloc_string_with_capacity(bytes.len() / 2 + 1);
+        let units = bytes.chunks_exact(2).map(|pair| {
+            let raw = [pair[0], pair[1]];
+            if big_endian {
+                u16::from_be_bytes(raw)
+            } else {
+                u16::from_le_bytes(raw)
+            }
+        });
+        for unit in char::decode_utf16(units) {
+            out.push(unit.unwrap_or(char::REPLACEMENT_CHARACTER));
+        }
+        if !bytes.len().is_multiple_of(2) {
+            // An odd trailing byte is invalid; mirror std by appending one
+            // replacement character.
+            out.push(char::REPLACEMENT_CHARACTER);
+        }
+        out
+    }
+
     /// Create a new, empty growable [`Vec`](crate::vec::Vec) backed by this arena.
     /// No allocation is performed until the first push.
     ///

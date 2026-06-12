@@ -17,8 +17,6 @@ use allocator_api2::alloc::Allocator;
 
 use crate::{Arc, Box};
 
-// ===== Arc<str, A> =====
-
 impl<A: Allocator + Clone> Arc<str, A> {
     /// Borrow as `&str`. Ergonomic alias for `&**self` (`Deref<Target = str>`).
     #[must_use]
@@ -75,8 +73,6 @@ impl<A: Allocator + Clone> From<Arc<str, A>> for Arc<[u8], A> {
         unsafe { Self::from_raw(thin) }
     }
 }
-
-// ===== Box<str, A> =====
 
 impl<A: Allocator + Clone> Box<str, A> {
     /// Borrow as `&str`. Ergonomic alias for `&**self` (`Deref<Target = str>`).

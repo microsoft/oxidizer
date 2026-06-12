@@ -4,8 +4,7 @@
 #![allow(clippy::inline_always, reason = "hot bump-allocator helpers must inline into their callers")]
 
 use alloc::sync::Arc as StdArc;
-use alloc::vec::Vec;
-use core::cell::{Cell, RefCell};
+use core::cell::Cell;
 use core::fmt;
 use core::ptr::NonNull;
 
@@ -16,10 +15,30 @@ use crate::arena_builder::ArenaBuilder;
 use crate::arena_stats::ArenaStats;
 use crate::internal::chunk_mutator::ChunkMutator;
 use crate::internal::chunk_provider::{ChunkProvider, ChunkProviderConfig};
-use crate::internal::constants::SizeClass;
+use crate::internal::chunk_ref::ChunkRef;
+use crate::internal::constants::{MAX_NORMAL_ALLOC, SizeClass};
 use crate::internal::current_chunk::CurrentChunk;
 use crate::internal::local_chunk::LocalChunk;
 use crate::internal::shared_chunk::SharedChunk;
+
+/// Surplus of shared-chunk strong refs the arena pre-credits to the
+/// chunk's atomic `ref_count` at install time. The arena tracks
+/// per-allocation handouts in a non-atomic local counter
+/// (`local_shared_count`) and reconciles the surplus with a single
+/// `fetch_sub(LARGE_SHARED_REF_SURPLUS - local_shared_count)` when
+/// the chunk is retired (refill / reset / arena drop).
+///
+/// While the chunk is current, the atomic refcount stays
+/// `>= 1 + LARGE_SHARED_REF_SURPLUS - drops_observed`. Concurrent
+/// `Arc::drop` on other threads can only ever subtract; with this
+/// surplus picked at 2^30 the refcount cannot underflow below the
+/// per-chunk u16-capped allocation count, and concurrent
+/// `Arc::clone` cannot overflow either (u32 leaves ~2^30 headroom).
+///
+/// Net cost of the per-allocation atomic disappears entirely; in
+/// exchange we pay one extra atomic op per chunk install and one per
+/// chunk retire.
+const LARGE_SHARED_REF_SURPLUS: u32 = 1 << 30;
 
 mod alloc_growable;
 pub(crate) mod alloc_prefixed;
@@ -34,6 +53,9 @@ mod alloc_unsized;
 mod alloc_utf16;
 pub(crate) mod alloc_value;
 mod reserve;
+mod retired_local;
+
+use retired_local::RetiredLocalChunks;
 
 /// A flexible bump allocator.
 ///
@@ -74,11 +96,24 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// `Arc`s independently hold the chunk's refcount.
     current_shared: CurrentChunk<SharedChunk<A>>,
 
+    /// Non-atomic count of strong references the arena has handed
+    /// out from `current_shared`'s chunk since installing it. The
+    /// chunk's atomic `ref_count` is pre-credited with
+    /// `LARGE_SHARED_REF_SURPLUS` at install so each handout can just
+    /// bump this counter — no atomic op in the per-allocation hot
+    /// path. At retire (refill / reset / arena drop) the surplus is
+    /// reconciled with a single
+    /// `fetch_sub(LARGE_SHARED_REF_SURPLUS - local_shared_count)`,
+    /// leaving the chunk's atomic count equal to the number of
+    /// escaped handles. Stays at `0` whenever `current_shared` holds
+    /// an empty mutator.
+    local_shared_count: Cell<u32>,
+
     /// Local-chunk mutators whose chunk was rotated out while it might still
     /// have outstanding simple-ref `&mut T` borrows. Each retained mutator
     /// holds a `+1` on its chunk, keeping it alive (and preventing teardown
     /// / drop-replay) until the arena is reset or dropped.
-    retired_local: RefCell<Vec<ChunkMutator<LocalChunk<A>>>>,
+    retired_local: RetiredLocalChunks<A>,
 
     /// Geometric-growth chunk-class hint for the next local refill: each
     /// successful refill bumps this toward the largest cacheable class so
@@ -91,13 +126,6 @@ pub struct Arena<A: Allocator + Clone = Global> {
     next_shared_class: Cell<SizeClass>,
 
     provider: StdArc<ChunkProvider<A>>,
-
-    /// Running counter of user-requested bytes. Updated on every
-    /// successful allocation with the `Layout::size()` the caller
-    /// asked for; excludes alignment padding, drop-entry overhead,
-    /// and chunk headers.
-    #[cfg(feature = "stats")]
-    total_bytes_allocated: Cell<u64>,
 
     /// Running count of buffer relocations (growable collections moved to
     /// a fresh, larger buffer because they could not grow in place).
@@ -184,7 +212,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        expect_alloc(Self::try_from_config(allocator, crate::internal::constants::MAX_NORMAL_ALLOC, None))
+        expect_alloc(Self::try_from_config(allocator, MAX_NORMAL_ALLOC, None))
     }
 
     /// Fallible variant of [`Self::new_in`].
@@ -198,7 +226,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: 'static,
     {
-        Self::try_from_config(allocator, crate::internal::constants::MAX_NORMAL_ALLOC, None)
+        Self::try_from_config(allocator, MAX_NORMAL_ALLOC, None)
     }
 
     /// Internal builder entry point: assemble an `Arena` from a fully
@@ -215,12 +243,11 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(Self {
             current_local: CurrentChunk::new(ChunkMutator::<LocalChunk<A>>::empty()),
             current_shared: CurrentChunk::new(ChunkMutator::<SharedChunk<A>>::empty()),
-            retired_local: RefCell::new(Vec::new()),
+            local_shared_count: Cell::new(0),
+            retired_local: RetiredLocalChunks::new(),
             next_local_class: Cell::new(SizeClass::ZERO),
             next_shared_class: Cell::new(SizeClass::ZERO),
             provider,
-            #[cfg(feature = "stats")]
-            total_bytes_allocated: Cell::new(0),
             #[cfg(feature = "stats")]
             relocations: Cell::new(0),
         })
@@ -264,8 +291,17 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn stats(&self) -> ArenaStats {
         let chunks = self.provider.chunk_alloc_stats();
+        // `wasted_tail_bytes` is a live gauge over chunks that are
+        // currently *not* accepting allocations (retired, or held by
+        // outstanding handles). Fold in the currently-active local and
+        // shared chunks' free tails so the reported value also reflects
+        // the slack that would become wasted if the next alloc forced
+        // a refill right now.
+        let current_local_free = u64::from(self.current_local.borrow().wasted_tail_for_stats());
+        let current_shared_free = u64::from(self.current_shared.borrow().wasted_tail_for_stats());
         ArenaStats {
-            total_bytes_allocated: self.total_bytes_allocated.get(),
+            total_bytes_allocated: self.provider.bytes_outstanding(),
+            wasted_tail_bytes: self.provider.wasted_tail_bytes() + current_local_free + current_shared_free,
             normal_local_chunks_allocated: chunks.normal_local(),
             oversized_local_chunks_allocated: chunks.oversized_local(),
             normal_shared_chunks_allocated: chunks.normal_shared(),
@@ -273,14 +309,6 @@ impl<A: Allocator + Clone> Arena<A> {
             relocations: self.relocations.get(),
             ..ArenaStats::default()
         }
-    }
-
-    /// Record a successful user allocation of `bytes` bytes.
-    #[cfg(feature = "stats")]
-    #[inline(always)]
-    pub(crate) fn record_alloc(&self, bytes: usize) {
-        let prev = self.total_bytes_allocated.get();
-        self.total_bytes_allocated.set(prev + bytes as u64);
     }
 
     /// Record a buffer relocation (a growable collection moved to a fresh
@@ -303,7 +331,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// allocation, mirroring the lazy semantics of [`Self::new`].
     #[cold]
     pub fn reset(&mut self) {
-        self.retired_local.borrow_mut().clear();
+        // Reconcile the surplus on the current shared chunk before
+        // the mutator's Drop fires its own dec_ref — keeps the
+        // chunk's atomic refcount in sync with the number of escaped
+        // handles.
+        self.reconcile_shared_surplus();
+        self.retired_local.clear();
         *self.current_local.get_mut() = ChunkMutator::<LocalChunk<A>>::empty();
         *self.current_shared.get_mut() = ChunkMutator::<SharedChunk<A>>::empty();
     }
@@ -329,8 +362,6 @@ impl<A: Allocator + Clone> Arena<A> {
     pub const fn bytemuck(&self) -> crate::bytemuck::BytemuckView<'_, A> {
         crate::bytemuck::BytemuckView::new(self)
     }
-
-    // ----- internal: refill helpers -----
 
     /// Borrow the current local mutator for a single bump attempt. Used
     /// by the hot path of every local-chunk allocator.
@@ -404,7 +435,7 @@ impl<A: Allocator + Clone> Arena<A> {
         // moved into the new ChunkMutator.
         let new_mutator = unsafe { ChunkMutator::<LocalChunk<A>>::from_owned(new_chunk) };
         let old = self.current_local.replace(new_mutator);
-        self.retired_local.borrow_mut().push(old);
+        self.retired_local.push(old);
         self.next_local_class.set(self.next_local_class.get().saturating_inc());
         Ok(())
     }
@@ -421,11 +452,38 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(never)]
     #[cfg_attr(test, mutants::skip)] // see `refill_local`
     pub(crate) fn refill_shared(&self, min_payload: usize) -> Result<(), AllocError> {
+        // Reconcile the surplus on the old chunk before its mutator's
+        // Drop fires its own dec_ref — keeps the chunk's atomic
+        // refcount equal to the number of escaped handles regardless
+        // of how many we pre-credited.
+        self.reconcile_shared_surplus();
         // Release the exhausted current chunk's refcount *before* reserving
         // the replacement so a now-unreferenced chunk frees its bytes and
         // lets the new reservation reuse the budget.
         self.current_shared.drop_replace(ChunkMutator::<SharedChunk<A>>::empty());
+        // The previous `drop_replace` may have run user-supplied drop
+        // shims (chunk teardown). Those can re-enter the arena via
+        // `alloc_arc`/`alloc_box` which call `refill_shared`
+        // recursively and install a fresh chunk into `current_shared`.
+        // Honor that installation as-is: returning `Ok` lets the
+        // caller's retry loop re-attempt the allocation against the
+        // reentry-installed chunk. If it doesn't fit `min_payload`,
+        // the caller will simply call us again and we'll reconcile +
+        // replace that chunk in turn (its own `local_shared_count`
+        // already tracks any nested handouts).
+        if self.current_shared.borrow().chunk_ptr().is_some() {
+            return Ok(());
+        }
         let new_chunk = self.provider.acquire_shared(min_payload, self.next_shared_class.get())?;
+        // Pre-credit a large surplus of refs on the new chunk so the
+        // per-allocation hot path can just bump a non-atomic local
+        // counter — the surplus absorbs any concurrent Arc::drop on
+        // other threads (capacity-bounded handouts can't underflow
+        // it).
+        // SAFETY: we hold the +1 from `acquire_shared`; the chunk is
+        // live for the duration of this borrow.
+        unsafe { new_chunk.as_ref().pre_credit_refs(LARGE_SHARED_REF_SURPLUS as usize) };
+        debug_assert_eq!(self.local_shared_count.get(), 0, "local_shared_count must be 0 after reconcile");
         // SAFETY: `acquire_shared` returns a refcount-1 chunk.
         let new_mutator = unsafe { ChunkMutator::<SharedChunk<A>>::from_owned(new_chunk) };
         self.current_shared.drop_replace(new_mutator);
@@ -460,6 +518,34 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(do_alloc(&mutator, chunk))
     }
 
+    /// Closure-free variant of [`Self::alloc_oversized_shared_with`] for
+    /// hot callers whose `do_alloc` would otherwise capture a
+    /// user-provided `FnOnce`. See
+    /// [`Self::acquire_oversized_local_mutator`] for the per-iteration
+    /// spill rationale this avoids.
+    ///
+    /// Caller contract: the returned `mutator` owns the chunk's `+1`
+    /// strong reference. Perform the bump reservation, take any
+    /// smart-pointer `+1` via `acquire_shared_chunk_ref`, then drop the
+    /// mutator (it releases its `+1` automatically). If the smart-
+    /// pointer ref was taken, the chunk stays alive via that ref;
+    /// otherwise the chunk is torn down here.
+    #[cold]
+    #[inline(never)]
+    #[allow(
+        clippy::type_complexity,
+        reason = "Returning both the mutator and the chunk pointer keeps the cold helper closure-free"
+    )]
+    pub(crate) fn acquire_oversized_shared_mutator(
+        &self,
+        min_payload: usize,
+    ) -> Result<(ChunkMutator<SharedChunk<A>>, NonNull<SharedChunk<A>>), AllocError> {
+        let chunk = self.provider.acquire_oversized_shared(min_payload)?;
+        // SAFETY: `acquire_oversized_shared` returns a refcount-1 chunk.
+        let mutator = unsafe { ChunkMutator::<SharedChunk<A>>::from_owned(chunk) };
+        Ok((mutator, chunk))
+    }
+
     /// Local mirror of [`Self::alloc_oversized_shared_with`]. The
     /// temporary mutator is pushed into `retired_local` on success so
     /// the chunk's `+1` strong reference is retained for the duration
@@ -481,8 +567,105 @@ impl<A: Allocator + Clone> Arena<A> {
         let mutator = unsafe { ChunkMutator::<LocalChunk<A>>::from_owned(chunk) };
         let result = do_alloc(&mutator);
         // Retain the mutator (and its `+1`) for the `&Arena` lifetime.
-        self.retired_local.borrow_mut().push(mutator);
+        self.retired_local.push(mutator);
         Ok(result)
+    }
+
+    /// Closure-free variant of [`Self::alloc_oversized_local_with`] for
+    /// hot callers whose `do_alloc` would otherwise capture a
+    /// user-provided `FnOnce`. Capturing such a closure into the
+    /// `do_alloc` callback forces the user closure's environment
+    /// (e.g. `&loop_counter` for a default-by-ref capture) to live in
+    /// an addressable stack slot, which materializes as a per-iteration
+    /// spill on the hot path even when the oversized branch is never
+    /// taken.
+    ///
+    /// Caller contract: invoke the bump allocator on the returned
+    /// mutator, perform any value init, then call
+    /// [`Self::retain_oversized_local_mutator`] to transfer the
+    /// mutator's `+1` into `retired_local`. If anything between this
+    /// call and the `retain_*` call unwinds, the mutator is dropped
+    /// normally and the oversized chunk is torn down — same panic
+    /// semantics as the closure form.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn acquire_oversized_local_mutator(&self, min_payload: usize) -> Result<ChunkMutator<LocalChunk<A>>, AllocError> {
+        let chunk = self.provider.acquire_oversized_local(min_payload)?;
+        // SAFETY: `acquire_oversized_local` returns a refcount-1 chunk;
+        // the `+1` moves into the mutator.
+        Ok(unsafe { ChunkMutator::<LocalChunk<A>>::from_owned(chunk) })
+    }
+
+    /// Retains an oversized-local mutator obtained from
+    /// [`Self::acquire_oversized_local_mutator`] by pushing it into
+    /// `retired_local`. See that method for the full contract.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn retain_oversized_local_mutator(&self, mutator: ChunkMutator<LocalChunk<A>>) {
+        self.retired_local.push(mutator);
+    }
+
+    /// Per-allocation hot path: acquires one strong reference on
+    /// `current_shared`'s chunk by bumping the non-atomic
+    /// `local_shared_count`. No atomic op: the surplus pre-credited
+    /// at chunk install absorbs the handout.
+    ///
+    /// `chunk_ptr` must be the chunk currently installed in
+    /// `current_shared`; callers obtain it from `try_reserve_shared*`
+    /// or `try_alloc_with_chunk` which return the chunk pointer
+    /// alongside the reservation. The arena's `+1` plus the
+    /// pre-credited surplus on that chunk make the adopt sound — the
+    /// chunk cannot be torn down while we hold any of the surplus.
+    #[expect(clippy::inline_always, reason = "hot-path entry; must inline fully for arena performance")]
+    #[inline(always)]
+    pub(crate) fn acquire_current_shared_chunk_ref(&self, chunk_ptr: NonNull<SharedChunk<A>>) -> ChunkRef<A> {
+        // Wrap-protected: per-chunk handouts are bounded by the
+        // chunk's u16-capped allocation count, well below `u32::MAX`.
+        self.local_shared_count.set(self.local_shared_count.get().wrapping_add(1));
+        // SAFETY: we hold (and are handing out) one of the
+        // pre-credited surplus refs on `chunk_ptr`.
+        unsafe { ChunkRef::<A>::adopt(chunk_ptr) }
+    }
+
+    /// Reconcile the pre-credited surplus on `current_shared`'s
+    /// chunk with the locally-tracked handout count. After this call
+    /// the chunk's atomic `ref_count` equals `1 + escaped_handles`
+    /// (the `+1` is the mutator's own reference, released when the
+    /// mutator drops). No-op when no chunk is currently installed.
+    #[inline]
+    fn reconcile_shared_surplus(&self) {
+        let local = self.local_shared_count.replace(0);
+        // `local_shared_count` is only ever non-zero while
+        // `current_shared` holds a real (non-empty) mutator whose
+        // chunk is the same one we pre-credited against.
+        let Some(chunk) = self.current_shared.borrow().chunk_ptr() else {
+            debug_assert_eq!(local, 0, "local_shared_count must be 0 when no shared chunk installed");
+            return;
+        };
+        // Subtract the unused portion of the surplus: we pre-credited
+        // `LARGE_SHARED_REF_SURPLUS` at install and handed out
+        // `local` refs, so `LARGE_SHARED_REF_SURPLUS - local`
+        // surplus refs remain unhanded-out and must be released.
+        let refund = LARGE_SHARED_REF_SURPLUS - local;
+        // SAFETY: arena holds the mutator's +1 plus the
+        // pre-credited surplus on this chunk; we own exactly
+        // `refund` previously-credited refs that were never handed
+        // out.
+        unsafe { chunk.as_ref().refund_refs(refund as usize) };
+    }
+}
+
+impl<A: Allocator + Clone> Drop for Arena<A> {
+    fn drop(&mut self) {
+        // Reconcile any pre-credited surplus before the current
+        // shared mutator's Drop releases its own +1. Without this,
+        // the chunk's atomic refcount would still carry the surplus,
+        // preventing the chunk from reaching zero and being torn
+        // down even when no handles remain.
+        self.reconcile_shared_surplus();
+        // Field drops (current_local, current_shared, retired_local,
+        // provider Arc) run after this returns and release all
+        // remaining +1s.
     }
 }
 
@@ -492,9 +675,10 @@ impl<A: Allocator + Clone> fmt::Debug for Arena<A> {
     }
 }
 
-// No explicit `Drop` impl: field drops (Cells/RefCells of mutators) release
-// chunk refcounts, and the `Arc<ChunkProvider>` releases the cache, which
-// returns retained chunks to the backing allocator.
+// `Drop` impl above refunds unused pre-credited shared refs; field
+// drops (Cells/RefCells of mutators) then release chunk refcounts,
+// and the `Arc<ChunkProvider>` releases the cache, which returns
+// retained chunks to the backing allocator.
 
 /// Convert a fallible alloc result to its `Ok` value, panicking on
 /// `Err` with the canonical multitude allocator-failure message.

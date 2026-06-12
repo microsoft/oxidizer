@@ -35,8 +35,11 @@ pub struct BoxUtf16Str<A: Allocator + Clone = Global> {
 }
 
 // SAFETY: thin pointer into an atomically-refcounted shared chunk;
-// `Utf16Str` is `Send + Sync`.
-unsafe impl<A: Allocator + Clone + Send> Send for BoxUtf16Str<A> {}
+// `Utf16Str` is `Send + Sync`. Like `Box<T, A>` (see its `Send`
+// rationale), a last-ref `Drop` on the receiving thread tears the
+// shared chunk down through `Weak<ChunkProvider<A>>`, so `Send`
+// requires `A: Send + Sync` (not just `A: Send`).
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for BoxUtf16Str<A> {}
 // SAFETY: `&BoxUtf16Str` exposes only `&Utf16Str` (immutable);
 // `DerefMut` requires `&mut self` and is serialized by the borrow
 // checker.

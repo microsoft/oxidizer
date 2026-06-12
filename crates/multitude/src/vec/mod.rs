@@ -15,11 +15,6 @@
 )]
 
 //! Arena-backed growable vectors and the `vec!` macro.
-//!
-//! [`Vec`] is a transient builder that can be frozen into compact arena
-//! handles such as [`Vec::into_arena_arc`] or [`Vec::into_arena_box`].
-//!
-//! For the string equivalents, see [`crate::strings`].
 
 use core::marker::PhantomData;
 use core::mem;
@@ -33,9 +28,11 @@ mod basic;
 mod collect_in;
 mod drain;
 mod freeze;
+mod from_in;
 mod from_iterator_in;
 mod into_iter;
 mod mutate;
+mod splice;
 mod traits;
 mod vec_macro;
 
@@ -43,15 +40,12 @@ pub use collect_in::CollectIn;
 pub use drain::Drain;
 pub use from_iterator_in::FromIteratorIn;
 pub use into_iter::IntoIter;
+pub use splice::Splice;
 
 #[doc(inline)]
 pub use crate::__multitude_vec as vec;
 
 /// A growable, mutable vector that lives in an [`Arena`].
-///
-/// `Vec` is a **transient builder**: 32 bytes on 64-bit (data pointer +
-/// length + capacity + arena reference). Its purpose is to be filled and
-/// then frozen via [`Self::into_arena_arc`] or [`Self::into_arena_box`].
 ///
 /// `push`, `pop`, `extend`, `iter`, and other standard vector methods
 /// behave the same as on `std::vec::Vec`.
@@ -66,7 +60,7 @@ pub use crate::__multitude_vec as vec;
 /// v.push(1);
 /// v.push(2);
 /// v.push(3);
-/// let frozen = v.into_arena_box();
+/// let frozen = v.into_boxed_slice();
 /// assert_eq!(&*frozen, &[1, 2, 3]);
 /// ```
 pub struct Vec<'a, T, A: Allocator + Clone = Global> {
@@ -154,6 +148,11 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
                 // hence for `'a`); the reservation is fresh and
                 // non-overlapping with the old buffer.
                 unsafe { self.buf.replace_buffer_raw(new_ptr, new_cap_actual) };
+                // The previous oversized chunk is left in `retired_local`
+                // until arena reset/drop. It is NOT released here: a
+                // zero-copy `split_off` can leave a sibling buffer
+                // pointing into the same chunk, and freeing it on one
+                // half's growth would dangle the other (use-after-free).
                 return Ok(());
             }
             self.arena.refill_local(refill_hint)?;

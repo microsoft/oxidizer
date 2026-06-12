@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use allocator_api2::alloc::Allocator;
+
+use crate::Arena;
 use crate::vec::FromIteratorIn;
 
 /// Extension trait on iterators that lets you collect directly into an
@@ -18,10 +21,9 @@ use crate::vec::FromIteratorIn;
 /// assert_eq!(v.len(), 10);
 /// ```
 pub trait CollectIn: IntoIterator + Sized {
-    /// Collect this iterator into `C`, using `allocator` as the backing
-    /// allocator smart pointer.
-    fn collect_in<C: FromIteratorIn<Self::Item>>(self, allocator: C::Allocator) -> C {
-        C::from_iter_in(self, allocator)
+    /// Collect this iterator into `C`, allocating into `arena`.
+    fn collect_in<'a, A: Allocator + Clone, C: FromIteratorIn<'a, Self::Item, A>>(self, arena: &'a Arena<A>) -> C {
+        C::from_iter_in(self, arena)
     }
 }
 

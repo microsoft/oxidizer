@@ -9,7 +9,7 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use super::Vec;
 use crate::internal::arena_buf::ArenaBuf;
 
-/// Reclaim-byte arithmetic extracted from [`Vec::shrink_to_fit`].
+/// Reclaim-byte arithmetic for [`Vec::shrink_to_fit`].
 #[inline]
 #[cfg_attr(test, mutants::skip)] // arithmetic not observable via public API
 fn shrink_reclaim_bytes(cap: usize, len: usize, elem: usize) -> usize {
@@ -111,12 +111,24 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     // correctness gate.
     #[cfg_attr(test, mutants::skip)]
     pub fn shrink_to_fit(&mut self) {
+        self.shrink_to(0);
+    }
+
+    /// Shrink the capacity with a lower bound.
+    ///
+    /// The capacity will remain at least as large as both `self.len()` and
+    /// `min_capacity`. Reclamation only succeeds while the buffer still sits
+    /// at the chunk's bump cursor; otherwise this is a no-op (matching
+    /// [`std::vec::Vec::shrink_to`]'s "best-effort" contract).
+    #[cfg_attr(test, mutants::skip)]
+    pub fn shrink_to(&mut self, min_capacity: usize) {
         if const { mem::size_of::<T>() == 0 } {
             return;
         }
         let len = self.buf.len();
+        let target = len.max(min_capacity);
         let cap = self.buf.cap();
-        if cap == len {
+        if cap <= target {
             return;
         }
         let elem = mem::size_of::<T>();
@@ -133,12 +145,46 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             return;
         }
         let end_addr = data_addr + total_bytes;
-        let reclaim_bytes = shrink_reclaim_bytes(cap, len, elem);
+        let reclaim_bytes = shrink_reclaim_bytes(cap, target, elem);
         if self.arena.current_local().try_reclaim_tail(end_addr, reclaim_bytes) {
-            // SAFETY: the chunk reclaimed `[len*elem, cap*elem)`, so this
+            // SAFETY: the chunk reclaimed `[target*elem, cap*elem)`, so this
             // buffer no longer owns that span; the live prefix `[0, len)`
-            // is untouched and still initialized, and `len <= len`.
-            unsafe { self.buf.set_cap(len) }
+            // is untouched and still initialized, and `len <= target`.
+            unsafe { self.buf.set_cap(target) }
+        }
+    }
+
+    /// Clone the elements in `src` (an index range into `self`) and append
+    /// them to the end. Mirrors [`std::vec::Vec::extend_from_within`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds, or if the backing allocator
+    /// fails while reserving.
+    pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R)
+    where
+        T: Clone,
+    {
+        let len = self.buf.len();
+        let start = match src.start_bound() {
+            core::ops::Bound::Included(&n) => n,
+            core::ops::Bound::Excluded(&n) => n.checked_add(1).expect("extend_from_within: start bound overflows usize"),
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match src.end_bound() {
+            core::ops::Bound::Included(&n) => n.checked_add(1).expect("extend_from_within: end bound overflows usize"),
+            core::ops::Bound::Excluded(&n) => n,
+            core::ops::Bound::Unbounded => len,
+        };
+        assert!(start <= end, "extend_from_within: start > end");
+        assert!(end <= len, "extend_from_within: range end out of bounds");
+        let count = end - start;
+        // Reserve up front so the subsequent pushes cannot relocate the
+        // buffer (which would invalidate the source indices we read from).
+        self.reserve(count);
+        for i in start..end {
+            let cloned = self.buf.as_slice()[i].clone();
+            self.push(cloned);
         }
     }
 
@@ -152,13 +198,8 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let mut write = 0;
         let len = self.buf.len();
         let slice = self.buf.as_mut_slice();
-        // Walk the live elements; for each kept element, swap it down into
-        // the write cursor. Dropped elements need to be removed; we record
-        // the surviving prefix and then truncate.
+        // Compact kept elements toward the front via swaps, then drop the tail.
         for read in 0..len {
-            // SAFETY-FREE: rely on indexing; slice covers `[..len]`.
-            // We need to mutate-in-place: borrow each element fresh.
-            // To avoid borrow conflicts we work with raw indexing twice.
             let keep = f(&mut slice[read]);
             if keep {
                 if write != read {
@@ -167,7 +208,6 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
                 write += 1;
             }
         }
-        // After compaction, drop the tail.
         self.buf.truncate(write);
     }
 
@@ -228,9 +268,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             return;
         }
         self.reserve(add);
-        // Drain owns the elements; push them in order.
         for item in other.buf.drain_all() {
-            // Capacity was reserved above.
             self.buf.push_within_cap(item).ok().expect("capacity reserved above");
         }
     }
@@ -355,5 +393,37 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let slice = self.buf.as_mut_slice();
         let last = slice.last_mut()?;
         if predicate(last) { self.buf.pop() } else { None }
+    }
+}
+
+impl<'a, T, A: Allocator + Clone, const N: usize> Vec<'a, [T; N], A> {
+    /// Flatten a `Vec<[T; N]>` into a `Vec<T>` in place (no copy). Mirrors
+    /// [`std::vec::Vec::into_flattened`].
+    ///
+    /// # Panics
+    ///
+    /// Panics on the (practically unreachable) `len * N` / `cap * N` overflow.
+    #[must_use]
+    pub fn into_flattened(self) -> Vec<'a, T, A> {
+        let arena = self.arena;
+        let mut me = core::mem::ManuallyDrop::new(self);
+        let len = me.buf.len();
+        let cap = me.buf.cap();
+        let ptr = me.buf.as_mut_ptr().cast::<T>();
+        let new_len = len.checked_mul(N).expect("Vec::into_flattened: length overflow");
+        let new_cap = if mem::size_of::<T>() == 0 {
+            usize::MAX
+        } else {
+            cap.checked_mul(N).expect("Vec::into_flattened: capacity overflow")
+        };
+        // SAFETY: `[T; N]` and a run of `N` `T`s share layout and alignment,
+        // so the buffer holds `len * N` initialized `T`s within `cap * N`
+        // slots of the same arena chunk that outlives `'a`. `ptr` is non-null
+        // (it came from a `NonNull` buffer base) and `T`-aligned (alignment of
+        // `[T; N]` equals that of `T`). `ManuallyDrop` keeps the source buffer
+        // and its elements from being dropped here; ownership of the elements
+        // transfers wholesale to the returned `Vec<T>`.
+        let buf = unsafe { ArenaBuf::from_raw_parts(core::ptr::NonNull::new_unchecked(ptr), new_len, new_cap) };
+        Vec::from_buf(buf, arena)
     }
 }
