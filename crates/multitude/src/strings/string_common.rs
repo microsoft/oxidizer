@@ -18,7 +18,7 @@ macro_rules! impl_arena_string_common {
             ///
             /// No allocation is performed until the first push.
             #[must_use]
-            pub const fn new_in(arena: &'a $crate::Arena<A>) -> Self {
+            pub(crate) const fn new_in(arena: &'a $crate::Arena<A>) -> Self {
                 Self {
                     inner: $crate::vec::Vec::new_in(arena),
                 }
@@ -32,7 +32,7 @@ macro_rules! impl_arena_string_common {
             /// Panics if the backing allocator fails. Use
             /// [`Self::try_with_capacity_in`] for a fallible variant.
             #[must_use]
-            pub fn with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Self {
+            pub(crate) fn with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Self {
                 Self {
                     inner: $crate::vec::Vec::with_capacity_in(cap, arena),
                 }
@@ -44,7 +44,7 @@ macro_rules! impl_arena_string_common {
             ///
             /// Returns [`allocator_api2::alloc::AllocError`] if the backing
             /// allocator fails.
-            pub fn try_with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Result<Self, allocator_api2::alloc::AllocError> {
+            pub(crate) fn try_with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Result<Self, allocator_api2::alloc::AllocError> {
                 Ok(Self {
                     inner: $crate::vec::Vec::try_with_capacity_in(cap, arena)?,
                 })
@@ -70,20 +70,6 @@ macro_rules! impl_arena_string_common {
                 self.inner.capacity()
             }
 
-            /// Return a raw const pointer to the string's elements.
-            #[must_use]
-            #[inline]
-            pub const fn as_ptr(&self) -> *const $Elem {
-                self.inner.as_ptr()
-            }
-
-            /// Return a raw mutable pointer to the string's elements.
-            #[allow(clippy::needless_pass_by_ref_mut, reason = "API shape mirrors std::String::as_mut_ptr")]
-            #[inline]
-            pub const fn as_mut_ptr(&mut self) -> *mut $Elem {
-                self.inner.as_mut_ptr()
-            }
-
             /// Reserve capacity for at least `additional` more elements.
             ///
             /// # Panics
@@ -106,12 +92,36 @@ macro_rules! impl_arena_string_common {
                 self.inner.try_reserve(additional)
             }
 
+            /// Reserve capacity for at least `additional` more elements,
+            /// without the amortized-growth slack of [`Self::reserve`].
+            #[inline]
+            pub fn reserve_exact(&mut self, additional: usize) {
+                self.inner.reserve_exact(additional);
+            }
+
+            /// Fallible variant of [`Self::reserve_exact`].
+            ///
+            /// # Errors
+            ///
+            /// Returns [`allocator_api2::alloc::AllocError`] if the backing
+            /// allocator fails.
+            #[inline]
+            pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), allocator_api2::alloc::AllocError> {
+                self.inner.try_reserve_exact(additional)
+            }
+
             /// Release any unused capacity back to the chunk's bump cursor.
             ///
             /// O(1) when the backing buffer is at the chunk's bump cursor;
             /// otherwise a no-op. See [`crate::vec::Vec::shrink_to_fit`].
             pub fn shrink_to_fit(&mut self) {
                 self.inner.shrink_to_fit();
+            }
+
+            /// Shrink the capacity with a lower bound (in elements). See
+            /// [`crate::vec::Vec::shrink_to`].
+            pub fn shrink_to(&mut self, min_capacity: usize) {
+                self.inner.shrink_to(min_capacity);
             }
 
             /// Truncates this string, removing all contents.

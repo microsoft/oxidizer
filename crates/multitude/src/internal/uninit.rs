@@ -339,7 +339,6 @@ impl<'a, T> UninitDrop<'a, T> {
         // storage exclusively.
         unsafe { &mut *ptr.as_ptr() }
     }
-
     /// Same as [`init`](Self::init) but returns a raw pointer with no
     /// lifetime. Used by the arena layer when the resulting reference's
     /// lifetime must be tied to `&Arena` rather than to the consumed

@@ -15,9 +15,11 @@ use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::Chunk;
+use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::drop_entry::DropEntry;
 use crate::internal::shared_chunk::SharedChunk;
+use crate::internal::uninit::{Uninit, UninitDrop};
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
 /// a chunk: value bytes + alignment padding, plus one [`DropEntry`] slot
@@ -325,6 +327,28 @@ impl<A: Allocator + Clone> Arena<A> {
     /// per-chunk reclamation rules and may extend its life past the
     /// arena via [`Arc`] smart pointers).
     ///
+    /// # Why `T: Send`?
+    ///
+    /// At first glance the bound is surprising — single-threaded arena
+    /// use feels like it shouldn't require it, and bump allocators such
+    /// as `bumpalo` allocate without it. The difference is destructors.
+    /// `bumpalo` leaks by default (it never runs `T::drop`), so a
+    /// migrated value is only ever bytes that nobody touches. multitude
+    /// instead registers a drop entry and runs `T::drop` **at arena
+    /// drop**. Because [`Arena`] is itself [`Send`], that teardown — and
+    /// therefore `T::drop` — may execute on a thread other than the one
+    /// that constructed the value. For a thread-affine `!Send` type
+    /// (e.g. holding an [`Rc`](std::rc::Rc) whose other clones live on
+    /// the original thread) that would be unsound, so `alloc` requires
+    /// `T: Send`.
+    ///
+    /// The bound is conservative: it is only strictly necessary for
+    /// `T: Drop`, but a static bound can't be conditioned on
+    /// `mem::needs_drop::<T>()` without specialization, so it is applied
+    /// uniformly. If you need to arena-allocate a `!Send` value, hold it
+    /// behind a smart pointer that runs its destructor eagerly on the
+    /// owning thread (e.g. [`Self::alloc_box`]).
+    ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
@@ -343,7 +367,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// ```
     #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc<T>(&self, value: T) -> &mut T {
+    pub fn alloc<T: Send>(&self, value: T) -> &mut T {
         (self.impl_alloc_value_with::<T, _>(move || value)).expect_alloc()
     }
 
@@ -359,7 +383,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the request.
     #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc<T>(&self, value: T) -> Result<&mut T, AllocError> {
+    pub fn try_alloc<T: Send>(&self, value: T) -> Result<&mut T, AllocError> {
         self.impl_alloc_value_with::<T, _>(move || value)
     }
 
@@ -377,7 +401,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// refcount bumped) but the chunk itself reclaims normally.
     #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> &mut T {
+    pub fn alloc_with<T: Send, F: FnOnce() -> T>(&self, f: F) -> &mut T {
         // See `alloc` for why the `Err` arm uses `panic_alloc!()` rather than
         // `unsafe { unreachable_unchecked() }`.
         (self.impl_alloc_value_with::<T, F>(f)).expect_alloc()
@@ -397,7 +421,7 @@ impl<A: Allocator + Clone> Arena<A> {
         reason = "Simple references: each call returns a fresh, disjoint &mut T; the borrow checker treats the returned reference as exclusive of its own region but harmlessly aliasing-with-shared with the &Arena borrow"
     )]
     #[inline]
-    pub fn try_alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
+    pub fn try_alloc_with<T: Send, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         self.impl_alloc_value_with::<T, F>(f)
     }
 
@@ -415,39 +439,54 @@ impl<A: Allocator + Clone> Arena<A> {
         loop {
             if const { mem::needs_drop::<T>() } {
                 if let Some(u) = self.try_reserve_local_with_drop::<T>() {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>());
                     return Ok(u.init(f()));
                 }
             } else if let Some(u) = self.try_reserve_local::<T>() {
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of::<T>());
                 return Ok(u.init(f()));
             }
             let wcp = worst_case_payload::<T>();
             if self.is_oversized_local(wcp) {
-                let ptr = self.alloc_oversized_local_with(wcp, |mutator| {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>());
-                    if const { mem::needs_drop::<T>() } {
-                        let ticket = mutator
-                            .try_alloc_uninit_with_drop::<T>()
-                            .expect("dedicated oversized chunk sized to fit one value + drop entry");
-                        ticket.init_raw(f())
-                    } else {
-                        let ticket = mutator
-                            .try_alloc_uninit::<T>()
-                            .expect("dedicated oversized chunk sized to fit one value");
-                        ticket.init_raw(f())
-                    }
-                })?;
-                // SAFETY: the chunk is retained in `retired_local` for the
-                // `&self` borrow, so `ptr` stays valid; the value is
-                // freshly initialized and uniquely held.
-                return Ok(unsafe { &mut *ptr.as_ptr() });
+                return self.alloc_oversized_value_with::<T, F>(wcp, f);
             }
             self.refill_local(wcp)?;
         }
+    }
+
+    /// Cold oversized-value fallback for [`Self::impl_alloc_value_with`].
+    ///
+    /// Kept `#[inline(never)]` so the fast-path body stays small
+    /// enough for the public scalar entry points to inline into their
+    /// callers; the bench shows that re-inlining this branch into
+    /// `impl_alloc_value_with` blows `alloc`'s instruction budget past
+    /// the inlining heuristic and turns every call site into a real
+    /// function call.
+    ///
+    /// Closure-free in the user-`f` argument: capturing `f` inside an
+    /// `impl FnOnce` passed to `alloc_oversized_local_with` would force
+    /// `f`'s environment (e.g. `&loop_counter` for a default-by-ref
+    /// capture) into an addressable stack slot, adding a per-iteration
+    /// spill on the hot path even when this cold branch is never taken.
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    fn alloc_oversized_value_with<T, F: FnOnce() -> T>(&self, wcp: usize, f: F) -> Result<&mut T, AllocError> {
+        let mutator = self.acquire_oversized_local_mutator(wcp)?;
+        let value_ptr = if const { mem::needs_drop::<T>() } {
+            let ticket = mutator
+                .try_alloc_uninit_with_drop::<T>()
+                .expect("dedicated oversized chunk sized to fit one value + drop entry");
+            ticket.init_raw(f())
+        } else {
+            let ticket = mutator
+                .try_alloc_uninit::<T>()
+                .expect("dedicated oversized chunk sized to fit one value");
+            ticket.init_raw(f())
+        };
+        self.retain_oversized_local_mutator(mutator);
+        // SAFETY: the chunk is retained in `retired_local` for the
+        // `&self` borrow, so `value_ptr` stays valid; the value is
+        // freshly initialized and uniquely held.
+        Ok(unsafe { &mut *value_ptr.as_ptr() })
     }
 
     /// Shared fast-path body for the `alloc_box` family.
@@ -509,40 +548,80 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError);
         }
         loop {
+            // A ZST whose allocation reserves no drop entry does not
+            // advance the bump cursor (`try_alloc(0, _)` is a no-op on
+            // the cursor), so back-to-back handouts would never refill
+            // the chunk. The per-allocation handout count is tracked in
+            // the non-atomic `local_shared_count` and draws down the
+            // pre-credited ref surplus; an unbounded run from a single
+            // chunk could exhaust that surplus, driving the chunk's
+            // atomic refcount to zero while it is still installed
+            // (use-after-free) or underflowing the surplus reconciliation
+            // at retire (double-free). Pre-reserve a 1-byte tag so each
+            // such handout advances the cursor, bounding per-chunk
+            // handouts to the chunk capacity (well below the surplus).
+            // The drop-entry path below already advances `drop_top`, so
+            // drop-registering reservations need no tag. Mirrors the
+            // guard in `impl_alloc_uninit_smart`.
+            if const { mem::size_of::<T>() == 0 && !(REGISTER_DROP && mem::needs_drop::<T>()) }
+                && self.current_shared().try_alloc(1, 1).is_none()
+            {
+                self.refill_shared(worst_case_payload::<T>())?;
+                continue;
+            }
             if const { REGISTER_DROP && mem::needs_drop::<T>() } {
                 if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_with_drop::<T>() {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>());
-                    return Ok(init_smart_slot_with_drop::<T, A, F>(uninit, chunk_ptr, f));
+                    let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                    return Ok(init_smart_slot_with_drop::<T, A, F>(uninit, chunk_ref, f));
                 }
             } else if let Some((uninit, chunk_ptr)) = self.try_reserve_shared::<T>() {
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of::<T>());
-                return Ok(init_smart_slot::<T, A, F>(uninit, chunk_ptr, f));
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                return Ok(init_smart_slot::<T, A, F>(uninit, chunk_ref, f));
             }
             // Worst-case payload includes a drop entry for `T: Drop`
             // so refill always sizes the chunk for the with-drop
             // reservation above.
             let wcp = worst_case_payload::<T>();
             if self.is_oversized_shared(wcp) {
-                return self.alloc_oversized_shared_with(wcp, |mutator, chunk_ptr| {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>());
-                    if const { REGISTER_DROP && mem::needs_drop::<T>() } {
-                        let ticket = mutator
-                            .try_alloc_uninit_with_drop::<T>()
-                            .expect("dedicated oversized chunk sized to fit one value + drop entry");
-                        init_smart_slot_with_drop::<T, A, F>(ticket, chunk_ptr, f)
-                    } else {
-                        let ticket = mutator
-                            .try_alloc_uninit::<T>()
-                            .expect("dedicated oversized chunk sized to fit one value");
-                        init_smart_slot::<T, A, F>(ticket, chunk_ptr, f)
-                    }
-                });
+                return self.alloc_oversized_smart_with::<T, F, REGISTER_DROP>(wcp, f);
             }
             self.refill_shared(wcp)?;
         }
+    }
+
+    /// Cold oversized-smart-pointer fallback for
+    /// [`Self::impl_alloc_smart_with`].
+    ///
+    /// Kept `#[inline(never)]` for the same reason as
+    /// [`Self::alloc_oversized_value_with`]: the fast-path body must
+    /// stay small enough for the public smart-pointer entry points to
+    /// inline; closure-free in `f` to avoid spilling the user closure's
+    /// environment to memory on the hot path.
+    #[cold]
+    #[inline(never)]
+    fn alloc_oversized_smart_with<T, F: FnOnce() -> T, const REGISTER_DROP: bool>(
+        &self,
+        wcp: usize,
+        f: F,
+    ) -> Result<NonNull<T>, AllocError> {
+        let (mutator, chunk_ptr) = self.acquire_oversized_shared_mutator(wcp)?;
+        let ptr = if const { REGISTER_DROP && mem::needs_drop::<T>() } {
+            let ticket = mutator
+                .try_alloc_uninit_with_drop::<T>()
+                .expect("dedicated oversized chunk sized to fit one value + drop entry");
+            let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+            init_smart_slot_with_drop::<T, A, F>(ticket, chunk_ref, f)
+        } else {
+            let ticket = mutator
+                .try_alloc_uninit::<T>()
+                .expect("dedicated oversized chunk sized to fit one value");
+            let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+            init_smart_slot::<T, A, F>(ticket, chunk_ref, f)
+        };
+        // `mutator` drops here, releasing its `+1`. The smart-pointer
+        // `chunk_ref` taken above owns the surviving `+1`.
+        drop(mutator);
+        Ok(ptr)
     }
 
     /// Shared body for the uninit/zeroed `Arc<MaybeUninit<T>>` family,
@@ -585,7 +664,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 continue;
             }
             if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_with_drop::<T>() {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let value = if zeroed {
                     mem::MaybeUninit::<T>::zeroed()
                 } else {
@@ -595,8 +674,6 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 // Publish the just-written placeholder so `assume_init` sees it.
                 self.current_shared().publish_drop_count();
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of::<T>());
                 // SAFETY: the chunk was bumped +1 for this `Arc` and a
                 // placeholder drop entry is reserved and published;
                 // `assume_init` commits the real shim once the value is set.
@@ -616,8 +693,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     };
                     let ptr = ticket.into_uninit_placeholder(value);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>());
                     // SAFETY: see the non-oversized branch above. The
                     // temporary mutator's `Drop` publishes the drop-entry
                     // count before this function returns, so `assume_init`
@@ -644,19 +719,15 @@ impl<A: Allocator + Clone> Arena<A> {
             return Err(AllocError);
         }
         reject_uninit_slice_arc_too_long(len)?;
-        #[cfg(feature = "stats")]
-        let bytes = mem::size_of::<T>().saturating_mul(len);
         // Refill hint accounts for prefix + payload alignment slack +
         // payload bytes + drop entry.
         let min_payload = super::alloc_prefixed::worst_case_thin_slice_payload::<T>(len);
         loop {
             if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice_with_drop::<T>(len) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let ptr = uninit.into_uninit_slice_placeholder(zeroed);
                 let _ = chunk_ref.forget();
                 self.current_shared().publish_drop_count();
-                #[cfg(feature = "stats")]
-                self.record_alloc(bytes);
                 // SAFETY: as in `impl_alloc_uninit_arc`; the placeholder slice
                 // drop entry is reserved and published for `assume_init`.
                 return Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) });
@@ -669,8 +740,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     let ptr = ticket.into_uninit_slice_placeholder(zeroed);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(bytes);
                     // SAFETY: see the non-oversized branch above.
                     unsafe { Arc::from_raw(ptr.cast::<u8>()) }
                 });
@@ -696,12 +765,7 @@ fn reject_uninit_slice_arc_too_long(len: usize) -> Result<(), AllocError> {
 /// of [`Arena::impl_alloc_smart_with`] so the closure-panic path runs
 /// the refcount-release guard.
 #[inline(always)]
-fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(
-    uninit: crate::internal::uninit::Uninit<'_, T>,
-    chunk_ptr: NonNull<SharedChunk<A>>,
-    f: F,
-) -> NonNull<T> {
-    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(uninit: Uninit<'_, T>, chunk_ref: ChunkRef<A>, f: F) -> NonNull<T> {
     let value = f();
     let _ = chunk_ref.forget();
     uninit.init_raw(value)
@@ -712,11 +776,10 @@ fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(
 /// value's `Drop` runs from the chunk's drop-list at teardown.
 #[inline(always)]
 fn init_smart_slot_with_drop<T, A: Allocator + Clone, F: FnOnce() -> T>(
-    uninit: crate::internal::uninit::UninitDrop<'_, T>,
-    chunk_ptr: NonNull<SharedChunk<A>>,
+    uninit: UninitDrop<'_, T>,
+    chunk_ref: ChunkRef<A>,
     f: F,
 ) -> NonNull<T> {
-    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
     let value = f();
     let _ = chunk_ref.forget();
     uninit.init_raw(value)
@@ -728,9 +791,7 @@ fn init_smart_slot_with_drop<T, A: Allocator + Clone, F: FnOnce() -> T>(
 /// [`Arena::init_arc_slot`] so the unsafe `inc_ref`/`adopt` pair lives
 /// in one place.
 #[inline(always)]
-pub(crate) fn acquire_shared_chunk_ref<A: Allocator + Clone>(
-    chunk_ptr: NonNull<SharedChunk<A>>,
-) -> crate::internal::chunk_ref::ChunkRef<A> {
+pub(crate) fn acquire_shared_chunk_ref<A: Allocator + Clone>(chunk_ptr: NonNull<SharedChunk<A>>) -> ChunkRef<A> {
     // SAFETY: `chunk_ptr` belongs to a currently-installed shared
     // mutator and the arena holds a +1 on it for the duration of
     // `&self`; we bump for the soon-to-be smart pointer and adopt
@@ -740,6 +801,6 @@ pub(crate) fn acquire_shared_chunk_ref<A: Allocator + Clone>(
     // semantics of the `alloc_box_with` / `alloc_arc_with` family).
     unsafe {
         chunk_ptr.as_ref().inc_ref();
-        crate::internal::chunk_ref::ChunkRef::<A>::adopt(chunk_ptr)
+        ChunkRef::<A>::adopt(chunk_ptr)
     }
 }

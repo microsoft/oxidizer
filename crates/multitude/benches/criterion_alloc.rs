@@ -42,12 +42,45 @@ const SLICE_LEN: usize = 8;
 ///    `warm_bump` (which similarly primes its cursor with a no-op
 ///    alloc) and isolates the comparison to "in-chunk bump cost
 ///    only" with no cold refill amortized into the per-op number.
+///
+/// Only used by benches that exercise **both** flavors in the timed
+/// region: the `vec_builder` benches build a local `Vec` and then
+/// `into_arc()` it. Benches that touch a single flavor must use
+/// [`warm_arena_local`] / [`warm_arena_shared`] instead: priming the
+/// unused flavor allocates a dead-weight 64 KiB chunk that doubles the
+/// arena's memory footprint and inflates the measured per-op time
+/// through extra cache/TLB pressure at the batch working-set sizes
+/// criterion picks (verified: priming the unused shared chunk made
+/// `alloc_slice_copy` measure ~9x slower than its true cost).
 fn warm_arena() -> Arena {
     let arena = Arena::builder()
         .with_capacity_local(64 * 1024)
         .with_capacity_shared(64 * 1024)
         .build();
     let _: &mut u64 = arena.alloc(0_u64);
+    let _ = arena.alloc_arc(0_u64);
+    arena
+}
+
+/// Like [`warm_arena`] but primes **only** the local (ref/value)
+/// flavor. Used by benches whose timed region allocates exclusively
+/// from the local chunk (`alloc`, `alloc_str`, `alloc_slice_*` ref,
+/// `alloc_string*`). Priming the shared flavor here would add a
+/// dead-weight 64 KiB chunk — see [`warm_arena`].
+fn warm_arena_local() -> Arena {
+    let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+    let _: &mut u64 = arena.alloc(0_u64);
+    arena
+}
+
+/// Like [`warm_arena`] but primes **only** the shared (`Box`/`Arc`)
+/// flavor. Used by benches whose timed region allocates exclusively
+/// from the shared chunk (every `*_box` / `*_arc` bench — both smart
+/// pointers are backed by refcounted shared chunks). Priming the local
+/// flavor here would add a dead-weight 64 KiB chunk — see
+/// [`warm_arena`].
+fn warm_arena_shared() -> Arena {
+    let arena = Arena::builder().with_capacity_shared(64 * 1024).build();
     let _ = arena.alloc_arc(0_u64);
     arena
 }
@@ -84,7 +117,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
 
     g.bench_function("alloc", |b| {
         b.iter_batched(
-            warm_arena,
+            warm_arena_local,
             |arena| {
                 for i in 0..N {
                     let _: &mut u64 = black_box(arena.alloc(black_box(i as u64)));
@@ -96,7 +129,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_with", |b| {
         b.iter_batched(
-            warm_arena,
+            warm_arena_local,
             |arena| {
                 for i in 0..N {
                     let _: &mut u64 = black_box(arena.alloc_with(|| black_box(i as u64)));
@@ -109,7 +142,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
 
     g.bench_function("alloc_box", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Box<u64>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Box<u64>>::with_capacity(N)),
             |(arena, mut h)| {
                 for i in 0..N {
                     h.push(arena.alloc_box(black_box(i as u64)));
@@ -121,7 +154,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_box_with", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Box<u64>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Box<u64>>::with_capacity(N)),
             |(arena, mut h)| {
                 for i in 0..N {
                     h.push(arena.alloc_box_with(|| black_box(i as u64)));
@@ -133,7 +166,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_uninit_box", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Box<MaybeUninit<u64>>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Box<MaybeUninit<u64>>>::with_capacity(N)),
             |(arena, mut h)| {
                 for _ in 0..N {
                     h.push(arena.alloc_uninit_box::<u64>());
@@ -145,7 +178,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_zeroed_box", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Box<MaybeUninit<u64>>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Box<MaybeUninit<u64>>>::with_capacity(N)),
             |(arena, mut h)| {
                 for _ in 0..N {
                     h.push(arena.alloc_zeroed_box::<u64>());
@@ -158,7 +191,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
 
     g.bench_function("alloc_arc", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Arc<u64>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Arc<u64>>::with_capacity(N)),
             |(arena, mut h)| {
                 for i in 0..N {
                     h.push(arena.alloc_arc(black_box(i as u64)));
@@ -170,7 +203,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_arc_with", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Arc<u64>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Arc<u64>>::with_capacity(N)),
             |(arena, mut h)| {
                 for i in 0..N {
                     h.push(arena.alloc_arc_with(|| black_box(i as u64)));
@@ -182,7 +215,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_uninit_arc", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Arc<MaybeUninit<u64>>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Arc<MaybeUninit<u64>>>::with_capacity(N)),
             |(arena, mut h)| {
                 for _ in 0..N {
                     h.push(arena.alloc_uninit_arc::<u64>());
@@ -194,7 +227,7 @@ fn bench_alloc_u64(c: &mut Criterion) {
     });
     g.bench_function("alloc_zeroed_arc", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Arc<MaybeUninit<u64>>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Arc<MaybeUninit<u64>>>::with_capacity(N)),
             |(arena, mut h)| {
                 for _ in 0..N {
                     h.push(arena.alloc_zeroed_arc::<u64>());
@@ -242,10 +275,10 @@ fn bench_alloc_str(c: &mut Criterion) {
 
     g.bench_function("alloc_str", |b| {
         b.iter_batched(
-            warm_arena,
+            warm_arena_local,
             |arena| {
                 for w in &words {
-                    let _: &mut str = black_box(arena.alloc_str(black_box(w)));
+                    let _: &mut str = black_box(arena.alloc_str(black_box(w.as_str())));
                 }
                 arena
             },
@@ -254,10 +287,10 @@ fn bench_alloc_str(c: &mut Criterion) {
     });
     g.bench_function("alloc_str_box", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Box<str>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Box<str>>::with_capacity(N)),
             |(arena, mut o)| {
                 for w in &words {
-                    o.push(arena.alloc_str_box(black_box(w)));
+                    o.push(arena.alloc_str_box(black_box(w.as_str())));
                 }
                 (o, arena)
             },
@@ -266,10 +299,10 @@ fn bench_alloc_str(c: &mut Criterion) {
     });
     g.bench_function("alloc_str_arc", |b| {
         b.iter_batched(
-            || (warm_arena(), Vec::<Arc<str>>::with_capacity(N)),
+            || (warm_arena_shared(), Vec::<Arc<str>>::with_capacity(N)),
             |(arena, mut o)| {
                 for w in &words {
-                    o.push(arena.alloc_str_arc(black_box(w)));
+                    o.push(arena.alloc_str_arc(black_box(w.as_str())));
                 }
                 (o, arena)
             },
@@ -281,7 +314,7 @@ fn bench_alloc_str(c: &mut Criterion) {
             warm_bump,
             |bump| {
                 for w in &words {
-                    let _: &mut str = black_box(bump.alloc_str(black_box(w)));
+                    let _: &mut str = black_box(bump.alloc_str(black_box(w.as_str())));
                 }
                 bump
             },
@@ -303,7 +336,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
         ($name:literal, $body:expr) => {
             g.bench_function($name, |b| {
                 b.iter_batched(
-                    warm_arena,
+                    warm_arena_local,
                     |arena| {
                         let r = $body(&arena);
                         // Return owned values so their `Drop` runs outside the timed region.
@@ -318,7 +351,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
         ($name:literal, $T:ty, $body:expr) => {
             g.bench_function($name, |b| {
                 b.iter_batched(
-                    || (warm_arena(), Vec::<$T>::with_capacity(N)),
+                    || (warm_arena_shared(), Vec::<$T>::with_capacity(N)),
                     |(arena, mut o)| {
                         $body(&arena, &mut o);
                         (o, arena)
@@ -347,7 +380,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
     // ref
     bench_arena!("alloc_slice_copy", |arena: &Arena| {
         for s in &slices {
-            let _: &mut [u64] = black_box(arena.alloc_slice_copy(black_box(s)));
+            let _: &mut [u64] = black_box(arena.alloc_slice_copy(black_box(s.as_slice())));
         }
     });
     bench_arena!("alloc_slice_clone", |arena: &Arena| {
@@ -369,7 +402,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
     // box
     bench_arena_collect!("alloc_slice_copy_box", Box<[u64]>, |arena: &Arena, o: &mut Vec<Box<[u64]>>| {
         for s in &slices {
-            o.push(arena.alloc_slice_copy_box(black_box(s)));
+            o.push(arena.alloc_slice_copy_box(black_box(s.as_slice())));
         }
     });
     bench_arena_collect!("alloc_slice_clone_box", Box<[u64]>, |arena: &Arena, o: &mut Vec<Box<[u64]>>| {
@@ -407,7 +440,7 @@ fn bench_alloc_slice(c: &mut Criterion) {
     // arc
     bench_arena_collect!("alloc_slice_copy_arc", Arc<[u64]>, |arena: &Arena, o: &mut Vec<Arc<[u64]>>| {
         for s in &slices {
-            o.push(arena.alloc_slice_copy_arc(black_box(s)));
+            o.push(arena.alloc_slice_copy_arc(black_box(s.as_slice())));
         }
     });
     bench_arena_collect!("alloc_slice_clone_arc", Arc<[u64]>, |arena: &Arena, o: &mut Vec<Arc<[u64]>>| {
@@ -476,28 +509,36 @@ fn bench_string_builder(c: &mut Criterion) {
 
     g.bench_function("alloc_string", |b| {
         b.iter_batched(
-            warm_arena,
+            warm_arena_local,
             |arena| {
                 let mut s = arena.alloc_string();
                 for w in &words {
                     s.push_str(black_box(w.as_str()));
                 }
-                let frozen = s.into_arena_box_str();
-                (frozen, arena)
+                // Mirror bumpalo's `into_bump_str`: take a `&str` view of
+                // the in-place chunk storage with no copy into a `Box<str>`.
+                // Dropping `s` is ~free (`u8` has no drop; storage is
+                // reclaimed at arena teardown) and must precede returning
+                // `arena`, which `s` borrows.
+                black_box(s.as_str());
+                drop(s);
+                arena
             },
             BatchSize::SmallInput,
         );
     });
     g.bench_function("alloc_string_with_capacity", |b| {
         b.iter_batched(
-            warm_arena,
+            warm_arena_local,
             |arena| {
                 let mut s = arena.alloc_string_with_capacity(N * 6);
                 for w in &words {
                     s.push_str(black_box(w.as_str()));
                 }
-                let frozen = s.into_arena_box_str();
-                (frozen, arena)
+                // See `alloc_string` above.
+                black_box(s.as_str());
+                drop(s);
+                arena
             },
             BatchSize::SmallInput,
         );
@@ -551,7 +592,7 @@ fn bench_vec_builder(c: &mut Criterion) {
                 for &i in &ints {
                     v.push(black_box(i));
                 }
-                let frozen = v.into_arena_arc();
+                let frozen = multitude::Arc::from(v);
                 (frozen, arena)
             },
             BatchSize::SmallInput,
@@ -565,7 +606,7 @@ fn bench_vec_builder(c: &mut Criterion) {
                 for &i in &ints {
                     v.push(black_box(i));
                 }
-                let frozen = v.into_arena_arc();
+                let frozen = multitude::Arc::from(v);
                 (frozen, arena)
             },
             BatchSize::SmallInput,
@@ -611,11 +652,10 @@ fn bench_vec_builder(c: &mut Criterion) {
 fn bench_arena_creation(c: &mut Criterion) {
     let mut g = c.benchmark_group("arena_creation");
 
-    g.bench_function("multitude", |b| {
+    g.bench_function("multitude_new", |b| {
         b.iter(|| {
             let arena = Arena::new();
             black_box(&arena);
-            // Drop is part of the lifecycle — included in the timed region.
             drop(arena);
         });
     });

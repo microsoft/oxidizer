@@ -15,7 +15,9 @@
 //! `const { mem::needs_drop::<T>() }` to specialize away the drop-entry
 //! reservation for trivial-drop element types.
 
+use core::hint::assert_unchecked;
 use core::mem;
+use core::ptr::NonNull;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
@@ -69,6 +71,38 @@ fn worst_case_slice_payload<T>(len: usize) -> usize {
     }
 }
 
+/// Empty `&mut [T]` backed by a well-aligned dangling pointer.
+///
+/// Used by the `impl_alloc_slice_*` fast paths to bypass the reservation
+/// machinery on `len == 0`: a length-0 reservation would otherwise trip
+/// the zero-size probe-byte guard in `try_alloc` (which exists to keep
+/// smart-pointer value pointers strictly inside the chunk for header
+/// recovery). For a plain `&mut [T]` there is no header recovery, and
+/// Rust permits a zero-length slice to alias a well-aligned dangling
+/// pointer.
+#[inline(always)]
+#[allow(clippy::mut_from_ref, reason = "the returned empty slice borrows nothing")]
+fn empty_slice<'a, T>() -> &'a mut [T] {
+    // SAFETY: `NonNull::<T>::dangling()` is well-aligned and non-null;
+    // an empty `&mut [T]` is well-defined regardless of the pointer
+    // value as long as alignment is correct.
+    unsafe { core::slice::from_raw_parts_mut(NonNull::<T>::dangling().as_ptr(), 0) }
+}
+
+/// Optimizer hint: tells codegen that `len` is non-zero. Every caller
+/// guards `len == 0` with an early return first, so this lets LLVM fold
+/// the `size.max(1)` clamp in the reservation probe down to `size`.
+#[inline(always)]
+// Mutation testing is suppressed: this is purely an optimization hint
+// with no runtime effect. `assert_unchecked(len >= 0)` is vacuously
+// true for `usize` and behaves identically to `len > 0`, so the
+// `>`→`>=` mutant is an equivalent mutant no behavioral test can detect.
+#[cfg_attr(test, mutants::skip)]
+fn assume_nonzero_len(len: usize) {
+    // SAFETY: callers handle `len == 0` via an early return before this.
+    unsafe { assert_unchecked(len > 0) };
+}
+
 impl<A: Allocator + Clone> Arena<A> {
     /// Bump-allocate a copy of `slice` (element-by-element `Copy`) into the arena.
     ///
@@ -112,7 +146,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// panic propagates.
     #[must_use]
     #[inline]
-    pub fn alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> &mut [T] {
+    pub fn alloc_slice_fill_with<T: Send, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> &mut [T] {
         (self.impl_alloc_slice_fill_with::<T, F>(len, f)).expect_alloc()
     }
 
@@ -128,7 +162,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// If `f` panics, already-initialized elements are dropped.
     #[allow(clippy::mut_from_ref, reason = "simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
+    pub fn try_alloc_slice_fill_with<T: Send, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
         self.impl_alloc_slice_fill_with::<T, F>(len, f)
     }
 
@@ -146,7 +180,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_slice_clone<T: Clone>(&self, slice: impl AsRef<[T]>) -> &mut [T] {
+    pub fn alloc_slice_clone<T: Clone + Send>(&self, slice: impl AsRef<[T]>) -> &mut [T] {
         (self.impl_alloc_slice_clone::<T>(slice.as_ref())).expect_alloc()
     }
 
@@ -163,7 +197,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// are dropped before the panic propagates.
     #[allow(clippy::mut_from_ref, reason = "simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_slice_clone<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<&mut [T], AllocError> {
+    pub fn try_alloc_slice_clone<T: Clone + Send>(&self, slice: impl AsRef<[T]>) -> Result<&mut [T], AllocError> {
         self.impl_alloc_slice_clone::<T>(slice.as_ref())
     }
 
@@ -181,7 +215,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `ExactSizeIterator::len()` reported.
     #[must_use]
     #[inline]
-    pub fn alloc_slice_fill_iter<T, I>(&self, iter: I) -> &mut [T]
+    pub fn alloc_slice_fill_iter<T: Send, I>(&self, iter: I) -> &mut [T]
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -202,7 +236,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `ExactSizeIterator::len()` reported.
     #[inline]
     #[allow(clippy::mut_from_ref, reason = "see `try_alloc_with`")]
-    pub fn try_alloc_slice_fill_iter<T, I>(&self, iter: I) -> Result<&mut [T], AllocError>
+    pub fn try_alloc_slice_fill_iter<T: Send, I>(&self, iter: I) -> Result<&mut [T], AllocError>
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -219,27 +253,66 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_copy<T: Copy>(&self, src: &[T]) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
         let len = src.len();
-        let refill_hint = worst_case_slice_payload::<T>(len);
+        if len == 0 {
+            return Ok(empty_slice::<T>());
+        }
+        // `len == 0` was handled above; hint the optimizer so the
+        // `size.max(1)` clamp in `try_alloc`'s probe folds to `size`.
+        assume_nonzero_len(len);
+        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
+        // `usize`. Hoisting the precomputed byte size lets the inner
+        // reservation helper skip the `checked_mul` overflow guard,
+        // removing a `shr/jne` pair from the bump-copy loop.
+        let size = mem::size_of_val(src);
         loop {
-            if let Some(u) = self.try_reserve_local_slice::<T>(len) {
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of_val(src));
+            if let Some(u) = self.try_reserve_local_slice_with_size::<T>(len, size) {
                 return Ok(u.init_copy_from_slice(src));
             }
-            if self.is_oversized_local(refill_hint) {
-                let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
-                    let ticket = mutator
-                        .try_alloc_uninit_slice::<T>(len)
-                        .expect("dedicated oversized chunk sized to fit slice");
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of_val(src));
-                    ticket.init_copy_from_slice_ptr(src)
-                })?;
-                // SAFETY: chunk retained in `retired_local` for `&self`.
-                return Ok(unsafe { ptr.as_mut() });
+            if let Some(slice) = self.refill_or_alloc_oversized_slice_copy::<T>(src)? {
+                return Ok(slice);
             }
-            self.refill_local(refill_hint)?;
         }
+    }
+
+    /// Cold fall-back for [`Self::impl_alloc_slice_copy`]: either refills
+    /// the current local chunk (return `Ok(None)` so the caller retries)
+    /// or returns the slice from a dedicated oversized chunk
+    /// (`Ok(Some(_))`). `refill_hint` is computed here so the hot loop
+    /// in the caller doesn't keep it live across iterations.
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    // Mutation testing is suppressed: the whole-body `-> Ok(None)`
+    // replacement drops the refill side effect, so the caller's
+    // reserve→refill retry loop spins forever (the suite hangs rather
+    // than fails). The `Ok(None)` return is the correct "refilled,
+    // please retry" signal.
+    #[cfg_attr(test, mutants::skip)]
+    fn refill_or_alloc_oversized_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
+        let refill_hint = worst_case_slice_payload::<T>(src.len());
+        if self.is_oversized_local(refill_hint) {
+            return Ok(Some(self.alloc_oversized_slice_copy::<T>(refill_hint, src)?));
+        }
+        self.refill_local(refill_hint)?;
+        Ok(None)
+    }
+
+    /// Cold oversized-fallback for [`Self::impl_alloc_slice_copy`].
+    /// Kept out-of-line so the hot loop doesn't keep `src`/`len`
+    /// addressable for a captured-by-move closure environment (see the
+    /// rationale on [`Self::alloc_oversized_value_with`]).
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    fn alloc_oversized_slice_copy<T: Copy>(&self, refill_hint: usize, src: &[T]) -> Result<&mut [T], AllocError> {
+        let mutator = self.acquire_oversized_local_mutator(refill_hint)?;
+        let ticket = mutator
+            .try_alloc_uninit_slice::<T>(src.len())
+            .expect("dedicated oversized chunk sized to fit slice");
+        let mut ptr = ticket.init_copy_from_slice_ptr(src);
+        self.retain_oversized_local_mutator(mutator);
+        // SAFETY: chunk retained in `retired_local` for `&self`.
+        Ok(unsafe { ptr.as_mut() })
     }
 
     /// Closure-free fast path for `alloc_slice_clone` /
@@ -253,40 +326,62 @@ impl<A: Allocator + Clone> Arena<A> {
         reject_over_aligned::<T>()?;
         reject_drop_slice_too_long::<T>(src.len())?;
         let len = src.len();
-        let refill_hint = worst_case_slice_payload::<T>(len);
+        if len == 0 {
+            return Ok(empty_slice::<T>());
+        }
+        // See `impl_alloc_slice_copy`.
+        assume_nonzero_len(len);
+        // See `impl_alloc_slice_copy`. Hoisted byte size lets the
+        // `!needs_drop` reservation arm skip the `checked_mul` overflow
+        // guard. The drop-tracked arm still uses the byte-size-unaware
+        // helper because it additionally reserves a drop entry slot.
+        let size = mem::size_of_val(src);
         loop {
             if const { mem::needs_drop::<T>() } {
                 if let Some(u) = self.try_reserve_local_slice_with_drop::<T>(len) {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of_val(src));
                     return Ok(u.init_clone_from_slice(src));
                 }
-            } else if let Some(u) = self.try_reserve_local_slice::<T>(len) {
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of_val(src));
+            } else if let Some(u) = self.try_reserve_local_slice_with_size::<T>(len, size) {
                 return Ok(u.init_clone_from_slice(src));
             }
-            if self.is_oversized_local(refill_hint) {
-                let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of_val(src));
-                    if const { mem::needs_drop::<T>() } {
-                        let ticket = mutator
-                            .try_alloc_uninit_slice_with_drop::<T>(len)
-                            .expect("dedicated oversized chunk sized to fit slice + drop entry");
-                        ticket.init_with_ptr(|i| src[i].clone())
-                    } else {
-                        let ticket = mutator
-                            .try_alloc_uninit_slice::<T>(len)
-                            .expect("dedicated oversized chunk sized to fit slice");
-                        ticket.init_with_ptr(|i| src[i].clone())
-                    }
-                })?;
-                // SAFETY: chunk retained in `retired_local` for `&self`.
-                return Ok(unsafe { ptr.as_mut() });
+            if let Some(slice) = self.refill_or_alloc_oversized_slice_clone::<T>(src)? {
+                return Ok(slice);
             }
-            self.refill_local(refill_hint)?;
         }
+    }
+
+    /// Cold fall-back for [`Self::impl_alloc_slice_clone`]. See
+    /// [`Self::refill_or_alloc_oversized_slice_copy`] for the rationale
+    /// behind the split.
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    // Mutation testing is suppressed: see
+    // `refill_or_alloc_oversized_slice_copy` — `-> Ok(None)` spins the
+    // caller's retry loop forever.
+    #[cfg_attr(test, mutants::skip)]
+    fn refill_or_alloc_oversized_slice_clone<T: Clone>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
+        let len = src.len();
+        let refill_hint = worst_case_slice_payload::<T>(len);
+        if self.is_oversized_local(refill_hint) {
+            let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
+                if const { mem::needs_drop::<T>() } {
+                    let ticket = mutator
+                        .try_alloc_uninit_slice_with_drop::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit slice + drop entry");
+                    ticket.init_with_ptr(|i| src[i].clone())
+                } else {
+                    let ticket = mutator
+                        .try_alloc_uninit_slice::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit slice");
+                    ticket.init_with_ptr(|i| src[i].clone())
+                }
+            })?;
+            // SAFETY: chunk retained in `retired_local` for `&self`.
+            return Ok(Some(unsafe { ptr.as_mut() }));
+        }
+        self.refill_local(refill_hint)?;
+        Ok(None)
     }
 
     /// Closure-bearing fast path for `alloc_slice_fill_with` /
@@ -301,27 +396,26 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_fill_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<&mut [T], AllocError> {
         reject_over_aligned::<T>()?;
         reject_drop_slice_too_long::<T>(len)?;
+        if len == 0 {
+            return Ok(empty_slice::<T>());
+        }
+        // See `impl_alloc_slice_copy`.
+        assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
         let mut f = Some(f);
         loop {
             if const { mem::needs_drop::<T>() } {
                 if let Some(u) = self.try_reserve_local_slice_with_drop::<T>(len) {
                     let f = f.take().expect("with closure taken twice");
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>() * len);
                     return Ok(u.init_with(f));
                 }
             } else if let Some(u) = self.try_reserve_local_slice::<T>(len) {
                 let f = f.take().expect("with closure taken twice");
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of::<T>() * len);
                 return Ok(u.init_with(f));
             }
             if self.is_oversized_local(refill_hint) {
                 let f = f.take().expect("with closure taken twice");
                 let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>() * len);
                     if const { mem::needs_drop::<T>() } {
                         let ticket = mutator
                             .try_alloc_uninit_slice_with_drop::<T>(len)
@@ -353,27 +447,30 @@ impl<A: Allocator + Clone> Arena<A> {
         reject_over_aligned::<T>()?;
         let len = iter.len();
         reject_drop_slice_too_long::<T>(len)?;
+        if len == 0 {
+            // Drop the iterator without consuming it: the contract is
+            // "fill `len` slots from the iterator", so a zero-length
+            // fill consumes nothing.
+            drop(iter);
+            return Ok(empty_slice::<T>());
+        }
+        // See `impl_alloc_slice_copy`.
+        assume_nonzero_len(len);
         let refill_hint = worst_case_slice_payload::<T>(len);
         let mut iter = Some(iter);
         loop {
             if const { mem::needs_drop::<T>() } {
                 if let Some(u) = self.try_reserve_local_slice_with_drop::<T>(len) {
                     let it = iter.take().expect("iterator taken twice");
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>() * len);
                     return Ok(u.init_from_iter(it));
                 }
             } else if let Some(u) = self.try_reserve_local_slice::<T>(len) {
                 let it = iter.take().expect("iterator taken twice");
-                #[cfg(feature = "stats")]
-                self.record_alloc(mem::size_of::<T>() * len);
                 return Ok(u.init_from_iter(it));
             }
             if self.is_oversized_local(refill_hint) {
                 let mut it = iter.take().expect("iterator taken twice");
                 let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(mem::size_of::<T>() * len);
                     if const { mem::needs_drop::<T>() } {
                         let ticket = mutator
                             .try_alloc_uninit_slice_with_drop::<T>(len)
