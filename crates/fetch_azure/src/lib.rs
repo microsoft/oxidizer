@@ -6,42 +6,63 @@
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_azure/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_azure/favicon.ico")]
 
-//! Use [`fetch`] as the HTTP transport for the Azure SDK for Rust.
+//! Bundle [`fetch`] and [`anyspawn`] as Azure SDK abstractions.
 //!
 //! The Azure SDK abstracts its HTTP transport behind the
-//! [`typespec_client_core::http::HttpClient`] trait. This crate provides
-//! [`FetchHttpClient`], an adapter that implements that trait on top of a
-//! [`fetch::HttpClient`], so Azure SDK pipelines can run over `fetch` and
-//! benefit from its resilience, observability, and runtime features.
+//! [`azure_core::http::HttpClient`] trait and its task spawning, sleeping, and
+//! yielding behind the [`azure_core::async_runtime::AsyncRuntime`] trait. This
+//! crate provides adapters for both:
+//!
+//! - [`FetchHttpClient`] implements [`HttpClient`] on top of a
+//!   [`fetch::HttpClient`], so Azure SDK pipelines run over `fetch` and benefit
+//!   from its resilience and observability.
+//! - [`SpawnerRuntime`] implements [`AsyncRuntime`] on top of an
+//!   [`anyspawn::Spawner`], so the Azure SDK spawns and sleeps on the runtime of
+//!   your choice.
 //!
 //! # Example
 //!
 //! ```
 //! use std::sync::Arc;
 //!
-//! use fetch::HttpClient;
-//! use fetch_azure::FetchHttpClient;
-//! use typespec_client_core::http::HttpClient as AzureHttpClient;
+//! use anyspawn::Spawner;
+//! use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
+//! use azure_core::http::HttpClient;
+//! use fetch::HttpClient as FetchClient;
+//! use fetch_azure::{new_async_runtime, new_http_client};
 //!
-//! // Wrap an existing `fetch` client so it can be handed to the Azure SDK.
-//! fn as_azure_transport(client: HttpClient) -> Arc<dyn AzureHttpClient> {
-//!     Arc::new(FetchHttpClient::new(client))
+//! // Adapt a `fetch` client into an Azure SDK transport.
+//! fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
+//!     new_http_client(client)
 //! }
-//! # let _ = as_azure_transport;
+//!
+//! // Install an `anyspawn`-backed async runtime for the Azure SDK.
+//! fn install_runtime(spawner: Spawner) {
+//!     let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner);
+//!     let _ = set_async_runtime(runtime);
+//! }
+//! # let _ = (transport, install_runtime);
 //! ```
 
 use std::collections::HashMap;
+use std::future::ready;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::{Context, Poll};
 
+use anyspawn::{JoinHandle, Spawner};
 use async_trait::async_trait;
+use azure_core::async_runtime::{AbortableTask, AsyncRuntime, SpawnedTask, TaskFuture};
+use azure_core::error::{Error, ErrorKind};
+use azure_core::http::headers::{HeaderName, HeaderValue, Headers};
+use azure_core::http::request::{Body, Request};
+use azure_core::http::response::PinnedStream;
+use azure_core::http::{AsyncRawResponse, HttpClient};
+use azure_core::time::Duration;
 use bytesbuf::BytesView;
 use futures::{StreamExt as _, TryStreamExt as _};
 use layered::Service as _;
-use typespec_client_core::error::{Error, ErrorKind};
-use typespec_client_core::http::headers::{HeaderName, HeaderValue, Headers};
-use typespec_client_core::http::request::{Body, Request};
-use typespec_client_core::http::response::PinnedStream;
-use typespec_client_core::http::{AsyncRawResponse, HttpClient};
 
 /// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
 ///
@@ -74,7 +95,7 @@ impl FetchHttpClient {
     }
 
     /// Converts a typespec [`Request`] into a `fetch` request.
-    fn to_fetch_request(&self, request: &Request) -> typespec_client_core::Result<fetch::HttpRequest> {
+    fn to_fetch_request(&self, request: &Request) -> azure_core::Result<fetch::HttpRequest> {
         // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
         // builder parses into an `http::Method`; this avoids matching on the
         // `#[non_exhaustive]` typespec `Method` enum.
@@ -132,7 +153,7 @@ pub fn new_http_client(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
 
 #[async_trait]
 impl HttpClient for FetchHttpClient {
-    async fn execute_request(&self, request: &Request) -> typespec_client_core::Result<AsyncRawResponse> {
+    async fn execute_request(&self, request: &Request) -> azure_core::Result<AsyncRawResponse> {
         let request = self.to_fetch_request(request)?;
 
         let response = self
@@ -176,4 +197,105 @@ fn to_headers(map: &http::HeaderMap) -> Headers {
         .collect::<HashMap<_, _>>();
 
     Headers::from(headers)
+}
+
+/// An [`AsyncRuntime`] that spawns work on an [`anyspawn::Spawner`].
+///
+/// Construct one from an existing [`Spawner`] with [`SpawnerRuntime::new`] (or
+/// via [`From`]) and install it as the Azure SDK runtime with
+/// [`azure_core::async_runtime::set_async_runtime`]. See [`new_async_runtime`]
+/// for a convenience that returns an `Arc<dyn AsyncRuntime>` directly.
+#[derive(Debug, Clone)]
+pub struct SpawnerRuntime {
+    spawner: Spawner,
+}
+
+impl SpawnerRuntime {
+    /// Creates a new runtime that spawns work on the given [`Spawner`].
+    #[must_use]
+    pub const fn new(spawner: Spawner) -> Self {
+        Self { spawner }
+    }
+
+    /// Returns a reference to the wrapped [`Spawner`].
+    pub const fn inner(&self) -> &Spawner {
+        &self.spawner
+    }
+
+    /// Consumes the runtime and returns the wrapped [`Spawner`].
+    pub fn into_inner(self) -> Spawner {
+        self.spawner
+    }
+}
+
+impl From<Spawner> for SpawnerRuntime {
+    fn from(spawner: Spawner) -> Self {
+        Self::new(spawner)
+    }
+}
+
+/// Wraps an [`anyspawn::Spawner`] as an `Arc<dyn AsyncRuntime>`.
+///
+/// This is a convenience for installing a `fetch`-friendly runtime with
+/// [`azure_core::async_runtime::set_async_runtime`].
+#[must_use]
+pub fn new_async_runtime(spawner: Spawner) -> Arc<dyn AsyncRuntime> {
+    Arc::new(SpawnerRuntime::new(spawner))
+}
+
+impl AsyncRuntime for SpawnerRuntime {
+    fn spawn(&self, f: TaskFuture) -> SpawnedTask {
+        Box::pin(SpawnerTask::new(self.spawner.spawn(f)))
+    }
+
+    fn sleep(&self, duration: Duration) -> TaskFuture {
+        let spawner = self.spawner.clone();
+        Box::pin(async move {
+            // `time::Duration` can be negative; clamp such values to zero. The
+            // wait runs on the spawner's blocking pool so any runtime works.
+            let duration = std::time::Duration::try_from(duration).unwrap_or_default();
+            let () = spawner.spawn_blocking(move || std::thread::sleep(duration)).await;
+        })
+    }
+
+    fn yield_now(&self) -> TaskFuture {
+        std::thread::yield_now();
+        Box::pin(ready(()))
+    }
+}
+
+/// Adapts an [`anyspawn::JoinHandle`] into an [`AbortableTask`].
+struct SpawnerTask {
+    handle: JoinHandle<()>,
+    aborted: AtomicBool,
+}
+
+impl SpawnerTask {
+    fn new(handle: JoinHandle<()>) -> Self {
+        Self {
+            handle,
+            aborted: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Future for SpawnerTask {
+    type Output = Result<(), Box<dyn std::error::Error + Send>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        if this.aborted.load(Ordering::Acquire) {
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut this.handle).poll(cx).map(Ok)
+    }
+}
+
+impl AbortableTask for SpawnerTask {
+    fn abort(&self) {
+        // `anyspawn` join handles cannot cancel the underlying task, so mark the
+        // task aborted and resolve on the next poll. The spawned work may keep
+        // running, but the caller is no longer blocked on it.
+        self.aborted.store(true, Ordering::Release);
+    }
 }

@@ -7,18 +7,23 @@
 //! real network access is required.
 
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
+use anyspawn::Spawner;
 use async_trait::async_trait;
+use azure_core::Bytes;
+use azure_core::async_runtime::AsyncRuntime;
+use azure_core::http::headers::HeaderName;
+use azure_core::http::request::{Body, Request};
+use azure_core::http::{HttpClient, Method, Url};
+use azure_core::stream::{BytesStream, SeekableStream};
+use azure_core::time::Duration;
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
-use fetch_azure::{FetchHttpClient, new_http_client};
+use fetch_azure::{FetchHttpClient, SpawnerRuntime, new_async_runtime, new_http_client};
 use futures::io::AsyncRead;
-use typespec_client_core::Bytes;
-use typespec_client_core::http::headers::HeaderName;
-use typespec_client_core::http::request::{Body, Request};
-use typespec_client_core::http::{HttpClient, Method, Url};
-use typespec_client_core::stream::{BytesStream, SeekableStream};
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -247,7 +252,7 @@ impl AsyncRead for ErroringStream {
 
 #[async_trait]
 impl SeekableStream for ErroringStream {
-    async fn reset(&mut self) -> typespec_client_core::Result<()> {
+    async fn reset(&mut self) -> azure_core::Result<()> {
         Ok(())
     }
 
@@ -266,4 +271,61 @@ fn error_chain(error: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     chain
+}
+
+#[tokio::test]
+async fn runtime_spawn_runs_task_to_completion() {
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+    let ran = Arc::new(AtomicBool::new(false));
+    let ran_in_task = Arc::clone(&ran);
+
+    let task = runtime.spawn(Box::pin(async move {
+        ran_in_task.store(true, Ordering::SeqCst);
+    }));
+    task.await.unwrap();
+
+    assert!(ran.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn runtime_abort_resolves_without_waiting() {
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+
+    // The task never completes on its own; aborting must let the await resolve.
+    let task = runtime.spawn(Box::pin(std::future::pending::<()>()));
+    task.abort();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn runtime_sleep_completes() {
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+
+    runtime.sleep(Duration::milliseconds(1)).await;
+}
+
+#[tokio::test]
+async fn runtime_yield_now_completes() {
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+
+    runtime.yield_now().await;
+}
+
+#[tokio::test]
+async fn new_async_runtime_returns_dyn_runtime() {
+    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(Spawner::new_tokio());
+
+    runtime.spawn(Box::pin(async {})).await.unwrap();
+}
+
+#[tokio::test]
+async fn runtime_from_spawner_and_inner_round_trip() {
+    let runtime = SpawnerRuntime::from(Spawner::new_tokio());
+
+    // `inner` exposes the wrapped spawner and `into_inner` returns it unchanged.
+    let _ = runtime.inner();
+    let spawner = runtime.into_inner();
+    let runtime = SpawnerRuntime::new(spawner);
+
+    runtime.yield_now().await;
 }

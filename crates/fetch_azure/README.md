@@ -13,26 +13,40 @@
 
 </div>
 
-Use [`fetch`][__link0] as the HTTP transport for the Azure SDK for Rust.
+Bundle [`fetch`][__link0] and [`anyspawn`][__link1] as Azure SDK abstractions.
 
 The Azure SDK abstracts its HTTP transport behind the
-[`typespec_client_core::http::HttpClient`][__link1] trait. This crate provides
-[`FetchHttpClient`][__link2], an adapter that implements that trait on top of a
-[`fetch::HttpClient`][__link3], so Azure SDK pipelines can run over `fetch` and
-benefit from its resilience, observability, and runtime features.
+[`azure_core::http::HttpClient`][__link2] trait and its task spawning, sleeping, and
+yielding behind the [`azure_core::async_runtime::AsyncRuntime`][__link3] trait. This
+crate provides adapters for both:
+
+* [`FetchHttpClient`][__link4] implements [`HttpClient`][__link5] on top of a
+  [`fetch::HttpClient`][__link6], so Azure SDK pipelines run over `fetch` and benefit
+  from its resilience and observability.
+* [`SpawnerRuntime`][__link7] implements [`AsyncRuntime`][__link8] on top of an
+  [`anyspawn::Spawner`][__link9], so the Azure SDK spawns and sleeps on the runtime of
+  your choice.
 
 ## Example
 
 ```rust
 use std::sync::Arc;
 
-use fetch::HttpClient;
-use fetch_azure::FetchHttpClient;
-use typespec_client_core::http::HttpClient as AzureHttpClient;
+use anyspawn::Spawner;
+use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
+use azure_core::http::HttpClient;
+use fetch::HttpClient as FetchClient;
+use fetch_azure::{new_async_runtime, new_http_client};
 
-// Wrap an existing `fetch` client so it can be handed to the Azure SDK.
-fn as_azure_transport(client: HttpClient) -> Arc<dyn AzureHttpClient> {
-    Arc::new(FetchHttpClient::new(client))
+// Adapt a `fetch` client into an Azure SDK transport.
+fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
+    new_http_client(client)
+}
+
+// Install an `anyspawn`-backed async runtime for the Azure SDK.
+fn install_runtime(spawner: Spawner) {
+    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner);
+    let _ = set_async_runtime(runtime);
 }
 ```
 
@@ -42,8 +56,14 @@ fn as_azure_transport(client: HttpClient) -> Arc<dyn AzureHttpClient> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbRv-wpNqCGrcbMZzL91BgMNYbjDONT0OwnFsbr-HEvaBX0LFhZIOCZWZldGNoZjAuMTEuMIJrZmV0Y2hfYXp1cmVlMC4xLjCCdHR5cGVzcGVjX2NsaWVudF9jb3JlZTEuMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbMickWN39c48b_g6cgT8kQlwb0qtqsQb8mDIb5jxRmQ-RUBphZISCaGFueXNwYXduZTAuNS4zgmphenVyZV9jb3JlZTEuMC4wgmVmZXRjaGYwLjExLjCCa2ZldGNoX2F6dXJlZTAuMS4w
  [__link0]: https://crates.io/crates/fetch/0.11.0
- [__link1]: https://docs.rs/typespec_client_core/1.0.0/typespec_client_core/?search=http::HttpClient
- [__link2]: https://docs.rs/fetch_azure/0.1.0/fetch_azure/struct.FetchHttpClient.html
- [__link3]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
+ [__link1]: https://crates.io/crates/anyspawn/0.5.3
+ [__link2]: https://docs.rs/azure_core/1.0.0/azure_core/?search=http::HttpClient
+ [__link3]: https://docs.rs/azure_core/1.0.0/azure_core/?search=async_runtime::AsyncRuntime
+ [__link4]: https://docs.rs/fetch_azure/0.1.0/fetch_azure/struct.FetchHttpClient.html
+ [__link5]: https://docs.rs/azure_core/1.0.0/azure_core/?search=http::HttpClient
+ [__link6]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
+ [__link7]: https://docs.rs/fetch_azure/0.1.0/fetch_azure/struct.SpawnerRuntime.html
+ [__link8]: https://docs.rs/azure_core/1.0.0/azure_core/?search=async_runtime::AsyncRuntime
+ [__link9]: https://docs.rs/anyspawn/0.5.3/anyspawn/?search=Spawner

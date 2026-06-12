@@ -68,6 +68,7 @@ anyhow = { version = "1.0.100", default-features = false }
 argh = { version = "0.1.13", default-features = false }
 async-once-cell = { version = "0.5.0", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
+azure_core = { version = "1.0.0", default-features = false }
 base64 = { version = "0.22.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
@@ -153,7 +154,6 @@ tracing-test = { version = "0.2.6", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
-typespec_client_core = { version = "1.0.0", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
