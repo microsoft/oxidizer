@@ -20,7 +20,7 @@ pub(crate) struct EngineCore {
 }
 
 impl EngineCore {
-    pub fn new(options: EngineOptions, clock: Clock) -> Self {
+    pub(crate) fn new(options: EngineOptions, clock: Clock) -> Self {
         Self {
             state: Mutex::new(State::Closed {
                 health: options.health_metrics_builder.build(),
@@ -157,7 +157,7 @@ pub(crate) struct Stats {
 }
 
 impl Stats {
-    pub fn new(opened_at: Instant) -> Self {
+    pub(crate) fn new(opened_at: Instant) -> Self {
         Self {
             opened_at,
             probes_total: 0,
@@ -169,7 +169,7 @@ impl Stats {
         }
     }
 
-    pub fn opened_duration(&self, now: Instant) -> Duration {
+    pub(crate) fn opened_duration(&self, now: Instant) -> Duration {
         now.saturating_duration_since(self.opened_at)
     }
 

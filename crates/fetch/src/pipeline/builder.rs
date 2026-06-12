@@ -45,14 +45,14 @@ pub(crate) enum Pipeline {
 
 #[cfg(test)]
 impl Pipeline {
-    pub fn dbg_string_for_custom_pipeline(&self) -> &str {
+    pub(crate) fn dbg_string_for_custom_pipeline(&self) -> &str {
         match self {
             Self::Minimal(_) => panic!("must be custom pipeline"),
             Self::Custom { debug, .. } => debug,
         }
     }
 
-    pub fn is_standard(&self) -> bool {
+    pub(crate) fn is_standard(&self) -> bool {
         match self {
             Self::Minimal(_) => false,
             Self::Custom { standard_pipeline, .. } => *standard_pipeline,

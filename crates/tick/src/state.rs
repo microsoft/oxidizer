@@ -27,7 +27,7 @@ impl ThreadAware for ClockState {
 }
 
 impl ClockState {
-    pub fn new_system() -> Self {
+    pub(crate) fn new_system() -> Self {
         Self::System(SynchronizedTimers::new_isolated())
     }
 
@@ -36,7 +36,7 @@ impl ClockState {
     /// [`Clock::new_tokio`][crate::Clock::new_tokio]). [`ThreadAware::relocate`] is a no-op for
     /// this variant.
     #[cfg(any(feature = "rt-shared", test))]
-    pub fn new_system_shared() -> Self {
+    pub(crate) fn new_system_shared() -> Self {
         Self::System(SynchronizedTimers::new_shared())
     }
 }
@@ -59,7 +59,7 @@ impl ClockState {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    pub fn is_unique(&self) -> bool {
+    pub(crate) fn is_unique(&self) -> bool {
         match self {
             Self::System(timers) => timers.is_unique(),
             #[cfg(any(feature = "test-util", test))]
@@ -100,12 +100,12 @@ impl ThreadAware for SynchronizedTimers {
 }
 
 impl SynchronizedTimers {
-    pub fn new_isolated() -> Self {
+    pub(crate) fn new_isolated() -> Self {
         Self::Isolated(thread_aware::Arc::new(|| Mutex::new(Timers::default())))
     }
 
     #[cfg(any(feature = "rt-shared", test))]
-    pub fn new_shared() -> Self {
+    pub(crate) fn new_shared() -> Self {
         Self::Shared(std::sync::Arc::new(Mutex::new(Timers::default())))
     }
 
@@ -127,7 +127,7 @@ impl SynchronizedTimers {
     }
 
     #[cfg_attr(test, mutants::skip)] // causes test timeout
-    pub fn is_unique(&self) -> bool {
+    pub(crate) fn is_unique(&self) -> bool {
         match self {
             #[cfg(any(feature = "rt-shared", test))]
             Self::Shared(timers) => std::sync::Arc::strong_count(timers) == 1,

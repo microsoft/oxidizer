@@ -215,19 +215,19 @@ pub(crate) struct Transport {
 }
 
 impl Transport {
-    pub fn create_transport_handler(&self, options: ClientOptions, meter: Meter, index: PoolIndex) -> TransportHandler {
+    pub(crate) fn create_transport_handler(&self, options: ClientOptions, meter: Meter, index: PoolIndex) -> TransportHandler {
         self.inner.as_ref()(options, meter, index)
     }
 
-    pub fn clock(&self) -> &Clock {
+    pub(crate) fn clock(&self) -> &Clock {
         &self.clock
     }
 
-    pub fn isolation(&self) -> Isolation {
+    pub(crate) fn isolation(&self) -> Isolation {
         self.isolation
     }
 
-    pub fn create_body_builder(&self, options: &ClientOptions) -> HttpBodyBuilder {
+    pub(crate) fn create_body_builder(&self, options: &ClientOptions) -> HttpBodyBuilder {
         create_body_builder(&self.global_pool, &self.clock, options)
     }
 }

@@ -15,7 +15,7 @@ pub(crate) enum ExecutionResult {
 
 #[cfg(any(feature = "logs", feature = "metrics", test))]
 impl ExecutionResult {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Success => "success",
             Self::Failure => "failure",
@@ -24,7 +24,7 @@ impl ExecutionResult {
 }
 
 impl ExecutionResult {
-    pub fn from_recovery(recovery: &RecoveryInfo) -> Self {
+    pub(crate) fn from_recovery(recovery: &RecoveryInfo) -> Self {
         match recovery.kind() {
             crate::RecoveryKind::Retry | crate::RecoveryKind::Unavailable => Self::Failure,
             _ => Self::Success,

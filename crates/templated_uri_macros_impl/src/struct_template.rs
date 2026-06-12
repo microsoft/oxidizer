@@ -22,7 +22,7 @@ type FieldOptsMap<'a> = std::collections::HashMap<String, &'a FieldOpts>;
 
 #[derive(Debug, FromAttributes)]
 #[darling(attributes(templated))]
-pub struct Opts {
+pub(crate) struct Opts {
     #[darling(rename = "template")]
     pub input_template: String,
     #[darling(default)]
@@ -35,7 +35,7 @@ pub struct Opts {
 
 #[derive(Debug, FromField)]
 #[darling(attributes(templated))]
-pub struct FieldOpts {
+pub(crate) struct FieldOpts {
     pub ident: Option<Ident>,
     #[darling(default)]
     pub unredacted: bool,
@@ -73,7 +73,7 @@ impl Fields {
 }
 
 // #[proc_macro_derive(TemplatedPathAndQuery, attributes(templated, unredacted))]
-pub fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> TokenStream {
+pub(crate) fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribute]) -> TokenStream {
     if !matches!(data.fields, syn::Fields::Named(_)) {
         crate::bail!(ident, "#[templated] can only be applied to structs with named fields");
     }

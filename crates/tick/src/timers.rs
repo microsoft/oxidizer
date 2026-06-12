@@ -21,7 +21,7 @@ impl TimerKey {
     }
 
     /// Determines when the timer will fire.
-    pub const fn tick(&self) -> Instant {
+    pub(crate) const fn tick(&self) -> Instant {
         self.tick
     }
 }
@@ -52,11 +52,11 @@ pub(crate) struct Timers {
 }
 
 impl Timers {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.wakers.len()
     }
 
-    pub fn alive(&self) -> bool {
+    pub(crate) fn alive(&self) -> bool {
         self.alive
     }
 
@@ -68,7 +68,7 @@ impl Timers {
     /// Registers a new timer that will fire at the specified instant.
     ///
     /// Returns a unique [`TimerKey`] that can be used to unregister the timer.
-    pub fn register(&mut self, when: Instant, waker: Waker) -> TimerKey {
+    pub(crate) fn register(&mut self, when: Instant, waker: Waker) -> TimerKey {
         // We can wrap the discriminator because it's only used to distinguish timers with the same instant,
         // and the actual value can start from 0 again.
         self.last_discriminator = self.last_discriminator.wrapping_add(1);
@@ -82,12 +82,12 @@ impl Timers {
     /// Unregisters a timer with the given key.
     ///
     /// If the timer was not found, this operation is a no-op.
-    pub fn unregister(&mut self, id: TimerKey) {
+    pub(crate) fn unregister(&mut self, id: TimerKey) {
         self.wakers.remove(&id);
     }
 
     /// Returns the instant when the next timer will fire, or `None` if no timers are registered.
-    pub fn next_timer(&self) -> Option<Instant> {
+    pub(crate) fn next_timer(&self) -> Option<Instant> {
         self.wakers.keys().next().map(TimerKey::tick)
     }
 
@@ -98,7 +98,7 @@ impl Timers {
     /// In the future, the signature of this method can be easily expanded to return more
     /// information about the timers that fired and when the next timer fires.
     #[cfg_attr(test, mutants::skip)] // Causes test timeout.
-    pub fn advance_timers(&mut self, now: Instant) -> Option<Instant> {
+    pub(crate) fn advance_timers(&mut self, now: Instant) -> Option<Instant> {
         self.alive = true;
 
         // We are adding 1ns to the instant to ensure that even timers whose deadline is the current

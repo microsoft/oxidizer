@@ -9,14 +9,14 @@ use ohno::{Error, OhnoCore};
 #[test]
 fn test_named_struct_debug_structure() {
     #[derive(Debug)]
-    pub struct RefNamedStruct {
+    pub(crate) struct RefNamedStruct {
         pub inner: OhnoCore,
         pub code: i32,
         pub message: String,
     }
 
     #[derive(Error)]
-    pub struct TestNamedStruct {
+    pub(crate) struct TestNamedStruct {
         #[error]
         pub inner: OhnoCore,
         pub code: i32,
@@ -43,10 +43,10 @@ fn test_named_struct_debug_structure() {
 #[test]
 fn test_tuple_struct_debug_structure() {
     #[derive(Debug)]
-    pub struct RefTupleStruct(pub OhnoCore, pub String, pub i32);
+    pub(crate) struct RefTupleStruct(pub OhnoCore, pub String, pub i32);
 
     #[derive(Error)]
-    pub struct TestTupleStruct(#[error] pub OhnoCore, pub String, pub i32);
+    pub(crate) struct TestTupleStruct(#[error] pub OhnoCore, pub String, pub i32);
 
     let ref_struct = RefTupleStruct(OhnoCore::from("error_content"), "additional_info".to_string(), 42);
 
@@ -61,12 +61,12 @@ fn test_tuple_struct_debug_structure() {
 #[test]
 fn test_single_field_struct_debug_structure() {
     #[derive(Debug)]
-    pub struct RefSingleField {
+    pub(crate) struct RefSingleField {
         pub value: OhnoCore,
     }
 
     #[derive(Error)]
-    pub struct TestSingleField {
+    pub(crate) struct TestSingleField {
         #[error]
         pub value: OhnoCore,
     }

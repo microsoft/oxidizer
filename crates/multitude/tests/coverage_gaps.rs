@@ -41,12 +41,12 @@ mod sync_failing {
     use allocator_api2::alloc::{AllocError, Allocator, Global};
 
     #[derive(Clone)]
-    pub struct SyncFailingAllocator {
+    pub(crate) struct SyncFailingAllocator {
         remaining: Arc<AtomicUsize>,
     }
 
     impl SyncFailingAllocator {
-        pub fn new(allow_n_allocs: usize) -> Self {
+        pub(crate) fn new(allow_n_allocs: usize) -> Self {
             Self {
                 remaining: Arc::new(AtomicUsize::new(allow_n_allocs)),
             }

@@ -15,7 +15,7 @@ pub(crate) struct SingleProbe {
 }
 
 impl SingleProbe {
-    pub fn new(probe_cooldown: Duration) -> Self {
+    pub(crate) fn new(probe_cooldown: Duration) -> Self {
         Self {
             probe_cooldown,
             entered_at: None,
@@ -23,7 +23,7 @@ impl SingleProbe {
     }
 
     #[cfg(test)]
-    pub fn probe_cooldown(&self) -> Duration {
+    pub(crate) fn probe_cooldown(&self) -> Duration {
         self.probe_cooldown
     }
 }

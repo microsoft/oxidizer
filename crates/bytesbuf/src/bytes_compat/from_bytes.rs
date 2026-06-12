@@ -69,7 +69,7 @@ struct BytesBlock {
 }
 
 impl BytesBlock {
-    pub const fn new(inner: Bytes) -> Self {
+    pub(crate) const fn new(inner: Bytes) -> Self {
         Self {
             _inner: inner,
             ref_count: AtomicUsize::new(1),

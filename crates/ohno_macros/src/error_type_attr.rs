@@ -43,7 +43,7 @@ use crate::utils::generate_unique_field_name;
 /// }
 /// ```
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
-pub fn error(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub(crate) fn error(_args: TokenStream, input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
     TokenStream::from(error_impl(&mut input))
 }

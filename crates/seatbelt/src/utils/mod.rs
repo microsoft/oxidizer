@@ -33,18 +33,18 @@ pub(crate) enum EnableIf<In> {
 
 impl<In> EnableIf<In> {
     /// Creates `Enabled` when `true`, `Disabled` when `false`.
-    pub fn new(enabled: bool) -> Self {
+    pub(crate) fn new(enabled: bool) -> Self {
         if enabled { Self::Enabled } else { Self::Disabled }
     }
 
     /// Creates a new `EnableIf` with a custom predicate.
-    pub fn custom(predicate: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
+    pub(crate) fn custom(predicate: impl Fn(&In) -> bool + Send + Sync + 'static) -> Self {
         Self::Custom(Arc::new(predicate))
     }
 
     /// Evaluates whether the middleware is enabled for the given input.
     #[cfg_attr(test, mutants::skip)] // causes test timeouts
-    pub fn call(&self, input: &In) -> bool {
+    pub(crate) fn call(&self, input: &In) -> bool {
         match self {
             Self::Enabled => true,
             Self::Disabled => false,

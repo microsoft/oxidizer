@@ -9,7 +9,7 @@ use crate::derive_error::types::ErrorFieldRef;
 use crate::utils::bail;
 
 /// Generate constructor methods for the error struct
-pub fn generate_constructor_methods(input: &DeriveInput, error_field: &ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
+pub(crate) fn generate_constructor_methods(input: &DeriveInput, error_field: &ErrorFieldRef) -> Result<proc_macro2::TokenStream> {
     let Data::Struct(data_struct) = &input.data else {
         bail!("Constructor generation only supports structs");
     };
