@@ -3,9 +3,16 @@
 
 //! Public constants for cachet telemetry field names and event values.
 //!
-//! Use these constants to filter or match cachet events in a custom
-//! `tracing_subscriber::Layer`. All cachet events are emitted with
-//! `FIELD_NAME`, `FIELD_EVENT`, and `FIELD_DURATION_NS` fields.
+//! Use these constants to filter or match cachet telemetry events in a custom
+//! `tracing_subscriber::Layer`.
+//!
+//! **Tier events** (hit, miss, expired, etc.) carry `FIELD_NAME`, `FIELD_EVENT`,
+//! and `FIELD_DURATION_NS`. Some events intentionally omit `FIELD_DURATION_NS`
+//! to indicate "not timed": `EVENT_INSERT_REJECTED`, `EVENT_EVICTION`, and
+//! background `EVENT_EXPIRED` events emitted from eviction listeners.
+//!
+//! **Operation-complete events** carry `FIELD_NAME`, `FIELD_OPERATION`,
+//! `FIELD_DURATION_NS`, and `FIELD_COALESCED`.
 //!
 //! # Example
 //!
@@ -41,6 +48,12 @@ pub const FIELD_EVENT: &str = "cache.event";
 /// Field name for the operation duration in nanoseconds.
 pub const FIELD_DURATION_NS: &str = "cache.duration_ns";
 
+/// Field name for the cache operation name.
+pub const FIELD_OPERATION: &str = "cache.operation";
+
+/// Field name recording whether stampede protection was enabled for the operation.
+pub const FIELD_COALESCED: &str = "cache.coalesced";
+
 // -- Event values (emitted in the `cache.event` field) --
 
 /// Cache entry was found and valid.
@@ -54,9 +67,6 @@ pub const EVENT_EXPIRED: &str = "cache.expired";
 
 /// An error occurred during a get operation.
 pub const EVENT_GET_ERROR: &str = "cache.get_error";
-
-/// A fallback tier was consulted.
-pub const EVENT_FALLBACK: &str = "cache.fallback";
 
 /// An entry was successfully inserted.
 pub const EVENT_INSERTED: &str = "cache.inserted";
@@ -95,10 +105,12 @@ mod tests {
 
     #[test]
     fn field_constants_match_tracing_field_names() {
-        // These constants must match the field names used in tracing macros in cache.rs.
+        // These constants must match the field names used in tracing macros in telemetry/cache.rs.
         assert_eq!(FIELD_NAME, "cache.name");
         assert_eq!(FIELD_EVENT, "cache.event");
         assert_eq!(FIELD_DURATION_NS, "cache.duration_ns");
+        assert_eq!(FIELD_OPERATION, "cache.operation");
+        assert_eq!(FIELD_COALESCED, "cache.coalesced");
     }
 
     #[test]
@@ -108,7 +120,6 @@ mod tests {
             EVENT_MISS,
             EVENT_EXPIRED,
             EVENT_GET_ERROR,
-            EVENT_FALLBACK,
             EVENT_INSERTED,
             EVENT_INSERT_REJECTED,
             EVENT_INSERT_ERROR,

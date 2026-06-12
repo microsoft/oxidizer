@@ -17,7 +17,38 @@ homepage = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["thread_aware_macros::ThreadAware"]
+allowed_external_types = [
+    "thread_aware_macros::ThreadAware",
+    # `bytes` feature
+    "bytes::bytes::Bytes",
+    "bytes::bytes_mut::BytesMut",
+    # `http` feature
+    "http::error::Error",
+    "http::header::map::HeaderMap",
+    "http::header::name::HeaderName",
+    "http::header::value::HeaderValue",
+    "http::method::Method",
+    "http::request::Request",
+    "http::response::Response",
+    "http::status::StatusCode",
+    "http::uri::Uri",
+    "http::uri::authority::Authority",
+    "http::uri::path::PathAndQuery",
+    "http::uri::port::Port",
+    "http::uri::scheme::Scheme",
+    "http::uri::InvalidUri",
+    "http::version::Version",
+    # `jiff02` feature
+    "jiff::civil::date::Date",
+    "jiff::civil::datetime::DateTime",
+    "jiff::civil::iso_week_date::ISOWeekDate",
+    "jiff::civil::time::Time",
+    "jiff::signed_duration::SignedDuration",
+    "jiff::span::Span",
+    "jiff::timestamp::Timestamp",
+    # `uuid` feature
+    "uuid::Uuid",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -27,17 +58,70 @@ default = ["derive"]
 derive = ["dep:thread_aware_macros"]
 threads = ["dep:many_cpus"]
 
+# Optional `ThreadAware` impls for 3rd-party crate types. By default no such
+# features are enabled, so this crate does not pull in any additional
+# dependencies. Enabling a feature pulls in that crate and exposes the impls.
+#
+# Feature naming convention (agreed during PR review):
+#
+# * Crate at `1.x` (or any other stable major)
+#     → bare crate name (e.g. `bytes`, `http`, `uuid`)
+# * Crate at `N.x` for N >= 2
+#     → `<crate><N>` (e.g. `bytes2` if we ever added bytes 2.x)
+# * Crate at `0.x`
+#     → `<crate>0<x>` (e.g. `jiff02` for jiff 0.2.x, `jiff03` for 0.3.x)
+#
+# A future breaking version of any of these crates can therefore be supported
+# additively (e.g. add a new `bytes2` feature alongside `bytes`) without forcing
+# a breaking release of this crate.
+#
+# See the `third_party` module for the list of types each feature covers.
+bytes = ["dep:bytes"]
+http = ["dep:http"]
+jiff02 = ["dep:jiff"]
+uuid = ["dep:uuid"]
+
 [dependencies]
 many_cpus = { workspace = true, optional = true }
 
 thread_aware_macros = { workspace = true, optional = true }
 
+bytes = { version = "1.11.1", default-features = false, optional = true }
+http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
+jiff = { version = "0.2.21", default-features = false, optional = true }
+uuid = { version = "1.21.0", default-features = false, optional = true }
+
 [dev-dependencies]
+bytes = { version = "1.11.1", default-features = false }
+criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
+http = { version = "1.4.1", default-features = false, features = ["std"] }
+jiff = { version = "0.2.21", default-features = false }
 many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
+uuid = { version = "1.21.0", default-features = false }
+
+# Workspace dep declares `default-features = false`; we re-enable `default` here
+# (which pulls in the `benchmark` feature with `library_benchmark`,
+# `library_benchmark_group!`, and `gungraun::main!`) only on Linux, since
+# gungraun requires Valgrind.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "criterion_third_party"
+harness = false
+required-features = ["bytes", "http", "jiff02", "uuid"]
+
+# Callgrind benches require Linux (Valgrind). The bench file is gated to compile
+# to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
+# cfg-gated, so it is unconditional here.
+[[bench]]
+name = "gungraun_third_party"
+harness = false
+required-features = ["bytes", "http", "jiff02", "uuid"]

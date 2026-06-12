@@ -4,7 +4,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A composable, multi-tier caching library with stampede protection, background
-//! refresh, and built-in OpenTelemetry telemetry.
+//! refresh, and structured telemetry.
 //!
 //! # Why Multi-Tier Caching?
 //!
@@ -79,7 +79,7 @@
 //! | Stampede protection | ❌ | ✅ |
 //! | Background refresh | ❌ | ✅ |
 //! | Service middleware integration | ❌ | ✅ |
-//! | Structured telemetry (tracing) | ❌ | ✅ |
+//! | Structured telemetry | ❌ | ✅ |
 //! | Pluggable storage backends | ❌ | ✅ |
 //! | Clock injection for testing | ❌ | ✅ |
 //!
@@ -225,12 +225,16 @@
 //!
 //! # Telemetry
 //!
+//! Cachet provides two complementary telemetry channels:
+//!
+//! ## Tracing events
+//!
 //! Enable with the `logs` feature and `.enable_logs()` on the cache builder.
+//! Each tier outcome and operation completion emits a structured [`tracing`] event.
 //!
-//! Each cache operation emits a structured [`tracing`] event with fields
-//! `cache.name`, `cache.event`, and `cache.duration_ns`.
-//!
-//! ## Subscribing to events
+//! **Tier events** carry `cache.name`, `cache.event`, and `cache.duration_ns`.
+//! **Operation-complete events** carry `cache.name`, `cache.operation`,
+//! `cache.duration_ns`, and `cache.coalesced`.
 //!
 //! Use [`telemetry::attributes`] constants to filter and match events in a
 //! custom `tracing_subscriber::Layer`:
@@ -248,13 +252,24 @@
 //!
 //! See the `telemetry_subscriber` example for a complete demonstration.
 //!
-//! ## Event types
+//! ### Event types
 //!
 //! | Level | Events |
 //! |-------|--------|
 //! | ERROR | `cache.get_error`, `cache.insert_error`, `cache.invalidate_error`, `cache.clear_error` |
-//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.fallback`, `cache.eviction` |
+//! | INFO  | `cache.expired`, `cache.refresh_miss`, `cache.inserted`, `cache.insert_rejected`, `cache.invalidated`, `cache.eviction` |
 //! | DEBUG | `cache.hit`, `cache.miss`, `cache.refresh_hit`, `cache.cleared` |
+//!
+//! ## Event handler callback API
+//!
+//! Register a [`CacheEventHandler`] via
+//! `.event_handler(handler)` on the cache builder to receive typed
+//! [`CacheTierEvent`] and
+//! [`CacheOperationEvent`] callbacks.
+//! Events carry a `request_id` for correlating tier outcomes with their parent
+//! operation. Works independently of the `logs` feature.
+//!
+//! See the `telemetry_accumulator` example for a DashMap-based accumulation pattern.
 
 mod builder;
 mod cache;
@@ -290,5 +305,7 @@ pub use cachet_tier::{CacheOp, MockCache};
 pub use policy::InsertPolicy;
 #[doc(inline)]
 pub use refresh::TimeToRefresh;
+#[doc(inline)]
+pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

@@ -13,11 +13,13 @@ use uniflight::Merger;
 
 use crate::Error;
 use crate::builder::CacheBuilder;
+use crate::telemetry::CacheTelemetry;
+use crate::telemetry::cache::{WithRequestIdExt, next_request_id};
 
 /// Type alias for cache names used in telemetry.
 ///
 /// A static reference is used so that names can be embedded in telemetry
-/// attributes (metric labels, log fields) without allocating on every
+/// fields (tracing events, handler callbacks) without allocating on every
 /// cache operation.
 pub type CacheName = &'static str;
 
@@ -113,6 +115,7 @@ pub struct Cache<K, V> {
     pub(crate) name: CacheName,
     pub(crate) storage: DynamicCache<K, V>,
     pub(crate) clock: Clock,
+    pub(crate) telemetry: CacheTelemetry,
     /// Mergers for stampede protection on all operations.
     /// Only present when `stampede_protection` is enabled.
     mergers: Option<Mergers<K, V>>,
@@ -149,11 +152,18 @@ where
     K: Clone + Eq + Hash + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(name: CacheName, storage: DynamicCache<K, V>, clock: Clock, stampede_protection: bool) -> Self {
+    pub(crate) fn new(
+        name: CacheName,
+        storage: DynamicCache<K, V>,
+        clock: Clock,
+        telemetry: CacheTelemetry,
+        stampede_protection: bool,
+    ) -> Self {
         Self {
             name,
             storage,
             clock,
+            telemetry,
             mergers: stampede_protection.then(Mergers::new),
         }
     }
@@ -220,18 +230,28 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
     {
-        if let Some(mergers) = &self.mergers {
-            let owned = key.to_owned();
-            let storage = &self.storage;
-            mergers
-                .get
-                .execute(key, move || async move { storage.get(&owned).await })
-                .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
-        } else {
-            let owned = key.to_owned();
-            self.storage.get(&owned).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let (result, coalesced) = if let Some(mergers) = &self.mergers {
+                let owned = key.to_owned();
+                let storage = &self.storage;
+                let result = mergers
+                    .get
+                    .execute(key, move || async move { storage.get(&owned).await })
+                    .await
+                    .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                (result, true)
+            } else {
+                let owned = key.to_owned();
+                (self.storage.get(&owned).await, false)
+            };
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.get", watch.elapsed(), coalesced);
+            result
         }
+        .with_request_id(request_id)
+        .await
     }
 
     /// Inserts a value into the cache.
@@ -260,7 +280,16 @@ where
     /// # };
     /// ```
     pub async fn insert(&self, key: K, entry: impl Into<CacheEntry<V>>) -> Result<(), Error> {
-        self.storage.insert(key, entry.into()).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let result = self.storage.insert(key, entry.into()).await;
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.insert", watch.elapsed(), false);
+            result
+        }
+        .with_request_id(request_id)
+        .await
     }
 
     /// Invalidates (removes) a value from the cache.
@@ -282,18 +311,28 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
     {
-        if let Some(mergers) = &self.mergers {
-            let owned = key.to_owned();
-            let storage = &self.storage;
-            mergers
-                .invalidate
-                .execute(key, move || async move { storage.invalidate(&owned).await })
-                .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
-        } else {
-            let owned = key.to_owned();
-            self.storage.invalidate(&owned).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let (result, coalesced) = if let Some(mergers) = &self.mergers {
+                let owned = key.to_owned();
+                let storage = &self.storage;
+                let result = mergers
+                    .invalidate
+                    .execute(key, move || async move { storage.invalidate(&owned).await })
+                    .await
+                    .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                (result, true)
+            } else {
+                let owned = key.to_owned();
+                (self.storage.invalidate(&owned).await, false)
+            };
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.invalidate", watch.elapsed(), coalesced);
+            result
         }
+        .with_request_id(request_id)
+        .await
     }
 
     /// Returns true if the cache contains a value for the given key.
@@ -315,7 +354,16 @@ where
     ///
     /// Returns an error if the underlying cache tier operation fails.
     pub async fn clear(&self) -> Result<(), Error> {
-        self.storage.clear().await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let result = self.storage.clear().await;
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.clear", watch.elapsed(), false);
+            result
+        }
+        .with_request_id(request_id)
+        .await
     }
 
     /// Returns an **approximate** count of entries, if supported by the underlying storage.
@@ -412,16 +460,26 @@ where
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
         Fut: Future<Output = V> + Send,
     {
-        let owned = key.to_owned();
-        if let Some(mergers) = &self.mergers {
-            mergers
-                .get_or_insert
-                .execute(key, move || async move { self.do_get_or_insert(&owned, f).await })
-                .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
-        } else {
-            self.do_get_or_insert(&owned, f).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let owned = key.to_owned();
+            let (result, coalesced) = if let Some(mergers) = &self.mergers {
+                let result = mergers
+                    .get_or_insert
+                    .execute(key, move || async move { self.do_get_or_insert(&owned, f).await })
+                    .await
+                    .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                (result, true)
+            } else {
+                (self.do_get_or_insert(&owned, f).await, false)
+            };
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.get_or_insert", watch.elapsed(), coalesced);
+            result
         }
+        .with_request_id(request_id)
+        .await
     }
 
     async fn do_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
@@ -434,7 +492,7 @@ where
         let value = f().await;
         let mut entry = CacheEntry::new(value);
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -517,7 +575,7 @@ where
         }
         let mut entry = f().await;
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -598,7 +656,7 @@ where
         }
         let mut entry = f().await.map_err(Error::from_source)?;
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -650,16 +708,26 @@ where
         E: std::error::Error + Send + Sync + 'static,
         Fut: Future<Output = Result<V, E>> + Send,
     {
-        let owned = key.to_owned();
-        if let Some(mergers) = &self.mergers {
-            mergers
-                .try_get_or_insert
-                .execute(key, move || async move { self.do_try_get_or_insert(&owned, f).await })
-                .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
-        } else {
-            self.do_try_get_or_insert(&owned, f).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let owned = key.to_owned();
+            let (result, coalesced) = if let Some(mergers) = &self.mergers {
+                let result = mergers
+                    .try_get_or_insert
+                    .execute(key, move || async move { self.do_try_get_or_insert(&owned, f).await })
+                    .await
+                    .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                (result, true)
+            } else {
+                (self.do_try_get_or_insert(&owned, f).await, false)
+            };
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.try_get_or_insert", watch.elapsed(), coalesced);
+            result
         }
+        .with_request_id(request_id)
+        .await
     }
 
     async fn do_try_get_or_insert<E, Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<CacheEntry<V>, Error>
@@ -673,7 +741,7 @@ where
         let value = f().await.map_err(Error::from_source)?;
         let mut entry = CacheEntry::new(value);
         entry.ensure_cached_at(self.clock.system_time());
-        self.insert(key.clone(), entry.clone()).await?;
+        self.storage.insert(key.clone(), entry.clone()).await?;
         Ok(entry)
     }
 
@@ -728,16 +796,26 @@ where
         Q: Hash + Eq + ToOwned<Owned = K> + ?Sized + Send + Sync,
         Fut: Future<Output = Option<V>> + Send,
     {
-        let owned = key.to_owned();
-        if let Some(mergers) = &self.mergers {
-            mergers
-                .optionally_get_or_insert
-                .execute(key, move || async move { self.do_optionally_get_or_insert(&owned, f).await })
-                .await
-                .unwrap_or_else(|panicked| Err(Error::from_source(panicked)))
-        } else {
-            self.do_optionally_get_or_insert(&owned, f).await
+        let request_id = next_request_id();
+        let watch = self.clock.stopwatch();
+        async {
+            let owned = key.to_owned();
+            let (result, coalesced) = if let Some(mergers) = &self.mergers {
+                let result = mergers
+                    .optionally_get_or_insert
+                    .execute(key, move || async move { self.do_optionally_get_or_insert(&owned, f).await })
+                    .await
+                    .unwrap_or_else(|panicked| Err(Error::from_source(panicked)));
+                (result, true)
+            } else {
+                (self.do_optionally_get_or_insert(&owned, f).await, false)
+            };
+            self.telemetry
+                .complete_operation(request_id, self.name, "cache.optionally_get_or_insert", watch.elapsed(), coalesced);
+            result
         }
+        .with_request_id(request_id)
+        .await
     }
 
     async fn do_optionally_get_or_insert<Fut>(&self, key: &K, f: impl FnOnce() -> Fut) -> Result<Option<CacheEntry<V>>, Error>
@@ -751,7 +829,7 @@ where
             Some(value) => {
                 let mut entry = CacheEntry::new(value);
                 entry.ensure_cached_at(self.clock.system_time());
-                self.insert(key.clone(), entry.clone()).await?;
+                self.storage.insert(key.clone(), entry.clone()).await?;
                 Ok(Some(entry))
             }
             None => Ok(None),
@@ -791,9 +869,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use cachet_tier::MockCache;
 
     use super::*;
+    use crate::telemetry::handler::RequestId;
+    use crate::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
         futures::executor::block_on(f)
@@ -839,6 +921,88 @@ mod tests {
             let result = cache.get("missing").await.unwrap();
             assert!(result.is_none());
         });
+    }
+
+    #[test]
+    fn cache_event_handler_receives_fallback_tier_events() {
+        type EventRecord = Vec<(RequestId, String, String, bool)>;
+
+        #[derive(Clone)]
+        struct RecordingHandler {
+            tier_events: Arc<Mutex<EventRecord>>,
+            operation_events: Arc<Mutex<EventRecord>>,
+        }
+
+        impl CacheEventHandler for RecordingHandler {
+            fn on_tier_event(&self, event: &CacheTierEvent<'_>) {
+                self.tier_events.lock().expect("test handler mutex should not be poisoned").push((
+                    event.request_id,
+                    event.tier_name.to_string(),
+                    event.outcome.to_string(),
+                    event.fallback,
+                ));
+            }
+
+            fn on_operation_complete(&self, event: &CacheOperationEvent<'_>) {
+                self.operation_events
+                    .lock()
+                    .expect("test handler mutex should not be poisoned")
+                    .push((
+                        event.request_id,
+                        event.cache_name.to_string(),
+                        event.operation.to_string(),
+                        event.coalesced,
+                    ));
+            }
+        }
+
+        let tier_events = Arc::new(Mutex::new(Vec::new()));
+        let operation_events = Arc::new(Mutex::new(Vec::new()));
+
+        block_on(async {
+            let clock = Clock::new_frozen();
+            let handler = RecordingHandler {
+                tier_events: Arc::clone(&tier_events),
+                operation_events: Arc::clone(&operation_events),
+            };
+
+            let l2 = Cache::builder::<String, i32>(clock.clone()).storage(MockCache::new()).name("l2");
+            let cache = Cache::builder::<String, i32>(clock)
+                .storage(MockCache::new())
+                .name("l1")
+                .event_handler(handler)
+                .fallback(l2)
+                .build();
+
+            let result = cache.get("missing").await.unwrap();
+            assert!(result.is_none());
+        });
+
+        let tier_events = tier_events.lock().expect("test handler mutex should not be poisoned").clone();
+        let operation_events = operation_events.lock().expect("test handler mutex should not be poisoned").clone();
+        let request_id = operation_events[0].0;
+
+        assert_eq!(
+            tier_events,
+            vec![
+                (
+                    request_id,
+                    "l1".to_string(),
+                    crate::telemetry::attributes::EVENT_MISS.to_string(),
+                    false
+                ),
+                (
+                    request_id,
+                    "l2".to_string(),
+                    crate::telemetry::attributes::EVENT_MISS.to_string(),
+                    true
+                ),
+            ]
+        );
+        assert_eq!(
+            operation_events,
+            vec![(request_id, "l1".to_string(), "cache.get".to_string(), false)]
+        );
     }
 
     #[test]

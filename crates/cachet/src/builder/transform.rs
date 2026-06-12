@@ -245,17 +245,17 @@ where
         let clock = self.clock.clone();
         let telemetry = self.telemetry.clone();
         let stampede_protection = self.stampede_protection;
-        let tier = self.build_tier(clock.clone(), telemetry);
+        let tier = self.build_tier(clock.clone(), telemetry.clone(), false);
 
-        crate::Cache::new(type_name::<Self::TierOutput>(None), tier, clock, stampede_protection)
+        crate::Cache::new(type_name::<Self::TierOutput>(None), tier, clock, telemetry, stampede_protection)
     }
 
-    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry) -> Self::TierOutput {
+    fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
         // Build pre-transform tier
-        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone());
+        let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone(), fallback);
 
         // Build post-transform tier, wrap in TransformAdapter
-        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone());
+        let post_tier = self.post.build_tier(clock.clone(), telemetry.clone(), true);
         let adapted = TransformAdapter::from_boxed(post_tier, self.key_encoder, self.value_codec);
 
         // Combine: pre is primary, adapted is fallback

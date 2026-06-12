@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.1] - 2026-06-10
+
+- 🔧 Maintenance
+
+  - Now requires `0.10.1` of `data_privacy_macros_impl`
+
 ## [0.10.0] - 2026-06-03
 
 - ✨ Features

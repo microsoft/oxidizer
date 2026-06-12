@@ -49,18 +49,7 @@ pub trait RedactedToString {
 
 impl<T: RedactedDisplay + ?Sized> RedactedToString for T {
     fn to_redacted_string(&self, redactor: &dyn Redactor) -> String {
-        struct Adapter<'a, T: ?Sized> {
-            inner: &'a T,
-            redactor: &'a dyn Redactor,
-        }
-
-        impl<T: RedactedDisplay + ?Sized> std::fmt::Display for Adapter<'_, T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                <T as RedactedDisplay>::fmt(self.inner, self.redactor, f)
-            }
-        }
-
-        Adapter { inner: self, redactor }.to_string()
+        core::fmt::from_fn(|f| self.fmt(redactor, f)).to_string()
     }
 }
 
