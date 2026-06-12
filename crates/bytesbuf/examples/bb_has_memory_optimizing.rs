@@ -38,7 +38,7 @@ struct UdpConnection {
 }
 
 impl UdpConnection {
-    pub const fn new(io_context: IoContext) -> Self {
+    pub(crate) const fn new(io_context: IoContext) -> Self {
         Self { io_context }
     }
 
@@ -48,7 +48,7 @@ impl UdpConnection {
         clippy::needless_pass_by_value,
         reason = "for example realism"
     )]
-    pub fn write(&mut self, packet: BytesView) {
+    pub(crate) fn write(&mut self, packet: BytesView) {
         // Note: making use of optimally configured memory may need some additional logic here.
         // This is out of scope of this example, because this example targets targeting how to
         // implement HasMemory. See `bb_optimal_path.rs` for an example of a type that
@@ -84,12 +84,12 @@ impl HasMemory for UdpConnection {
 struct IoContext;
 
 impl IoContext {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {}
     }
 
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> BytesBuf {
+    pub(crate) fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> BytesBuf {
         // This is a wrong way to implement this! Only to make the example compile.
         let memory = bytesbuf::mem::testing::TransparentMemory::new();
         memory.reserve(min_len)

@@ -33,12 +33,12 @@ impl Debug for Rnd {
 
 impl Rnd {
     #[cfg(test)]
-    pub fn new_fixed(value: f64) -> Self {
+    pub(crate) fn new_fixed(value: f64) -> Self {
         Self::Test(std::sync::Arc::new(move || value))
     }
 
     #[cfg(test)]
-    pub fn new_function<F>(f: F) -> Self
+    pub(crate) fn new_function<F>(f: F) -> Self
     where
         F: Fn() -> f64 + Send + Sync + 'static,
     {
@@ -46,7 +46,7 @@ impl Rnd {
     }
 
     #[cfg_attr(test, mutants::skip)] // Mutating return value causes infinite loops in backoff calculations
-    pub fn next_f64(&self) -> f64 {
+    pub(crate) fn next_f64(&self) -> f64 {
         match self {
             Self::Real => fastrand::f64(),
             #[cfg(test)]

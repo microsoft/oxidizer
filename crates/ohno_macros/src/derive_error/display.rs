@@ -9,7 +9,7 @@ use crate::utils::bail;
 
 /// Parse display template to support field references like `{field_name}`
 /// or format!-style with separate arguments
-pub fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
+pub(crate) fn parse_display_template(display_attr: &DisplayAttribute, input: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let mut result = String::new();
     let mut chars = display_attr.template.chars().peekable();
     let mut format_args = Vec::new();
@@ -114,7 +114,7 @@ fn generate_display_expression(result: &str, format_args: &[proc_macro2::TokenSt
 }
 
 /// Check if a field exists in the struct
-pub fn field_exists(field_name: &str, input: &DeriveInput) -> bool {
+pub(crate) fn field_exists(field_name: &str, input: &DeriveInput) -> bool {
     let Data::Struct(data_struct) = &input.data else {
         return false;
     };

@@ -7,10 +7,10 @@ use chumsky::prelude::*;
 
 use crate::error::ParseError;
 
-pub type Error<'a> = extra::Err<Rich<'a, char>>;
+pub(crate) type Error<'a> = extra::Err<Rich<'a, char>>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UriTemplate<'a> {
+pub(crate) struct UriTemplate<'a> {
     template_parts: Vec<TemplatePart<'a>>,
 }
 
@@ -168,7 +168,7 @@ impl<'a> ParamGroup<'a> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Param<'a> {
+pub(crate) struct Param<'a> {
     pub(crate) name: &'a str,
     pub(crate) is_unrestricted: bool,
 }

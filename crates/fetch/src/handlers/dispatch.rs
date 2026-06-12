@@ -82,11 +82,11 @@ impl std::fmt::Debug for DispatchMode {
 }
 
 impl DispatchMode {
-    pub fn single(transport: TransportHandler) -> Self {
+    pub(crate) fn single(transport: TransportHandler) -> Self {
         Self::Single(transport)
     }
 
-    pub fn pooled(transports: Vec<TransportHandler>, selection: PoolSelection) -> Self {
+    pub(crate) fn pooled(transports: Vec<TransportHandler>, selection: PoolSelection) -> Self {
         Self::Pooled {
             transports: Arc::from(transports),
             selector: Box::new(selection.into_selector::<TransportHandler>()),

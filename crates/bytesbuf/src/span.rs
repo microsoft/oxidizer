@@ -44,7 +44,7 @@ impl Span {
     }
 
     #[must_use]
-    pub const fn len(&self) -> BlockSize {
+    pub(crate) const fn len(&self) -> BlockSize {
         self.len
     }
 

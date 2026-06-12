@@ -43,7 +43,7 @@ use crate::{CacheEntry, Error, InsertPolicy};
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct CacheWrapper<K, V, CT> {
+pub(crate) struct CacheWrapper<K, V, CT> {
     pub(crate) name: CacheName,
     pub(crate) inner: CT,
     pub(crate) clock: Clock,

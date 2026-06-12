@@ -26,7 +26,7 @@ pub(crate) struct EngineTelemetry<T> {
 
 impl<T> EngineTelemetry<T> {
     #[cfg(any(feature = "metrics", feature = "logs", test))]
-    pub fn new(inner: T, telemetry: TelemetryHelper, breaker_id: crate::TelemetryString, clock: Clock) -> Self {
+    pub(crate) fn new(inner: T, telemetry: TelemetryHelper, breaker_id: crate::TelemetryString, clock: Clock) -> Self {
         Self {
             inner,
             telemetry,

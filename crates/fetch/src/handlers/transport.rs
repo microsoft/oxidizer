@@ -15,7 +15,7 @@ use layered::{DynamicService, DynamicServiceExt, Service};
 pub(crate) struct TransportHandler(pub DynamicService<HttpRequest, Result<HttpResponse>>);
 
 impl TransportHandler {
-    pub fn new<H: RequestHandler + 'static>(handler: H) -> Self {
+    pub(crate) fn new<H: RequestHandler + 'static>(handler: H) -> Self {
         Self(handler.into_dynamic())
     }
 }

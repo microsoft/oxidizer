@@ -19,11 +19,11 @@ pub(crate) struct CustomPipelineFactory(
 );
 
 impl CustomPipelineFactory {
-    pub fn new<T: RequestHandler + 'static>(factory: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
+    pub(crate) fn new<T: RequestHandler + 'static>(factory: impl Fn(Dispatch, PipelineContext) -> T + Send + Sync + 'static) -> Self {
         Self(Arc::new(move |dispatch, context| factory(dispatch, context).into_dynamic()))
     }
 
-    pub fn create(&self, handler: Dispatch, context: PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> {
+    pub(crate) fn create(&self, handler: Dispatch, context: PipelineContext) -> DynamicService<HttpRequest, crate::Result<HttpResponse>> {
         self.0(handler, context)
     }
 }

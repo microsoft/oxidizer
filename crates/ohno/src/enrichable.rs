@@ -83,7 +83,7 @@ mod tests {
     use super::*;
 
     #[derive(Default, ohno::Error)]
-    pub struct TestError {
+    pub(crate) struct TestError {
         pub data: OhnoCore,
     }
 

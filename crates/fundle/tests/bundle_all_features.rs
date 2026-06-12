@@ -19,10 +19,22 @@ pub struct Telemetry {}
 
 mod gpu {
     #[derive(Clone, Default)]
+    #[expect(
+        unreachable_pub,
+        reason = "must remain pub: #[fundle::bundle] generates a public interface over this bundle component type (E0446 otherwise)"
+    )]
     pub struct Instance;
     #[derive(Clone, Default)]
+    #[expect(
+        unreachable_pub,
+        reason = "must remain pub: #[fundle::bundle] generates a public interface over this bundle component type (E0446 otherwise)"
+    )]
     pub struct Device;
     #[derive(Clone, Default)]
+    #[expect(
+        unreachable_pub,
+        reason = "must remain pub: #[fundle::bundle] generates a public interface over this bundle component type (E0446 otherwise)"
+    )]
     pub struct Vulkan;
 
     #[fundle::bundle]

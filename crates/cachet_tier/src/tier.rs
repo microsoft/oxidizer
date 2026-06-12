@@ -7,6 +7,11 @@
 //! This trait is designed for composition: implement the storage operations,
 //! then use `cachet` to layer on telemetry, TTL, and multi-tier fallback.
 
+#![expect(
+    unreachable_pub,
+    reason = "CacheTier is re-exported at the crate root via `pub use tier::CacheTier`; the dynosaur attribute macro causes unreachable_pub to misfire on the generated definition"
+)]
+
 use std::future::Future;
 
 use crate::{CacheEntry, Error, SizeError};

@@ -13,13 +13,13 @@ mod field_detection;
 mod from_impls;
 #[cfg(test)]
 mod tests;
-pub mod types;
+pub(crate) mod types;
 
-pub use attributes::*;
-pub use constructors::*;
-pub use display::*;
-pub use field_detection::*;
-pub use from_impls::*;
+pub(crate) use attributes::*;
+pub(crate) use constructors::*;
+pub(crate) use display::*;
+pub(crate) use field_detection::*;
+pub(crate) use from_impls::*;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
@@ -29,7 +29,7 @@ use syn::{DeriveInput, Result, parse_macro_input};
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
-pub fn derive_error(input: TokenStream) -> TokenStream {
+pub(crate) fn derive_error(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     impl_error_derive(&input).unwrap_or_else(|err| err.to_compile_error()).into()
