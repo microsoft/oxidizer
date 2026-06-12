@@ -13,7 +13,7 @@
 //! trait on top of a [`fetch::HttpClient`], so Azure SDK pipelines run over
 //! `fetch` and benefit from its resilience and observability.
 //!
-//! To run the Azure SDK on an [`anyspawn`]-backed async runtime, see the
+//! To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 //! `anyspawn_azure` crate.
 //!
 //! # Example
