@@ -135,17 +135,17 @@ Use `--save-baseline` and `--baseline` flags to track regressions over time.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/uniflight">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb4YsqHKJIO4Ebne8KVDRuJvAbVEqIpjwMtY4bZY2vS6iuAethZIKCbHRocmVhZF9hd2FyZWUwLjcuM4JpdW5pZmxpZ2h0ZTAuMi4z
- [__link0]: https://docs.rs/uniflight/0.2.3/uniflight/struct.Merger.html
- [__link1]: https://docs.rs/uniflight/0.2.3/uniflight/?search=Merger::execute
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb4YsqHKJIO4Ebne8KVDRuJvAbVEqIpjwMtY4bZY2vS6iuAethZIKCbHRocmVhZF9hd2FyZWUwLjcuNIJpdW5pZmxpZ2h0ZTAuMi40
+ [__link0]: https://docs.rs/uniflight/0.2.4/uniflight/struct.Merger.html
+ [__link1]: https://docs.rs/uniflight/0.2.4/uniflight/?search=Merger::execute
  [__link10]: https://doc.rust-lang.org/stable/std/?search=hash::Hash
  [__link11]: https://doc.rust-lang.org/stable/std/cmp/trait.Eq.html
- [__link12]: https://docs.rs/uniflight/0.2.3/uniflight/struct.Merger.html
+ [__link12]: https://docs.rs/uniflight/0.2.4/uniflight/struct.Merger.html
  [__link2]: https://doc.rust-lang.org/stable/std/?search=borrow::Borrow
- [__link3]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=storage::Strategy
- [__link4]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=PerProcess
- [__link5]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=PerNuma
- [__link6]: https://docs.rs/thread_aware/0.7.3/thread_aware/?search=PerCore
- [__link7]: https://docs.rs/uniflight/0.2.3/uniflight/struct.LeaderPanicked.html
- [__link8]: https://docs.rs/uniflight/0.2.3/uniflight/?search=LeaderPanicked::message
+ [__link3]: https://docs.rs/thread_aware/0.7.4/thread_aware/?search=storage::Strategy
+ [__link4]: https://docs.rs/thread_aware/0.7.4/thread_aware/?search=PerProcess
+ [__link5]: https://docs.rs/thread_aware/0.7.4/thread_aware/?search=PerNuma
+ [__link6]: https://docs.rs/thread_aware/0.7.4/thread_aware/?search=PerCore
+ [__link7]: https://docs.rs/uniflight/0.2.4/uniflight/struct.LeaderPanicked.html
+ [__link8]: https://docs.rs/uniflight/0.2.4/uniflight/?search=LeaderPanicked::message
  [__link9]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html

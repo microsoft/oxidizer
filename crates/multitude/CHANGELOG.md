@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.4` of `bytesbuf`
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - Rewrite the multitude crate ([#471](https://github.com/microsoft/oxidizer/pull/471))
+
 ## [0.1.3] - 2026-06-04
 
 - 🔧 Maintenance

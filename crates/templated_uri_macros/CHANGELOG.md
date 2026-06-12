@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.2.4` of `templated_uri_macros_impl`
+
 ## [0.2.3] - 2026-06-04
 
 - 🔧 Maintenance
