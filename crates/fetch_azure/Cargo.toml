@@ -21,6 +21,7 @@ allowed_external_types = [
     # Workspace sibling crates
     "anyspawn::*",
     "fetch::*",
+    "tick::*",
     # External dependencies (azure_core re-exports these typespec types)
     "typespec_client_core::*",
 ]
@@ -34,6 +35,7 @@ anyspawn = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
 fetch = { workspace = true }
 layered = { workspace = true }
+tick = { workspace = true }
 
 # external
 async-trait = { workspace = true }
@@ -45,6 +47,7 @@ http = { workspace = true }
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
+tick = { path = "../tick", features = ["tokio"] }
 
 # external
 async-trait = { workspace = true }

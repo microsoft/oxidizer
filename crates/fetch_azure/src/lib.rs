@@ -30,15 +30,16 @@
 //! use azure_core::http::HttpClient;
 //! use fetch::HttpClient as FetchClient;
 //! use fetch_azure::{new_async_runtime, new_http_client};
+//! use tick::Clock;
 //!
 //! // Adapt a `fetch` client into an Azure SDK transport.
 //! fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
 //!     new_http_client(client)
 //! }
 //!
-//! // Install an `anyspawn`-backed async runtime for the Azure SDK.
-//! fn install_runtime(spawner: Spawner) {
-//!     let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner);
+//! // Install an `anyspawn`-backed async runtime (sleeping on a `tick::Clock`).
+//! fn install_runtime(spawner: Spawner, clock: Clock) {
+//!     let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner, clock);
 //!     let _ = set_async_runtime(runtime);
 //! }
 //! # let _ = (transport, install_runtime);
@@ -63,6 +64,7 @@ use azure_core::time::Duration;
 use bytesbuf::BytesView;
 use futures::{StreamExt as _, TryStreamExt as _};
 use layered::Service as _;
+use tick::Clock;
 
 /// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
 ///
@@ -199,48 +201,52 @@ fn to_headers(map: &http::HeaderMap) -> Headers {
     Headers::from(headers)
 }
 
-/// An [`AsyncRuntime`] that spawns work on an [`anyspawn::Spawner`].
+/// An [`AsyncRuntime`] that spawns work on an [`anyspawn::Spawner`] and sleeps
+/// on a [`tick::Clock`].
 ///
-/// Construct one from an existing [`Spawner`] with [`SpawnerRuntime::new`] (or
-/// via [`From`]) and install it as the Azure SDK runtime with
-/// [`azure_core::async_runtime::set_async_runtime`]. See [`new_async_runtime`]
-/// for a convenience that returns an `Arc<dyn AsyncRuntime>` directly.
+/// Construct one from an existing [`Spawner`] and [`Clock`] with
+/// [`SpawnerRuntime::new`] (or via [`From`]) and install it as the Azure SDK
+/// runtime with [`azure_core::async_runtime::set_async_runtime`]. See
+/// [`new_async_runtime`] for a convenience that returns an
+/// `Arc<dyn AsyncRuntime>` directly.
 #[derive(Debug, Clone)]
 pub struct SpawnerRuntime {
     spawner: Spawner,
+    clock: Clock,
 }
 
 impl SpawnerRuntime {
-    /// Creates a new runtime that spawns work on the given [`Spawner`].
+    /// Creates a new runtime that spawns work on `spawner` and sleeps on `clock`.
     #[must_use]
-    pub const fn new(spawner: Spawner) -> Self {
-        Self { spawner }
+    pub const fn new(spawner: Spawner, clock: Clock) -> Self {
+        Self { spawner, clock }
     }
 
     /// Returns a reference to the wrapped [`Spawner`].
-    pub const fn inner(&self) -> &Spawner {
+    pub const fn spawner(&self) -> &Spawner {
         &self.spawner
     }
 
-    /// Consumes the runtime and returns the wrapped [`Spawner`].
-    pub fn into_inner(self) -> Spawner {
-        self.spawner
+    /// Returns a reference to the wrapped [`Clock`].
+    #[must_use]
+    pub const fn clock(&self) -> &Clock {
+        &self.clock
     }
 }
 
-impl From<Spawner> for SpawnerRuntime {
-    fn from(spawner: Spawner) -> Self {
-        Self::new(spawner)
+impl From<(Spawner, Clock)> for SpawnerRuntime {
+    fn from((spawner, clock): (Spawner, Clock)) -> Self {
+        Self::new(spawner, clock)
     }
 }
 
-/// Wraps an [`anyspawn::Spawner`] as an `Arc<dyn AsyncRuntime>`.
+/// Wraps an [`anyspawn::Spawner`] and [`tick::Clock`] as an `Arc<dyn AsyncRuntime>`.
 ///
 /// This is a convenience for installing a `fetch`-friendly runtime with
 /// [`azure_core::async_runtime::set_async_runtime`].
 #[must_use]
-pub fn new_async_runtime(spawner: Spawner) -> Arc<dyn AsyncRuntime> {
-    Arc::new(SpawnerRuntime::new(spawner))
+pub fn new_async_runtime(spawner: Spawner, clock: Clock) -> Arc<dyn AsyncRuntime> {
+    Arc::new(SpawnerRuntime::new(spawner, clock))
 }
 
 impl AsyncRuntime for SpawnerRuntime {
@@ -249,12 +255,11 @@ impl AsyncRuntime for SpawnerRuntime {
     }
 
     fn sleep(&self, duration: Duration) -> TaskFuture {
-        let spawner = self.spawner.clone();
+        let clock = self.clock.clone();
         Box::pin(async move {
-            // `time::Duration` can be negative; clamp such values to zero. The
-            // wait runs on the spawner's blocking pool so any runtime works.
+            // `time::Duration` can be negative; clamp such values to zero.
             let duration = std::time::Duration::try_from(duration).unwrap_or_default();
-            let () = spawner.spawn_blocking(move || std::thread::sleep(duration)).await;
+            clock.delay(duration).await;
         })
     }
 
