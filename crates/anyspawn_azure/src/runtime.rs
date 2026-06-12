@@ -18,8 +18,8 @@ use tick::Clock;
 /// on a [`tick::Clock`].
 ///
 /// Construct one from an existing [`Spawner`] and [`Clock`] with
-/// [`Runtime::new`] (or via [`From`]), then convert it into an
-/// `Arc<dyn AsyncRuntime>` via [`From`] / [`Into`] and install it with
+/// [`Runtime::new`], then convert it into an `Arc<dyn AsyncRuntime>` via
+/// [`From`] / [`Into`] and install it with
 /// [`azure_core::async_runtime::set_async_runtime`].
 #[derive(Debug, Clone)]
 pub struct Runtime {
@@ -43,12 +43,6 @@ impl Runtime {
     #[must_use]
     pub const fn clock(&self) -> &Clock {
         &self.clock
-    }
-}
-
-impl From<(Spawner, Clock)> for Runtime {
-    fn from((spawner, clock): (Spawner, Clock)) -> Self {
-        Self::new(spawner, clock)
     }
 }
 

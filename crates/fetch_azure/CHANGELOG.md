@@ -4,12 +4,6 @@
 
 - ✨ Features
 
-  - introduce `fetch_azure`, bundling two Azure SDK abstractions backed by the
-    Oxidizer stack:
-    - `AzureHttpClient` implements `azure_core::http::HttpClient` on top of a
-      `fetch::HttpClient` transport.
-    - `Runtime` implements `azure_core::async_runtime::AsyncRuntime` on top
-      of an `anyspawn::Spawner` (spawning) and a `tick::Clock` (sleeping).
-    - with the optional `azure-identity` feature, `Runtime` also implements
-      `azure_identity::Executor`, running credential subprocesses on the
-      `anyspawn::Spawner`.
+  - introduce `fetch_azure`, adapting a `fetch::HttpClient` into an Azure SDK
+    HTTP transport: `AzureHttpClient` implements `azure_core::http::HttpClient`
+    on top of a `fetch::HttpClient`.

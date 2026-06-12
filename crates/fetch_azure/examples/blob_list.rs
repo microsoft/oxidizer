@@ -11,12 +11,13 @@ use std::env;
 use std::sync::Arc;
 
 use anyspawn::Spawner;
+use anyspawn_azure::Runtime;
 use azure_core::credentials::TokenCredential;
 use azure_core::http::{ClientOptions, Transport, Url};
 use azure_identity::{DeveloperToolsCredential, DeveloperToolsCredentialOptions, Executor};
 use azure_storage_blob::{BlobServiceClient, BlobServiceClientOptions};
 use fetch::HttpClient as FetchClient;
-use fetch_azure::{AzureHttpClient, Runtime};
+use fetch_azure::AzureHttpClient;
 use futures::TryStreamExt as _;
 use tick::Clock;
 

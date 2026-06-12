@@ -92,6 +92,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyspawn_azure"
+version = "0.1.0"
+dependencies = [
+ "anyspawn",
+ "async-trait",
+ "azure_core",
+ "azure_identity",
+ "futures",
+ "tick",
+ "tokio",
+]
+
+[[package]]
 name = "argh"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1271,6 +1284,7 @@ name = "fetch_azure"
 version = "0.1.0"
 dependencies = [
  "anyspawn",
+ "anyspawn_azure",
  "async-trait",
  "azure_core",
  "azure_identity",
