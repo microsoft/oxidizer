@@ -28,7 +28,7 @@
 //! use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
 //! use azure_core::http::HttpClient;
 //! use fetch::HttpClient as FetchClient;
-//! use fetch_azure::{AzureHttpClient, new_async_runtime};
+//! use fetch_azure::{AzureHttpClient, Runtime};
 //! use tick::Clock;
 //!
 //! // Adapt a `fetch` client into an Azure SDK transport.
@@ -38,7 +38,7 @@
 //!
 //! // Install an `anyspawn`-backed async runtime (sleeping on a `tick::Clock`).
 //! fn install_runtime(spawner: Spawner, clock: Clock) {
-//!     let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner, clock);
+//!     let runtime: Arc<dyn AsyncRuntime> = Runtime::new(spawner, clock).into();
 //!     let _ = set_async_runtime(runtime);
 //! }
 //! # let _ = (transport, install_runtime);
@@ -48,4 +48,4 @@ mod client;
 mod runtime;
 
 pub use client::AzureHttpClient;
-pub use runtime::{Runtime, new_async_runtime};
+pub use runtime::Runtime;

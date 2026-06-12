@@ -18,10 +18,9 @@ use tick::Clock;
 /// on a [`tick::Clock`].
 ///
 /// Construct one from an existing [`Spawner`] and [`Clock`] with
-/// [`Runtime::new`] (or via [`From`]) and install it as the Azure SDK runtime
-/// with [`azure_core::async_runtime::set_async_runtime`]. See
-/// [`new_async_runtime`] for a convenience that returns an
-/// `Arc<dyn AsyncRuntime>` directly.
+/// [`Runtime::new`] (or via [`From`]), then convert it into an
+/// `Arc<dyn AsyncRuntime>` via [`From`] / [`Into`] and install it with
+/// [`azure_core::async_runtime::set_async_runtime`].
 #[derive(Debug, Clone)]
 pub struct Runtime {
     spawner: Spawner,
@@ -53,13 +52,10 @@ impl From<(Spawner, Clock)> for Runtime {
     }
 }
 
-/// Wraps an [`anyspawn::Spawner`] and [`tick::Clock`] as an `Arc<dyn AsyncRuntime>`.
-///
-/// This is a convenience for installing a `fetch`-friendly runtime with
-/// [`azure_core::async_runtime::set_async_runtime`].
-#[must_use]
-pub fn new_async_runtime(spawner: Spawner, clock: Clock) -> Arc<dyn AsyncRuntime> {
-    Arc::new(Runtime::new(spawner, clock))
+impl From<Runtime> for Arc<dyn AsyncRuntime> {
+    fn from(runtime: Runtime) -> Self {
+        Arc::new(runtime)
+    }
 }
 
 impl AsyncRuntime for Runtime {

@@ -35,7 +35,7 @@ use anyspawn::Spawner;
 use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
 use azure_core::http::HttpClient;
 use fetch::HttpClient as FetchClient;
-use fetch_azure::{AzureHttpClient, new_async_runtime};
+use fetch_azure::{AzureHttpClient, Runtime};
 use tick::Clock;
 
 // Adapt a `fetch` client into an Azure SDK transport.
@@ -45,7 +45,7 @@ fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
 
 // Install an `anyspawn`-backed async runtime (sleeping on a `tick::Clock`).
 fn install_runtime(spawner: Spawner, clock: Clock) {
-    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(spawner, clock);
+    let runtime: Arc<dyn AsyncRuntime> = Runtime::new(spawner, clock).into();
     let _ = set_async_runtime(runtime);
 }
 ```
@@ -56,7 +56,7 @@ fn install_runtime(spawner: Spawner, clock: Clock) {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbrqIoJ8N-P7Mbeo4KsHTJWykbZMzMdpJ5oFcbCmGbFqcAa-lhZIWCaGFueXNwYXduZTAuNS4zgmphenVyZV9jb3JlZTEuMC4wgmVmZXRjaGYwLjExLjCCa2ZldGNoX2F6dXJlZTAuMS4wgmR0aWNrZTAuMy4z
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbKKsn8lFrPt8b0KAAJiBwTQ8bStgknxZYUFMb8x5TGN_lWzJhZIWCaGFueXNwYXduZTAuNS4zgmphenVyZV9jb3JlZTEuMC4wgmVmZXRjaGYwLjExLjCCa2ZldGNoX2F6dXJlZTAuMS4wgmR0aWNrZTAuMy4z
  [__link0]: https://crates.io/crates/fetch/0.11.0
  [__link1]: https://crates.io/crates/anyspawn/0.5.3
  [__link10]: https://docs.rs/tick/0.3.3/tick/?search=Clock
