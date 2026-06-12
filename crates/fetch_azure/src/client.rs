@@ -7,14 +7,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use azure_core::error::{Error, ErrorKind};
-use azure_core::http::headers::{HeaderName, HeaderValue, Headers};
-use azure_core::http::request::{Body, Request};
-use azure_core::http::response::PinnedStream;
-use azure_core::http::{AsyncRawResponse, HttpClient};
 use bytesbuf::BytesView;
 use futures::{StreamExt as _, TryStreamExt as _};
 use layered::Service as _;
+use typespec_client_core::error::{Error, ErrorKind};
+use typespec_client_core::http::headers::{HeaderName, HeaderValue, Headers};
+use typespec_client_core::http::request::{Body, Request};
+use typespec_client_core::http::response::PinnedStream;
+use typespec_client_core::http::{AsyncRawResponse, HttpClient};
 
 /// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
 ///
@@ -43,7 +43,7 @@ impl AzureHttpClient {
     }
 
     /// Converts a typespec [`Request`] into a `fetch` request.
-    fn to_fetch_request(&self, request: &Request) -> azure_core::Result<fetch::HttpRequest> {
+    fn to_fetch_request(&self, request: &Request) -> typespec_client_core::Result<fetch::HttpRequest> {
         // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
         // builder parses into an `http::Method`; this avoids matching on the
         // `#[non_exhaustive]` typespec `Method` enum.
@@ -102,7 +102,7 @@ impl From<AzureHttpClient> for Arc<dyn HttpClient> {
 
 #[async_trait]
 impl HttpClient for AzureHttpClient {
-    async fn execute_request(&self, request: &Request) -> azure_core::Result<AsyncRawResponse> {
+    async fn execute_request(&self, request: &Request) -> typespec_client_core::Result<AsyncRawResponse> {
         let request = self.to_fetch_request(request)?;
 
         let response = self

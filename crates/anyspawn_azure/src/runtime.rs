@@ -9,10 +9,10 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use anyspawn::{JoinHandle, Spawner};
-use azure_core::async_runtime::{AbortableTask, AsyncRuntime, SpawnedTask, TaskFuture};
-use azure_core::time::Duration;
 use futures::future::{AbortHandle, Abortable};
 use tick::Clock;
+use typespec_client_core::async_runtime::{AbortableTask, AsyncRuntime, SpawnedTask, TaskFuture};
+use typespec_client_core::time::Duration;
 
 /// An [`AsyncRuntime`] that spawns work on an [`anyspawn::Spawner`] and sleeps
 /// on a [`tick::Clock`].
@@ -20,7 +20,7 @@ use tick::Clock;
 /// Construct one from an existing [`Spawner`] and [`Clock`] with
 /// [`Runtime::new`], then convert it into an `Arc<dyn AsyncRuntime>` via
 /// [`From`] / [`Into`] and install it with
-/// [`azure_core::async_runtime::set_async_runtime`].
+/// [`typespec_client_core::async_runtime::set_async_runtime`].
 #[derive(Debug, Clone)]
 pub struct Runtime {
     spawner: Spawner,
