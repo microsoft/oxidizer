@@ -1,3 +1,13 @@
+codecov:
+  notify:
+    # Wait for all coverage matrix jobs to upload before reporting status.
+    # Each OS in the `coverage` job matrix in .github/workflows/main.yml does a
+    # single upload (its comma-separated lcov files are merged into one report),
+    # so this must equal the number of OS entries in that matrix. Without this,
+    # Codecov posts the `codecov/project` status after the first upload, before
+    # data from the other platforms has arrived, causing a spurious failure.
+    # Keep this in sync with the `coverage` matrix `os` list.
+    after_n_builds: 3
 coverage:
   precision: 1
   round: down
