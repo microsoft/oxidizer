@@ -1,0 +1,51 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_azure"
+description = "Adapts the fetch HTTP client as a transport for the Azure SDK for Rust."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "azure", "fetch", "http", "typespec"]
+categories = ["network-programming"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "fetch::*",
+    # External dependencies
+    "typespec_client_core::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# internal
+bytesbuf = { workspace = true, features = ["bytes-compat"] }
+fetch = { workspace = true }
+
+# external
+async-trait = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+http-body-util = { workspace = true }
+typespec_client_core = { workspace = true, features = ["http"] }
+
+[dev-dependencies]
+# internal
+fetch = { path = "../fetch", features = ["test-util"] }
+
+# external
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+typespec_client_core = { workspace = true, features = ["http"] }
+
+[lints]
+workspace = true
