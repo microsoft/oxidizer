@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for [`fetch_azure::FetchHttpClient`].
+//! Integration tests for [`fetch_azure::AzureHttpClient`].
 //!
 //! These exercise the adapter end-to-end using `fetch`'s `FakeHandler`, so no
 //! real network access is required.
@@ -22,7 +22,7 @@ use azure_core::stream::{BytesStream, SeekableStream};
 use azure_core::time::Duration;
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
-use fetch_azure::{FetchHttpClient, SpawnerRuntime, new_async_runtime, new_http_client};
+use fetch_azure::{AzureHttpClient, SpawnerRuntime, new_async_runtime, new_http_client};
 use futures::io::AsyncRead;
 use tick::Clock;
 
@@ -44,7 +44,7 @@ async fn execute_request_maps_status_headers_and_body() {
             .text("world")
             .build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 
@@ -66,7 +66,7 @@ async fn execute_request_forwards_method_and_bytes_body() {
         let body = request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).bytes(body).build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let mut request = request(Method::Post);
     request.set_body(Bytes::from_static(b"payload"));
@@ -84,7 +84,7 @@ async fn execute_request_forwards_seekable_stream_body() {
         let body = request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).bytes(body).build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let mut request = request(Method::Put);
     request.set_body(BytesStream::new(Bytes::from_static(b"streamed")));
@@ -103,7 +103,7 @@ async fn execute_request_forwards_request_headers() {
         let status = if forwarded { 200u16 } else { 400u16 };
         HttpResponseBuilder::new_fake().status(status).build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let mut request = request(Method::Get);
     request.insert_header("x-correlation", "abc123");
@@ -121,7 +121,7 @@ async fn execute_request_maps_all_methods() {
             let status = if request.method().as_str() == expected { 200u16 } else { 400u16 };
             HttpResponseBuilder::new_fake().status(status).build()
         });
-        let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+        let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
         let response = client.execute_request(&request(method)).await.unwrap();
 
@@ -132,7 +132,7 @@ async fn execute_request_maps_all_methods() {
 #[tokio::test]
 async fn execute_request_maps_transport_error() {
     let handler = FakeHandler::from_error_fn(|_request| fetch::HttpError::unavailable("simulated transport failure"));
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let error = client.execute_request(&request(Method::Get)).await.unwrap_err();
 
@@ -153,12 +153,12 @@ async fn new_http_client_returns_dyn_client() {
 
 #[tokio::test]
 async fn from_fetch_client_and_inner_round_trip() {
-    let adapter = FetchHttpClient::from(FetchClient::new_fake(status_handler(200)));
+    let adapter = AzureHttpClient::from(FetchClient::new_fake(status_handler(200)));
 
     // `inner` exposes the wrapped client and `into_inner` returns it unchanged.
     let _ = adapter.inner();
     let recovered = adapter.into_inner();
-    let adapter = FetchHttpClient::new(recovered);
+    let adapter = AzureHttpClient::new(recovered);
 
     let response = adapter.execute_request(&request(Method::Get)).await.unwrap();
     assert_eq!(response.status(), 200u16);
@@ -166,7 +166,7 @@ async fn from_fetch_client_and_inner_round_trip() {
 
 #[tokio::test]
 async fn execute_request_maps_request_build_failure() {
-    let client = FetchHttpClient::new(FetchClient::new_fake(status_handler(200)));
+    let client = AzureHttpClient::new(FetchClient::new_fake(status_handler(200)));
 
     // A header value containing a control character is rejected by the `http`
     // crate when the fetch request is built, exercising the DataConversion path.
@@ -193,7 +193,7 @@ async fn execute_request_skips_non_utf8_response_headers() {
             .header("x-binary", binary)
             .build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 
@@ -208,7 +208,7 @@ async fn execute_request_maps_seekable_stream_read_error() {
         request.into_body().into_bytes().await?;
         HttpResponseBuilder::new_fake().status(200u16).build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let mut request = request(Method::Post);
     request.set_body(Body::SeekableStream(Box::new(ErroringStream)));
@@ -230,7 +230,7 @@ async fn execute_request_maps_response_body_read_error() {
         );
         HttpResponseBuilder::new_fake().status(200u16).body(body).build()
     });
-    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+    let client = AzureHttpClient::new(FetchClient::new_fake(handler));
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
     let error = response.into_body().collect().await.unwrap_err();
