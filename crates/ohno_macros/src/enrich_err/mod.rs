@@ -23,7 +23,7 @@ use crate::utils::bail;
 ///
 /// See the main `ohno` crate documentation for detailed usage examples.
 #[cfg_attr(test, mutants::skip)] // procedural macro API cannot be used in tests directly
-pub fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
+pub(crate) fn enrich_err(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = proc_macro2::TokenStream::from(args);
     let input = parse_macro_input!(input as ItemFn);
 
@@ -67,7 +67,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
 /// Generate error enrichment expression for complex format expressions.
 /// Supports both simple string literals and format strings with complex expressions.
 /// Also supports legacy-style parameter interpolation like `{param}`.
-pub fn generate_msg_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
+pub(crate) fn generate_msg_expr(args_stream: proc_macro2::TokenStream) -> Result<proc_macro2::TokenStream> {
     // Parse the token stream - it could be:
     // 1. A single string literal: "message"
     // 2. A single string literal with parameter interpolation: "failed to read {path}"

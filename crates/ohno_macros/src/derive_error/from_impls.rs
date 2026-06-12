@@ -8,7 +8,7 @@ use crate::derive_error::types::{ErrorFieldRef, FromConfig};
 use crate::utils::bail;
 
 /// Generate From trait implementations for specified types
-pub fn generate_from_implementations(
+pub(crate) fn generate_from_implementations(
     input: &DeriveInput,
     error_field: &ErrorFieldRef,
     from_configs: &[FromConfig],

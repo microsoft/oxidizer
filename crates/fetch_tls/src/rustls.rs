@@ -175,14 +175,14 @@ type ServerCertVerifierFactoryType = Arc<dyn Fn(Arc<CryptoProvider>) -> Arc<dyn 
 struct ServerCertVerifierFactory(ServerCertVerifierFactoryType);
 
 impl ServerCertVerifierFactory {
-    pub fn new<F>(factory: F) -> Self
+    pub(crate) fn new<F>(factory: F) -> Self
     where
         F: Fn(Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> + Send + Sync + 'static,
     {
         Self(Arc::new(factory))
     }
 
-    pub fn invoke(&self, crypto_provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> {
+    pub(crate) fn invoke(&self, crypto_provider: Arc<CryptoProvider>) -> Arc<dyn ServerCertVerifier> {
         self.0.as_ref()(crypto_provider)
     }
 }

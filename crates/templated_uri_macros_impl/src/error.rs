@@ -6,7 +6,7 @@ use proc_macro2::{Span, TokenStream};
 
 #[ohno::error]
 #[display("Failed to parse URI: {errors:?}")]
-pub struct ParseError<'a> {
+pub(crate) struct ParseError<'a> {
     errors: Vec<Rich<'a, char>>,
 }
 

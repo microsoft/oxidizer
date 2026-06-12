@@ -8,7 +8,7 @@ use syn::{DataEnum, Fields};
 use crate::bail;
 
 #[expect(clippy::cognitive_complexity, reason = "Macros can be complex")]
-pub fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
+pub(crate) fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
     let enum_name = ident.to_string();
     let mut all_variants = Vec::new();
     let mut variant_types = Vec::new();

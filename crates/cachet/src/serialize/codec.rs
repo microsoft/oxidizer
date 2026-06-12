@@ -26,14 +26,14 @@ const FORMAT_VERSION: u8 = 1;
 ///
 /// For bidirectional serialization/deserialization, use [`PostcardCodec`].
 #[derive(Debug, Clone)]
-pub struct PostcardEncoder {
+pub(crate) struct PostcardEncoder {
     pool: GlobalPool,
 }
 
 impl PostcardEncoder {
     /// Creates a new encoder with a shared memory pool.
     #[must_use]
-    pub fn new(pool: GlobalPool) -> Self {
+    pub(crate) fn new(pool: GlobalPool) -> Self {
         Self { pool }
     }
 }
@@ -51,14 +51,14 @@ impl<T: Serialize + Send + Sync> Encoder<T, BytesView> for PostcardEncoder {
 /// Serialization writes directly into pool-backed memory via [`BytesBufWriter`](bytesbuf::BytesBufWriter),
 /// producing a [`BytesView`] with no intermediate heap allocation.
 #[derive(Debug, Clone)]
-pub struct PostcardCodec {
+pub(crate) struct PostcardCodec {
     pool: GlobalPool,
 }
 
 impl PostcardCodec {
     /// Creates a new codec with a shared memory pool.
     #[must_use]
-    pub fn new(pool: GlobalPool) -> Self {
+    pub(crate) fn new(pool: GlobalPool) -> Self {
         Self { pool }
     }
 }

@@ -6,7 +6,7 @@ use crate::affinity::Affinity;
 use crate::closure::ThreadAwareFnOnce;
 
 /// A closure with erased bounds.
-pub struct ErasedClosureOnce<T: ?Sized> {
+pub(crate) struct ErasedClosureOnce<T: ?Sized> {
     inner: Box<dyn Erased<T>>,
 }
 
@@ -22,7 +22,7 @@ impl<T: ?Sized> std::fmt::Debug for ErasedClosureOnce<T> {
 
 impl<T> ErasedClosureOnce<T> {
     /// Creates a new closure with erased bounds.
-    pub fn new<C>(closure: C) -> Self
+    pub(crate) fn new<C>(closure: C) -> Self
     where
         C: ThreadAwareFnOnce<T> + Clone + ThreadAware + 'static + Send + Sync,
     {

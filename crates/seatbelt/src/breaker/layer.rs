@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    pub fn half_open_mode_ok() {
+    pub(crate) fn half_open_mode_ok() {
         let layer = create_ready_layer().half_open_mode(HalfOpenMode::quick());
         assert_eq!(layer.half_open_mode, HalfOpenMode::quick());
 

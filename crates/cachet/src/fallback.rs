@@ -62,7 +62,7 @@ impl<K, V, P, F> std::fmt::Debug for FallbackCacheInner<K, V, P, F> {
 ///     .build();
 /// ```
 #[derive(Debug)]
-pub struct FallbackCache<K, V, P, F> {
+pub(crate) struct FallbackCache<K, V, P, F> {
     pub(crate) inner: Arc<FallbackCacheInner<K, V, P, F>>,
 }
 

@@ -457,7 +457,7 @@ mod tests {
     use crate::{Execute, Layer, Stack};
 
     #[test]
-    pub fn ensure_types() {
+    pub(crate) fn ensure_types() {
         static_assertions::assert_impl_all!(Intercept::<String, String, ()>: Debug, Clone, Send, Sync);
         static_assertions::assert_impl_all!(InterceptLayer::<String, String>: Debug, Clone, Send, Sync);
     }

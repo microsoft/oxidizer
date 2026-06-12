@@ -9,19 +9,19 @@ use crate::example_taxonomy::ExampleTaxonomy;
 
 #[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
 #[derive(Clone, Hash, Serialize, Deserialize, Constructor, From)]
-pub struct UserName(String);
+pub(crate) struct UserName(String);
 
 #[classified(ExampleTaxonomy::PersonallyIdentifiableInformation)]
 #[derive(Clone, Serialize, Deserialize, Constructor, From)]
-pub struct UserAddress(String);
+pub(crate) struct UserAddress(String);
 
 #[classified(ExampleTaxonomy::OrganizationallyIdentifiableInformation)]
 #[derive(Clone, Serialize, Deserialize, Constructor, From)]
-pub struct EmployeeID(String);
+pub(crate) struct EmployeeID(String);
 
 /// Holds info about a single corporate employee.
 #[derive(Serialize, Deserialize, Clone, RedactedDebug, RedactedDisplay)]
-pub struct Employee {
+pub(crate) struct Employee {
     pub name: UserName,
     pub address: UserAddress,
     pub id: EmployeeID,

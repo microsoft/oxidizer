@@ -20,7 +20,7 @@ pub(crate) struct Engines {
 }
 
 impl Engines {
-    pub fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
+    pub(crate) fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
         Self {
             map: RwLock::new(HashMap::new()),
             engine_options,
@@ -29,7 +29,7 @@ impl Engines {
         }
     }
 
-    pub fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
+    pub(crate) fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
         // Fast path: read lock for existing engines (common case).
         {
             let map = self.map.read().expect(ERR_POISONED_LOCK);
