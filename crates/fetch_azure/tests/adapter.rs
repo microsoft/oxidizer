@@ -24,6 +24,7 @@ use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
 use fetch_azure::{FetchHttpClient, SpawnerRuntime, new_async_runtime, new_http_client};
 use futures::io::AsyncRead;
+use tick::Clock;
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -275,7 +276,7 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 
 #[tokio::test]
 async fn runtime_spawn_runs_task_to_completion() {
-    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio(), Clock::new_tokio());
     let ran = Arc::new(AtomicBool::new(false));
     let ran_in_task = Arc::clone(&ran);
 
@@ -289,7 +290,7 @@ async fn runtime_spawn_runs_task_to_completion() {
 
 #[tokio::test]
 async fn runtime_abort_resolves_without_waiting() {
-    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio(), Clock::new_tokio());
 
     // The task never completes on its own; aborting must let the await resolve.
     let task = runtime.spawn(Box::pin(std::future::pending::<()>()));
@@ -299,33 +300,31 @@ async fn runtime_abort_resolves_without_waiting() {
 
 #[tokio::test]
 async fn runtime_sleep_completes() {
-    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio(), Clock::new_tokio());
 
     runtime.sleep(Duration::milliseconds(1)).await;
 }
 
 #[tokio::test]
 async fn runtime_yield_now_completes() {
-    let runtime = SpawnerRuntime::new(Spawner::new_tokio());
+    let runtime = SpawnerRuntime::new(Spawner::new_tokio(), Clock::new_tokio());
 
     runtime.yield_now().await;
 }
 
 #[tokio::test]
 async fn new_async_runtime_returns_dyn_runtime() {
-    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(Spawner::new_tokio());
+    let runtime: Arc<dyn AsyncRuntime> = new_async_runtime(Spawner::new_tokio(), Clock::new_tokio());
 
     runtime.spawn(Box::pin(async {})).await.unwrap();
 }
 
 #[tokio::test]
-async fn runtime_from_spawner_and_inner_round_trip() {
-    let runtime = SpawnerRuntime::from(Spawner::new_tokio());
+async fn runtime_from_spawner_clock_and_accessors_round_trip() {
+    let runtime = SpawnerRuntime::from((Spawner::new_tokio(), Clock::new_tokio()));
 
-    // `inner` exposes the wrapped spawner and `into_inner` returns it unchanged.
-    let _ = runtime.inner();
-    let spawner = runtime.into_inner();
-    let runtime = SpawnerRuntime::new(spawner);
+    // `spawner` and `clock` expose the wrapped components; rebuild from them.
+    let runtime = SpawnerRuntime::new(runtime.spawner().clone(), runtime.clock().clone());
 
     runtime.yield_now().await;
 }
