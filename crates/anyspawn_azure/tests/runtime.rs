@@ -98,3 +98,26 @@ async fn runtime_executor_runs_command() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("hello"));
 }
+
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+async fn runtime_converts_into_dyn_executor() {
+    use std::ffi::OsStr;
+
+    use azure_identity::Executor;
+
+    let executor: Arc<dyn Executor> = Runtime::new(Spawner::new_tokio(), Clock::new_tokio()).into();
+
+    #[cfg(windows)]
+    let output = executor
+        .run(OsStr::new("cmd"), &[OsStr::new("/C"), OsStr::new("echo hello")])
+        .await
+        .unwrap();
+    #[cfg(not(windows))]
+    let output = executor
+        .run(OsStr::new("/bin/sh"), &[OsStr::new("-c"), OsStr::new("echo hello")])
+        .await
+        .unwrap();
+
+    assert!(output.status.success());
+}

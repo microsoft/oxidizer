@@ -52,6 +52,13 @@ impl From<Runtime> for Arc<dyn AsyncRuntime> {
     }
 }
 
+#[cfg(feature = "azure-identity")]
+impl From<Runtime> for Arc<dyn azure_identity::Executor> {
+    fn from(runtime: Runtime) -> Self {
+        Arc::new(runtime)
+    }
+}
+
 impl AsyncRuntime for Runtime {
     fn spawn(&self, f: TaskFuture) -> SpawnedTask {
         // Wrap the task so that `abort` cancels it through `futures`: aborting
