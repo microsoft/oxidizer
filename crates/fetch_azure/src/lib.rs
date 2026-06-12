@@ -137,7 +137,7 @@ fn to_async_raw_response(response: fetch::HttpResponse) -> AsyncRawResponse {
 /// Converts an [`http::HeaderMap`] into [`Headers`].
 ///
 /// Header values that are not valid UTF-8 are skipped, mirroring the behavior
-/// of the Azure SDK's built-in `reqwest` transport.
+/// of the built-in `reqwest` transport in the Azure SDK.
 fn to_headers(map: &http::HeaderMap) -> Headers {
     let headers = map
         .iter()
