@@ -8,15 +8,15 @@
 
 use std::sync::Arc;
 
-use azure_core::http::{HttpClient, Method, Request, Url};
+use azure_core::http::{HttpClient as HttpClientTrait, Method, Request, Url};
 use fetch::HttpClient as FetchClient;
-use fetch_azure::AzureHttpClient;
+use fetch_azure::HttpClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build a `fetch` client (Tokio runtime + rustls TLS) and adapt it so it can
     // be used wherever the Azure SDK expects an `Arc<dyn HttpClient>` transport.
-    let transport: Arc<dyn HttpClient> = AzureHttpClient::from(FetchClient::new_tokio()).into();
+    let transport: Arc<dyn HttpClientTrait> = HttpClient::from(FetchClient::new_tokio()).into();
 
     // In a real application you would hand `transport` to an Azure SDK client's
     // options. Here we drive it directly to show the round-trip.
