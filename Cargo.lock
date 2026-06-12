@@ -255,6 +255,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -956,6 +967,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "powerfmt",
+ "serde_core",
 ]
 
 [[package]]
@@ -1015,6 +1027,12 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "dynosaur"
@@ -1156,6 +1174,20 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "fetch_azure"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytesbuf",
+ "fetch",
+ "futures",
+ "http",
+ "http-body-util",
+ "tokio",
+ "typespec_client_core",
 ]
 
 [[package]]
@@ -3788,6 +3820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
 ]
 
@@ -3802,6 +3835,17 @@ dependencies = [
  "thiserror",
  "time",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3901,6 +3945,39 @@ name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
+
+[[package]]
+name = "typespec"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21666a31293beab8f41d38c2849ddbc342cd9c7cb4d71a9818868287a8934e53"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures",
+ "url",
+]
+
+[[package]]
+name = "typespec_client_core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924f0c734e0ac3b881ab99d032bd28fcc969d2bb73ef1b8dd4772fd8e518a382"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bytes",
+ "dyn-clone",
+ "futures",
+ "pin-project",
+ "rand 0.10.1",
+ "serde",
+ "time",
+ "tracing",
+ "typespec",
+ "url",
+ "uuid",
+]
 
 [[package]]
 name = "unicode-ident"

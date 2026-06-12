@@ -35,6 +35,7 @@ data_privacy_core = { path = "crates/data_privacy_core", default-features = fals
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.2" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.2" }
 fetch = { path = "crates/fetch", default-features = false, version = "0.11.1" }
+fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.1.0" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.1" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.2" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.3" }
@@ -66,6 +67,7 @@ allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 argh = { version = "0.1.13", default-features = false }
 async-once-cell = { version = "0.5.0", default-features = false }
+async-trait = { version = "0.1.89", default-features = false }
 base64 = { version = "0.22.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
@@ -151,6 +153,7 @@ tracing-test = { version = "0.2.6", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
+typespec_client_core = { version = "1.0.0", default-features = false }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }

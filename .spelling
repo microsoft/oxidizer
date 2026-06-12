@@ -593,6 +593,10 @@ deterministically
 dereferences
 honour
 MPSC
+Azure
+SDK
+TypeSpec
+typespec
 precomputed
 u32
 2^30
