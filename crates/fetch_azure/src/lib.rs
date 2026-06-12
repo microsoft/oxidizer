@@ -13,7 +13,7 @@
 //! yielding behind the [`azure_core::async_runtime::AsyncRuntime`] trait. This
 //! crate provides adapters for both:
 //!
-//! - [`FetchHttpClient`] implements [`HttpClient`] on top of a
+//! - [`AzureHttpClient`] implements [`HttpClient`] on top of a
 //!   [`fetch::HttpClient`], so Azure SDK pipelines run over `fetch` and benefit
 //!   from its resilience and observability.
 //! - [`SpawnerRuntime`] implements [`AsyncRuntime`] on top of an
@@ -68,16 +68,16 @@ use tick::Clock;
 
 /// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
 ///
-/// Construct one from an existing `fetch` client with [`FetchHttpClient::new`]
+/// Construct one from an existing `fetch` client with [`AzureHttpClient::new`]
 /// (or via [`From`]) and pass it to the Azure SDK wherever a
 /// `dyn HttpClient` is expected. See [`new_http_client`] for a convenience that
 /// returns an `Arc<dyn HttpClient>` directly.
 #[derive(Debug, Clone)]
-pub struct FetchHttpClient {
+pub struct AzureHttpClient {
     client: fetch::HttpClient,
 }
 
-impl FetchHttpClient {
+impl AzureHttpClient {
     /// Creates a new adapter that forwards requests to the given `fetch` client.
     #[must_use]
     pub const fn new(client: fetch::HttpClient) -> Self {
@@ -138,7 +138,7 @@ impl FetchHttpClient {
     }
 }
 
-impl From<fetch::HttpClient> for FetchHttpClient {
+impl From<fetch::HttpClient> for AzureHttpClient {
     fn from(client: fetch::HttpClient) -> Self {
         Self::new(client)
     }
@@ -150,11 +150,11 @@ impl From<fetch::HttpClient> for FetchHttpClient {
 /// transport to the Azure SDK.
 #[must_use]
 pub fn new_http_client(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
-    Arc::new(FetchHttpClient::new(client))
+    Arc::new(AzureHttpClient::new(client))
 }
 
 #[async_trait]
-impl HttpClient for FetchHttpClient {
+impl HttpClient for AzureHttpClient {
     async fn execute_request(&self, request: &Request) -> azure_core::Result<AsyncRawResponse> {
         let request = self.to_fetch_request(request)?;
 
