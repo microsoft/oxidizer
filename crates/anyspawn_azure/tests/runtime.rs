@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests for [`fetch_azure::Runtime`].
+#![cfg(not(miri))] // Miri cannot run tokio's runtime or spawn OS processes.
+
+//! Integration tests for [`anyspawn_azure::Runtime`].
 //!
 //! These drive the runtime adapter on a real Tokio spawner and clock.
 
