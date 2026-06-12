@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
+use azure_core::http::{HttpClient, Method, Request, Url};
 use fetch::HttpClient as FetchClient;
 use fetch_azure::new_http_client;
-use typespec_client_core::http::{HttpClient, Method, Request, Url};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

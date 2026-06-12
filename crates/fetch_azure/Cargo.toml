@@ -3,10 +3,10 @@
 
 [package]
 name = "fetch_azure"
-description = "Adapts the fetch HTTP client as a transport for the Azure SDK for Rust."
+description = "Azure SDK transport and runtime backed by the fetch HTTP client and an anyspawn spawner."
 version = "0.1.0"
 readme = "README.md"
-keywords = ["oxidizer", "azure", "fetch", "http", "typespec"]
+keywords = ["oxidizer", "azure", "fetch", "http", "runtime"]
 categories = ["network-programming"]
 
 edition = { workspace = true }
@@ -19,8 +19,9 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     # Workspace sibling crates
+    "anyspawn::*",
     "fetch::*",
-    # External dependencies
+    # External dependencies (azure_core re-exports these typespec types)
     "typespec_client_core::*",
 ]
 
@@ -29,25 +30,27 @@ all-features = true
 
 [dependencies]
 # internal
+anyspawn = { workspace = true }
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
 fetch = { workspace = true }
 layered = { workspace = true }
 
 # external
 async-trait = { workspace = true }
+azure_core = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
-typespec_client_core = { workspace = true, features = ["http"] }
 
 [dev-dependencies]
 # internal
+anyspawn = { path = "../anyspawn", features = ["tokio"] }
 fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
 
 # external
 async-trait = { workspace = true }
+azure_core = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-typespec_client_core = { workspace = true, features = ["http"] }
 
 [lints]
 workspace = true
