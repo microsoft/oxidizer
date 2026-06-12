@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::fmt::{Debug, Display};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
+use data_privacy::{RedactedDebug, RedactedDisplay, Redactor};
 use http::uri::{Authority, Parts, PathAndQuery, Scheme};
 
 use crate::origin::{HTTP_DEFAULT_PORT, HTTPS_DEFAULT_PORT};
@@ -650,6 +651,20 @@ impl Display for BaseUri {
     }
 }
 
+impl RedactedDisplay for BaseUri {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        // A base URI is static configuration rather than request data, so it is
+        // rendered unredacted, consistently with how `Uri` formats its base components.
+        Display::fmt(self, f)
+    }
+}
+
+impl RedactedDebug for BaseUri {
+    fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self, f)
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for BaseUri {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -668,6 +683,40 @@ impl<'de> serde::Deserialize<'de> for BaseUri {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod redaction {
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        use super::*;
+
+        #[test]
+        fn redacted_display_matches_display() {
+            let engine = RedactionEngine::builder().build();
+            let base_uri = BaseUri::from_static("https://example.com/api/v1/");
+
+            // A base URI carries no request data, so redaction is a no-op and renders
+            // identically to `Display`, consistently with the `Uri` redaction impl.
+            assert_eq!(base_uri.to_redacted_string(&engine), base_uri.to_string());
+            assert_eq!(base_uri.to_redacted_string(&engine), "https://example.com/api/v1/");
+        }
+
+        #[test]
+        fn redacted_display_with_custom_port() {
+            let engine = RedactionEngine::builder().build();
+            let base_uri = BaseUri::from_static("https://example.com:8443/path/");
+            assert_eq!(base_uri.to_redacted_string(&engine), "https://example.com:8443/path/");
+        }
+
+        #[test]
+        fn redacted_debug_matches_debug() {
+            let engine = RedactionEngine::builder().build();
+            let base_uri = BaseUri::from_static("https://example.com/api/v1/");
+
+            let mut redacted = String::new();
+            engine.redacted_debug(&base_uri, &mut redacted).unwrap();
+            assert_eq!(redacted, format!("{base_uri:?}"));
+        }
+    }
 
     mod from_parts {
         use super::*;

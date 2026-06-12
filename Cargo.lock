@@ -3519,11 +3519,17 @@ dependencies = [
 name = "thread_aware"
 version = "0.7.3"
 dependencies = [
+ "bytes",
+ "criterion",
  "futures",
+ "gungraun",
+ "http",
+ "jiff",
  "many_cpus",
  "mutants",
  "static_assertions",
  "thread_aware_macros",
+ "uuid",
 ]
 
 [[package]]
