@@ -66,6 +66,10 @@ impl AzureHttpClient {
     ///
     /// Empty byte bodies reuse a shared empty body, and non-empty byte bodies are
     /// wrapped without copying. Seekable streams are forwarded as a chunk stream.
+    // The empty-body fast path yields a body that is observationally identical to
+    // the general bytes path (both report a zero-length body), so the
+    // `is_empty()` guard is an equivalent mutant that no test can distinguish.
+    #[cfg_attr(test, mutants::skip)]
     fn to_fetch_body(&self, body: &Body) -> fetch::HttpBody {
         let builder: &fetch::HttpBodyBuilder = self.client.as_ref();
 

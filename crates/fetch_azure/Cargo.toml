@@ -61,7 +61,8 @@ async-trait = { workspace = true }
 azure_core = { workspace = true }
 azure_storage_blob = { workspace = true }
 futures = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+mutants = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [[example]]
 name = "blob_list"
