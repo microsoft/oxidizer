@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyspawn::Spawner;
+use anyspawn_azure::Runtime;
 use azure_core::async_runtime::AsyncRuntime;
 use azure_core::time::Duration;
-use fetch_azure::Runtime;
 use tick::Clock;
 
 #[tokio::test]
@@ -66,8 +66,8 @@ async fn runtime_converts_into_dyn_runtime() {
 }
 
 #[tokio::test]
-async fn runtime_from_spawner_clock_and_accessors_round_trip() {
-    let runtime = Runtime::from((Spawner::new_tokio(), Clock::new_tokio()));
+async fn runtime_accessors_round_trip() {
+    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
 
     // `spawner` and `clock` expose the wrapped components; rebuild from them.
     let runtime = Runtime::new(runtime.spawner().clone(), runtime.clock().clone());

@@ -1,0 +1,58 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "anyspawn_azure"
+description = "Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "azure", "async", "runtime", "spawner"]
+categories = ["asynchronous"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn_azure"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "anyspawn::*",
+    "tick::*",
+    # External dependencies (azure_core re-exports these typespec types)
+    "azure_identity::*",
+    "typespec_client_core::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+## Implement [`azure_identity::Executor`] for [`Runtime`], allowing it to run the
+## subprocesses that developer credentials (e.g. the Azure CLI) rely on.
+azure-identity = ["dep:azure_identity", "dep:async-trait"]
+
+[dependencies]
+# internal
+anyspawn = { workspace = true }
+tick = { workspace = true }
+
+# external
+async-trait = { workspace = true, optional = true }
+azure_core = { workspace = true }
+azure_identity = { workspace = true, optional = true }
+futures = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+# internal
+anyspawn = { path = "../anyspawn", features = ["tokio"] }
+tick = { path = "../tick", features = ["tokio"] }
+
+# external
+azure_core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
