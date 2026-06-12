@@ -23,11 +23,17 @@ allowed_external_types = [
     "fetch::*",
     "tick::*",
     # External dependencies (azure_core re-exports these typespec types)
+    "azure_identity::*",
     "typespec_client_core::*",
 ]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[features]
+## Implement [`azure_identity::Executor`] for [`Runtime`], allowing it to run the
+## subprocesses that developer credentials (e.g. the Azure CLI) rely on.
+azure-identity = ["dep:azure_identity"]
 
 [dependencies]
 # internal
@@ -40,6 +46,7 @@ tick = { workspace = true }
 # external
 async-trait = { workspace = true }
 azure_core = { workspace = true }
+azure_identity = { workspace = true, optional = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 
@@ -52,8 +59,13 @@ tick = { path = "../tick", features = ["tokio"] }
 # external
 async-trait = { workspace = true }
 azure_core = { workspace = true }
+azure_storage_blob = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[example]]
+name = "blob_list"
+required-features = ["azure-identity"]
 
 [lints]
 workspace = true
