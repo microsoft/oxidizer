@@ -22,7 +22,7 @@ use azure_core::stream::{BytesStream, SeekableStream};
 use azure_core::time::Duration;
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
-use fetch_azure::{AzureHttpClient, SpawnerRuntime, new_async_runtime, new_http_client};
+use fetch_azure::{AzureHttpClient, SpawnerRuntime, new_async_runtime};
 use futures::io::AsyncRead;
 use tick::Clock;
 
@@ -143,8 +143,8 @@ async fn execute_request_maps_transport_error() {
 }
 
 #[tokio::test]
-async fn new_http_client_returns_dyn_client() {
-    let client = new_http_client(FetchClient::new_fake(status_handler(202)));
+async fn azure_http_client_converts_into_dyn_client() {
+    let client: Arc<dyn HttpClient> = AzureHttpClient::from(FetchClient::new_fake(status_handler(202))).into();
 
     let response = client.execute_request(&request(Method::Get)).await.unwrap();
 

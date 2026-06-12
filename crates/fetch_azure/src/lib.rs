@@ -29,12 +29,12 @@
 //! use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
 //! use azure_core::http::HttpClient;
 //! use fetch::HttpClient as FetchClient;
-//! use fetch_azure::{new_async_runtime, new_http_client};
+//! use fetch_azure::{AzureHttpClient, new_async_runtime};
 //! use tick::Clock;
 //!
 //! // Adapt a `fetch` client into an Azure SDK transport.
 //! fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
-//!     new_http_client(client)
+//!     AzureHttpClient::from(client).into()
 //! }
 //!
 //! // Install an `anyspawn`-backed async runtime (sleeping on a `tick::Clock`).
@@ -69,9 +69,17 @@ use tick::Clock;
 /// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
 ///
 /// Construct one from an existing `fetch` client with [`AzureHttpClient::new`]
-/// (or via [`From`]) and pass it to the Azure SDK wherever a
-/// `dyn HttpClient` is expected. See [`new_http_client`] for a convenience that
-/// returns an `Arc<dyn HttpClient>` directly.
+/// (or via [`From`]), then convert it into an `Arc<dyn HttpClient>` via [`From`]
+/// / [`Into`] to hand to the Azure SDK:
+///
+/// ```
+/// # use std::sync::Arc;
+/// # use azure_core::http::HttpClient;
+/// # use fetch_azure::AzureHttpClient;
+/// # fn wrap(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
+/// AzureHttpClient::from(client).into()
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct AzureHttpClient {
     client: fetch::HttpClient,
@@ -144,13 +152,10 @@ impl From<fetch::HttpClient> for AzureHttpClient {
     }
 }
 
-/// Wraps a [`fetch::HttpClient`] as an `Arc<dyn HttpClient>`.
-///
-/// This is a convenience for the common case of handing a `fetch`-backed
-/// transport to the Azure SDK.
-#[must_use]
-pub fn new_http_client(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
-    Arc::new(AzureHttpClient::new(client))
+impl From<AzureHttpClient> for Arc<dyn HttpClient> {
+    fn from(client: AzureHttpClient) -> Self {
+        Arc::new(client)
+    }
 }
 
 #[async_trait]
