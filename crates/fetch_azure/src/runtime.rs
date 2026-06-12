@@ -113,3 +113,21 @@ impl AbortableTask for RuntimeTask {
         self.abort_handle.abort();
     }
 }
+
+/// Runs developer-credential commands (e.g. the Azure CLI) on the blocking
+/// pool of the [`Spawner`], so credentials like `DeveloperToolsCredential`
+/// work on the same runtime as the rest of the SDK.
+#[cfg(feature = "azure-identity")]
+#[async_trait::async_trait]
+impl azure_identity::Executor for Runtime {
+    async fn run(&self, program: &std::ffi::OsStr, args: &[&std::ffi::OsStr]) -> std::io::Result<std::process::Output> {
+        // The program and arguments are borrowed, so own them before moving the
+        // blocking work onto the spawner's pool.
+        let program = program.to_os_string();
+        let args: Vec<std::ffi::OsString> = args.iter().map(|arg| (*arg).to_os_string()).collect();
+
+        self.spawner
+            .spawn_blocking(move || std::process::Command::new(&program).args(&args).output())
+            .await
+    }
+}

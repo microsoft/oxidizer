@@ -69,3 +69,27 @@ async fn runtime_from_spawner_clock_and_accessors_round_trip() {
 
     runtime.yield_now().await;
 }
+
+#[cfg(feature = "azure-identity")]
+#[tokio::test]
+async fn runtime_executor_runs_command() {
+    use std::ffi::OsStr;
+
+    use azure_identity::Executor;
+
+    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
+
+    #[cfg(windows)]
+    let output = runtime
+        .run(OsStr::new("cmd"), &[OsStr::new("/C"), OsStr::new("echo hello")])
+        .await
+        .unwrap();
+    #[cfg(not(windows))]
+    let output = runtime
+        .run(OsStr::new("/bin/sh"), &[OsStr::new("-c"), OsStr::new("echo hello")])
+        .await
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("hello"));
+}
