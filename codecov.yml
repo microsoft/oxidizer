@@ -8,9 +8,6 @@ codecov:
     # data from the other platforms has arrived, causing a spurious failure.
     # Keep this in sync with the `coverage` matrix `os` list.
     after_n_builds: 3
-    # Hold our status until all other CI statuses complete (default, set
-    # explicitly to make the intent clear alongside after_n_builds).
-    wait_for_ci: true
 coverage:
   precision: 1
   round: down
