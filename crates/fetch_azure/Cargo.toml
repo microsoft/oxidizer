@@ -1,0 +1,59 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_azure"
+description = "Azure SDK HTTP transport backed by the fetch HTTP client."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "azure", "fetch", "http", "transport"]
+categories = ["network-programming"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Workspace sibling crates
+    "fetch::*",
+    # External dependency that defines the HttpClient trait
+    "typespec_client_core::*",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+# internal
+bytesbuf = { workspace = true, features = ["bytes-compat"] }
+fetch = { workspace = true }
+layered = { workspace = true }
+
+# external
+async-trait = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
+typespec_client_core = { workspace = true, features = ["http"] }
+
+[dev-dependencies]
+# internal
+anyspawn = { path = "../anyspawn", features = ["tokio"] }
+anyspawn_azure = { path = "../anyspawn_azure", features = ["azure-identity"] }
+fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
+tick = { path = "../tick", features = ["tokio"] }
+
+# external
+async-trait = { workspace = true }
+azure_core = { workspace = true }
+azure_identity = { workspace = true }
+azure_storage_blob = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+mutants = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
