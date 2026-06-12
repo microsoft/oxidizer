@@ -33,10 +33,15 @@ async fn runtime_abort_resolves_without_waiting() {
     let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
 
     // The task never completes on its own; aborting must wake the waiter so the
-    // await resolves rather than hanging forever.
+    // await resolves rather than hanging forever. The timeout bounds the wait so
+    // a broken `abort` fails the test promptly instead of hanging.
     let task = runtime.spawn(Box::pin(std::future::pending::<()>()));
     task.abort();
-    task.await.unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), task)
+        .await
+        .expect("abort should wake the waiter so the task resolves promptly")
+        .unwrap();
 }
 
 #[tokio::test]
