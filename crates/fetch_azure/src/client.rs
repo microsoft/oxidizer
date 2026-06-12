@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The [`AzureHttpClient`] transport adapter.
+//! The [`HttpClient`] transport adapter.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,28 +14,27 @@ use typespec_client_core::error::{Error, ErrorKind};
 use typespec_client_core::http::headers::{HeaderName, HeaderValue, Headers};
 use typespec_client_core::http::request::{Body, Request};
 use typespec_client_core::http::response::PinnedStream;
-use typespec_client_core::http::{AsyncRawResponse, HttpClient};
+use typespec_client_core::http::{AsyncRawResponse, HttpClient as HttpClientTrait};
 
-/// An [`HttpClient`] that uses a [`fetch::HttpClient`] as its transport.
+/// A [`typespec_client_core::http::HttpClient`] backed by a [`fetch::HttpClient`] transport.
 ///
-/// Construct one from an existing `fetch` client with [`AzureHttpClient::new`]
+/// Construct one from an existing `fetch` client with [`HttpClient::new`]
 /// (or via [`From`]), then convert it into an `Arc<dyn HttpClient>` via [`From`]
 /// / [`Into`] to hand to the Azure SDK:
 ///
 /// ```
 /// # use std::sync::Arc;
-/// # use azure_core::http::HttpClient;
-/// # use fetch_azure::AzureHttpClient;
-/// # fn wrap(client: fetch::HttpClient) -> Arc<dyn HttpClient> {
-/// AzureHttpClient::from(client).into()
+/// # use fetch_azure::HttpClient;
+/// # fn wrap(client: fetch::HttpClient) -> Arc<dyn typespec_client_core::http::HttpClient> {
+/// HttpClient::from(client).into()
 /// # }
 /// ```
 #[derive(Debug, Clone)]
-pub struct AzureHttpClient {
+pub struct HttpClient {
     client: fetch::HttpClient,
 }
 
-impl AzureHttpClient {
+impl HttpClient {
     /// Creates a new adapter that forwards requests to the given `fetch` client.
     #[must_use]
     pub const fn new(client: fetch::HttpClient) -> Self {
@@ -88,20 +87,20 @@ impl AzureHttpClient {
     }
 }
 
-impl From<fetch::HttpClient> for AzureHttpClient {
+impl From<fetch::HttpClient> for HttpClient {
     fn from(client: fetch::HttpClient) -> Self {
         Self::new(client)
     }
 }
 
-impl From<AzureHttpClient> for Arc<dyn HttpClient> {
-    fn from(client: AzureHttpClient) -> Self {
+impl From<HttpClient> for Arc<dyn HttpClientTrait> {
+    fn from(client: HttpClient) -> Self {
         Arc::new(client)
     }
 }
 
 #[async_trait]
-impl HttpClient for AzureHttpClient {
+impl HttpClientTrait for HttpClient {
     async fn execute_request(&self, request: &Request) -> typespec_client_core::Result<AsyncRawResponse> {
         let request = self.to_fetch_request(request)?;
 
