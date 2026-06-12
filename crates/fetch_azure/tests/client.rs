@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg(not(miri))] // Miri cannot run the tokio-backed fetch transport.
+
 //! Integration tests for [`fetch_azure::HttpClient`].
 //!
 //! These exercise the transport adapter end-to-end using `fetch`'s
