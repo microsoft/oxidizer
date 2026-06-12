@@ -31,12 +31,12 @@ all-features = true
 # internal
 bytesbuf = { workspace = true, features = ["bytes-compat"] }
 fetch = { workspace = true }
+layered = { workspace = true }
 
 # external
 async-trait = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
-http-body-util = { workspace = true }
 typespec_client_core = { workspace = true, features = ["http"] }
 
 [dev-dependencies]
