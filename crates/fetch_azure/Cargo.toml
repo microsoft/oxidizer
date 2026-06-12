@@ -44,6 +44,8 @@ typespec_client_core = { workspace = true, features = ["http"] }
 fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
 
 # external
+async-trait = { workspace = true }
+futures = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 typespec_client_core = { workspace = true, features = ["http"] }
 
