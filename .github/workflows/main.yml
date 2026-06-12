@@ -371,6 +371,9 @@ jobs:
       matrix:
         # Note: windows-11-arm excluded due to LLVM coverage instrumentation bugs
         # causing "malformed instrumentation profile data: symbol name is empty" errors
+        # Note: when changing the number of OS entries here, update
+        # `codecov.notify.after_n_builds` in codecov.yml to match, otherwise
+        # Codecov reports the project status before all platforms have uploaded.
         os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm]
     steps:
       # prep
