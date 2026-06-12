@@ -6,14 +6,19 @@
 //! These exercise the adapter end-to-end using `fetch`'s `FakeHandler`, so no
 //! real network access is required.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use async_trait::async_trait;
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
 use fetch_azure::{FetchHttpClient, new_http_client};
+use futures::io::AsyncRead;
 use typespec_client_core::Bytes;
 use typespec_client_core::http::headers::HeaderName;
-use typespec_client_core::http::request::Request;
+use typespec_client_core::http::request::{Body, Request};
 use typespec_client_core::http::{HttpClient, Method, Url};
-use typespec_client_core::stream::BytesStream;
+use typespec_client_core::stream::{BytesStream, SeekableStream};
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -151,4 +156,114 @@ async fn from_fetch_client_and_inner_round_trip() {
 
     let response = adapter.execute_request(&request(Method::Get)).await.unwrap();
     assert_eq!(response.status(), 200u16);
+}
+
+#[tokio::test]
+async fn execute_request_maps_request_build_failure() {
+    let client = FetchHttpClient::new(FetchClient::new_fake(status_handler(200)));
+
+    // A header value containing a control character is rejected by the `http`
+    // crate when the fetch request is built, exercising the DataConversion path.
+    let mut request = request(Method::Get);
+    request.insert_header("x-invalid", "bad\nvalue");
+
+    let error = client.execute_request(&request).await.unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("failed to convert the Azure request into a fetch request"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_request_skips_non_utf8_response_headers() {
+    let handler = FakeHandler::from_fn(|_request| {
+        let binary = fetch::HeaderValue::from_bytes(&[0xff, 0xfe]).expect("valid header value bytes");
+        HttpResponseBuilder::new_fake()
+            .status(200u16)
+            .header("x-valid", "ok")
+            .header("x-binary", binary)
+            .build()
+    });
+    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+
+    let response = client.execute_request(&request(Method::Get)).await.unwrap();
+
+    assert_eq!(response.headers().get_optional_str(&HeaderName::from("x-valid")), Some("ok"));
+    assert_eq!(response.headers().get_optional_str(&HeaderName::from("x-binary")), None);
+}
+
+#[tokio::test]
+async fn execute_request_maps_seekable_stream_read_error() {
+    let handler = FakeHandler::from_async_fn(|request| async move {
+        // Reading the body drives the erroring stream, surfacing the failure.
+        request.into_body().into_bytes().await?;
+        HttpResponseBuilder::new_fake().status(200u16).build()
+    });
+    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+
+    let mut request = request(Method::Post);
+    request.set_body(Body::SeekableStream(Box::new(ErroringStream)));
+
+    let error = client.execute_request(&request).await.unwrap_err();
+
+    assert!(
+        error_chain(&error).contains("failed to read the Azure request body"),
+        "unexpected error: {error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_request_maps_response_body_read_error() {
+    let handler = FakeHandler::from_fn(|_request| {
+        let body = fetch::HttpBodyBuilder::new_fake().stream(
+            futures::stream::iter([Err(fetch::HttpError::unavailable("boom"))]),
+            &fetch::options::HttpBodyOptions::default(),
+        );
+        HttpResponseBuilder::new_fake().status(200u16).body(body).build()
+    });
+    let client = FetchHttpClient::new(FetchClient::new_fake(handler));
+
+    let response = client.execute_request(&request(Method::Get)).await.unwrap();
+    let error = response.into_body().collect().await.unwrap_err();
+
+    assert!(
+        error.to_string().contains("failed to read the response body"),
+        "unexpected error: {error}"
+    );
+}
+
+/// A [`SeekableStream`] whose reads always fail, used to cover the request-body error path.
+#[derive(Debug, Clone)]
+struct ErroringStream;
+
+impl AsyncRead for ErroringStream {
+    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &mut [u8]) -> Poll<std::io::Result<usize>> {
+        Poll::Ready(Err(std::io::Error::other("boom")))
+    }
+}
+
+#[async_trait]
+impl SeekableStream for ErroringStream {
+    async fn reset(&mut self) -> typespec_client_core::Result<()> {
+        Ok(())
+    }
+
+    fn len(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Joins an error and its `source` chain into a single string for assertions.
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut chain = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        chain.push_str(" | ");
+        chain.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    chain
 }
