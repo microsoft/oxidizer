@@ -97,11 +97,11 @@ version = "0.1.0"
 dependencies = [
  "anyspawn",
  "async-trait",
- "azure_core",
  "azure_identity",
  "futures",
  "tick",
  "tokio",
+ "typespec_client_core",
 ]
 
 [[package]]
@@ -1297,6 +1297,7 @@ dependencies = [
  "mutants",
  "tick",
  "tokio",
+ "typespec_client_core",
 ]
 
 [[package]]

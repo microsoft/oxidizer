@@ -16,7 +16,7 @@
 Adapt a [`fetch::HttpClient`][__link0] into an Azure SDK HTTP transport.
 
 The Azure SDK abstracts its HTTP transport behind the
-[`azure_core::http::HttpClient`][__link1] trait. [`AzureHttpClient`][__link2] implements that
+[`typespec_client_core::http::HttpClient`][__link1] trait. [`AzureHttpClient`][__link2] implements that
 trait on top of a [`fetch::HttpClient`][__link3], so Azure SDK pipelines run over
 `fetch` and benefit from its resilience and observability.
 
@@ -28,9 +28,9 @@ To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 ```rust
 use std::sync::Arc;
 
-use azure_core::http::HttpClient;
 use fetch::HttpClient as FetchClient;
 use fetch_azure::AzureHttpClient;
+use typespec_client_core::http::HttpClient;
 
 // Adapt a `fetch` client into an Azure SDK transport.
 fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
@@ -44,8 +44,8 @@ fn transport(client: FetchClient) -> Arc<dyn HttpClient> {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb2aDhkkwbzxob5vBRjb_giOMbjsT0P_P88kgbcQx5M6vmOXJhZIOCamF6dXJlX2NvcmVlMS4wLjCCZWZldGNoZjAuMTEuMIJrZmV0Y2hfYXp1cmVlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbzCTaIS0go2Ub8ViwNofWrMobqqDe_YG9-OUbqRZ4eEJ24fxhZIOCZWZldGNoZjAuMTEuMIJrZmV0Y2hfYXp1cmVlMC4xLjCCdHR5cGVzcGVjX2NsaWVudF9jb3JlZTEuMC4w
  [__link0]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
- [__link1]: https://docs.rs/azure_core/1.0.0/azure_core/?search=http::HttpClient
+ [__link1]: https://docs.rs/typespec_client_core/1.0.0/typespec_client_core/?search=http::HttpClient
  [__link2]: https://docs.rs/fetch_azure/0.1.0/fetch_azure/?search=AzureHttpClient
  [__link3]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
