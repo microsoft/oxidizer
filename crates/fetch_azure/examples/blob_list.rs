@@ -22,7 +22,13 @@ use tick::Clock;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service_url: Url = env::var("AZURE_STORAGE_SERVICE_ENDPOINT")?.parse()?;
+    // This example needs a live Storage account and developer sign-in, so it
+    // no-ops when the endpoint is not configured (e.g. in CI).
+    let Ok(endpoint) = env::var("AZURE_STORAGE_SERVICE_ENDPOINT") else {
+        println!("AZURE_STORAGE_SERVICE_ENDPOINT is not set; skipping blob listing.");
+        return Ok(());
+    };
+    let service_url: Url = endpoint.parse()?;
 
     // Run developer-credential subprocesses (e.g. the Azure CLI) on a
     // tokio-backed `Runtime` used as the credential's `Executor`.
