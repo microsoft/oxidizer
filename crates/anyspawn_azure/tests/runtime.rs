@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(missing_docs, reason = "test module")]
 #![cfg(not(miri))] // Miri cannot run tokio's runtime or spawn OS processes.
 
 //! Integration tests for [`anyspawn_azure::Runtime`].

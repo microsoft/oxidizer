@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(missing_docs, reason = "test module")]
 #![cfg(not(miri))] // Miri cannot run the tokio-backed fetch transport.
 
 //! Integration tests for [`fetch_azure::HttpClient`].
