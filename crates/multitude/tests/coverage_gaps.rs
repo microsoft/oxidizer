@@ -772,34 +772,34 @@ mod drop_slice_over_u16_max_returns_err {
 }
 
 // ============================================================================
-// vec/freeze.rs — `try_into_arena_arc` (lines 46–60). The infallible
-// `into_arena_arc` is exercised elsewhere; this targets the fallible
+// vec/freeze.rs — `try_into_arc` (lines 46–60). The infallible
+// `into_arc` is exercised elsewhere; this targets the fallible
 // variant and its allocator-error path via `FailingAllocator(1)` (the
 // initial vec buffer consumes the one allowed chunk, the freeze refill
 // then fails).
 // ============================================================================
-mod vec_freeze_try_into_arena_arc {
+mod vec_freeze_try_into_arc {
     use multitude::Arena;
 
     use crate::sync_failing::SyncFailingAllocator;
 
     #[test]
-    fn try_into_arena_arc_ok() {
+    fn try_into_arc_ok() {
         let a = Arena::new();
         let mut v = a.alloc_vec::<u32>();
         v.push(1);
         v.push(2);
         v.push(3);
-        let arc = v.try_into_arena_arc().unwrap();
+        let arc = v.try_into_arc().unwrap();
         assert_eq!(&*arc, &[1, 2, 3][..]);
     }
 
     #[test]
-    fn try_into_arena_arc_err_on_failing_allocator() {
+    fn try_into_arc_err_on_failing_allocator() {
         let a = Arena::new_in(SyncFailingAllocator::new(1));
         let mut v = a.alloc_vec::<u32>();
         v.push(1);
-        let r = v.try_into_arena_arc();
+        let r = v.try_into_arc();
         assert!(r.is_err());
     }
 }
@@ -1684,5 +1684,77 @@ mod oversized_paths {
         let m: &mut str = b.as_mut_str();
         m.make_ascii_uppercase();
         assert_eq!(b.as_str(), "HELLO");
+    }
+}
+
+// ============================================================================
+// vec/freeze.rs — `Vec::leak` (the O(1), allocation-free freeze for
+// `T: !Drop`, plus `&*v.leak()` for the shared variant), plus the empty-slice
+// early returns and the oversized `!Drop` arm of the slice-ref allocators
+// (alloc_slice_ref.rs).
+// ============================================================================
+mod freeze_and_slice_edges {
+    use multitude::Arena;
+
+    #[test]
+    fn vec_leak_shared_reborrow_returns_arena_lifetime_slice() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        for i in 0..6_u32 {
+            v.push(i * 10);
+        }
+        // `u32: !Drop`, so `leak` is the in-place reinterpret (no copy, no
+        // drop entry); reborrow as shared for `&[T]`.
+        let s: &[u32] = &*v.leak();
+        assert_eq!(s, &[0, 10, 20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn vec_leak_allows_in_place_mutation() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        v.push(1);
+        v.push(2);
+        v.push(3);
+        let s: &mut [u32] = v.leak();
+        for x in s.iter_mut() {
+            *x *= 2;
+        }
+        assert_eq!(s, &[2, 4, 6]);
+    }
+
+    #[test]
+    fn vec_leak_empty() {
+        let arena = Arena::new();
+        let v = arena.alloc_vec::<u32>();
+        let s: &[u32] = &*v.leak();
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_copy_empty_returns_empty_slice() {
+        let arena = Arena::new();
+        let s: &mut [u32] = arena.alloc_slice_copy::<u32>(&[]);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_clone_empty_returns_empty_slice() {
+        let arena = Arena::new();
+        let src: [String; 0] = [];
+        let s: &mut [String] = arena.alloc_slice_clone(&src);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_oversized_non_drop() {
+        let arena = Arena::new();
+        // 5000 × u32 = 20 KiB > MAX_NORMAL_ALLOC (16 KiB) ⇒ oversized path;
+        // `u32: !Drop` ⇒ the non-drop oversized arm of
+        // `impl_alloc_slice_fill_iter`.
+        let s: &mut [u32] = arena.alloc_slice_fill_iter((0_u32..5000).map(|i| i.wrapping_mul(3)));
+        assert_eq!(s.len(), 5000);
+        assert_eq!(s[0], 0);
+        assert_eq!(s[4999], 4999_u32.wrapping_mul(3));
     }
 }

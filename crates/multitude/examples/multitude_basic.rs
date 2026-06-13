@@ -44,7 +44,7 @@ fn main() {
         v.push(i * 100);
     }
     println!("v = {v:?}");
-    let frozen: Arc<[u64], _> = v.into_arena_arc();
+    let frozen: Arc<[u64], _> = Arc::from(v);
     println!("frozen = {frozen:?}");
 
     // -- Collect from an iterator -------------------------------------

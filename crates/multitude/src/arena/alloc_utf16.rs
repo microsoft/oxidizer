@@ -16,13 +16,14 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use super::alloc_prefixed::PREFIX_BYTES;
 use super::alloc_value::acquire_shared_chunk_ref;
 use super::{Arena, ExpectAlloc};
+use crate::strings::{ArcUtf16Str, BoxUtf16Str, Utf16String};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 impl<A: Allocator + Clone> Arena<A> {
     /// Copy `s` into a `Shared`-flavor chunk and return an [`ArcUtf16Str`](crate::strings::ArcUtf16Str).
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> crate::strings::ArcUtf16Str<A>
+    pub fn alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> ArcUtf16Str<A>
     where
         A: Send + Sync,
     {
@@ -37,19 +38,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<crate::strings::ArcUtf16Str<A>, AllocError>
+    pub fn try_alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<ArcUtf16Str<A>, AllocError>
     where
         A: Send + Sync,
     {
         self.impl_alloc_prefixed_shared::<u16>(s.as_ref().as_slice()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { crate::strings::ArcUtf16Str::from_raw(ptr) })
+            unsafe { ArcUtf16Str::from_raw(ptr) })
     }
 
     /// Copy `s` into the arena and return a [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> crate::strings::BoxUtf16Str<A> {
+    pub fn alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> BoxUtf16Str<A> {
         self.try_alloc_utf16_str_box(s).expect_alloc()
     }
 
@@ -61,16 +62,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<crate::strings::BoxUtf16Str<A>, AllocError> {
+    pub fn try_alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<BoxUtf16Str<A>, AllocError> {
         self.impl_alloc_prefixed_shared::<u16>(s.as_ref().as_slice()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { crate::strings::BoxUtf16Str::from_raw(ptr) })
+            unsafe { BoxUtf16Str::from_raw(ptr) })
     }
 
     /// Transcode `s` from UTF-8 to UTF-16 and return an [`ArcUtf16Str`](crate::strings::ArcUtf16Str).
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> crate::strings::ArcUtf16Str<A>
+    pub fn alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> ArcUtf16Str<A>
     where
         A: Send + Sync,
     {
@@ -85,19 +86,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Result<crate::strings::ArcUtf16Str<A>, AllocError>
+    pub fn try_alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Result<ArcUtf16Str<A>, AllocError>
     where
         A: Send + Sync,
     {
         self.impl_alloc_utf16_prefixed_from_str(s.as_ref()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { crate::strings::ArcUtf16Str::from_raw(ptr) })
+            unsafe { ArcUtf16Str::from_raw(ptr) })
     }
 
     /// Transcode `s` from UTF-8 to UTF-16 and return a [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> crate::strings::BoxUtf16Str<A> {
+    pub fn alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> BoxUtf16Str<A> {
         self.try_alloc_utf16_str_box_from_str(s).expect_alloc()
     }
 
@@ -109,17 +110,17 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Result<crate::strings::BoxUtf16Str<A>, AllocError> {
+    pub fn try_alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Result<BoxUtf16Str<A>, AllocError> {
         self.impl_alloc_utf16_prefixed_from_str(s.as_ref()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { crate::strings::BoxUtf16Str::from_raw(ptr) })
+            unsafe { BoxUtf16Str::from_raw(ptr) })
     }
 
     /// Create a new, empty growable [`Utf16String`](crate::strings::Utf16String) backed by this arena.
     #[must_use]
     #[inline]
-    pub const fn alloc_utf16_string(&self) -> crate::strings::Utf16String<'_, A> {
-        crate::strings::Utf16String::new_in(self)
+    pub const fn alloc_utf16_string(&self) -> Utf16String<'_, A> {
+        Utf16String::new_in(self)
     }
 
     /// Create a new growable arena-backed [`Utf16String`](crate::strings::Utf16String) with capacity.
@@ -132,8 +133,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// [`Self::try_alloc_utf16_string_with_capacity`] for a fallible variant.
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_string_with_capacity(&self, cap: usize) -> crate::strings::Utf16String<'_, A> {
-        crate::strings::Utf16String::with_capacity_in(cap, self)
+    pub fn alloc_utf16_string_with_capacity(&self, cap: usize) -> Utf16String<'_, A> {
+        Utf16String::with_capacity_in(cap, self)
     }
 
     /// Fallible variant of [`Self::alloc_utf16_string_with_capacity`].
@@ -144,8 +145,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_string_with_capacity(&self, cap: usize) -> Result<crate::strings::Utf16String<'_, A>, AllocError> {
-        crate::strings::Utf16String::try_with_capacity_in(cap, self)
+    pub fn try_alloc_utf16_string_with_capacity(&self, cap: usize) -> Result<Utf16String<'_, A>, AllocError> {
+        Utf16String::try_with_capacity_in(cap, self)
     }
 
     /// Shared body for `alloc_utf16_str_arc_from_str` /
@@ -176,11 +177,9 @@ impl<A: Allocator + Clone> Arena<A> {
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
         loop {
             if let Some((uninit, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, elem_align) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let payload = transcode_utf16_into(uninit.as_non_null(), s, exact);
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(exact * elem_size);
                 return Ok(payload);
             }
             if self.is_oversized_shared(total) {
@@ -191,8 +190,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     let payload = transcode_utf16_into(base.as_non_null(), s, exact);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(exact * elem_size);
                     payload
                 });
             }
@@ -206,6 +203,12 @@ impl<A: Allocator + Clone> Arena<A> {
 /// returns a thin pointer to the first payload element. `exact` must
 /// match `s.chars().map(char::len_utf16).sum()` from a pre-walk.
 #[inline(always)]
+// Exercised by the `from_str` UTF-16 tests, but as a concrete (non-generic)
+// `#[inline(always)]` free fn it has no standalone instantiation, so
+// `llvm-cov` cannot attribute coverage to its body even though every call
+// site runs it. Excluded from coverage to avoid a false gap (cf.
+// `chunk_mutator::offset_or_unwind`).
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
     clippy::cast_ptr_alignment,
     reason = "see callers: `base + PREFIX_BYTES` is u16-aligned by construction"

@@ -23,37 +23,26 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         let len = self.buf.len();
         let start = match range.start_bound() {
             Bound::Included(&i) => i,
-            Bound::Excluded(&i) => i + 1,
+            Bound::Excluded(&i) => i.checked_add(1).expect("drain: start bound overflows usize"),
             Bound::Unbounded => 0,
         };
         let end = match range.end_bound() {
-            Bound::Included(&i) => i + 1,
+            Bound::Included(&i) => i.checked_add(1).expect("drain: end bound overflows usize"),
             Bound::Excluded(&i) => i,
             Bound::Unbounded => len,
         };
         assert!(start <= end, "drain: start > end");
         assert!(end <= len, "drain: end > len");
 
-        // Strategy: move the [start, end) elements into a heap-backed
-        // staging vec, leaving a "hole" in `self.buf`. The Drain iterator
-        // yields from the staging vec; on drop, it closes the hole by
-        // sliding the tail (already-initialized) elements left and
-        // truncating `self.buf` to `len - drained`.
-        //
-        // We use safe `swap_remove` semantics implemented via element-wise
-        // shifting: pull out the drained values, then compact.
-        //
-        // For the staging vec we use a `std`-allocated Vec to keep the
-        // drain iterator simple and avoid arena chunk churn.
-
-        // 1. Move out the drained slice in order.
+        // Eager hole-closing: pop the whole tail `[start, len)`, keep the
+        // drained prefix in a heap-backed staging vec, and push the surviving
+        // suffix back — all at construction time. So `Drain`'s `Drop` is a
+        // no-op and even a forgotten/leaked `Drain` leaves `self.buf`
+        // consistent. A `std`-allocated staging vec avoids arena chunk churn.
         let drained_count = end - start;
         let mut staged: allocator_api2::vec::Vec<T> = allocator_api2::vec::Vec::with_capacity(drained_count);
-        // Take each element by index; we rebuild the vector after.
-        // We do this via mem::replace on the slot using a "ghost" value:
-        // since `T` isn't `Default`, we can't fill — so instead, we
-        // truncate-then-rebuild. We pop the whole tail (after `start`)
-        // into a temp, then push the kept tail back.
+        // `T` isn't `Default`, so we can't punch a hole in place: pop the
+        // whole tail after `start`, then push the kept suffix back.
         let tail_count = len - start;
         let mut tail_staging: allocator_api2::vec::Vec<T> = allocator_api2::vec::Vec::with_capacity(tail_count);
         // Pop produces reverse order; collect then reverse.
@@ -61,15 +50,11 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
             tail_staging.push(self.buf.pop().expect("tail length matches len-start"));
         }
         tail_staging.reverse();
-        // `tail_staging` now contains [start, len) in original order.
-        // First `drained_count` go into `staged`; remainder go back.
         let mut iter = tail_staging.into_iter();
         for _ in 0..drained_count {
             staged.push(iter.next().expect("drained_count <= tail"));
         }
-        // Remaining items go back into `self.buf`. We may need capacity,
-        // but `self.buf` still has its existing capacity; pop didn't free
-        // it.
+        // Surviving suffix goes back; pop didn't free capacity.
         for item in iter {
             self.buf
                 .push_within_cap(item)

@@ -62,52 +62,6 @@ fn is_oversized_local_routes_above_threshold_via_oversized() {
     assert!(after_oversized > before_oversized);
 }
 
-// record_alloc(size * len) in alloc_slice_fill_with/fill_iter
-#[test]
-fn slice_fill_with_records_size_times_len() {
-    let arena = Arena::new();
-    let before = arena.stats().total_bytes_allocated;
-    let _s: &mut [u32] = arena.alloc_slice_fill_with(10, |i| u32::try_from(i).unwrap());
-    let after = arena.stats().total_bytes_allocated;
-    assert_eq!(after - before, (10 * core::mem::size_of::<u32>()) as u64);
-}
-
-#[test]
-fn slice_fill_iter_records_size_times_len() {
-    let arena = Arena::new();
-    let before = arena.stats().total_bytes_allocated;
-    let _s: &mut [u32] = arena.alloc_slice_fill_iter(0_u32..10);
-    let after = arena.stats().total_bytes_allocated;
-    assert_eq!(after - before, (10 * core::mem::size_of::<u32>()) as u64);
-}
-
-// Same `record_alloc(size * len)` arithmetic on the oversized branches
-// of fill_with / fill_iter (lines 322 / 372). The previous tests stay
-// on the in-arena fast path (sub-`max_normal_alloc` allocations) and
-// don't reach the oversized stats line. Trigger oversized routing by
-// lowering `max_normal_alloc` below the slice payload size.
-#[test]
-fn slice_fill_with_oversized_records_size_times_len() {
-    let mna = 4096;
-    let arena = ArenaBuilder::new().max_normal_alloc(mna).build();
-    let len = mna * 2; // exceeds threshold → oversized local chunk
-    let before = arena.stats().total_bytes_allocated;
-    let _s: &mut [u8] = arena.alloc_slice_fill_with(len, |_| 0);
-    let after = arena.stats().total_bytes_allocated;
-    assert_eq!(after - before, len as u64);
-}
-
-#[test]
-fn slice_fill_iter_oversized_records_size_times_len() {
-    let mna = 4096;
-    let arena = ArenaBuilder::new().max_normal_alloc(mna).build();
-    let len = mna * 2;
-    let before = arena.stats().total_bytes_allocated;
-    let _s: &mut [u8] = arena.alloc_slice_fill_iter((0..len).map(|_| 0_u8));
-    let after = arena.stats().total_bytes_allocated;
-    assert_eq!(after - before, len as u64);
-}
-
 // Vec::shrink_to_fit boundary: total < mna must reclaim (catches `==`/`>=`
 // mutants that would early-return at total == mna and below).
 #[test]
@@ -119,7 +73,7 @@ fn shrink_to_fit_reclaims_strictly_below_max_normal_alloc() {
     // its end IS at the bump cursor. `total_bytes = cap = mna - 1`,
     // strictly below the threshold.
     let cap = mna - 1;
-    let mut v: multitude::vec::Vec<'_, u8> = multitude::vec::Vec::with_capacity_in(cap, &arena);
+    let mut v: multitude::vec::Vec<'_, u8> = arena.alloc_vec_with_capacity(cap);
     v.extend_from_slice([7_u8; 16]);
     assert_eq!(v.capacity(), cap);
     v.shrink_to_fit();

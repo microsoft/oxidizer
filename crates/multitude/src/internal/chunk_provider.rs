@@ -135,8 +135,8 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// `AcqRel` speculative-add.
     bytes_outstanding: AtomicUsize,
     /// Single-thread local-chunk cache: thin `*mut u8` header pointer to
-    /// the freelist head (chunks linked via [`LocalChunk::write_cached_next`]
-    /// / [`LocalChunk::read_cached_next`]). Holds at most one freelist for
+    /// the freelist head (chunks linked via [`LocalChunk::set_next`]
+    /// / [`LocalChunk::next`]). Holds at most one freelist for
     /// the **current class floor** ([`Self::local_cache_class`]); chunks
     /// below the floor are destroyed instead of cached.
     local_cache: OwnerThreadCell<*mut u8>,
@@ -166,6 +166,13 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// Lifetime count of oversized one-shot shared chunks allocated.
     #[cfg(feature = "stats")]
     oversized_shared_chunks_allocated: AtomicU64,
+    /// Bytes currently "wasted" in the unused free region of chunks that have
+    /// been retired from an arena's `current_*` slot but have not yet been
+    /// returned to the cache or freed back to the underlying allocator. Bumped
+    /// up when a chunk is retired, bumped back down when the same chunk is
+    /// later cached or destroyed.
+    #[cfg(feature = "stats")]
+    wasted_tail_bytes: AtomicU64,
 }
 
 // SAFETY: `local_cache` is `OwnerThreadCell`, which exposes only `unsafe`
@@ -201,6 +208,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             normal_shared_chunks_allocated: AtomicU64::new(0),
             #[cfg(feature = "stats")]
             oversized_shared_chunks_allocated: AtomicU64::new(0),
+            #[cfg(feature = "stats")]
+            wasted_tail_bytes: AtomicU64::new(0),
         })
     }
 
@@ -213,6 +222,39 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             normal_shared: self.normal_shared_chunks_allocated.load(Ordering::Relaxed),
             oversized_shared: self.oversized_shared_chunks_allocated.load(Ordering::Relaxed),
         }
+    }
+
+    /// Total bytes currently outstanding from the underlying allocator: the
+    /// sum of every chunk (header + payload) that has been allocated and not
+    /// yet freed. Chunks released back to the size-class cache stay counted;
+    /// only chunks returned to the underlying allocator (cache evictions,
+    /// oversized one-shots dropped, drain-on-provider-drop) decrement.
+    #[cfg(feature = "stats")]
+    pub(crate) fn bytes_outstanding(&self) -> u64 {
+        self.bytes_outstanding.load(Ordering::Relaxed) as u64
+    }
+
+    /// Currently "wasted" tail bytes (free region between bump cursor and
+    /// drop-entry top) across chunks that have been retired from a current
+    /// `ChunkMutator` slot but have not yet been returned to the cache or
+    /// freed back to the underlying allocator.
+    #[cfg(feature = "stats")]
+    pub(crate) fn wasted_tail_bytes(&self) -> u64 {
+        self.wasted_tail_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Adds `n` to the wasted-tail-bytes counter. Called when a chunk is
+    /// retired from a current `ChunkMutator` slot.
+    #[cfg(feature = "stats")]
+    pub(crate) fn record_wasted_tail(&self, n: u64) {
+        self.wasted_tail_bytes.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Subtracts `n` from the wasted-tail-bytes counter. Called when a
+    /// retired chunk is later cached or destroyed.
+    #[cfg(feature = "stats")]
+    pub(crate) fn release_wasted_tail(&self, n: u64) {
+        self.wasted_tail_bytes.fetch_sub(n, Ordering::Relaxed);
     }
 
     /// Returns the provider's configuration.
@@ -278,7 +320,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 } else {
                     let fat = LocalChunk::<A>::header_to_fat(cur);
                     let head_nn = NonNull::new_unchecked(fat);
-                    *head = LocalChunk::read_cached_next(head_nn);
+                    *head = LocalChunk::next(head_nn);
                     LocalChunk::reinit_for_acquire(head_nn);
                     Some(head_nn)
                 }
@@ -312,10 +354,10 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 while !cur.is_null() {
                     let fat = LocalChunk::<A>::header_to_fat(cur);
                     let chunk_nn = NonNull::new_unchecked(fat);
-                    let next = LocalChunk::read_cached_next(chunk_nn);
+                    let next = LocalChunk::next(chunk_nn);
                     let total = LocalChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
                     if total >= new_min_total {
-                        LocalChunk::write_cached_next(chunk_nn, new_head);
+                        LocalChunk::set_next(chunk_nn, new_head);
                         new_head = cur;
                     } else {
                         LocalChunk::destroy(chunk_nn, &self.allocator);
@@ -470,6 +512,16 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // writing its cache-link slot.
         let capacity = (*chunk.as_ptr()).capacity();
         let total = LocalChunk::<A>::header_size() + capacity;
+        #[cfg(feature = "stats")]
+        {
+            // Decrement the wasted-tail counter by the value stashed on
+            // the chunk header at retire time (0 for chunks that never
+            // went through a mutator, e.g. preallocated cache fills).
+            let wasted = u64::from((*chunk.as_ptr()).wasted_at_retire());
+            if wasted != 0 {
+                self.release_wasted_tail(wasted);
+            }
+        }
         // Bypass the cache for non-class-size totals (oversized one-shots
         // whose total isn't a power of two) and for chunks below the
         // current cache class floor. The floor ratchets monotonically as
@@ -481,7 +533,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             return;
         }
         self.local_cache.with(|head| {
-            LocalChunk::write_cached_next(chunk, *head);
+            LocalChunk::set_next(chunk, *head);
             *head = chunk.cast::<u8>().as_ptr();
         });
     }
@@ -495,6 +547,16 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // SAFETY: chunk is live and uniquely owned by caller.
         let capacity = (*chunk.as_ptr()).capacity();
         let total = SharedChunk::<A>::header_size() + capacity;
+        #[cfg(feature = "stats")]
+        {
+            // See `release_local` for the symmetric subtract semantics.
+            // Acquire load on the shared chunk's atomic — the store may
+            // have happened on a different thread (last `Arc::drop`).
+            let wasted = u64::from((*chunk.as_ptr()).wasted_at_retire());
+            if wasted != 0 {
+                self.release_wasted_tail(wasted);
+            }
+        }
         // See `release_local` for the cache-bypass conditions.
         if !is_cacheable_size(total) || total < SizeClass::new(self.shared_cache_class.load(Ordering::Acquire)).bytes() {
             SharedChunk::destroy(chunk);
@@ -565,7 +627,13 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// single allocation, and the current chunk is left untouched so
     /// subsequent small allocations continue to use it.
     pub(crate) fn acquire_oversized_local(&self, min_payload: usize) -> Result<NonNull<LocalChunk<A>>, AllocError> {
-        let payload = round_up_to_drop_align(min_payload)?;
+        // Add `oversized_payload_align_slack()` to absorb the worst-case
+        // alignment skew the bump cursor pays at the start of an unaligned
+        // payload (chunk headers do not pad the payload to be 8-aligned).
+        // Callers requesting an `elem_align > align_of::<DropEntry>()` must
+        // pre-size `min_payload` accordingly; in practice oversized callers
+        // pass alignments ≤ 8.
+        let payload = round_up_to_drop_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
         let total = LocalChunk::<A>::header_size().checked_add(payload).ok_or(AllocError)?;
         self.reserve_bytes(total)?;
         match LocalChunk::<A>::allocate(&self.allocator, ptr::from_ref(self), payload) {
@@ -583,7 +651,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Shared-chunk mirror of [`Self::acquire_oversized_local`].
     pub(crate) fn acquire_oversized_shared(&self, min_payload: usize) -> Result<NonNull<SharedChunk<A>>, AllocError> {
-        let payload = round_up_to_drop_align(min_payload)?;
+        // See `acquire_oversized_local` for the alignment-slack rationale.
+        let payload = round_up_to_drop_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
         let total = SharedChunk::<A>::header_size().checked_add(payload).ok_or(AllocError)?;
         self.reserve_bytes(total)?;
         match SharedChunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
@@ -684,7 +753,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 while !cur.is_null() {
                     let fat = LocalChunk::<A>::header_to_fat(cur);
                     let chunk_nn = NonNull::new_unchecked(fat);
-                    let next = LocalChunk::read_cached_next(chunk_nn);
+                    let next = LocalChunk::next(chunk_nn);
                     LocalChunk::destroy(chunk_nn, &self.allocator);
                     cur = next;
                 }
@@ -711,7 +780,7 @@ impl<A: Allocator + Clone> Drop for ChunkProvider<A> {
 
 /// Convenience: cache lookup by total allocation size.
 #[inline]
-fn is_cacheable_size(total: usize) -> bool {
+pub(crate) fn is_cacheable_size(total: usize) -> bool {
     (MIN_CHUNK_BYTES..=MAX_CHUNK_BYTES).contains(&total) && total.is_power_of_two()
 }
 
@@ -728,6 +797,19 @@ fn is_cacheable_size(total: usize) -> bool {
 fn round_up_to_drop_align(min_payload: usize) -> Result<usize, AllocError> {
     let mask = mem::align_of::<DropEntry>() - 1;
     min_payload.checked_add(mask).map(|v| v & !mask).ok_or(AllocError)
+}
+
+/// Worst-case alignment skew the bump cursor pays at the start of an
+/// oversized chunk's (possibly unaligned) payload. Added to oversized
+/// requests so the first allocation always fits after alignment.
+#[inline]
+// Mutation testing is suppressed: `align - 1` is the exact maximum skew.
+// The `-`→`+` / `-`→`/` mutants only ever *over*-reserve by a few bytes
+// (never under-allocate), so they are equivalent for correctness and
+// invisible through any public API contract.
+#[cfg_attr(test, mutants::skip)]
+fn oversized_payload_align_slack() -> usize {
+    mem::align_of::<DropEntry>() - 1
 }
 
 /// Wraps the `needed_total > MAX_CHUNK_BYTES` check used by the
@@ -917,7 +999,3 @@ mod tests {
         );
     }
 }
-
-// Legacy CAS-retry helper removed: all the local CAS loops now use
-// `AtomicX::fetch_update`, whose contention-path retry lives in the
-// std library and is hidden from local coverage instrumentation.

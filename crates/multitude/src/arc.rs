@@ -344,9 +344,9 @@ where
     A: Send + Sync,
 {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable
-    /// [`Arc<[T], A>`](crate::Arc). See [`Vec::into_arena_arc`](crate::vec::Vec::into_arena_arc).
+    /// [`Arc<[T], A>`](crate::Arc). Mirrors `std`'s `From<Vec<T>> for Arc<[T]>`.
     #[inline]
     fn from(v: Vec<'a, T, A>) -> Self {
-        v.into_arena_arc()
+        v.freeze_into_arc()
     }
 }

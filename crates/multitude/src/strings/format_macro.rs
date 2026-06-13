@@ -4,7 +4,7 @@
 /// `format!`-style macro that writes into a fresh arena-backed
 /// [`String`](crate::strings::String).
 ///
-/// Freeze the result with [`String::into_arena_box_str`](crate::strings::String::into_arena_box_str)
+/// Freeze the result with [`String::into_boxed_str`](crate::strings::String::into_boxed_str)
 /// if you want an immutable [`Box<str>`](crate::Box).
 ///
 /// # Panics

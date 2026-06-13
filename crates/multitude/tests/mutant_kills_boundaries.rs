@@ -139,7 +139,7 @@ fn vec_shrink_to_fit_with_room_to_shrink_reduces_capacity() {
     // already cover `cap == len` no-op via existing tests; here pin
     // the actual shrink behavior for `cap > len`.
     let arena = Arena::new();
-    let mut v: ArenaVec<'_, u32> = ArenaVec::with_capacity_in(64, &arena);
+    let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(64);
     v.extend([1_u32, 2, 3, 4]);
     let cap_before = v.capacity();
     assert!(cap_before >= 64);

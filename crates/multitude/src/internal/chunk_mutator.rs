@@ -66,14 +66,12 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// incremented in this mutator's name. The mutator becomes the unique
     /// owner of that +1 and will release it on drop.
     pub(crate) unsafe fn from_owned(chunk: NonNull<C>) -> Self {
-        // SAFETY: caller asserts `chunk` is live; payload_ptr and capacity
-        // are accessible while the chunk is live.
-        let (start, cap) = unsafe { (C::payload_ptr(chunk), chunk.as_ref().capacity()) };
-        let start_addr = start.as_ptr() as usize;
-        // Align the drop-top down to `align_of::<DropEntry>()`.
-        let entry_align = mem::align_of::<DropEntry>();
-        let aligned_end_addr = (start_addr + cap) & !(entry_align - 1);
-        let aligned_end_offset = aligned_end_addr - start_addr;
+        // SAFETY: caller asserts `chunk` is live; `payload_range_for` only
+        // dereferences `chunk` to read `payload_ptr()` and `capacity()`.
+        let (start_addr, end_addr) = unsafe { Self::payload_range_for(chunk) };
+        // SAFETY: caller asserts `chunk` is live.
+        let start = unsafe { C::payload_ptr(chunk) };
+        let aligned_end_offset = end_addr - start_addr;
         // SAFETY: `aligned_end_offset <= cap`; `start.byte_add` lands
         // within (or at one-past-end of) the chunk payload.
         let drop_top = unsafe { start.byte_add(aligned_end_offset) };
@@ -111,6 +109,21 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         top.saturating_sub(cur)
     }
 
+    /// Free byte count between the bump cursor and the drop-entry top.
+    /// Used by stats accounting at retire (`ChunkMutator::Drop` and
+    /// `ChunkMutator::forget_into_chunk`) and by `Arena::stats` to fold
+    /// the currently-active chunks' unused tails into
+    /// `ArenaStats::wasted_tail_bytes`. The empty-mutator sentinel
+    /// returns 0 (saturating). The value is reported as `u32` since
+    /// chunk capacity is bounded well below `u32::MAX`.
+    #[cfg(feature = "stats")]
+    #[inline]
+    pub(crate) fn wasted_tail_for_stats(&self) -> u32 {
+        let top = self.drop_top.get().as_ptr() as usize;
+        let cur = self.bump.get().as_ptr() as usize;
+        u32::try_from(top.saturating_sub(cur)).unwrap_or(u32::MAX)
+    }
+
     /// Reads the chunk's payload start and end addresses.
     ///
     /// # Panics
@@ -123,10 +136,23 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         let chunk = self.chunk.expect("payload_range: chunk must be set");
         // SAFETY: mutator owns one strong reference to `chunk` for as
         // long as `&self` is borrowed.
+        unsafe { Self::payload_range_for(chunk) }
+    }
+
+    /// Reads `chunk`'s payload start address and drop-region-aligned end
+    /// address.
+    ///
+    /// # Safety
+    ///
+    /// `chunk` must reference a live chunk.
+    #[inline]
+    unsafe fn payload_range_for(chunk: NonNull<C>) -> (usize, usize) {
+        // SAFETY: caller asserts `chunk` is live.
         let (start, cap) = unsafe { (C::payload_ptr(chunk), chunk.as_ref().capacity()) };
         let start_addr = start.as_ptr() as usize;
-        // Align the reported end down to match `from_owned`'s drop_top
-        // alignment, keeping drop-entry math consistent.
+        // Align the reported end down to `align_of::<DropEntry>()` so the
+        // drop-entry region (entries grow down from this point) stays
+        // naturally aligned regardless of payload-start alignment.
         let entry_align = mem::align_of::<DropEntry>();
         let end_addr = (start_addr + cap) & !(entry_align - 1);
         (start_addr, end_addr)
@@ -145,6 +171,13 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     pub(crate) unsafe fn chunk_ptr_unchecked(&self) -> NonNull<C> {
         // SAFETY: see contract.
         unsafe { self.chunk.unwrap_unchecked() }
+    }
+
+    /// Returns the chunk this mutator owns, or `None` for the empty
+    /// (sentinel) mutator that has no chunk installed.
+    #[inline]
+    pub(crate) fn chunk_ptr(&self) -> Option<NonNull<C>> {
+        self.chunk
     }
 
     /// Reserves `size` bytes aligned to `align`. Returns an `InChunk<u8>`
@@ -171,9 +204,19 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         // SAFETY: see the overflow-safety note above.
         unsafe {
             hint::assert_unchecked(cur_addr > 0);
+            // On 64-bit targets every valid address is far below
+            // `isize::MAX`, so this also holds and lets the optimizer treat
+            // the align-up below as overflow-free. It is only asserted where
+            // guaranteed: on a target where an address may exceed
+            // `isize::MAX` (e.g. 32-bit upper half) the assertion could be
+            // false (→ UB), so we drop the hint and use checked arithmetic.
+            #[cfg(target_pointer_width = "64")]
             hint::assert_unchecked(isize::try_from(cur_addr).is_ok());
         }
+        #[cfg(target_pointer_width = "64")]
         let aligned_addr = (cur_addr + (align - 1)) & !(align - 1);
+        #[cfg(not(target_pointer_width = "64"))]
+        let aligned_addr = (cur_addr.checked_add(align - 1)?) & !(align - 1);
         // For zero-size allocations, probe one extra byte: a ZST alloc
         // at the chunk tail (`cur_addr == drop_top_addr`) would otherwise
         // return a value pointer equal to `chunk_base + CHUNK_ALIGN` for
@@ -269,6 +312,23 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         Some(Uninit::new(bytes.into_slice::<T>(len)))
     }
 
+    /// Like [`Self::try_alloc_uninit_slice`] but takes the precomputed
+    /// byte size, skipping the `size_of::<T>().checked_mul(len)`
+    /// overflow guard.
+    ///
+    /// # Safety
+    ///
+    /// `size` must equal `size_of::<T>() * len` (without overflow).
+    /// Callers holding an existing `&[T]` satisfy this trivially via
+    /// [`core::mem::size_of_val`] (which is an unchecked intrinsic
+    /// guaranteed not to overflow for any live slice).
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    pub(crate) unsafe fn try_alloc_uninit_slice_with_size<T>(&self, len: usize, size: usize) -> Option<Uninit<'_, [T]>> {
+        debug_assert_eq!(size, mem::size_of::<T>().wrapping_mul(len));
+        let bytes = self.try_alloc(size, mem::align_of::<T>())?;
+        Some(Uninit::new(bytes.into_slice::<T>(len)))
+    }
+
     /// Like [`Self::try_alloc_uninit_slice`] but reserves
     /// `size_of::<usize>()` extra bytes immediately before the payload
     /// for a thin-pointer DST length prefix, and writes `len` into that
@@ -288,7 +348,56 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
     )]
     pub(crate) fn try_alloc_uninit_slice_prefixed<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
-        let elem_size = mem::size_of::<T>();
+        let (payload, _) = self.try_alloc_prefixed_slice_payload::<T>(len)?;
+        Some(Uninit::new(payload))
+    }
+
+    /// Like [`Self::try_alloc_uninit_slice_prefixed`] but takes the
+    /// precomputed payload byte size, skipping the
+    /// `size_of::<T>().checked_mul(len)` overflow guard.
+    ///
+    /// # Safety
+    ///
+    /// `payload_bytes` must equal `size_of::<T>() * len` (without
+    /// overflow). Callers holding an existing `&[T]` satisfy this via
+    /// [`core::mem::size_of_val`].
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
+    )]
+    pub(crate) unsafe fn try_alloc_uninit_slice_prefixed_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
+        // SAFETY: forwarded to the caller.
+        let (payload, _) = unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }?;
+        Some(Uninit::new(payload))
+    }
+
+    /// Layout + alloc + prefix-write for "thin DST slice" reservations.
+    /// On success returns the payload ticket and the absolute payload
+    /// address (used by drop-tracked callers to encode `value_offset`).
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
+    fn try_alloc_prefixed_slice_payload<T>(&self, len: usize) -> Option<(InChunk<[T]>, usize)> {
+        let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
+        // SAFETY: just verified by `checked_mul`.
+        unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }
+    }
+
+    /// Inner helper for the prefixed slice path with a caller-provided
+    /// `payload_bytes`.
+    ///
+    /// # Safety
+    ///
+    /// `payload_bytes` must equal `size_of::<T>() * len` (without
+    /// overflow).
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
+    )]
+    unsafe fn try_alloc_prefixed_slice_payload_unchecked<T>(&self, len: usize, payload_bytes: usize) -> Option<(InChunk<[T]>, usize)> {
+        debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
         let elem_align = mem::align_of::<T>();
         let prefix_size = mem::size_of::<usize>();
         // Payload starts at the lowest elem-align-aligned offset >=
@@ -300,7 +409,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         // this, an empty slice (`len == 0` or ZST element) at the chunk
         // tail could return a payload pointer at `chunk_base +
         // CHUNK_ALIGN`, masking to the wrong tile on smart-pointer Drop.
-        let payload_bytes = elem_size.checked_mul(len)?.max(1);
+        let payload_bytes = payload_bytes.max(1);
         let total = payload_offset.checked_add(payload_bytes)?;
         let base_in_chunk = self.try_alloc(total, elem_align.max(1))?;
         // SAFETY: `base + payload_offset` is elem-align-aligned (both
@@ -315,7 +424,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
             ptr::write_unaligned(prefix_ptr, len);
             let payload_nn = NonNull::new_unchecked(payload_ptr);
             let payload_in_chunk = InChunk::from_raw(payload_nn).into_slice::<T>(len);
-            Some(Uninit::new(payload_in_chunk))
+            Some((payload_in_chunk, payload_ptr as usize))
         }
     }
 
@@ -379,35 +488,16 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
     )]
     pub(crate) fn try_alloc_uninit_slice_with_drop_prefixed<T>(&self, len: usize) -> Option<UninitDrop<'_, [T]>> {
-        let elem_size = mem::size_of::<T>();
-        let elem_align = mem::align_of::<T>();
-        let prefix_size = mem::size_of::<usize>();
-        let payload_offset = prefix_size.max(elem_align);
-        // See `try_alloc_uninit_slice_prefixed`: floor the payload byte
-        // count to 1 so the returned payload pointer is strictly inside
-        // the reservation, never landing at `chunk_base + CHUNK_ALIGN`.
-        let payload_bytes = elem_size.checked_mul(len)?.max(1);
-        let total = payload_offset.checked_add(payload_bytes)?;
         // `len` must fit in the drop entry's `u16` element-count field.
         let len_u16 = u16::try_from(len).ok()?;
         let drop_slot = self.try_reserve_drop_entry()?;
-        let Some(base_in_chunk) = self.try_alloc(total, elem_align.max(1)) else {
+        let Some((value, payload_addr)) = self.try_alloc_prefixed_slice_payload::<T>(len) else {
             self.unwind_drop_entry();
             return None;
         };
-        // SAFETY: see `try_alloc_uninit_slice_prefixed`. The drop
-        // entry's `value_offset` encodes the *payload* address
+        // The drop entry's `value_offset` encodes the *payload* address
         // (post-prefix) so `replay_drops` runs `drop_in_place::<[T]>`
         // on the real elements.
-        let value = unsafe {
-            let base_ptr = base_in_chunk.as_ptr();
-            let payload_ptr = base_ptr.add(payload_offset);
-            let prefix_ptr = payload_ptr.sub(prefix_size).cast::<usize>();
-            ptr::write_unaligned(prefix_ptr, len);
-            let payload_nn = NonNull::new_unchecked(payload_ptr);
-            InChunk::from_raw(payload_nn).into_slice::<T>(len)
-        };
-        let payload_addr = (base_in_chunk.as_ptr() as usize) + payload_offset;
         let value_offset = self.offset_or_unwind(payload_addr)?;
         // SAFETY: `drop_slot` is freshly reserved, aligned, exclusively
         // owned slot in the chunk's drop region.
@@ -435,7 +525,16 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         if cur.as_ptr() as usize != end_addr {
             return false;
         }
-        debug_assert!(bytes <= end_addr, "try_reclaim_tail: rewind underflows");
+        #[cfg(debug_assertions)]
+        {
+            // SAFETY: the `self.chunk.is_none()` early return above
+            // guarantees a live chunk; `payload_ptr` only reads its header.
+            let payload_start = unsafe { C::payload_ptr(self.chunk_ptr_unchecked()) }.as_ptr() as usize;
+            debug_assert!(
+                (cur.as_ptr() as usize) - payload_start >= bytes,
+                "try_reclaim_tail: rewind underflows chunk payload",
+            );
+        }
         // SAFETY: caller guarantees `bytes` was previously consumed
         // forward from the bump cursor; rolling back by `bytes` stays
         // within the chunk payload.
@@ -554,7 +653,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     }
 
     /// Cold helper: roll back the most recently reserved drop entry and
-    /// return `None`. Extracted from compound-reservation paths so the
+    /// return `None`. Out-of-line from compound-reservation paths so the
     /// genuinely-unreachable `u16::try_from(...) == Err` arm is a single
     /// line at the call site.
     #[cold]
@@ -609,6 +708,36 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
             chunk.as_ref().set_drop_entry_count(self.local_drop_entry_count());
         }
     }
+
+    /// Consumes the mutator, publishing the locally-tracked drop-entry
+    /// count to the chunk header and returning the chunk pointer with
+    /// the mutator's `+1` retained ownership transferred to the caller.
+    /// The mutator's `Drop` (which would otherwise release the `+1`) is
+    /// bypassed.
+    ///
+    /// Under the `stats` feature, this is also a "retire" event for
+    /// wasted-tail accounting: the chunk's free tail is recorded and
+    /// added to the provider's wasted-tail counter (the matching subtract
+    /// happens in `release_*` when the chunk is eventually cached or
+    /// destroyed). This matters for the `retired_local` push path, where
+    /// the chunk is removed from `current_local` (so its tail is wasted
+    /// from the user's POV) but the mutator's `Drop` is bypassed.
+    ///
+    /// Returns `None` for the empty (sentinel) mutator that has no
+    /// chunk installed.
+    #[inline]
+    pub(crate) fn forget_into_chunk(self) -> Option<NonNull<C>> {
+        self.publish_drop_count();
+        let chunk = self.chunk;
+        #[cfg(feature = "stats")]
+        if let Some(chunk) = chunk {
+            // SAFETY: chunk is live; the mutator still holds its +1
+            // (ownership transfers to the caller via `mem::forget` below).
+            unsafe { C::record_retire(chunk, self.wasted_tail_for_stats()) };
+        }
+        mem::forget(self);
+        chunk
+    }
 }
 
 impl<C: ?Sized + ChunkOps> Drop for ChunkMutator<C> {
@@ -622,6 +751,16 @@ impl<C: ?Sized + ChunkOps> Drop for ChunkMutator<C> {
         // unique remaining reference, and `teardown_and_release` will read
         // the count to walk the drop list.
         unsafe {
+            #[cfg(feature = "stats")]
+            {
+                // Record the wasted-tail at retire BEFORE dec_ref so that
+                // (a) the chunk header carries the value for the eventual
+                // `release_*` subtract (handles may outlive us), and (b) the
+                // provider counter goes up before any potential immediate
+                // release-driven subtract.
+                let wasted = self.wasted_tail_for_stats();
+                C::record_retire(chunk, wasted);
+            }
             let chunk_ref = chunk.as_ref();
             chunk_ref.set_drop_entry_count(self.local_drop_entry_count());
             if chunk_ref.dec_ref() {
@@ -631,9 +770,9 @@ impl<C: ?Sized + ChunkOps> Drop for ChunkMutator<C> {
     }
 }
 
-/// Hint for `try_alloc_bytes`: the bump cursor is non-zero and fits
-/// in `isize` (both hold because it's a `NonNull<u8>` sourced from a
-/// real chunk in the lower half of the address space).
+/// Hint for `try_alloc_bytes`: the bump cursor is non-zero and (on
+/// 64-bit) fits in `isize` (both hold because it's a `NonNull<u8>`
+/// sourced from a real chunk in the lower half of the address space).
 #[expect(clippy::inline_always, reason = "pure codegen hint; must inline to take effect")]
 #[inline(always)]
 #[cfg_attr(test, mutants::skip)] // pure hint, no observable behavior
@@ -641,6 +780,11 @@ fn hint_chunk_cur_addr_nonnull(cur_addr: usize) {
     // SAFETY: see fn doc.
     unsafe {
         hint::assert_unchecked(cur_addr > 0);
+        // Only asserted on 64-bit, where every valid address is below
+        // `isize::MAX`. On narrower targets an address may exceed
+        // `isize::MAX`, which would make this `assert_unchecked` false
+        // (→ UB); the caller's `checked_add` stays correct without it.
+        #[cfg(target_pointer_width = "64")]
         hint::assert_unchecked(isize::try_from(cur_addr).is_ok());
     }
 }
@@ -700,22 +844,11 @@ mod tests {
 
     #[test]
     fn capacity_and_free_bytes_match_chunk_layout() {
-        // Build a real chunk via the arena, then construct a fresh
-        // `ChunkMutator` over its payload to query layout. We reach the
-        // mutator indirectly via the arena's preallocate path: a
-        // `with_capacity_local`-built arena owns at least one chunk
-        // with a known capacity.
+        // The mutator isn't reachable externally, so exercise its
+        // free_bytes/capacity arithmetic end-to-end through a real arena
+        // chunk (the empty-mutator path is unit-tested above).
         let arena = crate::Arena::builder().with_capacity_local(1024).build();
-        // alloc one tiny value to be sure the chunk exists.
         let _ = arena.alloc(0_u32);
-        // We can't reach the mutator from outside, so validate the
-        // *behavior* via observable freed/capacity bytes: free_bytes
-        // must be strictly less than capacity after at least one
-        // allocation.
-        // (The free_bytes/capacity helpers are tested directly above
-        // for the empty-mutator path; this end-to-end check guards the
-        // arithmetic via the real chunk-mutator state used by the
-        // arena.)
         let v: &u32 = arena.alloc(42_u32);
         assert_eq!(*v, 42);
     }

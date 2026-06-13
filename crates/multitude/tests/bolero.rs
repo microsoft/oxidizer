@@ -413,7 +413,7 @@ mod bolero_lifecycle {
                     for i in 0..n {
                         v.push(Tracker::new(&created, &dropped, payload.wrapping_add(i as u64)));
                     }
-                    vec_arcs.push(v.into_arena_arc());
+                    vec_arcs.push(multitude::Arc::from(v));
                 }
                 Op::DropVecArc { idx } => {
                     if !vec_arcs.is_empty() {
@@ -428,7 +428,7 @@ mod bolero_lifecycle {
                     for i in 0..n {
                         v.push(Tracker::new(&created, &dropped, payload.wrapping_add(i as u64)));
                     }
-                    vec_boxes.push(v.into_arena_box());
+                    vec_boxes.push(v.into_boxed_slice());
                 }
                 Op::DropVecBox { idx } => {
                     if !vec_boxes.is_empty() {
@@ -448,7 +448,7 @@ mod bolero_lifecycle {
                         s.push('!');
                         s.shrink_to_fit();
                     }
-                    built_str_boxes.push(s.into_arena_box_str());
+                    built_str_boxes.push(s.into_boxed_str());
                 }
                 Op::DropBuiltStringBox { idx } => {
                     if !built_str_boxes.is_empty() {
@@ -493,7 +493,7 @@ mod bolero_lifecycle {
                         s.push('!');
                         s.shrink_to_fit();
                     }
-                    built_utf16_str_boxes.push(s.into_arena_box_utf16_str());
+                    built_utf16_str_boxes.push(s.into_boxed_utf16_str());
                 }
                 #[cfg(feature = "utf16")]
                 Op::DropBuiltUtf16StringBox { idx } => {
@@ -551,10 +551,6 @@ mod bolero_lifecycle {
                     "at least one chunk must have been allocated (created={created_n}, stats={s:?})",
                 );
             }
-            assert!(
-                s.total_bytes_allocated >= (created_n as u64).saturating_mul(8),
-                "total_bytes_allocated under-reported (created={created_n}, stats={s:?})",
-            );
         }
     }
 
@@ -646,11 +642,9 @@ mod bolero_panic_safety {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::panic, reason = "test deliberately injects panics to verify recovery")]
     #![allow(clippy::manual_assert, reason = "panic-injection sites are clearer with explicit panic!")]
-    use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::rc::Rc as StdRc;
     use std::sync::Arc as StdArc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
     use bolero::TypeGenerator;
     use multitude::Arena;
@@ -684,21 +678,21 @@ mod bolero_panic_safety {
     struct ClonePanicTracker {
         created: Counter,
         dropped: Counter,
-        remaining_before_panic: StdRc<Cell<i32>>,
+        remaining_before_panic: StdArc<AtomicI32>,
         payload: u64,
         armed: bool,
     }
 
     impl Clone for ClonePanicTracker {
         fn clone(&self) -> Self {
-            let remaining = self.remaining_before_panic.get();
+            let remaining = self.remaining_before_panic.load(Ordering::Relaxed);
             assert!(remaining > 0, "clone-panic-injection");
-            self.remaining_before_panic.set(remaining - 1);
+            self.remaining_before_panic.store(remaining - 1, Ordering::Relaxed);
             let _ = self.created.fetch_add(1, Ordering::Relaxed);
             Self {
                 created: StdArc::clone(&self.created),
                 dropped: StdArc::clone(&self.dropped),
-                remaining_before_panic: StdRc::clone(&self.remaining_before_panic),
+                remaining_before_panic: StdArc::clone(&self.remaining_before_panic),
                 payload: self.payload,
                 armed: true,
             }
@@ -718,7 +712,7 @@ mod bolero_panic_safety {
             Self {
                 created: StdArc::clone(&self.created),
                 dropped: StdArc::clone(&self.dropped),
-                remaining_before_panic: StdRc::clone(&self.remaining_before_panic),
+                remaining_before_panic: StdArc::clone(&self.remaining_before_panic),
                 payload: self.payload,
                 armed: false,
             }
@@ -775,7 +769,7 @@ mod bolero_panic_safety {
                     let seed = ClonePanicTracker {
                         created: StdArc::clone(&created),
                         dropped: StdArc::clone(&dropped),
-                        remaining_before_panic: StdRc::new(Cell::new(panic_idx_i32)),
+                        remaining_before_panic: StdArc::new(AtomicI32::new(panic_idx_i32)),
                         payload,
                         armed: false,
                     };
