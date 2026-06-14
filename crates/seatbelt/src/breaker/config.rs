@@ -54,10 +54,12 @@ pub struct BreakerConfig {
     pub break_duration: Duration,
 
     /// The behavior of the circuit breaker when transitioning from half-open to closed state.
+    #[cfg_attr(any(feature = "serde", test), serde(default))]
     pub half_open_mode: HalfOpenMode,
 
     /// How abandoned executions (accepted but never completed, e.g. cancelled futures) are treated
     /// by the health calculation.
+    #[cfg_attr(any(feature = "serde", test), serde(default))]
     pub abandoned_policy: AbandonedPolicy,
 }
 

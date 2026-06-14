@@ -16,8 +16,7 @@
 /// - [`AbandonedPolicy::when_all_abandoned`]: the special case of `abandon_rate_threshold` with a
 ///   threshold of `1.0` — abandoned executions only affect the decision when *every* execution was
 ///   abandoned (the default).
-/// - [`AbandonedPolicy::as_failures`]: abandoned executions are always treated as failures
-///   (equivalent to `abandon_rate_threshold` with a threshold of `0.0`).
+/// - [`AbandonedPolicy::as_failures`]: abandoned executions are always treated as failures.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
@@ -68,28 +67,24 @@ impl AbandonedPolicy {
     /// abandoned executions are ignored entirely and the decision is made purely on successes and
     /// failures.
     ///
-    /// `threshold` is a rate in `[0.0, 1.0]`:
+    /// `threshold` is a rate in `(0.0, 1.0]`:
     ///
     /// - `1.0` is equivalent to [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]:
     ///   abandoned executions only matter when *every* execution was abandoned.
-    /// - `0.0` is equivalent to [`as_failures`][AbandonedPolicy::as_failures]: abandoned executions
-    ///   are always treated as failures.
+    ///
+    /// To treat abandoned executions as failures unconditionally, use
+    /// [`as_failures`][AbandonedPolicy::as_failures] instead.
     ///
     /// # Panics
     ///
-    /// Panics if `threshold` is not in `[0.0, 1.0]`.
+    /// Panics if `threshold` is not in `(0.0, 1.0]`.
     #[must_use]
     pub fn abandon_rate_threshold(threshold: f32) -> Self {
-        assert!((0.0..=1.0).contains(&threshold), "threshold must be in [0.0, 1.0]");
+        assert!(threshold > 0.0 && threshold <= 1.0, "threshold must be in (0.0, 1.0]");
 
-        // A threshold of `0.0` means "any abandon rate counts", which is exactly `as_failures`.
-        let inner = if threshold == 0.0 {
-            Mode::AsFailures
-        } else {
-            Mode::AbandonRateThreshold(threshold)
-        };
-
-        Self { inner }
+        Self {
+            inner: Mode::AbandonRateThreshold(threshold),
+        }
     }
 
     /// Abandoned executions are always treated as failures.
@@ -98,9 +93,6 @@ impl AbandonedPolicy {
     /// failure rate, exactly as a real failure would. Use this when an abandoned execution should be
     /// considered just as bad as an outright failure (for example when cancellations are typically
     /// caused by the downstream service being too slow).
-    ///
-    /// This is exactly [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] with a
-    /// threshold of `0.0`.
     #[must_use]
     pub fn as_failures() -> Self {
         Self { inner: Mode::AsFailures }
@@ -110,8 +102,7 @@ impl AbandonedPolicy {
     ///
     /// This is used by the single-probe recovery gate, which has no statistical sample to apply
     /// the abandon-rate heuristic to: a lone abandoned probe is only conclusive evidence of failure
-    /// under the [`as_failures`][AbandonedPolicy::as_failures] policy (equivalently
-    /// [`abandon_rate_threshold(0.0)`][AbandonedPolicy::abandon_rate_threshold]).
+    /// under the [`as_failures`][AbandonedPolicy::as_failures] policy.
     pub(crate) fn counts_abandoned_as_failure(&self) -> bool {
         matches!(self.inner, Mode::AsFailures)
     }
@@ -180,23 +171,24 @@ mod tests {
     }
 
     #[test]
-    fn as_failures_equals_abandon_rate_threshold_zero() {
-        assert_eq!(AbandonedPolicy::as_failures(), AbandonedPolicy::abandon_rate_threshold(0.0));
-    }
-
-    #[test]
     fn abandon_rate_threshold_does_not_count_lone_probe_as_failure() {
         // Intermediate thresholds (and the 1.0 special case) leave the single-probe gate inconclusive.
         assert!(!AbandonedPolicy::abandon_rate_threshold(0.5).counts_abandoned_as_failure());
         assert!(!AbandonedPolicy::when_all_abandoned().counts_abandoned_as_failure());
-        // A zero threshold is the `as_failures` policy, which does reopen on a lone abandoned probe.
-        assert!(AbandonedPolicy::abandon_rate_threshold(0.0).counts_abandoned_as_failure());
+        // The `as_failures` policy does reopen on a lone abandoned probe.
+        assert!(AbandonedPolicy::as_failures().counts_abandoned_as_failure());
     }
 
     #[test]
-    #[should_panic(expected = "threshold must be in [0.0, 1.0]")]
-    fn abandon_rate_threshold_rejects_out_of_range() {
+    #[should_panic(expected = "threshold must be in (0.0, 1.0]")]
+    fn abandon_rate_threshold_rejects_above_range() {
         let _ = AbandonedPolicy::abandon_rate_threshold(1.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold must be in (0.0, 1.0]")]
+    fn abandon_rate_threshold_rejects_zero() {
+        let _ = AbandonedPolicy::abandon_rate_threshold(0.0);
     }
 
     #[test]
