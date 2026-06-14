@@ -3,20 +3,17 @@
 
 /// Controls how *abandoned* executions influence the circuit breaker's health decision.
 ///
-/// An execution is *abandoned* when it is accepted by the circuit breaker but its future is dropped
-/// before completing — for example when the caller cancels the request. Abandoned executions are
-/// **always** counted towards the reported throughput for telemetry purposes; this policy only
-/// governs whether, and how, they contribute to the open/close decision.
+/// An execution is *abandoned* when the circuit breaker accepts it but its future is dropped before
+/// completing — for example when the caller cancels the request. Abandoned executions are **always**
+/// counted towards the reported throughput for telemetry; this policy only governs whether, and how,
+/// they contribute to the open/close decision.
 ///
-/// The following policies are available:
-///
-/// - [`AbandonedPolicy::ignore`]: abandoned executions never affect the decision.
-/// - [`AbandonedPolicy::abandon_rate_threshold`]: abandoned executions are treated as failures once
-///   the proportion of abandoned executions reaches a configured threshold.
-/// - [`AbandonedPolicy::when_all_abandoned`]: the special case of `abandon_rate_threshold` with a
-///   threshold of `1.0` — abandoned executions only affect the decision when *every* execution was
-///   abandoned (the default).
-/// - [`AbandonedPolicy::as_failures`]: abandoned executions are always treated as failures.
+/// - [`ignore`][AbandonedPolicy::ignore]: abandoned executions never affect the decision.
+/// - [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold]: abandoned executions count
+///   as failures once their proportion of the throughput reaches a threshold.
+/// - [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]: the default — `abandon_rate_threshold`
+///   with a threshold of `1.0`, so abandoned executions only matter when *every* execution was abandoned.
+/// - [`as_failures`][AbandonedPolicy::as_failures]: abandoned executions always count as failures.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
@@ -27,53 +24,43 @@ pub struct AbandonedPolicy {
 impl AbandonedPolicy {
     /// Abandoned executions never influence the open/close decision.
     ///
-    /// They are still counted towards the reported throughput for telemetry, but they neither raise
-    /// nor lower the failure rate and never count towards the minimum throughput required to open
-    /// the circuit. Use this when cancellations are routine and should never be interpreted as a
-    /// signal about the health of the underlying service.
+    /// They are still reported in throughput telemetry, but never affect the failure rate or the
+    /// minimum throughput. Use this when cancellations are routine and say nothing about the health
+    /// of the underlying service.
     ///
-    /// > **Note**: with this policy the degenerate case where *every* execution is abandoned can
-    /// > never open the circuit, because no conclusive result is ever observed.
+    /// > **Note**: with this policy a run of *only* abandoned executions can never open the circuit,
+    /// > because no conclusive result is ever observed.
     #[must_use]
     pub fn ignore() -> Self {
         Self { inner: Mode::Ignore }
     }
 
-    /// **Default.** Abandoned executions only influence the decision when there were no successes and
-    /// no failures — that is, every execution was abandoned.
+    /// **Default.** Abandoned executions only count when *every* execution was abandoned.
     ///
-    /// In that degenerate case the abandoned executions are treated as failures so the circuit can
-    /// still react; otherwise it would never observe any result and could never open. As soon as
-    /// there is at least one conclusive result (a success or a failure), abandoned executions are
-    /// ignored entirely and the decision is made purely on successes and failures. This keeps
-    /// abandoned executions from either masking a genuine failure burst or manufacturing a false
-    /// failure rate, while still guarding against the "everything is abandoned" deadlock.
+    /// As long as there is at least one conclusive result (a success or a failure), abandoned
+    /// executions are ignored and the decision is made purely on successes and failures. Only in the
+    /// degenerate case where everything was abandoned do they count as failures, so the circuit can
+    /// still react instead of deadlocking on a service that never returns a result.
     ///
-    /// This is exactly [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] with a
-    /// threshold of `1.0`.
+    /// This is [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] with a threshold
+    /// of `1.0`.
     #[must_use]
     pub fn when_all_abandoned() -> Self {
         Self::abandon_rate_threshold(1.0)
     }
 
-    /// Abandoned executions are treated as failures once their proportion of the total throughput
-    /// reaches `threshold`.
+    /// Abandoned executions count as failures once their share of the throughput reaches `threshold`.
     ///
-    /// The *abandon rate* is `abandoned / total`, where `total` includes successes, failures and
-    /// abandoned executions. When the abandon rate is greater than or equal to `threshold`, every
-    /// abandoned execution is counted as a failure (contributing to both the failure count and the
-    /// total the failure rate is evaluated against), so a high enough rate of cancellations can on
-    /// its own drive the health to *unhealthy*. While the abandon rate stays below `threshold`,
-    /// abandoned executions are ignored entirely and the decision is made purely on successes and
-    /// failures.
+    /// The *abandon rate* is `abandoned / total`, where `total` counts successes, failures and
+    /// abandoned executions. Once the abandon rate reaches `threshold`, each abandoned execution is
+    /// folded into the failure rate (counting towards both its numerator and denominator), so enough
+    /// cancellations can open the circuit on their own. While the abandon rate stays below
+    /// `threshold`, abandoned executions are ignored and the decision rests on successes and failures
+    /// alone.
     ///
-    /// `threshold` is a rate in `(0.0, 1.0]`:
-    ///
-    /// - `1.0` is equivalent to [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]:
-    ///   abandoned executions only matter when *every* execution was abandoned.
-    ///
-    /// To treat abandoned executions as failures unconditionally, use
-    /// [`as_failures`][AbandonedPolicy::as_failures] instead.
+    /// `threshold` is a rate in `(0.0, 1.0]`; `1.0` is equivalent to
+    /// [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]. To count abandoned executions as
+    /// failures unconditionally, use [`as_failures`][AbandonedPolicy::as_failures] instead.
     ///
     /// # Panics
     ///
@@ -87,12 +74,12 @@ impl AbandonedPolicy {
         }
     }
 
-    /// Abandoned executions are always treated as failures.
+    /// Abandoned executions always count as failures.
     ///
-    /// Each abandoned execution contributes to both the numerator and the denominator of the
-    /// failure rate, exactly as a real failure would. Use this when an abandoned execution should be
-    /// considered just as bad as an outright failure (for example when cancellations are typically
-    /// caused by the downstream service being too slow).
+    /// Each abandoned execution contributes to both the numerator and the denominator of the failure
+    /// rate, exactly as a real failure would. Use this when an abandoned execution is just as bad as
+    /// an outright failure — for example when cancellations are typically caused by a downstream
+    /// service being too slow.
     #[must_use]
     pub fn as_failures() -> Self {
         Self { inner: Mode::AsFailures }
@@ -100,18 +87,17 @@ impl AbandonedPolicy {
 
     /// Returns `true` if abandoned executions are unconditionally treated as failures.
     ///
-    /// This is used by the single-probe recovery gate, which has no statistical sample to apply
-    /// the abandon-rate heuristic to: a lone abandoned probe is only conclusive evidence of failure
-    /// under the [`as_failures`][AbandonedPolicy::as_failures] policy.
+    /// Used by the single-probe recovery gate, which has no statistical sample to apply the
+    /// abandon-rate heuristic to: a lone abandoned probe is only conclusive evidence of failure under
+    /// the [`as_failures`][AbandonedPolicy::as_failures] policy.
     pub(crate) fn counts_abandoned_as_failure(&self) -> bool {
         matches!(self.inner, Mode::AsFailures)
     }
 
     /// Returns the policy's abandoned-handling [`Mode`] for the centralized health evaluator.
     ///
-    /// This exposes the policy purely as configuration data: the actual `(failures, total)`
-    /// derivation lives in [`HealthEvaluator`][super::HealthEvaluator], so that all health
-    /// evaluation logic is centralized in one place rather than split across types.
+    /// The `(failures, total)` derivation lives in [`HealthEvaluator`][super::HealthEvaluator], so
+    /// this exposes the policy purely as configuration data.
     pub(crate) fn mode(&self) -> Mode {
         self.inner
     }
