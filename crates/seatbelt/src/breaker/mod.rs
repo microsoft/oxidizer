@@ -133,17 +133,9 @@
 //! An execution is *abandoned* when it is accepted by the circuit breaker but its future is dropped
 //! before completing — for example when the caller cancels or times out the request. Abandoned
 //! executions are **always** counted towards the reported throughput for telemetry, but how they
-//! influence the open/close decision is governed by [`AbandonedPolicy`]
-//! (configured via [`abandoned_policy`][BreakerLayer::abandoned_policy]):
-//!
-//! - [`ignore`][AbandonedPolicy::ignore]: abandoned executions never affect the decision.
-//! - [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned] (default): abandoned executions are
-//!   treated as failures only in the degenerate case where *every* execution was abandoned (no
-//!   successes or failures). This guards against a circuit that can never open because no conclusive
-//!   result is ever observed, without letting abandoned executions distort an otherwise meaningful
-//!   sample.
-//! - [`as_failures`][AbandonedPolicy::as_failures]: every abandoned execution is treated as a
-//!   failure.
+//! influence the open/close decision is governed by [`AbandonedPolicy`] (configured via
+//! [`abandoned_policy`][BreakerLayer::abandoned_policy]). See [`AbandonedPolicy`] for the behavior
+//! of each individual policy variant.
 //!
 //! The same policy applies both to the closed-state health window and to the half-open probes.
 //!
