@@ -69,7 +69,7 @@ impl HalfOpenMode {
         abandoned_policy: &AbandonedPolicy,
     ) -> ProbesOptions {
         match self.inner {
-            Mode::Quick => ProbesOptions::quick(default_stage_duration),
+            Mode::Quick => ProbesOptions::quick(default_stage_duration, abandoned_policy),
             Mode::Progressive(duration) => {
                 ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold, abandoned_policy)
             }
