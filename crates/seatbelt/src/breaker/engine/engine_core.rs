@@ -394,7 +394,7 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes.throughput(), 0);
+            assert_eq!(stats.probes.total(), 0);
         } else {
             panic!("expected engine to be in Open state");
         }
@@ -414,7 +414,7 @@ mod tests {
 
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
-        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes.successes == 1));
+        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes.success == 1));
     }
 
     #[test]
@@ -456,8 +456,8 @@ mod tests {
 
         if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
             assert_eq!(stats.probes.abandoned, 1);
-            assert_eq!(stats.probes.failures, 0);
-            assert_eq!(stats.probes.successes, 0);
+            assert_eq!(stats.probes.failed, 0);
+            assert_eq!(stats.probes.success, 0);
         } else {
             panic!("expected engine to remain in HalfOpen state");
         }
@@ -606,9 +606,9 @@ mod tests {
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes.successes, 1);
+            assert_eq!(stats.probes.success, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes.failures, 0);
+            assert_eq!(stats.probes.failed, 0);
             assert_eq!(stats.re_opened, 0);
         } else {
             panic!("expected circuit to close after successful probe");
@@ -653,9 +653,9 @@ mod tests {
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes.successes, 1);
+            assert_eq!(stats.probes.success, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes.failures, 1);
+            assert_eq!(stats.probes.failed, 1);
             assert_eq!(stats.re_opened, 1);
         } else {
             panic!("expected circuit to close after successful probe");
@@ -747,12 +747,12 @@ mod tests {
         let mut stats = Stats::new(Instant::now());
 
         stats.record_probe_execution_result(ExecutionResult::Success);
-        assert_eq!(stats.probes.successes, 1);
-        assert_eq!(stats.probes.failures, 0);
+        assert_eq!(stats.probes.success, 1);
+        assert_eq!(stats.probes.failed, 0);
 
         stats.record_probe_execution_result(ExecutionResult::Failure);
-        assert_eq!(stats.probes.successes, 1);
-        assert_eq!(stats.probes.failures, 1);
+        assert_eq!(stats.probes.success, 1);
+        assert_eq!(stats.probes.failed, 1);
     }
 
     #[test]

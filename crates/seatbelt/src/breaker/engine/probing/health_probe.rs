@@ -135,7 +135,7 @@ mod tests {
 
         let status = probe.metrics.health_info();
         assert_eq!(status.status, HealthStatus::Healthy);
-        assert_eq!(status.counts.throughput(), 2);
+        assert_eq!(status.counts.total(), 2);
     }
 
     #[test]
@@ -152,7 +152,7 @@ mod tests {
             probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(1)),
             ProbingResult::Pending,
         );
-        assert_eq!(probe.metrics.health_info().counts.throughput(), 1);
+        assert_eq!(probe.metrics.health_info().counts.total(), 1);
 
         // Once the sampling period elapses with only abandoned probes, the default
         // when-all-abandoned policy treats the sample as unhealthy, so the probe reports failure.

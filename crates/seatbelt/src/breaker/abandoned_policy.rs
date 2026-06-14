@@ -82,8 +82,8 @@ impl AbandonedPolicy {
     /// reported throughput, which always includes abandoned executions.
     pub(crate) fn decision(&self, counts: ExecutionInfo) -> (u32, u32) {
         let ExecutionInfo {
-            successes,
-            failures,
+            success: successes,
+            failed: failures,
             abandoned,
         } = counts;
         match self.inner {
