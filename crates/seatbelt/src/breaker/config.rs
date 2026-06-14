@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use crate::breaker::HalfOpenMode;
 use crate::breaker::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOLD, DEFAULT_MIN_THROUGHPUT, DEFAULT_SAMPLING_DURATION};
+use crate::breaker::{AbandonedPolicy, HalfOpenMode};
 
 /// Configuration for the circuit breaker middleware.
 ///
@@ -24,6 +24,7 @@ use crate::breaker::constants::{DEFAULT_BREAK_DURATION, DEFAULT_FAILURE_THRESHOL
 /// | `sampling_duration` | 30 seconds |
 /// | `break_duration` | 5 seconds |
 /// | `half_open_mode` | `Progressive` (no custom stage duration) |
+/// | `abandoned_policy` | `Pathological` |
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -54,6 +55,10 @@ pub struct BreakerConfig {
 
     /// The behavior of the circuit breaker when transitioning from half-open to closed state.
     pub half_open_mode: HalfOpenMode,
+
+    /// How abandoned executions (accepted but never completed, e.g. cancelled futures) are treated
+    /// by the health calculation.
+    pub abandoned_policy: AbandonedPolicy,
 }
 
 impl Default for BreakerConfig {
@@ -65,6 +70,7 @@ impl Default for BreakerConfig {
             sampling_duration: DEFAULT_SAMPLING_DURATION,
             break_duration: DEFAULT_BREAK_DURATION,
             half_open_mode: HalfOpenMode::progressive(None),
+            abandoned_policy: AbandonedPolicy::default(),
         }
     }
 }

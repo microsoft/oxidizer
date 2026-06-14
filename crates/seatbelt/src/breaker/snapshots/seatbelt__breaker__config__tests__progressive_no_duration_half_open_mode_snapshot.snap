@@ -1,6 +1,5 @@
 ---
 source: crates/seatbelt/src/breaker/config.rs
-assertion_line: 101
 expression: config
 ---
 {
@@ -11,5 +10,6 @@ expression: config
   "break_duration": "5s",
   "half_open_mode": {
     "Progressive": null
-  }
+  },
+  "abandoned_policy": "Pathological"
 }

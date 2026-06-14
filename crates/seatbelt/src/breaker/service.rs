@@ -96,11 +96,9 @@ where
             ControlFlow::Break(output) => return output,
         };
 
-        let mut guard = AbandonedGuard::new(self.shared.as_ref(), engine.as_ref(), &breaker_id, mode);
+        let mut guard = AbandonedGuard::new(Arc::clone(&self.shared), engine, breaker_id, mode);
         let output = self.inner.execute(input).await;
-        guard.disarm();
-
-        self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+        guard.complete(&output);
 
         output
     }
@@ -166,16 +164,18 @@ where
             }
         };
 
-        let shared = Arc::clone(&self.shared);
+        // Construct the guard BEFORE building the inner future and move it into the returned future
+        // so that dropping the future before it is ever polled still records the abandonment. `enter`
+        // already ran synchronously above (inside `before_execute`), so a pre-poll drop would
+        // otherwise leak an accepted-but-never-exited execution. The guard owns the only handles it
+        // needs, so the normal-completion `after_execute` runs through `complete`.
+        let mut guard = AbandonedGuard::new(Arc::clone(&self.shared), engine, breaker_id, mode);
         let future = self.inner.call(input);
 
         BreakerFuture {
             inner: Box::pin(async move {
-                let mut guard = AbandonedGuard::new(shared.as_ref(), engine.as_ref(), &breaker_id, mode);
                 let output = future.await;
-                guard.disarm();
-
-                shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+                guard.complete(&output);
                 output
             }),
         }
@@ -242,27 +242,17 @@ impl<In, Out> BreakerShared<In, Out> {
     }
 }
 
-/// RAII guard that records an *abandoned* execution if it is dropped before completing.
-///
-/// An execution is abandoned when it is accepted by the circuit breaker (via [`CircuitEngine::enter`])
-/// but its future is dropped before the explicit [`CircuitEngine::exit`] is reached — for example when
-/// the caller cancels the future. Without this guard such executions would never affect the circuit
-/// breaker state, which can lead to pathological cases where every execution is abandoned yet the
-/// circuit never opens.
-///
-/// On the normal completion path the guard is [disarmed](Self::disarm) and the explicit `exit` path
-/// takes over. If the guard is still armed when dropped, it records the abandonment with the engine
-/// and, when that opens the circuit, invokes the `on_opened` callback with no output.
-struct AbandonedGuard<'a, In, Out, E: CircuitEngine + ?Sized> {
-    shared: &'a BreakerShared<In, Out>,
-    engine: &'a E,
-    breaker_id: &'a BreakerId,
+/// Guard that records an *abandoned* execution if it is dropped before completing.
+struct AbandonedGuard<In, Out> {
+    shared: Arc<BreakerShared<In, Out>>,
+    engine: Arc<Engine>,
+    breaker_id: BreakerId,
     mode: ExecutionMode,
     armed: bool,
 }
 
-impl<'a, In, Out, E: CircuitEngine + ?Sized> AbandonedGuard<'a, In, Out, E> {
-    fn new(shared: &'a BreakerShared<In, Out>, engine: &'a E, breaker_id: &'a BreakerId, mode: ExecutionMode) -> Self {
+impl<In, Out> AbandonedGuard<In, Out> {
+    fn new(shared: Arc<BreakerShared<In, Out>>, engine: Arc<Engine>, breaker_id: BreakerId, mode: ExecutionMode) -> Self {
         Self {
             shared,
             engine,
@@ -272,20 +262,22 @@ impl<'a, In, Out, E: CircuitEngine + ?Sized> AbandonedGuard<'a, In, Out, E> {
         }
     }
 
-    /// Disarms the guard once the execution has completed normally.
-    fn disarm(&mut self) {
+    /// Completes the guard on the normal execution path: it disarms the abandonment handling and
+    /// runs the explicit `exit`/callback logic for the produced output.
+    fn complete(&mut self, output: &Out) {
         self.armed = false;
+        self.shared.after_execute(self.engine.as_ref(), output, self.mode, &self.breaker_id);
     }
 }
 
-impl<In, Out, E: CircuitEngine + ?Sized> Drop for AbandonedGuard<'_, In, Out, E> {
+impl<In, Out> Drop for AbandonedGuard<In, Out> {
     fn drop(&mut self) {
         if !self.armed {
             return;
         }
 
         if let ExitCircuitResult::Opened(_health) = self.engine.exit(ExecutionResult::Abandoned, self.mode) {
-            self.shared.invoke_on_opened(None, self.breaker_id);
+            self.shared.invoke_on_opened(None, &self.breaker_id);
         }
     }
 }

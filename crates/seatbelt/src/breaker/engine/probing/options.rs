@@ -4,7 +4,7 @@
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use crate::breaker::HealthMetricsBuilder;
+use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
 
 /// The minimum throughput during probing stage is set to 1, so at least one request must come
 /// through in each probing stage to evaluate the health.
@@ -34,18 +34,33 @@ impl ProbesOptions {
         Self::new([ProbeOptions::SingleProbe { cooldown }])
     }
 
-    pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32) -> Self {
-        Self::gradual(&[0.001, 0.01, 0.05, 0.1, 0.25, 0.5], stage_duration, failure_threshold)
+    pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32, abandoned_policy: &AbandonedPolicy) -> Self {
+        Self::gradual(
+            &[0.001, 0.01, 0.05, 0.1, 0.25, 0.5],
+            stage_duration,
+            failure_threshold,
+            abandoned_policy,
+        )
     }
 
-    pub(crate) fn gradual(probing_ratio: &[f64], stage_duration: Duration, failure_threshold: f32) -> Self {
+    pub(crate) fn gradual(
+        probing_ratio: &[f64],
+        stage_duration: Duration,
+        failure_threshold: f32,
+        abandoned_policy: &AbandonedPolicy,
+    ) -> Self {
         // Start with a single probe
         let initial = std::iter::once(ProbeOptions::SingleProbe { cooldown: stage_duration });
 
         // Then continue with health-based probes
-        let health = probing_ratio
-            .iter()
-            .map(|probing_ratio| ProbeOptions::HealthProbe(HealthProbeOptions::new(stage_duration, failure_threshold, *probing_ratio)));
+        let health = probing_ratio.iter().map(|probing_ratio| {
+            ProbeOptions::HealthProbe(HealthProbeOptions::with_policy(
+                stage_duration,
+                failure_threshold,
+                *probing_ratio,
+                abandoned_policy.clone(),
+            ))
+        });
 
         Self::new(initial.chain(health))
     }
@@ -68,7 +83,17 @@ pub(crate) struct HealthProbeOptions {
 }
 
 impl HealthProbeOptions {
+    #[cfg(test)]
     pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
+        Self::with_policy(stage_duration, failure_threshold, probing_ratio, AbandonedPolicy::default())
+    }
+
+    pub(crate) fn with_policy(
+        stage_duration: Duration,
+        failure_threshold: f32,
+        probing_ratio: f64,
+        abandoned_policy: AbandonedPolicy,
+    ) -> Self {
         assert!(probing_ratio > 0.0 && probing_ratio <= 1.0, "probing_ratio must be in (0.0, 1.0]");
         assert!((0.0..1.0).contains(&failure_threshold), "failure_threshold must be in [0.0, 1.0)");
         assert!(stage_duration > Duration::ZERO, "stage_duration must be greater than zero");
@@ -76,7 +101,7 @@ impl HealthProbeOptions {
         Self {
             // The min throughput is set to 0, so if no requests come in during the probing stage,
             // the health will be considered healthy by default.
-            builder: HealthMetricsBuilder::new(stage_duration, failure_threshold, MIN_THROUGHPUT),
+            builder: HealthMetricsBuilder::with_policy(stage_duration, failure_threshold, MIN_THROUGHPUT, abandoned_policy),
             probing_ratio,
         }
     }
@@ -191,7 +216,7 @@ mod tests {
 
     #[test]
     fn probes_options_progressive_ok() {
-        let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2);
+        let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 7);

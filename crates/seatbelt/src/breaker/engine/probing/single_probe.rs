@@ -50,8 +50,12 @@ impl ProbeOperation for SingleProbe {
     fn record(&mut self, result: ExecutionResult, _now: Instant) -> ProbingResult {
         match result {
             ExecutionResult::Success => ProbingResult::Success,
-            // An abandoned probe cannot confirm recovery and is treated as a failure.
-            ExecutionResult::Failure | ExecutionResult::Abandoned => ProbingResult::Failure,
+            ExecutionResult::Failure => ProbingResult::Failure,
+            // An abandoned probe is inconclusive: it can neither confirm recovery nor prove a
+            // failure, so the circuit stays half-open until a conclusive probe is observed. A fresh
+            // probe is allowed once the cool-down elapses (see `allow_probe`), which means a
+            // persistent stream of abandoned probes cannot pin the circuit permanently open.
+            ExecutionResult::Abandoned => ProbingResult::Pending,
         }
     }
 }
