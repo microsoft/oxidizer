@@ -103,7 +103,15 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
         let exit_result = self.inner.exit(result, mode);
 
-        // Emit telemetry events for circuit state changes
+        self.report_state_change(&exit_result);
+
+        exit_result
+    }
+}
+
+impl<T: CircuitEngine> EngineTelemetry<T> {
+    /// Emits telemetry events for circuit state changes produced by `exit`.
+    fn report_state_change(&self, exit_result: &ExitCircuitResult) {
         match exit_result {
             ExitCircuitResult::Opened(health) => {
                 #[cfg(any(feature = "metrics", test))]
@@ -128,12 +136,13 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.health.failure_rate = health.failure_rate(),
                         circuit_breaker.health.throughput = health.throughput(),
+                        circuit_breaker.health.abandoned = health.abandoned(),
                     );
                 }
 
                 _ = health;
             }
-            ExitCircuitResult::Closed(ref stats) => {
+            ExitCircuitResult::Closed(stats) => {
                 #[cfg(any(feature = "metrics", test))]
                 if self.telemetry.metrics_enabled() {
                     self.telemetry.report_metrics(&[
@@ -158,6 +167,7 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         circuit_breaker.probes.total = stats.probes_total,
                         circuit_breaker.probes.successful = stats.probes_successes,
                         circuit_breaker.probes.failed = stats.probes_failures,
+                        circuit_breaker.probes.abandoned = stats.probes_abandoned,
                         circuit_breaker.probes.lost = stats.probes_lost,
                         circuit_breaker.rejections = stats.rejected,
                         circuit_breaker.re_opened = stats.re_opened,
@@ -172,8 +182,6 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                 // event, or when there is no state change.
             }
         }
-
-        exit_result
     }
 }
 
@@ -267,7 +275,7 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(1, 0, 0.75, 100)),
+            ExitCircuitResult::Opened(HealthInfo::new(1, 0, 0, 0.75, 100)),
         ));
 
         let _ = telemetry_engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);

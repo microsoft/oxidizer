@@ -50,7 +50,8 @@ impl ProbeOperation for SingleProbe {
     fn record(&mut self, result: ExecutionResult, _now: Instant) -> ProbingResult {
         match result {
             ExecutionResult::Success => ProbingResult::Success,
-            ExecutionResult::Failure => ProbingResult::Failure,
+            // An abandoned probe cannot confirm recovery and is treated as a failure.
+            ExecutionResult::Failure | ExecutionResult::Abandoned => ProbingResult::Failure,
         }
     }
 }

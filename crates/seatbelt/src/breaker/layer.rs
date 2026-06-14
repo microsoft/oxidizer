@@ -218,12 +218,16 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// Sets the callback to be invoked when the circuit breaker opens.
     ///
     /// This `callback` is called whenever the circuit breaker transitions from
-    /// closed to open state due to exceeding the failure threshold. It receives
-    /// a reference to the output and [`OnOpenedArgs`] containing circuit breaker context.
+    /// closed to open state due to exceeding the failure threshold. It receives an
+    /// optional reference to the output and [`OnOpenedArgs`] containing circuit breaker context.
+    ///
+    /// The output is `None` when the circuit was opened by an *abandoned* execution — one that was
+    /// accepted by the circuit breaker but never completed (e.g. a dropped or cancelled future) and
+    /// therefore produced no output.
     ///
     /// **Default**: No callback
     #[must_use]
-    pub fn on_opened(mut self, callback: impl Fn(&Out, OnOpenedArgs) + Send + Sync + 'static) -> Self {
+    pub fn on_opened(mut self, callback: impl Fn(Option<&Out>, OnOpenedArgs) + Send + Sync + 'static) -> Self {
         self.on_opened = Some(OnOpened::new(callback));
         self
     }
