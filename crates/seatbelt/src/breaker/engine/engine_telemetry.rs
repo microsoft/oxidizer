@@ -193,7 +193,7 @@ mod tests {
     use opentelemetry::KeyValue;
 
     use super::*;
-    use crate::breaker::{EngineFake, HealthInfo, Stats};
+    use crate::breaker::{AbandonedPolicy, EngineFake, HealthInfo, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 
@@ -275,7 +275,7 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(1, 0, 0, 0.75, 100)),
+            ExitCircuitResult::Opened(HealthInfo::with_policy(1, 0, 0, 0.75, 100, &AbandonedPolicy::pathological())),
         ));
 
         let _ = telemetry_engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
