@@ -17,7 +17,10 @@ pub(crate) enum ProbeOptions {
     ///
     /// After the initial probe is allowed, it enters a cool-down period during which
     /// no further probes are allowed.
-    SingleProbe { cooldown: Duration },
+    SingleProbe {
+        cooldown: Duration,
+        abandoned_policy: AbandonedPolicy,
+    },
 
     /// A health-based probe that uses health metrics to determine the health of the system.
     HealthProbe(HealthProbeOptions),
@@ -30,8 +33,11 @@ pub(crate) struct ProbesOptions {
 }
 
 impl ProbesOptions {
-    pub(crate) fn quick(cooldown: Duration) -> Self {
-        Self::new([ProbeOptions::SingleProbe { cooldown }])
+    pub(crate) fn quick(cooldown: Duration, abandoned_policy: &AbandonedPolicy) -> Self {
+        Self::new([ProbeOptions::SingleProbe {
+            cooldown,
+            abandoned_policy: abandoned_policy.clone(),
+        }])
     }
 
     pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32, abandoned_policy: &AbandonedPolicy) -> Self {
@@ -50,7 +56,10 @@ impl ProbesOptions {
         abandoned_policy: &AbandonedPolicy,
     ) -> Self {
         // Start with a single probe
-        let initial = std::iter::once(ProbeOptions::SingleProbe { cooldown: stage_duration });
+        let initial = std::iter::once(ProbeOptions::SingleProbe {
+            cooldown: stage_duration,
+            abandoned_policy: abandoned_policy.clone(),
+        });
 
         // Then continue with health-based probes
         let health = probing_ratio.iter().map(|probing_ratio| {
@@ -119,13 +128,13 @@ mod tests {
     #[test]
     fn single_probe_constructor_creates_correct_options() {
         let cooldown = Duration::from_secs(15);
-        let options = ProbesOptions::quick(cooldown);
+        let options = ProbesOptions::quick(cooldown, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 1);
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown: c } if *c == Duration::from_secs(15)
+            ProbeOptions::SingleProbe { cooldown: c, .. } if *c == Duration::from_secs(15)
         ));
     }
 
@@ -134,25 +143,28 @@ mod tests {
         let options = ProbesOptions::new([
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(10),
+                abandoned_policy: AbandonedPolicy::default(),
             },
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(20),
+                abandoned_policy: AbandonedPolicy::default(),
             },
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(30),
+                abandoned_policy: AbandonedPolicy::default(),
             },
         ]);
 
         let probes: Vec<_> = options.probes().collect();
         assert_eq!(probes.len(), 3);
-        assert!(matches!(&probes[0], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(10)));
-        assert!(matches!(&probes[1], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(20)));
-        assert!(matches!(&probes[2], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30)));
+        assert!(matches!(&probes[0], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(10)));
+        assert!(matches!(&probes[1], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(20)));
+        assert!(matches!(&probes[2], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(30)));
     }
 
     #[test]
     fn clone_preserves_probe_count() {
-        let options = ProbesOptions::quick(Duration::from_secs(25));
+        let options = ProbesOptions::quick(Duration::from_secs(25), &AbandonedPolicy::default());
         let cloned = options.clone();
 
         assert_eq!(options.probes().count(), cloned.probes().count());
@@ -160,7 +172,7 @@ mod tests {
 
     #[test]
     fn probes_iterator_is_reusable() {
-        let options = ProbesOptions::quick(Duration::from_secs(30));
+        let options = ProbesOptions::quick(Duration::from_secs(30), &AbandonedPolicy::default());
 
         assert_eq!(options.probes().count(), 1);
         assert_eq!(options.probes().count(), 1);

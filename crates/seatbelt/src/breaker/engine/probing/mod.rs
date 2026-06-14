@@ -71,7 +71,9 @@ pub(crate) enum Probe {
 impl Probe {
     pub(crate) fn new(options: ProbeOptions) -> Self {
         match options {
-            ProbeOptions::SingleProbe { cooldown } => Self::Single(SingleProbe::new(cooldown)),
+            ProbeOptions::SingleProbe { cooldown, abandoned_policy } => {
+                Self::Single(SingleProbe::new(cooldown, abandoned_policy))
+            }
             ProbeOptions::HealthProbe(options) => Self::Health(HealthProbe::new(options)),
         }
     }

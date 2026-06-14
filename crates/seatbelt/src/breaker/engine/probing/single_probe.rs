@@ -4,20 +4,22 @@
 use std::time::{Duration, Instant};
 
 use super::{AllowProbeResult, ProbeOperation, ProbingResult};
-use crate::breaker::ExecutionResult;
+use crate::breaker::{AbandonedPolicy, ExecutionResult};
 
 /// Allows a single probe to get in and based on the result either closes the circuit
 /// or goes back to open state.
 #[derive(Debug, Clone)]
 pub(crate) struct SingleProbe {
     probe_cooldown: Duration,
+    abandoned_policy: AbandonedPolicy,
     entered_at: Option<Instant>,
 }
 
 impl SingleProbe {
-    pub(crate) fn new(probe_cooldown: Duration) -> Self {
+    pub(crate) fn new(probe_cooldown: Duration, abandoned_policy: AbandonedPolicy) -> Self {
         Self {
             probe_cooldown,
+            abandoned_policy,
             entered_at: None,
         }
     }
@@ -50,9 +52,20 @@ impl ProbeOperation for SingleProbe {
     fn record(&mut self, result: ExecutionResult, _now: Instant) -> ProbingResult {
         match result {
             ExecutionResult::Success => ProbingResult::Success,
-            // A failure or abandoned probe is treated as a failure: the circuit stays half-open
-            // until a conclusive probe is observed.
-            ExecutionResult::Failure | ExecutionResult::Abandoned => ProbingResult::Failure,
+            ExecutionResult::Failure => ProbingResult::Failure,
+            // An abandoned probe carries no signal about whether the service recovered. Only the
+            // `as_failures` policy treats it as a definitive failure that re-opens the circuit. Under
+            // any other policy it is inconclusive: stay half-open and allow another probe after the
+            // cool-down rather than re-opening. This prevents a high rate of abandoned executions
+            // (e.g. immediate hedging cancelling the in-flight probe) from pinning the circuit open
+            // and blocking recovery.
+            ExecutionResult::Abandoned => {
+                if self.abandoned_policy.counts_abandoned_as_failure() {
+                    ProbingResult::Failure
+                } else {
+                    ProbingResult::Pending
+                }
+            }
         }
     }
 }
@@ -64,7 +77,7 @@ mod tests {
 
     #[test]
     fn allow_probe_accepts_single_probe() {
-        let mut probe = SingleProbe::new(Duration::from_secs(5));
+        let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();
 
         // The first probe should be accepted
@@ -84,7 +97,7 @@ mod tests {
 
     #[test]
     fn allow_probe_check_bounds() {
-        let mut probe = SingleProbe::new(Duration::from_secs(5));
+        let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();
 
         // The first probe should be accepted
@@ -101,7 +114,7 @@ mod tests {
 
     #[test]
     fn record_ensure_correct_result() {
-        let mut probe = SingleProbe::new(Duration::from_secs(5));
+        let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::default());
         let now = Instant::now();
 
         // Record a success
@@ -109,5 +122,27 @@ mod tests {
 
         // Record a failure
         assert_eq!(probe.record(ExecutionResult::Failure, now), ProbingResult::Failure);
+    }
+
+    #[test]
+    fn record_abandoned_is_inconclusive_under_default_policy() {
+        // Default (`when_all_abandoned`) and `ignore` policies treat an abandoned probe as
+        // inconclusive: the circuit stays half-open (Pending) so a high rate of abandoned
+        // executions cannot pin the circuit open and block recovery.
+        for policy in [AbandonedPolicy::default(), AbandonedPolicy::ignore()] {
+            let mut probe = SingleProbe::new(Duration::from_secs(5), policy);
+            let now = Instant::now();
+
+            assert_eq!(probe.record(ExecutionResult::Abandoned, now), ProbingResult::Pending);
+        }
+    }
+
+    #[test]
+    fn record_abandoned_is_failure_under_as_failures_policy() {
+        // The `as_failures` policy treats an abandoned probe as a definitive failure.
+        let mut probe = SingleProbe::new(Duration::from_secs(5), AbandonedPolicy::as_failures());
+        let now = Instant::now();
+
+        assert_eq!(probe.record(ExecutionResult::Abandoned, now), ProbingResult::Failure);
     }
 }

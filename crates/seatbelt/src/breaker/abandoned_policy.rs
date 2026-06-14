@@ -63,6 +63,15 @@ impl AbandonedPolicy {
         Self { inner: Mode::AsFailures }
     }
 
+    /// Returns `true` if abandoned executions are unconditionally treated as failures.
+    ///
+    /// This is used by the single-probe recovery gate, which has no statistical sample to apply
+    /// the `when_all_abandoned` heuristic to: a lone abandoned probe is only conclusive evidence of
+    /// failure under the [`as_failures`][AbandonedPolicy::as_failures] policy.
+    pub(crate) fn counts_abandoned_as_failure(&self) -> bool {
+        matches!(self.inner, Mode::AsFailures)
+    }
+
     /// Computes the `(failures, total)` pair used for the health decision from the raw execution
     /// counts, according to this policy.
     ///
