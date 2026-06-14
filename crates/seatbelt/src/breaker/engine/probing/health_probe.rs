@@ -154,8 +154,8 @@ mod tests {
         );
         assert_eq!(probe.metrics.health_info().throughput(), 1);
 
-        // Once the sampling period elapses with only abandoned probes, the default pathological
-        // policy treats the sample as unhealthy, so the probe reports failure.
+        // Once the sampling period elapses with only abandoned probes, the default
+        // when-all-abandoned policy treats the sample as unhealthy, so the probe reports failure.
         assert_eq!(
             probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(10)),
             ProbingResult::Failure,

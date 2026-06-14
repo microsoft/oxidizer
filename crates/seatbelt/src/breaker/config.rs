@@ -24,7 +24,7 @@ use crate::breaker::{AbandonedPolicy, HalfOpenMode};
 /// | `sampling_duration` | 30 seconds |
 /// | `break_duration` | 5 seconds |
 /// | `half_open_mode` | `Progressive` (no custom stage duration) |
-/// | `abandoned_policy` | `Pathological` |
+/// | `abandoned_policy` | `WhenAllAbandoned` |
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]

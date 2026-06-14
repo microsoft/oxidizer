@@ -11,7 +11,7 @@
 /// Three policies are available:
 ///
 /// - [`AbandonedPolicy::ignore`]: abandoned executions never affect the decision.
-/// - [`AbandonedPolicy::pathological`]: abandoned executions only affect the decision in the
+/// - [`AbandonedPolicy::when_all_abandoned`]: abandoned executions only affect the decision in the
 ///   degenerate case where there were no conclusive results at all (the default).
 /// - [`AbandonedPolicy::as_failures`]: abandoned executions are always treated as failures.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -29,15 +29,15 @@ impl AbandonedPolicy {
     /// the circuit. Use this when cancellations are routine and should never be interpreted as a
     /// signal about the health of the underlying service.
     ///
-    /// > **Note**: with this policy the pathological case where *every* execution is abandoned can
+    /// > **Note**: with this policy the degenerate case where *every* execution is abandoned can
     /// > never open the circuit, because no conclusive result is ever observed.
     #[must_use]
     pub fn ignore() -> Self {
         Self { inner: Mode::Ignore }
     }
 
-    /// **Default.** Abandoned executions only influence the decision in the pathological case where
-    /// there were no successes and no failures — that is, every execution was abandoned.
+    /// **Default.** Abandoned executions only influence the decision when there were no successes and
+    /// no failures — that is, every execution was abandoned.
     ///
     /// In that degenerate case the abandoned executions are treated as failures so the circuit can
     /// still react; otherwise it would never observe any result and could never open. As soon as
@@ -46,8 +46,10 @@ impl AbandonedPolicy {
     /// abandoned executions from either masking a genuine failure burst or manufacturing a false
     /// failure rate, while still guarding against the "everything is abandoned" deadlock.
     #[must_use]
-    pub fn pathological() -> Self {
-        Self { inner: Mode::Pathological }
+    pub fn when_all_abandoned() -> Self {
+        Self {
+            inner: Mode::WhenAllAbandoned,
+        }
     }
 
     /// Abandoned executions are always treated as failures.
@@ -70,7 +72,7 @@ impl AbandonedPolicy {
     pub(crate) fn decision(&self, successes: u32, failures: u32, abandoned: u32) -> (u32, u32) {
         match self.inner {
             Mode::Ignore => (failures, successes.saturating_add(failures)),
-            Mode::Pathological => {
+            Mode::WhenAllAbandoned => {
                 if successes == 0 && failures == 0 {
                     (abandoned, abandoned)
                 } else {
@@ -89,7 +91,7 @@ impl AbandonedPolicy {
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 enum Mode {
     #[default]
-    Pathological,
+    WhenAllAbandoned,
     Ignore,
     AsFailures,
 }
@@ -108,8 +110,8 @@ mod tests {
     }
 
     #[test]
-    fn pathological_considers_abandoned_only_when_all_abandoned() {
-        let policy = AbandonedPolicy::pathological();
+    fn when_all_abandoned_considers_abandoned_only_when_all_abandoned() {
+        let policy = AbandonedPolicy::when_all_abandoned();
         assert_eq!(policy.decision(0, 0, 10), (10, 10));
         assert_eq!(policy.decision(1, 0, 10), (0, 1));
         assert_eq!(policy.decision(0, 2, 10), (2, 2));
@@ -123,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn default_is_pathological() {
-        assert_eq!(AbandonedPolicy::default(), AbandonedPolicy::pathological());
+    fn default_is_when_all_abandoned() {
+        assert_eq!(AbandonedPolicy::default(), AbandonedPolicy::when_all_abandoned());
     }
 }

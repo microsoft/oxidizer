@@ -11,5 +11,5 @@ expression: config
   "half_open_mode": {
     "Progressive": "45s"
   },
-  "abandoned_policy": "Pathological"
+  "abandoned_policy": "WhenAllAbandoned"
 }
