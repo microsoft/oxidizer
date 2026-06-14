@@ -50,10 +50,10 @@ impl ExecutionInfo {
         }
     }
 
-    fn merge(&mut self, other: Self) {
-        self.succeeded = self.succeeded.saturating_add(other.succeeded);
-        self.failed = self.failed.saturating_add(other.failed);
-        self.abandoned = self.abandoned.saturating_add(other.abandoned);
+    fn subtract(&mut self, other: Self) {
+        self.succeeded = self.succeeded.saturating_sub(other.succeeded);
+        self.failed = self.failed.saturating_sub(other.failed);
+        self.abandoned = self.abandoned.saturating_sub(other.abandoned);
     }
 }
 
@@ -103,6 +103,10 @@ pub(crate) struct HealthMetrics {
     sampling_duration: Duration,
     window_duration: Duration,
     windows: VecDeque<Window>,
+    /// Running aggregate of [`Self::windows`] counts, kept in sync as windows are added to and
+    /// evicted from the sliding window, so [`Self::health_info`] does not re-sum every window on
+    /// each invocation.
+    counts: ExecutionInfo,
     evaluator: HealthEvaluator,
 }
 
@@ -112,23 +116,26 @@ impl HealthMetrics {
             sampling_duration,
             window_duration: sampling_duration / WINDOW_COUNT,
             windows: VecDeque::with_capacity(WINDOW_COUNT as usize),
+            counts: ExecutionInfo::default(),
             evaluator,
         }
     }
 
     pub(crate) fn record(&mut self, result: ExecutionResult, now: Instant) {
         self.current_window(now).update(result);
+        self.counts.record(result);
     }
 
     /// Returns a mutable reference to the current window, evicting expired windows and creating a
     /// new window when the most recent one is older than the per-window duration.
     fn current_window(&mut self, now: Instant) -> &mut Window {
-        // Remove old windows
-        while self
+        // Remove old windows, keeping the running aggregate in sync.
+        while let Some(expired) = self
             .windows
             .pop_front_if(|front| now.duration_since(front.started_at) > self.sampling_duration)
-            .is_some()
-        {}
+        {
+            self.counts.subtract(expired.counts);
+        }
 
         let needs_new_window = self
             .windows
@@ -143,12 +150,7 @@ impl HealthMetrics {
     }
 
     pub(crate) fn health_info(&self) -> HealthInfo {
-        let mut counts = ExecutionInfo::default();
-        for w in &self.windows {
-            counts.merge(w.counts);
-        }
-
-        self.evaluator.evaluate(counts)
+        self.evaluator.evaluate(self.counts)
     }
 }
 
