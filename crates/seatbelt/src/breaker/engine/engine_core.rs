@@ -115,7 +115,8 @@ impl State {
                 ExitCircuitResult::Unchanged
             }
             Self::HalfOpen { probes, stats } => {
-                // record the result of the probe
+                // Record the result of the probe (abandoned probes are tracked separately). How an
+                // abandoned probe affects the recovery decision is handled inside the probe itself.
                 stats.record_probe_execution_result(result);
 
                 match probes.record(result, now) {
@@ -153,6 +154,7 @@ pub(crate) struct Stats {
     pub probes_lost: usize,
     pub probes_successes: usize,
     pub probes_failures: usize,
+    pub probes_abandoned: usize,
     pub rejected: usize,
 }
 
@@ -164,6 +166,7 @@ impl Stats {
             probes_lost: 0,
             probes_successes: 0,
             probes_failures: 0,
+            probes_abandoned: 0,
             rejected: 0,
             re_opened: 0,
         }
@@ -188,6 +191,10 @@ impl Stats {
             }
             ExecutionResult::Failure => {
                 self.probes_failures = self.probes_failures.saturating_add(1);
+            }
+            // An abandoned probe is tracked separately but treated as a failure for the probe decision (see `exit`).
+            ExecutionResult::Abandoned => {
+                self.probes_abandoned = self.probes_abandoned.saturating_add(1);
             }
         }
     }
@@ -443,6 +450,84 @@ mod tests {
         let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
 
         assert!(matches!(result, ExitCircuitResult::Reopened));
+    }
+
+    #[test]
+    fn exit_when_half_open_with_abandoned_reopens_circuit() {
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open then half-open
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open
+
+        // An abandoned probe cannot confirm recovery and is treated as a failure.
+        let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe);
+
+        assert!(matches!(result, ExitCircuitResult::Reopened));
+
+        if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes_abandoned, 1);
+            assert_eq!(stats.probes_failures, 0);
+        } else {
+            panic!("expected engine to be in Open state");
+        }
+    }
+
+    #[test]
+    fn exit_when_closed_with_abandoned_opens_only_without_successes() {
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3),
+            probes: ProbesOptions::quick(Duration::from_secs(2)),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // The first two abandoned executions are below the minimum throughput.
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Unchanged
+        ));
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Unchanged
+        ));
+
+        // The third abandoned execution (still no successes) opens the circuit.
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Opened(_)
+        ));
+    }
+
+    #[test]
+    fn exit_when_closed_with_abandoned_ignored_when_successes_present() {
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3),
+            probes: ProbesOptions::quick(Duration::from_secs(2)),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // A single success means abandoned executions are ignored from then on.
+        engine.enter();
+        engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+
+        for _ in 0..10 {
+            engine.enter();
+            assert!(matches!(
+                engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+                ExitCircuitResult::Unchanged
+            ));
+        }
     }
 
     #[test]

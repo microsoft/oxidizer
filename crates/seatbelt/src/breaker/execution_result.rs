@@ -6,11 +6,16 @@ use crate::RecoveryInfo;
 /// An evaluated execution result.
 ///
 /// From the perspective of a circuit breaker, an execution can either
-/// succeed or fail. This enum captures that binary outcome.
+/// succeed or fail. This enum captures that binary outcome, plus the
+/// [`Abandoned`](Self::Abandoned) case for executions that were accepted
+/// by the circuit breaker but never completed (e.g. a dropped future).
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) enum ExecutionResult {
     Success,
     Failure,
+
+    /// The execution was accepted but never completed (e.g. its future was dropped or cancelled).
+    Abandoned,
 }
 
 #[cfg(any(feature = "logs", feature = "metrics", test))]
@@ -19,6 +24,7 @@ impl ExecutionResult {
         match self {
             Self::Success => "success",
             Self::Failure => "failure",
+            Self::Abandoned => "abandoned",
         }
     }
 }
@@ -52,5 +58,6 @@ mod tests {
     fn test_execution_result_as_str() {
         assert_eq!(ExecutionResult::Success.as_str(), "success");
         assert_eq!(ExecutionResult::Failure.as_str(), "failure");
+        assert_eq!(ExecutionResult::Abandoned.as_str(), "abandoned");
     }
 }

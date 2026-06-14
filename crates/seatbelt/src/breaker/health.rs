@@ -21,27 +21,41 @@ pub(crate) enum HealthStatus {
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct HealthInfo {
     throughput: u32,
+    abandoned: u32,
     failure_rate: f32,
     health_status: HealthStatus,
 }
 
 impl HealthInfo {
-    pub(crate) fn new(successes: u32, failures: u32, failure_threshold: f32, min_throughput: u32) -> Self {
-        let throughput = successes.saturating_add(failures);
+    pub(crate) fn new(successes: u32, failures: u32, abandoned: u32, failure_threshold: f32, min_throughput: u32) -> Self {
+        // Abandoned executions (entered but never exited, e.g. a dropped/cancelled future) are
+        // always counted towards throughput, but only contribute to the failure rate when there
+        // were no successful executions during the sampling period. This handles the pathological
+        // case where every execution is abandoned: without this, the circuit would never observe
+        // any result and could never open.
+        let throughput = successes.saturating_add(failures).saturating_add(abandoned);
 
         if throughput == 0 {
             return Self {
                 throughput: 0,
+                abandoned: 0,
                 failure_rate: 0.0,
                 health_status: HealthStatus::Healthy,
             };
         }
+
+        let failures = if successes == 0 {
+            failures.saturating_add(abandoned)
+        } else {
+            failures
+        };
 
         #[expect(clippy::cast_possible_truncation, reason = "Acceptable")]
         let failure_rate = (f64::from(failures) / f64::from(throughput)) as f32;
 
         Self {
             throughput,
+            abandoned,
             failure_rate,
             health_status: if failure_rate >= failure_threshold && throughput >= min_throughput {
                 HealthStatus::Unhealthy
@@ -49,6 +63,14 @@ impl HealthInfo {
                 HealthStatus::Healthy
             },
         }
+    }
+
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        expect(dead_code, reason = "trying to avoid dead code here leads to too much conditionals")
+    )]
+    pub(crate) fn abandoned(&self) -> u32 {
+        self.abandoned
     }
 
     #[cfg_attr(
@@ -116,6 +138,12 @@ impl HealthMetrics {
     }
 
     pub(crate) fn record(&mut self, result: ExecutionResult, now: Instant) {
+        self.current_window(now).update(result);
+    }
+
+    /// Returns a mutable reference to the current window, evicting expired windows and creating a
+    /// new window when the most recent one is older than the per-window duration.
+    fn current_window(&mut self, now: Instant) -> &mut Window {
         // Remove old windows
         while self
             .windows
@@ -123,30 +151,30 @@ impl HealthMetrics {
             .is_some()
         {}
 
-        // Get or create the current window
-        if let Some(back) = self.windows.back_mut()
-            && now.duration_since(back.started_at) < self.window_duration
-        {
-            // Update the existing window
-            back.update(result);
-        } else {
-            // Create a new window
-            let mut new_window = Window::new(now);
-            new_window.update(result);
-            self.windows.push_back(new_window);
+        let needs_new_window = self
+            .windows
+            .back()
+            .is_none_or(|back| now.duration_since(back.started_at) >= self.window_duration);
+
+        if needs_new_window {
+            self.windows.push_back(Window::new(now));
         }
+
+        self.windows.back_mut().expect("a current window was just ensured to exist above")
     }
 
     pub(crate) fn health_info(&self) -> HealthInfo {
         let mut successes = 0_u32;
         let mut failures = 0_u32;
+        let mut abandoned = 0_u32;
 
         for w in &self.windows {
             successes = successes.saturating_add(w.successes);
             failures = failures.saturating_add(w.failures);
+            abandoned = abandoned.saturating_add(w.abandoned);
         }
 
-        HealthInfo::new(successes, failures, self.failure_threshold, self.min_throughput)
+        HealthInfo::new(successes, failures, abandoned, self.failure_threshold, self.min_throughput)
     }
 }
 
@@ -154,6 +182,7 @@ impl HealthMetrics {
 struct Window {
     successes: u32,
     failures: u32,
+    abandoned: u32,
     started_at: Instant,
 }
 
@@ -162,6 +191,7 @@ impl Window {
         Self {
             successes: 0,
             failures: 0,
+            abandoned: 0,
             started_at,
         }
     }
@@ -170,6 +200,7 @@ impl Window {
         match result {
             ExecutionResult::Success => self.successes = self.successes.saturating_add(1),
             ExecutionResult::Failure => self.failures = self.failures.saturating_add(1),
+            ExecutionResult::Abandoned => self.abandoned = self.abandoned.saturating_add(1),
         }
     }
 }
@@ -232,6 +263,31 @@ mod tests {
     }
 
     #[test]
+    fn record_abandoned_opens_only_when_no_successes() {
+        let start = Instant::now();
+
+        // No successes recorded: abandoned executions are considered and can make the circuit unhealthy.
+        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
+        metrics.record(ExecutionResult::Abandoned, start);
+        metrics.record(ExecutionResult::Abandoned, start);
+        let info = metrics.health_info();
+        assert_eq!(info.throughput(), 2);
+        assert_eq!(info.failure_rate(), 1.0);
+        assert_eq!(info.status(), HealthStatus::Unhealthy);
+
+        // With at least one success, abandoned executions are ignored.
+        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
+        metrics.record(ExecutionResult::Success, start);
+        metrics.record(ExecutionResult::Abandoned, start);
+        metrics.record(ExecutionResult::Abandoned, start);
+        let info = metrics.health_info();
+        assert_eq!(info.throughput(), 3);
+        assert_eq!(info.abandoned(), 2);
+        assert_eq!(info.failure_rate(), 0.0);
+        assert_eq!(info.status(), HealthStatus::Healthy);
+    }
+
+    #[test]
     fn record_ensure_old_window_discarded() {
         let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
         let start = Instant::now();
@@ -285,7 +341,7 @@ mod tests {
 
         #[test]
         fn zero_throughput_is_healthy() {
-            let info = HealthInfo::new(0, 0, 0.5, 10);
+            let info = HealthInfo::new(0, 0, 0, 0.5, 10);
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (0, 0.0, HealthStatus::Healthy)
@@ -294,7 +350,7 @@ mod tests {
 
         #[test]
         fn only_successes_is_healthy() {
-            let info = HealthInfo::new(10, 0, 0.5, 5);
+            let info = HealthInfo::new(10, 0, 0, 0.5, 5);
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (10, 0.0, HealthStatus::Healthy)
@@ -303,7 +359,7 @@ mod tests {
 
         #[test]
         fn only_failures_above_threshold_is_unhealthy() {
-            let info = HealthInfo::new(0, 10, 0.5, 5);
+            let info = HealthInfo::new(0, 10, 0, 0.5, 5);
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (10, 1.0, HealthStatus::Unhealthy)
@@ -313,34 +369,65 @@ mod tests {
         #[test]
         fn failure_threshold_boundaries() {
             // At threshold
-            let info = HealthInfo::new(5, 5, 0.5, 5);
+            let info = HealthInfo::new(5, 5, 0, 0.5, 5);
             assert_eq!(info.status(), HealthStatus::Unhealthy);
 
             // Below threshold
-            let info = HealthInfo::new(6, 4, 0.5, 5);
+            let info = HealthInfo::new(6, 4, 0, 0.5, 5);
             assert_eq!(info.status(), HealthStatus::Healthy);
         }
 
         #[test]
         fn min_throughput_boundaries() {
             // Below min throughput - healthy despite high failure rate
-            let info = HealthInfo::new(0, 3, 0.5, 5);
+            let info = HealthInfo::new(0, 3, 0, 0.5, 5);
             assert_eq!(info.status(), HealthStatus::Healthy);
 
             // At min throughput - unhealthy with high failure rate
-            let info = HealthInfo::new(1, 4, 0.5, 5);
+            let info = HealthInfo::new(1, 4, 0, 0.5, 5);
             assert_eq!(info.status(), HealthStatus::Unhealthy);
         }
 
         #[test]
         fn edge_cases() {
             // Saturating add
-            let info = HealthInfo::new(u32::MAX, 1, 0.5, 5);
+            let info = HealthInfo::new(u32::MAX, 1, 0, 0.5, 5);
             assert_eq!(info.throughput(), u32::MAX);
 
             // Zero threshold
-            let info = HealthInfo::new(1, 1, 0.0, 0);
+            let info = HealthInfo::new(1, 1, 0, 0.0, 0);
             assert_eq!(info.status(), HealthStatus::Unhealthy);
+        }
+
+        #[test]
+        fn abandoned_considered_when_no_successes() {
+            // No successes: abandoned executions count as failures and can open the circuit.
+            let info = HealthInfo::new(0, 0, 5, 0.5, 5);
+            assert_eq!(
+                (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
+                (5, 5, 1.0, HealthStatus::Unhealthy)
+            );
+        }
+
+        #[test]
+        fn abandoned_ignored_when_there_are_successes() {
+            // At least one success: abandoned executions are tracked and counted towards throughput,
+            // but do not contribute to the failure rate.
+            let info = HealthInfo::new(10, 0, 100, 0.5, 5);
+            assert_eq!(
+                (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
+                (110, 100, 0.0, HealthStatus::Healthy)
+            );
+        }
+
+        #[test]
+        fn abandoned_combined_with_failures_when_no_successes() {
+            // No successes: abandoned are added on top of failures.
+            let info = HealthInfo::new(0, 2, 3, 0.5, 5);
+            assert_eq!(
+                (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
+                (5, 3, 1.0, HealthStatus::Unhealthy)
+            );
         }
     }
 }

@@ -127,8 +127,8 @@ async fn execute_end_to_end_with_callbacks(#[case] use_tower: bool) {
                 assert_eq!(input, "probe_input");
                 probing_called.store(true, Ordering::SeqCst);
             })
-            .on_opened(move |output: &Result<String, String>, _| {
-                assert_eq!(output.as_ref().unwrap(), "error_output");
+            .on_opened(move |output: Option<&Result<String, String>>, _| {
+                assert_eq!(output.unwrap().as_ref().unwrap(), "error_output");
                 opened_called.store(true, Ordering::SeqCst);
             })
             .on_closed(move |output: &Result<String, String>, args: OnClosedArgs| {
@@ -171,6 +171,112 @@ async fn execute_end_to_end_with_callbacks(#[case] use_tower: bool) {
     // normal execution should pass through
     let result = execute_service(&mut service, "success_input".to_string(), use_tower).await;
     assert_eq!(result, Ok("success_output".to_string()));
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn abandoned_executions_open_circuit(#[case] use_tower: bool) {
+    use futures::FutureExt;
+
+    let opened_called = Arc::new(AtomicBool::new(false));
+    let opened_output_was_none = Arc::new(AtomicBool::new(false));
+    let opened_called_clone = Arc::clone(&opened_called);
+    let opened_output_was_none_clone = Arc::clone(&opened_output_was_none);
+
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
+
+    let stack = (
+        Breaker::layer("test_breaker", &context)
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::never())
+            .rejected_input(|_: String, _| Ok("circuit is open".to_string()))
+            .min_throughput(3)
+            .on_opened(move |output: Option<&Result<String, String>>, _| {
+                opened_called.store(true, Ordering::SeqCst);
+                // An abandoned execution produces no output.
+                opened_output_was_none.store(output.is_none(), Ordering::SeqCst);
+            }),
+        // The inner service never completes, so every execution is abandoned when its future is dropped.
+        Execute::new(|_: String| async move { std::future::pending::<Result<String, String>>().await }),
+    );
+
+    let mut service = stack.into_service();
+
+    // Abandon several executions by polling each future once (so the circuit breaker accepts it) and
+    // then dropping it while the inner service is still pending.
+    for _ in 0..3 {
+        if use_tower {
+            poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
+            let future = TowerService::call(&mut service, "input".to_string());
+            assert!(future.now_or_never().is_none(), "execution should not complete");
+        } else {
+            let future = service.execute("input".to_string());
+            assert!(future.now_or_never().is_none(), "execution should not complete");
+        }
+    }
+
+    // With no successful executions, the abandoned ones are considered and open the circuit.
+    assert!(opened_called_clone.load(Ordering::SeqCst));
+    assert!(opened_output_was_none_clone.load(Ordering::SeqCst));
+
+    // Subsequent executions are rejected because the circuit is now open.
+    let result = execute_service(&mut service, "input".to_string(), use_tower).await;
+    assert_eq!(result, Ok("circuit is open".to_string()));
+}
+
+#[rstest]
+#[case::layered(false)]
+#[case::tower(true)]
+#[tokio::test]
+async fn abandoned_executions_ignored_when_successes_present(#[case] use_tower: bool) {
+    use futures::FutureExt;
+
+    let opened_called = Arc::new(AtomicBool::new(false));
+    let opened_called_clone = Arc::clone(&opened_called);
+
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
+
+    let stack = (
+        Breaker::layer("test_breaker", &context)
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::never())
+            .rejected_input(|_: String, _| Ok("circuit is open".to_string()))
+            .min_throughput(3)
+            .on_opened(move |_, _| opened_called.store(true, Ordering::SeqCst)),
+        Execute::new(|input: String| async move {
+            if input == "complete" {
+                Ok::<_, String>("ok".to_string())
+            } else {
+                std::future::pending::<Result<String, String>>().await
+            }
+        }),
+    );
+
+    let mut service = stack.into_service();
+
+    // Record a successful execution so abandoned executions are subsequently ignored.
+    let result = execute_service(&mut service, "complete".to_string(), use_tower).await;
+    assert_eq!(result, Ok("ok".to_string()));
+
+    // Abandon many executions; because a success was recorded, they must not open the circuit.
+    for _ in 0..10 {
+        if use_tower {
+            poll_fn(|cx| service.poll_ready(cx)).await.unwrap();
+            let future = TowerService::call(&mut service, "abandon".to_string());
+            assert!(future.now_or_never().is_none());
+        } else {
+            let future = service.execute("abandon".to_string());
+            assert!(future.now_or_never().is_none());
+        }
+    }
+
+    assert!(!opened_called_clone.load(Ordering::SeqCst));
+
+    // The circuit is still closed, so a completing execution passes through.
+    let result = execute_service(&mut service, "complete".to_string(), use_tower).await;
+    assert_eq!(result, Ok("ok".to_string()));
 }
 
 #[rstest]

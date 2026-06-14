@@ -96,7 +96,9 @@ where
             ControlFlow::Break(output) => return output,
         };
 
+        let mut guard = AbandonedGuard::new(self.shared.as_ref(), engine.as_ref(), &breaker_id, mode);
         let output = self.inner.execute(input).await;
+        guard.disarm();
 
         self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
 
@@ -169,7 +171,10 @@ where
 
         BreakerFuture {
             inner: Box::pin(async move {
+                let mut guard = AbandonedGuard::new(shared.as_ref(), engine.as_ref(), &breaker_id, mode);
                 let output = future.await;
+                guard.disarm();
+
                 shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
                 output
             }),
@@ -210,7 +215,7 @@ impl<In, Out> BreakerShared<In, Out> {
         match engine.exit(execution_result, mode) {
             ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {}
             ExitCircuitResult::Opened(_health) => {
-                self.invoke_on_opened(output, breaker_id);
+                self.invoke_on_opened(Some(output), breaker_id);
             }
             ExitCircuitResult::Closed(stats) => {
                 self.invoke_on_closed(output, breaker_id, stats.opened_duration(self.clock.instant()));
@@ -224,7 +229,7 @@ impl<In, Out> BreakerShared<In, Out> {
         }
     }
 
-    fn invoke_on_opened(&self, output: &Out, breaker_id: &BreakerId) {
+    fn invoke_on_opened(&self, output: Option<&Out>, breaker_id: &BreakerId) {
         if let Some(on_opened) = &self.on_opened {
             on_opened.call(output, OnOpenedArgs { breaker_id });
         }
@@ -233,6 +238,54 @@ impl<In, Out> BreakerShared<In, Out> {
     fn invoke_on_closed(&self, output: &Out, breaker_id: &BreakerId, open_duration: std::time::Duration) {
         if let Some(on_closed) = &self.on_closed {
             on_closed.call(output, OnClosedArgs { breaker_id, open_duration });
+        }
+    }
+}
+
+/// RAII guard that records an *abandoned* execution if it is dropped before completing.
+///
+/// An execution is abandoned when it is accepted by the circuit breaker (via [`CircuitEngine::enter`])
+/// but its future is dropped before the explicit [`CircuitEngine::exit`] is reached — for example when
+/// the caller cancels the future. Without this guard such executions would never affect the circuit
+/// breaker state, which can lead to pathological cases where every execution is abandoned yet the
+/// circuit never opens.
+///
+/// On the normal completion path the guard is [disarmed](Self::disarm) and the explicit `exit` path
+/// takes over. If the guard is still armed when dropped, it records the abandonment with the engine
+/// and, when that opens the circuit, invokes the `on_opened` callback with no output.
+struct AbandonedGuard<'a, In, Out, E: CircuitEngine + ?Sized> {
+    shared: &'a BreakerShared<In, Out>,
+    engine: &'a E,
+    breaker_id: &'a BreakerId,
+    mode: ExecutionMode,
+    armed: bool,
+}
+
+impl<'a, In, Out, E: CircuitEngine + ?Sized> AbandonedGuard<'a, In, Out, E> {
+    fn new(shared: &'a BreakerShared<In, Out>, engine: &'a E, breaker_id: &'a BreakerId, mode: ExecutionMode) -> Self {
+        Self {
+            shared,
+            engine,
+            breaker_id,
+            mode,
+            armed: true,
+        }
+    }
+
+    /// Disarms the guard once the execution has completed normally.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl<In, Out, E: CircuitEngine + ?Sized> Drop for AbandonedGuard<'_, In, Out, E> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        if let ExitCircuitResult::Opened(_health) = self.engine.exit(ExecutionResult::Abandoned, self.mode) {
+            self.shared.invoke_on_opened(None, self.breaker_id);
         }
     }
 }
@@ -383,7 +436,7 @@ mod tests {
 
         let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(move |output, _| {
-                assert_eq!(output, "error_response");
+                assert_eq!(output, Some(&"error_response".to_string()));
                 opened_called.store(true, Ordering::SeqCst);
             })
             .on_closed(|_, _| panic!("on_closed should not be called"))
@@ -393,7 +446,7 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(1, 1, 1.0, 1)),
+            ExitCircuitResult::Opened(HealthInfo::new(1, 1, 0, 1.0, 1)),
         );
 
         service
