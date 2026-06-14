@@ -54,7 +54,7 @@ impl ProbesOptions {
 
         // Then continue with health-based probes
         let health = probing_ratio.iter().map(|probing_ratio| {
-            ProbeOptions::HealthProbe(HealthProbeOptions::with_policy(
+            ProbeOptions::HealthProbe(HealthProbeOptions::new(
                 stage_duration,
                 failure_threshold,
                 *probing_ratio,
@@ -83,17 +83,7 @@ pub(crate) struct HealthProbeOptions {
 }
 
 impl HealthProbeOptions {
-    #[cfg(test)]
-    pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
-        Self::with_policy(stage_duration, failure_threshold, probing_ratio, AbandonedPolicy::default())
-    }
-
-    pub(crate) fn with_policy(
-        stage_duration: Duration,
-        failure_threshold: f32,
-        probing_ratio: f64,
-        abandoned_policy: AbandonedPolicy,
-    ) -> Self {
+    pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64, abandoned_policy: AbandonedPolicy) -> Self {
         assert!(probing_ratio > 0.0 && probing_ratio <= 1.0, "probing_ratio must be in (0.0, 1.0]");
         assert!((0.0..1.0).contains(&failure_threshold), "failure_threshold must be in [0.0, 1.0)");
         assert!(stage_duration > Duration::ZERO, "stage_duration must be greater than zero");
@@ -188,7 +178,7 @@ mod tests {
         let failure_threshold = 0.2;
         let probing_ratio = 0.1;
 
-        let options = HealthProbeOptions::new(sampling_duration, failure_threshold, probing_ratio);
+        let options = HealthProbeOptions::new(sampling_duration, failure_threshold, probing_ratio, AbandonedPolicy::default());
 
         assert_eq!(options.stage_duration(), sampling_duration);
         assert_eq!(options.probing_ratio, probing_ratio);
@@ -199,19 +189,19 @@ mod tests {
     #[should_panic(expected = "stage_duration must be greater than zero")]
     #[test]
     fn health_probe_options_ctor_sampling_duration() {
-        let _ = HealthProbeOptions::new(Duration::ZERO, 0.1, 0.5);
+        let _ = HealthProbeOptions::new(Duration::ZERO, 0.1, 0.5, AbandonedPolicy::default());
     }
 
     #[should_panic(expected = "failure_threshold must be in [0.0, 1.0)")]
     #[test]
     fn health_probe_options_ctor_failure_threshold() {
-        let _ = HealthProbeOptions::new(Duration::from_secs(10), 1.0, 0.5);
+        let _ = HealthProbeOptions::new(Duration::from_secs(10), 1.0, 0.5, AbandonedPolicy::default());
     }
 
     #[should_panic(expected = "probing_ratio must be in (0.0, 1.0]")]
     #[test]
     fn health_probe_options_ctor_probing_ratio() {
-        let _ = HealthProbeOptions::new(Duration::from_secs(10), 0.1, 0.0);
+        let _ = HealthProbeOptions::new(Duration::from_secs(10), 0.1, 0.0, AbandonedPolicy::default());
     }
 
     #[test]

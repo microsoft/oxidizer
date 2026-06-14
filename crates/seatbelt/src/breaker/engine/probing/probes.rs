@@ -56,6 +56,7 @@ mod tests {
     use tick::Clock;
 
     use super::*;
+    use crate::breaker::AbandonedPolicy;
     use crate::breaker::engine::probing::HealthProbeOptions;
 
     #[test]
@@ -85,7 +86,12 @@ mod tests {
     fn record_returns_pending_when_probe_returns_pending() {
         let now = Clock::new_frozen().instant();
 
-        let options = ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0))]);
+        let options = ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
+            Duration::from_secs(5),
+            0.2,
+            1.0,
+            AbandonedPolicy::default(),
+        ))]);
         let mut probes = Probes::new(&options);
 
         // Initialize sampling period
