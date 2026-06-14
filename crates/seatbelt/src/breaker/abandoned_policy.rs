@@ -14,7 +14,7 @@
 /// - [`AbandonedPolicy::pathological`]: abandoned executions only affect the decision in the
 ///   degenerate case where there were no conclusive results at all (the default).
 /// - [`AbandonedPolicy::as_failures`]: abandoned executions are always treated as failures.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
 pub struct AbandonedPolicy {
@@ -47,9 +47,7 @@ impl AbandonedPolicy {
     /// failure rate, while still guarding against the "everything is abandoned" deadlock.
     #[must_use]
     pub fn pathological() -> Self {
-        Self {
-            inner: Mode::Pathological,
-        }
+        Self { inner: Mode::Pathological }
     }
 
     /// Abandoned executions are always treated as failures.
@@ -60,9 +58,7 @@ impl AbandonedPolicy {
     /// caused by the downstream service being too slow).
     #[must_use]
     pub fn as_failures() -> Self {
-        Self {
-            inner: Mode::AsFailures,
-        }
+        Self { inner: Mode::AsFailures }
     }
 
     /// Computes the `(failures, total)` pair used for the health decision from the raw execution
@@ -89,19 +85,12 @@ impl AbandonedPolicy {
     }
 }
 
-impl Default for AbandonedPolicy {
-    /// Returns [`AbandonedPolicy::pathological`], matching the default used by
-    /// [`BreakerLayer`](crate::breaker::BreakerLayer).
-    fn default() -> Self {
-        Self::pathological()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 enum Mode {
-    Ignore,
+    #[default]
     Pathological,
+    Ignore,
     AsFailures,
 }
 

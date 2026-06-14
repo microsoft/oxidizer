@@ -27,18 +27,6 @@ pub(crate) struct HealthInfo {
 }
 
 impl HealthInfo {
-    #[cfg(test)]
-    pub(crate) fn new(successes: u32, failures: u32, abandoned: u32, failure_threshold: f32, min_throughput: u32) -> Self {
-        Self::with_policy(
-            successes,
-            failures,
-            abandoned,
-            failure_threshold,
-            min_throughput,
-            &AbandonedPolicy::pathological(),
-        )
-    }
-
     pub(crate) fn with_policy(
         successes: u32,
         failures: u32,
@@ -377,7 +365,7 @@ mod tests {
 
         #[test]
         fn zero_throughput_is_healthy() {
-            let info = HealthInfo::new(0, 0, 0, 0.5, 10);
+            let info = HealthInfo::with_policy(0, 0, 0, 0.5, 10, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (0, 0.0, HealthStatus::Healthy)
@@ -386,7 +374,7 @@ mod tests {
 
         #[test]
         fn only_successes_is_healthy() {
-            let info = HealthInfo::new(10, 0, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(10, 0, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (10, 0.0, HealthStatus::Healthy)
@@ -395,7 +383,7 @@ mod tests {
 
         #[test]
         fn only_failures_above_threshold_is_unhealthy() {
-            let info = HealthInfo::new(0, 10, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(0, 10, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.failure_rate(), info.status()),
                 (10, 1.0, HealthStatus::Unhealthy)
@@ -405,33 +393,33 @@ mod tests {
         #[test]
         fn failure_threshold_boundaries() {
             // At threshold
-            let info = HealthInfo::new(5, 5, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(5, 5, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(info.status(), HealthStatus::Unhealthy);
 
             // Below threshold
-            let info = HealthInfo::new(6, 4, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(6, 4, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(info.status(), HealthStatus::Healthy);
         }
 
         #[test]
         fn min_throughput_boundaries() {
             // Below min throughput - healthy despite high failure rate
-            let info = HealthInfo::new(0, 3, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(0, 3, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(info.status(), HealthStatus::Healthy);
 
             // At min throughput - unhealthy with high failure rate
-            let info = HealthInfo::new(1, 4, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(1, 4, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(info.status(), HealthStatus::Unhealthy);
         }
 
         #[test]
         fn edge_cases() {
             // Saturating add
-            let info = HealthInfo::new(u32::MAX, 1, 0, 0.5, 5);
+            let info = HealthInfo::with_policy(u32::MAX, 1, 0, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(info.throughput(), u32::MAX);
 
             // Zero threshold
-            let info = HealthInfo::new(1, 1, 0, 0.0, 0);
+            let info = HealthInfo::with_policy(1, 1, 0, 0.0, 0, &AbandonedPolicy::pathological());
             assert_eq!(info.status(), HealthStatus::Unhealthy);
         }
 
@@ -439,7 +427,7 @@ mod tests {
         fn abandoned_considered_only_when_all_executions_abandoned() {
             // No conclusive results at all: abandoned executions count as failures and can open the
             // circuit. This is the single pathological case where abandonment drives the decision.
-            let info = HealthInfo::new(0, 0, 5, 0.5, 5);
+            let info = HealthInfo::with_policy(0, 0, 5, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
                 (5, 5, 1.0, HealthStatus::Unhealthy)
@@ -450,7 +438,7 @@ mod tests {
         fn abandoned_ignored_when_there_are_successes() {
             // At least one success: abandoned executions are tracked and counted towards throughput,
             // but do not contribute to the failure rate.
-            let info = HealthInfo::new(10, 0, 100, 0.5, 5);
+            let info = HealthInfo::with_policy(10, 0, 100, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
                 (110, 100, 0.0, HealthStatus::Healthy)
@@ -463,7 +451,7 @@ mod tests {
             // ignored entirely and the decision is made purely on successes/failures. The two real
             // failures are below the minimum throughput, so the circuit stays healthy even though the
             // abandoned executions would otherwise have pushed the total over the threshold.
-            let info = HealthInfo::new(0, 2, 3, 0.5, 5);
+            let info = HealthInfo::with_policy(0, 2, 3, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
                 (5, 3, 1.0, HealthStatus::Healthy)
@@ -471,7 +459,7 @@ mod tests {
 
             // With enough real failures to meet the minimum throughput, the abandoned executions are
             // still ignored but the real failures alone open the circuit.
-            let info = HealthInfo::new(0, 5, 3, 0.5, 5);
+            let info = HealthInfo::with_policy(0, 5, 3, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
                 (8, 3, 1.0, HealthStatus::Unhealthy)
@@ -483,7 +471,7 @@ mod tests {
             // A flood of abandoned executions must not mask a genuine burst of failures: with
             // successes present the decision is made on successes/failures only, excluding the
             // abandoned executions from the denominator.
-            let info = HealthInfo::new(1, 9, 100, 0.5, 5);
+            let info = HealthInfo::with_policy(1, 9, 100, 0.5, 5, &AbandonedPolicy::pathological());
             assert_eq!(
                 (info.throughput(), info.abandoned(), info.failure_rate(), info.status()),
                 (110, 100, 0.9, HealthStatus::Unhealthy)
