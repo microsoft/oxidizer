@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use super::ExecutionInfo;
+
 /// Controls how *abandoned* executions influence the circuit breaker's health decision.
 ///
 /// An execution is *abandoned* when it is accepted by the circuit breaker but its future is dropped
@@ -78,7 +80,12 @@ impl AbandonedPolicy {
     /// The returned values are the failure count and the total count that the failure rate and the
     /// minimum-throughput check are evaluated against. They deliberately may differ from the
     /// reported throughput, which always includes abandoned executions.
-    pub(crate) fn decision(&self, successes: u32, failures: u32, abandoned: u32) -> (u32, u32) {
+    pub(crate) fn decision(&self, counts: ExecutionInfo) -> (u32, u32) {
+        let ExecutionInfo {
+            successes,
+            failures,
+            abandoned,
+        } = counts;
         match self.inner {
             Mode::Ignore => (failures, successes.saturating_add(failures)),
             Mode::WhenAllAbandoned => {
@@ -113,24 +120,24 @@ mod tests {
     #[test]
     fn ignore_excludes_abandoned_from_decision() {
         let policy = AbandonedPolicy::ignore();
-        assert_eq!(policy.decision(5, 1, 10), (1, 6));
+        assert_eq!(policy.decision(ExecutionInfo::new(5, 1, 10)), (1, 6));
         // Every execution abandoned: nothing conclusive, so the decision total is zero.
-        assert_eq!(policy.decision(0, 0, 10), (0, 0));
+        assert_eq!(policy.decision(ExecutionInfo::new(0, 0, 10)), (0, 0));
     }
 
     #[test]
     fn when_all_abandoned_considers_abandoned_only_when_all_abandoned() {
         let policy = AbandonedPolicy::when_all_abandoned();
-        assert_eq!(policy.decision(0, 0, 10), (10, 10));
-        assert_eq!(policy.decision(1, 0, 10), (0, 1));
-        assert_eq!(policy.decision(0, 2, 10), (2, 2));
+        assert_eq!(policy.decision(ExecutionInfo::new(0, 0, 10)), (10, 10));
+        assert_eq!(policy.decision(ExecutionInfo::new(1, 0, 10)), (0, 1));
+        assert_eq!(policy.decision(ExecutionInfo::new(0, 2, 10)), (2, 2));
     }
 
     #[test]
     fn as_failures_always_counts_abandoned() {
         let policy = AbandonedPolicy::as_failures();
-        assert_eq!(policy.decision(5, 1, 10), (11, 16));
-        assert_eq!(policy.decision(0, 0, 10), (10, 10));
+        assert_eq!(policy.decision(ExecutionInfo::new(5, 1, 10)), (11, 16));
+        assert_eq!(policy.decision(ExecutionInfo::new(0, 0, 10)), (10, 10));
     }
 
     #[test]

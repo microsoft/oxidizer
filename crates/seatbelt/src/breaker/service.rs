@@ -438,7 +438,12 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::with_policy(1, 1, 0, 1.0, 1, &AbandonedPolicy::when_all_abandoned())),
+            ExitCircuitResult::Opened(HealthInfo::new(
+                ExecutionInfo::new(1, 1, 0),
+                1.0,
+                1,
+                &AbandonedPolicy::when_all_abandoned(),
+            )),
         );
 
         service

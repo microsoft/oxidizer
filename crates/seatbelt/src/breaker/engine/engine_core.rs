@@ -92,7 +92,7 @@ impl State {
                 let health = health.health_info();
 
                 // decide the next state based on health status
-                match health.status() {
+                match health.status {
                     // Health is good, remain in a closed state
                     HealthStatus::Healthy => ExitCircuitResult::Unchanged,
                     // Health is poor, transition to Open state

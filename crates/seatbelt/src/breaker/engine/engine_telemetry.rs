@@ -134,9 +134,9 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         strategy.name = %self.telemetry.strategy_name,
                         circuit_breaker.state = CircuitState::Open.as_str(),
                         circuit_breaker.id = %self.breaker_id,
-                        circuit_breaker.health.failure_rate = health.failure_rate(),
-                        circuit_breaker.health.throughput = health.throughput(),
-                        circuit_breaker.health.abandoned = health.abandoned(),
+                        circuit_breaker.health.failure_rate = health.failure_rate,
+                        circuit_breaker.health.throughput = health.counts.throughput(),
+                        circuit_breaker.health.abandoned = health.counts.abandoned,
                     );
                 }
 
@@ -193,7 +193,7 @@ mod tests {
     use opentelemetry::KeyValue;
 
     use super::*;
-    use crate::breaker::{AbandonedPolicy, EngineFake, HealthInfo, Stats};
+    use crate::breaker::{AbandonedPolicy, EngineFake, ExecutionInfo, HealthInfo, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 
@@ -275,7 +275,12 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::with_policy(1, 0, 0, 0.75, 100, &AbandonedPolicy::when_all_abandoned())),
+            ExitCircuitResult::Opened(HealthInfo::new(
+                ExecutionInfo::new(1, 0, 0),
+                0.75,
+                100,
+                &AbandonedPolicy::when_all_abandoned(),
+            )),
         ));
 
         let _ = telemetry_engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
