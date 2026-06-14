@@ -100,7 +100,7 @@ impl HealthProbeOptions {
         Self {
             // The min throughput is set to 0, so if no requests come in during the probing stage,
             // the health will be considered healthy by default.
-            builder: HealthMetricsBuilder::with_policy(stage_duration, failure_threshold, MIN_THROUGHPUT, abandoned_policy),
+            builder: HealthMetricsBuilder::new(stage_duration, failure_threshold, MIN_THROUGHPUT, abandoned_policy),
             probing_ratio,
         }
     }

@@ -42,7 +42,7 @@ impl ExecutionInfo {
         self.successes.saturating_add(self.failures).saturating_add(self.abandoned)
     }
 
-    fn record(&mut self, result: ExecutionResult) {
+    pub(crate) fn record(&mut self, result: ExecutionResult) {
         match result {
             ExecutionResult::Success => self.successes = self.successes.saturating_add(1),
             ExecutionResult::Failure => self.failures = self.failures.saturating_add(1),
@@ -110,17 +110,7 @@ pub(crate) struct HealthMetricsBuilder {
 }
 
 impl HealthMetricsBuilder {
-    #[cfg(test)]
-    pub(crate) fn new(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32) -> Self {
-        Self::with_policy(sampling_duration, failure_threshold, min_throughput, AbandonedPolicy::default())
-    }
-
-    pub(crate) fn with_policy(
-        sampling_duration: Duration,
-        failure_threshold: f32,
-        min_throughput: u32,
-        abandoned_policy: AbandonedPolicy,
-    ) -> Self {
+    pub(crate) fn new(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32, abandoned_policy: AbandonedPolicy) -> Self {
         Self {
             sampling_duration: sampling_duration.max(MIN_SAMPLING_DURATION),
             failure_threshold,
@@ -230,7 +220,7 @@ mod tests {
 
     #[test]
     fn factory_ok() {
-        let builder = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5);
+        let builder = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default());
         let metrics = builder.build();
 
         assert_eq!(metrics.sampling_duration, Duration::from_secs(10));
@@ -239,7 +229,7 @@ mod tests {
         assert_eq!(metrics.min_throughput, 5);
 
         // small sampling duration is clamped
-        let builder = HealthMetricsBuilder::new(Duration::from_millis(500), 0.5, 5);
+        let builder = HealthMetricsBuilder::new(Duration::from_millis(500), 0.5, 5, AbandonedPolicy::default());
         let metrics = builder.build();
         assert_eq!(metrics.sampling_duration, MIN_SAMPLING_DURATION);
     }

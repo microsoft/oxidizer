@@ -9,7 +9,7 @@ use tick::Clock;
 use super::{EngineOptions, EnterCircuitResult, ExitCircuitResult};
 use crate::breaker::constants::ERR_POISONED_LOCK;
 use crate::breaker::engine::probing::{AllowProbeResult, Probes, ProbingResult};
-use crate::breaker::{CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
+use crate::breaker::{CircuitEngine, ExecutionInfo, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
 
 /// Engine that manages the state of the circuit breaker.
 #[derive(Debug)]
@@ -105,10 +105,7 @@ impl State {
                     }
                 }
             }
-            Self::Open { stats, .. } => {
-                // Record lost results for statistics purposes
-                stats.probes_lost = stats.probes_lost.saturating_add(1);
-
+            Self::Open { .. } => {
                 // In open state, we don't process results. This can happen when multiple threads are involved and
                 // the state of circuit breaker changes between enter and exit calls since these are separate
                 // method calls that could be interleaved with other threads. Ignore the result.
@@ -149,13 +146,9 @@ impl State {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Stats {
+    pub probes: ExecutionInfo,
     pub opened_at: Instant,
     pub re_opened: usize,
-    pub probes_total: usize,
-    pub probes_lost: usize,
-    pub probes_successes: usize,
-    pub probes_failures: usize,
-    pub probes_abandoned: usize,
     pub rejected: usize,
 }
 
@@ -163,11 +156,7 @@ impl Stats {
     pub(crate) fn new(opened_at: Instant) -> Self {
         Self {
             opened_at,
-            probes_total: 0,
-            probes_lost: 0,
-            probes_successes: 0,
-            probes_failures: 0,
-            probes_abandoned: 0,
+            probes: ExecutionInfo::default(),
             rejected: 0,
             re_opened: 0,
         }
@@ -178,27 +167,16 @@ impl Stats {
     }
 
     fn record_allow_result(&mut self, allow: AllowProbeResult) {
-        if allow == AllowProbeResult::Accepted {
-            self.probes_total = self.probes_total.saturating_add(1);
-        } else {
+        if allow != AllowProbeResult::Accepted {
             self.rejected = self.rejected.saturating_add(1);
         }
     }
 
     fn record_probe_execution_result(&mut self, result: ExecutionResult) {
-        match result {
-            ExecutionResult::Success => {
-                self.probes_successes = self.probes_successes.saturating_add(1);
-            }
-            ExecutionResult::Failure => {
-                self.probes_failures = self.probes_failures.saturating_add(1);
-            }
-            // An abandoned probe is tracked separately for statistics; how it affects the recovery
-            // decision is governed by the configured `AbandonedPolicy` (see `Probe::record`).
-            ExecutionResult::Abandoned => {
-                self.probes_abandoned = self.probes_abandoned.saturating_add(1);
-            }
-        }
+        // Successes, failures and abandoned probes are all tallied in `probes`; how an abandoned
+        // probe affects the recovery decision is governed by the configured `AbandonedPolicy`
+        // (see `Probe::record`).
+        self.probes.record(result);
     }
 }
 
@@ -220,6 +198,7 @@ mod tests {
                 Duration::from_secs(30),
                 0.1, // 10% failure threshold
                 10,  // minimum 10 requests
+                AbandonedPolicy::default(),
             ),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         }
@@ -365,6 +344,7 @@ mod tests {
                 Duration::from_secs(30),
                 0.1, // 10% failure threshold
                 20,  // minimum 20 requests (higher than default 10 for this test)
+                AbandonedPolicy::default(),
             ),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
@@ -414,7 +394,7 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes_lost, 1);
+            assert_eq!(stats.probes.throughput(), 0);
         } else {
             panic!("expected engine to be in Open state");
         }
@@ -434,7 +414,7 @@ mod tests {
 
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
-        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes_successes == 1 && stats.probes_total == 1));
+        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes.successes == 1));
     }
 
     #[test]
@@ -475,9 +455,9 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes_abandoned, 1);
-            assert_eq!(stats.probes_failures, 0);
-            assert_eq!(stats.probes_successes, 0);
+            assert_eq!(stats.probes.abandoned, 1);
+            assert_eq!(stats.probes.failures, 0);
+            assert_eq!(stats.probes.successes, 0);
         } else {
             panic!("expected engine to remain in HalfOpen state");
         }
@@ -487,7 +467,7 @@ mod tests {
     fn exit_when_half_open_with_abandoned_reopens_under_as_failures_policy() {
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::as_failures()),
         };
         let control = ClockControl::new();
@@ -540,7 +520,7 @@ mod tests {
     fn exit_when_closed_with_abandoned_opens_only_without_successes() {
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3, AbandonedPolicy::default()),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let clock = Clock::new_frozen();
@@ -570,7 +550,7 @@ mod tests {
     fn exit_when_closed_with_abandoned_ignored_when_successes_present() {
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3, AbandonedPolicy::default()),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let clock = Clock::new_frozen();
@@ -626,11 +606,9 @@ mod tests {
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes_successes, 1);
-            assert_eq!(stats.probes_total, 1);
+            assert_eq!(stats.probes.successes, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes_failures, 0);
-            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.failures, 0);
             assert_eq!(stats.re_opened, 0);
         } else {
             panic!("expected circuit to close after successful probe");
@@ -675,11 +653,9 @@ mod tests {
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes_successes, 1);
-            assert_eq!(stats.probes_total, 2);
+            assert_eq!(stats.probes.successes, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes_failures, 1);
-            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.failures, 1);
             assert_eq!(stats.re_opened, 1);
         } else {
             panic!("expected circuit to close after successful probe");
@@ -707,7 +683,7 @@ mod tests {
     fn engine_with_custom_break_duration() {
         let settings = EngineOptions {
             break_duration: Duration::from_millis(100),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 50),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 50, AbandonedPolicy::default()),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let control = ClockControl::new();
@@ -741,6 +717,7 @@ mod tests {
                 Duration::from_secs(30),
                 0.5, // 50% failure threshold
                 10,  // minimum 10 requests
+                AbandonedPolicy::default(),
             ),
             probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
@@ -770,12 +747,12 @@ mod tests {
         let mut stats = Stats::new(Instant::now());
 
         stats.record_probe_execution_result(ExecutionResult::Success);
-        assert_eq!(stats.probes_successes, 1);
-        assert_eq!(stats.probes_failures, 0);
+        assert_eq!(stats.probes.successes, 1);
+        assert_eq!(stats.probes.failures, 0);
 
         stats.record_probe_execution_result(ExecutionResult::Failure);
-        assert_eq!(stats.probes_successes, 1);
-        assert_eq!(stats.probes_failures, 1);
+        assert_eq!(stats.probes.successes, 1);
+        assert_eq!(stats.probes.failures, 1);
     }
 
     #[test]
@@ -783,11 +760,9 @@ mod tests {
         let mut stats = Stats::new(Instant::now());
 
         stats.record_allow_result(AllowProbeResult::Accepted);
-        assert_eq!(stats.probes_total, 1);
         assert_eq!(stats.rejected, 0);
 
         stats.record_allow_result(AllowProbeResult::Rejected);
-        assert_eq!(stats.probes_total, 1);
         assert_eq!(stats.rejected, 1);
     }
 
@@ -808,7 +783,7 @@ mod tests {
 
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
             // Use a HealthProbe with long sampling duration so it returns Pending
             probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
                 Duration::from_mins(1),

@@ -416,7 +416,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         Engines::new(
             super::engine::EngineOptions {
                 break_duration: self.break_duration,
-                health_metrics_builder: HealthMetricsBuilder::with_policy(
+                health_metrics_builder: HealthMetricsBuilder::new(
                     self.sampling_duration,
                     self.failure_threshold,
                     self.min_throughput,
