@@ -82,18 +82,18 @@ impl AbandonedPolicy {
     /// reported throughput, which always includes abandoned executions.
     pub(crate) fn decision(&self, counts: ExecutionInfo) -> (u32, u32) {
         let ExecutionInfo {
-            success,
+            succeeded,
             failed,
             abandoned,
         } = counts;
 
         match self.inner {
-            Mode::Ignore => (failed, success.saturating_add(failed)),
+            Mode::Ignore => (failed, succeeded.saturating_add(failed)),
             Mode::WhenAllAbandoned => {
-                if success == 0 && failed == 0 {
+                if succeeded == 0 && failed == 0 {
                     (abandoned, abandoned)
                 } else {
-                    (failed, success.saturating_add(failed))
+                    (failed, succeeded.saturating_add(failed))
                 }
             }
             Mode::AsFailures => (failed.saturating_add(abandoned), counts.total()),

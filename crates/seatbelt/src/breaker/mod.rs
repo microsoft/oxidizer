@@ -186,7 +186,7 @@
 //!   - `resilience.circuit_breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
 //!   - `resilience.circuit_breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
 //!
-//! Additional structured logging events are emitted with detailed health metrics (failure rate, throughput) for circuit state transitions.
+//! Additional structured logging events are emitted with detailed health metrics (failure rate, total executions) for circuit state transitions.
 //!
 //! # Examples
 //!

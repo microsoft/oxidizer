@@ -22,16 +22,16 @@ pub(crate) enum HealthStatus {
 /// three loose `u32` arguments.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub(crate) struct ExecutionInfo {
-    pub(crate) success: u32,
+    pub(crate) succeeded: u32,
     pub(crate) failed: u32,
     pub(crate) abandoned: u32,
 }
 
 impl ExecutionInfo {
     #[cfg(test)]
-    pub(crate) fn new(success: u32, failed: u32, abandoned: u32) -> Self {
+    pub(crate) fn new(succeeded: u32, failed: u32, abandoned: u32) -> Self {
         Self {
-            success,
+            succeeded,
             failed,
             abandoned,
         }
@@ -39,19 +39,19 @@ impl ExecutionInfo {
 
     /// Total number of recorded executions, including abandoned ones.
     pub(crate) fn total(self) -> u32 {
-        self.success.saturating_add(self.failed).saturating_add(self.abandoned)
+        self.succeeded.saturating_add(self.failed).saturating_add(self.abandoned)
     }
 
     pub(crate) fn record(&mut self, result: ExecutionResult) {
         match result {
-            ExecutionResult::Success => self.success = self.success.saturating_add(1),
+            ExecutionResult::Success => self.succeeded = self.succeeded.saturating_add(1),
             ExecutionResult::Failure => self.failed = self.failed.saturating_add(1),
             ExecutionResult::Abandoned => self.abandoned = self.abandoned.saturating_add(1),
         }
     }
 
     fn merge(&mut self, other: Self) {
-        self.success = self.success.saturating_add(other.success);
+        self.succeeded = self.succeeded.saturating_add(other.succeeded);
         self.failed = self.failed.saturating_add(other.failed);
         self.abandoned = self.abandoned.saturating_add(other.abandoned);
     }
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(metrics.windows.len(), 3);
 
         let first_window = &metrics.windows[0];
-        assert_eq!(first_window.counts.success, 10);
+        assert_eq!(first_window.counts.succeeded, 10);
         assert_eq!(first_window.counts.failed, 0);
         assert_eq!(first_window.started_at, start);
 

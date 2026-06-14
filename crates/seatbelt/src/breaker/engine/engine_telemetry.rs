@@ -135,7 +135,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         circuit_breaker.state = CircuitState::Open.as_str(),
                         circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.health.failure_rate = health.failure_rate,
-                        circuit_breaker.health.throughput = health.counts.total(),
+                        circuit_breaker.health.total = health.counts.total(),
                         circuit_breaker.health.abandoned = health.counts.abandoned,
                     );
                 }
@@ -165,7 +165,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
                         circuit_breaker.id = %self.breaker_id,
                         circuit_breaker.probes.total = stats.probes.total(),
-                        circuit_breaker.probes.success = stats.probes.success,
+                        circuit_breaker.probes.succeeded = stats.probes.succeeded,
                         circuit_breaker.probes.failed = stats.probes.failed,
                         circuit_breaker.probes.abandoned = stats.probes.abandoned,
                         circuit_breaker.probes.lost = stats.probes_lost,
