@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::breaker::AbandonedPolicy;
 use crate::breaker::constants::MIN_SAMPLING_DURATION;
 use crate::breaker::engine::probing::ProbesOptions;
 
@@ -61,10 +62,17 @@ impl HalfOpenMode {
         }
     }
 
-    pub(super) fn to_options(&self, default_stage_duration: Duration, failure_threshold: f32) -> ProbesOptions {
+    pub(super) fn to_options(
+        &self,
+        default_stage_duration: Duration,
+        failure_threshold: f32,
+        abandoned_policy: &AbandonedPolicy,
+    ) -> ProbesOptions {
         match self.inner {
             Mode::Quick => ProbesOptions::quick(default_stage_duration),
-            Mode::Progressive(duration) => ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold),
+            Mode::Progressive(duration) => {
+                ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold, abandoned_policy)
+            }
         }
     }
 }
@@ -100,7 +108,7 @@ mod tests {
     #[test]
     fn quick_mode_creates_single_probe() {
         let mode = HalfOpenMode::quick();
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 1);
@@ -111,7 +119,7 @@ mod tests {
     fn quick_mode_uses_default_duration() {
         let mode = HalfOpenMode::quick();
         let default = Duration::from_secs(30);
-        let options = mode.to_options(default, 0.1);
+        let options = mode.to_options(default, 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert!(matches!(
@@ -123,7 +131,7 @@ mod tests {
     #[test]
     fn progressive_mode_creates_seven_probes() {
         let mode = HalfOpenMode::progressive(None);
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
 
         assert_eq!(options.probes().len(), 7);
     }
@@ -132,7 +140,7 @@ mod tests {
     fn progressive_mode_with_custom_duration() {
         let custom = Duration::from_secs(45);
         let mode = HalfOpenMode::progressive(custom);
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert!(matches!(
@@ -153,7 +161,7 @@ mod tests {
     fn progressive_mode_with_default_duration() {
         let mode = HalfOpenMode::progressive(None);
         let default = Duration::from_mins(1);
-        let options = mode.to_options(default, 0.1);
+        let options = mode.to_options(default, 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert!(matches!(

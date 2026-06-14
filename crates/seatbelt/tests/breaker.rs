@@ -226,6 +226,45 @@ async fn abandoned_executions_open_circuit(#[case] use_tower: bool) {
     assert_eq!(result, Ok("circuit is open".to_string()));
 }
 
+/// Regression test for the tower path: `enter` runs synchronously inside `call`, so a future that
+/// is dropped *before it is ever polled* must still be recorded as abandoned. Otherwise an accepted
+/// execution would leak without ever affecting the circuit breaker state.
+#[tokio::test]
+async fn tower_abandons_future_dropped_before_first_poll() {
+    let opened_called = Arc::new(AtomicBool::new(false));
+    let opened_called_clone = Arc::clone(&opened_called);
+
+    let clock = Clock::new_frozen();
+    let context: ResilienceContext<String, Result<String, String>> = ResilienceContext::new(&clock).name("test_pipeline");
+
+    let stack = (
+        Breaker::layer("test_breaker", &context)
+            .recovery_with(|_: &Result<String, String>, _| RecoveryInfo::never())
+            .rejected_input(|_: String, _| Ok("circuit is open".to_string()))
+            .min_throughput(3)
+            .on_opened(move |_output: Option<&Result<String, String>>, _| {
+                opened_called.store(true, Ordering::SeqCst);
+            }),
+        Execute::new(|_: String| async move { std::future::pending::<Result<String, String>>().await }),
+    );
+
+    let mut service = stack.into_service();
+
+    // Build each future via `call` and drop it immediately without polling.
+    for _ in 0..3 {
+        poll_fn(|cx| TowerService::poll_ready(&mut service, cx)).await.unwrap();
+        let future = TowerService::call(&mut service, "input".to_string());
+        drop(future);
+    }
+
+    // Even though none of the futures were ever polled, the abandonments were recorded and the
+    // circuit is now open.
+    assert!(opened_called_clone.load(Ordering::SeqCst));
+
+    let result = execute_service(&mut service, "input".to_string(), true).await;
+    assert_eq!(result, Ok("circuit is open".to_string()));
+}
+
 #[rstest]
 #[case::layered(false)]
 #[case::tower(true)]

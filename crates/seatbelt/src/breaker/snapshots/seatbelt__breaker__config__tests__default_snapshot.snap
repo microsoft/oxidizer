@@ -10,5 +10,6 @@ expression: config
   "break_duration": "5s",
   "half_open_mode": {
     "Progressive": null
-  }
+  },
+  "abandoned_policy": "Pathological"
 }

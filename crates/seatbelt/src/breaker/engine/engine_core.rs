@@ -192,7 +192,8 @@ impl Stats {
             ExecutionResult::Failure => {
                 self.probes_failures = self.probes_failures.saturating_add(1);
             }
-            // An abandoned probe is tracked separately but treated as a failure for the probe decision (see `exit`).
+            // An abandoned probe is tracked separately; it is inconclusive and leaves the recovery
+            // decision unchanged (see `Probe::record`).
             ExecutionResult::Abandoned => {
                 self.probes_abandoned = self.probes_abandoned.saturating_add(1);
             }
@@ -453,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn exit_when_half_open_with_abandoned_reopens_circuit() {
+    fn exit_when_half_open_with_abandoned_is_inconclusive() {
         let settings = create_test_settings();
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -464,17 +465,48 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        // An abandoned probe cannot confirm recovery and is treated as a failure.
+        // An abandoned probe is inconclusive: it cannot confirm recovery, but it must not re-open
+        // the circuit either, otherwise a stream of abandoned probes would pin it open forever.
         let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe);
 
-        assert!(matches!(result, ExitCircuitResult::Reopened));
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
 
-        if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
             assert_eq!(stats.probes_abandoned, 1);
             assert_eq!(stats.probes_failures, 0);
+            assert_eq!(stats.probes_successes, 0);
         } else {
-            panic!("expected engine to be in Open state");
+            panic!("expected engine to remain in HalfOpen state");
         }
+    }
+
+    #[test]
+    fn exit_when_half_open_abandoned_then_success_closes_circuit() {
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open then half-open
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open
+
+        // An abandoned probe leaves the circuit half-open and a fresh probe can still recover it.
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe),
+            ExitCircuitResult::Unchanged
+        ));
+
+        // After the cool-down a new probe is allowed and a success closes the circuit.
+        control.advance(Duration::from_secs(6));
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Success, ExecutionMode::Probe),
+            ExitCircuitResult::Closed(_)
+        ));
+
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::Closed { .. }));
     }
 
     #[test]

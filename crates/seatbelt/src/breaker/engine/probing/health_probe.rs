@@ -44,7 +44,9 @@ impl ProbeOperation for HealthProbe {
     }
 
     fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
-        // Always record the result
+        // Always record the result, including abandoned executions: the health metrics apply the
+        // configured `AbandonedPolicy` when deriving the health status, so abandoned probes are
+        // evaluated consistently with the closed-state decision.
         self.metrics.record(result, now);
 
         // If we are still sampling, we cannot make a decision yet
@@ -133,6 +135,30 @@ mod tests {
         let status = probe.metrics.health_info();
         assert_eq!(status.status(), HealthStatus::Healthy);
         assert_eq!(status.throughput(), 2);
+    }
+
+    #[test]
+    fn record_abandoned_is_sampled_and_evaluated_by_health_infra() {
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0);
+        let mut probe = HealthProbe::new(options);
+        let now = Instant::now();
+
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+
+        // Abandoned probes are recorded so the health metrics can apply the configured policy.
+        // While still sampling, the decision stays pending.
+        assert_eq!(
+            probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(1)),
+            ProbingResult::Pending,
+        );
+        assert_eq!(probe.metrics.health_info().throughput(), 1);
+
+        // Once the sampling period elapses with only abandoned probes, the default pathological
+        // policy treats the sample as unhealthy, so the probe reports failure.
+        assert_eq!(
+            probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(10)),
+            ProbingResult::Failure,
+        );
     }
 
     #[test]
