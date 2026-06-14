@@ -71,9 +71,10 @@ pub(crate) enum Probe {
 impl Probe {
     pub(crate) fn new(options: ProbeOptions) -> Self {
         match options {
-            ProbeOptions::SingleProbe { cooldown, abandoned_policy } => {
-                Self::Single(SingleProbe::new(cooldown, abandoned_policy))
-            }
+            ProbeOptions::SingleProbe {
+                cooldown,
+                abandoned_policy,
+            } => Self::Single(SingleProbe::new(cooldown, abandoned_policy)),
             ProbeOptions::HealthProbe(options) => Self::Health(HealthProbe::new(options)),
         }
     }
@@ -110,7 +111,10 @@ mod tests {
     #[test]
     fn probe_new_creates_single_probe() {
         let cooldown = Duration::from_secs(5);
-        let probe = Probe::new(ProbeOptions::SingleProbe { cooldown });
+        let probe = Probe::new(ProbeOptions::SingleProbe {
+            cooldown,
+            abandoned_policy: AbandonedPolicy::default(),
+        });
         assert!(matches!(probe, Probe::Single(duration) if duration.probe_cooldown() == cooldown));
     }
 
@@ -118,6 +122,7 @@ mod tests {
     fn probe_allow_probe_delegates_to_inner() {
         let mut probe = Probe::new(ProbeOptions::SingleProbe {
             cooldown: Duration::from_secs(5),
+            abandoned_policy: AbandonedPolicy::default(),
         });
         let now = Instant::now();
 
@@ -129,6 +134,7 @@ mod tests {
     fn probe_record_delegates_to_inner() {
         let mut probe = Probe::new(ProbeOptions::SingleProbe {
             cooldown: Duration::from_secs(5),
+            abandoned_policy: AbandonedPolicy::default(),
         });
         let now = Instant::now();
 
