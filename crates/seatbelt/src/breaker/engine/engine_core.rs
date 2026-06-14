@@ -105,7 +105,11 @@ impl State {
                     }
                 }
             }
-            Self::Open { .. } => {
+            Self::Open { stats, .. } => {
+                // Record lost results for statistics purposes. This happens when the state of the
+                // circuit changes between a probe being allowed and the circuit becoming half-open.
+                stats.probes_lost = stats.probes_lost.saturating_add(1);
+
                 // In open state, we don't process results. This can happen when multiple threads are involved and
                 // the state of circuit breaker changes between enter and exit calls since these are separate
                 // method calls that could be interleaved with other threads. Ignore the result.
@@ -147,6 +151,7 @@ impl State {
 #[derive(Debug, Clone)]
 pub(crate) struct Stats {
     pub probes: ExecutionInfo,
+    pub probes_lost: usize,
     pub opened_at: Instant,
     pub re_opened: usize,
     pub rejected: usize,
@@ -157,6 +162,7 @@ impl Stats {
         Self {
             opened_at,
             probes: ExecutionInfo::default(),
+            probes_lost: 0,
             rejected: 0,
             re_opened: 0,
         }
@@ -394,7 +400,7 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes.total(), 0);
+            assert_eq!(stats.probes_lost, 1);
         } else {
             panic!("expected engine to be in Open state");
         }
@@ -609,6 +615,7 @@ mod tests {
             assert_eq!(stats.probes.success, 1);
             assert_eq!(stats.rejected, 1);
             assert_eq!(stats.probes.failed, 0);
+            assert_eq!(stats.probes_lost, 0);
             assert_eq!(stats.re_opened, 0);
         } else {
             panic!("expected circuit to close after successful probe");
@@ -656,6 +663,7 @@ mod tests {
             assert_eq!(stats.probes.success, 1);
             assert_eq!(stats.rejected, 1);
             assert_eq!(stats.probes.failed, 1);
+            assert_eq!(stats.probes_lost, 0);
             assert_eq!(stats.re_opened, 1);
         } else {
             panic!("expected circuit to close after successful probe");

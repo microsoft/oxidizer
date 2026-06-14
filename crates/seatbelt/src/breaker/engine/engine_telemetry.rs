@@ -168,6 +168,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         circuit_breaker.probes.success = stats.probes.success,
                         circuit_breaker.probes.failed = stats.probes.failed,
                         circuit_breaker.probes.abandoned = stats.probes.abandoned,
+                        circuit_breaker.probes.lost = stats.probes_lost,
                         circuit_breaker.rejections = stats.rejected,
                         circuit_breaker.re_opened = stats.re_opened,
                     );
