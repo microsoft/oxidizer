@@ -103,6 +103,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::breaker::AbandonedPolicy;
 
     #[test]
     fn probe_new_creates_single_probe() {
@@ -150,14 +151,14 @@ mod tests {
 
     #[test]
     fn probe_new_creates_health_probe() {
-        let options = HealthProbeOptions::new(Duration::from_secs(10), 0.2, 0.5);
+        let options = HealthProbeOptions::new(Duration::from_secs(10), 0.2, 0.5, AbandonedPolicy::default());
         let probe = Probe::new(ProbeOptions::HealthProbe(options));
         assert!(matches!(probe, Probe::Health(_)));
     }
 
     #[test]
     fn probe_health_allow_probe_delegates_to_inner() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0, AbandonedPolicy::default());
         let mut probe = Probe::new(ProbeOptions::HealthProbe(options));
         let now = Instant::now();
 
@@ -167,7 +168,7 @@ mod tests {
 
     #[test]
     fn probe_health_record_delegates_to_inner() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.2, 1.0, AbandonedPolicy::default());
         let mut probe = Probe::new(ProbeOptions::HealthProbe(options));
         let now = Instant::now();
 

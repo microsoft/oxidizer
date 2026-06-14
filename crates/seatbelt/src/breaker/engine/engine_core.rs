@@ -209,8 +209,8 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::breaker::HealthMetricsBuilder;
     use crate::breaker::engine::probing::ProbesOptions;
+    use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
 
     fn create_test_settings() -> EngineOptions {
         EngineOptions {
@@ -783,7 +783,12 @@ mod tests {
             break_duration: Duration::from_secs(5),
             health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
             // Use a HealthProbe with long sampling duration so it returns Pending
-            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(Duration::from_mins(1), 0.2, 1.0))]),
+            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
+                Duration::from_mins(1),
+                0.2,
+                1.0,
+                AbandonedPolicy::default(),
+            ))]),
         };
         let control = ClockControl::new();
         let clock = control.to_clock();
