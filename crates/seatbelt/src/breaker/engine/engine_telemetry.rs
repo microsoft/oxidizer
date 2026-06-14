@@ -275,7 +275,7 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::with_policy(1, 0, 0, 0.75, 100, &AbandonedPolicy::pathological())),
+            ExitCircuitResult::Opened(HealthInfo::with_policy(1, 0, 0, 0.75, 100, &AbandonedPolicy::when_all_abandoned())),
         ));
 
         let _ = telemetry_engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);

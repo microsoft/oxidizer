@@ -9,5 +9,5 @@ expression: config
   "sampling_duration": "30s",
   "break_duration": "5s",
   "half_open_mode": "Quick",
-  "abandoned_policy": "Pathological"
+  "abandoned_policy": "WhenAllAbandoned"
 }

@@ -44,7 +44,7 @@ BreakerLayer {
         ),
     },
     abandoned_policy: AbandonedPolicy {
-        inner: Pathological,
+        inner: WhenAllAbandoned,
     },
     _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
 }
