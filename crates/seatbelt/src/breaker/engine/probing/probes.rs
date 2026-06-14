@@ -64,9 +64,11 @@ mod tests {
         let options = ProbesOptions::new([
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(1),
+                abandoned_policy: AbandonedPolicy::default(),
             },
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(2),
+                abandoned_policy: AbandonedPolicy::default(),
             },
         ]);
         let mut probes = Probes::new(&options);

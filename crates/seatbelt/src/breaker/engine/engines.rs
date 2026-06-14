@@ -67,8 +67,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::breaker::HealthMetricsBuilder;
     use crate::breaker::engine::probing::ProbesOptions;
+    use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
     use crate::metrics::create_resilience_event_counter;
 
     #[test]
@@ -83,7 +83,7 @@ mod tests {
             EngineOptions {
                 break_duration: Duration::from_mins(1),
                 health_metrics_builder: HealthMetricsBuilder::new(Duration::from_millis(100), 0.5, 5),
-                probes: ProbesOptions::quick(Duration::from_secs(1)),
+                probes: ProbesOptions::quick(Duration::from_secs(1), &AbandonedPolicy::default()),
             },
             Clock::new_frozen(),
             telemetry,

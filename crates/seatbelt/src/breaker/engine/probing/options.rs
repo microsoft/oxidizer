@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(probes.len(), 7);
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30)
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(30)
         ));
 
         let expected_ratios = [0.001, 0.01, 0.05, 0.1, 0.25, 0.5];

@@ -119,12 +119,14 @@ mod tests {
     fn quick_mode_uses_default_duration() {
         let mode = HalfOpenMode::quick();
         let default = Duration::from_secs(30);
-        let options = mode.to_options(default, 0.1, &AbandonedPolicy::default());
+        let options = mode.to_options(default, 0.1, &AbandonedPolicy::as_failures());
         let probes: Vec<_> = options.probes().collect();
 
+        // The configured abandoned policy is threaded through to the single probe gate.
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == default
+            ProbeOptions::SingleProbe { cooldown, abandoned_policy }
+                if *cooldown == default && *abandoned_policy == AbandonedPolicy::as_failures()
         ));
     }
 
@@ -145,7 +147,7 @@ mod tests {
 
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == custom
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == custom
         ));
 
         for probe in &probes[1..] {
@@ -166,7 +168,7 @@ mod tests {
 
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == default
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == default
         ));
 
         for probe in &probes[1..] {
