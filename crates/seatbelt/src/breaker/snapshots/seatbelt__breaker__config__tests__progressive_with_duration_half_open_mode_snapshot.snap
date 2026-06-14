@@ -11,5 +11,7 @@ expression: config
   "half_open_mode": {
     "Progressive": "45s"
   },
-  "abandoned_policy": "WhenAllAbandoned"
+  "abandoned_policy": {
+    "AbandonRateThreshold": 1.0
+  }
 }

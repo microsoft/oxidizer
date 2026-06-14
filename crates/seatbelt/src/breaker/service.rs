@@ -438,12 +438,9 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(
-                ExecutionInfo::new(1, 1, 0),
-                1.0,
-                1,
-                &AbandonedPolicy::when_all_abandoned(),
-            )),
+            ExitCircuitResult::Opened(
+                HealthEvaluator::new(1.0, 1, AbandonedPolicy::when_all_abandoned()).evaluate(ExecutionInfo::new(1, 1, 0)),
+            ),
         );
 
         service
@@ -520,7 +517,7 @@ mod tests {
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_circuit");
         log_capture.assert_contains("circuit_breaker.state=\"open\"");
-        log_capture.assert_contains("circuit_breaker.health.failure_rate");
+        log_capture.assert_contains("circuit_breaker.health.total");
 
         // Request should be rejected (emits another open state log)
         let _ = service.execute("test".to_string()).await;

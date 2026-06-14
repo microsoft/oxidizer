@@ -593,6 +593,7 @@ deterministically
 dereferences
 honour
 MPSC
+evaluator
 Azure
 SDK
 TypeSpec

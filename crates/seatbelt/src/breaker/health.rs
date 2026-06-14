@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use super::{AbandonedPolicy, ExecutionResult};
+use super::{AbandonedPolicy, ExecutionResult, HealthEvaluator};
 use crate::breaker::constants::MIN_SAMPLING_DURATION;
 
 const WINDOW_COUNT: u32 = 10;
@@ -59,45 +59,15 @@ impl ExecutionInfo {
 
 /// Aggregated health information that can be used to determine the failure rate and throughput
 /// of a service over a recent sampling period.
+///
+/// This is a plain verdict produced by [`HealthEvaluator`]; all of the evaluation logic (how
+/// abandoned executions are folded in, and how the failure rate and minimum throughput are turned
+/// into a [`HealthStatus`]) lives there.
 #[must_use]
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct HealthInfo {
     pub(crate) counts: ExecutionInfo,
-    pub(crate) failure_rate: f32,
     pub(crate) status: HealthStatus,
-}
-
-impl HealthInfo {
-    pub(crate) fn new(counts: ExecutionInfo, failure_threshold: f32, min_throughput: u32, abandoned_policy: &AbandonedPolicy) -> Self {
-        // Abandoned executions (entered but never exited, e.g. a dropped/cancelled future) are always
-        // counted towards the reported throughput. How they influence the open/close decision is
-        // delegated to the configured [`AbandonedPolicy`], which yields the failure count and the
-        // total count the failure rate and minimum-throughput check are evaluated against. That
-        // decision total may exclude abandoned executions even though they are reported in the
-        // throughput.
-        let (decision_failures, decision_total) = abandoned_policy.decision(counts);
-
-        if decision_total == 0 {
-            return Self {
-                counts,
-                failure_rate: 0.0,
-                status: HealthStatus::Healthy,
-            };
-        }
-
-        #[expect(clippy::cast_possible_truncation, reason = "Acceptable")]
-        let failure_rate = (f64::from(decision_failures) / f64::from(decision_total)) as f32;
-
-        Self {
-            counts,
-            failure_rate,
-            status: if failure_rate >= failure_threshold && decision_total >= min_throughput {
-                HealthStatus::Unhealthy
-            } else {
-                HealthStatus::Healthy
-            },
-        }
-    }
 }
 
 /// Pre-configured builder that creates `HealthMetrics` instances with consistent settings.
@@ -120,11 +90,9 @@ impl HealthMetricsBuilder {
     }
 
     pub(crate) fn build(&self) -> HealthMetrics {
-        HealthMetrics::with_policy(
+        HealthMetrics::new(
             self.sampling_duration,
-            self.failure_threshold,
-            self.min_throughput,
-            self.abandoned_policy.clone(),
+            HealthEvaluator::new(self.failure_threshold, self.min_throughput, self.abandoned_policy.clone()),
         )
     }
 }
@@ -135,25 +103,16 @@ pub(crate) struct HealthMetrics {
     sampling_duration: Duration,
     window_duration: Duration,
     windows: VecDeque<Window>,
-    failure_threshold: f32,
-    min_throughput: u32,
-    abandoned_policy: AbandonedPolicy,
+    evaluator: HealthEvaluator,
 }
 
 impl HealthMetrics {
-    #[cfg(test)]
-    fn new(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32) -> Self {
-        Self::with_policy(sampling_duration, failure_threshold, min_throughput, AbandonedPolicy::default())
-    }
-
-    fn with_policy(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32, abandoned_policy: AbandonedPolicy) -> Self {
+    fn new(sampling_duration: Duration, evaluator: HealthEvaluator) -> Self {
         Self {
             sampling_duration,
             window_duration: sampling_duration / WINDOW_COUNT,
             windows: VecDeque::with_capacity(WINDOW_COUNT as usize),
-            failure_threshold,
-            min_throughput,
-            abandoned_policy,
+            evaluator,
         }
     }
 
@@ -189,7 +148,7 @@ impl HealthMetrics {
             counts.merge(w.counts);
         }
 
-        HealthInfo::new(counts, self.failure_threshold, self.min_throughput, &self.abandoned_policy)
+        self.evaluator.evaluate(counts)
     }
 }
 
@@ -214,7 +173,6 @@ impl Window {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
-#[expect(clippy::float_cmp, reason = "simpler tests")]
 mod tests {
     use super::*;
 
@@ -225,8 +183,6 @@ mod tests {
 
         assert_eq!(metrics.sampling_duration, Duration::from_secs(10));
         assert_eq!(metrics.window_duration, Duration::from_secs(1));
-        assert_eq!(metrics.failure_threshold, 0.5);
-        assert_eq!(metrics.min_throughput, 5);
 
         // small sampling duration is clamped
         let builder = HealthMetricsBuilder::new(Duration::from_millis(500), 0.5, 5, AbandonedPolicy::default());
@@ -236,36 +192,34 @@ mod tests {
 
     #[test]
     fn record_when_empty() {
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default()).build();
         let start = Instant::now();
         metrics.record(ExecutionResult::Success, start);
         let info = metrics.health_info();
 
         assert_eq!(info.counts.total(), 1);
-        assert_eq!(info.failure_rate, 0.0);
+        assert_eq!(info.status, HealthStatus::Healthy);
     }
 
     #[test]
     fn create_health_info_healthy_when_not_throughput() {
-        let metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
+        let metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default()).build();
 
         let info = metrics.health_info();
 
         assert_eq!(info.counts.total(), 0);
-        assert_eq!(info.failure_rate, 0.0);
         assert_eq!(info.status, HealthStatus::Healthy);
     }
 
     #[test]
     fn record_twice() {
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 2, AbandonedPolicy::default()).build();
         let start = Instant::now();
         metrics.record(ExecutionResult::Success, start);
         metrics.record(ExecutionResult::Failure, start);
         let info = metrics.health_info();
 
         assert_eq!(info.counts.total(), 2);
-        assert_eq!(info.failure_rate, 0.5);
         assert_eq!(info.status, HealthStatus::Unhealthy);
     }
 
@@ -275,29 +229,27 @@ mod tests {
 
         // No conclusive results recorded: abandoned executions are considered and can make the
         // circuit unhealthy.
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 2, AbandonedPolicy::default()).build();
         metrics.record(ExecutionResult::Abandoned, start);
         metrics.record(ExecutionResult::Abandoned, start);
         let info = metrics.health_info();
         assert_eq!(info.counts.total(), 2);
-        assert_eq!(info.failure_rate, 1.0);
         assert_eq!(info.status, HealthStatus::Unhealthy);
 
         // With at least one success, abandoned executions are ignored.
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 2);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 2, AbandonedPolicy::default()).build();
         metrics.record(ExecutionResult::Success, start);
         metrics.record(ExecutionResult::Abandoned, start);
         metrics.record(ExecutionResult::Abandoned, start);
         let info = metrics.health_info();
         assert_eq!(info.counts.total(), 3);
         assert_eq!(info.counts.abandoned, 2);
-        assert_eq!(info.failure_rate, 0.0);
         assert_eq!(info.status, HealthStatus::Healthy);
     }
 
     #[test]
     fn record_ensure_old_window_discarded() {
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default()).build();
         let start = Instant::now();
         metrics.record(ExecutionResult::Success, start);
 
@@ -307,12 +259,12 @@ mod tests {
         let info = metrics.health_info();
 
         assert_eq!(info.counts.total(), 1);
-        assert_eq!(info.failure_rate, 0.0);
+        assert_eq!(info.status, HealthStatus::Healthy);
     }
 
     #[test]
     fn new_ensure_initialized_properly() {
-        let metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
+        let metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default()).build();
         assert_eq!(metrics.sampling_duration, Duration::from_secs(10));
         assert_eq!(metrics.window_duration, Duration::from_secs(1));
         assert!(metrics.windows.is_empty());
@@ -320,7 +272,7 @@ mod tests {
 
     #[test]
     fn ensure_multiple_windows_created() {
-        let mut metrics = HealthMetrics::new(Duration::from_secs(10), 0.5, 5);
+        let mut metrics = HealthMetricsBuilder::new(Duration::from_secs(10), 0.5, 5, AbandonedPolicy::default()).build();
         let start = Instant::now();
         for i in 0..30 {
             let now = start + Duration::from_millis(i * 100);
@@ -341,156 +293,6 @@ mod tests {
 
         assert_eq!(metrics.windows.len(), 2);
         assert_eq!(info.counts.total(), 11);
-        assert_eq!(info.failure_rate, 0.0);
-    }
-
-    mod health_info_create_tests {
-        use super::*;
-
-        #[test]
-        fn zero_throughput_is_healthy() {
-            let info = HealthInfo::new(ExecutionInfo::new(0, 0, 0), 0.5, 10, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.failure_rate, info.status),
-                (0, 0.0, HealthStatus::Healthy)
-            );
-        }
-
-        #[test]
-        fn only_successes_is_healthy() {
-            let info = HealthInfo::new(ExecutionInfo::new(10, 0, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.failure_rate, info.status),
-                (10, 0.0, HealthStatus::Healthy)
-            );
-        }
-
-        #[test]
-        fn only_failures_above_threshold_is_unhealthy() {
-            let info = HealthInfo::new(ExecutionInfo::new(0, 10, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.failure_rate, info.status),
-                (10, 1.0, HealthStatus::Unhealthy)
-            );
-        }
-
-        #[test]
-        fn failure_threshold_boundaries() {
-            // At threshold
-            let info = HealthInfo::new(ExecutionInfo::new(5, 5, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.status, HealthStatus::Unhealthy);
-
-            // Below threshold
-            let info = HealthInfo::new(ExecutionInfo::new(6, 4, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.status, HealthStatus::Healthy);
-        }
-
-        #[test]
-        fn min_throughput_boundaries() {
-            // Below min throughput - healthy despite high failure rate
-            let info = HealthInfo::new(ExecutionInfo::new(0, 3, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.status, HealthStatus::Healthy);
-
-            // At min throughput - unhealthy with high failure rate
-            let info = HealthInfo::new(ExecutionInfo::new(1, 4, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.status, HealthStatus::Unhealthy);
-        }
-
-        #[test]
-        fn edge_cases() {
-            // Saturating add
-            let info = HealthInfo::new(ExecutionInfo::new(u32::MAX, 1, 0), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.counts.total(), u32::MAX);
-
-            // Zero threshold
-            let info = HealthInfo::new(ExecutionInfo::new(1, 1, 0), 0.0, 0, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(info.status, HealthStatus::Unhealthy);
-        }
-
-        #[test]
-        fn abandoned_considered_only_when_all_executions_abandoned() {
-            // No conclusive results at all: abandoned executions count as failures and can open the
-            // circuit. This is the single degenerate case where abandonment drives the decision.
-            let info = HealthInfo::new(ExecutionInfo::new(0, 0, 5), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (5, 5, 1.0, HealthStatus::Unhealthy)
-            );
-        }
-
-        #[test]
-        fn abandoned_ignored_when_there_are_successes() {
-            // At least one success: abandoned executions are tracked and counted towards throughput,
-            // but do not contribute to the failure rate.
-            let info = HealthInfo::new(ExecutionInfo::new(10, 0, 100), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (110, 100, 0.0, HealthStatus::Healthy)
-            );
-        }
-
-        #[test]
-        fn abandoned_ignored_when_failures_present() {
-            // Once there is at least one conclusive result (here a failure), abandoned executions are
-            // ignored entirely and the decision is made purely on successes/failures. The two real
-            // failures are below the minimum throughput, so the circuit stays healthy even though the
-            // abandoned executions would otherwise have pushed the total over the threshold.
-            let info = HealthInfo::new(ExecutionInfo::new(0, 2, 3), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (5, 3, 1.0, HealthStatus::Healthy)
-            );
-
-            // With enough real failures to meet the minimum throughput, the abandoned executions are
-            // still ignored but the real failures alone open the circuit.
-            let info = HealthInfo::new(ExecutionInfo::new(0, 5, 3), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (8, 3, 1.0, HealthStatus::Unhealthy)
-            );
-        }
-
-        #[test]
-        fn abandoned_does_not_dilute_real_failures() {
-            // A flood of abandoned executions must not mask a genuine burst of failures: with
-            // successes present the decision is made on successes/failures only, excluding the
-            // abandoned executions from the denominator.
-            let info = HealthInfo::new(ExecutionInfo::new(1, 9, 100), 0.5, 5, &AbandonedPolicy::when_all_abandoned());
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (110, 100, 0.9, HealthStatus::Unhealthy)
-            );
-        }
-
-        #[test]
-        fn ignore_policy_never_opens_from_abandoned() {
-            let policy = AbandonedPolicy::ignore();
-
-            // Every execution abandoned: ignored entirely, so the circuit stays healthy.
-            let info = HealthInfo::new(ExecutionInfo::new(0, 0, 100), 0.5, 5, &policy);
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (100, 100, 0.0, HealthStatus::Healthy)
-            );
-
-            // Abandoned executions are excluded from the decision denominator entirely.
-            let info = HealthInfo::new(ExecutionInfo::new(2, 2, 100), 0.5, 5, &policy);
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (104, 100, 0.5, HealthStatus::Healthy)
-            );
-        }
-
-        #[test]
-        fn as_failures_policy_counts_abandoned_as_failures() {
-            let policy = AbandonedPolicy::as_failures();
-
-            // Abandoned executions count towards both the numerator and the denominator.
-            let info = HealthInfo::new(ExecutionInfo::new(2, 0, 8), 0.5, 5, &policy);
-            assert_eq!(
-                (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-                (10, 8, 0.8, HealthStatus::Unhealthy)
-            );
-        }
+        assert_eq!(info.status, HealthStatus::Healthy);
     }
 }
