@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::ops::ControlFlow::{self, Break, Continue};
+
 use super::abandoned_policy::Mode;
 use super::{AbandonedPolicy, ExecutionInfo, HealthInfo, HealthStatus};
 
@@ -27,16 +29,6 @@ impl HealthEvaluator {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn failure_threshold(&self) -> f32 {
-        self.failure_threshold
-    }
-
-    #[cfg(test)]
-    pub(crate) fn min_throughput(&self) -> u32 {
-        self.min_throughput
-    }
-
     /// Evaluates the health verdict for the given execution counts.
     ///
     /// Abandoned executions (entered but never exited, e.g. a dropped/cancelled future) are always
@@ -44,62 +36,50 @@ impl HealthEvaluator {
     /// contribute to the failure rate and minimum-throughput check is decided by [`Self::decision`]
     /// according to the configured [`AbandonedPolicy`].
     pub(crate) fn evaluate(&self, counts: ExecutionInfo) -> HealthInfo {
-        let (decision_failures, decision_total) = self.decision(counts);
-
-        if decision_total == 0 {
+        // not enough data to make decision
+        if counts.total() == 0 {
             return HealthInfo {
                 counts,
-                failure_rate: 0.0,
                 status: HealthStatus::Healthy,
             };
         }
 
-        #[expect(clippy::cast_possible_truncation, reason = "Acceptable")]
-        let failure_rate = (f64::from(decision_failures) / f64::from(decision_total)) as f32;
-
-        let status = if failure_rate >= self.failure_threshold && decision_total >= self.min_throughput {
-            HealthStatus::Unhealthy
-        } else {
-            HealthStatus::Healthy
-        };
-
-        HealthInfo {
-            counts,
-            failure_rate,
-            status,
+        match self.evaluate_core(counts) {
+            Continue((decision_failures, decision_total)) => HealthInfo {
+                counts,
+                status: evaluate_threshold(decision_failures, decision_total, self.min_throughput, self.failure_threshold),
+            },
+            Break(status) => HealthInfo { counts, status },
         }
     }
 
-    /// Derives the `(failures, total)` pair that the failure rate and minimum-throughput check are
-    /// evaluated against, folding abandoned executions in according to the configured policy.
-    ///
-    /// The returned total may deliberately differ from [`ExecutionInfo::total`], which always
-    /// includes abandoned executions for the reported throughput.
-    fn decision(&self, counts: ExecutionInfo) -> (u32, u32) {
+    fn evaluate_core(&self, counts: ExecutionInfo) -> ControlFlow<HealthStatus, (u32, u32)> {
         match self.abandoned_policy.mode() {
-            Mode::Ignore => (counts.failed, counts.succeeded.saturating_add(counts.failed)),
-            Mode::AsFailures => (counts.failed.saturating_add(counts.abandoned), counts.total()),
-            Mode::AbandonRateThreshold(threshold) => Self::rate_threshold_decision(counts, threshold),
+            Mode::Ignore => ControlFlow::Continue((counts.failed, counts.succeeded.saturating_add(counts.failed))),
+            Mode::AsFailures => ControlFlow::Continue((counts.failed.saturating_add(counts.abandoned), counts.total())),
+            Mode::AbandonRateThreshold(threshold) => {
+                match evaluate_threshold(counts.abandoned, counts.total(), self.min_throughput, threshold) {
+                    HealthStatus::Healthy => ControlFlow::Continue((counts.failed, counts.succeeded.saturating_add(counts.failed))),
+                    // if we evaluate as unhealthy, we break early with the unhealthy status
+                    HealthStatus::Unhealthy => ControlFlow::Break(HealthStatus::Unhealthy),
+                }
+            }
         }
     }
+}
 
-    /// Decision logic for the abandon-rate based rule.
-    ///
-    /// When the abandon rate (`abandoned / total`) reaches `threshold`, abandoned executions are
-    /// counted as failures over the full throughput; otherwise they are excluded from the decision
-    /// entirely and only successes and failures are considered.
-    fn rate_threshold_decision(counts: ExecutionInfo, threshold: f32) -> (u32, u32) {
-        let total = counts.total();
-        if total == 0 {
-            return (0, 0);
-        }
+#[expect(clippy::cast_possible_truncation, reason = "Acceptable")]
+fn evaluate_threshold(failures: u32, total: u32, min_throughput: u32, failure_threshold: f32) -> HealthStatus {
+    if total == 0 || total < min_throughput {
+        return HealthStatus::Healthy;
+    }
 
-        let abandon_rate = f64::from(counts.abandoned) / f64::from(total);
-        if abandon_rate >= f64::from(threshold) {
-            (counts.failed.saturating_add(counts.abandoned), total)
-        } else {
-            (counts.failed, counts.succeeded.saturating_add(counts.failed))
-        }
+    let failure_rate = (f64::from(failures) / f64::from(total)) as f32;
+
+    if failure_rate >= failure_threshold {
+        HealthStatus::Unhealthy
+    } else {
+        HealthStatus::Healthy
     }
 }
 
@@ -112,35 +92,26 @@ mod tests {
         HealthEvaluator::new(failure_threshold, min_throughput, policy).evaluate(counts)
     }
 
-    fn decision(counts: ExecutionInfo, policy: AbandonedPolicy) -> (u32, u32) {
-        HealthEvaluator::new(0.5, 5, policy).decision(counts)
+    fn decision(counts: ExecutionInfo, policy: AbandonedPolicy) -> ControlFlow<HealthStatus, (u32, u32)> {
+        HealthEvaluator::new(0.5, 5, policy).evaluate_core(counts)
     }
 
     #[test]
     fn zero_throughput_is_healthy() {
         let info = evaluate(ExecutionInfo::new(0, 0, 0), 0.5, 10, AbandonedPolicy::when_all_abandoned());
-        assert_eq!(
-            (info.counts.total(), info.failure_rate, info.status),
-            (0, 0.0, HealthStatus::Healthy)
-        );
+        assert_eq!((info.counts.total(), info.status), (0, HealthStatus::Healthy));
     }
 
     #[test]
     fn only_successes_is_healthy() {
         let info = evaluate(ExecutionInfo::new(10, 0, 0), 0.5, 5, AbandonedPolicy::when_all_abandoned());
-        assert_eq!(
-            (info.counts.total(), info.failure_rate, info.status),
-            (10, 0.0, HealthStatus::Healthy)
-        );
+        assert_eq!((info.counts.total(), info.status), (10, HealthStatus::Healthy));
     }
 
     #[test]
     fn only_failures_above_threshold_is_unhealthy() {
         let info = evaluate(ExecutionInfo::new(0, 10, 0), 0.5, 5, AbandonedPolicy::when_all_abandoned());
-        assert_eq!(
-            (info.counts.total(), info.failure_rate, info.status),
-            (10, 1.0, HealthStatus::Unhealthy)
-        );
+        assert_eq!((info.counts.total(), info.status), (10, HealthStatus::Unhealthy));
     }
 
     #[test]
@@ -182,8 +153,8 @@ mod tests {
         // circuit. This is the single degenerate case where abandonment drives the decision.
         let info = evaluate(ExecutionInfo::new(0, 0, 5), 0.5, 5, AbandonedPolicy::when_all_abandoned());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (5, 5, 1.0, HealthStatus::Unhealthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (5, 5, HealthStatus::Unhealthy)
         );
     }
 
@@ -193,8 +164,8 @@ mod tests {
         // but do not contribute to the failure rate.
         let info = evaluate(ExecutionInfo::new(10, 0, 100), 0.5, 5, AbandonedPolicy::when_all_abandoned());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (110, 100, 0.0, HealthStatus::Healthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (110, 100, HealthStatus::Healthy)
         );
     }
 
@@ -206,16 +177,16 @@ mod tests {
         // abandoned executions would otherwise have pushed the total over the threshold.
         let info = evaluate(ExecutionInfo::new(0, 2, 3), 0.5, 5, AbandonedPolicy::when_all_abandoned());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (5, 3, 1.0, HealthStatus::Healthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (5, 3, HealthStatus::Healthy)
         );
 
         // With enough real failures to meet the minimum throughput, the abandoned executions are
         // still ignored but the real failures alone open the circuit.
         let info = evaluate(ExecutionInfo::new(0, 5, 3), 0.5, 5, AbandonedPolicy::when_all_abandoned());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (8, 3, 1.0, HealthStatus::Unhealthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (8, 3, HealthStatus::Unhealthy)
         );
     }
 
@@ -226,8 +197,8 @@ mod tests {
         // abandoned executions from the denominator.
         let info = evaluate(ExecutionInfo::new(1, 9, 100), 0.5, 5, AbandonedPolicy::when_all_abandoned());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (110, 100, 0.9, HealthStatus::Unhealthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (110, 100, HealthStatus::Unhealthy)
         );
     }
 
@@ -238,15 +209,15 @@ mod tests {
         // Every execution abandoned: ignored entirely, so the circuit stays healthy.
         let info = evaluate(ExecutionInfo::new(0, 0, 100), 0.5, 5, policy.clone());
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (100, 100, 0.0, HealthStatus::Healthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (100, 100, HealthStatus::Healthy)
         );
 
         // Abandoned executions are excluded from the decision denominator entirely.
         let info = evaluate(ExecutionInfo::new(2, 2, 100), 0.5, 5, policy);
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (104, 100, 0.5, HealthStatus::Healthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (104, 100, HealthStatus::Healthy)
         );
     }
 
@@ -257,49 +228,59 @@ mod tests {
         // Abandoned executions count towards both the numerator and the denominator.
         let info = evaluate(ExecutionInfo::new(2, 0, 8), 0.5, 5, policy);
         assert_eq!(
-            (info.counts.total(), info.counts.abandoned, info.failure_rate, info.status),
-            (10, 8, 0.8, HealthStatus::Unhealthy)
+            (info.counts.total(), info.counts.abandoned, info.status),
+            (10, 8, HealthStatus::Unhealthy)
         );
     }
 
     #[test]
     fn decision_ignore_excludes_abandoned() {
         let policy = AbandonedPolicy::ignore();
-        assert_eq!(decision(ExecutionInfo::new(5, 1, 10), policy.clone()), (1, 6));
+        assert_eq!(decision(ExecutionInfo::new(5, 1, 10), policy.clone()), Continue((1, 6)));
         // Every execution abandoned: nothing conclusive, so the decision total is zero.
-        assert_eq!(decision(ExecutionInfo::new(0, 0, 10), policy), (0, 0));
+        assert_eq!(decision(ExecutionInfo::new(0, 0, 10), policy), Continue((0, 0)));
     }
 
     #[test]
     fn decision_when_all_abandoned_considers_abandoned_only_when_all_abandoned() {
         let policy = AbandonedPolicy::when_all_abandoned();
-        assert_eq!(decision(ExecutionInfo::new(0, 0, 10), policy.clone()), (10, 10));
-        assert_eq!(decision(ExecutionInfo::new(1, 0, 10), policy.clone()), (0, 1));
-        assert_eq!(decision(ExecutionInfo::new(0, 2, 10), policy), (2, 2));
+        // Every execution abandoned: the abandon rate reaches the threshold and short-circuits to
+        // unhealthy.
+        assert_eq!(
+            decision(ExecutionInfo::new(0, 0, 10), policy.clone()),
+            Break(HealthStatus::Unhealthy)
+        );
+        // With any conclusive result the abandon rate is below the threshold, so abandoned are
+        // excluded from the decision.
+        assert_eq!(decision(ExecutionInfo::new(1, 0, 10), policy.clone()), Continue((0, 1)));
+        assert_eq!(decision(ExecutionInfo::new(0, 2, 10), policy), Continue((2, 2)));
     }
 
     #[test]
     fn decision_rate_threshold_counts_abandoned_when_rate_reached() {
         let policy = AbandonedPolicy::abandon_rate_threshold(0.5);
-        // 70% abandoned: at or above the threshold, abandoned count as failures over the full total.
-        assert_eq!(decision(ExecutionInfo::new(2, 1, 7), policy.clone()), (8, 10));
-        // Exactly at the threshold (50% abandoned): abandoned still count as failures.
-        assert_eq!(decision(ExecutionInfo::new(3, 2, 5), policy), (7, 10));
+        // 70% abandoned: at or above the threshold, the decision short-circuits to unhealthy.
+        assert_eq!(
+            decision(ExecutionInfo::new(2, 1, 7), policy.clone()),
+            Break(HealthStatus::Unhealthy)
+        );
+        // Exactly at the threshold (50% abandoned): still unhealthy.
+        assert_eq!(decision(ExecutionInfo::new(3, 2, 5), policy), Break(HealthStatus::Unhealthy));
     }
 
     #[test]
     fn decision_rate_threshold_ignores_abandoned_below_rate() {
         let policy = AbandonedPolicy::abandon_rate_threshold(0.5);
         // 10% abandoned: below the threshold, abandoned are excluded from the decision entirely.
-        assert_eq!(decision(ExecutionInfo::new(5, 4, 1), policy.clone()), (4, 9));
+        assert_eq!(decision(ExecutionInfo::new(5, 4, 1), policy.clone()), Continue((4, 9)));
         // No executions at all: nothing conclusive.
-        assert_eq!(decision(ExecutionInfo::new(0, 0, 0), policy), (0, 0));
+        assert_eq!(decision(ExecutionInfo::new(0, 0, 0), policy), Continue((0, 0)));
     }
 
     #[test]
     fn decision_as_failures_always_counts_abandoned() {
         let policy = AbandonedPolicy::as_failures();
-        assert_eq!(decision(ExecutionInfo::new(5, 1, 10), policy.clone()), (11, 16));
-        assert_eq!(decision(ExecutionInfo::new(0, 0, 10), policy), (10, 10));
+        assert_eq!(decision(ExecutionInfo::new(5, 1, 10), policy.clone()), Continue((11, 16)));
+        assert_eq!(decision(ExecutionInfo::new(0, 0, 10), policy), Continue((10, 10)));
     }
 }
