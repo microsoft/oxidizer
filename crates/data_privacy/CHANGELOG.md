@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.2] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.1` of `data_privacy_core`
+  - Now requires `0.10.2` of `data_privacy_macros`
+  - Now requires `0.10.2` of `data_privacy_macros_impl`
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.93 and adopt new stdlib helpers ([#474](https://github.com/microsoft/oxidizer/pull/474))
+
 ## [0.12.1] - 2026-06-10
 
 - 🔧 Maintenance

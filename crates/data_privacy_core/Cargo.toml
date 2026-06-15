@@ -4,7 +4,7 @@
 [package]
 name = "data_privacy_core"
 description = "Core data classification types and traits for the data_privacy ecosystem."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["oxidizer", "compliance", "privacy", "classification"]
 categories = ["data-structures"]

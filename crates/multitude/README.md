@@ -384,89 +384,89 @@ existing `_arc` slice methods).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbL7eM_c-g_FIbcvUKD8Z1WTMbdKENvBr-UV8bFzF5ShZNBethZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMS4xgmhieXRlc2J1ZmUwLjUuM4JpbXVsdGl0dWRlZTAuMS4zgmh6ZXJvY29weWYwLjguNTA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbL7eM_c-g_FIbcvUKD8Z1WTMbdKENvBr-UV8bFzF5ShZNBethZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMS4xgmhieXRlc2J1ZmUwLjUuNIJpbXVsdGl0dWRlZTAuMi4wgmh6ZXJvY29weWYwLjguNTA
  [__link0]: https://crates.io/crates/bumpalo
- [__link1]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link10]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec
+ [__link1]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link10]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec
  [__link11]: https://crates.io/crates/dst-factory
- [__link12]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::format
- [__link13]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::ArcUtf16Str
- [__link14]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::BoxUtf16Str
- [__link15]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::Utf16String
- [__link16]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::format_utf16
- [__link17]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link18]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link19]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena
- [__link2]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
+ [__link12]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::format
+ [__link13]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::ArcUtf16Str
+ [__link14]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::BoxUtf16Str
+ [__link15]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::Utf16String
+ [__link16]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::format_utf16
+ [__link17]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link18]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link19]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena
+ [__link2]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
  [__link20]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link21]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link22]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link23]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link24]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
+ [__link21]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link22]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link23]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link24]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
  [__link25]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
- [__link26]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec
- [__link27]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
+ [__link26]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec
+ [__link27]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String
  [__link28]: https://crates.io/crates/allocator-api2
- [__link29]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
- [__link3]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link30]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec
- [__link31]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String::into_arena_box_str
- [__link32]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link33]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec::into_arena_box
- [__link34]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
+ [__link29]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String
+ [__link3]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link30]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec
+ [__link31]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String::into_arena_box_str
+ [__link32]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link33]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec::into_arena_box
+ [__link34]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
  [__link35]: https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md
  [__link36]: https://crates.io/crates/bumpalo
- [__link37]: https://docs.rs/multitude/0.1.3/multitude/strings/index.html
- [__link38]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link39]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::ArcUtf16Str
- [__link4]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link40]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link41]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::BoxUtf16Str
- [__link42]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena
- [__link43]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
- [__link44]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::Utf16String
- [__link45]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::format
- [__link46]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::format_utf16
- [__link47]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
- [__link48]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String::into_arena_box_str
- [__link49]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link5]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link50]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::Utf16String
- [__link51]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::Utf16String::into_arena_box_utf16_str
- [__link52]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::BoxUtf16Str
- [__link53]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link54]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena
- [__link55]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::alloc_dst_arc
- [__link56]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::alloc_dst_box
+ [__link37]: https://docs.rs/multitude/0.2.0/multitude/strings/index.html
+ [__link38]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link39]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::ArcUtf16Str
+ [__link4]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link40]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link41]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::BoxUtf16Str
+ [__link42]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena
+ [__link43]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String
+ [__link44]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::Utf16String
+ [__link45]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::format
+ [__link46]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::format_utf16
+ [__link47]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String
+ [__link48]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String::into_arena_box_str
+ [__link49]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link5]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link50]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::Utf16String
+ [__link51]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::Utf16String::into_arena_box_utf16_str
+ [__link52]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::BoxUtf16Str
+ [__link53]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link54]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena
+ [__link55]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::alloc_dst_arc
+ [__link56]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::alloc_dst_box
  [__link57]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout
  [__link58]: https://crates.io/crates/dst-factory
  [__link59]: https://doc.rust-lang.org/stable/std/?search=io::Write
- [__link6]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link60]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec
- [__link61]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link62]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link63]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
- [__link64]: https://docs.rs/multitude/0.1.3/multitude/?search=vec::Vec
- [__link65]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::alloc_dst_arc
- [__link66]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::alloc_dst_box
- [__link67]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::ArcUtf16Str
- [__link68]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::BoxUtf16Str
- [__link69]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::Utf16String
- [__link7]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link70]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::format_utf16
+ [__link6]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link60]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec
+ [__link61]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link62]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link63]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String
+ [__link64]: https://docs.rs/multitude/0.2.0/multitude/?search=vec::Vec
+ [__link65]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::alloc_dst_arc
+ [__link66]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::alloc_dst_box
+ [__link67]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::ArcUtf16Str
+ [__link68]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::BoxUtf16Str
+ [__link69]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::Utf16String
+ [__link7]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link70]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::format_utf16
  [__link71]: https://crates.io/crates/widestring
- [__link72]: https://docs.rs/multitude/0.1.3/multitude/?search=zerocopy::ZerocopyView
+ [__link72]: https://docs.rs/multitude/0.2.0/multitude/?search=zerocopy::ZerocopyView
  [__link73]: https://docs.rs/zerocopy/0.8.50/zerocopy/?search=FromZeros
- [__link74]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::zerocopy
- [__link75]: https://docs.rs/multitude/0.1.3/multitude/?search=bytemuck::BytemuckView
+ [__link74]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::zerocopy
+ [__link75]: https://docs.rs/multitude/0.2.0/multitude/?search=bytemuck::BytemuckView
  [__link76]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
- [__link77]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena::bytemuck
+ [__link77]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena::bytemuck
  [__link78]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
- [__link79]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
- [__link8]: https://docs.rs/multitude/0.1.3/multitude/?search=Box
- [__link80]: https://docs.rs/multitude/0.1.3/multitude/?search=Arc
+ [__link79]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
+ [__link8]: https://docs.rs/multitude/0.2.0/multitude/?search=Box
+ [__link80]: https://docs.rs/multitude/0.2.0/multitude/?search=Arc
  [__link81]: https://docs.rs/bytes/1.11.1/bytes/?search=Bytes
- [__link82]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=mem::Memory
- [__link83]: https://docs.rs/multitude/0.1.3/multitude/?search=Arena
- [__link84]: https://docs.rs/bytesbuf/0.5.3/bytesbuf/?search=BytesBuf
- [__link9]: https://docs.rs/multitude/0.1.3/multitude/?search=strings::String
+ [__link82]: https://docs.rs/bytesbuf/0.5.4/bytesbuf/?search=mem::Memory
+ [__link83]: https://docs.rs/multitude/0.2.0/multitude/?search=Arena
+ [__link84]: https://docs.rs/bytesbuf/0.5.4/bytesbuf/?search=BytesBuf
+ [__link9]: https://docs.rs/multitude/0.2.0/multitude/?search=strings::String

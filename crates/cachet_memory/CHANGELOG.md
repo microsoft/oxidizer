@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.5] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.4` of `cachet_tier`
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.1.6` of `recoverable`
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+
 ## [0.3.4] - 2026-06-05
 
 - 🔧 Maintenance

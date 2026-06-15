@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+
 ## [0.2.2] - 2026-06-04
 
 - 🔧 Maintenance
