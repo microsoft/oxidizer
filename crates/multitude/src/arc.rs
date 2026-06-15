@@ -187,8 +187,9 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
 }
 
 impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
-    /// Convert a slice handle of `MaybeUninit<T>` whose elements are
-    /// now initialized into a slice handle of `T`. O(1).
+    /// Convert an initialized `Arc<[MaybeUninit<T>]>` into an `Arc<[T]>`.
+    ///
+    /// O(1) — reinterprets the existing handle in place.
     ///
     /// # Safety
     ///
@@ -344,9 +345,9 @@ where
     A: Send + Sync,
 {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable
-    /// [`Arc<[T], A>`](crate::Arc). See [`Vec::into_arena_arc`](crate::vec::Vec::into_arena_arc).
+    /// [`Arc<[T], A>`](crate::Arc). Mirrors `std`'s `From<Vec<T>> for Arc<[T]>`.
     #[inline]
     fn from(v: Vec<'a, T, A>) -> Self {
-        v.into_arena_arc()
+        v.freeze_into_arc()
     }
 }

@@ -25,11 +25,11 @@
 #[macro_export]
 macro_rules! __multitude_vec {
     (in $arena:expr) => {
-        $crate::vec::Vec::new_in($arena)
+        $crate::Arena::alloc_vec($arena)
     };
     (in $arena:expr; $elem:expr; $n:expr) => {{
         let __multitude_n: ::core::primitive::usize = $n;
-        let mut __multitude_buf = $crate::vec::Vec::with_capacity_in(__multitude_n, $arena);
+        let mut __multitude_buf = $crate::Arena::alloc_vec_with_capacity($arena, __multitude_n);
         __multitude_buf.resize(__multitude_n, $elem);
         __multitude_buf
     }};

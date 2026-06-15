@@ -14,7 +14,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Create an empty vector backed by `arena`. No allocation until the first push.
     #[inline]
     #[must_use]
-    pub const fn new_in(arena: &'a Arena<A>) -> Self {
+    pub(crate) const fn new_in(arena: &'a Arena<A>) -> Self {
         Self::from_buf(ArenaBuf::new(), arena)
     }
 
@@ -25,7 +25,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_with_capacity_in`] for a fallible variant.
     #[must_use]
-    pub fn with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Self {
+    pub(crate) fn with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Self {
         (Self::try_with_capacity_in(cap, arena)).expect_alloc()
     }
 
@@ -35,7 +35,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data
     /// alignment is at least 32 KiB.
-    pub fn try_with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Result<Self, AllocError> {
+    pub(crate) fn try_with_capacity_in(cap: usize, arena: &'a Arena<A>) -> Result<Self, AllocError> {
         let mut v = Self::new_in(arena);
         if cap > 0 {
             v.try_grow_to(cap)?;
@@ -178,9 +178,13 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         T: Copy,
     {
         let src = other.as_ref();
-        let needed = self.buf.len().checked_add(src.len()).ok_or(AllocError)?;
-        if needed > self.buf.cap() {
-            self.try_grow_to(grow_target(self.buf.cap(), needed))?;
+        let cap = self.buf.cap();
+        let len = self.buf.len();
+        // `len <= cap` is a Vec invariant, so this subtraction never underflows
+        // and avoids the `checked_add` overflow guard on the hot fast path.
+        if cap - len < src.len() {
+            let needed = len.checked_add(src.len()).ok_or(AllocError)?;
+            self.try_grow_to(grow_target(cap, needed))?;
         }
         self.buf.extend_copy(src);
         Ok(())
@@ -214,6 +218,14 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     #[allow(clippy::needless_pass_by_ref_mut, reason = "API shape mirrors std::Vec::as_mut_ptr")]
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         self.buf.as_mut_ptr()
+    }
+
+    /// Returns the remaining spare capacity of the vector as a slice of
+    /// `MaybeUninit<T>`. Mirrors [`std::vec::Vec::spare_capacity_mut`].
+    #[must_use]
+    #[inline]
+    pub fn spare_capacity_mut(&mut self) -> &mut [core::mem::MaybeUninit<T>] {
+        self.buf.spare_capacity_mut()
     }
 }
 

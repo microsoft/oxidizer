@@ -14,6 +14,28 @@ use multitude::{Arc, Arena, Box};
 fn assert_send<T: Send>() {}
 fn assert_sync<T: Sync>() {}
 
+// Compile-time `!Send` / `!Sync` assertions via the two-blanket-impl
+// ambiguity trick: `probe` resolves unambiguously only when the type does
+// *not* implement the trait. If it does, both blanket impls apply and the
+// call fails to compile — exactly the regression we want to catch.
+trait AmbiguousIfSend<A> {
+    fn probe() {}
+}
+impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+impl<T: ?Sized + Send> AmbiguousIfSend<u8> for T {}
+fn assert_not_send<T: ?Sized>() {
+    let _ = <T as AmbiguousIfSend<_>>::probe;
+}
+
+trait AmbiguousIfSync<A> {
+    fn probe() {}
+}
+impl<T: ?Sized> AmbiguousIfSync<()> for T {}
+impl<T: ?Sized + Sync> AmbiguousIfSync<u8> for T {}
+fn assert_not_sync<T: ?Sized>() {
+    let _ = <T as AmbiguousIfSync<_>>::probe;
+}
+
 #[test]
 fn arena_is_send() {
     // `Arena: Send` is intended to be auto-derived from its fields.
@@ -87,4 +109,22 @@ fn box_str_is_send_sync() {
 fn arc_str_is_send_sync() {
     assert_send::<Arc<str>>();
     assert_sync::<Arc<str>>();
+}
+
+#[test]
+fn drain_and_splice_are_not_send_or_sync() {
+    // `Vec` is thread-affine (`!Send`/`!Sync`): its `drain`/`splice`
+    // iterators borrow it mutably and restore the surviving tail in `Drop`.
+    // They must inherit that `!Send`/`!Sync` — otherwise a live `Drain`
+    // could migrate to another thread and run the in-place tail restore
+    // from a foreign thread, which is unsound. The `PhantomData<&'d mut
+    // Vec<..>>` marker locks this in; this test fails to compile if a future
+    // refactor accidentally makes either iterator `Send`/`Sync`.
+    use allocator_api2::alloc::Global;
+    use multitude::vec::{Drain, Splice};
+
+    assert_not_send::<Drain<'static, 'static, u64, Global>>();
+    assert_not_sync::<Drain<'static, 'static, u64, Global>>();
+    assert_not_send::<Splice<'static, 'static, core::iter::Empty<u64>, Global>>();
+    assert_not_sync::<Splice<'static, 'static, core::iter::Empty<u64>, Global>>();
 }

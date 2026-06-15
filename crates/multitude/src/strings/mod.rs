@@ -3,15 +3,11 @@
 
 //! Arena-backed string builders and frozen string handles.
 //!
-//! [`String`] builds UTF-8 strings that can be frozen into
-//! [`Arc<str>`](crate::Arc) or [`Box<str>`](crate::Box) — both 8-byte
-//! thin smart pointers with `Deref<Target = str>` and string-flavored
-//! impls (`PartialEq<str>`, `Serialize`, `From<Arc<str>> for Arc<[u8]>`,
-//! etc.). With `utf16`, the crate also exposes the parallel UTF-16
-//! types ([`ArcUtf16Str`], [`BoxUtf16Str`], [`Utf16String`]) and
-//! `format_utf16!`.
+//! [`String`] builds UTF-8 strings in an arena, while the optional
+//! [`Utf16String`] type supports UTF-16.
 
 mod format_macro;
+mod from_utf16_error;
 mod str_impls;
 mod string;
 mod string_common;
@@ -34,10 +30,11 @@ pub use arc_utf16_str::ArcUtf16Str;
 #[cfg(feature = "utf16")]
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 pub use box_utf16_str::BoxUtf16Str;
-pub use string::String;
+pub use from_utf16_error::FromUtf16Error;
+pub use string::{Drain, String};
 #[cfg(feature = "utf16")]
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
-pub use utf16_string::Utf16String;
+pub use utf16_string::{Utf16Drain, Utf16String};
 
 #[doc(inline)]
 pub use crate::__multitude_format as format;

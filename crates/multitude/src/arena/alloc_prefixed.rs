@@ -24,6 +24,7 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use super::Arena;
 use super::alloc_value::acquire_shared_chunk_ref;
 use crate::internal::chunk_ref::ChunkRef;
+use crate::internal::drop_entry::DropEntry;
 
 /// Byte size of the inline element-count prefix written immediately
 /// before every prefixed-shared payload.
@@ -49,8 +50,8 @@ pub(crate) fn worst_case_thin_slice_payload<T>(len: usize) -> usize {
         // worst-case align-up at the front of the reservation).
         .saturating_add(elem_align);
     if mem::needs_drop::<T>() {
-        base.saturating_add(mem::size_of::<crate::internal::drop_entry::DropEntry>())
-            .saturating_add(mem::align_of::<crate::internal::drop_entry::DropEntry>())
+        base.saturating_add(mem::size_of::<DropEntry>())
+            .saturating_add(mem::align_of::<DropEntry>())
     } else {
         base
     }
@@ -87,12 +88,10 @@ impl<A: Allocator + Clone> Arena<A> {
             // payload (at offset PREFIX_BYTES, a multiple of any align
             // ≤ usize's) ends up naturally aligned for `T` reads/writes.
             if let Some((uninit, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, elem_align) {
-                let chunk_ref: ChunkRef<A> = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref: ChunkRef<A> = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let payload = write_prefixed_payload::<T>(uninit.as_non_null(), src);
                 // Hand the +1 over to the caller's smart pointer.
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(len.saturating_mul(elem_size));
                 return Ok(payload);
             }
             if self.is_oversized_shared(total) {
@@ -103,8 +102,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     let chunk_ref: ChunkRef<A> = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     let payload = write_prefixed_payload::<T>(base.as_non_null(), src);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(len.saturating_mul(elem_size));
                     payload
                 });
             }

@@ -593,3 +593,10 @@ deterministically
 dereferences
 honour
 MPSC
+precomputed
+u32
+2^30
+~2^30
+POV
+lossy
+unrounded
