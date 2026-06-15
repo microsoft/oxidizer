@@ -6,7 +6,7 @@ use syn::Fields;
 
 use crate::field_attrs::{FieldAttrCfg, is_phantom_data, parse_field_attrs};
 
-pub fn build_struct_body(_name: &syn::Ident, fields: &Fields, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
+pub(crate) fn build_struct_body(_name: &syn::Ident, fields: &Fields, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
     Ok(match fields {
         Fields::Named(named) => {
             let mut stmts = Vec::new();

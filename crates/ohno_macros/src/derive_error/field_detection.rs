@@ -10,7 +10,7 @@ const NO_ERROR_FIELD: &str = "No field marked with `#[error]` found and no OhnoC
 const MULTIPLE_ERROR_FIELDS: &str = "Multiple OhnoCore fields found. Please mark the desired field with `#[error]` to disambiguate";
 
 /// Find the field marked with `#[error]` or auto-detect `OhnoCore` field
-pub fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
+pub(crate) fn find_error_field(input: &DeriveInput) -> Result<ErrorFieldRef> {
     let Data::Struct(data_struct) = &input.data else {
         bail!("Error derive only supports structs");
     };
@@ -91,7 +91,7 @@ fn has_error_attribute(field: &syn::Field) -> bool {
 }
 
 /// Check if a type is `OhnoCore` or a variant of it
-pub fn is_inner_error_type(ty: &Type) -> bool {
+pub(crate) fn is_inner_error_type(ty: &Type) -> bool {
     let Type::Path(TypePath { path, .. }) = ty else {
         return false;
     };

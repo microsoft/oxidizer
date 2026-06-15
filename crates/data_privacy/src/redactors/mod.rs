@@ -11,7 +11,7 @@ pub mod rapidhash_redactor;
 
 #[cfg(any(feature = "xxh3", feature = "rapidhash"))]
 #[inline]
-pub fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
+pub(crate) fn u64_to_hex_array<const N: usize>(mut value: u64) -> [u8; N] {
     const HEX_LOWER_CHARS: &[u8; 16] = b"0123456789abcdef";
 
     let mut buffer = [0u8; N];

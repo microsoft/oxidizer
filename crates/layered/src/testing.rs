@@ -16,7 +16,7 @@ pub(crate) struct MockService {
 
 impl MockService {
     #[must_use]
-    pub fn new(poll_ready_response: Poll<Result<(), String>>, call_response: Result<String, String>) -> Self {
+    pub(crate) fn new(poll_ready_response: Poll<Result<(), String>>, call_response: Result<String, String>) -> Self {
         Self {
             poll_ready_response,
             call_response,

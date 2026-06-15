@@ -11,7 +11,7 @@ use crate::closure::ErasedClosureOnce;
 ///
 /// For `ThreadAware` types, the function clones and calls `relocate()`.
 /// For non-`ThreadAware` types, it just clones (ignoring source/destination).
-pub type DataFn<T> = fn(&T, Option<Affinity>, Affinity) -> Box<T>;
+pub(crate) type DataFn<T> = fn(&T, Option<Affinity>, Affinity) -> Box<T>;
 
 pub(crate) enum Factory<T: ?Sized> {
     /// An external closure was provided to create the data.

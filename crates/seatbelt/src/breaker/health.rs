@@ -26,7 +26,7 @@ pub(crate) struct HealthInfo {
 }
 
 impl HealthInfo {
-    pub fn new(successes: u32, failures: u32, failure_threshold: f32, min_throughput: u32) -> Self {
+    pub(crate) fn new(successes: u32, failures: u32, failure_threshold: f32, min_throughput: u32) -> Self {
         let throughput = successes.saturating_add(failures);
 
         if throughput == 0 {
@@ -55,7 +55,7 @@ impl HealthInfo {
         not(any(feature = "logs", test)),
         expect(dead_code, reason = "trying to avoid dead code here leads to too much conditionals")
     )]
-    pub fn throughput(&self) -> u32 {
+    pub(crate) fn throughput(&self) -> u32 {
         self.throughput
     }
 
@@ -63,11 +63,11 @@ impl HealthInfo {
         not(any(feature = "logs", test)),
         expect(dead_code, reason = "trying to avoid dead code here leads to too much conditionals")
     )]
-    pub fn failure_rate(&self) -> f32 {
+    pub(crate) fn failure_rate(&self) -> f32 {
         self.failure_rate
     }
 
-    pub fn status(&self) -> HealthStatus {
+    pub(crate) fn status(&self) -> HealthStatus {
         self.health_status
     }
 }
@@ -81,7 +81,7 @@ pub(crate) struct HealthMetricsBuilder {
 }
 
 impl HealthMetricsBuilder {
-    pub fn new(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32) -> Self {
+    pub(crate) fn new(sampling_duration: Duration, failure_threshold: f32, min_throughput: u32) -> Self {
         Self {
             sampling_duration: sampling_duration.max(MIN_SAMPLING_DURATION),
             failure_threshold,
@@ -89,7 +89,7 @@ impl HealthMetricsBuilder {
         }
     }
 
-    pub fn build(&self) -> HealthMetrics {
+    pub(crate) fn build(&self) -> HealthMetrics {
         HealthMetrics::new(self.sampling_duration, self.failure_threshold, self.min_throughput)
     }
 }
@@ -115,7 +115,7 @@ impl HealthMetrics {
         }
     }
 
-    pub fn record(&mut self, result: ExecutionResult, now: Instant) {
+    pub(crate) fn record(&mut self, result: ExecutionResult, now: Instant) {
         // Remove old windows
         while self
             .windows
@@ -137,7 +137,7 @@ impl HealthMetrics {
         }
     }
 
-    pub fn health_info(&self) -> HealthInfo {
+    pub(crate) fn health_info(&self) -> HealthInfo {
         let mut successes = 0_u32;
         let mut failures = 0_u32;
 

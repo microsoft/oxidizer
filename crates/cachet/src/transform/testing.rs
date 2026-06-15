@@ -25,7 +25,7 @@ use crate::{Codec, Encoder, Error};
 /// // A codec that always returns a soft failure
 /// let codec = MockCodec::<i32>::soft_failure("version mismatch");
 /// ```
-pub struct MockCodec<T> {
+pub(crate) struct MockCodec<T> {
     soft_failure: Option<&'static str>,
     _phantom: PhantomData<T>,
 }
@@ -33,7 +33,7 @@ pub struct MockCodec<T> {
 impl<T> MockCodec<T> {
     /// Creates a mock codec that decodes successfully (returns the value as-is).
     #[must_use]
-    pub fn value() -> Self {
+    pub(crate) fn value() -> Self {
         Self {
             soft_failure: None,
             _phantom: PhantomData,
@@ -42,7 +42,7 @@ impl<T> MockCodec<T> {
 
     /// Creates a mock codec that always returns [`DecodeOutcome::SoftFailure`] with the given reason.
     #[must_use]
-    pub fn soft_failure(reason: &'static str) -> Self {
+    pub(crate) fn soft_failure(reason: &'static str) -> Self {
         Self {
             soft_failure: Some(reason),
             _phantom: PhantomData,

@@ -47,7 +47,7 @@ impl From<BackoffOptions> for DelayBackoff {
 }
 
 impl DelayBackoff {
-    pub fn delays(&self) -> impl Iterator<Item = Duration> {
+    pub(crate) fn delays(&self) -> impl Iterator<Item = Duration> {
         DelaysIter {
             props: self.0.clone(),
             attempt: 0,

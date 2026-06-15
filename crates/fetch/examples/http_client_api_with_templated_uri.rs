@@ -20,7 +20,7 @@ mod api {
 
     type Result<T, E = ohno::AppError> = std::result::Result<T, E>;
 
-    pub struct CratesClient {
+    pub(crate) struct CratesClient {
         client: HttpClient,
     }
 
@@ -43,31 +43,31 @@ mod api {
             Ok(result)
         }
 
-        pub async fn get_crate(&self, crate_name: EscapedString) -> Result<CrateResponse> {
+        pub(crate) async fn get_crate(&self, crate_name: EscapedString) -> Result<CrateResponse> {
             let api_endpoint = CratesApi::get_crate(crate_name);
             self.fetch(api_endpoint).await
         }
 
-        pub async fn search_crates(&self, query: EscapedString) -> Result<CratesResponse> {
+        pub(crate) async fn search_crates(&self, query: EscapedString) -> Result<CratesResponse> {
             let search_url = CratesApi::search_crates(query);
             self.fetch(search_url).await
         }
     }
 
     #[derive(serde::Deserialize, Debug)]
-    pub struct CrateResponse {
+    pub(crate) struct CrateResponse {
         #[serde(rename = "crate")]
         pub model: Crate,
     }
 
     #[derive(serde::Deserialize, Debug)]
-    pub struct CratesResponse {
+    pub(crate) struct CratesResponse {
         #[serde(rename = "crates")]
         pub crates: Vec<Crate>,
     }
 
     #[derive(serde::Deserialize, Debug)]
-    pub struct Crate {
+    pub(crate) struct Crate {
         pub name: String,
         pub downloads: u64,
         pub description: String,

@@ -259,12 +259,12 @@ mod tests {
     }
 
     #[test]
-    pub fn assert_send() {
+    pub(crate) fn assert_send() {
         static_assertions::assert_impl_all!(Json<String> : Send);
     }
 
     #[test]
-    pub fn smoke_test() {
+    pub(crate) fn smoke_test() {
         let json = json!({
             "name": "John",
             "surname": "Doe"
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_read_owned() {
+    pub(crate) fn test_read_owned() {
         let json = json!({
             "name": "Jane",
             "surname": "Smith"
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_read_then_read_owned() {
+    pub(crate) fn test_read_then_read_owned() {
         let json = json!({
             "name": "Jane",
             "surname": "Smith"
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_escaped_json() {
+    pub(crate) fn test_escaped_json() {
         let json = json!({
             "name": "Jane",
             "surname": "\"Smith\"",
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_escaped_fails() {
+    pub(crate) fn test_escaped_fails() {
         let json = json!({
             "name": "Jane",
             "surname": "\"Smith\"",

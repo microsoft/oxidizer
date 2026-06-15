@@ -52,11 +52,11 @@ struct ConnectionZeroCounter {
 }
 
 impl ConnectionZeroCounter {
-    pub const fn new(connection: Connection) -> Self {
+    pub(crate) const fn new(connection: Connection) -> Self {
         Self { connection, zero_count: 0 }
     }
 
-    pub fn write(&mut self, message: BytesView) {
+    pub(crate) fn write(&mut self, message: BytesView) {
         // Cloning a BytesView is a cheap zero-copy operation,
         self.count_zeros(message.clone());
 
@@ -71,7 +71,7 @@ impl ConnectionZeroCounter {
         }
     }
 
-    pub const fn zero_count(&self) -> u64 {
+    pub(crate) const fn zero_count(&self) -> u64 {
         self.zero_count
     }
 }

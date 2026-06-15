@@ -72,7 +72,7 @@ struct VecBlock {
 }
 
 impl VecBlock {
-    pub const fn new(inner: Vec<u8>) -> Self {
+    pub(crate) const fn new(inner: Vec<u8>) -> Self {
         Self {
             _inner: inner,
             ref_count: AtomicUsize::new(1),

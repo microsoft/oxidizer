@@ -48,7 +48,7 @@ impl Default for MetricTester {
 
 impl MetricTester {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let in_memory = InMemoryMetricExporter::default();
 
         Self {
@@ -58,17 +58,17 @@ impl MetricTester {
     }
 
     #[must_use]
-    pub fn meter_provider(&self) -> &SdkMeterProvider {
+    pub(crate) fn meter_provider(&self) -> &SdkMeterProvider {
         &self.provider
     }
 
     #[must_use]
-    pub fn collect_attributes(&self) -> Vec<KeyValue> {
+    pub(crate) fn collect_attributes(&self) -> Vec<KeyValue> {
         self.provider.force_flush().unwrap();
         collect_attributes(&self.exporter)
     }
 
-    pub fn assert_attributes(&self, key_values: &[KeyValue], expected_length: Option<usize>) {
+    pub(crate) fn assert_attributes(&self, key_values: &[KeyValue], expected_length: Option<usize>) {
         let attributes = self.collect_attributes();
 
         if let Some(expected_length) = expected_length {
@@ -152,7 +152,7 @@ pub(crate) struct LogCapture {
 
 impl LogCapture {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             buffer: Arc::new(Mutex::new(Vec::new())),
         }
@@ -160,12 +160,12 @@ impl LogCapture {
 
     /// Returns the captured log output as a string.
     #[must_use]
-    pub fn output(&self) -> String {
+    pub(crate) fn output(&self) -> String {
         String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
     }
 
     /// Asserts that the captured log output contains the given string.
-    pub fn assert_contains(&self, expected: &str) {
+    pub(crate) fn assert_contains(&self, expected: &str) {
         let output = self.output();
         assert!(
             output.contains(expected),
@@ -176,7 +176,7 @@ impl LogCapture {
     /// Creates a `tracing_subscriber` that writes to this capture buffer.
     /// Use with `set_default()` for thread-local capture.
     #[must_use]
-    pub fn subscriber(&self) -> impl tracing::Subscriber {
+    pub(crate) fn subscriber(&self) -> impl tracing::Subscriber {
         use tracing_subscriber::layer::SubscriberExt;
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
     }
