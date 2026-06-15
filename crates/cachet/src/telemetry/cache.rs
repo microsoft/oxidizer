@@ -505,46 +505,12 @@ mod tests {
         assert!(capture.output().is_empty());
     }
 
-    #[test]
-    fn logging_enabled_without_subscriber_is_noop() {
-        // logging_enabled=true and we install a *discarding* tracing subscriber
-        // on this thread. The production behaviour we care about is that
-        // cachet's tracing emission paths don't panic, even when the
-        // subscriber does nothing with the events.
-        //
-        // We *cannot* run this with no subscriber at all, because doing so
-        // poisons the global `tracing` callsite-interest cache for parallel
-        // tests in the same binary. When this thread first hits a
-        // `tracing::error!` / `tracing::info!` callsite with no thread-local
-        // default, `tracing-core` takes its "just one dispatcher" fast path
-        // (`Dispatchers::has_just_one` is true whenever the registered
-        // dispatcher count is <=1, including 0) and invokes
-        // `get_default(register_callsite)` on THIS thread. With no default
-        // installed, that resolves to the `NoSubscriber` fallback, whose
-        // `register_callsite` returns `Interest::never()`. That decision is
-        // then cached process-wide, silently suppressing those events on
-        // every other thread for the rest of the test binary's lifetime --
-        // which manifested as a flaky `every_helper_emits_its_event`
-        // (assertion failures on `cache.get_error` / `cache.insert_rejected`
-        // with an empty capture buffer). Installing any real subscriber on
-        // this thread keeps the callsite cached as enabled while still
-        // exercising the dispatch path of the `record_*` helpers.
-        let capture = LogCapture::new();
-        let _guard = tracing::subscriber::set_default(subscriber(&capture));
-
-        let telemetry = CacheTelemetry::with_logging();
-        let request_id = next_request_id();
-        futures::executor::block_on(
-            async {
-                telemetry.record_hit("c", Duration::ZERO, false);
-                telemetry.record_get_error("c", Duration::ZERO, false);
-                telemetry.record_insert_rejected("c", false);
-                telemetry.complete_operation(request_id, "c", "cache.get", Duration::ZERO, true);
-            }
-            .with_request_id(request_id),
-        );
-        // No panic = all emission paths handled gracefully.
-    }
+    // NOTE: a previous `logging_enabled_without_subscriber_is_noop` unit test
+    // lived here, exercising the cachet tracing emission paths with no
+    // subscriber installed. It caused a process-wide flake -- see
+    // `crates/cachet/tests/no_subscriber.rs` for the test (relocated to its
+    // own integration-test binary) and the comment there for the
+    // tracing-core `Interest::never` poisoning rationale.
 
     #[cfg_attr(miri, ignore)]
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
