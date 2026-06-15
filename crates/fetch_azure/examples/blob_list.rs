@@ -5,7 +5,7 @@
 //! an `anyspawn`/`tick`-backed [`Runtime`] as the credential executor.
 //!
 //! Set `AZURE_STORAGE_SERVICE_ENDPOINT` (and sign in with `az`/`azd`), then run:
-//! `cargo run --example blob_list --features azure-identity`
+//! `cargo run -p fetch_azure --example blob_list`
 
 use std::env;
 use std::sync::Arc;

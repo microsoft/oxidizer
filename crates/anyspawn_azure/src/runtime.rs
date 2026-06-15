@@ -3,7 +3,6 @@
 
 //! The [`Runtime`] async-runtime adapter.
 
-use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -83,8 +82,30 @@ impl AsyncRuntime for Runtime {
     }
 
     fn yield_now(&self) -> TaskFuture {
-        std::thread::yield_now();
-        Box::pin(ready(()))
+        Box::pin(YieldNow { yielded: false })
+    }
+}
+
+/// A future that yields to the async scheduler exactly once before completing.
+///
+/// Unlike an immediately-ready future, this returns [`Poll::Pending`] on its
+/// first poll (waking itself), so the awaiting task actually yields control to
+/// the executor before resuming.
+struct YieldNow {
+    yielded: bool,
+}
+
+impl Future for YieldNow {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        if self.yielded {
+            Poll::Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }
 
