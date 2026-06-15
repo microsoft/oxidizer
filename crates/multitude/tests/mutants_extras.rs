@@ -5,7 +5,6 @@
 
 mod common;
 
-// === merged from tests/mutants_kill.rs ===
 mod mutants_for_kill {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std for thread/sync primitives")]
@@ -32,14 +31,6 @@ mod mutants_for_kill {
     // A. Trait-impl mutants: hash forwarders and Pointer formatter.
     // --------------------------------------------------------------------
 
-    /// Kills `crates/multitude/src/arc.rs:282: replace <Arc as Hash>::hash with ()`.
-    ///
-    /// If `Arc::hash` were a no-op, every key would hash to the hasher's
-    /// initial state and the `HashMap` lookup would still find the value
-    /// for any *equal* key (because `HashMap` uses `Eq` after the bucket
-    /// hit). To distinguish, we hash the key directly with a single-shot
-    /// hasher and assert the produced hash is not the empty-stream hash —
-    /// i.e. that `hash` actually fed bytes to the hasher.
     // --------------------------------------------------------------------
     // B/I. Builder defaults / preallocation paths / resolve_capacity.
     // --------------------------------------------------------------------
@@ -69,11 +60,6 @@ mod mutants_for_kill {
         }
     }
 
-    /// Kills mutants in `try_alloc_inner_arc_with` and
-    /// `try_alloc_inner_arc_oversized_with`:
-    /// `arena.rs:670 + → *`, `681 > → >=`, `700 > → ==/>=`,
-    /// `703 + → -/*` (multiple), and the oversized arc path's
-    /// `1185 match-guard` and `1201 OversizedSharedGuard::drop`.
     #[test]
     fn many_drop_typed_arc_allocs_run_drop_exactly_once_each() {
         let counter = StdArc::new(AtomicUsize::new(0));
@@ -91,16 +77,6 @@ mod mutants_for_kill {
         assert_eq!(counter.load(Ordering::Relaxed), 256);
     }
 
-    /// Kills the oversized-value match-guard mutant
-    /// `arena.rs:849: replace match guard e <= cap.saturating_sub(entry_size)
-    /// with true` and the analogous oversized-value paths
-    /// (`1098`, `1185`), plus the large-alignment portion of
-    /// `try_alloc_inner_*` `+entry_size` calculations.
-    ///
-    /// The test allocates a `T` whose size exceeds the default
-    /// `max_normal_alloc` (16 KiB) and whose alignment is non-trivial
-    /// (64 bytes). This forces the oversized one-shot path, where the
-    /// match guard is the only post-alignment fit check.
     #[test]
     fn oversized_drop_typed_alloc_runs_drop_and_respects_alignment() {
         #[repr(align(64))]
@@ -150,15 +126,6 @@ mod mutants_for_kill {
     // H. align_offset — exercised transitively via oversized aligned alloc.
     // --------------------------------------------------------------------
 
-    /// Kills `crates/multitude/src/arena.rs:5206: replace align_offset ->
-    /// Option<usize> with Some(0)`.
-    ///
-    /// If `align_offset` always returned `Some(0)`, the oversized path
-    /// would treat any chunk's payload base as already aligned for `T`.
-    /// For non-aligned bases (chunk payloads start right after the
-    /// `SharedChunk`/`LocalChunk` header, which is 64-byte aligned but
-    /// not necessarily 128-byte aligned), a `T` with align 128 would
-    /// land off-alignment and our `% 128` assertion would catch it.
     #[test]
     fn oversized_high_alignment_drives_align_offset() {
         #[repr(align(128))]
@@ -180,22 +147,6 @@ mod mutants_for_kill {
     // D. try_bump_fit boundary mutant.
     // --------------------------------------------------------------------
 
-    /// Kills `crates/multitude/src/arena.rs:5192: replace > with >= in
-    /// try_bump_fit` and the analogous comparisons in
-    /// `try_alloc_slice_local_no_drop_with_slow:2432`,
-    /// `try_alloc_slice_local_copy_slow:2527`, and
-    /// `try_alloc_slice_shared_with:2651`.
-    ///
-    /// `try_bump_fit` returns `None` for `aligned > max_aligned`. The
-    /// mutation `>` → `>=` rejects `aligned == max_aligned` (the
-    /// perfect-fit case). We hit this exact equality by running enough
-    /// allocations to exhaust whole chunks at minimum class (512 B), then
-    /// asking for a properly aligned u64 payload that fits exactly. We
-    /// can't guarantee a perfect equality on every host, but a high
-    /// volume of distinct alignment + size combos forces the boundary on
-    /// many of them — the test asserts every read-back value is correct,
-    /// so any spurious reject + retry that picked a wrong cursor would
-    /// surface as a wrong read or a panic.
     #[test]
     fn many_distinct_size_and_align_combinations_succeed() {
         let arena = Arena::new();
@@ -229,16 +180,6 @@ mod mutants_for_kill {
     // D/E. allocate_layout `+` arithmetic.
     // --------------------------------------------------------------------
 
-    /// Kills `crates/multitude/src/arena.rs:1598: replace + with - in
-    /// Arena::allocate_layout`.
-    ///
-    /// `allocate_layout` is the SimpleRef-flavor entry that backs
-    /// `arena.alloc_string_with_capacity` / `alloc_vec_with_capacity`.
-    /// The `+` is the `needed = size + align.saturating_sub(_)` calc on
-    /// the refill path. With `-` the subtraction may underflow (in
-    /// release: wrap to a huge `needed` → refill fails → `AllocError` →
-    /// panic in `panic_alloc`). We force the refill path by allocating
-    /// a vec with non-trivial alignment that fills more than one chunk.
     #[test]
     fn vec_with_alignment_grows_across_chunks() {
         let arena = Arena::new();
@@ -263,9 +204,6 @@ mod mutants_for_kill {
     // D/E/F. Slice paths — local and shared, with and without Drop.
     // --------------------------------------------------------------------
 
-    /// Kills the no-drop slice fast-path slow-tail mutants
-    /// `arena.rs:2432 > → ==/>=` and `2527 > → ==/>=` by exhausting the
-    /// fast-path bump space and forcing the slow refill path repeatedly.
     #[test]
     fn many_copy_slices_force_slow_refill() {
         let arena = Arena::new();
@@ -285,15 +223,6 @@ mod mutants_for_kill {
     // Misc: confirm the && operator in the oversized-value flavor gate.
     // --------------------------------------------------------------------
 
-    /// Kills `crates/multitude/src/arena.rs:1072: replace && with || in
-    /// Arena::try_alloc_inner_oversized_value`.
-    ///
-    /// The expression is `needs_drop::<T>() && !matches!(flavor, Box)`.
-    /// With `||` the `entry_size` is reserved for `Box` flavor too, which
-    /// then writes a drop entry the Box flavor never expects (it runs
-    /// `drop_in_place` directly). The result is either a double-drop or
-    /// a corrupted oversized chunk teardown. We exercise the oversized
-    /// Box path with a Drop-needing payload and assert exactly one Drop.
     #[test]
     fn oversized_box_drop_runs_exactly_once() {
         #[repr(align(64))]
@@ -315,7 +244,6 @@ mod mutants_for_kill {
     }
 }
 
-// === merged from tests/mutants_kill2.rs ===
 mod mutants_for_kill2 {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -354,17 +282,6 @@ mod mutants_for_kill2 {
     // constants.rs mutants
     // ============================================================
 
-    /// Kills `constants.rs:77:34 - -> +` and `- -> /` in `min_class_for_bytes`.
-    ///
-    /// Line 77 returns `NUM_CHUNK_CLASSES - 1` (= 7) for `bytes >=
-    /// MAX_CHUNK_BYTES`. Mutated `+` returns 9; mutated `/` returns 8.
-    /// Both are out-of-range class indices.
-    ///
-    /// In all *publicly reachable* call sites the return value is clamped
-    /// by a subsequent `.min(NUM_CHUNK_CLASSES - 1)`. We document this
-    /// as EQUIVALENT — see `MUTANTS_EQUIVALENT.md` — and rely on the
-    /// constants.rs:76 / 87 tests above to bound the function's range.
-
     // ============================================================
     // drop_list.rs mutants — PAD_BYTES via mem::size_of::<DropEntry>
     // ============================================================
@@ -384,143 +301,14 @@ mod mutants_for_kill2 {
     // arena_builder.rs mutants
     // ============================================================
 
-    /// Kills `arena_builder.rs:174:80 - -> +` and `- -> /` in
-    /// `resolve_capacity`.
-    ///
-    /// The expression `min_class_for_bytes(capacity).min(NUM_CHUNK_CLASSES - 1)`
-    /// clamps the class to the top valid index. Mutated:
-    ///   `+` -> `.min(NUM_CHUNK_CLASSES + 1)` = `.min(9)`, no effective clamp;
-    ///   `/` -> `.min(NUM_CHUNK_CLASSES / 1)` = `.min(8)`, no effective clamp.
-    ///
-    /// For inputs where `min_class_for_bytes` returns a value > 7, the
-    /// unmutated clamp pins to 7 (64 KiB) while the mutated code returns
-    /// the larger class -> `class_to_bytes(c)` debug-asserts -> panic.
-    ///
-    /// `min_class_for_bytes` itself saturates at 7 (constants.rs line 77),
-    /// so this only kills if `min_class_for_bytes` is *also* mutated to
-    /// not saturate (covered by `min_class_at_max_chunk_bytes_stays_in_range`).
-    /// As an independent witness here, we exercise capacity == 65537:
-    /// orig path: min_class returns 7, .min(7) = 7. Both clamps produce
-    /// 7 too. Hence this mutation is killed *only* in combination with
-    /// already-killing the constants.rs mutants — we document this
-    /// reliance in MUTANTS_EQUIVALENT.md.
-    ///
-    /// However there is still an observable: the second `min` argument
-    /// is `NUM_CHUNK_CLASSES - 1`. If this becomes `+ 1` (= 9) and we
-    /// somehow reached a `min_class_for_bytes` of 8 or 9 (it can't, in
-    /// the unmutated callee), no behaviour change. So the mutation is
-    /// effectively benign UNLESS the callee changes. Mark as
-    /// EQUIVALENT (see MUTANTS_EQUIVALENT.md).
-
     // ============================================================
     // chunk_provider.rs mutants
     // ============================================================
-
-    /// Kills `chunk_provider.rs:152:9 release_budget -> ()` more directly
-    /// by forcing the allocator to fail on a fresh chunk. We use a
-    /// `byte_budget` that admits a normal chunk but route the value
-    /// through the **oversized** allocator (size > max_normal_alloc),
-    /// which calls `acquire_local` with `min_payload > max_normal_alloc`.
-    /// That path's failure-rollback (line 171/415) calls
-    /// `release_budget(total_bytes)` if `LocalChunk::allocate` fails.
-    ///
-    /// We can't easily make the system allocator fail. Instead, we
-    /// observe the symmetric path: budget rejection (line 244/394). If
-    /// the budget is exhausted, allocations return Err; subsequent
-    /// drop-and-reallocate must succeed (because the dropped chunk's
-    /// release_budget was called). This is the same observable as
-    /// `release_budget_frees_accounted_bytes`; we accept the indirect
-    /// witness here.
-
-    /// Kills `chunk_provider.rs:187:43 - -> +` and `- -> /` in
-    /// `acquire_local`. Line 187: `let max_class = NUM_CHUNK_CLASSES - 1`.
-    ///
-    /// Mutated `+` -> max_class=9; `/` -> max_class=8. Both shift the
-    /// class ceiling above the legal range. The subsequent `min(max_class)`
-    /// of `req_class.max(high_water)` could then permit
-    /// `target_class = 8` or `9`, and `class_to_bytes(target_class)`
-    /// debug-asserts -> panic.
-    ///
-    /// To force `req_class.max(high_water) > 7` we need
-    /// `high_water > 7`, which can't happen organically. But `req_class`
-    /// from `min_class_for_bytes(min_payload >= 65536)` returns 7
-    /// (unmutated). Hmm — `target_class = req_class.max(hw).min(max_class)`:
-    /// with `req_class=7, hw=0, max_class=7`: 7. Mutated max_class=8 or 9
-    /// still produces 7. No observable difference.
-    ///
-    /// HOWEVER: in `next_high_water = target_class.saturating_add(1)
-    /// .min(NUM_CHUNK_CLASSES-1).min(max_class)`. Unmutated:
-    /// `.min(7).min(7) = 7`. Mutated: `.min(7).min(8 or 9) = 7`. Still 7.
-    ///
-    /// We cannot easily observe this in isolation; the saturating add
-    /// already caps at 8 which the second `.min(NUM_CHUNK_CLASSES-1)`
-    /// pins to 7. EQUIVALENT — documented in MUTANTS_EQUIVALENT.md.
-
-    /// Kills `chunk_provider.rs:254:84 - -> +` and `- -> /` in
-    /// `acquire_local`. Line 254: `next_high_water = target_class.saturating_add(1)
-    /// .min(NUM_CHUNK_CLASSES - 1).min(max_class)`. Column 84 is the
-    /// first `.min(NUM_CHUNK_CLASSES - 1)`.
-    ///
-    /// Unmutated: `.min(7)` clamps target_class+1 to 7 -> next_high_water
-    /// stays at 7 when target_class=7. Mutated `+`: `.min(9)` -> would
-    /// allow next_high_water=8 -> then `.min(max_class=7)` clamps to 7.
-    /// Same outcome. Mutated `/`: `.min(8)` -> next_high_water=8 ->
-    /// `.min(7) = 7`. Same. EQUIVALENT.
-
-    /// Kills `chunk_provider.rs:258:36 > -> >=` in `acquire_local`.
-    /// Line 258: `if next_high_water > *h { *h = next_high_water; }`.
-    ///
-    /// Mutated `>=` writes even when equal — observable only as a
-    /// redundant store with no behavioural change. EQUIVALENT.
-
-    /// Kills `chunk_provider.rs:300:33 > -> ==/<>=`, in `preallocate_local`.
-    /// Line 300: `if target_class > *h { *h = target_class; }`. Same
-    /// idempotency story as 258 — but here we can force a difference.
-    ///
-    /// Sequence: build with a smaller `with_capacity_local` first
-    /// (preallocate sets the initial high-water class), then a second
-    /// builder call... actually `with_capacity_local` is the only knob.
-    /// The user-visible high-water effect is observed indirectly via
-    /// follow-up chunk sizing.
-    ///
-    /// `target_class > *h` ensures the ratchet only writes when the new
-    /// class is strictly larger. Mutated `==`: only writes on equality,
-    /// so a larger class doesn't update. Mutated `<`: writes only on
-    /// smaller. Mutated `>=`: equal also writes (idempotent).
-    ///
-    /// Observable: preallocate_local is called once per builder chunk.
-    /// With a request for capacity covering 2 chunks (e.g., 96 KiB ->
-    /// 2 chunks of 64 KiB), the first preallocate sets h=7, the second
-    /// would already see h=7. So all four mutations behave identically
-    /// per-call. EQUIVALENT in this context.
-
-    /// Kills `chunk_provider.rs:424:43 - -> +` and `- -> /` in
-    /// `acquire_shared`. Same pattern as 187:43 — `NUM_CHUNK_CLASSES - 1`
-    /// for `max_class`. Same EQUIVALENT argument.
-
-    /// Kills `chunk_provider.rs:452:84 - -> +` and `- -> /` in
-    /// `acquire_shared`. Mirror of 254:84. EQUIVALENT.
 
     // ============================================================
     // arena.rs mutants
     // ============================================================
 
-    /// Documents `arena.rs:329:9` — `Arena::builder` constructs the builder
-    /// via the crate-internal `ArenaBuilder::new()`.
-    ///
-    /// `ArenaBuilder` no longer implements `Default` (its only construction
-    /// path is `Arena::builder` / `builder_in`), so the former
-    /// `from(Default::default())` mutation is no longer generated. EQUIVALENT.
-
-    /// Kills `arena.rs:698:76 + -> *` in `try_alloc_inner_arc_with`.
-    /// Line 698: `let count = (*chunk.as_ptr()).drop_count.get() + 1;`.
-    /// Mutated `*`: count = get() * 1 = get() (unchanged). Each
-    /// successful Arc<Drop> allocation should bump drop_count by 1;
-    /// mutated never bumps it. Replay-on-teardown iterates drop_count
-    /// entries; if drop_count stays 0, none of the Drops run.
-    ///
-    /// Test: allocate N Arc<DropCounter> in a single shared chunk, drop
-    /// them all, then drop the arena. Counter must equal N.
     #[test]
     fn arc_drop_count_increments_on_each_alloc() {
         let counter = StdArc::new(AtomicUsize::new(0));
@@ -536,16 +324,6 @@ mod mutants_for_kill2 {
         assert_eq!(counter.load(Ordering::Relaxed), 64);
     }
 
-    /// Kills `arena.rs:709:35 > -> >=` in `try_alloc_inner_arc_with`.
-    /// Line 709 is `if entry_size > 0`. With `>=`, the branch fires
-    /// unconditionally (entry_size is usize). For `T: !Drop` (entry_size
-    /// = 0), the mutated code would write a drop entry at an invalid
-    /// `new_drop_back_addr` slot — corrupting memory.
-    ///
-    /// Test: Allocate Arc<u32> (T: !Drop) many times so the alloc paths
-    /// are exercised; subsequent allocations and reads must succeed.
-    /// Saturate one chunk with a few large uninit fillers so we reach
-    /// the chunk's refill boundary with a small probe burst.
     #[test]
     fn arc_with_non_drop_t_does_not_install_drop_entry() {
         const N: u32 = 64;
@@ -562,23 +340,6 @@ mod mutants_for_kill2 {
         }
     }
 
-    /// Kills `arena.rs:731:104 + -> *` and `731:40 + -> -` in
-    /// `try_alloc_inner_arc_with`. Line 731 computes:
-    /// `let needed = layout.size() + layout.align().saturating_sub(...) + entry_size`.
-    /// Col 40 = first +, col 104 = second +.
-    ///
-    /// `+ -> *` at col 104: needed = `(size + align_slack) * entry_size`.
-    /// For T: !Drop (entry_size=0): needed = 0. refill_shared(0) succeeds
-    /// trivially, but the next loop iteration's fast-path still tries
-    /// `size` bytes — fails -> infinite loop / 4-retry exhaustion ->
-    /// AllocError.
-    ///
-    /// `+ -> -` at col 40: needed = `size - align_slack + entry_size`.
-    /// For typical align <= align_of::<usize>(), align_slack = 0, so
-    /// no difference. We deliberately use a high-alignment type to
-    /// make align_slack non-zero.
-    ///
-    /// Use `Arc<T>` where T has alignment > align_of::<usize>() = 8.
     #[test]
     fn arc_with_high_align_uses_correct_needed_size() {
         #[repr(align(64))]
@@ -594,24 +355,6 @@ mod mutants_for_kill2 {
         }
     }
 
-    /// Kills `arena.rs:899:24`, `1148:24`, `1235:24` —
-    /// `match guard e <= cap.saturating_sub(entry_size) with true`.
-    ///
-    /// In the oversized one-shot paths, `acquire_local`/`acquire_shared`
-    /// guarantees `cap >= needed = size + align_slack + entry_size`. The
-    /// `align_offset` always yields `aligned <= align_slack`, so
-    /// `aligned + size <= cap - entry_size` is always true.
-    ///
-    /// The match guard mutation `with true` is therefore EQUIVALENT —
-    /// the original condition never fails. See MUTANTS_EQUIVALENT.md.
-
-    /// Kills `arena.rs:1648:40 + -> -` in `allocate_layout`.
-    /// Line 1648: `let needed = layout.size() + layout.align().saturating_sub(core::mem::align_of::<usize>())`.
-    /// Used by the `Allocator` impl on `&Arena`. Mutated `-`: needed =
-    /// size - align_slack, which under-refills for high-alignment types.
-    ///
-    /// Exercise via `Allocator::allocate` (allocator_api2) of a 4 KiB
-    /// payload at high alignment, forcing chunk grow and proper refill.
     #[test]
     fn allocate_layout_high_align_refill_uses_sum() {
         use core::alloc::Layout;
@@ -641,9 +384,6 @@ mod mutants_for_kill2 {
         }
     }
 
-    /// Kills `arena.rs:2655:47 && -> ||`, `2660:23 != -> ==`,
-    /// `2660:35 > -> ==/>=` in `try_alloc_slice_shared_with`. Shared
-    /// mirror of 2261/2266 — same logic, different flavor.
     #[test]
     fn slice_shared_no_drop_does_not_install_entry() {
         let arena = multitude::Arena::new();
@@ -686,18 +426,6 @@ mod mutants_for_kill2 {
         assert_eq!(counter.load(Ordering::Relaxed), u16::MAX as usize);
     }
 
-    /// Kills `arena.rs:2701:35 > -> >=` in `try_alloc_slice_shared_with`.
-    /// Line 2701: `if entry_size > 0 { ... }`. With `>=`, the branch fires
-    /// even when entry_size == 0 (T: !Drop), writing a spurious drop
-    /// entry. Covered by `slice_shared_no_drop_does_not_install_entry`.
-
-    /// Kills `arena.rs:2719:35 += -> *=` in `try_alloc_slice_shared_with`.
-    /// Line 2719: `guard.len += 1`. The guard tracks initialised count
-    /// for panic-rollback. With `*=`, the count multiplies — `guard.len`
-    /// stays 0 (multiplied by 1 = 0). If init panics partway, the
-    /// rollback drops fewer elements than initialised -> memory leak,
-    /// but in the unwinding path. We trigger via a panicking init in
-    /// alloc_slice_fill_with_arc.
     #[test]
     fn slice_shared_init_increments_guard_len() {
         let counter = StdArc::new(AtomicUsize::new(0));
@@ -723,13 +451,6 @@ mod mutants_for_kill2 {
         assert_eq!(counter.load(Ordering::Relaxed), 10);
     }
 
-    /// Kills `arena.rs:2739:75 != -> ==` in `try_alloc_slice_shared_with`.
-    /// Line 2739: `self.refill_shared(compute_worst_case_size(layout, entry_size != 0))?`.
-    /// Mutated `==`: the `has_drop_entry` flag is inverted — refill sizes
-    /// computed for the opposite case. For drop slice, mutated under-refills.
-    ///
-    /// Force a Drop slice that strains the chunk: alloc_slice_fill_with_arc
-    /// with many drop elements through refill_shared.
     #[test]
     fn slice_shared_refill_uses_correct_has_drop_flag() {
         let counter = StdArc::new(AtomicUsize::new(0));
@@ -753,15 +474,6 @@ mod mutants_for_kill2 {
         assert_eq!(counter.load(Ordering::Relaxed), 256 * 8);
     }
 
-    /// Kills `arena.rs:5268:16 > -> >=` in `try_bump_fit`.
-    /// Line 5268: `if aligned > max_aligned { return None }`.
-    /// Boundary `aligned == max_aligned` must succeed. Mutated `>=`
-    /// rejects the exact-fit case, forcing a chunk refill where the
-    /// unmutated code would allocate in place.
-    ///
-    /// Exact-fit is hard to trigger deterministically without internals.
-    /// We approximate by allocating to chunk capacity with many small
-    /// values and asserting success.
     #[test]
     fn try_bump_fit_exact_aligned_succeeds() {
         let arena = multitude::Arena::new();
@@ -775,14 +487,6 @@ mod mutants_for_kill2 {
         }
     }
 
-    /// Kills `vec.rs:760 + → -, *` in `Vec::try_into_arc` and the
-    /// mirror in `Vec::into_box`. The closure passed to
-    /// `alloc_slice_fill_iter_*` advances its read index via
-    /// `consumed_cell.set(idx + 1)`. The `* 1` mutation freezes the
-    /// index at 0, so every element of the new slice is a bitwise copy of
-    /// the original Vec's element 0. The `- 1` mutation underflows on the
-    /// second iteration (UB / crash). A distinct-value assertion catches
-    /// both.
     #[test]
     fn vec_into_arc_advances_read_index() {
         let arena = multitude::Arena::new();
@@ -810,7 +514,6 @@ mod mutants_for_kill2 {
     }
 }
 
-// === merged from tests/mutants_kill3.rs ===
 mod mutants_for_kill3 {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -901,10 +604,6 @@ mod mutants_for_kill3 {
     // arena.rs — try_alloc_inner_arc_with slow-path mutants
     // =====================================================================
 
-    /// Kills: arena.rs:709:35 `> -> >=` in try_alloc_inner_arc_with
-    /// The `entry_size > 0` guard: if mutated to `>=`, the drop entry
-    /// is never written for types that need drop, causing dropped
-    /// values to leak (drop not called).
     #[test]
     fn arena_709_entry_size_gt_zero_arc_with() {
         let _guard = reset_drop_counter();
@@ -918,12 +617,6 @@ mod mutants_for_kill3 {
         assert!(drops >= 1, "DropTracker must be dropped; got {drops} drops");
     }
 
-    /// Kills: arena.rs:728:30 `> -> >=` in try_alloc_inner_arc_with
-    /// (oversized routing: `layout.size() > max_normal_alloc`)
-    /// If mutated to `>=`, a value whose size == max_normal_alloc goes
-    /// through the oversized path instead of the normal path. We test
-    /// that a value at exactly max_normal_alloc succeeds via the normal
-    /// path by filling the arena with many such allocations.
     #[test]
     #[cfg(feature = "stats")]
     fn arena_728_size_eq_max_normal_alloc_arc() {
@@ -943,12 +636,6 @@ mod mutants_for_kill3 {
         );
     }
 
-    /// Kills: arena.rs:731:40 `+ -> -` and 731:104 `+ -> *`
-    /// in try_alloc_inner_arc_with's `needed` computation.
-    /// `needed = layout.size() + align_slack + entry_size`
-    /// If `+` becomes `-` or `*`, `needed` is wrong; a subsequent
-    /// alloc may fail or corrupt because the chunk doesn't have enough
-    /// room. We allocate an Arc<DropTracker> and verify it drops correctly.
     #[test]
     fn arena_731_needed_computation_arc_with() {
         let _guard = reset_drop_counter();
@@ -968,10 +655,6 @@ mod mutants_for_kill3 {
     // arena.rs — try_alloc_inner_slow_value mutants (1085, 1089, 1101)
     // =====================================================================
 
-    /// Kills: arena.rs:1251:17 OversizedSharedGuard::drop -> ()
-    /// If the guard's drop is removed, a panicking closure in
-    /// try_alloc_inner_arc_oversized_with would leak the oversized shared chunk.
-    /// We verify that alloc_arc_with works and the value actually drops.
     #[test]
     fn arena_1251_oversized_shared_guard_drop() {
         let _guard = reset_drop_counter();
@@ -996,11 +679,6 @@ mod mutants_for_kill3 {
         assert!(drops >= 1, "oversized arc LargeArcDrop must drop");
     }
 
-    /// Kills: arena.rs:1648:40 `+ -> -` in allocate_layout
-    /// `needed = layout.size() + layout.align().saturating_sub(align_of::<usize>())`
-    /// If `+` becomes `-`, the needed computation underflows, requesting
-    /// too little memory, causing subsequent allocations to overlap.
-    /// We allocate layout-sensitive values and verify correctness.
     #[test]
     fn arena_1648_allocate_layout_needed() {
         let arena = Arena::new();
@@ -1026,10 +704,6 @@ mod mutants_for_kill3 {
     // arena.rs — slice allocation mutants
     // =====================================================================
 
-    /// Kills: arena.rs:2261:47 `&& -> ||` in try_alloc_slice_local_with
-    /// `entry_size = if drop_fn.is_some() && len != 0 { ... } else { 0 }`
-    /// If && becomes ||, entry_size is nonzero even when len == 0 or
-    /// drop_fn is None, wasting space or causing wrong behavior.
     #[test]
     fn arena_2261_slice_local_and_to_or() {
         let _guard = reset_drop_counter();
@@ -1045,10 +719,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: arena.rs:2266:23 `!= -> ==` and 2266:35 `> -> ==` / `> -> >=`
-    /// `if entry_size != 0 && len > u16::MAX as usize { return Err(AllocError); }`
-    /// Tests that a Drop-type slice with len > u16::MAX returns error,
-    /// and a non-Drop-type slice with len > u16::MAX succeeds.
     #[test]
     fn arena_2266_slice_len_boundary() {
         let arena = Arena::new();
@@ -1074,8 +744,6 @@ mod mutants_for_kill3 {
         drop(result);
     }
 
-    /// Kills: arena.rs:2655:47 `&& -> ||` in try_alloc_slice_shared_with
-    /// `entry_size = if drop_fn.is_some() && len != 0 { ... } else { 0 }`
     #[test]
     fn arena_2655_shared_slice_and_to_or() {
         let arena = Arena::new();
@@ -1093,8 +761,6 @@ mod mutants_for_kill3 {
         assert_eq!(nums_arc.len(), 5);
     }
 
-    /// Kills: arena.rs:2660:23 `!= -> ==` and 2660:35 `> -> ==` / `> -> >=`
-    /// Same pattern as 2266 but for shared slices.
     #[test]
     fn arena_2660_shared_slice_len_boundary() {
         let arena = Arena::new();
@@ -1108,10 +774,6 @@ mod mutants_for_kill3 {
         assert!(drops >= 1, "single-element arc slice must drop");
     }
 
-    /// Kills: arena.rs:2701:35 `> -> >=` in try_alloc_slice_shared_with
-    /// `if entry_size > 0 { ... advance drop_back ... }`
-    /// If mutated to `>=`, drop_back is never advanced for Drop types,
-    /// causing drop entries to overlap or be lost.
     #[test]
     fn arena_2701_shared_slice_entry_size_guard() {
         let _guard = reset_drop_counter();
@@ -1127,11 +789,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 60, "20 arcs * 3 elements = 60 drops");
     }
 
-    /// Kills: arena.rs:2719:35 `+= -> *=` in try_alloc_slice_shared_with
-    /// `guard.len += 1` in the init loop. If *= instead of +=,
-    /// guard.len goes 0*1=0, then 0*1=0, ... so on panic the guard
-    /// wouldn't drop any initialized elements. Test that all elements
-    /// are properly initialized.
     #[test]
     fn arena_2719_guard_len_increment() {
         let _guard = reset_drop_counter();
@@ -1144,11 +801,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 5, "all 5 elements must drop");
     }
 
-    /// Kills: arena.rs:2739:75 `!= -> ==` in try_alloc_slice_shared_with
-    /// `self.refill_shared(compute_worst_case_size(layout, entry_size != 0))?;`
-    /// If `!=` becomes `==`, entry_size==0 would claim "has drop entry"
-    /// and entry_size>0 would claim "no drop entry", causing wrong
-    /// worst-case size computation and potential failure.
     #[test]
     fn arena_2739_refill_shared_entry_size_check() {
         let _guard = reset_drop_counter();
@@ -1168,9 +820,6 @@ mod mutants_for_kill3 {
     // chunk_provider.rs mutants
     // =====================================================================
 
-    /// Kills: chunk_provider.rs:133:25 `> -> >=` in reserve_budget
-    /// `if next > budget { return Err(AllocError); }`
-    /// If mutated to `>=`, allocations exactly at budget fail.
     #[test]
     fn chunk_provider_133_reserve_budget_boundary() {
         // Set byte_budget so that exactly one default chunk fits.
@@ -1181,10 +830,6 @@ mod mutants_for_kill3 {
         let _v = arena.alloc(42u64);
     }
 
-    /// Kills: chunk_provider.rs:441:48 `+ -> *` in acquire_shared
-    /// `total_bytes = shared_header_size() + target_bytes`
-    /// If `+` becomes `*`, total_bytes = header * target which is way
-    /// too large, causing budget exhaustion or OOM.
     #[test]
     fn chunk_provider_441_shared_header_plus_target() {
         let arena = Arena::builder().byte_budget(512 * 1024).build();
@@ -1200,11 +845,6 @@ mod mutants_for_kill3 {
     // constants.rs mutants
     // =====================================================================
 
-    /// Kills: constants.rs:76:14 `>= -> <` in min_class_for_bytes
-    /// `if bytes >= MAX_CHUNK_BYTES { return NUM_CHUNK_CLASSES - 1; }`
-    /// If `>=` becomes `<`, bytes >= MAX_CHUNK_BYTES would fall through
-    /// to the loop, potentially returning a wrong class.
-    /// We test by allocating a large value that exercises the MAX_CHUNK_BYTES boundary.
     #[test]
     fn constants_76_min_class_ge_to_lt() {
         // Allocating a large value forces acquire_local with a large payload
@@ -1214,10 +854,6 @@ mod mutants_for_kill3 {
         let _alloc = arena.alloc_slice_copy(&big);
     }
 
-    /// Kills: constants.rs:87:13 `< -> <=` in min_class_for_bytes
-    /// `while v < ratio { v <<= 1; c += 1; }`
-    /// If `<` becomes `<=`, the loop runs one extra iteration, returning
-    /// a class that's one too high. This causes chunks to be too large.
     #[test]
     #[cfg(feature = "stats")]
     fn constants_87_loop_boundary() {
@@ -1240,8 +876,6 @@ mod mutants_for_kill3 {
     // local_chunk.rs / shared_chunk.rs mutants
     // =====================================================================
 
-    /// Kills: shared_chunk.rs:143:17 `- -> +` in max_bump_extent
-    /// Same as local_chunk but for shared chunks.
     #[test]
     fn shared_chunk_143_max_bump_extent() {
         let arena = Arena::new();
@@ -1254,10 +888,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: shared_chunk.rs:168:9 to_thin_ptr -> Default::default()
-    /// If to_thin_ptr returns null (Default for *mut u8), the shared chunk
-    /// cache and Treiber stack operations would use null pointers, causing
-    /// crashes or lost chunks.
     #[test]
     fn shared_chunk_168_to_thin_ptr() {
         let arena = Arena::new();
@@ -1275,10 +905,6 @@ mod mutants_for_kill3 {
         assert_eq!(*final_arc, 42);
     }
 
-    /// Kills: shared_chunk.rs:186:59 `- -> +` / `- -> /` in SharedChunk::allocate
-    /// `let payload = min_payload.checked_add(entry_align - 1)...& !(entry_align - 1)`
-    /// If `-` becomes `+` or `/`, the rounding is wrong, causing
-    /// misaligned drop entries or undersized chunks.
     #[test]
     fn shared_chunk_186_payload_rounding() {
         let _guard = reset_drop_counter();
@@ -1299,12 +925,6 @@ mod mutants_for_kill3 {
     // strings/string.rs mutants
     // =====================================================================
 
-    /// Kills: string.rs:465:19 `> -> >=` in String::try_reserve
-    /// `if needed > self.cap { self.try_grow_to_at_least(needed)?; }`
-    /// If `>` becomes `>=`, try_reserve grows even when needed == cap,
-    /// which wastes capacity but shouldn't break. However, if the grow
-    /// fails (tight budget), a reserve that should succeed (needed == cap)
-    /// would fail.
     #[test]
     fn string_465_try_reserve_boundary() {
         let arena = Arena::new();
@@ -1322,9 +942,6 @@ mod mutants_for_kill3 {
     // strings/utf16_string.rs mutants
     // =====================================================================
 
-    /// Kills: vec.rs:451:34 `- -> +` in resize
-    /// `self.reserve(new_len - self.len);`
-    /// If `-` becomes `+`, reserve amount is huge, causing OOM/panic.
     #[test]
     fn vec_451_resize_reserve() {
         let arena = Arena::new();
@@ -1339,11 +956,6 @@ mod mutants_for_kill3 {
         assert_eq!(v[2], 0);
     }
 
-    /// Kills: vec.rs:460:46 `- -> +` / `- -> /` in Guard::drop
-    /// `let added = self.vec.len - self.old_len;`
-    /// If wrong, the guard drops wrong elements on panic.
-    /// Also kills: vec.rs:461:30 `> -> >=`
-    /// `if added > 0 { drop tail }`
     #[test]
     fn vec_460_461_resize_guard() {
         let arena = Arena::new();
@@ -1359,9 +971,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: vec.rs:473:37 `- -> +` and vec.rs:474:26 `> -> >=` in resize
-    /// `let total_new = new_len - guard.vec.len;`
-    /// `if total_new > 0 { ... }`
     #[test]
     fn vec_473_474_resize_total_new() {
         let arena = Arena::new();
@@ -1377,9 +986,6 @@ mod mutants_for_kill3 {
         assert_eq!(v[1], 99); // unchanged
     }
 
-    /// Kills: vec.rs:762:17 `+= -> -=` / `+= -> *=` in into_box
-    /// `idx += 1` — if -= or *=, idx goes wrong and elements are
-    /// read from wrong positions or the loop never terminates.
     #[test]
     fn vec_762_into_box() {
         let arena = Arena::new();
@@ -1396,8 +1002,6 @@ mod mutants_for_kill3 {
         assert_eq!(boxed[4], 40);
     }
 
-    /// Kills: vec.rs:808:20 `> -> >=` and 808:31 `&& -> ||` and 808:43 `> -> >=`
-    /// `if new_cap > self.cap && self.cap > 0 { try in-place growth }`
     #[test]
     fn vec_808_realloc_inplace_guard() {
         let arena = Arena::new();
@@ -1416,11 +1020,6 @@ mod mutants_for_kill3 {
         assert_eq!(v2[0], 42);
     }
 
-    /// Kills: vec.rs:819:21 `> -> >=` in realloc
-    /// `if self.len > 0 { copy_nonoverlapping }`
-    /// If >= instead of >, copy runs even when len==0, which is
-    /// technically harmless but would copy from a dangling pointer
-    /// when cap was 0.
     #[test]
     fn vec_819_realloc_copy_guard() {
         let arena = Arena::new();
@@ -1435,10 +1034,6 @@ mod mutants_for_kill3 {
         assert_eq!(v[0], 1);
     }
 
-    /// Kills: vec.rs:828:20 `> -> ==` / `> -> >=` in realloc
-    /// `if old_cap > 0 { self.arena.bump_relocation(); }`
-    /// This tracks relocation stats. If the guard changes,
-    /// relocations aren't counted or are counted wrongly.
     #[test]
     fn vec_828_realloc_relocation_tracking() {
         let arena = Arena::new();
@@ -1453,14 +1048,6 @@ mod mutants_for_kill3 {
         assert_eq!(v[1], 2);
     }
 
-    // =====================================================================
-    // ROUND 2: Stronger tests for mutants that survived round 1
-    // =====================================================================
-
-    /// Kills: arena.rs:709:35 `> -> >=` — entry_size > 0 guard in arc_with
-    /// If mutated to `>=`, entry_size==0 (no-drop Arc) would enter the
-    /// drop-entry writing block and write a drop entry into unreserved
-    /// space, potentially corrupting memory. Test with non-Drop Arc type.
     #[test]
     fn arena_709_entry_size_zero_arc() {
         let arena = Arena::new();
@@ -1478,9 +1065,6 @@ mod mutants_for_kill3 {
         drop(arena);
     }
 
-    /// Kills: arena.rs:731:40 `+ -> -` and 731:104 `+ -> *`
-    /// Wrong `needed` computation causes refill with wrong size.
-    /// With tight budget, the wrong refill might fail.
     #[test]
     fn arena_731_needed_tight_budget_arc() {
         let _guard = reset_drop_counter();
@@ -1496,10 +1080,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 200);
     }
 
-    /// Kills: arena.rs:1251:17 OversizedSharedGuard::drop -> ()
-    /// The guard's drop cleans up the chunk on panic. If noop'd,
-    /// a panicking closure leaks the budget.
-    /// Test: trigger panic in alloc_arc_with, catch it, verify arena still works.
     #[test]
     fn arena_1251_oversized_guard_panic() {
         // Use an alloc strictly larger than `MAX_CHUNK_BYTES = 64 KiB` so
@@ -1527,11 +1107,6 @@ mod mutants_for_kill3 {
         let _arc2: multitude::Arc<[u8; N]> = arena.alloc_arc_with(|| [0u8; N]);
     }
 
-    /// Kills: arena.rs:1648:40 `+ -> -` in allocate_layout
-    /// `needed = size + align_slack` becomes `size - align_slack`.
-    /// For types with align == align_of::<usize>(), align_slack is 0, so
-    /// this is equivalent. For types with higher alignment, it underflows.
-    /// Use #[repr(align(64))] to create a type with larger alignment.
     #[test]
     fn arena_1648_high_alignment_layout() {
         #[repr(align(64))]
@@ -1554,10 +1129,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: arena.rs:2261:47 `&& -> ||` in try_alloc_slice_local_with
-    /// `entry_size = if drop_fn.is_some() && len != 0 { ... } else { 0 }`
-    /// With ||: len==0 or drop_fn.is_some() alone would set entry_size.
-    /// For Drop type with len==0, entry_size should be 0. With ||, it's nonzero.
     #[test]
     fn arena_2261_empty_drop_slice() {
         let _guard = reset_drop_counter();
@@ -1579,10 +1150,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 0, "empty Drop slices should not produce drops");
     }
 
-    /// Kills: arena.rs:2266:23 `!= -> ==` in try_alloc_slice_local_with
-    /// `if entry_size != 0 && len > u16::MAX { return Err }`
-    /// With ==: `entry_size == 0 && len > u16::MAX` would reject
-    /// non-Drop large slices. Test a large non-Drop slice.
     #[test]
     fn arena_2266_large_nondrop_slice() {
         let arena = Arena::new();
@@ -1597,8 +1164,6 @@ mod mutants_for_kill3 {
         assert_eq!(s[65535], 255);
     }
 
-    /// Kills: arena.rs:2655:47 `&& -> ||` in try_alloc_slice_shared_with
-    /// Same as 2261 but for shared slices.
     #[test]
     fn arena_2655_empty_drop_shared_slice() {
         let _guard = reset_drop_counter();
@@ -1613,8 +1178,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 0, "empty Drop arc slices should not produce drops");
     }
 
-    /// Kills: arena.rs:2660:23 `!= -> ==` in try_alloc_slice_shared_with
-    /// Same as 2266 but for shared slices.
     #[test]
     fn arena_2660_large_nondrop_shared_slice() {
         // Use a non-Copy, non-Drop wrapper so we go through try_alloc_slice_shared_with
@@ -1629,10 +1192,6 @@ mod mutants_for_kill3 {
         assert_eq!(arc[0], W(0));
     }
 
-    /// Kills: arena.rs:2701:35 `> -> >=` in try_alloc_slice_shared_with
-    /// `if entry_size > 0 { advance drop_back }`
-    /// For Drop types, entry_size > 0. If `>=`, non-Drop types
-    /// (entry_size == 0) would enter this block and write unreserved entries.
     #[test]
     fn arena_2701_entry_size_shared_slice() {
         let arena = Arena::new();
@@ -1647,16 +1206,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: shared_chunk.rs:143:17 `- -> +` in max_bump_extent
-    /// CHUNK_ALIGN - header → CHUNK_ALIGN + header. This allows bump
-    /// pointers past the chunk boundary, which corrupts memory.
-    ///
-    /// Saturate one shared chunk with a handful of large uninit
-    /// fillers so the bump cursor sits right against the chunk's true
-    /// end, then issue a few small `Arc<DropTracker>` probes. With the
-    /// mutated extent the probes spill past the end and corrupt
-    /// neighboring memory; with the unmutated extent the very first
-    /// probe forces a clean refill.
     #[test]
     fn shared_chunk_143_max_bump_many() {
         let _guard = reset_drop_counter();
@@ -1683,9 +1232,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, N as usize);
     }
 
-    /// Kills: shared_chunk.rs:168:9 to_thin_ptr -> Default
-    /// The Treiber stack and chunk caching use to_thin_ptr.
-    /// Force chunk reuse by allocating, dropping, and reallocating.
     #[test]
     fn shared_chunk_168_force_cache_reuse() {
         let arena = Arena::new();
@@ -1707,23 +1253,6 @@ mod mutants_for_kill3 {
         }
     }
 
-    /// Kills: shared_chunk.rs:186:59 `- -> +` / `- -> /` in allocate
-    /// Payload rounding: `min_payload + (entry_align - 1)` becomes
-    /// `min_payload + (entry_align + 1)` or `min_payload + (entry_align / 1)`.
-    /// For `- -> +`: align - 1 = 7 vs align + 1 = 9. Rounding mask stays same.
-    /// Effectively wastes 2 bytes per chunk but works. This may be EQUIVALENT.
-    /// For `- -> /`: align - 1 = 7 vs align / 1 = 8. The mask `!(8 - 1)` = !7
-    /// but original was `!(7)` = `!(7)`. Wait: `entry_align - 1` is used in both
-    /// the addend and the mask. Actually let me re-read...
-    /// `payload = (min_payload + entry_align - 1) & !(entry_align - 1)`
-    /// Mutation at 186:59 affects the first `-`: `(min_payload + entry_align + 1)` or `(min_payload + entry_align / 1)`
-    /// The mask is unchanged. So `+ 1` makes payload 2 bytes larger (rounds up 2 more).
-    /// That's still valid. For `/ 1`: `entry_align / 1 = entry_align`, same as `entry_align - 1 + 1`.
-    /// Both may be equivalent for the addend since the mask rounds down.
-    /// Actually, `(x + a - 1) & !(a - 1)` rounds x up to multiple of a.
-    /// `(x + a + 1) & !(a - 1)` rounds (x+2) up, giving a result at least 2 more.
-    /// `(x + a/1) & !(a-1)` = `(x + a) & !(a-1)` rounds (x+1) up.
-    /// Both produce valid but slightly larger allocations. Likely EQUIVALENT.
     #[test]
     fn shared_chunk_186_payload_rounding_stress() {
         let _guard = reset_drop_counter();
@@ -1745,9 +1274,6 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 800, "500 singles + 300 slice elements = 800");
     }
 
-    /// Kills: string.rs:465:19 `> -> >=` in try_reserve
-    /// Actually this is EQUIVALENT: grow helper returns early if min_cap <= cap.
-    /// But let's test it anyway.
     #[test]
     fn string_465_reserve_exact_capacity() {
         let arena = Arena::new();
@@ -1765,11 +1291,6 @@ mod mutants_for_kill3 {
     // UTF-16 stronger tests
     // =====================================================================
 
-    /// Kills: vec.rs:460:46 `- -> /` in Guard::drop
-    /// `let added = self.vec.len - self.old_len` becomes `self.vec.len / self.old_len`
-    /// On panic during clone, the guard drops the newly-added elements.
-    /// With /: added = 5/2=2 instead of 5-2=3, so only 2 elements are dropped
-    /// instead of 3 — leaking one cloned element.
     #[test]
     fn vec_460_guard_panic_clone() {
         use std::sync::atomic::AtomicUsize;
@@ -1816,18 +1337,8 @@ mod mutants_for_kill3 {
         assert_eq!(drops, 4, "guard must drop exactly 3 cloned elements + 1 value; got {drops}");
         assert_eq!(v.len(), 2);
     }
-
-    // vec:762 into_box: ZST/empty path only. ZSTs have no
-    // distinguishable element identity, empty vecs don't call the closure.
-    // EQUIVALENT.
-
-    // vec:808:31 && -> ||: both paths fall through to copy. EQUIVALENT.
-    // vec:808:43 > -> >=: cap==0 in-place probe returns None. EQUIVALENT.
-    // vec:819:21 > -> >=: copy 0 elements is no-op. EQUIVALENT.
-    // vec:474:26 > -> >=: total_new can never be 0 in this branch. EQUIVALENT.
 }
 
-// === merged from tests/mutants_kill4.rs ===
 mod mutants_for_kill4 {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1847,19 +1358,6 @@ mod mutants_for_kill4 {
 
     extern crate alloc;
 
-    /// Kills `vec/vec.rs:451:34 - → +` in `Vec::resize`.
-    ///
-    /// `self.reserve(new_len - self.len)`:
-    /// * Original `-`: reserves exactly `new_len - len` more slots →
-    ///   `try_grow_amortized(additional)` with `additional == new_len - len`.
-    /// * Mutated `+`: `additional == new_len + len`, so the amortized
-    ///   growth target becomes `max(len + new_len + len, 2*cap, 4)`.
-    ///
-    /// Starting from a vec of `len=5` (which after pushes has `cap=8`),
-    /// calling `resize(10, ...)` should grow capacity to `16` (= `max(10, 16, 4)`).
-    /// The mutated `+` produces `additional=15`, needed=20, capacity=20 (=`max(20, 16, 4)`).
-    ///
-    /// The assertion `capacity() == 16` distinguishes them.
     #[test]
     fn resize_uses_subtraction_for_reserve() {
         let arena = Arena::new();
@@ -1892,18 +1390,6 @@ mod mutants_for_kill4 {
         limit: usize,
     }
 
-    /// Kills `vec/vec.rs:460:46 - → /` in `Vec::resize::Guard::drop`.
-    ///
-    /// `let added = self.vec.len - self.old_len`:
-    /// * Original `-`: `added = len - old_len ≥ 0`.
-    /// * Mutated `/`: when `old_len == 0`, `len / 0` triggers a **divide-by-zero
-    ///   panic** during unwinding → double-panic abort.
-    ///
-    /// We resize an EMPTY vec with a value that panics on the second clone.
-    /// Original: the Guard drops the one already-written element cleanly
-    /// and the resize panic propagates with payload "clone panic …".
-    /// Mutated: `added = 0 / 0` is an immediate panic (different payload)
-    /// AND happens during drop → double-panic abort.
     #[test]
     fn resize_guard_drop_uses_subtraction() {
         use std::panic::{set_hook, take_hook};
@@ -1950,21 +1436,6 @@ mod mutants_for_kill4 {
         );
     }
 
-    /// Kills `vec/vec.rs:362:21 < → <=` in `Vec::shrink_to_fit`.
-    ///
-    /// `if self.len < self.cap && ...realloc(self.len).is_err()`:
-    /// * Original `<`: at `len == cap`, the realloc is skipped entirely.
-    /// * Mutated `<=`: at `len == cap`, `realloc(self.len) == realloc(self.cap)`
-    ///   is invoked → `realloc` early-returns at `new_cap == self.cap` (see
-    ///   `realloc()` body). Net effect on data is the same; **but** the
-    ///   short-circuit `&&` evaluates the right operand → an observable
-    ///   extra call. We catch this through the arena's allocation counter:
-    ///   with the mutation, an extra arena-side allocate call would
-    ///   happen ONLY if the realloc actually re-allocated; since it
-    ///   short-circuits inside `realloc`, this mutant is in fact equivalent.
-    ///
-    /// We therefore document this as **EQUIVALENT** and skip via
-    /// `#[mutants::skip]` on `shrink_to_fit` (see source).
     #[test]
     fn shrink_to_fit_at_full_cap_is_noop_documented() {
         let arena = Arena::new();
@@ -1980,7 +1451,6 @@ mod mutants_for_kill4 {
     }
 }
 
-// === merged from tests/mutants_kill5.rs ===
 mod mutants_for_kill5 {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1992,27 +1462,6 @@ mod mutants_for_kill5 {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    /// Kills two mutations in `Arena::try_alloc_slice_shared_with`:
-    ///
-    /// * `arena/inner_slice.rs:878:47` — `&&` → `||` on
-    ///   `drop_fn.is_some() && len != 0` when computing `entry_size`.
-    /// * `arena/inner_slice.rs:883:23` — `!=` → `==` on
-    ///   `entry_size != 0 && len > u16::MAX as usize`.
-    ///
-    /// `try_alloc_uninit_slice_arc::<u8>(len)` routes a non-Drop element
-    /// type with `drop_fn = None` and `len > 0` into
-    /// `try_alloc_slice_shared_with`. For `len > u16::MAX`:
-    /// * Original: `entry_size == 0` (because `drop_fn.is_none()`), so the
-    ///   `entry_size != 0 && len > u16::MAX` guard is false and the
-    ///   allocation succeeds via the oversized-shared path.
-    /// * Mutation `&&` → `||`: `entry_size` becomes non-zero because
-    ///   `len != 0`, then the guard fires and returns `AllocError`.
-    /// * Mutation `!=` → `==`: the guard becomes `0 == 0 && len > u16::MAX`,
-    ///   which is true, returning `AllocError`.
-    ///
-    /// The successful allocation of a 65 537-element `MaybeUninit<u8>`
-    /// slice in an `Arc<[MaybeUninit<u8>]>` is the observable that
-    /// distinguishes the original from both mutations.
     #[test]
     fn alloc_uninit_slice_arc_non_drop_above_u16_max_succeeds() {
         let arena = Arena::new();
@@ -2023,7 +1472,6 @@ mod mutants_for_kill5 {
     }
 }
 
-// === merged from tests/mutants_audit.rs ===
 mod mutants_for_audit {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -2715,7 +2163,6 @@ mod mutants_for_audit {
     // ============================================================================
 }
 
-// === merged from tests/mutants_complete.rs ===
 mod mutants_for_complete {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -3296,7 +2743,6 @@ mod mutants_for_complete {
     // ----------------------------------------------------------------------------
 }
 
-// === merged from tests/mutants_final.rs ===
 mod mutants_for_final {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]

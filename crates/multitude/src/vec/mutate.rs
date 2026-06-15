@@ -26,18 +26,63 @@ impl<T> Drop for ResizeGuard<'_, '_, T> {
 }
 
 impl<T, A: Allocator + Clone> Vec<'_, T, A> {
+    /// Replace the elements in `[start, end)` with `repl`, in place, without
+    /// any transient (global) allocation. `T: Copy` (no element drops run).
+    ///
+    /// Callers must ensure `start <= end <= self.len()`. On allocator failure
+    /// (growth case only) returns [`AllocError`] with `self` left unchanged.
+    pub(crate) fn try_replace_range_with_slice(&mut self, start: usize, end: usize, repl: &[T]) -> Result<(), AllocError>
+    where
+        T: Copy,
+    {
+        let gap = end - start;
+        let repl_len = repl.len();
+        let old_len = self.buf.len();
+        if repl_len >= gap {
+            let extra = repl_len - gap;
+            // Grow by `extra`, initializing the new trailing slots with filler
+            // (overwritten below); a no-op when `extra == 0`.
+            self.try_extend_from_slice(&repl[..extra])?;
+            let s = self.buf.as_mut_slice();
+            s.copy_within(end..old_len, end + extra);
+            s[start..start + repl_len].copy_from_slice(repl);
+        } else {
+            let new_len = start + repl_len + (old_len - end);
+            let s = self.buf.as_mut_slice();
+            s[start..start + repl_len].copy_from_slice(repl);
+            s.copy_within(end..old_len, start + repl_len);
+            self.buf.truncate(new_len);
+        }
+        Ok(())
+    }
+
     /// Insert `value` at position `idx`, shifting subsequent elements right.
     ///
     /// # Panics
     ///
     /// Panics if `idx > len`, or if the backing allocator fails on growth.
+    /// Use [`Self::try_insert`] for a fallible variant.
     pub fn insert(&mut self, idx: usize, value: T) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, value));
+    }
+
+    /// Fallible variant of [`Self::insert`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx > len`.
+    pub fn try_insert(&mut self, idx: usize, value: T) -> Result<(), AllocError> {
         let len = self.buf.len();
         assert!(idx <= len, "insertion index (is {idx}) should be <= len (is {len})");
-        if self.buf.remaining_cap() == 0 && self.try_reserve(1).is_err() {
-            crate::arena::panic_alloc!();
+        if self.buf.remaining_cap() == 0 {
+            self.try_reserve(1)?;
         }
         self.buf.insert_within_cap(idx, value);
+        Ok(())
     }
 
     /// Remove and return the element at position `idx`, shifting subsequent
@@ -178,8 +223,25 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Panics
     ///
     /// Panics if the range is out of bounds, or if the backing allocator
-    /// fails while reserving.
+    /// fails while reserving. Use [`Self::try_extend_from_within`] for a
+    /// fallible variant.
     pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R)
+    where
+        T: Clone,
+    {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+    }
+
+    /// Fallible variant of [`Self::extend_from_within`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails while reserving.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds.
+    pub fn try_extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) -> Result<(), AllocError>
     where
         T: Clone,
     {
@@ -199,11 +261,12 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let count = end - start;
         // Reserve up front so the subsequent pushes cannot relocate the
         // buffer (which would invalidate the source indices we read from).
-        self.reserve(count);
+        self.try_reserve(count)?;
         for i in start..end {
             let cloned = self.buf.as_slice()[i].clone();
-            self.push(cloned);
+            self.buf.push_within_cap(cloned).ok().expect("capacity reserved above");
         }
+        Ok(())
     }
 
     /// Retain only elements for which the predicate returns `true`.
@@ -274,21 +337,33 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails on growth.
+    /// Panics if the backing allocator fails on growth. Use
+    /// [`Self::try_append`] for a fallible variant.
     pub fn append(&mut self, other: &mut Self) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_append(other));
+    }
+
+    /// Fallible variant of [`Self::append`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth. On
+    /// error, `other` is left unchanged.
+    pub fn try_append(&mut self, other: &mut Self) -> Result<(), AllocError> {
         let add = other.buf.len();
         if add == 0 {
-            return;
+            return Ok(());
         }
         // Zero-copy fast path: when `other`'s storage directly abuts the
         // end of a full `self`, absorb it instead of copying elements.
         if const { mem::size_of::<T>() != 0 } && self.buf.try_absorb_adjacent(&mut other.buf) {
-            return;
+            return Ok(());
         }
-        self.reserve(add);
+        self.try_reserve(add)?;
         for item in other.buf.drain_all() {
             self.buf.push_within_cap(item).ok().expect("capacity reserved above");
         }
+        Ok(())
     }
 
     /// Reserve the minimum capacity for at least `additional` more elements.
@@ -319,18 +394,31 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails on growth.
+    /// Panics if the backing allocator fails on growth. Use
+    /// [`Self::try_resize`] for a fallible variant.
     pub fn resize(&mut self, new_len: usize, value: T)
+    where
+        T: Clone,
+    {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_resize(new_len, value));
+    }
+
+    /// Fallible variant of [`Self::resize`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
+    pub fn try_resize(&mut self, new_len: usize, value: T) -> Result<(), AllocError>
     where
         T: Clone,
     {
         let len = self.buf.len();
         if new_len <= len {
             self.buf.truncate(new_len);
-            return;
+            return Ok(());
         }
         let added = new_len - len;
-        self.reserve(added);
+        self.try_reserve(added)?;
         // If a `clone` (or the final move) panics partway through, the
         // guard rolls the length back to `len`, dropping every element
         // written so far. This keeps the vector in a consistent state and
@@ -345,21 +433,32 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         // Last push consumes the original `value` to avoid an extra clone.
         guard.buf.push_within_cap(value).ok().expect("capacity reserved above");
         mem::forget(guard);
+        Ok(())
     }
 
     /// Resize the vector to `new_len`, calling `f` for new elements.
     ///
     /// # Panics
     ///
-    /// Panics if the backing allocator fails on growth.
-    pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) {
+    /// Panics if the backing allocator fails on growth. Use
+    /// [`Self::try_resize_with`] for a fallible variant.
+    pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, f: F) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_resize_with(new_len, f));
+    }
+
+    /// Fallible variant of [`Self::resize_with`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
+    pub fn try_resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) -> Result<(), AllocError> {
         let len = self.buf.len();
         if new_len <= len {
             self.buf.truncate(new_len);
-            return;
+            return Ok(());
         }
         let added = new_len - len;
-        self.reserve(added);
+        self.try_reserve(added)?;
         // See `resize`: roll back on a panic in `f` so the elements
         // written before the panic are dropped and the length is restored.
         let guard = ResizeGuard {
@@ -370,16 +469,33 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             guard.buf.push_within_cap(f()).ok().expect("capacity reserved above");
         }
         mem::forget(guard);
+        Ok(())
     }
 
     /// Split the vector at `at`, returning a new vector containing `[at, len)`.
     ///
     /// # Panics
     ///
-    /// Panics if `at > len`.
+    /// Panics if `at > len`, or if the backing allocator fails. Use
+    /// [`Self::try_split_off`] for a fallible variant.
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // routing mutations produce externally indistinguishable empty tails
     pub fn split_off(&mut self, at: usize) -> Self {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+    }
+
+    /// Fallible variant of [`Self::split_off`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails. On error `self`
+    /// is left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at > len`.
+    #[cfg_attr(test, mutants::skip)] // routing mutations produce externally indistinguishable empty tails
+    pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         let len = self.buf.len();
         assert!(at <= len, "split index out of bounds (at is {at}, len is {len})");
         let tail_len = len - at;
@@ -387,23 +503,24 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         // tail: produce an independent tail and leave the head's storage
         // (and capacity) intact.
         if const { mem::size_of::<T>() == 0 } || self.buf.cap() == 0 || tail_len == 0 {
-            let mut tail = Self::with_capacity_in(tail_len, self.arena);
-            // Move the `[at, len)` suffix into `tail`, preserving order:
-            // pop into a staging buffer (reverse order) then push back.
-            let mut staging = allocator_api2::vec::Vec::with_capacity(tail_len);
+            let mut tail = Self::try_with_capacity_in(tail_len, self.arena)?;
+            // Only ZSTs reach here with `tail_len > 0` (a non-ZST `cap == 0`
+            // forces `tail_len == 0`). ZSTs carry no data, so popping the
+            // suffix straight into `tail` — which reverses order — is fine; no
+            // staging buffer is needed.
             for _ in 0..tail_len {
-                staging.push(self.buf.pop().expect("tail length matches"));
+                tail.buf
+                    .push_within_cap(self.buf.pop().expect("tail length matches"))
+                    .ok()
+                    .expect("capacity reserved above");
             }
-            while let Some(v) = staging.pop() {
-                tail.buf.push_within_cap(v).ok().expect("capacity reserved above");
-            }
-            return tail;
+            return Ok(tail);
         }
         // Zero-copy split: the tail shares the same chunk storage as the
         // head (storage is reclaimed only at arena teardown, which
         // outlives both halves), so no elements are copied.
         let tail_buf = self.buf.split_off_buf(at);
-        Self::from_buf(tail_buf, self.arena)
+        Ok(Self::from_buf(tail_buf, self.arena))
     }
 
     /// Pop the last element if the predicate returns `true`.

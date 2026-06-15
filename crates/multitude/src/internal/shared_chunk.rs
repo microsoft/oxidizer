@@ -460,8 +460,7 @@ mod tests {
         assert_eq!(got, super::super::constants::CHUNK_ALIGN);
     }
 
-    /// Regression guard for the "every shared chunk is allocated at 64 KiB"
-    /// bug: `chunk_layout` must round the allocation *size* up to
+    /// `chunk_layout` must round the allocation *size* up to
     /// `value_align` (8) and set the *base* alignment to `struct_align`
     /// (`CHUNK_ALIGN`), but must NOT round the size up to `CHUNK_ALIGN`.
     /// Each cacheable size class must therefore produce an allocation

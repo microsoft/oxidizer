@@ -198,7 +198,6 @@ fn single_ref_drop_after_arena_dropped() {
     drop(view); // exercises full cleanup with arena gone
 }
 
-// === relocated from coverage_extras.rs (bytesbuf-gated tests) ===
 mod from_coverage_extras_bytesbuf {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]

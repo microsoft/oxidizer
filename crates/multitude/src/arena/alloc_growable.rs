@@ -90,7 +90,25 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the backing allocator fails.
     #[must_use]
     pub fn alloc_string_from_utf8_lossy(&self, bytes: &[u8]) -> String<'_, A> {
-        String::from_str_in(&alloc::string::String::from_utf8_lossy(bytes), self)
+        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf8_lossy(bytes))
+    }
+
+    /// Fallible variant of [`Self::alloc_string_from_utf8_lossy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub fn try_alloc_string_from_utf8_lossy(&self, bytes: &[u8]) -> Result<String<'_, A>, AllocError> {
+        // Decode directly into the arena string; no intermediate global
+        // allocation (unlike `str::from_utf8_lossy`'s owned `Cow`).
+        let mut out = self.try_alloc_string_with_capacity(bytes.len())?;
+        for chunk in bytes.utf8_chunks() {
+            out.try_push_str(chunk.valid())?;
+            if !chunk.invalid().is_empty() {
+                out.try_push(char::REPLACEMENT_CHARACTER)?;
+            }
+        }
+        Ok(out)
     }
 
     /// Copy `bytes` into a fresh arena [`String`] without validating that
@@ -107,7 +125,21 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     pub unsafe fn alloc_string_from_utf8_unchecked(&self, bytes: &[u8]) -> String<'_, A> {
         // SAFETY: the caller guarantees `bytes` is valid UTF-8.
-        String::from_str_in(unsafe { core::str::from_utf8_unchecked(bytes) }, self)
+        crate::arena::ExpectAlloc::expect_alloc(unsafe { self.try_alloc_string_from_utf8_unchecked(bytes) })
+    }
+
+    /// Fallible variant of [`Self::alloc_string_from_utf8_unchecked`].
+    ///
+    /// # Safety
+    ///
+    /// `bytes` must be valid UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub unsafe fn try_alloc_string_from_utf8_unchecked(&self, bytes: &[u8]) -> Result<String<'_, A>, AllocError> {
+        // SAFETY: the caller guarantees `bytes` is valid UTF-8.
+        String::try_from_str_in(unsafe { core::str::from_utf8_unchecked(bytes) }, self)
     }
 
     /// Decode native-endian UTF-16 `units` into a fresh arena [`String`].
@@ -139,11 +171,20 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the backing allocator fails.
     #[must_use]
     pub fn alloc_string_from_utf16_lossy(&self, units: &[u16]) -> String<'_, A> {
-        let mut out = self.alloc_string_with_capacity(units.len());
+        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf16_lossy(units))
+    }
+
+    /// Fallible variant of [`Self::alloc_string_from_utf16_lossy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub fn try_alloc_string_from_utf16_lossy(&self, units: &[u16]) -> Result<String<'_, A>, AllocError> {
+        let mut out = self.try_alloc_string_with_capacity(units.len())?;
         for unit in char::decode_utf16(units.iter().copied()) {
-            out.push(unit.unwrap_or(char::REPLACEMENT_CHARACTER));
+            out.try_push(unit.unwrap_or(char::REPLACEMENT_CHARACTER))?;
         }
-        out
+        Ok(out)
     }
 
     /// Decode little-endian UTF-16 `bytes` into a fresh arena [`String`]. The
@@ -191,6 +232,15 @@ impl<A: Allocator + Clone> Arena<A> {
         self.alloc_string_from_utf16_bytes_lossy(bytes, false)
     }
 
+    /// Fallible variant of [`Self::alloc_string_from_utf16le_lossy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub fn try_alloc_string_from_utf16le_lossy(&self, bytes: &[u8]) -> Result<String<'_, A>, AllocError> {
+        self.try_alloc_string_from_utf16_bytes_lossy(bytes, false)
+    }
+
     /// Decode big-endian UTF-16 `bytes` into a fresh arena [`String`] (lossy).
     ///
     /// Odd trailing bytes and unpaired surrogates are replaced with `U+FFFD`. The
@@ -202,6 +252,15 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     pub fn alloc_string_from_utf16be_lossy(&self, bytes: &[u8]) -> String<'_, A> {
         self.alloc_string_from_utf16_bytes_lossy(bytes, true)
+    }
+
+    /// Fallible variant of [`Self::alloc_string_from_utf16be_lossy`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub fn try_alloc_string_from_utf16be_lossy(&self, bytes: &[u8]) -> Result<String<'_, A>, AllocError> {
+        self.try_alloc_string_from_utf16_bytes_lossy(bytes, true)
     }
 
     /// Shared body for the byte-oriented UTF-16 constructors. `big_endian`
@@ -231,7 +290,12 @@ impl<A: Allocator + Clone> Arena<A> {
 
     /// Shared body for the lossy byte-oriented UTF-16 constructors.
     fn alloc_string_from_utf16_bytes_lossy(&self, bytes: &[u8], big_endian: bool) -> String<'_, A> {
-        let mut out = self.alloc_string_with_capacity(bytes.len() / 2 + 1);
+        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf16_bytes_lossy(bytes, big_endian))
+    }
+
+    /// Fallible variant of [`Self::alloc_string_from_utf16_bytes_lossy`].
+    fn try_alloc_string_from_utf16_bytes_lossy(&self, bytes: &[u8], big_endian: bool) -> Result<String<'_, A>, AllocError> {
+        let mut out = self.try_alloc_string_with_capacity(bytes.len() / 2 + 1)?;
         let units = bytes.chunks_exact(2).map(|pair| {
             let raw = [pair[0], pair[1]];
             if big_endian {
@@ -241,14 +305,12 @@ impl<A: Allocator + Clone> Arena<A> {
             }
         });
         for unit in char::decode_utf16(units) {
-            out.push(unit.unwrap_or(char::REPLACEMENT_CHARACTER));
+            out.try_push(unit.unwrap_or(char::REPLACEMENT_CHARACTER))?;
         }
         if !bytes.len().is_multiple_of(2) {
-            // An odd trailing byte is invalid; mirror std by appending one
-            // replacement character.
-            out.push(char::REPLACEMENT_CHARACTER);
+            out.try_push(char::REPLACEMENT_CHARACTER)?;
         }
-        out
+        Ok(out)
     }
 
     /// Create a new, empty growable [`Vec`](crate::vec::Vec) backed by this arena.

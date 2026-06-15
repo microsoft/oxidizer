@@ -288,7 +288,6 @@ fn try_alloc_slice_clone_huge_len_returns_alloc_error() {
     result.unwrap_err();
 }
 
-// === merged from tests/reset.rs ===
 mod reset {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -477,7 +476,6 @@ mod reset {
     }
 }
 
-// === merged from tests/large_alloc.rs ===
 mod large_alloc {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1026,7 +1024,6 @@ mod large_alloc {
     }
 }
 
-// === merged from tests/fast_path_correctness.rs ===
 mod fast_path_correctness {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -1427,7 +1424,6 @@ mod fast_path_correctness {
     }
 }
 
-// === merged from tests/allocator_impl.rs ===
 mod allocator_impl {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -1480,7 +1476,6 @@ mod allocator_impl {
     }
 }
 
-// === merged from tests/mutants_chunk_provider.rs ===
 mod mutants_for_chunk_provider {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1494,13 +1489,6 @@ mod mutants_for_chunk_provider {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    /// Kills `chunk_provider.rs:133:25 > → >=` in `reserve_budget`.
-    ///
-    /// The check is `if next > budget { return Err }`. Mutated to `>=`,
-    /// the boundary `next == budget` (i.e. exactly the budget) would be
-    /// rejected. We pick a tight, exact-fit byte budget and exercise it
-    /// to its boundary — the unmutated code admits the allocation,
-    /// the mutated code returns `AllocError`.
     #[cfg(feature = "stats")]
     #[test]
     fn reserve_budget_admits_exact_fit() {
@@ -1530,22 +1518,6 @@ mod mutants_for_chunk_provider {
         );
     }
 
-    /// Kills `chunk_provider.rs:152:9 release_budget → ()` (function body
-    /// becomes a no-op) and the budget-release path in `acquire_local`
-    /// /`acquire_shared` (failure-rollback arms at 187/254/424/452).
-    ///
-    /// Strategy: configure a tight byte budget such that *two* normal
-    /// allocations would exceed it. Force the budget-release path by
-    /// failing the allocator on the second attempt; if `release_budget`
-    /// is a no-op the second-attempt's reserved bytes stay accounted and
-    /// the third attempt errors. Without a custom failing-allocator we
-    /// indirectly observe via `total_chunk_bytes` shrinking after a
-    /// chunk is freed: dropping the arena releases the chunks, which
-    /// must subtract their bytes from the running total. Re-creating a
-    /// new arena from the same provider would reuse the budget — but
-    /// arena and provider are 1:1, so we instead verify that a tighter
-    /// re-creation succeeds. (Cross-arena budget recycling is covered by
-    /// `arena_arc.rs::shared_chunk_returns_to_provider_after_arc_drop`.)
     #[cfg(feature = "stats")]
     #[test]
     fn release_budget_runs_when_chunk_freed() {
@@ -1567,20 +1539,6 @@ mod mutants_for_chunk_provider {
         assert!(arena2.stats().normal_shared_chunks_allocated >= 1);
     }
 
-    /// Kills `chunk_provider.rs:163:24 > → >=` in `acquire_local`
-    /// (oversized routing gate `min_payload > max_normal_alloc`) and the
-    /// matching `405:24` in `acquire_shared`.
-    ///
-    /// At the boundary `min_payload == max_normal_alloc`, the unmutated
-    /// code routes to the normal (cacheable) path. `> → >=` would route
-    /// the boundary case to oversized. We can detect this via the
-    /// `oversized_*_chunks_allocated` stats counter being 0 vs 1 when an
-    /// allocation lands exactly on the limit.
-    ///
-    /// `acquire_*(min_payload)` is invoked with `needed = size +
-    /// align_slack + entry_size`. To hit `needed == max_normal_alloc`
-    /// precisely we set a known `max_normal_alloc` and allocate a value
-    /// of matching size.
     #[cfg(feature = "stats")]
     #[test]
     fn acquire_local_boundary_does_not_route_oversized() {
@@ -1597,8 +1555,6 @@ mod mutants_for_chunk_provider {
         assert!(s.normal_shared_chunks_allocated + s.oversized_shared_chunks_allocated >= 1);
     }
 
-    /// Kills `chunk_provider.rs:405:24 > → >=` in `acquire_shared` (same
-    /// rationale as above, shared flavor).
     #[cfg(feature = "stats")]
     #[test]
     fn acquire_shared_boundary_does_not_route_oversized() {
@@ -1610,22 +1566,6 @@ mod mutants_for_chunk_provider {
         assert!(s.normal_shared_chunks_allocated + s.oversized_shared_chunks_allocated >= 1);
     }
 
-    /// Kills the subtraction mutants in `acquire_local` / `acquire_shared`
-    /// around `NUM_CHUNK_CLASSES - 1` (chunk_provider.rs:187, 254, 424,
-    /// 452): `- 1 → + 1` or `- 1 → / 1`. These set `max_class` to the
-    /// largest legal class index. Mutating shrinks/expands the class
-    /// ceiling, which changes the chunk *size* picked for fresh
-    /// allocations on a cache miss.
-    ///
-    /// We force a high-water mark by allocating many small values
-    /// sequentially. After enough allocations the provider must have
-    /// allocated several chunks; the largest chunk produced must be
-    /// 64 KiB (class 7 = `NUM_CHUNK_CLASSES - 1`). With mutations the
-    /// ceiling shifts: `+ 1` allows class 8 (128 KiB) → larger total
-    /// bytes; `/ 1` allows up to 8 (one larger class).
-    ///
-    /// Observation: total_bytes_allocated stays bounded by a
-    /// well-known sum under the unmutated ceiling.
     #[cfg(feature = "stats")]
     #[test]
     fn acquire_local_class_ceiling_is_correct() {
@@ -1652,20 +1592,6 @@ mod mutants_for_chunk_provider {
         );
     }
 
-    /// Kills `chunk_provider.rs:258:36 > → >=` and the matching
-    /// `chunk_provider.rs:300:33` mutants (`> with ==/</>=`) in
-    /// `preallocate_local`'s high-water ratchet.
-    ///
-    /// `next_high_water > *h` chooses the larger of the two. With
-    /// `>=`, equal high-waters cause a redundant write — observable only
-    /// through alias bookkeeping, but the *behavior* is identical. The
-    /// related comparison in `preallocate_local` at line 300 governs the
-    /// fetch_max ratchet on the shared cache; `> → <` reverses the
-    /// ratchet so future chunks shrink instead of growing.
-    ///
-    /// Strategy: preallocate first at a small class, then allocate at a
-    /// large class — the high-water mark should grow, and subsequent
-    /// fresh chunks should match the larger class.
     #[cfg(feature = "stats")]
     #[test]
     fn high_water_ratchet_grows_chunks() {
@@ -1689,10 +1615,6 @@ mod mutants_for_chunk_provider {
         assert_eq!(arena.stats().oversized_local_chunks_allocated, 0);
     }
 
-    /// Kills `chunk_provider.rs:274:47 + → *` in `preallocate_local`
-    /// (and `315:48` in `preallocate_shared`): the `local_header_size() +
-    /// target_bytes` total. With `*` the total balloons and reserve_budget
-    /// would fail for any tight budget.
     #[cfg(feature = "stats")]
     #[test]
     fn preallocate_total_bytes_uses_sum_not_product() {
@@ -1707,16 +1629,6 @@ mod mutants_for_chunk_provider {
         assert_eq!(arena2.stats().normal_shared_chunks_allocated, 1);
     }
 
-    /// Kills `chunk_provider.rs:462:9 try_pop_shared_at_least → None` and
-    /// `479:20 >= → <` (the cap-vs-min_bytes filter inside the cache pop).
-    ///
-    /// If `try_pop_shared_at_least` always returns `None`, every
-    /// `acquire_shared` cache-hit becomes a cache miss → a fresh chunk
-    /// is allocated → `normal_shared_chunks_allocated` doubles. To
-    /// detect: preallocate a shared chunk, then issue an arc that
-    /// should reuse the cached chunk; assert the counter does not
-    /// increase. With `>= → <` cap, every cached chunk fails the size
-    /// gate and we also miss the cache.
     #[cfg(feature = "stats")]
     #[test]
     fn shared_cache_pop_serves_preallocated_chunk() {
@@ -1732,7 +1644,6 @@ mod mutants_for_chunk_provider {
     }
 }
 
-// === merged from tests/mutants_internal.rs ===
 mod mutants_for_internal {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1807,19 +1718,6 @@ mod mutants_for_internal {
         );
     }
 
-    /// Kills `constants.rs:76:14 >= → <` and `87:13 < → <=` in
-    /// `min_class_for_bytes` (the upper / inner loop boundaries) and
-    /// `77:34 - → +/`.
-    ///
-    /// `min_class_for_bytes` saturates at `NUM_CHUNK_CLASSES - 1` for
-    /// `bytes >= MAX_CHUNK_BYTES` (= 64 KiB). With `< →`, the saturation
-    /// inverts and small inputs return class 7. The inner `while v <
-    /// ratio` is `<`; flipping to `<=` adds an extra round-up to the
-    /// next class.
-    ///
-    /// Observation: `with_capacity_local(N)` preallocates one chunk of
-    /// class = `min_class_for_bytes(N).min(NUM_CHUNK_CLASSES-1)`. By
-    /// scanning a few `N` we trigger several `min_class` paths.
     #[cfg(feature = "stats")]
     #[test]
     fn min_class_for_bytes_consistency() {
@@ -1848,13 +1746,6 @@ mod mutants_for_internal {
         assert_eq!(arena.stats().normal_local_chunks_allocated, 2);
     }
 
-    /// Kills `shared_chunk.rs:168:9 to_thin_ptr → Default::default()` (returns null).
-    ///
-    /// `to_thin_ptr` returns the chunk header address. If replaced with
-    /// `Default::default()` (= null), the shared-cache Treiber stack
-    /// link writes would store nulls — preallocated chunks would not be
-    /// findable. Detection: preallocate a shared chunk and assert it
-    /// can be popped to serve an Arc.
     #[cfg(feature = "stats")]
     #[test]
     fn to_thin_ptr_returns_chunk_address() {
@@ -1874,21 +1765,6 @@ mod mutants_for_internal {
         );
     }
 
-    /// Kills `shared_chunk.rs:187:38 - → +` and `187:38 - → /` in
-    /// `SharedChunk::allocate`. The line is
-    /// `min_payload.checked_add(entry_align - 1)?  & !(entry_align - 1)`.
-    ///
-    /// With `- → +`, `entry_align - 1` becomes `entry_align + 1` (9) →
-    /// the mask drops bits 0 and 3 from the rounded-up payload, producing
-    /// a payload smaller than requested and misaligned for `DropEntry`
-    /// writes. With `/ 1` it stays `entry_align` (8), `& !8 = & ~0b1000`
-    /// → only bit 3 cleared, mis-aligning payload.
-    ///
-    /// We allocate many Arc<Drop>'s into a shared chunk. With wrong
-    /// `payload`, the drop_back stack writes would be misaligned (UB on
-    /// some platforms) and replay would read garbage. The 1024-arc
-    /// test in `mutants_kill.rs` already exercises this; this test pins
-    /// a smaller, faster variant via stats.
     #[test]
     fn shared_chunk_payload_alignment_supports_drop_entries() {
         #[derive(Debug)]
@@ -1911,11 +1787,6 @@ mod mutants_for_internal {
         assert_eq!(c.load(Ordering::Relaxed), 256);
     }
 
-    /// Kills `arena_builder.rs:174:80 - → +` and `- → /` in
-    /// `ArenaBuilder::resolve_capacity` — already covered in
-    /// `mutants_kill.rs::resolve_capacity_uses_correct_class_minus_one_clamp`.
-    /// This is a thin additional regression with a different capacity
-    /// to maximize boundary coverage.
     #[cfg(feature = "stats")]
     #[test]
     fn resolve_capacity_64kib_yields_single_chunk() {
@@ -1926,7 +1797,6 @@ mod mutants_for_internal {
     }
 }
 
-// === merged from tests/mutants_kill_boundaries.rs ===
 mod mutants_for_kill_boundaries {
     #![cfg(feature = "stats")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -2209,7 +2079,6 @@ mod mutants_for_kill_boundaries {
     }
 }
 
-// === merged from tests/coverage_arena_gaps.rs ===
 mod coverage_arena_gaps {
     #![allow(clippy::unwrap_used, reason = "test code")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -2621,7 +2490,6 @@ mod coverage_arena_gaps {
     // ============================================================================
 }
 
-// === relocated from mutants_extras.rs (stats-gated tests) ===
 #[cfg(feature = "stats")]
 mod from_mutants_extras_stats {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
@@ -2653,12 +2521,6 @@ mod from_mutants_extras_stats {
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common::{self, DropCounter, FailingAllocator, SendFailingAllocator};
 
-    /// Kills `crates/multitude/src/arena.rs:410: replace
-    /// Arena::preallocate_one_shared -> Result<(), AllocError> with Ok(())`.
-    ///
-    /// If the body were skipped, `with_capacity_shared(N)` would not
-    /// install any chunk in the shared cache — the stats counter would
-    /// remain at 0.
     #[test]
     fn preallocate_one_shared_actually_allocates_chunk() {
         let arena = Arena::builder().with_capacity_shared(1024).build();
@@ -2668,21 +2530,6 @@ mod from_mutants_extras_stats {
         );
     }
 
-    /// Kills `crates/multitude/src/arena_builder.rs:174: replace - with +`
-    /// and `replace - with /` in `ArenaBuilder::resolve_capacity`.
-    ///
-    /// `resolve_capacity` clamps the target class to `NUM_CHUNK_CLASSES - 1`
-    /// (= 7, payload = 64 KiB). Mutating `- 1` to `+ 1` (clamp = 9) or
-    /// `/ 1` (clamp = 8) lets `target_class` exceed the legal range. In
-    /// release builds, `class_to_bytes(8)` returns 128 KiB and
-    /// `class_to_bytes(9)` returns 256 KiB, so the chunk count for a
-    /// 128 KiB request becomes `1` instead of the correct `2`. Asking for
-    /// 128 KiB and asserting `>= 2` chunks distinguishes both mutants from
-    /// the original.
-    ///
-    /// (We use shared so a single test also covers `preallocate_one_shared`'s
-    /// loop; the local sibling has its own existing coverage in
-    /// `tests/arena.rs::preallocate_skips_underlying_allocation_calls`.)
     #[test]
     fn resolve_capacity_uses_correct_class_minus_one_clamp() {
         // 128 KiB > MAX_CHUNK_BYTES (= 64 KiB), so target_class saturates
@@ -2700,15 +2547,6 @@ mod from_mutants_extras_stats {
         assert_eq!(arena2.stats().normal_local_chunks_allocated, 2);
     }
 
-    /// Kills `crates/multitude/src/arena.rs:1201: replace
-    /// <impl Drop for OversizedSharedGuard>::drop with ()`.
-    ///
-    /// `OversizedSharedGuard` reconciles a shared oversized chunk that was
-    /// pulled with `LARGE` inflation when the user closure panics. If the
-    /// drop body becomes a no-op the chunk is leaked and its bytes stay
-    /// charged to the byte budget. With a tight budget, a leak makes the
-    /// next oversized arc allocation fail; without the leak, the arena
-    /// recovers and the second allocation succeeds.
     #[test]
     fn oversized_shared_guard_drop_releases_on_panic() {
         // Each oversized arc below uses an 8 KiB blob (1024 u64s) which
@@ -2752,17 +2590,6 @@ mod from_mutants_extras_stats {
         );
     }
 
-    /// Kills `constants.rs:76:14 >= -> <` in `min_class_for_bytes`.
-    ///
-    /// At `bytes = 513`, the original code falls past the saturation
-    /// guard (line 76) into the loop, which returns class 1 (1 KiB).
-    /// Mutated `<` makes the guard fire for any `bytes < 65536`,
-    /// returning class 7 (64 KiB).
-    ///
-    /// `with_capacity_local(513)` preallocates one chunk of the resolved
-    /// class. With a `byte_budget` tight enough to accept a 1 KiB chunk
-    /// (plus header) but reject a 64 KiB chunk, `try_build` succeeds in
-    /// the unmutated build and fails after mutation.
     #[test]
     fn min_class_for_bytes_classifies_513_below_saturation() {
         // 4 KiB budget easily covers (header + 1 KiB) but not a 64 KiB chunk.
@@ -2770,18 +2597,6 @@ mod from_mutants_extras_stats {
         assert!(res.is_ok(), "513 must resolve to class 1 (1 KiB), fitting a 4 KiB budget");
     }
 
-    /// Kills `constants.rs:87:13 < -> <=` in the `while v < ratio` loop.
-    ///
-    /// For `bytes = 513`: `ratio = 513.div_ceil(512) = 2`. Original loop:
-    /// v=1, c=0; while v<2: v=2, c=1. Returns class 1.
-    /// Mutated `<=`: extra iteration: v=2, c=1; while 2<=2: v=4, c=2.
-    /// Returns class 2.
-    ///
-    /// Same byte-budget trick: a 4 KiB budget admits a 1 KiB chunk but
-    /// not 2 KiB plus header overhead would still fit, so we need a
-    /// tighter probe. Mutated class 2 -> 2 KiB chunk. With budget=1500
-    /// the unmutated 1 KiB chunk + header (<512) fits, the mutated
-    /// 2 KiB + header doesn't.
     #[test]
     fn min_class_inner_loop_uses_strict_less() {
         // Probe: an unbudgeted arena easily allocates a 1 KiB chunk and a
@@ -2794,24 +2609,6 @@ mod from_mutants_extras_stats {
         );
     }
 
-    /// Kills `chunk_provider.rs:133:25 > -> >=` in `reserve_budget`.
-    ///
-    /// The boundary `next == budget` must be accepted (`> budget` is
-    /// false); mutated `>=` rejects it.
-    ///
-    /// Bisecting the budget for a single chunk yields the smallest
-    /// passing budget B*, which is C in unmutated code and C+1 in
-    /// mutated. So bisection alone cannot distinguish. Instead we bisect
-    /// both `local` and `shared` budgets separately to obtain `bl` and
-    /// `bs`, then test a combined budget of `bl + bs - 1`. With
-    /// `with_capacity_local(512)` + `with_capacity_shared(512)`:
-    ///   * unmutated: bl = Cl, bs = Cs, combined = Cl+Cs-1; total need
-    ///     = Cl + Cs > combined -> rejected.
-    ///   * mutated:   bl = Cl+1, bs = Cs+1, combined = Cl+Cs+1; total
-    ///     need = Cl + Cs which is `< Cl+Cs+1` -> `>=` false -> admitted.
-    ///
-    /// Therefore asserting that combined REJECTS under the unmutated
-    /// code (but would ADMIT under mutation) kills the mutant.
     #[test]
     fn reserve_budget_admits_exact_equal() {
         fn ok_local(b: usize) -> bool {
@@ -2847,35 +2644,6 @@ mod from_mutants_extras_stats {
         );
     }
 
-    /// Kills `chunk_provider.rs:152:9 release_budget -> ()` in
-    /// `ChunkProvider::release_budget`.
-    ///
-    /// If `release_budget` is a no-op, allocations stay accounted even
-    /// after the chunk is freed. We allocate enough to nearly exhaust
-    /// the budget, drop those allocations, then allocate again with
-    /// the same arena — the freed bytes must be released so the
-    /// follow-up allocation fits. The path is the failure-rollback in
-    /// `acquire_local` (line 171) which calls `release_budget` after
-    /// `LocalChunk::allocate` returns Err.
-    ///
-    /// To force a failing chunk allocation we use a budget that admits
-    /// the first chunk but not the second; then deallocate (via
-    /// `Arena::reset`) and reallocate. Without `release_budget`, the
-    /// second attempt also fails. We use `try_alloc_box` to surface
-    /// the `AllocError` as `Err` rather than panic.
-    /// Kills `chunk_provider.rs:152:9 release_budget -> ()`.
-    ///
-    /// If `release_budget` is a no-op, the running `total_chunk_bytes`
-    /// monotonically grows even when chunks are freed. The free path
-    /// only fires for oversized chunks (the normal path caches the chunk
-    /// and never calls `release_budget`).
-    ///
-    /// We allocate an oversized box, drop it (which frees the
-    /// stand-alone oversized chunk and calls `release_budget`), and
-    /// allocate another oversized box. With unmutated code the budget
-    /// recycles and the second allocation fits; with the mutated `()`
-    /// body the first allocation's bytes stay accounted, and the second
-    /// allocation panics with `AllocError`.
     #[test]
     fn release_budget_frees_accounted_bytes() {
         let arena = Arena::builder().byte_budget(128 * 1024).max_normal_alloc(4 * 1024).build();
@@ -2890,16 +2658,6 @@ mod from_mutants_extras_stats {
         drop(arena);
     }
 
-    /// Kills `chunk_provider.rs:441:48 + -> *` in `acquire_shared`.
-    /// Line 441: `let total_bytes = shared_header_size() + target_bytes`.
-    /// Mutated `*` -> `header_size() * target_bytes`. For `target_bytes=512`
-    /// and header ~ 88, that's a 45 KiB allocation request vs ~600 B
-    /// original. A `byte_budget` of 1024 bytes admits 600 B but rejects
-    /// 45 KiB.
-    ///
-    /// Boundary test: build a shared-side arena with a tight budget;
-    /// force a fresh shared chunk via `alloc_arc`. With mutated `*`,
-    /// the budget check rejects; original admits.
     #[test]
     fn acquire_shared_total_bytes_is_sum_not_product() {
         let arena = Arena::builder().byte_budget(2 * 1024).build();
@@ -2909,19 +2667,6 @@ mod from_mutants_extras_stats {
         assert!(res.is_ok(), "header + payload must sum (not multiply) for budget check");
     }
 
-    /// Kills `arena.rs:728:30 > -> >=` in `try_alloc_inner_arc_with`.
-    /// Line 728: `if layout.size() > self.provider.max_normal_alloc`
-    /// routes to oversized one-shot path. Mutated `>=`: the boundary
-    /// case `size == max_normal_alloc` is routed oversized, which is
-    /// observable via `oversized_shared_chunks_allocated` counter.
-    ///
-    /// Note: this gate is reached only after the fast-path miss.
-    /// To trigger the slow path we allocate one item that doesn't fit
-    /// in the default shared chunk's bump cursor on first try, but the
-    /// fast-path generally just installs a fresh chunk anyway. The
-    /// simplest reliable trigger: allocate a value of exactly
-    /// `max_normal_alloc` bytes immediately after construction — the
-    /// fast-path stub state fails, slow path runs, hits line 728.
     #[test]
     fn arc_with_size_equal_max_normal_routes_normal() {
         let arena = Arena::builder().max_normal_alloc(4096).build();
@@ -2932,16 +2677,6 @@ mod from_mutants_extras_stats {
         assert!(s.normal_shared_chunks_allocated + s.oversized_shared_chunks_allocated >= 1);
     }
 
-    /// Kills `arena.rs:1251:17` — `<impl Drop for OversizedSharedGuard>::drop`
-    /// replaced with `()`. The Drop runs `reconcile_swap_out` to free the
-    /// chunk on a panic in `init`. If `init` panics and Drop is a no-op,
-    /// the chunk leaks; subsequent allocations either succeed (leaking)
-    /// or fail (budget exhausted).
-    ///
-    /// Witness: build with a tight `byte_budget`; force a panicking Arc
-    /// initialiser on an oversized chunk; catch the panic; allocate
-    /// again. If the guard's Drop is a no-op, the budget stays charged
-    /// and the next allocation fails.
     #[test]
     fn oversized_shared_guard_drop_releases_chunk_on_panic() {
         let arena = Arena::builder().byte_budget(256 * 1024).max_normal_alloc(4096).build();
@@ -2959,10 +2694,6 @@ mod from_mutants_extras_stats {
         assert_eq!(s.oversized_shared_chunks_allocated, 2);
     }
 
-    /// Kills: arena.rs:728:30 `> -> >=` — oversized routing for arc
-    /// When `layout.size()` == `max_normal_alloc`, the normal path should be
-    /// used. If mutated to `>=`, it takes the oversized path.
-    /// Detectable via stats: oversized vs normal shared chunk counts.
     #[test]
     fn arena_728_exact_max_normal_alloc_arc() {
         let arena = Arena::builder().max_normal_alloc(4096).build();

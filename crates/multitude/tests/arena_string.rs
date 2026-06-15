@@ -367,14 +367,12 @@ fn shrink_to_fit_reclaims_when_at_cursor() {
 fn shrink_to_fit_empty_or_full_noop() {
     let arena = Arena::new();
     let mut s = arena.alloc_string();
-    // Folded mutant-kill: string.rs:207 `|| -> &&` must still no-op at cap == 0.
     s.shrink_to_fit();
     assert_eq!(s.capacity(), 0);
 
     let mut s2 = arena.alloc_string_with_capacity(4);
     s2.push_str("abcd");
     let cap = s2.capacity();
-    // Folded mutant-kill: the same guard must also no-op when len == cap.
     s2.shrink_to_fit();
     assert_eq!(s2.capacity(), cap);
 }
@@ -711,7 +709,6 @@ fn write_str_via_trait() {
     assert_eq!(s.as_str(), "hello, world");
 }
 
-// === merged from tests/arena_str.rs ===
 mod arena_str {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -798,7 +795,6 @@ mod arena_str {
     }
 }
 
-// === merged from tests/arena_box_str.rs ===
 mod arena_box_str {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -976,7 +972,6 @@ mod arena_box_str {
     }
 }
 
-// === merged from tests/mutants_string.rs ===
 mod mutants_for_string {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -987,11 +982,6 @@ mod mutants_for_string {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    /// Kills `string.rs:94:16 > → >=` in `try_with_capacity_in`:
-    /// `if cap > 0 { allocate }`. With `>=`, even `cap == 0` allocates.
-    /// Detection: pointer identity. A zero-capacity request must leave
-    /// the data pointer in its dangling state (no allocation, no chunk
-    /// touched).
     #[test]
     fn with_capacity_zero_does_not_allocate() {
         let arena = Arena::new();
@@ -1005,9 +995,6 @@ mod mutants_for_string {
         assert_eq!(s0.as_ptr() as usize, s_new.as_ptr() as usize);
     }
 
-    /// Kills `string.rs:465:19 > → >=` in `try_reserve`. Same shape as
-    /// the utf16 counterpart: `if needed > self.cap { grow }`. With
-    /// `>=`, reserve at exact fit reallocates spuriously.
     #[test]
     fn string_reserve_at_exact_fit_does_not_regrow() {
         let arena = Arena::new();
@@ -1019,10 +1006,6 @@ mod mutants_for_string {
         assert_eq!(s.as_ptr(), ptr_before);
     }
 
-    /// Kills `string.rs:510:21 == → !=` in `into_box`. With
-    /// `!=`, the empty-fast-path triggers on non-empty inputs (wrong
-    /// output, possibly UB) and the data-path triggers on empty (UB on
-    /// dangling).
     #[test]
     fn into_box_handles_empty_and_non_empty() {
         let arena = Arena::new();
@@ -1082,16 +1065,6 @@ mod mutants_for_string {
         assert_eq!(&*escaped, "survives");
     }
 
-    /// Kills `string.rs:528:9 try_reclaim_tail → ()` (body becomes a
-    /// no-op), `528:21 >= → <` (early-return inverted), and `534:29 - → /`
-    /// (`total - used` arithmetic).
-    ///
-    /// `try_reclaim_tail` returns the unused trailing bytes to the chunk
-    /// cursor. If the function is a no-op or the arithmetic is wrong,
-    /// the next allocation in the same arena would either start past
-    /// the reclaimed region (no aliasing — invisible) or overlap with
-    /// it (corruption). We pin the *positive observation* by allocating
-    /// after a freeze and confirming the frozen string is intact.
     #[test]
     fn reclaim_tail_does_not_corrupt_frozen_string() {
         let arena = Arena::new();
@@ -1109,7 +1082,6 @@ mod mutants_for_string {
     }
 }
 
-// === merged from tests/format_macro.rs ===
 mod format_macro {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]

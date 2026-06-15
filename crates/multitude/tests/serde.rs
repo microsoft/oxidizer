@@ -71,7 +71,6 @@ fn arena_vec_of_strings_serializes() {
     assert_eq!(json, "[\"a\",\"b\"]");
 }
 
-// === relocated from coverage_extras.rs (serde-gated tests) ===
 mod from_coverage_extras_serde {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
