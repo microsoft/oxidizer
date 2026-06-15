@@ -2234,6 +2234,7 @@ mod coverage_arena_gaps {
     /// Used to drive over-alignment rejection in `_with` family functions
     /// without ever instantiating the value on the test stack frame
     /// (the over-alignment guard fires before the closure is invoked).
+    #[cfg(not(utc_backend))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct HalfChunkAlign;
@@ -2242,6 +2243,7 @@ mod coverage_arena_gaps {
     /// `layout.align() >= CHUNK_ALIGN` guard in the slice-copy family.
     /// Same Windows-stack caveat as [`HalfChunkAlign`]: never lives on
     /// the test stack.
+    #[cfg(not(utc_backend))]
     #[repr(align(65536))]
     #[derive(Clone, Copy)]
     struct ChunkAlign;
@@ -2326,6 +2328,7 @@ mod coverage_arena_gaps {
     // inner_value.rs:147 — `alloc_inner_arc_with_or_panic` over-alignment panic.
     // ============================================================================
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_arc_with_over_aligned_panics() {
@@ -2351,6 +2354,7 @@ mod coverage_arena_gaps {
     // inner_value.rs:927 — `alloc_inner_with_or_panic` over-alignment panic.
     // ============================================================================
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_with_over_aligned_panics() {
@@ -2358,6 +2362,7 @@ mod coverage_arena_gaps {
         let _: &mut HalfChunkAlign = arena.alloc_with(|| HalfChunkAlign);
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_box_with_over_aligned_panics() {
@@ -2376,6 +2381,7 @@ mod coverage_arena_gaps {
     // ever lives on the test stack frame.
     // ============================================================================
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_uninit_box_over_aligned_panics() {
@@ -2383,6 +2389,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_uninit_box::<HalfChunkAlign>();
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_uninit_arc_over_aligned_panics() {
@@ -2390,6 +2397,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_uninit_arc::<HalfChunkAlign>();
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
     fn alloc_slice_copy_over_aligned_panics() {
@@ -2407,6 +2415,7 @@ mod coverage_arena_gaps {
     // inner_slice.rs:833 — `try_alloc_slice_shared_copy` over-alignment.
     // ============================================================================
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_slice_no_drop_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2419,6 +2428,7 @@ mod coverage_arena_gaps {
         assert!(res.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_slice_copy_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2427,6 +2437,7 @@ mod coverage_arena_gaps {
         assert!(res.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_slice_copy_arc_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();
@@ -2522,6 +2533,7 @@ mod coverage_arena_gaps {
     // stack frame (the guard fires before the closure is invoked).
     // ============================================================================
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_arc_with_over_aligned_returns_err() {
         let arena = Arena::<Global>::new();

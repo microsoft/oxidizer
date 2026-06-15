@@ -173,6 +173,7 @@ unused_lifetimes = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
     'cfg(loom)',
+    'cfg(utc_backend)',
 ] }
 
 [workspace.lints.clippy]
