@@ -37,22 +37,6 @@ impl LogCapture {
         String::from_utf8_lossy(&self.buffer.lock().unwrap()).to_string()
     }
 
-    /// Clears the captured log output buffer.
-    ///
-    /// Useful when reusing a single `LogCapture` (and its installed subscriber)
-    /// across multiple sub-cases inside a single test. Re-installing a fresh
-    /// subscriber per sub-case via `tracing::subscriber::set_default` in tight
-    /// loops races with parallel tests' subscriber installations and can drop
-    /// events; sharing one subscriber and clearing the buffer between cases
-    /// avoids that flake.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the buffer cannot be locked for writing.
-    pub fn clear(&self) {
-        self.buffer.lock().unwrap().clear();
-    }
-
     /// Asserts that the captured log output contains the given string.
     ///
     /// # Panics
