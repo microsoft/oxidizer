@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.7] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.4` of `layered`
+  - Now requires `0.1.6` of `recoverable`
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+  - Now requires `0.3.4` of `tick`
+
+- ✔️ Tasks
+
+  - bump MSRV to 1.93 and adopt new stdlib helpers ([#474](https://github.com/microsoft/oxidizer/pull/474))
+
 ## [0.5.6] - 2026-06-10
 
 - 🔧 Maintenance
