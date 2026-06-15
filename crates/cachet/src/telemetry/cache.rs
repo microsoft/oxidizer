@@ -505,13 +505,6 @@ mod tests {
         assert!(capture.output().is_empty());
     }
 
-    // NOTE: a previous `logging_enabled_without_subscriber_is_noop` unit test
-    // lived here, exercising the cachet tracing emission paths with no
-    // subscriber installed. It caused a process-wide flake -- see
-    // `crates/cachet/tests/no_subscriber.rs` for the test (relocated to its
-    // own integration-test binary) and the comment there for the
-    // tracing-core `Interest::never` poisoning rationale.
-
     #[cfg_attr(miri, ignore)]
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
         let capture = LogCapture::new();

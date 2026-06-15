@@ -50,6 +50,18 @@ async fn logging_enabled_without_subscriber_does_not_panic() {
     // `tracing::info!` / `tracing::debug!` macros inside cachet. Those macros
     // must degrade to a no-op without panicking.
 
+    // Guard the test's core precondition: if some future change inadvertently
+    // installs a subscriber (e.g., via a global default in a dependency), the
+    // test would silently lose its meaning. Fail loudly instead.
+    tracing::dispatcher::get_default(|dispatch| {
+        assert!(
+            dispatch.is::<tracing::subscriber::NoSubscriber>(),
+            "test precondition violated: a tracing subscriber is installed, \
+             but this test must run with no subscriber to exercise the \
+             no-subscriber code paths; got {dispatch:?}"
+        );
+    });
+
     let clock = Clock::new_frozen();
 
     // (1) Always-failing storage -> covers the error-path tracing events:
@@ -62,22 +74,25 @@ async fn logging_enabled_without_subscriber_does_not_panic() {
         .storage(failing)
         .enable_logs()
         .build();
-    let _ = failing_cache.get(&"k".to_string()).await;
-    let _ = failing_cache.insert("k".to_string(), CacheEntry::new(1)).await;
-    let _ = failing_cache.invalidate(&"k".to_string()).await;
-    let _ = failing_cache.clear().await;
+    failing_cache.get(&"k".to_string()).await.unwrap_err();
+    failing_cache.insert("k".to_string(), CacheEntry::new(1)).await.unwrap_err();
+    failing_cache.invalidate(&"k".to_string()).await.unwrap_err();
+    failing_cache.clear().await.unwrap_err();
 
     // (2) Working storage with `InsertPolicy::never()` -> covers the
     //     success/miss/insert-rejected tracing events: `cache.miss`,
-    //     `cache.insert_rejected`, plus `complete_operation`.
+    //     `cache.insert_rejected`, plus `complete_operation`. `insert` returns
+    //     `Ok(())` when the policy rejects (rejection is not an error), and
+    //     the subsequent `get` must still miss because nothing was stored.
     let rejecting_cache: Cache<String, i32> = Cache::builder::<String, i32>(clock.clone())
         .name("no_sub_rejecting")
         .storage(MockCache::<String, i32>::new())
         .insert_policy(InsertPolicy::never())
         .enable_logs()
         .build();
-    let _ = rejecting_cache.get(&"k".to_string()).await;
-    let _ = rejecting_cache.insert("k".to_string(), CacheEntry::new(1)).await;
+    assert!(rejecting_cache.get(&"k".to_string()).await.unwrap().is_none());
+    rejecting_cache.insert("k".to_string(), CacheEntry::new(1)).await.unwrap();
+    assert!(rejecting_cache.get(&"k".to_string()).await.unwrap().is_none());
 
     // (3) Working storage with default policy -> covers `cache.hit` and
     //     `cache.inserted` (and the success path of `complete_operation`).
@@ -87,7 +102,7 @@ async fn logging_enabled_without_subscriber_does_not_panic() {
         .enable_logs()
         .build();
     working_cache.insert("k".to_string(), CacheEntry::<i32>::new(1)).await.unwrap();
-    let _ = working_cache.get(&"k".to_string()).await; // hit
+    assert!(working_cache.get(&"k".to_string()).await.unwrap().is_some());
 
     // No panic up to this point = every cachet tracing emission path tolerates
     // the absence of a subscriber.
