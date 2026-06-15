@@ -50,4 +50,8 @@ install-tools:
     }
 
     # Install platform-specific benchmark toolchain (Callgrind, Linux-only).
-    & (Join-Path $PSScriptRoot ".." "scripts" "install-callgrind-tools.ps1")
+    # `just` copies [script] recipes to a temp file before executing them, so
+    # $PSScriptRoot points at that temp directory rather than the repo. We use
+    # the `justfile_directory()` function to resolve the repo root at recipe
+    # expansion time so the call works no matter where the temp file lives.
+    & (Join-Path "{{ justfile_directory() }}" "scripts" "install-callgrind-tools.ps1")
