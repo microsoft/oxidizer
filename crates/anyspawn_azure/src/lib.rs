@@ -9,15 +9,14 @@
 //! Bundle [`anyspawn`] and [`tick`] as Azure SDK runtime abstractions.
 //!
 //! The Azure SDK abstracts its task spawning, sleeping, and yielding behind the
-//! [`typespec_client_core::async_runtime::AsyncRuntime`] trait, and the process
-//! execution that developer credentials rely on behind the `azure_identity::Executor`
+//! [`azure_core::async_runtime::AsyncRuntime`] trait, and the process execution
+//! that developer credentials rely on behind the `azure_identity::Executor`
 //! trait. This crate adapts those primitives to both:
 //!
-//! - [`Runtime`] implements [`typespec_client_core::async_runtime::AsyncRuntime`] on top of
-//!   an [`anyspawn::Spawner`] (spawning) and a [`tick::Clock`] (sleeping).
-//! - With the `azure-identity` feature, [`Runtime`] also implements
-//!   `azure_identity::Executor`, running credential commands on the
-//!   [`anyspawn::Spawner`].
+//! - [`Runtime`] implements `AsyncRuntime` on top of an [`anyspawn::Spawner`]
+//!   (spawning) and a [`tick::Clock`] (sleeping).
+//! - With the `azure-identity` feature, `Runtime` also implements
+//!   `azure_identity::Executor`, running credential commands on the spawner.
 //!
 //! # Example
 //!
@@ -26,8 +25,8 @@
 //!
 //! use anyspawn::Spawner;
 //! use anyspawn_azure::Runtime;
+//! use azure_core::async_runtime::{AsyncRuntime, set_async_runtime};
 //! use tick::Clock;
-//! use typespec_client_core::async_runtime::{AsyncRuntime, set_async_runtime};
 //!
 //! // Install an `anyspawn`-backed async runtime (sleeping on a `tick::Clock`).
 //! fn install_runtime(spawner: Spawner, clock: Clock) {

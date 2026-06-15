@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyspawn::Spawner;
 use anyspawn_azure::Runtime;
+use azure_core::async_runtime::AsyncRuntime;
+use azure_core::time::Duration;
 use tick::Clock;
-use typespec_client_core::async_runtime::AsyncRuntime;
-use typespec_client_core::time::Duration;
 
 #[tokio::test]
 async fn runtime_spawn_runs_task_to_completion() {

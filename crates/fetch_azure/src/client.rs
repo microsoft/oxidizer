@@ -7,26 +7,32 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use azure_core::error::{Error, ErrorKind};
+use azure_core::http::headers::{HeaderName, HeaderValue, Headers};
+use azure_core::http::request::{Body, Request};
+use azure_core::http::response::PinnedStream;
+use azure_core::http::{AsyncRawResponse, HttpClient as HttpClientTrait};
 use bytesbuf::BytesView;
 use futures::{StreamExt as _, TryStreamExt as _};
 use layered::Service as _;
-use typespec_client_core::error::{Error, ErrorKind};
-use typespec_client_core::http::headers::{HeaderName, HeaderValue, Headers};
-use typespec_client_core::http::request::{Body, Request};
-use typespec_client_core::http::response::PinnedStream;
-use typespec_client_core::http::{AsyncRawResponse, HttpClient as HttpClientTrait};
 
-/// A [`typespec_client_core::http::HttpClient`] backed by a [`fetch::HttpClient`] transport.
+/// An [`azure_core::http::HttpClient`] implementation backed by a
+/// [`fetch::HttpClient`] transport.
 ///
-/// Construct one from an existing `fetch` client with [`HttpClient::new`]
-/// (or via [`From`]), then convert it into an `Arc<dyn HttpClient>` via [`From`]
-/// / [`Into`] to hand to the Azure SDK:
+/// Construct one from an existing `fetch` client with [`HttpClient::new`] (or
+/// via [`From`]), then convert it into the `Arc<dyn azure_core::http::HttpClient>`
+/// that Azure SDK clients accept as their transport. The Azure SDK shares its
+/// transport as an `Arc` to promote reuse: one client (and its connection pool)
+/// is shared across the request pipeline rather than cloned per call. The same
+/// intent underlies the `Policy` and `TokenCredential` traits.
 ///
 /// ```
 /// # use std::sync::Arc;
+/// # use azure_core::http::HttpClient as HttpClientTrait;
 /// # use fetch_azure::HttpClient;
-/// # fn wrap(client: fetch::HttpClient) -> Arc<dyn typespec_client_core::http::HttpClient> {
-/// HttpClient::from(client).into()
+/// # fn example(client: fetch::HttpClient) {
+/// let transport: Arc<dyn HttpClientTrait> = HttpClient::from(client).into();
+/// # let _ = transport;
 /// # }
 /// ```
 #[derive(Debug, Clone)]
@@ -41,11 +47,11 @@ impl HttpClient {
         Self { client }
     }
 
-    /// Converts a typespec [`Request`] into a `fetch` request.
-    fn to_fetch_request(&self, request: &Request) -> typespec_client_core::Result<fetch::HttpRequest> {
+    /// Converts an Azure SDK [`Request`] into a `fetch` request.
+    fn to_fetch_request(&self, request: &Request) -> azure_core::Result<fetch::HttpRequest> {
         // `Method::as_str` yields a canonical token (e.g. "GET") that `fetch`'s
         // builder parses into an `http::Method`; this avoids matching on the
-        // `#[non_exhaustive]` typespec `Method` enum.
+        // `#[non_exhaustive]` Azure SDK `Method` enum.
         let mut builder = self.client.request(request.method().as_str(), request.url().as_str());
 
         for (name, value) in request.headers().iter() {
@@ -61,7 +67,7 @@ impl HttpClient {
         })
     }
 
-    /// Converts a typespec request [`Body`] into a `fetch` [`HttpBody`](fetch::HttpBody).
+    /// Converts an Azure SDK request [`Body`] into a `fetch` [`HttpBody`](fetch::HttpBody).
     ///
     /// Empty byte bodies reuse a shared empty body, and non-empty byte bodies are
     /// wrapped without copying. Seekable streams are forwarded as a chunk stream.
@@ -101,7 +107,7 @@ impl From<HttpClient> for Arc<dyn HttpClientTrait> {
 
 #[async_trait]
 impl HttpClientTrait for HttpClient {
-    async fn execute_request(&self, request: &Request) -> typespec_client_core::Result<AsyncRawResponse> {
+    async fn execute_request(&self, request: &Request) -> azure_core::Result<AsyncRawResponse> {
         let request = self.to_fetch_request(request)?;
 
         let response = self

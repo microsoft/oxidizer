@@ -14,15 +14,15 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
+use azure_core::Bytes;
+use azure_core::http::headers::HeaderName;
+use azure_core::http::request::{Body, Request};
+use azure_core::http::{HttpClient as HttpClientTrait, Method, Url};
+use azure_core::stream::{BytesStream, SeekableStream};
 use fetch::fake::FakeHandler;
 use fetch::{HttpClient as FetchClient, HttpResponseBuilder};
 use fetch_azure::HttpClient;
 use futures::io::AsyncRead;
-use typespec_client_core::Bytes;
-use typespec_client_core::http::headers::HeaderName;
-use typespec_client_core::http::request::{Body, Request};
-use typespec_client_core::http::{HttpClient as HttpClientTrait, Method, Url};
-use typespec_client_core::stream::{BytesStream, SeekableStream};
 
 fn request(method: Method) -> Request {
     Request::new(Url::parse("https://example.com/path").expect("valid url"), method)
@@ -238,7 +238,7 @@ impl AsyncRead for ErroringStream {
 
 #[async_trait]
 impl SeekableStream for ErroringStream {
-    async fn reset(&mut self) -> typespec_client_core::Result<()> {
+    async fn reset(&mut self) -> azure_core::Result<()> {
         Ok(())
     }
 

@@ -20,7 +20,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure
 allowed_external_types = [
     # Workspace sibling crates
     "fetch::*",
-    # External dependency that defines the HttpClient trait
+    # azure_core re-exports its HttpClient trait from this crate;
+    # cargo-check-external-types reports re-exports by their defining crate.
     "typespec_client_core::*",
 ]
 
@@ -35,9 +36,9 @@ layered = { workspace = true }
 
 # external
 async-trait = { workspace = true }
+azure_core = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
-typespec_client_core = { workspace = true, features = ["http"] }
 
 [dev-dependencies]
 # internal

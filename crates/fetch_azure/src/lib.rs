@@ -9,9 +9,9 @@
 //! Adapt a [`fetch::HttpClient`] into an Azure SDK HTTP transport.
 //!
 //! The Azure SDK abstracts its HTTP transport behind the
-//! [`typespec_client_core::http::HttpClient`] trait. [`HttpClient`] implements that
-//! trait on top of a [`fetch::HttpClient`], so Azure SDK pipelines run over
-//! `fetch` and benefit from its resilience and observability.
+//! [`azure_core::http::HttpClient`] trait. [`HttpClient`] implements it on top
+//! of a `fetch` client, so Azure SDK pipelines run over `fetch` and benefit
+//! from its resilience and observability.
 //!
 //! To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 //! `anyspawn_azure` crate.
@@ -19,16 +19,18 @@
 //! # Example
 //!
 //! ```
-//! use std::sync::Arc;
-//!
-//! use fetch::HttpClient as FetchClient;
+//! use azure_core::http::{ClientOptions, Transport};
 //! use fetch_azure::HttpClient;
 //!
-//! // Adapt a `fetch` client into an Azure SDK transport.
-//! fn transport(client: FetchClient) -> Arc<dyn typespec_client_core::http::HttpClient> {
-//!     HttpClient::from(client).into()
-//! }
-//! # let _ = transport;
+//! # fn example(client: fetch::HttpClient) {
+//! // Wire a `fetch` client in as the transport for an Azure SDK client.
+//! let transport = Transport::new(HttpClient::from(client).into());
+//! let options = ClientOptions {
+//!     transport: Some(transport),
+//!     ..Default::default()
+//! };
+//! # let _ = options;
+//! # }
 //! ```
 
 mod client;

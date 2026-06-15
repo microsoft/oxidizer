@@ -16,9 +16,9 @@
 Adapt a [`fetch::HttpClient`][__link0] into an Azure SDK HTTP transport.
 
 The Azure SDK abstracts its HTTP transport behind the
-[`typespec_client_core::http::HttpClient`][__link1] trait. [`HttpClient`][__link2] implements that
-trait on top of a [`fetch::HttpClient`][__link3], so Azure SDK pipelines run over
-`fetch` and benefit from its resilience and observability.
+[`azure_core::http::HttpClient`][__link1] trait. [`HttpClient`][__link2] implements it on top
+of a `fetch` client, so Azure SDK pipelines run over `fetch` and benefit
+from its resilience and observability.
 
 To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 `anyspawn_azure` crate.
@@ -26,15 +26,15 @@ To run the Azure SDK on an `anyspawn`-backed async runtime, see the
 ## Example
 
 ```rust
-use std::sync::Arc;
-
-use fetch::HttpClient as FetchClient;
+use azure_core::http::{ClientOptions, Transport};
 use fetch_azure::HttpClient;
 
-// Adapt a `fetch` client into an Azure SDK transport.
-fn transport(client: FetchClient) -> Arc<dyn typespec_client_core::http::HttpClient> {
-    HttpClient::from(client).into()
-}
+// Wire a `fetch` client in as the transport for an Azure SDK client.
+let transport = Transport::new(HttpClient::from(client).into());
+let options = ClientOptions {
+    transport: Some(transport),
+    ..Default::default()
+};
 ```
 
 
@@ -43,8 +43,7 @@ fn transport(client: FetchClient) -> Arc<dyn typespec_client_core::http::HttpCli
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbUKR9me1iXZ8bPNIxVoL75w4bTc-gWeJmBuMbzmMs_QiBJylhZIOCZWZldGNoZjAuMTEuMIJrZmV0Y2hfYXp1cmVlMC4xLjCCdHR5cGVzcGVjX2NsaWVudF9jb3JlZTEuMC4w
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbbmImiFehOUcbSWj7AJ0Zo0QbEU03KDZjzxUbIR9apRz2JO5hZIOCamF6dXJlX2NvcmVlMS4wLjCCZWZldGNoZjAuMTEuMIJrZmV0Y2hfYXp1cmVlMC4xLjA
  [__link0]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
- [__link1]: https://docs.rs/typespec_client_core/1.0.0/typespec_client_core/?search=http::HttpClient
+ [__link1]: https://docs.rs/azure_core/1.0.0/azure_core/?search=http::HttpClient
  [__link2]: https://docs.rs/fetch_azure/0.1.0/fetch_azure/?search=HttpClient
- [__link3]: https://docs.rs/fetch/0.11.0/fetch/?search=HttpClient
