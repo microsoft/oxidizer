@@ -524,110 +524,100 @@ mod tests {
     }
 
     #[cfg_attr(miri, ignore)]
-    fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
+    #[test]
+    fn every_helper_emits_its_event() {
+        // Install a single subscriber for the whole test rather than calling
+        // `set_default` once per sub-case. The repeated install/drop churn was
+        // flaky under parallel test execution: occasionally an event emitted
+        // immediately after a fresh `set_default` was filtered out (likely via
+        // tracing's interest cache rebuild path racing with other tests'
+        // subscriber installations), leaving the capture buffer empty.
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let telemetry = CacheTelemetry::with_logging();
-        let request_id = next_request_id();
-        f(&telemetry, request_id);
-        capture.assert_contains(expected);
-    }
 
-    #[cfg_attr(miri, ignore)]
-    #[test]
-    fn every_helper_emits_its_event() {
-        assert_emits(attributes::EVENT_HIT, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_hit("c", Duration::ZERO, false) }.with_request_id(request_id).await;
-            });
-        });
-        assert_emits(attributes::EVENT_MISS, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_miss("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_EXPIRED, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_expired("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_GET_ERROR, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_get_error("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_REFRESH_HIT, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_refresh_hit("c", Duration::ZERO) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_REFRESH_MISS, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_refresh_miss("c", Duration::ZERO) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_INSERTED, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_inserted("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_INSERT_REJECTED, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_insert_rejected("c", false) }.with_request_id(request_id).await;
-            });
-        });
-        assert_emits(attributes::EVENT_INSERT_ERROR, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_insert_error("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_INVALIDATED, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_invalidated("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_INVALIDATE_ERROR, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_invalidate_error("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_CLEARED, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_cleared("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_CLEAR_ERROR, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_clear_error("c", Duration::ZERO, false) }
-                    .with_request_id(request_id)
-                    .await;
-            });
-        });
-        assert_emits(attributes::EVENT_EVICTION, |t, request_id| {
-            futures::executor::block_on(async {
-                async { t.record_eviction("c") }.with_request_id(request_id).await;
-            });
-        });
+        #[expect(clippy::type_complexity, reason = "table-driven test cases")]
+        let cases: &[(&str, &dyn Fn(&CacheTelemetry, RequestId))] = &[
+            (attributes::EVENT_HIT, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_hit("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_MISS, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_miss("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_EXPIRED, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_expired("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_GET_ERROR, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_get_error("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_REFRESH_HIT, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_refresh_hit("c", Duration::ZERO) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_REFRESH_MISS, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_refresh_miss("c", Duration::ZERO) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_INSERTED, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_inserted("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_INSERT_REJECTED, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_insert_rejected("c", false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_INSERT_ERROR, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_insert_error("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_INVALIDATED, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_invalidated("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_INVALIDATE_ERROR, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_invalidate_error("c", Duration::ZERO, false) }
+                        .with_request_id(r)
+                        .await;
+                });
+            }),
+            (attributes::EVENT_CLEARED, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_cleared("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_CLEAR_ERROR, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_clear_error("c", Duration::ZERO, false) }.with_request_id(r).await;
+                });
+            }),
+            (attributes::EVENT_EVICTION, &|t, r| {
+                futures::executor::block_on(async {
+                    async { t.record_eviction("c") }.with_request_id(r).await;
+                });
+            }),
+        ];
+
+        for (expected, f) in cases {
+            capture.clear();
+            let request_id = next_request_id();
+            f(&telemetry, request_id);
+            capture.assert_contains(expected);
+        }
     }
 
     #[test]
