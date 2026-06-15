@@ -55,10 +55,20 @@ async fn runtime_sleep_completes() {
 }
 
 #[tokio::test]
-async fn runtime_yield_now_completes() {
-    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
+async fn runtime_yield_now_yields_once_then_completes() {
+    use std::task::{Context, Poll};
 
-    runtime.yield_now().await;
+    use futures::task::noop_waker;
+
+    let runtime = Runtime::new(Spawner::new_tokio(), Clock::new_tokio());
+    let mut future = runtime.yield_now();
+
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+
+    // The first poll must yield (Pending) before the future completes.
+    assert_eq!(future.as_mut().poll(&mut cx), Poll::Pending);
+    assert_eq!(future.as_mut().poll(&mut cx), Poll::Ready(()));
 }
 
 #[tokio::test]
