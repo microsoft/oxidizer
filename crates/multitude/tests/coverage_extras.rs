@@ -151,9 +151,12 @@ mod coverage {
     // Err(AllocError) }` guard in `try_alloc_with` and `try_reserve_and_init`.
     //
     // The guard lives in a thin outer function whose frame doesn't depend
-    // on `T`'s alignment, so the test runs on every platform — including
-    // Windows, whose default 1 MiB stack can't accommodate the 128 KiB-
-    // aligned frame the guarded body would otherwise require.
+    // on `T`'s alignment, so the test runs on every LLVM-backed platform —
+    // including Windows, whose default 1 MiB stack can't accommodate the
+    // 128 KiB-aligned frame the guarded body would otherwise require.
+    //
+    // Skipped under the UTC codegen backend (`--cfg utc_backend`): UTC caps
+    // type alignment at 8192 bytes, well below the 128 KiB this test needs.
     #[cfg(not(utc_backend))]
     #[repr(align(131072))]
     struct HugeAlign(#[expect(dead_code, reason = "field present to give the type a non-zero size")] u8);
