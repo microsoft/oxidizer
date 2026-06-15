@@ -32,8 +32,11 @@
 //! Integration tests each compile to their own binary with their own
 //! `tracing-core` callsite registry, so running this scenario here cannot
 //! poison any other test binary's callsite cache.
-
-#![cfg(all(feature = "memory", feature = "logs", any(feature = "test-util", test)))]
+//!
+//! The `memory`, `logs`, and `test-util` features required for this test
+//! are declared in `Cargo.toml` via `required-features` on the
+//! `[[test]] name = "no_subscriber"` entry, so no `#![cfg(...)]` gate is
+//! needed here.
 
 use cachet::{Cache, CacheEntry, InsertPolicy, MockCache};
 use tick::Clock;
