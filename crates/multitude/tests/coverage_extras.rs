@@ -151,12 +151,17 @@ mod coverage {
     // Err(AllocError) }` guard in `try_alloc_with` and `try_reserve_and_init`.
     //
     // The guard lives in a thin outer function whose frame doesn't depend
-    // on `T`'s alignment, so the test runs on every platform — including
-    // Windows, whose default 1 MiB stack can't accommodate the 128 KiB-
-    // aligned frame the guarded body would otherwise require.
+    // on `T`'s alignment, so the test runs on every LLVM-backed platform —
+    // including Windows, whose default 1 MiB stack can't accommodate the
+    // 128 KiB-aligned frame the guarded body would otherwise require.
+    //
+    // Skipped under the UTC codegen backend (`--cfg utc_backend`): UTC caps
+    // type alignment at 8192 bytes, well below the 128 KiB this test needs.
+    #[cfg(not(utc_backend))]
     #[repr(align(131072))]
     struct HugeAlign(#[expect(dead_code, reason = "field present to give the type a non-zero size")] u8);
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_with_rejects_excessive_alignment() {
         // try_alloc_with is the &mut T entry point. CHUNK_ALIGN is 64 KiB;
@@ -430,9 +435,11 @@ mod coverage {
     // `try_alloc_with_rejects_excessive_alignment`. The `MaybeUninit<T>` returned
     // by the uninit-family entry points never materializes a real `T` on the
     // stack, so the test compiles and runs safely on every platform.
+    #[cfg(not(utc_backend))]
     #[repr(align(131072))]
     struct HugeAlignBox(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_uninit_box_rejects_excessive_alignment() {
         let arena: Arena = Arena::new();
@@ -943,7 +950,7 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_copy_rejects_overaligned() {
@@ -971,7 +978,7 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_fill_with_rejects_overaligned() {
@@ -1093,21 +1100,23 @@ mod coverage {
     // before the guard runs. The MaybeUninit/uninit-family tests only hold
     // the type *inside* `MaybeUninit`, so they're safe everywhere.
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct HalfChunkAlignNoDrop(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
+    #[cfg(not(utc_backend))]
     #[repr(align(32768))]
     struct HalfChunkAlignDrop(#[expect(dead_code, reason = "field gives the type a non-zero size")] u8);
 
+    #[cfg(not(utc_backend))]
     #[expect(clippy::empty_drop, reason = "Drop impl makes needs_drop::<T>() true for the test")]
     impl Drop for HalfChunkAlignDrop {
         fn drop(&mut self) {}
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     fn try_alloc_arc_with_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r: Result<multitude::Arc<HalfChunkAlignDrop>, _> = arena.try_alloc_arc_with(|| HalfChunkAlignDrop(0));
@@ -1115,13 +1124,14 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     fn try_alloc_box_with_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r: Result<multitude::Box<HalfChunkAlignDrop>, _> = arena.try_alloc_box_with(|| HalfChunkAlignDrop(0));
         assert!(r.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_uninit_box_rejects_half_chunk_alignment() {
         // Holding T inside MaybeUninit means no stack frame needs T's
@@ -1131,6 +1141,7 @@ mod coverage {
         assert!(r.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_uninit_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -1139,7 +1150,7 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     fn try_alloc_slice_fill_with_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r = arena.try_alloc_slice_fill_with_arc::<HalfChunkAlignDrop, _>(1, |_| HalfChunkAlignDrop(0));
@@ -1147,13 +1158,14 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     fn try_alloc_slice_fill_with_box_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
         let r = arena.try_alloc_slice_fill_with_box::<HalfChunkAlignDrop, _>(1, |_| HalfChunkAlignDrop(0));
         assert!(r.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_uninit_slice_arc_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -1161,6 +1173,7 @@ mod coverage {
         assert!(r.is_err());
     }
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_uninit_slice_box_rejects_half_chunk_alignment() {
         let arena: Arena = Arena::new();
@@ -1169,7 +1182,7 @@ mod coverage {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(all(not(target_os = "windows"), not(utc_backend)))]
     fn try_alloc_slice_copy_arc_allows_half_chunk_align_for_copy_t() {
         let arena: Arena = Arena::new();
         let data = [HalfChunkAlignNoDrop(0), HalfChunkAlignNoDrop(1)];
@@ -1747,15 +1760,19 @@ mod coverage_complete {
 
     // ---- arena.rs: MAX_SMART_PTR_ALIGN guard in `try_alloc_slice_shared_no_drop_with`. ----
 
+    #[cfg(not(utc_backend))]
     #[repr(align(32768))]
     #[derive(Clone, Copy)]
     struct OverAligned32K;
 
     // SAFETY: zero-sized POD; no drop.
+    #[cfg(not(utc_backend))]
     unsafe impl Send for OverAligned32K {}
     // SAFETY: zero-sized POD; no drop.
+    #[cfg(not(utc_backend))]
     unsafe impl Sync for OverAligned32K {}
 
+    #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_slice_fill_with_arc_rejects_over_aligned() {
         let arena = Arena::new();

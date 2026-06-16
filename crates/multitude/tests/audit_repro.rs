@@ -128,6 +128,7 @@ fn arc_concurrent_assume_init_no_race() {
 /// exercises the cap without forcing a 32 KiB stack frame (Windows
 /// MSVC chokes on rustc-emitted stack alignment of that size; see
 /// the `HalfChunkAlign` / `ChunkAlign` note in `coverage_arena_gaps.rs`).
+#[cfg(not(utc_backend))]
 #[test]
 fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
     #[repr(align(32768))]
