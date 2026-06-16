@@ -69,11 +69,11 @@ impl<T> Debug for SyncHolder<T> {
 // The only way to get the inner T is to consume the `SyncHolder<T>` itself.
 // This is important to ensure that `SyncHolder<T>` is Sync and no invariants are violated.
 impl<T> SyncHolder<T> {
-    pub fn new(value: T) -> Self {
+    pub(crate) fn new(value: T) -> Self {
         Self { value }
     }
 
-    pub fn into_inner(self) -> T {
+    pub(crate) fn into_inner(self) -> T {
         self.value
     }
 }

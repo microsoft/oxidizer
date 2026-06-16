@@ -110,7 +110,7 @@ where
     /// immediately without spawning a duplicate task. Otherwise, it spawns
     /// an async task to fetch the value from the fallback tier and promote
     /// it to the primary tier.
-    pub fn do_refresh(&self, key: &K) {
+    pub(crate) fn do_refresh(&self, key: &K) {
         if let Some(refresh) = &self.inner.refresh {
             // Check if already in-flight on this thread
             if !refresh.try_start_refresh(key) {

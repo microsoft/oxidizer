@@ -43,7 +43,7 @@ pub(crate) use bail;
 
 /// Generate a unique field name for `OhnoCore` that doesn't conflict with existing named fields
 #[cfg_attr(test, mutants::skip)] // mutation testing leads to an infinite loop here...
-pub fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident {
+pub(crate) fn generate_unique_field_name(existing_fields: &[&syn::Ident]) -> syn::Ident {
     let mut candidate = "ohno_core".to_string();
     let mut counter = 0;
     while existing_fields.iter().any(|ident| ident == &AsRef::<str>::as_ref(&candidate)) {

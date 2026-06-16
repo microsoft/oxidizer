@@ -23,10 +23,13 @@ use crate::strings::utf16_str_common::impl_utf16_str_common;
 ///
 /// # `Send` and `Sync`
 ///
-/// `BoxUtf16Str<A>` is [`Send`] when `A: Send` and [`Sync`] when
+/// `BoxUtf16Str<A>` is [`Send`] when `A: Send + Sync` and [`Sync`] when
 /// `A: Sync` — `Utf16Str` is itself `Send + Sync`. The backing chunk's
-/// refcount is atomic, so dropping the `BoxUtf16Str` on a thread other
-/// than the one that created it is sound.
+/// refcount is atomic, but a last-reference `Drop` on the receiving thread
+/// tears the shared chunk down through its `Weak<ChunkProvider<A>>` (which
+/// touches the shared provider/allocator); hence `Send` requires `A: Sync`
+/// too, exactly as [`Arc`](crate::Arc) does — `A` is *not* uniquely owned
+/// the way `std::boxed::Box<T, A>`'s is.
 pub struct BoxUtf16Str<A: Allocator + Clone = Global> {
     /// Thin pointer to the first `u16` of the payload. The element
     /// count lives in the `usize` immediately preceding the payload.
@@ -35,8 +38,11 @@ pub struct BoxUtf16Str<A: Allocator + Clone = Global> {
 }
 
 // SAFETY: thin pointer into an atomically-refcounted shared chunk;
-// `Utf16Str` is `Send + Sync`.
-unsafe impl<A: Allocator + Clone + Send> Send for BoxUtf16Str<A> {}
+// `Utf16Str` is `Send + Sync`. Like `Box<T, A>` (see its `Send`
+// rationale), a last-ref `Drop` on the receiving thread tears the
+// shared chunk down through `Weak<ChunkProvider<A>>`, so `Send`
+// requires `A: Send + Sync` (not just `A: Send`).
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for BoxUtf16Str<A> {}
 // SAFETY: `&BoxUtf16Str` exposes only `&Utf16Str` (immutable);
 // `DerefMut` requires `&mut self` and is serialized by the borrow
 // checker.

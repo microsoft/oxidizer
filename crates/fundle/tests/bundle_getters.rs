@@ -9,6 +9,10 @@
     missing_docs,
     reason = "Unit tests"
 )]
+#![expect(
+    unreachable_pub,
+    reason = "test-local bundle component structs must stay pub for the #[fundle::bundle]-generated public interface (E0446 otherwise)"
+)]
 
 #[derive(Debug, Default, Clone)]
 pub struct Logger {}

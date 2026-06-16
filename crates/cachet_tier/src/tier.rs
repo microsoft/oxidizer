@@ -36,6 +36,11 @@ use crate::{CacheEntry, Error, SizeError};
 /// - `is_empty`: Delegates to [`len`](Self::len), returning `Ok(true)` when
 ///   the reported length is `0` and otherwise propagating any `SizeError`
 #[dynosaur::dynosaur(pub(crate) DynCacheTier = dyn(box) CacheTier, bridge(none))]
+#[allow(
+    clippy::allow_attributes,
+    unreachable_pub,
+    reason = "re-exported at the crate root via `pub use tier::CacheTier`; the dynosaur attribute macro misfires unreachable_pub on the definition and item-level #[expect] is unfulfilled across the expansion"
+)]
 pub trait CacheTier<K, V>: Send + Sync {
     /// Gets a value, returning an error if the operation fails.
     fn get(&self, key: &K) -> impl Future<Output = Result<Option<CacheEntry<V>>, Error>> + Send;

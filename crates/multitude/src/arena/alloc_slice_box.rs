@@ -163,7 +163,11 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_box_copy<T: Copy>(&self, src: &[T]) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(src.len())?;
         let len = src.len();
-        let ptr = self.reserve_slice_box::<T>(len, |slot_ptr| {
+        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
+        // `usize`. Hoisting it past the refill loop spares the inner
+        // reservation a `checked_mul` overflow guard.
+        let payload_bytes = mem::size_of_val(src);
+        let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
             // SAFETY: `slot_ptr` is the reservation start; `len` elements
             // of `T` fit by construction.
             unsafe { ptr::copy_nonoverlapping(src.as_ptr(), slot_ptr, len) };
@@ -180,7 +184,12 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(len)?;
-        let ptr = self.reserve_slice_box::<T>(len, |slot_ptr| {
+        // Caller-provided `len`: must overflow-check the payload size
+        // up front so the hot loop can skip the `checked_mul`. On
+        // overflow we report `AllocError` immediately rather than spin
+        // refilling.
+        let payload_bytes = mem::size_of::<T>().checked_mul(len).ok_or(AllocError)?;
+        let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
             // SAFETY: `slot_ptr` is the reservation start; we init `len` slots
             // with panic-safe rollback via `InitGuard`.
             unsafe {
@@ -208,30 +217,30 @@ impl<A: Allocator + Clone> Arena<A> {
         })
     }
 
-    /// Reserve `len` `T` slots in the current shared chunk, bump the
+    /// Reserve `len` `T` slots (with precomputed `payload_bytes ==
+    /// size_of::<T>() * len`) in the current shared chunk, bump the
     /// chunk's strong refcount, call `init(slot_ptr)`, and return the
     /// base pointer on success. On allocator failure, refills and
     /// retries; on `init` panic, the refcount bump is released via
     /// `ChunkRef::Drop` (reservation is leaked in-chunk).
     #[inline]
-    fn reserve_slice_box<T>(&self, len: usize, init: impl FnOnce(*mut T)) -> Result<NonNull<T>, AllocError> {
+    fn reserve_slice_box<T>(&self, len: usize, payload_bytes: usize, init: impl FnOnce(*mut T)) -> Result<NonNull<T>, AllocError> {
+        debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
         // Width budget includes prefix + payload alignment slack +
         // payload bytes.
-        #[cfg(feature = "stats")]
-        let payload_bytes = mem::size_of::<T>().saturating_mul(len);
         let bytes_needed = worst_case_thin_slice_payload::<T>(len);
         let mut init = Some(init);
         loop {
-            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+            // SAFETY: `payload_bytes == size_of::<T>() * len` per caller contract.
+            let reserved = unsafe { self.try_reserve_shared_slice_with_size::<T>(len, payload_bytes) };
+            if let Some((uninit, chunk_ptr)) = reserved {
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let (base, _len) = uninit.into_raw_buffer();
                 // Run the init under the chunk_ref's Drop guard: a panic
                 // releases the +1 so the chunk is not leaked.
                 let init = init.take().expect("reserve_slice_box init taken twice");
                 init(base.as_ptr());
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(payload_bytes);
                 return Ok(base);
             }
             if self.is_oversized_shared(bytes_needed) {
@@ -244,8 +253,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (base, _len) = ticket.into_raw_buffer();
                     init_owned(base.as_ptr());
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(payload_bytes);
                     base
                 });
             }

@@ -152,7 +152,7 @@ fn bump_slices() -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
 #[bench::run(warm_arena())]
 fn alloc(arena: Arena) -> Arena {
     for i in 0..N {
-        let _: &mut u64 = black_box(black_box(&arena).alloc(black_box(i as u64)));
+        let _: &mut u64 = black_box(arena.alloc(black_box(i as u64)));
     }
     arena
 }
@@ -161,7 +161,7 @@ fn alloc(arena: Arena) -> Arena {
 #[bench::run(warm_arena())]
 fn alloc_with(arena: Arena) -> Arena {
     for i in 0..N {
-        let _: &mut u64 = black_box(black_box(&arena).alloc_with(|| black_box(i as u64)));
+        let _: &mut u64 = black_box(arena.alloc_with(|| black_box(i as u64)));
     }
     arena
 }
@@ -248,18 +248,18 @@ fn alloc_zeroed_arc(state: (Arena, Vec<Arc<MaybeUninit<u64>>>)) -> (Arena, Vec<A
 
 #[library_benchmark]
 #[bench::run(warm_bump())]
-fn alloc_u64_bumpalo_alloc(bump: bumpalo::Bump) -> bumpalo::Bump {
+fn bumpalo_alloc(bump: bumpalo::Bump) -> bumpalo::Bump {
     for i in 0..N {
-        let _: &mut u64 = black_box(black_box(&bump).alloc(black_box(i as u64)));
+        let _: &mut u64 = black_box(bump.alloc(black_box(i as u64)));
     }
     bump
 }
 
 #[library_benchmark]
 #[bench::run(warm_bump())]
-fn alloc_u64_bumpalo_alloc_with(bump: bumpalo::Bump) -> bumpalo::Bump {
+fn bumpalo_alloc_with(bump: bumpalo::Bump) -> bumpalo::Bump {
     for i in 0..N {
-        let _: &mut u64 = black_box(black_box(&bump).alloc_with(|| black_box(i as u64)));
+        let _: &mut u64 = black_box(bump.alloc_with(|| black_box(i as u64)));
     }
     bump
 }
@@ -271,7 +271,7 @@ fn alloc_u64_bumpalo_alloc_with(bump: bumpalo::Bump) -> bumpalo::Bump {
 fn alloc_str(state: (Arena, Vec<String>, Vec<*mut str>)) -> (Arena, Vec<String>, Vec<*mut str>) {
     let (arena, words, mut out) = state;
     for w in &words {
-        let s: &mut str = black_box(arena.alloc_str(black_box(w)));
+        let s: &mut str = black_box(arena.alloc_str(black_box(w.as_str())));
         out.push(s as *mut str);
     }
     (arena, words, out)
@@ -282,7 +282,7 @@ fn alloc_str(state: (Arena, Vec<String>, Vec<*mut str>)) -> (Arena, Vec<String>,
 fn alloc_str_box(state: (Arena, Vec<String>, Vec<Box<str>>)) -> (Arena, Vec<String>, Vec<Box<str>>) {
     let (arena, words, mut out) = state;
     for w in &words {
-        out.push(black_box(arena.alloc_str_box(black_box(w))));
+        out.push(black_box(arena.alloc_str_box(black_box(w.as_str()))));
     }
     (arena, words, out)
 }
@@ -292,17 +292,17 @@ fn alloc_str_box(state: (Arena, Vec<String>, Vec<Box<str>>)) -> (Arena, Vec<Stri
 fn alloc_str_arc(state: (Arena, Vec<String>, Vec<Arc<str>>)) -> (Arena, Vec<String>, Vec<Arc<str>>) {
     let (arena, words, mut out) = state;
     for w in &words {
-        out.push(black_box(arena.alloc_str_arc(black_box(w))));
+        out.push(black_box(arena.alloc_str_arc(black_box(w.as_str()))));
     }
     (arena, words, out)
 }
 
 #[library_benchmark]
 #[bench::run(bump_words_out())]
-fn alloc_str_bumpalo_alloc_str(state: (bumpalo::Bump, Vec<String>, Vec<*mut str>)) -> (bumpalo::Bump, Vec<String>, Vec<*mut str>) {
+fn bumpalo_alloc_str(state: (bumpalo::Bump, Vec<String>, Vec<*mut str>)) -> (bumpalo::Bump, Vec<String>, Vec<*mut str>) {
     let (bump, words, mut out) = state;
     for w in &words {
-        let s: &mut str = black_box(black_box(&bump).alloc_str(black_box(w)));
+        let s: &mut str = black_box(bump.alloc_str(black_box(w.as_str())));
         out.push(s as *mut str);
     }
     (bump, words, out)
@@ -315,7 +315,7 @@ fn alloc_str_bumpalo_alloc_str(state: (bumpalo::Bump, Vec<String>, Vec<*mut str>
 fn alloc_slice_copy(state: (Arena, Vec<[u64; SLICE_LEN]>)) -> (Arena, Vec<[u64; SLICE_LEN]>) {
     let (arena, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(arena.alloc_slice_copy(black_box(s)));
+        let _: &mut [u64] = black_box(arena.alloc_slice_copy(black_box(s.as_slice())));
     }
     (arena, slices)
 }
@@ -355,7 +355,7 @@ fn alloc_slice_fill_iter(arena: Arena) -> Arena {
 fn alloc_slice_copy_box(state: (Arena, Vec<[u64; SLICE_LEN]>, Vec<Box<[u64]>>)) -> (Arena, Vec<[u64; SLICE_LEN]>, Vec<Box<[u64]>>) {
     let (arena, slices, mut out) = state;
     for s in &slices {
-        out.push(black_box(arena.alloc_slice_copy_box(black_box(s))));
+        out.push(black_box(arena.alloc_slice_copy_box(black_box(s.as_slice()))));
     }
     (arena, slices, out)
 }
@@ -421,7 +421,7 @@ fn alloc_zeroed_slice_box(state: (Arena, Vec<Box<[MaybeUninit<u64>]>>)) -> (Aren
 fn alloc_slice_copy_arc(state: (Arena, Vec<[u64; SLICE_LEN]>, Vec<Arc<[u64]>>)) -> (Arena, Vec<[u64; SLICE_LEN]>, Vec<Arc<[u64]>>) {
     let (arena, slices, mut out) = state;
     for s in &slices {
-        out.push(black_box(arena.alloc_slice_copy_arc(black_box(s))));
+        out.push(black_box(arena.alloc_slice_copy_arc(black_box(s.as_slice()))));
     }
     (arena, slices, out)
 }
@@ -484,38 +484,38 @@ fn alloc_zeroed_slice_arc(state: (Arena, Vec<Arc<[MaybeUninit<u64>]>>)) -> (Aren
 
 #[library_benchmark]
 #[bench::run(bump_slices())]
-fn alloc_slice_bumpalo_alloc_slice_copy(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
+fn bumpalo_alloc_slice_copy(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
     let (bump, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(black_box(&bump).alloc_slice_copy(black_box(s.as_slice())));
+        let _: &mut [u64] = black_box(bump.alloc_slice_copy(black_box(s.as_slice())));
     }
     (bump, slices)
 }
 
 #[library_benchmark]
 #[bench::run(bump_slices())]
-fn alloc_slice_bumpalo_alloc_slice_clone(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
+fn bumpalo_alloc_slice_clone(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
     let (bump, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(black_box(&bump).alloc_slice_clone(black_box(s.as_slice())));
+        let _: &mut [u64] = black_box(bump.alloc_slice_clone(black_box(s.as_slice())));
     }
     (bump, slices)
 }
 
 #[library_benchmark]
 #[bench::run(warm_bump())]
-fn alloc_slice_bumpalo_alloc_slice_fill_with(bump: bumpalo::Bump) -> bumpalo::Bump {
+fn bumpalo_alloc_slice_fill_with(bump: bumpalo::Bump) -> bumpalo::Bump {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(black_box(&bump).alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
+        let _: &mut [u64] = black_box(bump.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
     }
     bump
 }
 
 #[library_benchmark]
 #[bench::run(warm_bump())]
-fn alloc_slice_bumpalo_alloc_slice_fill_iter(bump: bumpalo::Bump) -> bumpalo::Bump {
+fn bumpalo_alloc_slice_fill_iter(bump: bumpalo::Bump) -> bumpalo::Bump {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(black_box(&bump).alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
+        let _: &mut [u64] = black_box(bump.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
     }
     bump
 }
@@ -524,31 +524,36 @@ fn alloc_slice_bumpalo_alloc_slice_fill_iter(bump: bumpalo::Bump) -> bumpalo::Bu
 
 #[library_benchmark]
 #[bench::run(arena_words())]
-fn alloc_string(state: (Arena, Vec<String>)) -> (Box<str>, Arena, Vec<String>) {
+fn alloc_string(state: (Arena, Vec<String>)) -> (*const str, Arena, Vec<String>) {
     let (arena, words) = state;
     let mut s = arena.alloc_string();
     for w in &words {
         s.push_str(black_box(w.as_str()));
     }
-    let frozen = black_box(s.into_arena_box_str());
+    // Mirror bumpalo's `into_bump_str`: take a `&str` view of the in-place
+    // chunk storage with no copy into a `Box<str>`. The bytes stay valid
+    // until arena teardown, so the returned pointer remains usable.
+    let frozen: *const str = black_box(s.as_str() as *const str);
+    drop(s);
     (frozen, arena, words)
 }
 
 #[library_benchmark]
 #[bench::run(arena_words())]
-fn alloc_string_with_capacity(state: (Arena, Vec<String>)) -> (Box<str>, Arena, Vec<String>) {
+fn alloc_string_with_capacity(state: (Arena, Vec<String>)) -> (*const str, Arena, Vec<String>) {
     let (arena, words) = state;
     let mut s = arena.alloc_string_with_capacity(N * 6);
     for w in &words {
         s.push_str(black_box(w.as_str()));
     }
-    let frozen = black_box(s.into_arena_box_str());
+    let frozen: *const str = black_box(s.as_str() as *const str);
+    drop(s);
     (frozen, arena, words)
 }
 
 #[library_benchmark]
 #[bench::run(bump_words())]
-fn string_builder_bumpalo_string_new_in(state: (bumpalo::Bump, Vec<String>)) -> (*const str, bumpalo::Bump, Vec<String>) {
+fn bumpalo_string_new_in(state: (bumpalo::Bump, Vec<String>)) -> (*const str, bumpalo::Bump, Vec<String>) {
     let (bump, words) = state;
     let mut s = bumpalo::collections::String::new_in(&bump);
     for w in &words {
@@ -560,7 +565,7 @@ fn string_builder_bumpalo_string_new_in(state: (bumpalo::Bump, Vec<String>)) -> 
 
 #[library_benchmark]
 #[bench::run(bump_words())]
-fn string_builder_bumpalo_string_with_capacity_in(state: (bumpalo::Bump, Vec<String>)) -> (*const str, bumpalo::Bump, Vec<String>) {
+fn bumpalo_string_with_capacity_in(state: (bumpalo::Bump, Vec<String>)) -> (*const str, bumpalo::Bump, Vec<String>) {
     let (bump, words) = state;
     let mut s = bumpalo::collections::String::with_capacity_in(N * 6, &bump);
     for w in &words {
@@ -574,31 +579,31 @@ fn string_builder_bumpalo_string_with_capacity_in(state: (bumpalo::Bump, Vec<Str
 
 #[library_benchmark]
 #[bench::run(arena_ints())]
-fn alloc_vec(state: (Arena, Vec<i32>)) -> (Arc<[i32]>, Arena, Vec<i32>) {
+fn alloc_vec(state: (Arena, Vec<i32>)) -> (*const [i32], Arena, Vec<i32>) {
     let (arena, ints) = state;
     let mut v = arena.alloc_vec::<i32>();
     for &i in &ints {
         v.push(black_box(i));
     }
-    let frozen = black_box(v.into_arena_arc());
+    let frozen: *const [i32] = black_box(v.leak() as *const [i32]);
     (frozen, arena, ints)
 }
 
 #[library_benchmark]
 #[bench::run(arena_ints())]
-fn alloc_vec_with_capacity(state: (Arena, Vec<i32>)) -> (Arc<[i32]>, Arena, Vec<i32>) {
+fn alloc_vec_with_capacity(state: (Arena, Vec<i32>)) -> (*const [i32], Arena, Vec<i32>) {
     let (arena, ints) = state;
     let mut v = arena.alloc_vec_with_capacity::<i32>(N);
     for &i in &ints {
         v.push(black_box(i));
     }
-    let frozen = black_box(v.into_arena_arc());
+    let frozen: *const [i32] = black_box(v.leak() as *const [i32]);
     (frozen, arena, ints)
 }
 
 #[library_benchmark]
 #[bench::run(bump_ints())]
-fn vec_builder_bumpalo_vec_new_in(state: (bumpalo::Bump, Vec<i32>)) -> (*const [i32], bumpalo::Bump, Vec<i32>) {
+fn bumpalo_vec_new_in(state: (bumpalo::Bump, Vec<i32>)) -> (*const [i32], bumpalo::Bump, Vec<i32>) {
     let (bump, ints) = state;
     let mut v: bumpalo::collections::Vec<'_, i32> = bumpalo::collections::Vec::new_in(&bump);
     for &i in &ints {
@@ -610,7 +615,7 @@ fn vec_builder_bumpalo_vec_new_in(state: (bumpalo::Bump, Vec<i32>)) -> (*const [
 
 #[library_benchmark]
 #[bench::run(bump_ints())]
-fn vec_builder_bumpalo_vec_with_capacity_in(state: (bumpalo::Bump, Vec<i32>)) -> (*const [i32], bumpalo::Bump, Vec<i32>) {
+fn bumpalo_vec_with_capacity_in(state: (bumpalo::Bump, Vec<i32>)) -> (*const [i32], bumpalo::Bump, Vec<i32>) {
     let (bump, ints) = state;
     let mut v: bumpalo::collections::Vec<'_, i32> = bumpalo::collections::Vec::with_capacity_in(N, &bump);
     for &i in &ints {
@@ -627,13 +632,13 @@ fn vec_builder_bumpalo_vec_with_capacity_in(state: (bumpalo::Bump, Vec<i32>)) ->
 // involves a system allocation.
 
 #[library_benchmark]
-fn arena_creation_multitude() {
+fn multitude_new() {
     let arena = black_box(Arena::new());
     drop(arena);
 }
 
 #[library_benchmark]
-fn arena_creation_bumpalo_new() {
+fn bumpalo_new() {
     let bump = black_box(bumpalo::Bump::new());
     drop(bump);
 }
@@ -641,15 +646,15 @@ fn arena_creation_bumpalo_new() {
 library_benchmark_group!(
     name = alloc_group;
     benchmarks =
-        arena_creation_multitude, arena_creation_bumpalo_new,
+        multitude_new, bumpalo_new,
         alloc, alloc_with,
         alloc_box, alloc_box_with,
         alloc_uninit_box, alloc_zeroed_box,
         alloc_arc, alloc_arc_with,
         alloc_uninit_arc, alloc_zeroed_arc,
-        alloc_u64_bumpalo_alloc, alloc_u64_bumpalo_alloc_with,
+        bumpalo_alloc, bumpalo_alloc_with,
         alloc_str, alloc_str_box,
-        alloc_str_arc, alloc_str_bumpalo_alloc_str,
+        alloc_str_arc, bumpalo_alloc_str,
         alloc_slice_copy, alloc_slice_clone,
         alloc_slice_fill_with, alloc_slice_fill_iter,
         alloc_slice_copy_box, alloc_slice_clone_box,
@@ -658,12 +663,12 @@ library_benchmark_group!(
         alloc_slice_copy_arc, alloc_slice_clone_arc,
         alloc_slice_fill_with_arc, alloc_slice_fill_iter_arc,
         alloc_uninit_slice_arc, alloc_zeroed_slice_arc,
-        alloc_slice_bumpalo_alloc_slice_copy, alloc_slice_bumpalo_alloc_slice_clone,
-        alloc_slice_bumpalo_alloc_slice_fill_with, alloc_slice_bumpalo_alloc_slice_fill_iter,
+        bumpalo_alloc_slice_copy, bumpalo_alloc_slice_clone,
+        bumpalo_alloc_slice_fill_with, bumpalo_alloc_slice_fill_iter,
         alloc_string, alloc_string_with_capacity,
-        string_builder_bumpalo_string_new_in, string_builder_bumpalo_string_with_capacity_in,
+        bumpalo_string_new_in, bumpalo_string_with_capacity_in,
         alloc_vec, alloc_vec_with_capacity,
-        vec_builder_bumpalo_vec_new_in, vec_builder_bumpalo_vec_with_capacity_in
+        bumpalo_vec_new_in, bumpalo_vec_with_capacity_in
 );
 
 main!(

@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::{self, RwLock};
 
 pub use builtin::{PerCore, PerNuma, PerProcess};
-pub use storage::{Storage, Strategy};
+pub(crate) use storage::{Storage, Strategy};
 
 use crate::ThreadAware;
 use crate::affinity::Affinity;

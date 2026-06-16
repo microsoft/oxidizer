@@ -505,12 +505,12 @@ mod mutants_for_kill2 {
     // arena.rs mutants
     // ============================================================
 
-    /// Kills `arena.rs:329:9` — `Arena::builder` returns
-    /// `ArenaBuilder::new()` vs `ArenaBuilder::from(Default::default())`.
+    /// Documents `arena.rs:329:9` — `Arena::builder` constructs the builder
+    /// via the crate-internal `ArenaBuilder::new()`.
     ///
-    /// Both expressions produce an identical `ArenaBuilder<Global>`
-    /// (Default::default() returns ArenaBuilder::new() and From<T> for T
-    /// is the identity blanket impl). EQUIVALENT.
+    /// `ArenaBuilder` no longer implements `Default` (its only construction
+    /// path is `Arena::builder` / `builder_in`), so the former
+    /// `from(Default::default())` mutation is no longer generated. EQUIVALENT.
 
     /// Kills `arena.rs:698:76 + -> *` in `try_alloc_inner_arc_with`.
     /// Line 698: `let count = (*chunk.as_ptr()).drop_count.get() + 1;`.
@@ -775,41 +775,37 @@ mod mutants_for_kill2 {
         }
     }
 
-    /// Kills `vec.rs:760 + → -, *` in `Vec::try_into_arena_arc` and the
-    /// mirror at `vec.rs:859` in `Vec::into_arena_box_copy`. The closure
-    /// passed to `try_alloc_slice_fill_with_*` advances its read index
-    /// via `consumed_cell.set(idx + 1)`. The `* 1` mutation freezes the
+    /// Kills `vec.rs:760 + → -, *` in `Vec::try_into_arc` and the
+    /// mirror in `Vec::into_box`. The closure passed to
+    /// `alloc_slice_fill_iter_*` advances its read index via
+    /// `consumed_cell.set(idx + 1)`. The `* 1` mutation freezes the
     /// index at 0, so every element of the new slice is a bitwise copy of
     /// the original Vec's element 0. The `- 1` mutation underflows on the
     /// second iteration (UB / crash). A distinct-value assertion catches
     /// both.
     #[test]
-    fn vec_into_arena_arc_advances_read_index() {
+    fn vec_into_arc_advances_read_index() {
         let arena = multitude::Arena::new();
-        let mut v: multitude::vec::Vec<u32, _> = multitude::vec::Vec::new_in(&arena);
+        let mut v: multitude::vec::Vec<u32, _> = arena.alloc_vec();
         v.push(10);
         v.push(20);
         v.push(30);
-        let arc: multitude::Arc<[u32]> = v.into_arena_arc();
+        let arc: multitude::Arc<[u32]> = multitude::Arc::from(v);
         assert_eq!(&*arc, &[10, 20, 30]);
     }
 
     #[test]
-    fn vec_into_arena_box_advances_read_index() {
-        // Force the copy fallback path (`into_arena_box_copy`) by using a
-        // builder-detached Vec (Vec::new), then into_arena_box, which
-        // routes to into_arena_box_copy when the buffer doesn't sit at the
-        // bump cursor.
+    fn vec_into_box_advances_read_index() {
+        // `Vec::into_box` moves the elements into a fresh shared
+        // allocation via `alloc_slice_fill_iter_box`, whose fill closure
+        // advances its read index per element. This exercises that
+        // advance and confirms the elements land in order.
         let arena = multitude::Arena::new();
-        // Allocate another value to push the bump cursor past where this
-        // Vec's buffer lives, forcing the copy fallback.
-        let mut v: multitude::vec::Vec<u32, _> = multitude::vec::Vec::with_capacity_in(3, &arena);
+        let mut v: multitude::vec::Vec<u32, _> = arena.alloc_vec_with_capacity(3);
         v.push(11);
         v.push(22);
         v.push(33);
-        // Allocate something to detach the buffer from the bump cursor.
-        let _detach: &mut u64 = arena.alloc(0xdead_beef_u64);
-        let b: multitude::Box<[u32]> = v.into_arena_box();
+        let b: multitude::Box<[u32]> = v.into_boxed_slice();
         assert_eq!(&*b, &[11, 22, 33]);
     }
 }
@@ -1381,17 +1377,17 @@ mod mutants_for_kill3 {
         assert_eq!(v[1], 99); // unchanged
     }
 
-    /// Kills: vec.rs:762:17 `+= -> -=` / `+= -> *=` in into_arena_box_copy
+    /// Kills: vec.rs:762:17 `+= -> -=` / `+= -> *=` in into_box
     /// `idx += 1` — if -= or *=, idx goes wrong and elements are
     /// read from wrong positions or the loop never terminates.
     #[test]
-    fn vec_762_into_arena_box_copy() {
+    fn vec_762_into_box() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec_with_capacity::<u64>(10);
         for i in 0..5 {
             v.push(i * 10);
         }
-        let boxed = v.into_arena_box();
+        let boxed = v.into_boxed_slice();
         assert_eq!(boxed.len(), 5);
         assert_eq!(boxed[0], 0);
         assert_eq!(boxed[1], 10);
@@ -1821,7 +1817,7 @@ mod mutants_for_kill3 {
         assert_eq!(v.len(), 2);
     }
 
-    // vec:762 into_arena_box_copy: ZST/empty path only. ZSTs have no
+    // vec:762 into_box: ZST/empty path only. ZSTs have no
     // distinguishable element identity, empty vecs don't call the closure.
     // EQUIVALENT.
 
@@ -2180,7 +2176,7 @@ mod mutants_for_audit {
 
     // ============================================================================
     // vec.rs:634 — into_arena_rc's `if needs_drop && len > 0`
-    // vec.rs:837 — into_arena_box's `if needs_drop && self.len > 0`
+    // vec.rs:837 — into_box's `if needs_drop && self.len > 0`
     //
     // Mutant: `>` → `>=`. With `>= 0` (always true for usize) the empty Drop
     // vec would attempt to install a slice DropEntry of len=0, which would
@@ -2199,7 +2195,7 @@ mod mutants_for_audit {
     // ============================================================================
 
     // ============================================================================
-    // vec.rs:911 — into_arena_box_copy's `consumed_cell.set(idx + 1)`
+    // vec.rs:911 — into_box's `consumed_cell.set(idx + 1)`
     // Mutant `+ → *`: at idx==0 both yield 0 → infinite loop / wrong index.
     // Kill: copy at least 2 elements and verify all are present.
     // ============================================================================
@@ -2711,7 +2707,7 @@ mod mutants_for_audit {
     }
 
     // ============================================================================
-    // vec.rs:911:35 — `consumed_cell.set(idx + 1)` in `into_arena_box_copy`.
+    // vec.rs:911:35 — `consumed_cell.set(idx + 1)` in `into_box`.
     // Mutant `+` -> `*`: with idx==0, `0 * 1 == 0`; consumed_cell never
     // advances, every closure invocation reads `data[0]`. Kill: route the
     // buffer to an oversized chunk so install fails, then verify boxed
@@ -3293,10 +3289,10 @@ mod mutants_for_complete {
     // ----------------------------------------------------------------------------
 
     // ----------------------------------------------------------------------------
-    // arena.rs:448 — Arena::builder() returns ArenaBuilder<Global>.
-    // Mutant: replace with `ArenaBuilder::from(Default::default())`.
-    // EQUIVALENT — both produce the same ArenaBuilder<Global> via the blanket
-    // `From<T> for T` impl on Default's output. No test required.
+    // arena.rs:448 — Arena::builder() returns ArenaBuilder<Global>, constructed
+    // via the crate-internal `ArenaBuilder::new()`. `ArenaBuilder` no longer
+    // implements `Default`, so the former `from(Default::default())` mutant is
+    // no longer generated. No test required.
     // ----------------------------------------------------------------------------
 }
 
@@ -3392,14 +3388,14 @@ mod mutants_for_final {
     }
 
     // ============================================================================
-    // `cap == len` short-circuit: into_arena_box at exact cap=len skips reclaim.
+    // `cap == len` short-circuit: into_box at exact cap=len skips reclaim.
     // ----------------------------------------------------------------------------
     // At `cap == len`, original skips reclaim; mutant `>=` tries to reclaim 0
     // bytes (no-op). Behavior observable through chunk count not changing.
     // ============================================================================
 
     // ============================================================================
-    // `into_arena_box`'s ZST/empty routing (`== with !=` at line 834)
+    // `into_box`'s ZST/empty routing (`== with !=` at line 834)
     // ----------------------------------------------------------------------------
     // Mutant inverts the early-return condition. Non-ZST non-empty vec must
     // take the in-place path (no new chunk). With mutant, it takes the copy
@@ -3407,15 +3403,15 @@ mod mutants_for_final {
     // ============================================================================
 
     #[test]
-    fn vec_into_arena_box_empty_routes_through_copy_path() {
+    fn vec_into_box_empty_routes_through_copy_path() {
         let arena = Arena::new();
         let v: ArenaVec<'_, u32> = arena.alloc_vec();
-        let b: ArenaBox<[u32]> = v.into_arena_box();
+        let b: ArenaBox<[u32]> = v.into_boxed_slice();
         assert_eq!(b.len(), 0);
     }
 
     // ============================================================================
-    // `into_arena_box_copy`'s `consumed_cell.set(idx + 1)` (line 922)
+    // `into_box`'s `consumed_cell.set(idx + 1)` (line 922)
     // ----------------------------------------------------------------------------
     // Mutant `+ with *`: `set(idx * 1) = idx`. Loop never advances and resulting
     // slice holds N copies of element 0. Detection: copy path with distinct

@@ -185,12 +185,25 @@
 //!
 //! Once you're done building, you can **freeze them** into immutable smart pointers:
 //!
-//! - [`String::into_arena_box_str`](strings::String::into_arena_box_str) → [`Box<str>`](crate::Box) (**8 bytes**, thin).
+//! - [`String::into_boxed_str`](strings::String::into_boxed_str) →
+//!   [`Box<str>`](crate::Box) (**8 bytes**, thin), or `Box::from(string)`.
 //!   The freeze is **O(n)** — it copies the bytes into a compact,
-//!   length-prefixed allocation so the resulting single pointer is
-//!   `Send`-safe and can outlive the arena.
-//! - [`Vec::into_arena_box`](vec::Vec::into_arena_box) → [`Box<[T]>`](crate::Box) (**8 bytes**, thin).
-//!   For `T: !Drop`, the freeze is **O(1)**.
+//!   length-prefixed allocation so the resulting single pointer can outlive
+//!   the arena. (Like any [`Box`], it is `Send`/`Sync` only when the
+//!   allocator `A` is.)
+//! - [`Vec::into_boxed_slice`](vec::Vec::into_boxed_slice) →
+//!   [`Box<[T]>`](crate::Box) (**8 bytes**, thin), or `Box::from(vec)`.
+//!   The freeze is **O(n)** — it moves the elements into a fresh compact,
+//!   length-prefixed allocation so the resulting single pointer can outlive
+//!   the arena. (Like any [`Box`], it is `Send`/`Sync` only when `T` and the
+//!   allocator `A` are.)
+//! - `Arc::from(vec)` / `Arc::from(string)` → [`Arc<[T]>`](crate::Arc) /
+//!   [`Arc<str>`](crate::Arc), the shared, reference-counted freeze
+//!   (mirroring `std`'s `From<Vec<T>> for Arc<[T]>`).
+//! - [`Vec::leak`](vec::Vec::leak) → `&mut [T]` (or `&*v.leak()` for `&[T]`)
+//!   borrowed for the arena's lifetime. For `T: !Drop`, this freeze is
+//!   **O(1) and allocation-free** — the existing buffer is reinterpreted in
+//!   place. Unlike the `Box`/`Arc` freezes, the slice does not outlive the arena.
 //!
 //! The `Vec` freeze also reclaims any unused capacity left in the
 //! buffer when the conditions allow it, so those bytes become available
@@ -207,7 +220,7 @@
 //! builder.push_str("world");
 //!
 //! // Freeze for storage: 8-byte single-pointer smart pointer. O(n) — copies the bytes.
-//! let stored: Box<str> = builder.into_arena_box_str();
+//! let stored: Box<str> = builder.into_boxed_str();
 //! assert_eq!(&*stored, "hello, world");
 //! ```
 //!
@@ -247,14 +260,14 @@
 //!    [`Utf16String`](strings::Utf16String) are transient growable
 //!    buffers — small structs (32 bytes) carrying a data pointer +
 //!    length + capacity + arena reference. You build them up with
-//!    `push_str` / `push_char` / [`format!`](strings::format!) /
+//!    `push_str` / `push` / [`format!`](strings::format!) /
 //!    [`format_utf16!`](strings::format_utf16!), then **freeze** them
 //!    into one of the smart pointers above:
 //!
 //!    | Builder | Freeze method | Result |
 //!    |---|---|---|
-//!    | [`String`](strings::String) | [`into_arena_box_str`](strings::String::into_arena_box_str) | [`Box<str>`](crate::Box) |
-//!    | [`Utf16String`](strings::Utf16String) | [`into_arena_box_utf16_str`](strings::Utf16String::into_arena_box_utf16_str) | [`BoxUtf16Str`](strings::BoxUtf16Str) |
+//!    | [`String`](strings::String) | [`into_boxed_str`](strings::String::into_boxed_str) | [`Box<str>`](crate::Box) |
+//!    | [`Utf16String`](strings::Utf16String) | [`into_boxed_utf16_str`](strings::Utf16String::into_boxed_utf16_str) | [`BoxUtf16Str`](strings::BoxUtf16Str) |
 //!
 //!    The UTF-16 freeze reuses the buffer in place (O(1)) and returns
 //!    any unused tail capacity to the chunk's bump cursor when it can.
@@ -284,7 +297,7 @@
 //! let mut b = arena.alloc_string();
 //! b.push_str("abc");
 //! b.push_str("123");
-//! let frozen: Box<str> = b.into_arena_box_str();
+//! let frozen: Box<str> = b.into_boxed_str();
 //! assert_eq!(&*frozen, "abc123");
 //!
 //! // format!-style:
@@ -314,7 +327,7 @@
 //! let mut b = arena.alloc_utf16_string();
 //! b.push_str(utf16str!("abc"));
 //! b.push_from_str("123");
-//! let frozen = b.into_arena_box_utf16_str();
+//! let frozen = b.into_boxed_utf16_str();
 //! assert_eq!(&*frozen, utf16str!("abc123"));
 //!
 //! // format!-style:
@@ -396,6 +409,7 @@ mod r#box;
 #[cfg(feature = "dst")]
 #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
 pub mod dst;
+mod from_in;
 mod internal;
 pub mod strings;
 mod thin_smart_ptr_common;
@@ -432,3 +446,4 @@ pub use self::arena_builder::ArenaBuilder;
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
+pub use self::from_in::{FromIn, IntoIn};

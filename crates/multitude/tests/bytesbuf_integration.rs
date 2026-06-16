@@ -217,7 +217,7 @@ mod from_coverage_extras_bytesbuf {
     #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
     #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
     #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
-    use multitude::{Arena, ArenaBuilder};
+    use multitude::Arena;
 
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common;
@@ -271,7 +271,7 @@ mod from_coverage_extras_bytesbuf {
         // Drive `allocate_shared_layout` (3112)'s refill failure path via bytesbuf.
         use bytesbuf::mem::Memory;
         let alloc = common::SendFailingAllocator::new(1);
-        let arena = ArenaBuilder::new_in(alloc).max_normal_alloc(4096).try_build().unwrap();
+        let arena = Arena::builder_in(alloc).max_normal_alloc(4096).try_build().unwrap();
         // First few `reserve` calls succeed (within the initial chunk). Eventually
         // a `reserve` will need a fresh chunk and fail; we catch the panic from
         // bytesbuf's `expect("arena allocation failed")` wrapper.

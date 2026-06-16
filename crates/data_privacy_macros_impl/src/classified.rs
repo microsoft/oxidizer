@@ -16,7 +16,7 @@ struct MacroArgs {
 }
 
 impl MacroArgs {
-    pub fn parse(attr_args: TokenStream) -> SynResult<Self> {
+    pub(crate) fn parse(attr_args: TokenStream) -> SynResult<Self> {
         if attr_args.is_empty() {
             Err(syn::Error::new(
                 attr_args.span(),

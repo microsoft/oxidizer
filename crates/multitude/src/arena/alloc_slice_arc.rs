@@ -155,16 +155,18 @@ impl<A: Allocator + Clone> Arena<A> {
         check_slice_arc_layout::<T>(src.len())?;
         let len = src.len();
         // Copy is never `Drop`, so use the no-drop reservation.
-        #[cfg(feature = "stats")]
-        let payload_bytes = mem::size_of::<T>().saturating_mul(len);
         let bytes_needed = worst_case_thin_slice_payload::<T>(len);
+        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
+        // `usize`. Hoisting the precomputed byte size lets the inner
+        // reservation helper skip the `checked_mul` overflow guard.
+        let payload_bytes = mem::size_of_val(src);
         loop {
-            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+            // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`.
+            let reserved = unsafe { self.try_reserve_shared_slice_with_size::<T>(len, payload_bytes) };
+            if let Some((uninit, chunk_ptr)) = reserved {
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let slice_ptr = uninit.init_copy_from_slice_ptr(src);
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(payload_bytes);
                 // SAFETY: `slice_ptr` points to `len` initialized `T`s in a
                 // shared chunk with a fresh +1; `Arc::from_raw` adopts that
                 // +1. Chunk-wide provenance preserved via `init_copy_from_slice_ptr`.
@@ -178,8 +180,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     let slice_ptr = ticket.init_copy_from_slice_ptr(src);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(payload_bytes);
                     // SAFETY: see the non-oversized branch.
                     unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
                 });
@@ -194,8 +194,6 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     fn impl_alloc_slice_arc_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Arc<[T], A>, AllocError> {
         check_slice_arc_layout::<T>(len)?;
-        #[cfg(feature = "stats")]
-        let payload_bytes = mem::size_of::<T>().saturating_mul(len);
         // Refill hint accounts for the length prefix, payload alignment
         // slack, payload bytes, and (for `T: Drop`) a drop-entry slot.
         let bytes_needed = worst_case_thin_slice_payload::<T>(len);
@@ -205,12 +203,10 @@ impl<A: Allocator + Clone> Arena<A> {
             // pick the right reservation helper.
             if const { mem::needs_drop::<T>() } {
                 if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice_with_drop::<T>(len) {
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                     let f = f.take().expect("with closure taken twice");
                     let slice_ptr = uninit.init_with_ptr(f);
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(payload_bytes);
                     // SAFETY: see `impl_alloc_slice_arc_copy`; the drop entry
                     // was committed by `init_with_ptr` for the chunk-teardown
                     // path. `slice_ptr` carries chunk-wide provenance so the
@@ -218,12 +214,10 @@ impl<A: Allocator + Clone> Arena<A> {
                     return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
                 }
             } else if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let f = f.take().expect("with closure taken twice");
                 let slice_ptr = uninit.init_with_ptr(f);
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(payload_bytes);
                 // SAFETY: see `impl_alloc_slice_arc_copy`; chunk-wide
                 // provenance preserved via `init_with_ptr`.
                 return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
@@ -248,8 +242,6 @@ impl<A: Allocator + Clone> Arena<A> {
                         let _ = chunk_ref.forget();
                         p
                     };
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(payload_bytes);
                     // SAFETY: see the non-oversized branches above.
                     unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
                 });

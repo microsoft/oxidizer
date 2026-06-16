@@ -69,7 +69,7 @@ pub(crate) enum Metering {
 }
 
 impl Metering {
-    pub fn custom(meter_provider: &dyn MeterProvider) -> Self {
+    pub(crate) fn custom(meter_provider: &dyn MeterProvider) -> Self {
         Self::Custom(meter_provider.meter(METER_NAME))
     }
 }

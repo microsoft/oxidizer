@@ -50,7 +50,7 @@ impl MyApi {
         Self { clock: clock.clone() }
     }
 
-    pub async fn do_something(&self) {
+    pub(crate) async fn do_something(&self) {
         // Start the measurement.
         let watch = self.clock.stopwatch();
 

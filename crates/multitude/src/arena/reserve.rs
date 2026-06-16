@@ -68,6 +68,24 @@ impl<A: Allocator + Clone> Arena<A> {
         Some(unsafe { ticket.rebind() })
     }
 
+    /// Like [`Self::try_reserve_local_slice`] but takes the precomputed
+    /// byte size; the slice-copy/clone fast paths hold an existing
+    /// `&[T]` and compute `size_of_val(src)` once outside the refill
+    /// loop, sparing the inner reservation a `checked_mul` overflow
+    /// guard.
+    ///
+    /// # Safety
+    ///
+    /// `size` must equal `size_of::<T>() * len` (without overflow).
+    #[inline(always)]
+    #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
+    pub(crate) fn try_reserve_local_slice_with_size<T>(&self, len: usize, size: usize) -> Option<Uninit<'_, [T]>> {
+        // SAFETY: forwarded to the caller.
+        let ticket = unsafe { self.current_local().try_alloc_uninit_slice_with_size::<T>(len, size) }?;
+        // SAFETY: see module-level rationale.
+        Some(unsafe { ticket.rebind() })
+    }
+
     /// Try to reserve `len` consecutive bytes in the current local chunk.
     /// Byte-slice fast path that skips alignment math and overflow checks.
     #[inline(always)]
@@ -130,6 +148,34 @@ impl<A: Allocator + Clone> Arena<A> {
     pub(crate) fn try_reserve_shared_slice<T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<SharedChunk<A>>)> {
         let mutator = self.current_shared();
         let ticket = mutator.try_alloc_uninit_slice_prefixed::<T>(len)?;
+        // SAFETY: see `try_reserve_shared`.
+        Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
+    }
+
+    /// Like [`Self::try_reserve_shared_slice`] but takes the precomputed
+    /// payload byte size; the slice-copy fast paths hold an existing
+    /// `&[T]` and compute `size_of_val(src)` once outside the refill
+    /// loop, sparing the inner reservation a `checked_mul` overflow
+    /// guard.
+    ///
+    /// # Safety
+    ///
+    /// `payload_bytes` must equal `size_of::<T>() * len` (without
+    /// overflow).
+    #[inline(always)]
+    #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
+    #[allow(
+        clippy::type_complexity,
+        reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
+    )]
+    pub(crate) unsafe fn try_reserve_shared_slice_with_size<T>(
+        &self,
+        len: usize,
+        payload_bytes: usize,
+    ) -> Option<(Uninit<'_, [T]>, NonNull<SharedChunk<A>>)> {
+        let mutator = self.current_shared();
+        // SAFETY: forwarded to the caller.
+        let ticket = unsafe { mutator.try_alloc_uninit_slice_prefixed_with_size::<T>(len, payload_bytes) }?;
         // SAFETY: see `try_reserve_shared`.
         Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
     }

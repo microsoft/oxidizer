@@ -47,6 +47,20 @@ pub(crate) trait ChunkOps: Chunk {
     ///
     /// Caller must hold the unique remaining reference to `chunk`.
     unsafe fn teardown_and_release(chunk: NonNull<Self>);
+
+    /// Stashes `wasted` on the chunk header and adds it to the provider's
+    /// wasted-tail counter. Called from `ChunkMutator::Drop` at retire-time
+    /// (i.e., as the mutator's `+1` is about to be released). The matching
+    /// subtract happens in [`ChunkProvider::release_local`] /
+    /// [`ChunkProvider::release_shared`] when the chunk is later cached
+    /// or destroyed.
+    ///
+    /// # Safety
+    ///
+    /// `chunk` must reference a live chunk. Caller (the mutator) holds at
+    /// least one reference.
+    #[cfg(feature = "stats")]
+    unsafe fn record_retire(chunk: NonNull<Self>, wasted: u32);
 }
 
 #[allow(
@@ -90,6 +104,15 @@ impl<A: Allocator + Clone> ChunkOps for LocalChunk<A> {
         debug_assert!(!provider.is_null(), "local-chunk provider back-pointer is null in teardown");
         (*provider).release_local(chunk);
     }
+
+    #[cfg(feature = "stats")]
+    unsafe fn record_retire(chunk: NonNull<Self>, wasted: u32) {
+        let chunk_ref = &*chunk.as_ptr();
+        chunk_ref.set_wasted_at_retire(wasted);
+        let provider = chunk_ref.provider();
+        debug_assert!(!provider.is_null(), "local-chunk provider back-pointer is null at retire");
+        (*provider).record_wasted_tail(u64::from(wasted));
+    }
 }
 
 #[allow(
@@ -126,6 +149,18 @@ impl<A: Allocator + Clone> ChunkOps for SharedChunk<A> {
             provider.release_shared(chunk);
         } else {
             SharedChunk::destroy(chunk);
+        }
+    }
+
+    #[cfg(feature = "stats")]
+    unsafe fn record_retire(chunk: NonNull<Self>, wasted: u32) {
+        let chunk_ref = &*chunk.as_ptr();
+        chunk_ref.set_wasted_at_retire(wasted);
+        // If the provider has already been dropped (shared chunks can
+        // outlive their arena), there is no counter left to update;
+        // the stashed `wasted_at_retire` will simply never be read.
+        if let Some(provider) = chunk_ref.provider().upgrade() {
+            provider.record_wasted_tail(u64::from(wasted));
         }
     }
 }

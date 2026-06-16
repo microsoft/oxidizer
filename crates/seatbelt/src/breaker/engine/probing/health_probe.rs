@@ -61,7 +61,7 @@ impl ProbeOperation for HealthProbe {
 }
 
 impl HealthProbe {
-    pub fn new(options: HealthProbeOptions) -> Self {
+    pub(crate) fn new(options: HealthProbeOptions) -> Self {
         Self {
             metrics: options.builder.build(),
             options,

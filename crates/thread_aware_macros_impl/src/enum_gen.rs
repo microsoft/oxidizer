@@ -6,7 +6,7 @@ use syn::{DataEnum, Fields};
 
 use crate::field_attrs::{FieldAttrCfg, is_phantom_data, parse_field_attrs};
 
-pub fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
+pub(crate) fn build_enum_body(_name: &syn::Ident, data: &DataEnum, root_path: &syn::Path) -> syn::Result<proc_macro2::TokenStream> {
     let mut arms = Vec::new();
     for variant in &data.variants {
         let v_ident = &variant.ident;
