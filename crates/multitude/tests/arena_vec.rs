@@ -110,7 +110,7 @@ fn traits_compile() {
 #[test]
 fn try_push_succeeds() {
     let arena = Arena::new();
-    let mut v = Vec::new_in(&arena);
+    let mut v = arena.alloc_vec();
     v.try_push(1_u32).unwrap();
     v.try_push(2_u32).unwrap();
     assert_eq!(&*v, &[1, 2]);
@@ -119,7 +119,7 @@ fn try_push_succeeds() {
 #[test]
 fn try_reserve_succeeds() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     v.try_reserve(64).unwrap();
     assert!(v.capacity() >= 64);
 }
@@ -127,7 +127,7 @@ fn try_reserve_succeeds() {
 #[test]
 fn try_with_capacity_in_succeeds() {
     let arena = Arena::new();
-    let v: Vec<u32> = Vec::try_with_capacity_in(32, &arena).unwrap();
+    let v: Vec<u32> = arena.try_alloc_vec_with_capacity(32).unwrap();
     assert!(v.capacity() >= 32);
     assert!(v.is_empty());
 }
@@ -135,7 +135,7 @@ fn try_with_capacity_in_succeeds() {
 #[test]
 fn try_with_capacity_in_zero_does_not_allocate() {
     let arena = Arena::new();
-    let v: Vec<u32> = Vec::try_with_capacity_in(0, &arena).unwrap();
+    let v: Vec<u32> = arena.try_alloc_vec_with_capacity(0).unwrap();
     assert_eq!(v.capacity(), 0);
 }
 
@@ -143,7 +143,7 @@ fn try_with_capacity_in_zero_does_not_allocate() {
 fn try_push_returns_err_on_alloc_failure() {
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
-    let mut v: Vec<u32, _> = Vec::new_in(&arena);
+    let mut v: Vec<u32, _> = arena.alloc_vec();
     let _ = v.try_push(1).unwrap_err();
 }
 
@@ -151,7 +151,7 @@ fn try_push_returns_err_on_alloc_failure() {
 fn try_reserve_returns_err_on_alloc_failure() {
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
-    let mut v: Vec<u32, _> = Vec::new_in(&arena);
+    let mut v: Vec<u32, _> = arena.alloc_vec();
     let _ = v.try_reserve(16).unwrap_err();
 }
 
@@ -159,21 +159,21 @@ fn try_reserve_returns_err_on_alloc_failure() {
 fn try_with_capacity_in_returns_err_on_alloc_failure() {
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
-    let result: Result<Vec<u32, _>, _> = Vec::try_with_capacity_in(16, &arena);
+    let result: Result<Vec<u32, _>, _> = arena.try_alloc_vec_with_capacity(16);
     let _ = result.unwrap_err();
 }
 
 #[test]
 fn with_capacity_in_pub_succeeds() {
     let arena = Arena::new();
-    let v: Vec<u32> = Vec::with_capacity_in(8, &arena);
+    let v: Vec<u32> = arena.alloc_vec_with_capacity(8);
     assert!(v.capacity() >= 8);
 }
 
 #[test]
 fn new_in_pub_succeeds() {
     let arena = Arena::new();
-    let v: Vec<u8> = Vec::new_in(&arena);
+    let v: Vec<u8> = arena.alloc_vec();
     assert_eq!(v.len(), 0);
     assert_eq!(v.capacity(), 0);
 }
@@ -219,7 +219,7 @@ fn insert_remove_swap_remove() {
 #[should_panic(expected = "insertion index")]
 fn insert_out_of_bounds_panics() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     v.insert(99, 1);
 }
 
@@ -227,7 +227,7 @@ fn insert_out_of_bounds_panics() {
 #[should_panic(expected = "removal index")]
 fn remove_out_of_bounds_panics() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     let _ = v.remove(0);
 }
 
@@ -235,7 +235,7 @@ fn remove_out_of_bounds_panics() {
 #[should_panic(expected = "swap_remove index")]
 fn swap_remove_out_of_bounds_panics() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     let _ = v.swap_remove(0);
 }
 
@@ -347,7 +347,7 @@ fn append_moves_elements() {
 #[test]
 fn reserve_exact_grows() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     v.reserve_exact(50);
     assert!(v.capacity() >= 50);
 }
@@ -355,7 +355,7 @@ fn reserve_exact_grows() {
 #[test]
 fn try_reserve_exact_succeeds() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     v.try_reserve_exact(40).unwrap();
     assert!(v.capacity() >= 40);
 }
@@ -364,7 +364,7 @@ fn try_reserve_exact_succeeds() {
 fn try_reserve_exact_returns_err_on_alloc_failure() {
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
-    let mut v: Vec<u32, _> = Vec::new_in(&arena);
+    let mut v: Vec<u32, _> = arena.alloc_vec();
     let _ = v.try_reserve_exact(16).unwrap_err();
 }
 
@@ -756,6 +756,59 @@ fn shrink_to_fit_at_cursor_reclaims_in_place() {
 }
 
 #[test]
+fn leak_reclaims_unused_capacity_tail() {
+    // `leak` on a buffer that ends at the bump cursor returns the live
+    // prefix and hands the unused `[len, cap)` tail back to the chunk, so
+    // the next allocation reuses that space immediately.
+    let arena = Arena::new();
+    let mut v = arena.alloc_vec::<u64>();
+    v.reserve_exact(16);
+    v.extend([1_u64, 2, 3]);
+    let base = v.as_ptr() as usize;
+    let leaked: &mut [u64] = v.leak();
+    assert_eq!(leaked, &[1, 2, 3]);
+    assert_eq!(leaked.as_ptr() as usize, base);
+    // The reclaimed tail is reused: the next u64 lands right after the
+    // three retained elements, not after the original capacity of 16.
+    let next = arena.alloc(9_u64);
+    assert_eq!(core::ptr::from_ref::<u64>(next) as usize, base + 3 * core::mem::size_of::<u64>());
+}
+
+#[test]
+fn drop_at_cursor_reclaims_storage() {
+    // Dropping a buffer that ends at the bump cursor returns its whole
+    // storage to the chunk (LIFO reclaim), so the next allocation reuses
+    // the freed space rather than waiting for arena teardown.
+    let arena = Arena::new();
+    let base = {
+        let mut v = arena.alloc_vec::<u64>();
+        v.reserve_exact(16);
+        v.extend([1_u64, 2, 3]);
+        v.as_ptr() as usize
+    }; // `v` dropped here -> reclaims `[0, cap)`.
+    let next = arena.alloc(9_u64);
+    assert_eq!(core::ptr::from_ref::<u64>(next) as usize, base);
+}
+
+#[test]
+fn drop_not_at_cursor_does_not_reclaim() {
+    // A buffer overtaken by a later allocation is no longer at the bump
+    // cursor; dropping it must not roll the cursor back (which would
+    // corrupt the intervening allocation).
+    let arena = Arena::new();
+    let mut v = arena.alloc_vec::<u64>();
+    v.extend([1_u64, 2, 3]);
+    let v_base = v.as_ptr() as usize;
+    // Allocate after `v`, moving the cursor past its buffer.
+    let mid_addr = core::ptr::from_ref::<u64>(arena.alloc(7_u64)) as usize;
+    drop(v); // not at the cursor -> no reclaim
+    let next_addr = core::ptr::from_ref::<u64>(arena.alloc(8_u64)) as usize;
+    // `next` follows `mid`; it must not reuse `v`'s abandoned storage.
+    assert!(next_addr > mid_addr);
+    assert_ne!(next_addr, v_base);
+}
+
+#[test]
 fn pop_if_removes_when_true() {
     let arena = Arena::new();
     let mut v = arena.alloc_vec();
@@ -778,7 +831,7 @@ fn pop_if_keeps_when_false() {
 #[test]
 fn pop_if_empty_returns_none() {
     let arena = Arena::new();
-    let mut v: Vec<u32> = Vec::new_in(&arena);
+    let mut v: Vec<u32> = arena.alloc_vec();
     let r = v.pop_if(|_| true);
     assert_eq!(r, None);
 }
@@ -841,7 +894,7 @@ fn into_iter_mut_borrowed() {
 #[test]
 fn extend_ref_for_copy_types() {
     let arena = Arena::new();
-    let mut v: Vec<u8> = Vec::new_in(&arena);
+    let mut v: Vec<u8> = arena.alloc_vec();
     let src = [1_u8, 2, 3];
     v.extend(src.iter());
     assert_eq!(v.as_slice(), &[1, 2, 3]);
@@ -1184,6 +1237,49 @@ fn resize_with_panic_in_f_drops_already_written() {
 }
 
 #[test]
+fn splice_drop_panic_in_removed_element_restores_tail() {
+    // If a removed element's `Drop` panics while `Splice::drop` is discarding
+    // the unconsumed drained range, `Splice`'s `Drain` field is still dropped
+    // during unwinding (Rust drops a struct's fields even when its `Drop` impl
+    // panics), and `Drain::drop`'s `TailGuard` restores the surviving tail. The
+    // source vector must therefore remain contiguous and usable.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static DROPS: AtomicUsize = AtomicUsize::new(0);
+    DROPS.store(0, Ordering::Relaxed);
+
+    struct Bomb(u32);
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            DROPS.fetch_add(1, Ordering::Relaxed);
+            assert!(self.0 != 999, "deliberate panic dropping a removed element");
+        }
+    }
+
+    let arena = Arena::new();
+    let mut v = arena.alloc_vec::<Bomb>();
+    v.push(Bomb(0));
+    v.push(Bomb(999));
+    v.push(Bomb(2));
+    v.push(Bomb(3));
+
+    // Drop the `Splice` (removing indices 1..3) without consuming it: its
+    // `Drop` drains `Bomb(999)` first, whose destructor panics.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = v.splice(1..3, core::iter::empty::<Bomb>());
+    }));
+    assert!(result.is_err());
+
+    // Tail (`Bomb(3)`) restored after the retained head (`Bomb(0)`); the
+    // removed `Bomb(999)` and `Bomb(2)` are gone. Vector is contiguous.
+    assert_eq!(v.len(), 2);
+    assert_eq!(v.as_slice()[0].0, 0);
+    assert_eq!(v.as_slice()[1].0, 3);
+    // The vector is still fully usable after the panic.
+    v.push(Bomb(4));
+    assert_eq!(v.as_slice().iter().map(|b| b.0).collect::<std::vec::Vec<_>>(), [0, 3, 4]);
+}
+
+#[test]
 fn resize_grow_by_one() {
     let arena = Arena::new();
     let mut v = arena.alloc_vec();
@@ -1484,29 +1580,90 @@ mod mutants_for_vec {
     }
 
     /// Kills `vec/vec.rs:762:17 += → -=` and `762:17 += → *=` in
-    /// `into_arena_box_copy`.
+    /// `into_box`.
     ///
     /// `idx += 1` after each read. With `-=` idx underflows → next read
     /// is wildly out of bounds → segfault/UB. With `*=` idx stays 0 →
     /// the same element is read N times → wrong output.
     #[test]
-    fn into_arena_box_copy_yields_distinct_elements() {
+    fn into_box_yields_distinct_elements() {
         use multitude::vec::Vec as MVec;
 
         let arena = Arena::new();
-        // Use a vec of types where `into_arena_box` takes the copy path
-        // (any type works for into_arena_box, but copy path is the cold
+        // Use a vec of types where `into_box` takes the copy path
+        // (any type works for into_box, but copy path is the cold
         // tail; we exercise it indirectly via empty-builder edge case in
-        // tests/arena_vec.rs). Here we exercise the public into_arena_box
+        // tests/arena_vec.rs). Here we exercise the public into_box
         // path with non-Copy types so the slow-path is taken on some
         // configurations.
         let mut v: MVec<'_, String> = arena.alloc_vec();
         for i in 0..8_u32 {
             v.push(format!("item-{i}"));
         }
-        let b = v.into_arena_box();
+        let b = v.into_boxed_slice();
         for (i, s) in b.iter().enumerate() {
             assert_eq!(s, &format!("item-{i}"));
         }
     }
+}
+
+/// Regression test for a use-after-free between `Vec::split_off`'s
+/// zero-copy sharing and oversized-chunk reclamation on growth.
+///
+/// `split_off` of an oversized-backed `Vec` leaves the head and tail
+/// sharing one chunk's payload (no copy). Growing one half past the
+/// oversized threshold relocates it to a fresh chunk. The old chunk
+/// must NOT be freed at that point, because the sibling half still
+/// points into it — freeing it would dangle the sibling. We grow the
+/// head, then read and drop the tail (whose elements run real
+/// destructors); under the bug this touches freed memory.
+#[test]
+fn split_off_sibling_survives_oversized_growth_of_other_half() {
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Dropper(StdArc<AtomicUsize>);
+    impl Drop for Dropper {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let counter = StdArc::new(AtomicUsize::new(0));
+    let arena = Arena::new();
+
+    // Build an oversized-backed Vec (> 16 KiB normal-class cutover):
+    // 4096 * size_of::<Dropper>() (8 bytes) = 32 KiB.
+    let mut head = arena.alloc_vec::<Dropper>();
+    for _ in 0..4096 {
+        head.push(Dropper(counter.clone()));
+    }
+    // Zero-copy split: `tail` shares the same oversized chunk as `head`.
+    let tail = head.split_off(2048);
+    assert_eq!(head.len(), 2048);
+    assert_eq!(tail.len(), 2048);
+
+    // Grow `head` past the oversized threshold again, forcing it to
+    // relocate to a fresh oversized chunk. The chunk shared with `tail`
+    // must remain alive.
+    for _ in 0..6144 {
+        head.push(Dropper(counter.clone()));
+    }
+    assert_eq!(head.len(), 8192);
+
+    // Touch every element of the sibling: a UAF would read freed memory.
+    let mut sum = 0_usize;
+    for d in tail.as_slice() {
+        sum += StdArc::strong_count(&d.0);
+    }
+    assert!(sum > 0);
+
+    // Drop the sibling explicitly: runs 2048 real destructors over the
+    // shared chunk's storage — must not be a use-after-free.
+    drop(tail);
+    drop(head);
+    drop(arena);
+    // 4096 (initial) + 6144 (regrowth) Droppers were created and all
+    // must have been dropped exactly once.
+    assert_eq!(counter.load(Ordering::Relaxed), 4096 + 6144);
 }

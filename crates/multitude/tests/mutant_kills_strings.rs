@@ -153,8 +153,8 @@ fn string_partial_eq_ref_str_true_and_false() {
 
 #[cfg(feature = "utf16")]
 mod utf16_kills {
-    use multitude::Arena;
     use multitude::strings::{ArcUtf16Str, BoxUtf16Str, Utf16String};
+    use multitude::{Arena, FromIn as _};
     use widestring::{Utf16Str, utf16str};
 
     use super::hash_of;
@@ -257,7 +257,7 @@ mod utf16_kills {
     #[test]
     fn utf16_string_display_renders_contents() {
         let arena = Arena::new();
-        let mut s = Utf16String::from_str_in("hello", &arena);
+        let mut s = Utf16String::from_in("hello", &arena);
         assert_eq!(format!("{s}"), "hello");
         s.push_from_str(" world");
         assert_eq!(format!("{s}"), "hello world");

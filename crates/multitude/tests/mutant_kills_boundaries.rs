@@ -11,8 +11,6 @@
 #![allow(clippy::unwrap_used, reason = "test code")]
 
 use multitude::Arena;
-#[cfg(feature = "stats")]
-use multitude::ArenaBuilder;
 use multitude::vec::Vec as ArenaVec;
 
 // --- ArenaBuf / Vec insert/remove boundaries (via Vec public API) ---------
@@ -139,7 +137,7 @@ fn vec_shrink_to_fit_with_room_to_shrink_reduces_capacity() {
     // already cover `cap == len` no-op via existing tests; here pin
     // the actual shrink behavior for `cap > len`.
     let arena = Arena::new();
-    let mut v: ArenaVec<'_, u32> = ArenaVec::with_capacity_in(64, &arena);
+    let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(64);
     v.extend([1_u32, 2, 3, 4]);
     let cap_before = v.capacity();
     assert!(cap_before >= 64);
@@ -221,11 +219,10 @@ fn arena_try_new_succeeds_with_default_globals() {
 
 #[test]
 fn arena_builder_returns_independent_builder_each_call() {
-    // `builder() -> ArenaBuilder::from(Default::default())` mutation
-    // would return a builder pre-loaded with an `ArenaBuilder::new()`
-    // default (equivalent in practice), so this mutation is hard to
-    // observe directly. We pin the chain: `Arena::builder().build()`
-    // produces a functional arena that can allocate.
+    // `Arena::builder()` constructs the builder via the crate-internal
+    // `ArenaBuilder::new()`; we pin the chain so a mutated `builder()` is
+    // caught: `Arena::builder().build()` produces a functional arena that
+    // can allocate.
     let arena: Arena = Arena::builder().build();
     let r = arena.alloc(99_u64);
     assert_eq!(*r, 99);
@@ -244,7 +241,7 @@ fn preallocate_with_max_class_capacity_does_not_double_ratchet() {
     // user-visible side effect. Best we can observe: a builder that
     // pins class 0 produces exactly one chunk; the second allocation
     // should not trigger a re-preallocation.
-    let arena = ArenaBuilder::new().with_capacity_local(512).build();
+    let arena = Arena::builder().with_capacity_local(512).build();
     let s = arena.stats();
     assert_eq!(s.normal_local_chunks_allocated, 1);
     // Allocate within the preallocated chunk: no new chunk acquired.
@@ -256,7 +253,7 @@ fn preallocate_with_max_class_capacity_does_not_double_ratchet() {
 #[cfg(feature = "stats")]
 #[test]
 fn preallocate_shared_with_capacity_does_not_double_ratchet() {
-    let arena = ArenaBuilder::new().with_capacity_shared(512).build();
+    let arena = Arena::builder().with_capacity_shared(512).build();
     let s = arena.stats();
     assert_eq!(s.normal_shared_chunks_allocated, 1);
     // First arc within preallocated chunk: still 1.

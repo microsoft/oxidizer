@@ -38,6 +38,26 @@ pub(crate) struct ArenaBuf<'a, T> {
     _phantom: PhantomData<&'a mut [T]>,
 }
 
+impl<T> ArenaBuf<'_, T> {
+    /// Reconstruct a buffer from raw parts.
+    ///
+    /// # Safety
+    ///
+    /// The `(ptr, len, cap)` triple must satisfy the type's invariants for
+    /// some live arena chunk that outlives `'a` — e.g. parts taken from
+    /// another `ArenaBuf` (possibly reinterpreted, as in
+    /// [`Vec::into_flattened`](crate::vec::Vec::into_flattened)).
+    #[inline]
+    pub(crate) const unsafe fn from_raw_parts(ptr: NonNull<T>, len: usize, cap: usize) -> Self {
+        Self {
+            ptr,
+            len,
+            cap,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<'a, T> ArenaBuf<'a, T> {
     /// Creates an empty buffer with no backing storage. ZSTs are
     /// initialized with `cap = usize::MAX` since no real storage is
@@ -187,13 +207,17 @@ impl<'a, T> ArenaBuf<'a, T> {
         T: Copy,
     {
         debug_assert!(self.remaining_cap() >= src.len(), "extend_copy: insufficient capacity");
-        if src.is_empty() {
-            return;
-        }
         // SAFETY: the tail `[len .. len + src.len()]` is in-bounds uninit
         // storage (invariant + caller-checked capacity); `src` is a
         // caller-supplied slice and cannot alias the freshly-reserved
-        // chunk storage. `T: Copy` permits bitwise duplication.
+        // chunk storage. `T: Copy` permits bitwise duplication. When
+        // `src.len() > 0`, the caller-checked `remaining_cap() >= src.len()`
+        // forces `cap > 0`, so the destination is a live, `T`-aligned
+        // allocation. When `src.len() == 0` the call is a no-op for which
+        // `copy_nonoverlapping` only requires both pointers to be non-null
+        // and `T`-aligned — satisfied because `self.ptr` is a `NonNull`
+        // that `ArenaBuf` keeps `T`-aligned even while dangling (`cap == 0`
+        // / ZST), and `src.as_ptr()` is likewise non-null and aligned.
         unsafe {
             ptr::copy_nonoverlapping(src.as_ptr(), self.ptr.as_ptr().add(self.len), src.len());
         }
@@ -275,8 +299,8 @@ impl<'a, T> ArenaBuf<'a, T> {
         // SAFETY: `idx < len` so the slot is initialized; `ptr::read`
         // transfers ownership. The subsequent `ptr::copy` shifts the
         // suffix `[idx+1, len)` down by one over an overlap-safe move.
-        // Finally `len` is lowered so the moved-from tail is not seen as
-        // initialized.
+        // Lowering `len` afterward keeps the moved-from tail from being
+        // seen as initialized.
         let value = unsafe {
             let base = self.ptr.as_ptr().add(idx);
             let value = ptr::read(base);
@@ -358,6 +382,15 @@ impl<'a, T> ArenaBuf<'a, T> {
             return false;
         }
         let self_end = self.ptr.as_ptr().wrapping_add(self.cap);
+        // The exact pointer-equality test below is also a proof that `other`
+        // lives in the *same chunk* as `self` (so `self.ptr`'s chunk-wide
+        // provenance legitimately covers the absorbed region). A distinct
+        // chunk's payload always begins `header_size > 0` bytes after its
+        // base, and chunk allocations never overlap, so a buffer in another
+        // chunk can never start exactly at `self`'s one-past-the-end address:
+        // that would require the other chunk's base to fall *inside* `self`'s
+        // chunk. Hence `ptr::eq(self_end, other.ptr)` can only hold when both
+        // buffers were carved from one chunk's bump region.
         if !ptr::eq(self_end.cast_const(), other.ptr.as_ptr().cast_const()) {
             return false;
         }
@@ -385,10 +418,40 @@ impl<'a, T> ArenaBuf<'a, T> {
         self.cap = new_cap;
     }
 
+    /// Returns the spare capacity `[len, cap)` as a mutable slice of
+    /// `MaybeUninit<T>`.
+    #[inline]
+    pub(crate) fn spare_capacity_mut(&mut self) -> &mut [mem::MaybeUninit<T>] {
+        let spare = self.cap - self.len;
+        // SAFETY: by the invariants, `ptr + len` addresses `cap - len`
+        // uninitialized `T` slots; `MaybeUninit<T>` has the same layout as
+        // `T`, and the `&mut self` borrow grants exclusive access. For ZSTs
+        // the dangling-but-aligned pointer is valid for any length.
+        unsafe {
+            let ptr = self.ptr.as_ptr().add(self.len).cast::<mem::MaybeUninit<T>>();
+            slice::from_raw_parts_mut(ptr, spare)
+        }
+    }
+
     /// Returns an owning, double-ended iterator that yields the live
     /// elements in order, leaving the buffer empty. The iterator's
     /// `Drop` drops any elements that were not yielded. The iterator
     /// is bound to the arena lifetime `'a` of the buffer.
+    ///
+    /// # Caller contract
+    ///
+    /// The returned [`DrainAll`] is deliberately bound to the arena
+    /// lifetime `'a` rather than to the `&mut self` borrow, so that an
+    /// owning [`IntoIter`](crate::vec::IntoIter) can hold it past the
+    /// `ManuallyDrop<Vec>` that produced it. Because the borrow checker
+    /// therefore does **not** tie the iterator to this buffer, the
+    /// caller MUST NOT touch `self` (push, grow, drain again, drop the
+    /// elements, etc.) until the returned iterator has been fully
+    /// consumed or dropped: the iterator keeps a *copy* of `self.ptr`
+    /// and still logically owns `[0, len)`, so any concurrent write or
+    /// re-read of those slots would alias and double-own the elements.
+    /// All current callers consume the iterator immediately and never
+    /// reuse the buffer afterwards.
     #[inline]
     pub(crate) fn drain_all(&mut self) -> DrainAll<'a, T> {
         let len = self.len;

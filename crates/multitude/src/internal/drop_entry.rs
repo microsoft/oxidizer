@@ -180,7 +180,14 @@ pub(crate) unsafe fn commit_placeholder_drop_fn(
 ) -> bool {
     let entry_size = mem::size_of::<DropEntry>();
     let entry_align = mem::align_of::<DropEntry>();
-    let aligned_len = payload_len & !(entry_align - 1);
+    // Align the *absolute* payload-end address down to `entry_align`,
+    // matching `ChunkMutator::from_owned`'s `aligned_end_addr` formula.
+    // Doing the alignment on absolute addresses (rather than on
+    // `payload_len` alone) keeps the entry positions valid even when
+    // `payload` itself is not `entry_align`-aligned — the chunk
+    // headers don't pad their payload start anymore.
+    let payload_addr = payload as usize;
+    let aligned_end_offset = ((payload_addr.wrapping_add(payload_len)) & !(entry_align - 1)).wrapping_sub(payload_addr);
     // Find the placeholder by (value_offset, len) and unconditionally
     // store the real shim. Concurrent `assume_init` calls on cloned
     // handles for the same allocation race here; both calls compute
@@ -194,9 +201,9 @@ pub(crate) unsafe fn commit_placeholder_drop_fn(
     // addresses across invocations of the same function. The single-
     // pass unconditional store sidesteps the comparison entirely.
     for i in 0..drop_entry_count {
-        let entry_off = aligned_len - (i + 1) * entry_size;
-        // SAFETY: `entry_off + entry_size <= aligned_len <= payload_len`, so
-        // the entry lies inside the payload; the caller guarantees an
+        let entry_off = aligned_end_offset - (i + 1) * entry_size;
+        // SAFETY: `entry_off + entry_size <= aligned_end_offset <= payload_len`,
+        // so the entry lies inside the payload; the caller guarantees an
         // initialized `DropEntry` was written there. We hold a chunk
         // reference, so the slot stays live for this read/write.
         let entry = &*(payload.add(entry_off).cast::<DropEntry>());
@@ -258,17 +265,23 @@ pub(crate) unsafe fn replay_drops(payload: *mut u8, payload_len: usize, drop_ent
     }
     let entry_size = mem::size_of::<DropEntry>();
     let entry_align = mem::align_of::<DropEntry>();
-    // Align the effective payload end down to `entry_align`. The
-    // allocator (see `ChunkMutator::from_owned`) reserves drop entries
-    // starting from this aligned end, so the trailing bytes between
-    // `aligned_len` and `payload_len` were never populated.
-    let aligned_len = payload_len & !(entry_align - 1);
-    // Iterate newest-first (LIFO): the last-written entry sits closest to
-    // the aligned payload end. Index `i` runs from 0 (newest) up to
-    // `drop_entry_count - 1` (oldest).
-    for i in 0..drop_entry_count {
-        let entry_off = aligned_len - (i + 1) * entry_size;
-        // SAFETY: `entry_off + entry_size <= aligned_len <= payload_len`,
+    // Align the *absolute* payload-end address down to `entry_align`,
+    // matching `ChunkMutator::from_owned`'s `aligned_end_addr` formula
+    // (which the allocator uses when reserving drop entries). Computing
+    // the alignment on absolute addresses keeps drop-entry positions
+    // valid even when `payload` itself is not `entry_align`-aligned —
+    // chunk headers do not pad the payload start.
+    let payload_addr = payload as usize;
+    let aligned_end_offset = ((payload_addr.wrapping_add(payload_len)) & !(entry_align - 1)).wrapping_sub(payload_addr);
+    // Iterate newest-first (LIFO) so child values drop before their
+    // parents, matching Rust's drop semantics. Entries grow downward
+    // from the aligned payload end, so the newest (last-written) entry
+    // sits at the lowest address (`aligned_end - count * entry_size`)
+    // and the oldest at the highest (`aligned_end - entry_size`).
+    // Visiting `i` from `count - 1` down to `0` walks newest -> oldest.
+    for i in (0..drop_entry_count).rev() {
+        let entry_off = aligned_end_offset - (i + 1) * entry_size;
+        // SAFETY: `entry_off + entry_size <= aligned_end_offset <= payload_len`,
         // so the entry lies inside the payload allocation; the caller
         // guarantees that an initialized `DropEntry` was previously
         // written there. If committed, the entry's
@@ -348,6 +361,76 @@ mod tests {
         // SAFETY: the slot is initialized.
         let installed = unsafe { (*next_ptr).drop_fn() };
         assert!(installed.is_some());
+    }
+
+    /// Regression test for the unaligned-payload formula: when
+    /// `payload_ptr` is **not** `align_of::<DropEntry>()`-aligned (as
+    /// happens for the post-padding-removal chunk layouts), both
+    /// `commit_placeholder_drop_fn` and `replay_drops` must still place
+    /// drop entries at absolutely-aligned addresses near the payload
+    /// tail. The buffer below intentionally offsets the payload start
+    /// by `entry_align - 1` bytes from an aligned base, so the
+    /// payload start address is 1-aligned but the *end* of the
+    /// reserved payload still lands on an `entry_align` multiple.
+    #[test]
+    fn replay_and_commit_tolerate_unaligned_payload_start() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn counting_shim(_p: *mut u8, _n: usize) {
+            CALLS.fetch_add(1, Ordering::Relaxed);
+        }
+        CALLS.store(0, Ordering::Relaxed);
+
+        let entry_size = mem::size_of::<DropEntry>();
+        let entry_align = mem::align_of::<DropEntry>();
+        // Buffer big enough to host two entries plus the misalignment slack.
+        let extra = entry_align - 1;
+        let payload_len = entry_size * 2 + extra;
+        // Over-allocate by `entry_align` so we can choose an unaligned start.
+        let mut buf = std::vec![0u8; payload_len + entry_align];
+        let base_addr = buf.as_mut_ptr() as usize;
+        // Pick a payload_start address that's odd-aligned. Anchor 1 byte
+        // past an aligned base so payload_addr mod entry_align == 1.
+        let aligned_base = (base_addr + entry_align - 1) & !(entry_align - 1);
+        let payload_start_addr = aligned_base + 1;
+        let payload_offset = payload_start_addr - base_addr;
+        // SAFETY: `payload_offset + payload_len` ≤ `buf.len()` by construction.
+        let payload_ptr = unsafe { buf.as_mut_ptr().add(payload_offset) };
+        assert_ne!((payload_ptr as usize) % entry_align, 0, "payload must be unaligned for this test");
+
+        // Where the entries *must* land: at the absolute-aligned end.
+        let aligned_end_addr = (payload_start_addr + payload_len) & !(entry_align - 1);
+        let aligned_end_offset = aligned_end_addr - payload_start_addr;
+
+        let value_offset: u16 = 0;
+        let len: u16 = 1;
+        let shim_fn = counting_shim as DropFn;
+
+        // Write two placeholders at the correctly-aligned offsets.
+        // SAFETY: both offsets are within the payload buffer and produce
+        // entry_align-aligned addresses by construction.
+        unsafe {
+            let top_off = aligned_end_offset - entry_size;
+            let next_off = aligned_end_offset - 2 * entry_size;
+            // Top: non-matching placeholder.
+            ptr::write(payload_ptr.add(top_off).cast::<DropEntry>(), DropEntry::placeholder(99, 1));
+            // Below: matching placeholder.
+            ptr::write(
+                payload_ptr.add(next_off).cast::<DropEntry>(),
+                DropEntry::placeholder(value_offset, len),
+            );
+        }
+
+        // Commit phase must locate the matching entry and install the shim.
+        // SAFETY: both entries are initialized; payload_len includes them.
+        let committed = unsafe { commit_placeholder_drop_fn(payload_ptr, payload_len, 2, value_offset as usize, len as usize, shim_fn) };
+        assert!(committed);
+
+        // Replay phase must invoke the installed shim exactly once
+        // (the non-matching placeholder still has no shim).
+        // SAFETY: payload_ptr + payload_len bounds the live buffer.
+        unsafe { replay_drops(payload_ptr, payload_len, 2) };
+        assert_eq!(CALLS.load(Ordering::Relaxed), 1);
     }
 
     /// `raw_used` returns the byte sum of the un-padded `DropEntry`
