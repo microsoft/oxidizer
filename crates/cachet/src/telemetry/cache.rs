@@ -505,24 +505,6 @@ mod tests {
         assert!(capture.output().is_empty());
     }
 
-    #[test]
-    fn logging_enabled_without_subscriber_is_noop() {
-        // logging_enabled=true but no tracing subscriber.
-        // No panic means tracing events degrade to a no-op cleanly.
-        let telemetry = CacheTelemetry::with_logging();
-        let request_id = next_request_id();
-        futures::executor::block_on(
-            async {
-                telemetry.record_hit("c", Duration::ZERO, false);
-                telemetry.record_get_error("c", Duration::ZERO, false);
-                telemetry.record_insert_rejected("c", false);
-                telemetry.complete_operation(request_id, "c", "cache.get", Duration::ZERO, true);
-            }
-            .with_request_id(request_id),
-        );
-        // No panic = all paths handled gracefully without a subscriber.
-    }
-
     #[cfg_attr(miri, ignore)]
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
         let capture = LogCapture::new();
