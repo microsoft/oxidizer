@@ -3,6 +3,7 @@
 Please see each crate's change log below:
 
 - [`anyspawn`](./crates/anyspawn/CHANGELOG.md)
+- [`anyspawn_azure`](./crates/anyspawn_azure/CHANGELOG.md)
 - [`bytesbuf`](./crates/bytesbuf/CHANGELOG.md)
 - [`bytesbuf_io`](./crates/bytesbuf_io/CHANGELOG.md)
 - [`cachet`](./crates/cachet/CHANGELOG.md)
@@ -13,6 +14,7 @@ Please see each crate's change log below:
 - [`data_privacy_macros`](./crates/data_privacy_macros/CHANGELOG.md)
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/CHANGELOG.md)
 - [`fetch`](./crates/fetch/CHANGELOG.md)
+- [`fetch_azure`](./crates/fetch_azure/CHANGELOG.md)
 - [`fetch_hyper`](./crates/fetch_hyper/CHANGELOG.md)
 - [`fetch_options`](./crates/fetch_options/CHANGELOG.md)
 - [`fetch_tls`](./crates/fetch_tls/CHANGELOG.md)
