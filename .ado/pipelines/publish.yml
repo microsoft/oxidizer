@@ -15,6 +15,12 @@ parameters:
 - name: previousVersion
   type: string
   default: 'HEAD^'
+# Whether to perform the publish. On the Official pipeline this defaults to
+# true so qualifying builds publish for real.
+- name: executePublish
+  displayName: 'Publish crates (real publish)'
+  type: boolean
+  default: true
 
 resources:
   repositories:
@@ -30,3 +36,4 @@ extends:
     validationOsList: ${{ parameters.validationOsList }}
     validationProfiles: ${{ parameters.validationProfiles }}
     previousVersion: ${{ parameters.previousVersion }}
+    executePublish: ${{ parameters.executePublish }}
