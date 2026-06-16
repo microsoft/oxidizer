@@ -56,7 +56,7 @@ mod utf16_smoke {
     }
 
     #[test]
-    fn arc_into_arena_arc_slice() {
+    fn arc_into_arc_slice() {
         let arena = Arena::new();
         let a = arena.alloc_utf16_str_arc(utf16str!("abc"));
         let bytes: multitude::Arc<[u16]> = a.into();
@@ -67,7 +67,7 @@ mod utf16_smoke {
 // === merged from tests/utf16_string_builder.rs ===
 mod utf16_string_builder {
 
-    use multitude::Arena;
+    use multitude::{Arena, FromIn as _};
     use widestring::utf16str;
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
@@ -187,9 +187,9 @@ mod utf16_string_builder {
     }
 
     #[test]
-    fn from_str_in_and_from_utf16_str_in() {
+    fn from_in_str_and_from_utf16_str_in() {
         let arena = Arena::new();
-        let a = multitude::strings::Utf16String::from_str_in("hello", &arena);
+        let a = multitude::strings::Utf16String::from_in("hello", &arena);
         assert_eq!(a.as_utf16_str(), utf16str!("hello"));
         let b = multitude::strings::Utf16String::from_utf16_str_in(utf16str!("world"), &arena);
         assert_eq!(b.as_utf16_str(), utf16str!("world"));
@@ -282,7 +282,7 @@ mod utf16_string_builder {
     #[test]
     fn try_with_capacity_in_zero_does_not_allocate_but_is_usable() {
         let arena = Arena::new();
-        let s = multitude::strings::Utf16String::try_with_capacity_in(0, &arena).unwrap();
+        let s = arena.try_alloc_utf16_string_with_capacity(0).unwrap();
         assert_eq!(s.len(), 0);
         assert_eq!(s.capacity(), 0);
         assert!(s.is_empty());
@@ -291,7 +291,7 @@ mod utf16_string_builder {
     #[test]
     fn try_with_capacity_in_respects_requested_capacity() {
         let arena = Arena::new();
-        let s = multitude::strings::Utf16String::try_with_capacity_in(8, &arena).unwrap();
+        let s = arena.try_alloc_utf16_string_with_capacity(8).unwrap();
         assert!(s.capacity() >= 8);
         assert_eq!(s.len(), 0);
     }
@@ -299,7 +299,7 @@ mod utf16_string_builder {
     #[test]
     fn try_with_capacity_in_one_allocates_at_least_one_unit() {
         let arena = Arena::new();
-        let s = multitude::strings::Utf16String::try_with_capacity_in(1, &arena).unwrap();
+        let s = arena.try_alloc_utf16_string_with_capacity(1).unwrap();
         assert!(s.capacity() >= 1);
         assert_eq!(s.len(), 0);
     }
@@ -524,7 +524,7 @@ mod utf16_coverage {
     use std::panic::AssertUnwindSafe;
 
     use multitude::strings::{String, Utf16String};
-    use multitude::{Arc, Arena, Box};
+    use multitude::{Arc, Arena, Box, FromIn as _};
     use widestring::{Utf16Str, utf16str};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
@@ -715,21 +715,21 @@ mod utf16_coverage {
     #[test]
     fn try_push_err() {
         let a = fail_arena();
-        let mut s = Utf16String::new_in(&a);
+        let mut s = a.alloc_utf16_string();
         assert!(s.try_push('a').is_err());
     }
 
     #[test]
     fn try_push_str_err() {
         let a = fail_arena();
-        let mut s = Utf16String::new_in(&a);
+        let mut s = a.alloc_utf16_string();
         assert!(s.try_push_str(utf16str!("abc")).is_err());
     }
 
     #[test]
     fn try_push_from_str_err() {
         let a = fail_arena();
-        let mut s = Utf16String::new_in(&a);
+        let mut s = a.alloc_utf16_string();
         assert!(s.try_push_from_str("abc").is_err());
     }
 
@@ -745,7 +745,7 @@ mod utf16_coverage {
     fn reserve_panics_when_alloc_fails() {
         expect_panic(|| {
             let a = fail_arena();
-            let mut s = Utf16String::new_in(&a);
+            let mut s = a.alloc_utf16_string();
             s.reserve(64);
         });
     }
@@ -753,7 +753,7 @@ mod utf16_coverage {
     #[test]
     fn try_reserve_err() {
         let a = fail_arena();
-        let mut s = Utf16String::new_in(&a);
+        let mut s = a.alloc_utf16_string();
         assert!(s.try_reserve(64).is_err());
     }
 
@@ -853,7 +853,7 @@ mod utf16_coverage {
     #[test]
     fn from_utf16_str_in_and_from_str_in() {
         let arena = Arena::new();
-        let a = Utf16String::from_str_in("hello, 💖", &arena);
+        let a = Utf16String::from_in("hello, 💖", &arena);
         assert_eq!(a.as_utf16_str(), utf16str!("hello, 💖"));
         let b = Utf16String::from_utf16_str_in(utf16str!("world"), &arena);
         assert_eq!(b.as_utf16_str(), utf16str!("world"));
@@ -941,7 +941,7 @@ mod utf16_coverage {
     #[test]
     fn grow_doubling_path() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(4, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(4);
         s.push_str(utf16str!("abcd"));
         s.push('e'); // forces grow; doubling 4*2 = 8 covers needed 5
         assert!(s.capacity() >= 8);
@@ -951,7 +951,7 @@ mod utf16_coverage {
     #[test]
     fn grow_uses_min_cap_when_doubling_too_small() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(4, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(4);
         s.push_str(utf16str!("abcd"));
         let big = "x".repeat(100);
         s.push_from_str(&big); // forces grow; min_cap > 2*old_cap
@@ -1016,7 +1016,7 @@ mod utf16_coverage {
     #[test]
     fn insert_grows_capacity() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(4, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(4);
         s.push_str(utf16str!("abcd"));
         s.insert_utf16_str(2, utf16str!("XYZW"));
         assert_eq!(s.as_utf16_str(), utf16str!("abXYZWcd"));
@@ -1026,7 +1026,7 @@ mod utf16_coverage {
     #[test]
     fn replace_range_grows_capacity() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(4, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(4);
         s.push_str(utf16str!("abcd"));
         s.replace_range(0..1, utf16str!("XXXXX")); // adds 4 → needs cap 8
         assert_eq!(s.as_utf16_str(), utf16str!("XXXXXbcd"));
@@ -1118,7 +1118,7 @@ mod utf16_coverage {
         // FailingAllocator(1): builder gets initial chunk (cap=4), then a huge
         // try_reserve would need a fresh oversized chunk → second alloc fails.
         let arena = Arena::builder().allocator_in(FailingAllocator::new(1)).build();
-        let mut s = Utf16String::try_with_capacity_in(4, &arena).unwrap();
+        let mut s = arena.try_alloc_utf16_string_with_capacity(4).unwrap();
         s.try_push_str(utf16str!("abcd")).unwrap();
         assert!(s.try_reserve(64 * 1024).is_err());
     }
@@ -1127,7 +1127,7 @@ mod utf16_coverage {
     fn panic_grow_to_at_least() {
         expect_panic(|| {
             let arena = Arena::builder().allocator_in(FailingAllocator::new(1)).build();
-            let mut s = Utf16String::try_with_capacity_in(4, &arena).unwrap();
+            let mut s = arena.try_alloc_utf16_string_with_capacity(4).unwrap();
             s.try_push_str(utf16str!("abcd")).unwrap();
             // grow_to_at_least's panic_alloc lambda fires here.
             s.push_from_str("x".repeat(64 * 1024));
@@ -1142,7 +1142,7 @@ mod utf16_coverage {
     fn panic_push_when_alloc_fails() {
         expect_panic(|| {
             let a = fail_arena();
-            let mut s = Utf16String::new_in(&a);
+            let mut s = a.alloc_utf16_string();
             s.push('a');
         });
     }
@@ -1151,7 +1151,7 @@ mod utf16_coverage {
     fn panic_push_str_when_alloc_fails() {
         expect_panic(|| {
             let a = fail_arena();
-            let mut s = Utf16String::new_in(&a);
+            let mut s = a.alloc_utf16_string();
             s.push_str(utf16str!("abc"));
         });
     }
@@ -1160,7 +1160,7 @@ mod utf16_coverage {
     fn panic_push_from_str_when_alloc_fails() {
         expect_panic(|| {
             let a = fail_arena();
-            let mut s = Utf16String::new_in(&a);
+            let mut s = a.alloc_utf16_string();
             s.push_from_str("abc");
         });
     }
@@ -1168,7 +1168,7 @@ mod utf16_coverage {
     #[test]
     fn reserve_no_growth_path() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(16, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(16);
         s.reserve(4); // already have cap >= len + 4; no-op branch
         assert_eq!(s.capacity(), 16);
         assert_eq!(s.len(), 0);
@@ -1184,14 +1184,14 @@ mod utf16_coverage {
         // cap*2 > isize::MAX but ≤ usize::MAX on 64-bit. checked_mul succeeds,
         // checked_add succeeds, isize::try_from fails → AllocError.
         let cap = (isize::MAX.unsigned_abs() / 2) + 1000;
-        let r = Utf16String::try_with_capacity_in(cap, &arena);
+        let r = arena.try_alloc_utf16_string_with_capacity(cap);
         r.unwrap_err();
     }
 
     #[test]
     fn try_grow_isize_overflow_guard() {
         let arena = Arena::new();
-        let mut s = Utf16String::try_with_capacity_in(4, &arena).unwrap();
+        let mut s = arena.try_alloc_utf16_string_with_capacity(4).unwrap();
         // Force try_grow_to_at_least → new_cap such that new_cap*2 > isize::MAX
         // but ≤ usize::MAX. The isize::try_from check on new_total returns Err.
         let huge = (isize::MAX.unsigned_abs() / 2) + 1000;
@@ -1250,7 +1250,7 @@ mod mutants_for_utf16_strings {
     #[test]
     fn shrink_to_fit_reduces_capacity_to_len() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(64, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(64);
         s.push_str(utf16str!("abc"));
         assert_eq!(s.len(), 3);
         let cap_before = s.capacity();
@@ -1275,7 +1275,7 @@ mod mutants_for_utf16_strings {
     #[test]
     fn reserve_exact_capacity_does_not_regrow() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(8, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(8);
         assert!(s.capacity() >= 8);
         let cap = s.capacity();
         let ptr_before = s.as_ptr();
@@ -1294,7 +1294,7 @@ mod mutants_for_utf16_strings {
     #[test]
     fn push_slice_at_exact_fit_does_not_regrow() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(8, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(8);
         let cap = s.capacity();
         let ptr_before = s.as_ptr();
         // Push exactly `cap` u16s.
@@ -1342,7 +1342,7 @@ mod mutants_for_utf16_strings {
 
         // Insert exactly at the grow boundary: build a String at known
         // cap, then insert enough to hit needed == cap.
-        let mut t = Utf16String::with_capacity_in(8, &arena);
+        let mut t = arena.alloc_utf16_string_with_capacity(8);
         t.push_str(utf16str!("abcd"));
         let ptr_before = t.as_ptr();
         let cap = t.capacity();
@@ -1382,7 +1382,7 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.as_utf16_str(), utf16str!("ll"));
 
         // Folded from_mutants_extras_utf16_scattered::utf16_remove_shifts_correct_byte_count.
-        let mut s = Utf16String::new_in(&arena);
+        let mut s = arena.alloc_utf16_string();
         s.push_from_str("abcdefghij");
         assert_eq!(s.remove(4), 'e');
         assert_eq!(s.as_slice().to_vec(), widestring::Utf16String::from_str("abcdfghij").into_vec());
@@ -1454,12 +1454,12 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.as_utf16_str(), utf16str!("abcxyz"));
 
         // Replace into an empty string.
-        let mut s = Utf16String::new_in(&arena);
+        let mut s = arena.alloc_utf16_string();
         s.replace_range(0..0, utf16str!("abc"));
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
     }
 
-    /// Kills `utf16_string.rs:466:21 == → !=` in `into_arena_box_utf16_str`.
+    /// Kills `utf16_string.rs:466:21 == → !=` in `into_box`.
     ///
     /// The branch is `if self.cap == 0 { … return empty … }`. With `!=`,
     /// the empty fast-path runs for non-empty strings (UB / wrong data)
@@ -1467,19 +1467,61 @@ mod mutants_for_utf16_strings {
     /// We test both branches by freezing an empty and a non-empty
     /// string into a `BoxUtf16Str`.
     #[test]
-    fn into_arena_box_utf16_str_handles_empty_and_non_empty() {
+    fn into_box_handles_empty_and_non_empty() {
         let arena = Arena::new();
         // Empty case.
-        let s = Utf16String::new_in(&arena);
-        let b = s.into_arena_box_utf16_str();
+        let s = arena.alloc_utf16_string();
+        let b = s.into_boxed_utf16_str();
         assert_eq!(&*b, utf16str!(""));
         assert_eq!(b.len(), 0);
 
         // Non-empty case.
         let s = Utf16String::from_utf16_str_in(utf16str!("hello, world"), &arena);
-        let b = s.into_arena_box_utf16_str();
+        let b = s.into_boxed_utf16_str();
         assert_eq!(&*b, utf16str!("hello, world"));
         assert_eq!(b.len(), 12);
+    }
+
+    /// `Utf16String::into_arc` freezes into a shared, reference-counted
+    /// `ArcUtf16Str` whose contents match the builder, for both empty
+    /// and non-empty inputs, and which can be cloned and outlive the
+    /// arena.
+    #[test]
+    fn into_arc_handles_empty_and_non_empty() {
+        use multitude::strings::ArcUtf16Str;
+
+        let arena = Arena::new();
+
+        let s_empty = arena.alloc_utf16_string();
+        let a_empty: ArcUtf16Str = ArcUtf16Str::from(s_empty);
+        assert_eq!(&*a_empty, utf16str!(""));
+        assert_eq!(a_empty.len(), 0);
+
+        let s = Utf16String::from_utf16_str_in(utf16str!("hello, world"), &arena);
+        let a: ArcUtf16Str = ArcUtf16Str::from(s);
+        assert_eq!(&*a, utf16str!("hello, world"));
+        assert_eq!(a.len(), 12);
+
+        // Cloning shares the same backing allocation.
+        let a2 = a.clone();
+        assert_eq!(&*a2, utf16str!("hello, world"));
+        assert_eq!(a.as_ptr(), a2.as_ptr());
+    }
+
+    /// An `ArcUtf16Str` produced by `into_arc` outlives the arena it was
+    /// built from (the backing shared chunk is held by the refcount).
+    #[test]
+    fn into_arc_outlives_arena() {
+        use multitude::strings::ArcUtf16Str;
+
+        let escaped: ArcUtf16Str = {
+            let arena = Arena::new();
+            let s = Utf16String::from_utf16_str_in(utf16str!("survives"), &arena);
+            let a = ArcUtf16Str::from(s);
+            drop(arena);
+            a
+        };
+        assert_eq!(&*escaped, utf16str!("survives"));
     }
 
     /// Kills `utf16_string.rs:491:29 - → /` in `try_reclaim_tail`.
@@ -1499,9 +1541,9 @@ mod mutants_for_utf16_strings {
     #[test]
     fn reclaim_tail_does_not_corrupt_frozen_string() {
         let arena = Arena::new();
-        let mut s = Utf16String::with_capacity_in(256, &arena);
+        let mut s = arena.alloc_utf16_string_with_capacity(256);
         s.push_str(utf16str!("frozen"));
-        let frozen = s.into_arena_box_utf16_str();
+        let frozen = s.into_boxed_utf16_str();
         // Allocate something in the same arena to potentially overlap with
         // the reclaimed tail bytes.
         let _filler: multitude::vec::Vec<'_, u64> = {
@@ -1531,7 +1573,7 @@ mod mutation_coverage {
 
     use multitude::strings::{BoxUtf16Str, String as ArenaString, Utf16String};
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arena, ArenaBuilder, Box};
+    use multitude::{Arena, ArenaBuilder, Box, FromIn as _};
     use widestring::{Utf16Str, utf16str};
 
     use crate::common;
@@ -1553,15 +1595,15 @@ mod mutation_coverage {
     #[test]
     fn test_string_is_empty_false_when_nonempty() {
         let arena = Arena::new();
-        let s = ArenaString::from_str_in("alpha", &arena);
+        let s = ArenaString::from_in("alpha", &arena);
         assert!(!s.is_empty());
     }
 
     #[test]
     fn test_string_partial_eq_distinguishes_different_values() {
         let arena = Arena::new();
-        let a = ArenaString::from_str_in("alpha", &arena);
-        let b = ArenaString::from_str_in("beta", &arena);
+        let a = ArenaString::from_in("alpha", &arena);
+        let b = ArenaString::from_in("beta", &arena);
         let beta = "beta";
 
         assert_ne!(a, b);
@@ -1572,8 +1614,8 @@ mod mutation_coverage {
     #[test]
     fn test_string_hash_depends_on_contents() {
         let arena = Arena::new();
-        let a = ArenaString::from_str_in("alpha", &arena);
-        let b = ArenaString::from_str_in("beta", &arena);
+        let a = ArenaString::from_in("alpha", &arena);
+        let b = ArenaString::from_in("beta", &arena);
 
         assert_ne!(hash_value(&a), hash_value(&b));
     }
@@ -1581,7 +1623,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_as_ref_returns_expected_contents() {
         let arena = Arena::new();
-        let s = ArenaString::from_str_in("expected", &arena);
+        let s = ArenaString::from_in("expected", &arena);
         let r: &str = s.as_ref();
 
         assert_eq!(r, "expected");
@@ -1614,7 +1656,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_remove_from_middle_preserves_tail() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcde", &arena);
+        let mut s = ArenaString::from_in("abcde", &arena);
 
         assert_eq!(s.remove(2), 'c');
         assert_eq!(s.as_str(), "abde");
@@ -1623,7 +1665,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_retain_keeps_only_requested_chars() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abracadabra", &arena);
+        let mut s = ArenaString::from_in("abracadabra", &arena);
 
         s.retain(|ch| ch == 'a');
 
@@ -1644,7 +1686,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_replace_range_shorter_shifts_tail_left() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcXYZdef", &arena);
+        let mut s = ArenaString::from_in("abcXYZdef", &arena);
 
         s.replace_range(3..6, "Q");
 
@@ -1804,7 +1846,7 @@ mod mutation_coverage {
     #[test]
     fn test_vec_is_empty_false_when_nonempty() {
         let arena = Arena::new();
-        let mut v: ArenaVec<u32, _> = ArenaVec::new_in(&arena);
+        let mut v: ArenaVec<u32, _> = arena.alloc_vec();
         v.push(1);
         assert!(!v.is_empty());
     }
@@ -1942,7 +1984,7 @@ mod mutation_coverage {
 
     #[test]
     fn test_arena_alloc_str_keeps_pinned_chunk_alive_across_rotation() {
-        let arena = ArenaBuilder::new().build();
+        let arena = Arena::builder().build();
         let s: &mut str = arena.alloc_str("hello");
 
         let a = arena.alloc_slice_copy(std::vec![1_u8; 4000]);
@@ -2002,7 +2044,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_partial_eq_str_returns_false_for_mismatch() {
         let arena = Arena::new();
-        let s = ArenaString::from_str_in("alpha", &arena);
+        let s = ArenaString::from_in("alpha", &arena);
         assert!(!<ArenaString as PartialEq<str>>::eq(&s, "beta"));
     }
 
@@ -2016,7 +2058,7 @@ mod mutation_coverage {
     #[test]
     fn test_vec_try_with_capacity_in_zero_does_not_allocate() {
         let arena = Arena::new();
-        let v = ArenaVec::<u32>::try_with_capacity_in(0, &arena).unwrap();
+        let v = arena.try_alloc_vec_with_capacity::<u32>(0).unwrap();
         assert_eq!(v.capacity(), 0);
         assert_eq!(v.len(), 0);
     }
@@ -2024,7 +2066,7 @@ mod mutation_coverage {
     #[test]
     fn test_vec_try_reserve_at_exact_boundary_does_not_grow() {
         let arena = Arena::new();
-        let mut v = ArenaVec::<u32>::try_with_capacity_in(8, &arena).unwrap();
+        let mut v = arena.try_alloc_vec_with_capacity::<u32>(8).unwrap();
         v.push(1);
         v.push(2);
         // cap=8, len=2, spare = cap - len = 6
@@ -2119,7 +2161,7 @@ mod mutation_coverage {
     #[test]
     fn test_vec_try_reserve_exact_at_boundary_does_not_grow() {
         let arena = Arena::new();
-        let mut v = ArenaVec::<u32>::try_with_capacity_in(8, &arena).unwrap();
+        let mut v = arena.try_alloc_vec_with_capacity::<u32>(8).unwrap();
         v.push(1);
         v.push(2);
         let cap_before = v.capacity();
@@ -2189,7 +2231,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_shrink_to_fit_cap_equals_len_is_noop() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("hello", &arena);
+        let mut s = ArenaString::from_in("hello", &arena);
         // Force a shrink_to_fit so cap == len
         s.shrink_to_fit();
         let cap_after_first = s.capacity();
@@ -2206,7 +2248,7 @@ mod mutation_coverage {
         assert_eq!(s.capacity(), 0);
         // Can't mutably borrow to call shrink_to_fit on a zero-capacity string
         // through the arena API, but we can create one fresh
-        let mut s2: ArenaString = ArenaString::new_in(&arena);
+        let mut s2: ArenaString = arena.alloc_string();
         s2.shrink_to_fit(); // cap == 0 path
         assert_eq!(s2.len(), 0);
     }
@@ -2214,7 +2256,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_insert_str_at_start_shifts_all() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("world", &arena);
+        let mut s = ArenaString::from_in("world", &arena);
         s.insert_str(0, "hello ");
         assert_eq!(s.as_str(), "hello world");
     }
@@ -2233,7 +2275,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_remove_first_char_shifts_all() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcde", &arena);
+        let mut s = ArenaString::from_in("abcde", &arena);
         assert_eq!(s.remove(0), 'a');
         assert_eq!(s.as_str(), "bcde");
     }
@@ -2241,7 +2283,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_remove_multibyte_char() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("aéc", &arena);
+        let mut s = ArenaString::from_in("aéc", &arena);
         assert_eq!(s.remove(1), 'é');
         assert_eq!(s.as_str(), "ac");
     }
@@ -2249,7 +2291,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_retain_removes_alternating() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcdef", &arena);
+        let mut s = ArenaString::from_in("abcdef", &arena);
         let mut toggle = false;
         s.retain(|_| {
             toggle = !toggle;
@@ -2261,7 +2303,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_retain_removes_none() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abc", &arena);
+        let mut s = ArenaString::from_in("abc", &arena);
         s.retain(|_| true);
         assert_eq!(s.as_str(), "abc");
     }
@@ -2269,7 +2311,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_retain_removes_all() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abc", &arena);
+        let mut s = ArenaString::from_in("abc", &arena);
         s.retain(|_| false);
         assert_eq!(s.as_str(), "");
     }
@@ -2287,7 +2329,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_replace_range_shrink_by_exact_amount() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcdef", &arena);
+        let mut s = ArenaString::from_in("abcdef", &arena);
         // Replace "bcde" (4 bytes) with "X" (1 byte), shrink of 3
         s.replace_range(1..5, "X");
         assert_eq!(s.as_str(), "aXf");
@@ -2296,7 +2338,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_replace_range_same_size() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcdef", &arena);
+        let mut s = ArenaString::from_in("abcdef", &arena);
         s.replace_range(2..4, "CD");
         assert_eq!(s.as_str(), "abCDef");
     }
@@ -2304,7 +2346,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_replace_range_shrink_at_end() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcdef", &arena);
+        let mut s = ArenaString::from_in("abcdef", &arena);
         // Replace "ef" with "" — shrink == removed, no tail shift needed
         s.replace_range(4..6, "");
         assert_eq!(s.as_str(), "abcd");
@@ -2356,7 +2398,7 @@ mod mutation_coverage {
     #[test]
     fn test_string_extend_empty_chars() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("hello", &arena);
+        let mut s = ArenaString::from_in("hello", &arena);
         let cap_before = s.capacity();
         s.extend(std::iter::empty::<char>());
         assert_eq!(s.as_str(), "hello");
@@ -2377,7 +2419,7 @@ mod mutation_coverage {
     #[test]
     fn test_utf16_string_shrink_to_fit_cap_zero_is_noop() {
         let arena = Arena::new();
-        let mut s = Utf16String::new_in(&arena);
+        let mut s = arena.alloc_utf16_string();
         s.shrink_to_fit();
         assert_eq!(s.len(), 0);
     }
@@ -2522,14 +2564,14 @@ mod mutation_coverage {
     #[test]
     fn test_arena_builder_max_normal_alloc_at_exact_min_succeeds() {
         // MIN_MAX_NORMAL_ALLOC = 4096
-        let result = ArenaBuilder::new().max_normal_alloc(4096).try_build();
+        let result = Arena::builder().max_normal_alloc(4096).try_build();
         result.unwrap();
     }
 
     #[test]
     #[should_panic(expected = "max_normal_alloc must be in")]
     fn test_arena_builder_max_normal_alloc_below_min_fails() {
-        let _ = ArenaBuilder::new().max_normal_alloc(4095).try_build();
+        let _ = Arena::builder().max_normal_alloc(4095).try_build();
     }
 
     #[test]
@@ -3057,7 +3099,7 @@ mod from_coverage_extras_utf16 {
     #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
     use multitude::strings::Utf16String;
     use multitude::vec::FromIteratorIn;
-    use multitude::{Arena, ArenaBuilder};
+    use multitude::{Arena, ArenaBuilder, FromIn as _};
     use widestring::utf16str;
 
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
@@ -3066,7 +3108,7 @@ mod from_coverage_extras_utf16 {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn utf16_string_push_panics_on_allocator_error() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena = Arena::builder_in(FailingAllocator::new(0)).build();
         let mut s = arena.alloc_utf16_string();
         s.push('x');
     }
@@ -3074,8 +3116,8 @@ mod from_coverage_extras_utf16 {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn utf16_string_insert_panics_from_grow_to_at_least() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(1)).build();
-        let mut s = Utf16String::from_str_in("a", &arena);
+        let arena = Arena::builder_in(FailingAllocator::new(1)).build();
+        let mut s = Utf16String::from_in("a", &arena);
         // Any replacement that forces a grow request triggers the panic;
         // the `FailingAllocator` denies every allocation after the first
         // regardless of size, so a moderate replacement (well past the
@@ -3087,7 +3129,7 @@ mod from_coverage_extras_utf16 {
     #[test]
     fn utf16_string_reserve_zero_on_nonempty_string_is_noop() {
         let arena = Arena::new();
-        let mut s = Utf16String::from_str_in("already allocated", &arena);
+        let mut s = Utf16String::from_in("already allocated", &arena);
         let cap = s.capacity();
         s.reserve(0);
         assert_eq!(s.capacity(), cap);
@@ -3156,7 +3198,7 @@ mod from_coverage_extras_utf16 {
         // code unit, plus the length prefix) deterministically takes the
         // oversized-shared branch regardless of any future change to the
         // default threshold.
-        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
         #[cfg(feature = "stats")]
@@ -3179,7 +3221,7 @@ mod from_coverage_extras_utf16 {
         // code unit, plus the length prefix) deterministically takes the
         // oversized-shared branch regardless of any future change to the
         // default threshold.
-        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
         #[cfg(feature = "stats")]
@@ -3277,7 +3319,7 @@ mod from_mutants_extras_utf16_scattered {
     fn utf16_shrink_to_fit_uses_multiplication() {
         use multitude::strings::Utf16String;
         let arena = Arena::new();
-        let mut s: Utf16String<'_> = Utf16String::new_in(&arena);
+        let mut s: Utf16String<'_> = arena.alloc_utf16_string();
         s.reserve(32);
         for _ in 0..8_u16 {
             s.push('a');
@@ -3333,7 +3375,7 @@ mod from_mutants_extras_utf16_scattered {
     fn utf16_exact_fit_push_is_observably_identical() {
         use multitude::strings::Utf16String;
         let arena = Arena::new();
-        let mut s: Utf16String<'_> = Utf16String::new_in(&arena);
+        let mut s: Utf16String<'_> = arena.alloc_utf16_string();
         s.reserve(4);
         let cap = s.capacity();
         // Push exactly `cap` ASCII chars (each 1 u16). After the last push,

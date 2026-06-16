@@ -141,3 +141,47 @@ fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
     let c = arena.alloc_slice_clone::<Wide>(src);
     assert_eq!(c.len(), 1);
 }
+
+/// Audit finding: non-`Drop` ZST `alloc_arc` / `alloc_box` handouts did
+/// not advance the bump cursor (`try_alloc(0, _)` is a cursor no-op), so
+/// a single chunk could hand out unbounded refcounted handles. Each
+/// handout draws down the pre-credited shared-ref surplus via the
+/// non-atomic `local_shared_count`; an unbounded run exhausts it,
+/// driving the chunk's atomic refcount to zero while the chunk is still
+/// installed (use-after-free) or underflowing the surplus reconciliation
+/// at retire (double-free). The fix reserves a 1-byte tag per such
+/// handout so the cursor advances and per-chunk handouts stay bounded by
+/// the chunk capacity (far below the surplus).
+///
+/// Deterministic regression proxy: consecutive ZST shared handouts must
+/// occupy distinct addresses (pre-fix they shared one address and the
+/// cursor never moved). The create-and-drop loop exercises the refills
+/// the tag now forces and confirms the arena stays consistent afterward.
+#[test]
+fn zst_shared_handouts_advance_cursor() {
+    let arena = Arena::new();
+
+    let a = arena.alloc_arc(());
+    let b = arena.alloc_arc(());
+    let c = arena.alloc_arc(());
+    assert_ne!(a.as_ptr(), b.as_ptr(), "ZST Arc handouts must get distinct addresses");
+    assert_ne!(b.as_ptr(), c.as_ptr(), "ZST Arc handouts must get distinct addresses");
+
+    let bx1 = arena.alloc_box(());
+    let bx2 = arena.alloc_box(());
+    assert_ne!(bx1.as_ptr(), bx2.as_ptr(), "ZST Box handouts must get distinct addresses");
+
+    // Many create-and-drop cycles force the chunk to fill (1 byte each)
+    // and refill. Pre-fix the cursor never advanced, so this pattern
+    // could drive the live chunk's atomic refcount to zero.
+    for _ in 0..2_000 {
+        drop(arena.alloc_arc(()));
+        drop(arena.alloc_box(()));
+    }
+
+    // Arena remains usable for both flavors after the churn.
+    let z = arena.alloc_arc(());
+    let _ = arena.alloc_arc(7_u64);
+    assert!(!z.as_ptr().is_null());
+    drop(arena);
+}

@@ -15,12 +15,12 @@ pub(crate) struct TelemetryHelper {
 
 impl TelemetryHelper {
     #[cfg(any(feature = "metrics", test))]
-    pub fn metrics_enabled(&self) -> bool {
+    pub(crate) fn metrics_enabled(&self) -> bool {
         self.event_reporter.is_some()
     }
 
     #[cfg(any(feature = "metrics", test))]
-    pub fn report_metrics(&self, attributes: &[opentelemetry::KeyValue]) {
+    pub(crate) fn report_metrics(&self, attributes: &[opentelemetry::KeyValue]) {
         if let Some(reporter) = &self.event_reporter {
             reporter.add(1, attributes);
         }

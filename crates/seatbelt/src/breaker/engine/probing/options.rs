@@ -30,15 +30,15 @@ pub(crate) struct ProbesOptions {
 }
 
 impl ProbesOptions {
-    pub fn quick(cooldown: Duration) -> Self {
+    pub(crate) fn quick(cooldown: Duration) -> Self {
         Self::new([ProbeOptions::SingleProbe { cooldown }])
     }
 
-    pub fn progressive(stage_duration: Duration, failure_threshold: f32) -> Self {
+    pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32) -> Self {
         Self::gradual(&[0.001, 0.01, 0.05, 0.1, 0.25, 0.5], stage_duration, failure_threshold)
     }
 
-    pub fn gradual(probing_ratio: &[f64], stage_duration: Duration, failure_threshold: f32) -> Self {
+    pub(crate) fn gradual(probing_ratio: &[f64], stage_duration: Duration, failure_threshold: f32) -> Self {
         // Start with a single probe
         let initial = std::iter::once(ProbeOptions::SingleProbe { cooldown: stage_duration });
 
@@ -50,25 +50,25 @@ impl ProbesOptions {
         Self::new(initial.chain(health))
     }
 
-    pub fn new(probes: impl IntoIterator<Item = ProbeOptions>) -> Self {
+    pub(crate) fn new(probes: impl IntoIterator<Item = ProbeOptions>) -> Self {
         let probes: Vec<ProbeOptions> = probes.into_iter().collect();
         assert!(!probes.is_empty(), "the probes list cannot be empty");
         Self { probes }
     }
 
-    pub fn probes(&self) -> IntoIter<ProbeOptions> {
+    pub(crate) fn probes(&self) -> IntoIter<ProbeOptions> {
         self.probes.clone().into_iter()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct HealthProbeOptions {
+pub(crate) struct HealthProbeOptions {
     pub(super) builder: HealthMetricsBuilder,
     pub(super) probing_ratio: f64,
 }
 
 impl HealthProbeOptions {
-    pub fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
+    pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
         assert!(probing_ratio > 0.0 && probing_ratio <= 1.0, "probing_ratio must be in (0.0, 1.0]");
         assert!((0.0..1.0).contains(&failure_threshold), "failure_threshold must be in [0.0, 1.0)");
         assert!(stage_duration > Duration::ZERO, "stage_duration must be greater than zero");
@@ -81,12 +81,12 @@ impl HealthProbeOptions {
         }
     }
 
-    pub fn stage_duration(&self) -> Duration {
+    pub(crate) fn stage_duration(&self) -> Duration {
         self.builder.sampling_duration
     }
 
     #[cfg(test)]
-    pub fn failure_threshold(&self) -> f32 {
+    pub(crate) fn failure_threshold(&self) -> f32 {
         self.builder.failure_threshold
     }
 }

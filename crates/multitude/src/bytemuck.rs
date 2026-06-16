@@ -56,7 +56,7 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater (which exceeds the arena chunk alignment).
     #[must_use]
     #[inline]
-    pub fn alloc<T: Zeroable>(&self) -> &'a mut T {
+    pub fn alloc<T: Zeroable + Send>(&self) -> &'a mut T {
         self.arena
             .try_alloc_with::<T, _>(T::zeroed)
             .expect("bytemuck: arena allocation failed")
@@ -69,7 +69,7 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc<T: Zeroable>(&self) -> Result<&'a mut T, AllocError> {
+    pub fn try_alloc<T: Zeroable + Send>(&self) -> Result<&'a mut T, AllocError> {
         self.arena.try_alloc_with::<T, _>(T::zeroed)
     }
 
@@ -80,7 +80,7 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater.
     #[must_use]
     #[inline]
-    pub fn alloc_slice<T: Zeroable>(&self, len: usize) -> &'a mut [T] {
+    pub fn alloc_slice<T: Zeroable + Send>(&self, len: usize) -> &'a mut [T] {
         self.arena
             .try_alloc_slice_fill_with(len, |_| T::zeroed())
             .expect("bytemuck: arena allocation failed")
@@ -93,7 +93,7 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc_slice<T: Zeroable>(&self, len: usize) -> Result<&'a mut [T], AllocError> {
+    pub fn try_alloc_slice<T: Zeroable + Send>(&self, len: usize) -> Result<&'a mut [T], AllocError> {
         self.arena.try_alloc_slice_fill_with(len, |_| T::zeroed())
     }
 

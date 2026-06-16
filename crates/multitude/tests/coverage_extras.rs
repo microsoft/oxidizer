@@ -672,7 +672,7 @@ mod coverage {
     #[test]
     fn arena_string_try_push_str_initial_alloc_err() {
         let a = fail_arena();
-        let mut s = multitude::strings::String::new_in(&a);
+        let mut s = a.alloc_string();
         assert!(s.try_push_str("hello").is_err());
     }
 
@@ -681,7 +681,7 @@ mod coverage {
         // Allow the initial chunk alloc, fail the grow's new-chunk alloc by
         // requesting a capacity that exceeds the chunk_size.
         let a = Arena::builder().allocator_in(FailingAllocator::new(1)).build();
-        let mut s = multitude::strings::String::try_with_capacity_in(4, &a).unwrap();
+        let mut s = a.try_alloc_string_with_capacity(4).unwrap();
         s.try_push_str("abcd").unwrap();
         // Forces grow_for_string → needs new (oversized) chunk → allocator fails.
         assert!(s.try_reserve(64 * 1024).is_err());
@@ -691,7 +691,7 @@ mod coverage {
     fn panic_arena_string_grow_to_at_least() {
         expect_panic(|| {
             let a = Arena::builder().allocator_in(FailingAllocator::new(1)).build();
-            let mut s = multitude::strings::String::try_with_capacity_in(4, &a).unwrap();
+            let mut s = a.try_alloc_string_with_capacity(4).unwrap();
             s.try_push_str("abcd").unwrap();
             // grow_to_at_least asks for a new chunk; allocator is exhausted.
             s.push_str("x".repeat(64 * 1024));
@@ -735,7 +735,7 @@ mod coverage {
     fn vec_try_reserve_no_growth_needed() {
         // Line 182: try_reserve when capacity already sufficient → Ok(()) without growing.
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         v.push(1);
         v.push(2);
         // capacity should be >= 4 after the initial growth; reserve 1 more (already have room).
@@ -747,7 +747,7 @@ mod coverage {
     fn vec_try_reserve_exact_realloc_and_overflow() {
         // Lines 432-436: try_reserve_exact that needs realloc.
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         v.push(1);
         // Force exact reserve beyond current capacity.
         assert!(v.try_reserve_exact(100).is_ok());
@@ -765,7 +765,7 @@ mod coverage {
     fn vec_resize_with_shrink() {
         // Lines 473-475: resize_with to a smaller size calls truncate.
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..10 {
             v.push(i);
         }
@@ -780,7 +780,7 @@ mod coverage {
         // Lines 512-513: Excluded start bound and Unbounded start.
         // Lines 516-518: Included end bound and Unbounded end.
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..10 {
             v.push(i);
         }
@@ -792,7 +792,7 @@ mod coverage {
 
         // drain(..) → Unbounded start, Unbounded end → start=0, end=len
         let arena2 = Arena::new();
-        let mut v2: Vec<u32> = Vec::new_in(&arena2);
+        let mut v2: Vec<u32> = arena2.alloc_vec();
         for i in 0..5 {
             v2.push(i);
         }
@@ -805,7 +805,7 @@ mod coverage {
     fn vec_zst_operations() {
         // Lines 360, 586, 594-596: ZST Vec realloc and shrink_to_fit.
         let arena = Arena::new();
-        let mut v: Vec<()> = Vec::new_in(&arena);
+        let mut v: Vec<()> = arena.alloc_vec();
         for _ in 0..100 {
             v.push(());
         }
@@ -820,7 +820,7 @@ mod coverage {
         // Lines 833-835: Drain Debug format.
         // Lines 865-875: Drain::next_back (DoubleEndedIterator).
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..5 {
             v.push(i);
         }
@@ -840,7 +840,7 @@ mod coverage {
     fn vec_insert_triggers_growth() {
         // Line 284: insert when len == cap forces grow_one.
         let arena = Arena::new();
-        let mut v: Vec<u32> = Vec::new_in(&arena);
+        let mut v: Vec<u32> = arena.alloc_vec();
         // Fill to capacity (initial growth is 4).
         for i in 0..4 {
             v.push(i);
@@ -857,7 +857,7 @@ mod coverage {
         // Line 126: grow_one → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(1)); // 1 alloc for initial chunk
-            let mut v: Vec<u64, _> = Vec::new_in(&arena);
+            let mut v: Vec<u64, _> = arena.alloc_vec();
             // First pushes may succeed using the chunk, but growth will fail.
             // FailingAllocator(1) gives exactly one chunk; the second
             // realloc-on-grow trips the panic well before 100 pushes —
@@ -873,7 +873,7 @@ mod coverage {
         // Line 168: reserve → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(0));
-            let mut v: Vec<u64, _> = Vec::new_in(&arena);
+            let mut v: Vec<u64, _> = arena.alloc_vec();
             v.reserve(1);
         });
     }
@@ -883,7 +883,7 @@ mod coverage {
         // Line 422: reserve_exact → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(0));
-            let mut v: Vec<u64, _> = Vec::new_in(&arena);
+            let mut v: Vec<u64, _> = arena.alloc_vec();
             v.reserve_exact(1);
         });
     }
@@ -1268,7 +1268,7 @@ mod coverage_more {
     use allocator_api2::alloc::Allocator;
     use multitude::strings::String as ArenaString;
     use multitude::vec::Vec as ArenaVec;
-    use multitude::{Arc, Arena, ArenaBuilder};
+    use multitude::{Arc, Arena, FromIn as _};
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
@@ -1295,7 +1295,7 @@ mod coverage_more {
     // ---- src/arc.rs / src/rc.rs gaps ----
 
     #[test]
-    fn arc_from_arena_vec_uses_into_arena_arc() {
+    fn arc_from_arena_vec_uses_into_arc() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, i32> = arena.alloc_vec();
         v.push(1);
@@ -1310,7 +1310,7 @@ mod coverage_more {
     #[test]
     fn builder_preallocate_shared_releases_budget_on_allocator_error() {
         assert!(
-            ArenaBuilder::new_in(SendFailingAllocator::new(0))
+            Arena::builder_in(SendFailingAllocator::new(0))
                 .with_capacity_shared(512)
                 .try_build()
                 .is_err()
@@ -1319,14 +1319,14 @@ mod coverage_more {
 
     #[test]
     fn oversized_shared_alloc_error_releases_budget() {
-        let arena = ArenaBuilder::new_in(SendFailingAllocator::new(0)).max_normal_alloc(4096).build();
+        let arena = Arena::builder_in(SendFailingAllocator::new(0)).max_normal_alloc(4096).build();
         let src = std::vec![7_u8; 5000];
         assert!(arena.try_alloc_slice_copy_arc(src).is_err());
     }
 
     #[test]
     fn shared_cache_discards_too_small_chunk_before_large_request() {
-        let arena = ArenaBuilder::new().with_capacity_shared(512).build();
+        let arena = Arena::builder().with_capacity_shared(512).build();
         let big = std::vec![3_u8; 4096];
         let a = arena.alloc_slice_copy_arc(&big);
         assert_eq!(a.len(), big.len());
@@ -1334,7 +1334,7 @@ mod coverage_more {
 
     #[test]
     fn preallocate_local_updates_high_water_on_larger_class() {
-        let arena = ArenaBuilder::new().with_capacity_local(1024).build();
+        let arena = Arena::builder().with_capacity_local(1024).build();
         let value = arena.alloc(42_u32);
         assert_eq!(*value, 42);
     }
@@ -1346,7 +1346,7 @@ mod coverage_more {
     #[test]
     fn string_retain_panic_restores_guard_len() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("abcd", &arena);
+        let mut s = ArenaString::from_in("abcd", &arena);
 
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             s.retain(|ch| {
@@ -1417,7 +1417,7 @@ mod coverage_more {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn string_push_panics_on_allocator_error() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena = Arena::builder_in(FailingAllocator::new(0)).build();
         let mut s = arena.alloc_string();
         s.push('x');
     }
@@ -1425,7 +1425,7 @@ mod coverage_more {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn string_reserve_panics_on_allocator_error() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena = Arena::builder_in(FailingAllocator::new(0)).build();
         let mut s = arena.alloc_string();
         s.reserve(128);
     }
@@ -1433,8 +1433,8 @@ mod coverage_more {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn string_replace_range_panics_from_grow_to_at_least() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(1)).build();
-        let mut s = ArenaString::from_str_in("a", &arena);
+        let arena = Arena::builder_in(FailingAllocator::new(1)).build();
+        let mut s = ArenaString::from_in("a", &arena);
         // `FailingAllocator` denies every allocation after the first
         // regardless of size; a moderate replacement (well past the
         // initial small chunk's residual capacity) is sufficient.
@@ -1445,7 +1445,7 @@ mod coverage_more {
     #[test]
     fn string_reserve_zero_on_nonempty_string_is_noop() {
         let arena = Arena::new();
-        let mut s = ArenaString::from_str_in("already allocated", &arena);
+        let mut s = ArenaString::from_in("already allocated", &arena);
         let cap = s.capacity();
         s.reserve(0);
         assert_eq!(s.capacity(), cap);
@@ -1459,47 +1459,47 @@ mod coverage_more {
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn vec_with_capacity_panics_on_allocator_error() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
-        let _v: ArenaVec<'_, u8, _> = ArenaVec::with_capacity_in(8, &arena);
+        let arena = Arena::builder_in(FailingAllocator::new(0)).build();
+        let _v: ArenaVec<'_, u8, _> = arena.alloc_vec_with_capacity(8);
     }
 
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
-    fn vec_into_arena_arc_panics_on_shared_allocator_error() {
-        let arena = ArenaBuilder::new_in(SendFailingAllocator::new(1)).build();
-        let mut v: ArenaVec<'_, u8, _> = ArenaVec::with_capacity_in(4, &arena);
+    fn vec_into_arc_panics_on_shared_allocator_error() {
+        let arena = Arena::builder_in(SendFailingAllocator::new(1)).build();
+        let mut v: ArenaVec<'_, u8, _> = arena.alloc_vec_with_capacity(4);
         v.extend([1, 2, 3, 4]);
-        let _arc = v.into_arena_arc();
+        let _arc = multitude::Arc::from(v);
     }
 
     #[test]
-    fn vec_into_arena_box_copy_handles_zst_fallback() {
+    fn vec_into_box_handles_zst_fallback() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<()>();
         for _ in 0..16 {
             v.push(());
         }
         // Folded mutant-kill: vec.rs:834 `==`/`!=` must keep ZST Vecs on the copy fallback.
-        let b = v.into_arena_box();
+        let b = v.into_boxed_slice();
         assert_eq!(b.len(), 16);
     }
 
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
-    fn vec_into_arena_box_copy_panics_on_zst_drop_alloc_error() {
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+    fn vec_into_box_panics_on_zst_drop_alloc_error() {
+        let arena = Arena::builder_in(FailingAllocator::new(0)).build();
         let mut v = arena.alloc_vec::<DropZst>();
         v.extend([DropZst, DropZst, DropZst]);
-        let _ = v.into_arena_box();
+        let _ = v.into_boxed_slice();
     }
 
     #[test]
-    fn vec_into_arena_box_falls_back_when_drop_entry_install_misses() {
+    fn vec_into_box_falls_back_when_drop_entry_install_misses() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<Droppy>();
         v.extend([Droppy("a"), Droppy("b")]);
         let _decoy = arena.alloc_slice_fill_with(70_000, |i| i as u8);
-        let b = v.into_arena_box();
+        let b = v.into_boxed_slice();
         assert_eq!(b.len(), 2);
     }
 
@@ -1511,11 +1511,11 @@ mod coverage_more {
     // runtime-checked assertion, not a memory-safety property, so Miri
     // adds no value beyond what `cargo test` already verifies.
     #[cfg_attr(miri, ignore)]
-    fn vec_into_arena_box_panics_when_drop_slice_is_too_long_for_entry() {
+    fn vec_into_box_panics_when_drop_slice_is_too_long_for_entry() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<Droppy>();
         v.extend((0..=u16::MAX).map(|_| Droppy("many")));
-        let _ = v.into_arena_box();
+        let _ = v.into_boxed_slice();
     }
 
     #[test]
@@ -1529,7 +1529,7 @@ mod coverage_more {
     #[test]
     fn vec_realloc_edge_cases_are_observable_through_public_api() {
         let arena = Arena::new();
-        let mut v = ArenaVec::with_capacity_in(8, &arena);
+        let mut v = arena.alloc_vec_with_capacity(8);
         v.extend([1_u32, 2, 3, 4]);
 
         v.reserve_exact(0);
@@ -1552,8 +1552,8 @@ mod coverage_more {
         // Verify the no-op path under a one-shot allocator that would
         // refuse any subsequent allocation, demonstrating that no
         // allocator call is made.
-        let arena = ArenaBuilder::new_in(FailingAllocator::new(1)).max_normal_alloc(4096).build();
-        let mut v = ArenaVec::with_capacity_in(70_000, &arena);
+        let arena = Arena::builder_in(FailingAllocator::new(1)).max_normal_alloc(4096).build();
+        let mut v = arena.alloc_vec_with_capacity(70_000);
         let cap_before = v.capacity();
         v.extend([1_u32, 2, 3, 4]);
         v.shrink_to_fit();
@@ -1779,11 +1779,9 @@ mod coverage_complete {
         use std::sync::Barrier;
         use std::thread;
 
-        use multitude::ArenaBuilder;
-
         // Force CAS contention on shared-cache push/pop and reserve_budget by
         // hammering the same arena from many threads simultaneously.
-        let arena: Arena = ArenaBuilder::new().max_normal_alloc(4096).byte_budget(128 * 1024 * 1024).build();
+        let arena: Arena = Arena::builder().max_normal_alloc(4096).byte_budget(128 * 1024 * 1024).build();
 
         // Pre-allocate Arcs grouped per thread so all the work happens during
         // the dropping phase (cross-thread chunk releases).

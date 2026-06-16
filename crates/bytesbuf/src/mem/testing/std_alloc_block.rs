@@ -11,7 +11,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize};
 
 /// Allocates a new memory block of the given length from the Rust global allocator.
 #[must_use]
-pub fn allocate(len: NonZero<BlockSize>) -> Block {
+pub(crate) fn allocate(len: NonZero<BlockSize>) -> Block {
     // This will become the inner state behind the BlockRef instances.
     let block_ptr = new_block(len);
 

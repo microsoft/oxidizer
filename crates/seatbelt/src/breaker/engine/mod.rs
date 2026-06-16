@@ -18,7 +18,7 @@ pub(crate) enum CircuitState {
 
 #[cfg(any(feature = "metrics", feature = "logs", test))]
 impl CircuitState {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Closed => "closed",
             Self::Open => "open",
@@ -74,7 +74,7 @@ pub(crate) enum ExecutionMode {
 }
 
 // Type alias for the default engine with telemetry.
-pub type Engine = EngineTelemetry<EngineCore>;
+pub(crate) type Engine = EngineTelemetry<EngineCore>;
 
 /// Trait defining the behavior of a circuit breaker engine.
 pub(crate) trait CircuitEngine: Debug + Send + Sync + 'static {

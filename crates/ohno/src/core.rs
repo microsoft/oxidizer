@@ -12,7 +12,7 @@ use super::source::Source;
 
 /// Internal error data that is boxed to keep `OhnoCore` lightweight.
 #[derive(Debug, Clone)]
-pub struct Inner {
+pub(crate) struct Inner {
     pub(super) source: Source,
     pub(super) backtrace: Backtrace,
     pub(super) enrichment: Vec<EnrichmentEntry>,

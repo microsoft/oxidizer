@@ -56,11 +56,11 @@ struct Connection {
 }
 
 impl Connection {
-    pub const fn new(io_context: IoContext) -> Self {
+    pub(crate) const fn new(io_context: IoContext) -> Self {
         Self { io_context }
     }
 
-    pub fn write(&mut self, message: BytesView) {
+    pub(crate) fn write(&mut self, message: BytesView) {
         // We now need to identify whether the message actually uses memory that allows us to
         // use the optimal I/O path. There is no requirement that the data passed to us contains
         // only memory with our preferred configuration.
@@ -135,12 +135,12 @@ impl HasMemory for Connection {
 struct IoContext;
 
 impl IoContext {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {}
     }
 
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub fn reserve_io_memory(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> BytesBuf {
+    pub(crate) fn reserve_io_memory(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> BytesBuf {
         let min_len: BlockSize = min_len
             .try_into()
             .expect("this example is limited to max allocation size of BlockSize, just to keep it simple");
@@ -181,7 +181,7 @@ mod io_memory {
 
     /// Allocates a new memory block of the given length and returns a `BlockRef` to it.
     #[must_use]
-    pub fn allocate(len: NonZero<BlockSize>, memory_configuration: MemoryConfiguration) -> Block {
+    pub(crate) fn allocate(len: NonZero<BlockSize>, memory_configuration: MemoryConfiguration) -> Block {
         let block_ptr = new_block(len, memory_configuration);
 
         // SAFETY: We just created that memory block, so it is valid for reads.

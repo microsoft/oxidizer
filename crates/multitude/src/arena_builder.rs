@@ -27,25 +27,27 @@ pub struct ArenaBuilder<A: Allocator + Clone = Global> {
 
 impl ArenaBuilder<Global> {
     /// Start a new builder with default knobs and the [`Global`] allocator.
+    ///
+    /// Crate-internal: the public entry point is
+    /// [`Arena::builder`](crate::Arena::builder), per the builder convention
+    /// that a builder is obtained from its target type, not constructed
+    /// directly.
     #[must_use]
     #[inline]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::new_in(Global)
-    }
-}
-
-impl Default for ArenaBuilder<Global> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// Start a new builder with default knobs and a custom backing
     /// allocator.
+    ///
+    /// Crate-internal: the public entry point is
+    /// [`Arena::builder_in`](crate::Arena::builder_in).
     #[must_use]
     #[inline]
-    pub fn new_in(allocator: A) -> Self {
+    pub(crate) fn new_in(allocator: A) -> Self {
         Self {
             allocator,
             max_normal_alloc: MAX_NORMAL_ALLOC,
@@ -56,12 +58,12 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
         }
     }
 
-    /// Set the size threshold above which a request that needs a fresh
-    /// chunk gets its own oversized chunk.
+    /// Set the oversized-allocation cutover threshold.
     ///
-    /// Must be in `[4096, MAX_CHUNK_BYTES - chunk_header_size]`. Out-of-range
-    /// values cause [`Self::build`] / [`Self::try_build`] to panic with the
-    /// resolved bounds in the panic message.
+    /// Requests that need a fresh chunk and exceed this size get their own
+    /// oversized chunk. Must be in `[4096, MAX_CHUNK_BYTES - chunk_header_size]`;
+    /// out-of-range values cause [`Self::build`] / [`Self::try_build`] to panic
+    /// with the resolved bounds in the panic message.
     #[must_use]
     #[inline]
     pub const fn max_normal_alloc(mut self, bytes: usize) -> Self {
@@ -69,8 +71,10 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
         self
     }
 
-    /// Set a cap on the total bytes of chunk capacity that may be
-    /// outstanding at any one time (live + cached).
+    /// Set a cap on outstanding chunk-capacity bytes.
+    ///
+    /// Limits the total bytes of chunk capacity (live + cached) that may be
+    /// outstanding at any one time.
     #[must_use]
     #[inline]
     pub const fn byte_budget(mut self, bytes: usize) -> Self {

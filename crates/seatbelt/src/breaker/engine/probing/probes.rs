@@ -15,7 +15,7 @@ pub(crate) struct Probes {
 }
 
 impl Probes {
-    pub fn new(options: &ProbesOptions) -> Self {
+    pub(crate) fn new(options: &ProbesOptions) -> Self {
         let mut probes = options.probes();
         let probe = probes.next().expect("probes are never empty because ProbesOptions enforces that");
 
@@ -25,11 +25,11 @@ impl Probes {
         }
     }
 
-    pub fn allow_probe(&mut self, now: Instant) -> AllowProbeResult {
+    pub(crate) fn allow_probe(&mut self, now: Instant) -> AllowProbeResult {
         self.current.allow_probe(now)
     }
 
-    pub fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
+    pub(crate) fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
         match self.current.record(result, now) {
             ProbingResult::Success => {
                 // check if there are more probes to try

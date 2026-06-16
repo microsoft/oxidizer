@@ -233,10 +233,326 @@ fn alloc_lifetime_bound_by_arena_borrow() {
 #[test]
 fn alloc_charges_stats() {
     let arena = Arena::new();
-    let before = arena.stats().total_bytes_allocated;
     let _r: &mut u64 = arena.alloc(42);
-    let after = arena.stats().total_bytes_allocated;
-    assert!(after >= before + 8);
+    // After any successful allocation, the provider must have obtained
+    // at least one chunk from the underlying allocator; that chunk is
+    // strictly larger than the 8-byte payload.
+    assert!(arena.stats().total_bytes_allocated >= 8);
+}
+
+/// `wasted_tail_bytes` is a *live* gauge of the unused tail space
+/// across the active `current_*` chunks plus any chunks that have
+/// been retired from a `current_*` slot but not yet cached or
+/// destroyed. It must be zero on a fresh arena (no chunks held at
+/// all), and return to zero after `reset` releases every chunk back
+/// to the cache / underlying allocator (which leaves the arena with
+/// the empty-mutator sentinels, contributing 0 slack each).
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_bytes_is_live_and_returns_to_zero_after_reset() {
+    let mut arena = Arena::new();
+    assert_eq!(arena.stats().wasted_tail_bytes, 0, "fresh arena has no chunks");
+    // Force at least one allocation so the arena obtains a chunk.
+    for _ in 0..32 {
+        let _r: &mut u64 = arena.alloc(0);
+    }
+    // The active chunk now contributes its free tail to the gauge
+    // (the chunk has plenty of room left even after 32 u64 allocs).
+    assert!(
+        arena.stats().wasted_tail_bytes > 0,
+        "active chunk's free tail must contribute to wasted_tail_bytes",
+    );
+    arena.reset();
+    // After reset every chunk has been released (either cached or
+    // destroyed). `current_*` are reset to empty-mutator sentinels
+    // which contribute 0 slack.
+    assert_eq!(
+        arena.stats().wasted_tail_bytes,
+        0,
+        "reset returned every chunk and reinstalled the empty sentinel; \
+         wasted-tail must be zero again",
+    );
+}
+
+/// Specifically exercises the "active chunk contributes its tail"
+/// path: with zero retired chunks, `wasted_tail_bytes` must still
+/// reflect the free region of the current local/shared chunks, and
+/// it must shrink as further allocations consume that region.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_includes_active_chunks_and_shrinks_with_allocs() {
+    let arena = Arena::new();
+    // Trigger a single small local alloc to pin a local chunk.
+    let _: &mut u8 = arena.alloc(0);
+    let chunks_before = arena.stats().normal_local_chunks_allocated;
+    let after_one = arena.stats().wasted_tail_bytes;
+    assert!(after_one > 0, "active local chunk's free tail must be included even with 0 retires");
+    // A handful of small allocs that fit in the current chunk's
+    // remaining capacity. The free tail must strictly decrease
+    // because no refill occurred.
+    for _ in 0..16 {
+        let _: &mut u64 = arena.alloc(0);
+    }
+    assert_eq!(
+        arena.stats().normal_local_chunks_allocated,
+        chunks_before,
+        "test relies on no refill happening; tighten the loop if this fires",
+    );
+    let after_many = arena.stats().wasted_tail_bytes;
+    assert!(
+        after_many < after_one,
+        "subsequent allocs consumed bump space; the active chunk's \
+         contribution to wasted_tail_bytes must shrink (before={after_one}, \
+         after={after_many})",
+    );
+}
+
+/// Retiring a chunk while a smart-pointer handle still holds it alive
+/// keeps the wasted tail counted until the handle drops (the chunk
+/// reaches `release_shared` only when its refcount finally hits zero).
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_bytes_is_held_by_outstanding_arc() {
+    let arena = Arena::new();
+    // Allocate one `Arc` in the initial (small) shared chunk and keep
+    // it alive across a refill that retires the chunk.
+    let pinned = arena.alloc_arc::<u64>(7);
+    // Force the current shared chunk to refill until at least one
+    // chunk gets retired without being released (i.e., a handle is
+    // still keeping it alive). Detect retire via the shared chunk
+    // count rather than the wasted-tail gauge, because the latter is
+    // never zero now that the active chunk's free tail contributes.
+    let initial_shared = arena.stats().normal_shared_chunks_allocated;
+    let mut tries = 0;
+    while arena.stats().normal_shared_chunks_allocated == initial_shared {
+        // 2 KiB slice allocations fill the small initial shared chunk
+        // quickly; refill is triggered well before we hit the cap.
+        drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 2048]));
+        tries += 1;
+        assert!(tries < 1_000, "shared chunk never refilled — retire path appears broken");
+    }
+    let held_wasted = arena.stats().wasted_tail_bytes;
+    drop(pinned);
+    // With the handle gone the original chunk's refcount hits zero,
+    // it routes through `release_shared`, and the counter decrements.
+    let after_drop = arena.stats().wasted_tail_bytes;
+    assert!(
+        after_drop < held_wasted,
+        "dropping the last handle must release the retired chunk's wasted tail \
+         (before={held_wasted}, after={after_drop})",
+    );
+}
+
+/// `refill_local` is the other major retire path: when the
+/// `current_local` slot's chunk is full, the old mutator is pushed
+/// into `retired_local` (which keeps a `+1` for the duration of the
+/// `&Arena` borrow). The wasted tail of every retired chunk must be
+/// counted; `reset` releases every retired chunk back to the cache
+/// and the counter must return cleanly to zero.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
+    let mut arena = Arena::new();
+    // Force the first chunk to be acquired so subsequent allocs trigger
+    // refills rather than the initial empty-mutator → first-chunk path.
+    let _: &mut u8 = arena.alloc(0);
+    let baseline = arena.stats().wasted_tail_bytes;
+    let chunks_before = arena.stats().normal_local_chunks_allocated;
+    let mut refills_observed = 0u64;
+    let mut saw_growth_over_baseline = false;
+    // Use a prime allocation size so the chunk cannot be exactly
+    // exhausted (which would leave a true wasted-tail of zero); this
+    // guarantees at least one refill leaves visible slack.
+    //
+    // `allocs` is a safety valve: if the chunk-allocation counter never
+    // advances (e.g. a broken `stats()` / `normal_local()` / a
+    // zero-length `alloc_slice_fill_with`), the refill condition can
+    // never be met and this loop would otherwise spin forever. Bound it
+    // so such a regression fails loudly instead of hanging.
+    let mut allocs = 0u64;
+    while refills_observed < 8 {
+        let _: &mut [u8] = arena.alloc_slice_fill_with(509, |_| 0_u8);
+        allocs += 1;
+        assert!(
+            allocs < 100_000,
+            "after {allocs} allocations only {refills_observed}/8 refills were observed — \
+             chunk-allocation accounting (stats/normal_local) or slice fill appears broken",
+        );
+        let now_chunks = arena.stats().normal_local_chunks_allocated;
+        if now_chunks > chunks_before + refills_observed {
+            refills_observed += 1;
+            // After a refill the gauge must include both the retired
+            // chunk's tail AND the new active chunk's tail, so it must
+            // exceed the baseline (which was only the very first
+            // active chunk's tail just after one tiny alloc).
+            if arena.stats().wasted_tail_bytes > baseline {
+                saw_growth_over_baseline = true;
+            }
+        }
+    }
+    assert!(
+        saw_growth_over_baseline,
+        "across {refills_observed} refills with a prime allocation size, \
+         the wasted-tail counter never exceeded its single-active-chunk \
+         baseline — retire-side accounting is broken",
+    );
+    arena.reset();
+    assert_eq!(
+        arena.stats().wasted_tail_bytes,
+        0,
+        "reset must release every chunk and reinstall the empty sentinels, \
+         taking the gauge back to zero",
+    );
+}
+
+/// **Conservation invariant**: across a full retire-and-release cycle,
+/// the wasted-tail counter must return to exactly its starting value.
+/// Catches off-by-one or asymmetric-arithmetic bugs (e.g., add 4 KiB,
+/// subtract 4096) that observation-of-non-zero tests would miss.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
+    let mut arena = Arena::new();
+    for cycle in 0..10 {
+        let before = arena.stats().wasted_tail_bytes;
+        assert_eq!(before, 0, "cycle {cycle}: baseline must be 0 before allocations begin");
+        // Mix of all major allocation paths to exercise every retire-
+        // generating code path within a single cycle:
+        for _ in 0..4 {
+            let _: &mut u64 = arena.alloc(42);
+            let _: &mut [u8] = arena.alloc_slice_fill_with(256, |_| 0);
+            drop(arena.alloc_arc::<u64>(1));
+            drop(arena.alloc_box::<u64>(2));
+            drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 1024]));
+        }
+        arena.reset();
+        let after = arena.stats().wasted_tail_bytes;
+        assert_eq!(
+            after, 0,
+            "cycle {cycle}: after reset, the counter must return to exactly 0 \
+             (got {after}) — asymmetric add/subtract would leave a residue",
+        );
+    }
+}
+
+/// Cache-reuse must not leak: a chunk that's cached on reset, then
+/// re-acquired in the next epoch, then re-retired must contribute its
+/// new wasted tail (not the stale stashed value from the previous
+/// epoch, and not double-counted).
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_correct_after_cache_reuse_cycles() {
+    let mut arena = Arena::new();
+    let mut acquired_chunks_total = 0u64;
+    for _ in 0..20 {
+        // Force at least one full chunk's worth of allocs so we cycle
+        // through `current_local` AND populate the cache on reset.
+        for _ in 0..64 {
+            let _: &mut u64 = arena.alloc(0);
+        }
+        let stats = arena.stats();
+        acquired_chunks_total = stats.normal_local_chunks_allocated;
+        arena.reset();
+        // After every reset the counter must be 0 — even though the
+        // chunk's `wasted_at_retire` field still holds the previous
+        // value, the subtract at cache-push consumed it exactly once,
+        // and the next epoch's retire will re-set + re-add.
+        assert_eq!(arena.stats().wasted_tail_bytes, 0, "cache reuse leaked into wasted-tail counter");
+    }
+    // Sanity: we actually exercised real allocations, not a no-op.
+    assert!(acquired_chunks_total >= 1, "test did not allocate any chunks");
+}
+
+/// Multiple shared chunks pinned by outstanding Arcs each contribute
+/// their wasted tail; dropping the handles one at a time must
+/// monotonically shrink the counter without underflow.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_decreases_monotonically_as_pinned_arcs_drop() {
+    let arena = Arena::new();
+    let mut pins = std::vec::Vec::new();
+    // Build up several pinned chunks by interleaving a pin with allocs
+    // that force a shared refill.
+    for _ in 0..5 {
+        pins.push(arena.alloc_arc::<u64>(99));
+        for _ in 0..10 {
+            drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 2048]));
+        }
+    }
+    let peak = arena.stats().wasted_tail_bytes;
+    // We may not get a contribution from every iteration (some Arcs
+    // may share a chunk with later ones), but at least some chunks
+    // were retired while pinned.
+    assert!(peak > 0, "expected outstanding pins to keep retired chunks counted");
+    // Drop the pins. The counter must never grow, never underflow,
+    // and end at most equal to whatever the currently-active shared
+    // chunk would contribute (which is 0 since it's not yet retired).
+    let mut prev = peak;
+    while let Some(p) = pins.pop() {
+        drop(p);
+        let cur = arena.stats().wasted_tail_bytes;
+        assert!(cur <= prev, "dropping a pin must never grow the counter (prev={prev}, cur={cur})");
+        // Underflow on a u64 atomic would show up as a value near
+        // `u64::MAX`. Guard against that explicitly.
+        assert!(
+            cur < u64::MAX / 2,
+            "counter underflowed (cur={cur}); subtract was unbalanced from add",
+        );
+        prev = cur;
+    }
+}
+
+/// Oversized local allocations route through `alloc_oversized_local_*`,
+/// which pushes a temporary mutator into `retired_local` so the
+/// caller's simple reference can outlive the call. That mutator's
+/// chunk participates in wasted-tail accounting just like a refill-
+/// retired chunk: it must contribute on retire and release exactly on
+/// reset.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_handles_oversized_local_retire() {
+    let mut arena = Arena::new();
+    // Three oversized allocations create three retired oversized chunks.
+    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let mid = arena.stats().wasted_tail_bytes;
+    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let after = arena.stats().wasted_tail_bytes;
+    // Each oversized chunk is sized to its request plus alignment and
+    // drop-entry slack; the wasted tail per chunk may be 0 or small
+    // depending on alignment. Either way, accumulating retires must
+    // never *decrease* the counter (no spurious subtracts).
+    assert!(
+        after >= mid,
+        "more oversized retires must not shrink the counter (mid={mid}, after={after})",
+    );
+    arena.reset();
+    assert_eq!(
+        arena.stats().wasted_tail_bytes,
+        0,
+        "reset must release every oversized-retired chunk",
+    );
+}
+
+/// Smoke-test against u64 wrap-around: stress every retire+release path
+/// many times. If the subtract ever exceeded the matching add even by
+/// one byte, the running counter would underflow to a value near
+/// `u64::MAX`.
+#[cfg(feature = "stats")]
+#[test]
+fn wasted_tail_never_underflows_under_stress() {
+    let mut arena = Arena::new();
+    for _ in 0..256 {
+        let _: &mut u64 = arena.alloc(0);
+        let _: &mut [u8] = arena.alloc_slice_fill_with(64, |_| 0);
+        drop(arena.alloc_arc::<u64>(0));
+        drop(arena.alloc_box::<u64>(0));
+        drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 4096]));
+        // Always-positive: counter never observed as huge.
+        assert!(arena.stats().wasted_tail_bytes < u64::MAX / 2);
+    }
+    arena.reset();
+    assert_eq!(arena.stats().wasted_tail_bytes, 0);
 }
 
 use crate::common::FailingAllocator;

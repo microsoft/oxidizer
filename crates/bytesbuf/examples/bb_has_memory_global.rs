@@ -48,18 +48,18 @@ struct ChecksumCalculator {
 }
 
 impl ChecksumCalculator {
-    pub const fn new(memory: GlobalPool) -> Self {
+    pub(crate) const fn new(memory: GlobalPool) -> Self {
         Self { memory, checksum: 0 }
     }
 
-    pub fn add_bytes(&mut self, mut bytes: BytesView) {
+    pub(crate) fn add_bytes(&mut self, mut bytes: BytesView) {
         while !bytes.is_empty() {
             let b = bytes.get_byte();
             self.checksum = self.checksum.wrapping_add(u64::from(b));
         }
     }
 
-    pub const fn checksum(&self) -> u64 {
+    pub(crate) const fn checksum(&self) -> u64 {
         self.checksum
     }
 }

@@ -11,7 +11,7 @@ pub(crate) struct EngineFake {
 }
 
 impl EngineFake {
-    pub fn new(enter_result: EnterCircuitResult, exit_result: ExitCircuitResult) -> Self {
+    pub(crate) fn new(enter_result: EnterCircuitResult, exit_result: ExitCircuitResult) -> Self {
         Self { enter_result, exit_result }
     }
 }

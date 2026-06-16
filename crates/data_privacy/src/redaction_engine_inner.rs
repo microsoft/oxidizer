@@ -28,7 +28,7 @@ impl RedactionEngineInner {
     /// Performs a single hash lookup. Returns `None` when the class has been explicitly suppressed,
     /// `Some(class_redactor)` when a class-specific redactor is registered, or `Some(fallback)` otherwise.
     #[must_use]
-    pub fn resolve(&self, data_class: &DataClass) -> Option<&(dyn Redactor + Send + Sync)> {
+    pub(crate) fn resolve(&self, data_class: &DataClass) -> Option<&(dyn Redactor + Send + Sync)> {
         match self.redactors.get(data_class) {
             Some(RedactionPolicy::Redact(redactor)) => Some(redactor.as_ref()),
             Some(RedactionPolicy::Suppressed) => None,
@@ -38,25 +38,25 @@ impl RedactionEngineInner {
 
     #[cfg(test)]
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.redactors.len()
     }
 
-    pub fn shrink(&mut self) {
+    pub(crate) fn shrink(&mut self) {
         self.redactors.shrink_to_fit();
     }
 
-    pub fn insert(&mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) {
+    pub(crate) fn insert(&mut self, data_class: impl IntoDataClass, redactor: impl Redactor + Send + Sync + 'static) {
         self.redactors
             .insert(data_class.into_data_class(), RedactionPolicy::Redact(Box::new(redactor)));
     }
 
-    pub fn suppress(&mut self, data_class: impl IntoDataClass) {
+    pub(crate) fn suppress(&mut self, data_class: impl IntoDataClass) {
         self.redactors.insert(data_class.into_data_class(), RedactionPolicy::Suppressed);
     }
 
     #[must_use]
-    pub fn redacts(&self, data_class: &DataClass) -> bool {
+    pub(crate) fn redacts(&self, data_class: &DataClass) -> bool {
         match self.redactors.get(data_class) {
             Some(RedactionPolicy::Suppressed) => false,
             Some(RedactionPolicy::Redact(redactor)) => redactor.redacts(data_class),
@@ -64,7 +64,7 @@ impl RedactionEngineInner {
         }
     }
 
-    pub fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
+    pub(crate) fn set_fallback(&mut self, redactor: impl Redactor + Send + Sync + 'static) {
         self.fallback = Box::new(redactor);
     }
 }

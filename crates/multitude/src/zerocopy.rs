@@ -53,7 +53,7 @@ impl<'a, A: Allocator + Clone> ZerocopyView<'a, A> {
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater (which exceeds the arena chunk alignment).
     #[must_use]
     #[inline]
-    pub fn alloc<T: FromZeros>(&self) -> &'a mut T {
+    pub fn alloc<T: FromZeros + Send>(&self) -> &'a mut T {
         self.arena
             .try_alloc_with::<T, _>(T::new_zeroed)
             .expect("zerocopy: arena allocation failed")
@@ -66,7 +66,7 @@ impl<'a, A: Allocator + Clone> ZerocopyView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc<T: FromZeros>(&self) -> Result<&'a mut T, AllocError> {
+    pub fn try_alloc<T: FromZeros + Send>(&self) -> Result<&'a mut T, AllocError> {
         self.arena.try_alloc_with::<T, _>(T::new_zeroed)
     }
 
@@ -77,7 +77,7 @@ impl<'a, A: Allocator + Clone> ZerocopyView<'a, A> {
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater.
     #[must_use]
     #[inline]
-    pub fn alloc_slice<T: FromZeros>(&self, len: usize) -> &'a mut [T] {
+    pub fn alloc_slice<T: FromZeros + Send>(&self, len: usize) -> &'a mut [T] {
         self.arena
             .try_alloc_slice_fill_with(len, |_| T::new_zeroed())
             .expect("zerocopy: arena allocation failed")
@@ -90,7 +90,7 @@ impl<'a, A: Allocator + Clone> ZerocopyView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc_slice<T: FromZeros>(&self, len: usize) -> Result<&'a mut [T], AllocError> {
+    pub fn try_alloc_slice<T: FromZeros + Send>(&self, len: usize) -> Result<&'a mut [T], AllocError> {
         self.arena.try_alloc_slice_fill_with(len, |_| T::new_zeroed())
     }
 

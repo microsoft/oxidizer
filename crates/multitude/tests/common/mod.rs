@@ -14,7 +14,7 @@ use std::collections::hash_map::DefaultHasher;
 
 use allocator_api2::alloc::{AllocError, Allocator, Global};
 
-pub fn hash_of<T: Hash>(v: &T) -> u64 {
+pub(crate) fn hash_of<T: Hash>(v: &T) -> u64 {
     let mut h = DefaultHasher::new();
     v.hash(&mut h);
     h.finish()
@@ -29,12 +29,12 @@ pub fn hash_of<T: Hash>(v: &T) -> u64 {
 /// mutability via `Rc<Cell<usize>>` on the test side; here we wrap
 /// the count in a heap pointer for `Clone` to copy).
 #[derive(Clone)]
-pub struct FailingAllocator {
+pub(crate) struct FailingAllocator {
     remaining: std::rc::Rc<Cell<usize>>,
 }
 
 impl FailingAllocator {
-    pub fn new(allow_n_allocs: usize) -> Self {
+    pub(crate) fn new(allow_n_allocs: usize) -> Self {
         Self {
             remaining: std::rc::Rc::new(Cell::new(allow_n_allocs)),
         }
@@ -62,24 +62,24 @@ unsafe impl Allocator for FailingAllocator {
 /// can detect leaks across an `Arena`'s lifetime. Tracks `allocate`
 /// vs. `deallocate` and `grow`/`shrink` deltas.
 #[derive(Clone)]
-pub struct TrackingAllocator {
+pub(crate) struct TrackingAllocator {
     live_chunks: std::rc::Rc<Cell<isize>>,
     live_bytes: std::rc::Rc<Cell<isize>>,
 }
 
 impl TrackingAllocator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             live_chunks: std::rc::Rc::new(Cell::new(0)),
             live_bytes: std::rc::Rc::new(Cell::new(0)),
         }
     }
 
-    pub fn live_chunks(&self) -> isize {
+    pub(crate) fn live_chunks(&self) -> isize {
         self.live_chunks.get()
     }
 
-    pub fn live_bytes(&self) -> isize {
+    pub(crate) fn live_bytes(&self) -> isize {
         self.live_bytes.get()
     }
 }
@@ -105,24 +105,24 @@ unsafe impl Allocator for TrackingAllocator {
 /// Send + Sync variant of [`TrackingAllocator`] for tests that need
 /// to allocate `Arc` (whose constructor requires `A: Send + Sync`).
 #[derive(Clone)]
-pub struct SendTrackingAllocator {
+pub(crate) struct SendTrackingAllocator {
     live_chunks: std::sync::Arc<core::sync::atomic::AtomicIsize>,
     live_bytes: std::sync::Arc<core::sync::atomic::AtomicIsize>,
 }
 
 impl SendTrackingAllocator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             live_chunks: std::sync::Arc::new(core::sync::atomic::AtomicIsize::new(0)),
             live_bytes: std::sync::Arc::new(core::sync::atomic::AtomicIsize::new(0)),
         }
     }
 
-    pub fn live_chunks(&self) -> isize {
+    pub(crate) fn live_chunks(&self) -> isize {
         self.live_chunks.load(core::sync::atomic::Ordering::Relaxed)
     }
 
-    pub fn live_bytes(&self) -> isize {
+    pub(crate) fn live_bytes(&self) -> isize {
         self.live_bytes.load(core::sync::atomic::Ordering::Relaxed)
     }
 }
@@ -156,7 +156,7 @@ unsafe impl Allocator for SendTrackingAllocator {
 ///
 /// Used to drive `chunk_end_addr_fits_in_isize`-style regression tests.
 #[derive(Clone, Copy, Default)]
-pub struct BadAddressAllocator;
+pub(crate) struct BadAddressAllocator;
 
 // SAFETY: returns synthetic pointers never read or written; `deallocate`
 // is a no-op so no foreign allocator is asked to free a fake pointer.
@@ -192,12 +192,12 @@ unsafe impl Allocator for BadAddressAllocator {
 
 /// constructor families (which require `A: Send + Sync`).
 #[derive(Clone)]
-pub struct SendFailingAllocator {
+pub(crate) struct SendFailingAllocator {
     remaining: std::sync::Arc<core::sync::atomic::AtomicUsize>,
 }
 
 impl SendFailingAllocator {
-    pub fn new(allow_n_allocs: usize) -> Self {
+    pub(crate) fn new(allow_n_allocs: usize) -> Self {
         Self {
             remaining: std::sync::Arc::new(core::sync::atomic::AtomicUsize::new(allow_n_allocs)),
         }
@@ -233,7 +233,7 @@ unsafe impl Allocator for SendFailingAllocator {
 /// vector when dropped. Tests use `Droppy::take_log()` to inspect
 /// the order in which payloads were destroyed.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Droppy(pub &'static str);
+pub(crate) struct Droppy(pub &'static str);
 
 std::thread_local! {
     static DROPPY_LOG: Cell<Option<Vec<&'static str>>> = const { Cell::new(None) };
@@ -251,7 +251,7 @@ impl Drop for Droppy {
 
 impl Droppy {
     /// Drain the thread-local drop log and return the captured labels.
-    pub fn take_log() -> Vec<&'static str> {
+    pub(crate) fn take_log() -> Vec<&'static str> {
         DROPPY_LOG.with(|c| c.take().unwrap_or_default())
     }
 }
@@ -259,14 +259,14 @@ impl Droppy {
 /// Reference-counted drop counter. Increments its `AtomicUsize` once
 /// when dropped. Clones share the same counter via the inner `Arc`.
 #[derive(Clone, Debug, Default)]
-pub struct DropCounter(pub std::sync::Arc<core::sync::atomic::AtomicUsize>);
+pub(crate) struct DropCounter(pub std::sync::Arc<core::sync::atomic::AtomicUsize>);
 
 impl DropCounter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn count(&self) -> usize {
+    pub(crate) fn count(&self) -> usize {
         self.0.load(core::sync::atomic::Ordering::Relaxed)
     }
 }

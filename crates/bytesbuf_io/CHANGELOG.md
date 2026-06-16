@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.5] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.4` of `bytesbuf`
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+
 ## [0.5.4] - 2026-06-04
 
 - 🔧 Maintenance

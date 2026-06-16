@@ -15,13 +15,13 @@ const FROM_INVALID_FORM: &str = "from attribute must be in the form #[from(Type1
 
 /// Structure to hold display attribute information
 #[derive(Debug)]
-pub struct DisplayAttribute {
+pub(crate) struct DisplayAttribute {
     pub template: String,
     pub args: Vec<syn::Expr>,
 }
 
 /// Find the display attribute value
-pub fn find_display_attribute(input: &DeriveInput) -> Result<Option<DisplayAttribute>> {
+pub(crate) fn find_display_attribute(input: &DeriveInput) -> Result<Option<DisplayAttribute>> {
     for attr in &input.attrs {
         if attr.path().is_ident("display") {
             let Meta::List(meta_list) = &attr.meta else {
@@ -67,17 +67,17 @@ fn parse_display_tokens(tokens: &proc_macro2::TokenStream) -> Result<DisplayAttr
 }
 
 /// Check if the `no_constructors` attribute is present
-pub fn has_no_constructors_attribute(input: &DeriveInput) -> bool {
+pub(crate) fn has_no_constructors_attribute(input: &DeriveInput) -> bool {
     has_simple_attribute(input, "no_constructors")
 }
 
 /// Check if the `no_debug` attribute is present
-pub fn has_no_debug_attribute(input: &DeriveInput) -> bool {
+pub(crate) fn has_no_debug_attribute(input: &DeriveInput) -> bool {
     has_simple_attribute(input, "no_debug")
 }
 
 /// Parse the from attribute to get types for From trait implementation
-pub fn find_from_attribute(input: &DeriveInput) -> Result<Vec<FromConfig>> {
+pub(crate) fn find_from_attribute(input: &DeriveInput) -> Result<Vec<FromConfig>> {
     let mut from_configs = Vec::new();
     for attr in &input.attrs {
         if attr.path().is_ident("from") {

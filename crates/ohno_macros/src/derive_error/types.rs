@@ -7,7 +7,7 @@ use quote::quote;
 
 /// Represents different ways to access the error field in a struct
 #[derive(Debug)]
-pub enum ErrorFieldRef {
+pub(crate) enum ErrorFieldRef {
     /// Named field: `self.field_name`
     Named(syn::Ident),
     /// Tuple field: `self.0`, `self.1`, etc.
@@ -16,7 +16,7 @@ pub enum ErrorFieldRef {
 
 impl ErrorFieldRef {
     /// Generate the token stream for accessing this field (e.g., `self.field_name` or `self.0`)
-    pub fn to_field_access(&self) -> proc_macro2::TokenStream {
+    pub(crate) fn to_field_access(&self) -> proc_macro2::TokenStream {
         match self {
             Self::Named(ident) => quote! { #ident },
             Self::Indexed(index) => quote! { #index },
@@ -35,7 +35,7 @@ impl std::fmt::Display for ErrorFieldRef {
 
 /// Configuration for a single From implementation with optional field expressions
 #[derive(Debug)]
-pub struct FromConfig {
+pub(crate) struct FromConfig {
     /// The type to implement From for
     pub from_type: syn::Type,
     /// Custom field expressions: `field_name -> expression`

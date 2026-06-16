@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+
 ## [0.5.3] - 2026-06-04
 
 - 🔧 Maintenance

@@ -20,7 +20,7 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 /// Intended for tests that exercise TLS configuration plumbing without
 /// caring about certificate validity. Never use in production.
 #[derive(Debug, Default)]
-pub struct AcceptAllServerCertVerifier;
+pub(crate) struct AcceptAllServerCertVerifier;
 
 impl ServerCertVerifier for AcceptAllServerCertVerifier {
     fn verify_server_cert(
@@ -66,7 +66,7 @@ impl ServerCertVerifier for AcceptAllServerCertVerifier {
 /// Useful for verifying plumbing of a `ResolvesClientCert` through
 /// [`crate::RustlsOptions`] without requiring a real key.
 #[derive(Debug, Default)]
-pub struct NoClientCertResolver;
+pub(crate) struct NoClientCertResolver;
 
 impl ResolvesClientCert for NoClientCertResolver {
     fn resolve(&self, _root_hint_subjects: &[&[u8]], _sigschemes: &[SignatureScheme]) -> Option<Arc<CertifiedKey>> {
