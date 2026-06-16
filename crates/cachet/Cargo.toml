@@ -103,6 +103,10 @@ required-features = ["test-util"]
 name = "eviction"
 required-features = ["memory", "logs"]
 
+[[test]]
+name = "no_subscriber"
+required-features = ["memory", "logs", "test-util"]
+
 [[example]]
 name = "simple"
 required-features = ["memory"]

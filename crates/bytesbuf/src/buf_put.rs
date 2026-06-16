@@ -88,7 +88,7 @@ impl BytesBuf {
     ///
     /// # Panics
     ///
-    /// Panics if there is insufficient remaining capacity in the buffer.
+    /// Panics if the resulting total buffer capacity would be greater than `usize::MAX`.
     pub fn put_bytes(&mut self, view: BytesView) {
         self.append(view);
     }

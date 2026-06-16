@@ -176,9 +176,17 @@ unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
 # Allow our special-purpose nonstandard cfg attributes.
+# - coverage / coverage_nightly: set by cargo-llvm-cov to enable nightly coverage attributes.
+# - loom: set via RUSTFLAGS to swap in the loom model-checker for atomics in select crates.
+# - utc_backend: opt-in flag for the UTC (Microsoft) Rust codegen backend, which caps type
+#   alignment at 8192 bytes. Crates that intentionally exercise larger alignments (e.g.
+#   multitude's over-alignment guard tests) gate the offending items on this cfg so they
+#   compile out when targeting UTC. Set via RUSTFLAGS="--cfg utc_backend" in pipelines
+#   that pin a UTC toolchain (ms-prod-1.95+).
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
     'cfg(loom)',
+    'cfg(utc_backend)',
 ] }
 
 [workspace.lints.clippy]

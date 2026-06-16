@@ -564,6 +564,33 @@ impl BytesView {
         BytesViewSlices::new(self)
     }
 
+    /// Copies the byte sequence into a new [`Vec<u8>`].
+    ///
+    /// The view itself is left unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # let memory = bytesbuf::mem::GlobalPool::new();
+    /// use bytesbuf::BytesView;
+    ///
+    /// let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+    ///
+    /// let bytes = view.to_vec();
+    ///
+    /// assert_eq!(bytes, b"Hello, world!");
+    /// ```
+    #[must_use]
+    pub fn to_vec(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.len());
+
+        for (slice, _meta) in self.slices() {
+            bytes.extend_from_slice(slice);
+        }
+
+        bytes
+    }
+
     /// Inspects the metadata of the [`first_slice()`].
     ///
     /// `None` if there is no metadata associated with the first slice or
@@ -1387,6 +1414,40 @@ mod tests {
     fn slices_iterator_empty() {
         let view = BytesView::new();
         assert_eq!(view.slices().count(), 0);
+    }
+
+    #[test]
+    fn to_vec_single_span() {
+        let memory = TransparentMemory::new();
+        let view = BytesView::copied_from_slice(b"Hello, world!", &memory);
+
+        let bytes = view.to_vec();
+
+        assert_eq!(bytes, b"Hello, world!");
+        // The view is left unchanged.
+        assert_eq!(view.len(), 13);
+    }
+
+    #[test]
+    fn to_vec_multi_span() {
+        let memory = TransparentMemory::new();
+        let segment1 = BytesView::copied_from_slice(b"Hello, ", &memory);
+        let segment2 = BytesView::copied_from_slice(b"world!", &memory);
+
+        let view = BytesView::from_views(vec![segment1, segment2]);
+
+        let bytes = view.to_vec();
+
+        assert_eq!(bytes, b"Hello, world!");
+    }
+
+    #[test]
+    fn to_vec_empty() {
+        let view = BytesView::new();
+
+        let bytes = view.to_vec();
+
+        assert!(bytes.is_empty());
     }
 
     #[test]
