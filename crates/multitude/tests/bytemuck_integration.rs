@@ -331,7 +331,6 @@ fn alloc_slice_ref_is_mutable() {
     assert_eq!(s, &[0, 99, 0]);
 }
 
-// === relocated from coverage_extras.rs (bytemuck-gated tests) ===
 mod from_coverage_extras_bytemuck {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]

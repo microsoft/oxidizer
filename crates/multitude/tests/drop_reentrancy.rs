@@ -12,7 +12,6 @@
 
 mod common;
 
-// === merged from tests/arena_drop_reentrancy.rs ===
 mod arena_drop_reentrancy {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -290,7 +289,6 @@ mod arena_drop_reentrancy {
     }
 }
 
-// === merged from tests/alloc_reentrancy.rs ===
 mod alloc_reentrancy {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -302,7 +300,6 @@ mod alloc_reentrancy {
     use crate::common;
 }
 
-// === merged from tests/drop_behavior.rs ===
 mod drop_behavior {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]

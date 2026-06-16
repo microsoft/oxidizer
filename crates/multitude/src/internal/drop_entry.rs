@@ -363,13 +363,11 @@ mod tests {
         assert!(installed.is_some());
     }
 
-    /// Regression test for the unaligned-payload formula: when
-    /// `payload_ptr` is **not** `align_of::<DropEntry>()`-aligned (as
-    /// happens for the post-padding-removal chunk layouts), both
-    /// `commit_placeholder_drop_fn` and `replay_drops` must still place
-    /// drop entries at absolutely-aligned addresses near the payload
-    /// tail. The buffer below intentionally offsets the payload start
-    /// by `entry_align - 1` bytes from an aligned base, so the
+    /// When `payload_ptr` is **not** `align_of::<DropEntry>()`-aligned,
+    /// both `commit_placeholder_drop_fn` and `replay_drops` must still
+    /// place drop entries at absolutely-aligned addresses near the
+    /// payload tail. The buffer below intentionally offsets the payload
+    /// start by `entry_align - 1` bytes from an aligned base, so the
     /// payload start address is 1-aligned but the *end* of the
     /// reserved payload still lands on an `entry_align` multiple.
     #[test]

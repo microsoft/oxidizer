@@ -7,7 +7,6 @@
 
 mod common;
 
-// === merged from tests/loom_arc.rs ===
 mod loom_arc {
     #![allow(clippy::std_instead_of_core, reason = "loom + std interop in tests")]
     #![allow(clippy::missing_panics_doc, reason = "test code")]
@@ -566,7 +565,6 @@ mod loom_arc {
     }
 }
 
-// === merged from tests/loom_bytesbuf.rs ===
 mod loom_bytesbuf {
     #![cfg(all(loom, feature = "bytesbuf"))]
     #![allow(clippy::std_instead_of_core, reason = "loom + std interop in tests")]

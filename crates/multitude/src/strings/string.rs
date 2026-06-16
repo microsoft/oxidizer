@@ -81,6 +81,13 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         out
     }
 
+    /// Fallible variant of [`Self::from_str_in`].
+    pub(crate) fn try_from_str_in(s: &str, arena: &'a Arena<A>) -> Result<Self, allocator_api2::alloc::AllocError> {
+        let mut out = Self::try_with_capacity_in(s.len(), arena)?;
+        out.try_push_str(s)?;
+        Ok(out)
+    }
+
     /// Remove the last character from the string and return it.
     ///
     /// Returns `None` if the string is empty.
@@ -116,10 +123,25 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-8
     /// character boundary, or if the backing allocator fails on growth.
+    /// Use [`Self::try_insert`] for a fallible variant.
     pub fn insert(&mut self, idx: usize, ch: char) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, ch));
+    }
+
+    /// Fallible variant of [`Self::insert`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is greater than `self.len()` or not on a UTF-8
+    /// character boundary.
+    pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u8; 4];
         let s = ch.encode_utf8(&mut buf);
-        self.insert_str(idx, s);
+        self.try_insert_str(idx, s)
     }
 
     /// Insert a string slice at byte index `idx`.
@@ -129,16 +151,32 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if `idx` is greater than `self.len()`, if `idx` is not
     /// on a UTF-8 character boundary, if the resulting length would
     /// overflow `usize`, or if the backing allocator fails on growth.
+    /// Use [`Self::try_insert_str`] for a fallible variant.
     pub fn insert_str(&mut self, idx: usize, s: &str) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_insert_str(idx, s));
+    }
+
+    /// Fallible variant of [`Self::insert_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth, or
+    /// if the resulting length would overflow `usize`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is greater than `self.len()` or if `idx` is not on a
+    /// UTF-8 character boundary.
+    pub fn try_insert_str(&mut self, idx: usize, s: &str) -> Result<(), AllocError> {
         let len = self.inner.len();
         assert!(idx <= len, "insertion index out of bounds (was {idx}, len = {len})");
         assert!(self.as_str().is_char_boundary(idx), "insert_str: idx is not on a char boundary");
         let bytes = s.as_bytes();
         let added = bytes.len();
         if added == 0 {
-            return;
+            return Ok(());
         }
-        self.inner.reserve(added);
+        self.inner.try_reserve(added)?;
         // Append the new bytes at the end (the buffer grew by `added`),
         // then rotate the region [idx..len+added] right by `added` so
         // the layout becomes [prefix ++ bytes ++ old_suffix].
@@ -147,6 +185,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         }
         let region = &mut self.inner.as_mut_slice()[idx..len + added];
         region.rotate_right(added);
+        Ok(())
     }
 
     /// Remove the character at byte index `idx` and return it.
@@ -224,8 +263,25 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if either bound is out of range, the bounds are not on
     /// UTF-8 character boundaries, the resulting length would overflow
-    /// `usize`, or the backing allocator fails on growth.
+    /// `usize`, or the backing allocator fails on growth. Use
+    /// [`Self::try_replace_range`] for a fallible variant.
     pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_replace_range(range, replace_with));
+    }
+
+    /// Fallible variant of [`Self::replace_range`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth, or
+    /// if the resulting length would overflow `usize`. On error `self` is
+    /// left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either bound is out of range or the bounds are not on UTF-8
+    /// character boundaries.
+    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) -> Result<(), AllocError> {
         let len = self.len();
         let start = match range.start_bound() {
             Bound::Included(&i) => i,
@@ -243,13 +299,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         assert!(s_ref.is_char_boundary(start), "replace_range: start is not on a char boundary");
         assert!(s_ref.is_char_boundary(end), "replace_range: end is not on a char boundary");
 
-        // Rebuild via a staging vec to keep this fully safe.
-        let mut staging: allocator_api2::vec::Vec<u8> = allocator_api2::vec::Vec::with_capacity(start + replace_with.len() + (len - end));
-        staging.extend_from_slice(&self.as_bytes()[..start]);
-        staging.extend_from_slice(replace_with.as_bytes());
-        staging.extend_from_slice(&self.as_bytes()[end..]);
-        self.inner.clear();
-        self.inner.extend_from_slice(staging.as_slice());
+        self.inner.try_replace_range_with_slice(start, end, replace_with.as_bytes())
     }
 
     /// Append a single character.
@@ -330,13 +380,28 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// # Panics
     ///
-    /// Panics if `at` is not on a `char` boundary, or is past the end.
+    /// Panics if `at` is not on a `char` boundary, or is past the end. Use
+    /// [`Self::try_split_off`] for a fallible variant.
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+    }
+
+    /// Fallible variant of [`Self::split_off`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails. On error `self`
+    /// is left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at` is not on a `char` boundary, or is past the end.
+    pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         assert!(self.as_str().is_char_boundary(at), "String::split_off: `at` is not a char boundary");
-        Self {
-            inner: self.inner.split_off(at),
-        }
+        Ok(Self {
+            inner: self.inner.try_split_off(at)?,
+        })
     }
 
     /// Clone the bytes in `src` and append them to the end.
@@ -347,8 +412,22 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// # Panics
     ///
     /// Panics if the range is out of bounds or its bounds are not on `char`
-    /// boundaries.
+    /// boundaries. Use [`Self::try_extend_from_within`] for a fallible variant.
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+    }
+
+    /// Fallible variant of [`Self::extend_from_within`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails while reserving.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds or its bounds are not on `char`
+    /// boundaries.
+    pub fn try_extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) -> Result<(), AllocError> {
         let len = self.len();
         let start = match src.start_bound() {
             Bound::Included(&i) => i,
@@ -365,7 +444,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         let s_ref = self.as_str();
         assert!(s_ref.is_char_boundary(start), "extend_from_within: start is not on a char boundary");
         assert!(s_ref.is_char_boundary(end), "extend_from_within: end is not on a char boundary");
-        self.inner.extend_from_within(start..end);
+        self.inner.try_extend_from_within(start..end)
     }
 
     /// Remove the `char`s in byte range `range`, returning a draining iterator.
@@ -409,10 +488,49 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails.
+    /// Panics if the underlying allocator fails. Use
+    /// [`Self::try_into_boxed_str`] for a fallible variant.
     #[must_use]
     pub fn into_boxed_str(self) -> Box<str, A> {
-        self.inner.arena().alloc_str_box(self.as_str())
+        crate::arena::ExpectAlloc::expect_alloc(self.try_into_boxed_str())
+    }
+
+    /// Fallible variant of [`Self::into_boxed_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_boxed_str(self) -> Result<Box<str, A>, AllocError> {
+        self.inner.arena().try_alloc_str_box(self.as_str())
+    }
+
+    /// Freeze into a shared [`Arc<str, A>`](crate::Arc). [`Arc::from`] is the
+    /// trait form.
+    ///
+    /// **O(n)** — copies the contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails. Use [`Self::try_into_arc_str`]
+    /// for a fallible variant.
+    #[must_use]
+    pub fn into_arc_str(self) -> Arc<str, A>
+    where
+        A: Send + Sync,
+    {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_into_arc_str())
+    }
+
+    /// Fallible variant of [`Self::into_arc_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_arc_str(self) -> Result<Arc<str, A>, AllocError>
+    where
+        A: Send + Sync,
+    {
+        self.inner.arena().try_alloc_str_arc(self.as_str())
     }
 
     /// Consume the `String`, returning an arena-lifetime mutable string
@@ -512,7 +630,7 @@ impl<'a, A: Allocator + Clone + Send + Sync> From<String<'a, A>> for Arc<str, A>
     /// Mirrors `std`'s `From<String> for Arc<str>`.
     #[inline]
     fn from(s: String<'a, A>) -> Self {
-        s.inner.arena().alloc_str_arc(s.as_str())
+        s.into_arc_str()
     }
 }
 

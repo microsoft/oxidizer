@@ -14,7 +14,6 @@
 
 mod common;
 
-// === merged from tests/dst.rs ===
 mod dst {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -132,7 +131,6 @@ mod dst {
     }
 }
 
-// === merged from tests/dst_box.rs ===
 mod dst_box {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -226,7 +224,6 @@ mod dst_box {
         let b = arena.alloc_slice_copy_box([1_u32, 2, 3]);
         assert_eq!(&*b, &[1, 2, 3]);
 
-        // Folded from_coverage_extras_dst::alloc_slice_copy_box_succeeds keeps the alternate payload assertion.
         let b: multitude::Box<[u8]> = arena.alloc_slice_copy_box([10_u8, 20, 30]);
         assert_eq!(&*b, &[10, 20, 30]);
     }
@@ -259,7 +256,6 @@ mod dst_box {
         assert_eq!(b[0], "a");
         assert_eq!(b[2], "c");
 
-        // Folded from_coverage_extras_dst::alloc_slice_clone_box_succeeds keeps the alternate input case.
         let src = [
             std::string::String::from("x"),
             std::string::String::from("y"),
@@ -283,7 +279,6 @@ mod dst_box {
         let b: multitude::Box<[u64]> = arena.alloc_slice_fill_with_box(5, |i| (i as u64) * 10);
         assert_eq!(&*b, &[0, 10, 20, 30, 40]);
 
-        // Folded from_coverage_extras_dst::alloc_slice_fill_with_box_succeeds keeps the shorter fill case.
         let b: multitude::Box<[u32]> = arena.alloc_slice_fill_with_box(4, |i| (i + 1) as u32);
         assert_eq!(&*b, &[1, 2, 3, 4]);
     }
@@ -301,7 +296,6 @@ mod dst_box {
         let b: multitude::Box<[i32]> = arena.alloc_slice_fill_iter_box([7_i32, 8, 9]);
         assert_eq!(&*b, &[7, 8, 9]);
 
-        // Folded from_coverage_extras_dst::alloc_slice_fill_iter_box_succeeds keeps the range-based iterator case.
         let b: multitude::Box<[u8]> = arena.alloc_slice_fill_iter_box(0_u8..5);
         assert_eq!(&*b, &[0, 1, 2, 3, 4]);
     }
@@ -505,7 +499,6 @@ mod dst_box {
     }
 }
 
-// === merged from tests/dst_panic_safety.rs ===
 mod dst_panic_safety {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -544,7 +537,6 @@ mod dst_panic_safety {
     }
 }
 
-// === relocated from coverage_extras.rs (dst-gated tests) ===
 mod from_coverage_extras_dst {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
@@ -722,7 +714,6 @@ mod from_coverage_extras_dst {
     }
 }
 
-// === relocated from mutants_extras.rs (dst-gated tests) ===
 mod from_mutants_extras_dst {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
@@ -753,13 +744,6 @@ mod from_mutants_extras_dst {
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common::{self, FailingAllocator, SendFailingAllocator};
 
-    /// Kills `arena.rs:3197:55 - -> /` in `allocate_shared_layout`.
-    /// Line 3197 computes `aligned_offset = aligned_addr - data_addr`.
-    /// Mutated `/`: when `aligned_addr == data_addr` (the common case for
-    /// pre-aligned bump cursors), `-` yields 0 but `/` yields 1, so the
-    /// returned pointer becomes misaligned by 1 byte. This test exercises
-    /// the path via the public DST-Arc API for a `[u128]` (align=16, non-
-    /// Drop) and asserts the returned payload is properly aligned.
     #[test]
     fn allocate_shared_layout_high_align_offset_zero_preserved() {
         use core::alloc::Layout;

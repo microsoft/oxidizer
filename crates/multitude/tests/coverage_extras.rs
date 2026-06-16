@@ -5,7 +5,6 @@
 
 mod common;
 
-// === merged from tests/coverage.rs ===
 mod coverage {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -503,7 +502,6 @@ mod coverage {
 
         let mut exact = arena.alloc_string_with_capacity(8);
         exact.push_str("abc");
-        // Folded mutant-kill: exact-fit reserve must short-circuit when len + additional == cap.
         exact.try_reserve(5).unwrap();
         assert_eq!(exact.capacity(), 8);
     }
@@ -1259,7 +1257,6 @@ mod coverage {
     }
 }
 
-// === merged from tests/coverage_more.rs ===
 mod coverage_more {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -1492,7 +1489,6 @@ mod coverage_more {
         for _ in 0..16 {
             v.push(());
         }
-        // Folded mutant-kill: vec.rs:834 `==`/`!=` must keep ZST Vecs on the copy fallback.
         let b = v.into_boxed_slice();
         assert_eq!(b.len(), 16);
     }
@@ -1644,7 +1640,6 @@ mod coverage_more {
     }
 }
 
-// === merged from tests/coverage_complete.rs ===
 mod coverage_complete {
     #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -1871,7 +1866,6 @@ mod coverage_complete {
     // ============================================================================
 }
 
-// === merged from tests/coverage_llvmcov.rs ===
 mod coverage_llvmcov {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::missing_panics_doc, reason = "test code")]

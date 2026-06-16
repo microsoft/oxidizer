@@ -11,8 +11,6 @@ arena is Send, that teardown can run on a migrated thread, which would be unsoun
 bound is now documented on `Arena::alloc`. Still open: a !Send-friendly path for thread-local-only use (give up
 `Arena: Send` to drop the `T: Send` requirement), and/or relaxing the bound to the `T: Drop` case only (needs specialization).
 
-- Add missing try_xxx for any allocating functions.
- 
 - No owning IntoIterator for Box<[T]> (std has it). Minor, but an easy ergonomic win.
 
 ## Zero-copy `Vec`/`String` → `Arc<[T]>` / `Arc<str>`
