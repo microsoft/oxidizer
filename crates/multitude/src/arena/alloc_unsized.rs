@@ -224,7 +224,7 @@ impl<A: Allocator + Clone> Arena<A> {
         loop {
             if let Some((reservation, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, layout.align().max(1)) {
                 let init = init.take().expect("init taken twice");
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 // SAFETY: see `write_dst_prefix_and_init` — `reservation`
                 // is the freshly reserved exclusive storage; we write
                 // metadata at `payload - meta_bytes` and hand `init` a
@@ -305,7 +305,7 @@ impl<A: Allocator + Clone> Arena<A> {
 
             if let Some((base_in_chunk, drop_slot_opt, chunk_ptr)) = reservation {
                 let init = init.take().expect("init taken twice");
-                let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 // SAFETY: see `write_dst_prefix_and_init`.
                 let payload_nn =
                     unsafe { write_dst_prefix_and_init::<T>(base_in_chunk.as_non_null(), payload_offset, meta_bytes, metadata, init) };
@@ -318,8 +318,6 @@ impl<A: Allocator + Clone> Arena<A> {
                     }
                 }
                 let _ = chunk_ref.forget();
-                #[cfg(feature = "stats")]
-                self.record_alloc(layout.size());
                 return Ok(payload_nn);
             }
 
@@ -343,8 +341,6 @@ impl<A: Allocator + Clone> Arena<A> {
                         }
                     }
                     let _ = chunk_ref.forget();
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(layout.size());
                     payload_nn
                 });
             }

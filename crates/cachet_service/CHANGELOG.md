@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.6] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.4` of `cachet_tier`
+  - Now requires `0.3.4` of `layered`
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.1.6` of `recoverable`
+
 ## [0.2.5] - 2026-06-10
 
 - 🔧 Maintenance

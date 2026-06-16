@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.7.0] - 2026-06-11
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.4` of `anyspawn`
+  - Now requires `0.5.4` of `bytesbuf`
+  - Now requires `0.3.5` of `cachet_memory`
+  - Now requires `0.2.6` of `cachet_service`
+  - Now requires `0.2.4` of `cachet_tier`
+  - Now requires `0.3.4` of `layered`
+  - Now requires `0.3.6` of `ohno`
+  - Now requires `0.3.4` of `ohno_macros`
+  - Now requires `0.1.6` of `recoverable`
+  - Now requires `0.7.4` of `thread_aware`
+  - Now requires `0.7.4` of `thread_aware_macros`
+  - Now requires `0.7.3` of `thread_aware_macros_impl`
+  - Now requires `0.3.4` of `tick`
+  - Now requires `0.2.4` of `uniflight`
+
+- ✨ Features
+
+  - structured telemetry with correlated events, and handler API ([#460](https://github.com/microsoft/oxidizer/pull/460))
+
 ## [0.6.6] - 2026-06-10
 
 - 🔧 Maintenance

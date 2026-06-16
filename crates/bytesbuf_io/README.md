@@ -35,9 +35,9 @@ types that produce or consume streams of bytes. These are in the `testing` modul
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf_io">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbzALaooHm88wblzy9ny6Wy9IbBKVdX0-eOvkbIABdjy2GM0phZIGCa2J5dGVzYnVmX2lvZTAuNS40
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbzALaooHm88wblzy9ny6Wy9IbBKVdX0-eOvkbIABdjy2GM0phZIGCa2J5dGVzYnVmX2lvZTAuNS41
  [__link0]: https://docs.io/bytesbuf
- [__link1]: https://docs.rs/bytesbuf_io/0.5.4/bytesbuf_io/?search=Read
- [__link2]: https://docs.rs/bytesbuf_io/0.5.4/bytesbuf_io/?search=Write
+ [__link1]: https://docs.rs/bytesbuf_io/0.5.5/bytesbuf_io/?search=Read
+ [__link2]: https://docs.rs/bytesbuf_io/0.5.5/bytesbuf_io/?search=Write
  [__link3]: https://docs.io/bytesbuf
- [__link4]: https://docs.rs/bytesbuf_io/0.5.4/bytesbuf_io/?search=Read
+ [__link4]: https://docs.rs/bytesbuf_io/0.5.5/bytesbuf_io/?search=Read

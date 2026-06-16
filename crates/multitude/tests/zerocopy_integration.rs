@@ -310,7 +310,7 @@ mod from_coverage_extras_zerocopy {
     #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
     #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
     #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
-    use multitude::{Arena, ArenaBuilder};
+    use multitude::Arena;
 
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common::{self, FailingAllocator, SendFailingAllocator};
@@ -318,42 +318,42 @@ mod from_coverage_extras_zerocopy {
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena: Arena<FailingAllocator> = Arena::builder_in(FailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc::<u32>();
     }
 
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_slice_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena: Arena<FailingAllocator> = Arena::builder_in(FailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc_slice::<u32>(4);
     }
 
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_box_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena: Arena<FailingAllocator> = Arena::builder_in(FailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc_box::<u32>();
     }
 
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_arc_panics_on_failing_allocator() {
-        let arena: Arena<SendFailingAllocator> = ArenaBuilder::new_in(SendFailingAllocator::new(0)).build();
+        let arena: Arena<SendFailingAllocator> = Arena::builder_in(SendFailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc_arc::<u32>();
     }
 
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_slice_arc_panics_on_failing_allocator() {
-        let arena: Arena<SendFailingAllocator> = ArenaBuilder::new_in(SendFailingAllocator::new(0)).build();
+        let arena: Arena<SendFailingAllocator> = Arena::builder_in(SendFailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc_slice_arc::<u32>(4);
     }
 
     #[test]
     #[should_panic(expected = "zerocopy: arena allocation failed")]
     fn zerocopy_view_alloc_slice_box_panics_on_failing_allocator() {
-        let arena: Arena<FailingAllocator> = ArenaBuilder::new_in(FailingAllocator::new(0)).build();
+        let arena: Arena<FailingAllocator> = Arena::builder_in(FailingAllocator::new(0)).build();
         let _ = arena.zerocopy().alloc_slice_box::<u32>(4);
     }
 }

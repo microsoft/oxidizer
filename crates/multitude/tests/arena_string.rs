@@ -19,9 +19,9 @@ mod common;
 
 use core::cmp::Ordering;
 
-use multitude::Arena;
 use multitude::strings::String;
 use multitude::vec::CollectIn;
+use multitude::{Arena, FromIn};
 
 #[test]
 fn clear_and_reuse() {
@@ -183,7 +183,7 @@ fn try_reserve_succeeds() {
 #[test]
 fn try_with_capacity_in_succeeds() {
     let arena = Arena::new();
-    let s = String::try_with_capacity_in(32, &arena).unwrap();
+    let s = arena.try_alloc_string_with_capacity(32).unwrap();
     assert!(s.capacity() >= 32);
     assert!(s.is_empty());
 }
@@ -191,7 +191,7 @@ fn try_with_capacity_in_succeeds() {
 #[test]
 fn try_with_capacity_in_zero_does_not_allocate() {
     let arena = Arena::new();
-    let s = String::try_with_capacity_in(0, &arena).unwrap();
+    let s = arena.try_alloc_string_with_capacity(0).unwrap();
     assert_eq!(s.capacity(), 0);
 }
 
@@ -226,7 +226,7 @@ fn try_reserve_returns_err_on_alloc_failure() {
 fn try_with_capacity_in_returns_err_on_alloc_failure() {
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
-    let result = String::try_with_capacity_in(16, &arena);
+    let result = arena.try_alloc_string_with_capacity(16);
     let _ = result.unwrap_err();
 }
 
@@ -234,7 +234,7 @@ fn try_with_capacity_in_returns_err_on_alloc_failure() {
 fn try_grow_path_via_push_str_after_initial() {
     // Drives try_grow_to_at_least's slow path (cap > 0 branch).
     let arena = Arena::new();
-    let mut s = String::try_with_capacity_in(4, &arena).unwrap();
+    let mut s = arena.try_alloc_string_with_capacity(4).unwrap();
     s.try_push_str("abcd").unwrap(); // fills initial cap exactly
     s.try_push_str("e").unwrap(); // forces grow
     assert_eq!(&*s, "abcde");
@@ -242,17 +242,17 @@ fn try_grow_path_via_push_str_after_initial() {
 }
 
 #[test]
-fn from_str_in_copies_content() {
+fn from_in_str_copies_content() {
     let arena = Arena::new();
-    let s = String::from_str_in("hello, world", &arena);
+    let s = String::from_in("hello, world", &arena);
     assert_eq!(s.as_str(), "hello, world");
     assert!(s.capacity() >= "hello, world".len());
 }
 
 #[test]
-fn from_str_in_empty() {
+fn from_in_str_empty() {
     let arena = Arena::new();
-    let s = String::from_str_in("", &arena);
+    let s = String::from_in("", &arena);
     assert!(s.is_empty());
     assert_eq!(s.capacity(), 0);
     assert_eq!(s.as_str(), "");
@@ -261,7 +261,7 @@ fn from_str_in_empty() {
 #[test]
 fn as_bytes_returns_correct_bytes() {
     let arena = Arena::new();
-    let s = String::from_str_in("héllo", &arena);
+    let s = String::from_in("héllo", &arena);
     assert_eq!(s.as_bytes(), "héllo".as_bytes());
 }
 
@@ -275,7 +275,7 @@ fn as_bytes_empty() {
 #[test]
 fn as_mut_str_allows_mutation() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     s.as_mut_str().make_ascii_uppercase();
     assert_eq!(s.as_str(), "HELLO");
 }
@@ -290,26 +290,34 @@ fn as_mut_str_empty() {
 #[test]
 fn as_ptr_and_as_mut_ptr() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hi", &arena);
+    let mut s = String::from_in("hi", &arena);
+    // Read the bytes through a shared pointer *before* taking any mutable
+    // pointer: `as_mut_ptr` reborrows `&mut str`/`&mut [u8]`, which would
+    // invalidate an earlier shared pointer under Stacked Borrows — exactly as
+    // it does in `std`, where both pointers come via `Deref`/`DerefMut` to
+    // `str`.
     let p = s.as_ptr();
-    let q = s.as_mut_ptr();
-    assert_eq!(p, q.cast_const());
-    // SAFETY: valid pointer to len bytes.
+    // SAFETY: `p` addresses the first of the two initialized bytes "hi".
     unsafe {
         assert_eq!(*p, b'h');
     }
-    // SAFETY: valid pointer to len bytes; offset 1 is in bounds.
+    // SAFETY: offset 1 is within the two initialized bytes.
     let p1 = unsafe { p.add(1) };
-    // SAFETY: valid pointer to a byte.
+    // SAFETY: `p1` addresses the second initialized byte.
     unsafe {
         assert_eq!(*p1, b'i');
     }
+    let const_addr = p.addr();
+    // `as_ptr` and `as_mut_ptr` address the same buffer (compare addresses
+    // only; the pointers' borrow tags differ).
+    let mut_addr = s.as_mut_ptr().addr();
+    assert_eq!(const_addr, mut_addr);
 }
 
 #[test]
 fn pop_returns_chars_in_reverse() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("a💖é", &arena);
+    let mut s = String::from_in("a💖é", &arena);
     assert_eq!(s.pop(), Some('é'));
     assert_eq!(s.pop(), Some('💖'));
     assert_eq!(s.pop(), Some('a'));
@@ -320,7 +328,7 @@ fn pop_returns_chars_in_reverse() {
 #[test]
 fn truncate_shortens() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     let cap = s.capacity();
     s.truncate(3);
     assert_eq!(s.as_str(), "hel");
@@ -330,7 +338,7 @@ fn truncate_shortens() {
 #[test]
 fn truncate_noop_when_longer() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hi", &arena);
+    let mut s = String::from_in("hi", &arena);
     s.truncate(50);
     assert_eq!(s.as_str(), "hi");
 }
@@ -339,14 +347,14 @@ fn truncate_noop_when_longer() {
 #[should_panic(expected = "char boundary")]
 fn truncate_panics_on_non_boundary() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("é", &arena); // 2 bytes
+    let mut s = String::from_in("é", &arena); // 2 bytes
     s.truncate(1);
 }
 
 #[test]
 fn shrink_to_fit_reclaims_when_at_cursor() {
     let arena = Arena::new();
-    let mut s = String::with_capacity_in(1024, &arena);
+    let mut s = arena.alloc_string_with_capacity(1024);
     s.push_str("short");
     let _len = s.len();
     s.shrink_to_fit();
@@ -363,7 +371,7 @@ fn shrink_to_fit_empty_or_full_noop() {
     s.shrink_to_fit();
     assert_eq!(s.capacity(), 0);
 
-    let mut s2 = String::with_capacity_in(4, &arena);
+    let mut s2 = arena.alloc_string_with_capacity(4);
     s2.push_str("abcd");
     let cap = s2.capacity();
     // Folded mutant-kill: the same guard must also no-op when len == cap.
@@ -372,9 +380,40 @@ fn shrink_to_fit_empty_or_full_noop() {
 }
 
 #[test]
+fn leak_reclaims_unused_capacity_tail() {
+    // `String::leak` hands its unused `[len, cap)` byte tail back to the
+    // chunk when the buffer is still at the bump cursor, so the next
+    // allocation reuses that space.
+    let arena = Arena::new();
+    let mut s = arena.alloc_string_with_capacity(64);
+    s.push_str("abc");
+    let base = s.as_str().as_ptr() as usize;
+    let leaked: &mut str = s.leak();
+    assert_eq!(leaked, "abc");
+    assert_eq!(leaked.as_ptr() as usize, base);
+    // Reclaimed tail reused: the next str lands right after "abc".
+    let next = arena.alloc_str("XY");
+    assert_eq!(next.as_ptr() as usize, base + 3);
+}
+
+#[test]
+fn drop_at_cursor_reclaims_storage() {
+    // Dropping a `String` whose buffer ends at the bump cursor returns its
+    // whole storage to the chunk; the next allocation reuses it.
+    let arena = Arena::new();
+    let base = {
+        let mut s = arena.alloc_string_with_capacity(64);
+        s.push_str("abc");
+        s.as_str().as_ptr() as usize
+    }; // `s` dropped here -> reclaims its backing bytes.
+    let next = arena.alloc_str("WXYZ");
+    assert_eq!(next.as_ptr() as usize, base);
+}
+
+#[test]
 fn insert_at_various_positions() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("ac", &arena);
+    let mut s = String::from_in("ac", &arena);
     s.insert(1, 'b');
     assert_eq!(s.as_str(), "abc");
     s.insert(0, 'Z');
@@ -386,7 +425,7 @@ fn insert_at_various_positions() {
 #[test]
 fn insert_multibyte_char() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("ab", &arena);
+    let mut s = String::from_in("ab", &arena);
     s.insert(1, '💖');
     assert_eq!(s.as_str(), "a💖b");
 }
@@ -394,7 +433,7 @@ fn insert_multibyte_char() {
 #[test]
 fn insert_str_grows() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("ad", &arena);
+    let mut s = String::from_in("ad", &arena);
     s.insert_str(1, "bc");
     assert_eq!(s.as_str(), "abcd");
 }
@@ -402,7 +441,7 @@ fn insert_str_grows() {
 #[test]
 fn insert_str_empty_is_noop() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hi", &arena);
+    let mut s = String::from_in("hi", &arena);
     s.insert_str(1, "");
     assert_eq!(s.as_str(), "hi");
 }
@@ -411,7 +450,7 @@ fn insert_str_empty_is_noop() {
 #[should_panic(expected = "char boundary")]
 fn insert_panics_on_bad_index() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("é", &arena);
+    let mut s = String::from_in("é", &arena);
     s.insert(1, 'x');
 }
 
@@ -419,14 +458,14 @@ fn insert_panics_on_bad_index() {
 #[should_panic(expected = "insertion index out of bounds")]
 fn insert_panics_when_idx_past_end() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hi", &arena);
+    let mut s = String::from_in("hi", &arena);
     s.insert(99, 'x');
 }
 
 #[test]
 fn remove_returns_char() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("a💖c", &arena);
+    let mut s = String::from_in("a💖c", &arena);
     let ch = s.remove(1);
     assert_eq!(ch, '💖');
     assert_eq!(s.as_str(), "ac");
@@ -435,7 +474,7 @@ fn remove_returns_char() {
 #[test]
 fn remove_first_and_last() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("abcd", &arena);
+    let mut s = String::from_in("abcd", &arena);
     assert_eq!(s.remove(0), 'a');
     assert_eq!(s.as_str(), "bcd");
     assert_eq!(s.remove(s.len() - 1), 'd');
@@ -453,7 +492,7 @@ fn remove_panics_when_empty() {
 #[test]
 fn retain_filters_chars() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("a1b2c3", &arena);
+    let mut s = String::from_in("a1b2c3", &arena);
     s.retain(|c| c.is_ascii_alphabetic());
     assert_eq!(s.as_str(), "abc");
 }
@@ -461,7 +500,7 @@ fn retain_filters_chars() {
 #[test]
 fn retain_removes_all() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     s.retain(|_| false);
     assert!(s.is_empty());
 }
@@ -469,7 +508,7 @@ fn retain_removes_all() {
 #[test]
 fn retain_keeps_all() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     s.retain(|_| true);
     assert_eq!(s.as_str(), "hello");
 }
@@ -477,7 +516,7 @@ fn retain_keeps_all() {
 #[test]
 fn retain_with_multibyte() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("a💖b💖c", &arena);
+    let mut s = String::from_in("a💖b💖c", &arena);
     s.retain(|c| c != '💖');
     assert_eq!(s.as_str(), "abc");
 }
@@ -485,7 +524,7 @@ fn retain_with_multibyte() {
 #[test]
 fn replace_range_same_length() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello world", &arena);
+    let mut s = String::from_in("hello world", &arena);
     s.replace_range(6..11, "earth");
     assert_eq!(s.as_str(), "hello earth");
 }
@@ -493,7 +532,7 @@ fn replace_range_same_length() {
 #[test]
 fn replace_range_grow() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hi world", &arena);
+    let mut s = String::from_in("hi world", &arena);
     s.replace_range(0..2, "hello");
     assert_eq!(s.as_str(), "hello world");
 }
@@ -501,7 +540,7 @@ fn replace_range_grow() {
 #[test]
 fn replace_range_shrink() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello world", &arena);
+    let mut s = String::from_in("hello world", &arena);
     s.replace_range(0..5, "hi");
     assert_eq!(s.as_str(), "hi world");
 }
@@ -509,7 +548,7 @@ fn replace_range_shrink() {
 #[test]
 fn replace_range_unbounded() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     s.replace_range(.., "goodbye");
     assert_eq!(s.as_str(), "goodbye");
 }
@@ -517,7 +556,7 @@ fn replace_range_unbounded() {
 #[test]
 fn replace_range_empty_replacement() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello world", &arena);
+    let mut s = String::from_in("hello world", &arena);
     s.replace_range(5..11, "");
     assert_eq!(s.as_str(), "hello");
 }
@@ -525,7 +564,7 @@ fn replace_range_empty_replacement() {
 #[test]
 fn replace_range_inclusive() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("abcdef", &arena);
+    let mut s = String::from_in("abcdef", &arena);
     s.replace_range(1..=3, "XYZW");
     assert_eq!(s.as_str(), "aXYZWef");
 }
@@ -534,14 +573,14 @@ fn replace_range_inclusive() {
 #[should_panic(expected = "char boundary")]
 fn replace_range_panics_on_non_boundary() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("é", &arena);
+    let mut s = String::from_in("é", &arena);
     s.replace_range(0..1, "x");
 }
 
 #[test]
 fn clone_produces_equal_independent_string() {
     let arena = Arena::new();
-    let original = String::from_str_in("hello", &arena);
+    let original = String::from_in("hello", &arena);
     let mut cloned = original.clone();
     assert_eq!(original.as_str(), cloned.as_str());
     // Independent buffers
@@ -563,7 +602,7 @@ fn clone_empty() {
 #[test]
 fn deref_mut_allows_mutation() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("hello", &arena);
+    let mut s = String::from_in("hello", &arena);
     let r: &mut str = &mut s;
     r.make_ascii_uppercase();
     assert_eq!(s.as_str(), "HELLO");
@@ -572,7 +611,7 @@ fn deref_mut_allows_mutation() {
 #[test]
 fn as_mut_trait_allows_mutation() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("abc", &arena);
+    let mut s = String::from_in("abc", &arena);
     let r: &mut str = AsMut::as_mut(&mut s);
     r.make_ascii_uppercase();
     assert_eq!(s.as_str(), "ABC");
@@ -581,7 +620,7 @@ fn as_mut_trait_allows_mutation() {
 #[test]
 fn borrow_mut_trait_allows_mutation() {
     let arena = Arena::new();
-    let mut s = String::from_str_in("xyz", &arena);
+    let mut s = String::from_in("xyz", &arena);
     let r: &mut str = core::borrow::BorrowMut::borrow_mut(&mut s);
     r.make_ascii_uppercase();
     assert_eq!(s.as_str(), "XYZ");
@@ -646,7 +685,7 @@ fn write_macro_formats_into_string() {
 fn write_macro_appends() {
     use core::fmt::Write;
     let arena = Arena::new();
-    let mut s = String::from_str_in("prefix:", &arena);
+    let mut s = String::from_in("prefix:", &arena);
     write!(s, " {}", 100).unwrap();
     assert_eq!(s.as_str(), "prefix: 100");
 }
@@ -956,10 +995,10 @@ mod mutants_for_string {
     #[test]
     fn with_capacity_zero_does_not_allocate() {
         let arena = Arena::new();
-        let s0 = MString::with_capacity_in(0, &arena);
+        let s0 = arena.alloc_string_with_capacity(0);
         assert_eq!(s0.capacity(), 0);
         // Compare against `new_in` (the documented no-alloc constructor).
-        let s_new = MString::new_in(&arena);
+        let s_new = arena.alloc_string();
         assert_eq!(s_new.capacity(), 0);
         // Both have the same dangling data pointer (== 1 by NonNull::dangling()).
         // ptr identity is the strongest observable signal here.
@@ -972,7 +1011,7 @@ mod mutants_for_string {
     #[test]
     fn string_reserve_at_exact_fit_does_not_regrow() {
         let arena = Arena::new();
-        let mut s = MString::with_capacity_in(16, &arena);
+        let mut s = arena.alloc_string_with_capacity(16);
         let cap = s.capacity();
         let ptr_before = s.as_ptr();
         s.reserve(cap); // additional == cap → needed == cap (len was 0)
@@ -980,24 +1019,67 @@ mod mutants_for_string {
         assert_eq!(s.as_ptr(), ptr_before);
     }
 
-    /// Kills `string.rs:510:21 == → !=` in `into_arena_box_str`. With
+    /// Kills `string.rs:510:21 == → !=` in `into_box`. With
     /// `!=`, the empty-fast-path triggers on non-empty inputs (wrong
     /// output, possibly UB) and the data-path triggers on empty (UB on
     /// dangling).
     #[test]
-    fn into_arena_box_str_handles_empty_and_non_empty() {
+    fn into_box_handles_empty_and_non_empty() {
         let arena = Arena::new();
 
-        let s_empty = MString::new_in(&arena);
-        let b_empty = s_empty.into_arena_box_str();
+        let s_empty = arena.alloc_string();
+        let b_empty = s_empty.into_boxed_str();
         assert_eq!(&*b_empty, "");
         assert_eq!(b_empty.len(), 0);
 
-        let mut s = MString::with_capacity_in(16, &arena);
+        let mut s = arena.alloc_string_with_capacity(16);
         s.push_str("hello");
-        let b = s.into_arena_box_str();
+        let b = s.into_boxed_str();
         assert_eq!(&*b, "hello");
         assert_eq!(b.len(), 5);
+    }
+
+    /// `String::into_arc` freezes into a shared, reference-counted
+    /// `Arc<str>` whose contents match the builder, for both empty and
+    /// non-empty inputs, and which can be cloned and outlive the arena.
+    #[test]
+    fn into_arc_handles_empty_and_non_empty() {
+        use multitude::Arc;
+
+        let arena = Arena::new();
+
+        let s_empty = arena.alloc_string();
+        let a_empty: Arc<str> = Arc::from(s_empty);
+        assert_eq!(&*a_empty, "");
+        assert_eq!(a_empty.len(), 0);
+
+        let mut s = arena.alloc_string_with_capacity(16);
+        s.push_str("hello");
+        let a: Arc<str> = Arc::from(s);
+        assert_eq!(&*a, "hello");
+        assert_eq!(a.len(), 5);
+
+        // Cloning shares the same backing allocation.
+        let a2 = a.clone();
+        assert_eq!(&*a2, "hello");
+        assert_eq!(a.as_ptr(), a2.as_ptr());
+    }
+
+    /// An `Arc<str>` produced by `into_arc` outlives the arena it was
+    /// built from (the backing shared chunk is held by the refcount).
+    #[test]
+    fn into_arc_outlives_arena() {
+        use multitude::Arc;
+
+        let escaped: Arc<str> = {
+            let arena = Arena::new();
+            let mut s = arena.alloc_string();
+            s.push_str("survives");
+            let a = Arc::from(s);
+            drop(arena);
+            a
+        };
+        assert_eq!(&*escaped, "survives");
     }
 
     /// Kills `string.rs:528:9 try_reclaim_tail → ()` (body becomes a
@@ -1013,9 +1095,9 @@ mod mutants_for_string {
     #[test]
     fn reclaim_tail_does_not_corrupt_frozen_string() {
         let arena = Arena::new();
-        let mut s = MString::with_capacity_in(256, &arena);
+        let mut s = arena.alloc_string_with_capacity(256);
         s.push_str("frozen!");
-        let frozen = s.into_arena_box_str();
+        let frozen = s.into_boxed_str();
         let _filler: multitude::vec::Vec<'_, u64> = {
             let mut v = arena.alloc_vec_with_capacity::<u64>(64);
             for i in 0..64 {

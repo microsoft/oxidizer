@@ -8,13 +8,13 @@
 //! below the current floor are returned to the system, and any cached
 //! chunks below the floor are evicted at the next floor bump.
 #![cfg(feature = "stats")]
-use multitude::{Arena, ArenaBuilder};
+use multitude::Arena;
 
 /// Bumping the cache class via successive refills should evict
 /// previously cached small chunks, returning them to the system.
 #[test]
 fn cache_floor_evicts_smaller_chunks_on_bump() {
-    let arena: Arena = ArenaBuilder::new().build();
+    let arena: Arena = Arena::builder().build();
     // Trigger several refills so the local-class ratchet advances.
     // Each `alloc_slice_fill_with` of an increasing length forces a
     // refill once the current chunk runs out, advancing the ratchet.
@@ -36,7 +36,7 @@ fn cache_floor_evicts_smaller_chunks_on_bump() {
 /// size) is returned to the system rather than cached.
 #[test]
 fn release_below_floor_bypasses_cache() {
-    let arena: Arena = ArenaBuilder::new().build();
+    let arena: Arena = Arena::builder().build();
     // Drive the ratchet up to class 7 by issuing many shared-chunk refills.
     for _ in 0..NUM_REFILLS {
         // Each alloc_arc forces a small-chunk shared allocation if the
