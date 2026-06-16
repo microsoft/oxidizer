@@ -15,7 +15,6 @@
 
 mod common;
 
-// === merged from tests/utf16_smoke.rs ===
 mod utf16_smoke {
 
     use multitude::Arena;
@@ -64,7 +63,6 @@ mod utf16_smoke {
     }
 }
 
-// === merged from tests/utf16_string_builder.rs ===
 mod utf16_string_builder {
 
     use multitude::{Arena, FromIn as _};
@@ -379,7 +377,6 @@ mod utf16_string_builder {
     extern crate alloc;
 }
 
-// === merged from tests/utf16_format.rs ===
 mod utf16_format {
 
     use core::fmt;
@@ -433,7 +430,6 @@ mod utf16_format {
     }
 }
 
-// === merged from tests/utf16_serde.rs ===
 mod utf16_serde {
 
     use multitude::Arena;
@@ -468,7 +464,6 @@ mod utf16_serde {
     }
 }
 
-// === merged from tests/utf16_cross_thread.rs ===
 mod utf16_cross_thread {
 
     use core::sync::atomic::{AtomicUsize, Ordering};
@@ -514,7 +509,6 @@ mod utf16_cross_thread {
     }
 }
 
-// === merged from tests/utf16_coverage.rs ===
 mod utf16_coverage {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -659,7 +653,6 @@ mod utf16_coverage {
         s.push_str(utf16str!("abc"));
         s.truncate(10);
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
-        // Folded from_mutants_extras_utf16_scattered::utf16_truncate_to_current_length_is_noop.
         s.truncate(3);
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
         assert_eq!(s.len(), 3);
@@ -717,6 +710,17 @@ mod utf16_coverage {
         let a = fail_arena();
         let mut s = a.alloc_utf16_string();
         assert!(s.try_push('a').is_err());
+    }
+
+    #[test]
+    fn try_push_appends_chars() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.try_push('a').unwrap();
+        s.try_push('β').unwrap();
+        s.try_push('💖').unwrap(); // surrogate pair: +2 u16
+        assert_eq!(s.len(), 4);
+        assert_eq!(s.as_utf16_str(), utf16str!("aβ💖"));
     }
 
     #[test]
@@ -1200,7 +1204,6 @@ mod utf16_coverage {
     }
 }
 
-// === merged from tests/mutants_utf16_strings.rs ===
 mod mutants_for_utf16_strings {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1215,17 +1218,6 @@ mod mutants_for_utf16_strings {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    /// Kills `utf16_string.rs:191:20 > → >=` in `truncate`.
-    ///
-    /// `truncate(new_len)` performs a boundary check `new_len > 0` to
-    /// guard a surrogate-pair assert. With `>=`, the assert path is
-    /// taken for `new_len == 0` and reads `self.as_slice()[0]` — which
-    /// is safe (empty slice indexing panics deterministically when
-    /// `len == 0`, but in our scenario `len > 0`). We instead rely on
-    /// the *post-truncate length* invariant: truncating to 0 must leave
-    /// the string empty. With `>=` (mutant), the function panics on
-    /// surrogate check before assigning `self.len = 0`. Either way
-    /// `len == 0` after a successful truncate(0).
     #[test]
     fn truncate_to_zero_clears_string() {
         let arena = Arena::new();
@@ -1235,18 +1227,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.as_utf16_str(), utf16str!(""));
     }
 
-    /// Kills `utf16_string.rs:203:26 || → &&` and `206:38 - → /` and
-    /// `207:43 * → +//` in `shrink_to_fit`.
-    ///
-    /// Pre-conditions:
-    /// - `cap == 0 || len == cap` returns early; otherwise shrink.
-    /// - With `&&`: early-return only when both, so otherwise-shrink path
-    ///   runs even when `cap == 0` → UB-ish pointer math on dangling.
-    /// - With `- → /`: `cap - len → cap / len` (wrong reclaim units).
-    /// - With `* → + | /`: byte-count math wrong → wrong reclaim_bytes.
-    ///
-    /// To exercise: build a Utf16String with known cap > len, shrink_to_fit,
-    /// assert capacity drops to `len`.
     #[test]
     fn shrink_to_fit_reduces_capacity_to_len() {
         let arena = Arena::new();
@@ -1263,15 +1243,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.capacity(), 3);
     }
 
-    /// Kills `utf16_string.rs:260:19 > → >=` (`try_push_from_str`),
-    /// `277:19 > → >=` (`try_push_slice`), `298:19 > → >=` (`try_reserve`):
-    /// the `if needed > self.cap { try_grow }` boundary. With `>=`, the
-    /// grow path runs even when capacity already suffices.
-    ///
-    /// Detection: call try_reserve with a value that produces `needed
-    /// == cap` exactly. With `>` the grow is skipped (no observable
-    /// change); with `>=` the buffer is reallocated → observable via
-    /// the change in pointer identity (`as_ptr()` differs).
     #[test]
     fn reserve_exact_capacity_does_not_regrow() {
         let arena = Arena::new();
@@ -1307,16 +1278,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(ptr_before, ptr_after, "push at exact-fit must not reallocate");
     }
 
-    /// Kills `utf16_string.rs:318:16 > → >=` and `330:19 > → >=` and
-    /// `337:76 - → +` in `insert_slice`.
-    ///
-    /// 318:16 is `if idx > 0 && idx < self.len` (surrogate check guard).
-    /// 330:19 is `if needed > self.cap { grow }` (same shape as above).
-    /// 337:76 is `self.len - idx` (memmove count). `- → +` produces
-    /// `self.len + idx` → reads past the buffer → corruption or panic.
-    ///
-    /// Test by inserting a slice that fits exactly and asserting both
-    /// content and length post-insert.
     #[test]
     fn insert_slice_preserves_content() {
         let arena = Arena::new();
@@ -1330,7 +1291,6 @@ mod mutants_for_utf16_strings {
         s.insert_utf16_str(s.len(), utf16str!("!"));
         assert_eq!(s.as_utf16_str(), utf16str!("hXXello!"));
 
-        // Folded from_coverage_extras_utf16::utf16_string_insert_str_at_end_of_string.
         let mut appended = arena.alloc_utf16_string();
         appended.push_str(utf16str!("hi"));
         appended.insert_utf16_str(appended.len(), utf16str!("!"));
@@ -1353,15 +1313,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(t.as_ptr(), ptr_before, "insert at exact-fit must not reallocate");
     }
 
-    /// Kills `utf16_string.rs:356:72 - → +`, `356:78 - → +/*` in `remove`.
-    ///
-    /// `self.len - idx - n` is the memmove byte count after extracting
-    /// the char at `idx` (`n` code units wide). The two `-` operators
-    /// are: `(len - idx) - n` (binding `len - idx` first). Wrong arithmetic
-    /// reads past the buffer or produces a giant count.
-    ///
-    /// Test: build a string with content, remove from the middle, and
-    /// verify the result and length.
     #[test]
     fn remove_middle_preserves_content() {
         let arena = Arena::new();
@@ -1381,7 +1332,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(removed, 'h');
         assert_eq!(s.as_utf16_str(), utf16str!("ll"));
 
-        // Folded from_mutants_extras_utf16_scattered::utf16_remove_shifts_correct_byte_count.
         let mut s = arena.alloc_utf16_string();
         s.push_from_str("abcdefghij");
         assert_eq!(s.remove(4), 'e');
@@ -1392,14 +1342,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.as_slice().to_vec(), widestring::Utf16String::from_str("bcdfghi").into_vec());
     }
 
-    /// Kills `utf16_string.rs:396:22 && → ||`, `396:18 > → >=`,
-    /// `396:31 < → <=` (the surrogate-guard `start > 0 && start <
-    /// self.len`), `403:16/27` (same for end), `418:20 > → >=`
-    /// (`new_len > self.cap`), and `424:81 - → +` (`self.len - end`
-    /// memmove count) in `replace_range`.
-    ///
-    /// The test exercises replace_range with several boundary positions
-    /// and verifies output content and length.
     #[test]
     fn replace_range_at_boundaries() {
         let arena = Arena::new();
@@ -1409,13 +1351,11 @@ mod mutants_for_utf16_strings {
         s.replace_range(.., utf16str!("WORLD"));
         assert_eq!(s.as_utf16_str(), utf16str!("WORLD"));
 
-        // Folded from_coverage_extras_utf16::utf16_string_replace_range_full_with_longer.
         let mut s = arena.alloc_utf16_string();
         s.push_str(utf16str!("abc"));
         s.replace_range(0..3, utf16str!("xyzw"));
         assert_eq!(s.as_utf16_str(), utf16str!("xyzw"));
 
-        // Folded from_coverage_extras_utf16::utf16_string_replace_range_full_with_shorter.
         let mut s = arena.alloc_utf16_string();
         s.push_str(utf16str!("abcdef"));
         s.replace_range(0..6, utf16str!("xy"));
@@ -1446,7 +1386,6 @@ mod mutants_for_utf16_strings {
         s.replace_range(2..2, utf16str!("--"));
         assert_eq!(s.as_utf16_str(), utf16str!("he--llo"));
 
-        // Folded from_coverage_extras_utf16::utf16_string_replace_range_empty_at_end.
         let mut s = arena.alloc_utf16_string();
         s.push_str(utf16str!("abc"));
         let n = s.len();
@@ -1459,13 +1398,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(s.as_utf16_str(), utf16str!("abc"));
     }
 
-    /// Kills `utf16_string.rs:466:21 == → !=` in `into_box`.
-    ///
-    /// The branch is `if self.cap == 0 { … return empty … }`. With `!=`,
-    /// the empty fast-path runs for non-empty strings (UB / wrong data)
-    /// and the data path runs for empty strings (reads from dangling).
-    /// We test both branches by freezing an empty and a non-empty
-    /// string into a `BoxUtf16Str`.
     #[test]
     fn into_box_handles_empty_and_non_empty() {
         let arena = Arena::new();
@@ -1524,20 +1456,6 @@ mod mutants_for_utf16_strings {
         assert_eq!(&*escaped, utf16str!("survives"));
     }
 
-    /// Kills `utf16_string.rs:491:29 - → /` in `try_reclaim_tail`.
-    ///
-    /// `total - used` (= unused trailing bytes). With `/` produces a tiny
-    /// reclaim amount → buffer cursor moves slightly back. The chunk
-    /// invariant is violated subtly but the next allocation may overlap
-    /// the still-live frozen string. Exercise:
-    /// 1. Build a Utf16String with extra capacity.
-    /// 2. Freeze into box (triggers try_reclaim_tail).
-    /// 3. Allocate more in the same arena.
-    /// 4. Read back the frozen string — it must still equal the original.
-    ///
-    /// With wrong reclaim arithmetic, the second allocation would
-    /// overlap the frozen string's tail (or the data pointer), corrupting
-    /// the readback.
     #[test]
     fn reclaim_tail_does_not_corrupt_frozen_string() {
         let arena = Arena::new();
@@ -1557,7 +1475,6 @@ mod mutants_for_utf16_strings {
     }
 }
 
-// === merged from tests/mutation_coverage.rs ===
 mod mutation_coverage {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -2593,15 +2510,9 @@ mod mutation_coverage {
     }
 }
 
-// === relocated from mutants_extras.rs (was mutants_for_kill3::utf16_*) ===
 mod utf16_tests {
     use multitude::Arena;
 
-    /// Kills: `utf16_string.rs:191:20` `> -> >=` in truncate
-    /// `if new_len > 0 { check boundary }`
-    /// If `>` becomes `>=`, truncate(0) would try to check
-    /// `self.as_slice()[0]` for surrogate boundary, but `new_len==0`
-    /// means we're clearing — no boundary check needed.
     #[test]
     fn utf16_191_truncate_to_zero() {
         let arena = Arena::new();
@@ -2626,12 +2537,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 1);
     }
 
-    /// Kills: `utf16_string.rs:203:26` `|| -> &&` in `shrink_to_fit`
-    /// `if self.cap == 0 || self.len == self.cap { return; }`
-    /// If `||` becomes `&&`, both conditions must be true to skip,
-    /// but cap==0 && len==cap is always cap==0 && len==0.
-    /// When cap > 0 && len == cap, `shrink_to_fit` would incorrectly
-    /// try to reclaim 0 bytes.
     #[test]
     fn utf16_203_shrink_to_fit_or_to_and() {
         let arena = Arena::new();
@@ -2652,8 +2557,6 @@ mod utf16_tests {
         assert_eq!(s2.len(), 0);
     }
 
-    /// Kills: `utf16_string.rs:206:38` `- -> /` in `shrink_to_fit`
-    /// `let reclaim_units = self.cap - self.len;`
     #[test]
     fn utf16_206_shrink_reclaim_units() {
         let arena = Arena::new();
@@ -2667,8 +2570,6 @@ mod utf16_tests {
         // (best-effort, so we just verify no crash)
     }
 
-    /// Kills: `utf16_string.rs:207:43` `* -> +` / `* -> /` in `shrink_to_fit`
-    /// `let reclaim_bytes = reclaim_units * core::mem::size_of::<u16>();`
     #[test]
     fn utf16_207_shrink_reclaim_bytes() {
         let arena = Arena::new();
@@ -2684,8 +2585,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 5);
     }
 
-    /// Kills: `utf16_string.rs:260:19` `> -> >=` in `try_push_from_str`
-    /// `if needed > self.cap { self.try_grow_to_at_least(needed)?; }`
     #[test]
     fn utf16_260_push_from_str_boundary() {
         let arena = Arena::new();
@@ -2703,8 +2602,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 6);
     }
 
-    /// Kills: `utf16_string.rs:277:19` `> -> >=` in `try_push_slice`
-    /// `if needed > self.cap { self.try_grow_to_at_least(needed)?; }`
     #[test]
     fn utf16_277_push_slice_boundary() {
         let arena = Arena::new();
@@ -2719,21 +2616,17 @@ mod utf16_tests {
         assert_eq!(s.len(), 4);
     }
 
-    /// Kills: `utf16_string.rs:298:19` `> -> >=` in `try_reserve`
     #[test]
     fn utf16_298_try_reserve_boundary() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string_with_capacity(10);
         s.push('A'); // len=1
         let cap_before = s.capacity();
-        // Folded mutant-kill: exact-fit reserve must short-circuit before the grow path.
         s.try_reserve(9).unwrap(); // needed=10==cap, no grow
         assert_eq!(s.capacity(), cap_before);
         s.try_reserve(10).unwrap(); // needed=11>cap, must grow
     }
 
-    /// Kills: `utf16_string.rs:318:16` `> -> >=` in `insert_slice` (idx <= self.len)
-    /// `utf16_string.rs:330:19` `> -> >=` in `insert_slice` (needed > self.cap)
     #[test]
     fn utf16_318_330_insert_slice() {
         let arena = Arena::new();
@@ -2752,10 +2645,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 6);
     }
 
-    /// Kills: `utf16_string.rs:337:76` `- -> +` in `insert_slice`
-    /// `core::ptr::copy(base.add(idx), base.add(idx + s_len), self.len - idx);`
-    /// If `-` becomes `+`, the copy length is self.len + idx (too much),
-    /// reading/writing out of bounds.
     #[test]
     fn utf16_337_insert_copy_length() {
         let arena = Arena::new();
@@ -2776,8 +2665,6 @@ mod utf16_tests {
         assert_eq!(slice[5], 'E' as u16);
     }
 
-    /// Kills: `utf16_string.rs:356:72` `- -> +` and 356:78 `- -> +` / `- -> /`
-    /// In remove: `self.len - idx - n` — shift length after removal.
     #[test]
     fn utf16_356_remove_shift() {
         let arena = Arena::new();
@@ -2798,9 +2685,6 @@ mod utf16_tests {
         assert_eq!(slice[3], 'E' as u16);
     }
 
-    /// Kills: `utf16_string.rs:396:18` `> -> >=` and 396:22 `&& -> ||` and 396:31 `< -> <=`
-    /// These are the boundary checks in `replace_range`:
-    /// `if start > 0 && start < self.len { check boundary }`
     #[test]
     fn utf16_396_replace_range_start_boundary() {
         let arena = Arena::new();
@@ -2819,9 +2703,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 5);
     }
 
-    /// Kills: `utf16_string.rs:403:16` `> -> ==` / `> -> <` / `> -> >=`
-    /// and 403:27 `< -> >`
-    /// `if end > 0 && end < self.len { check boundary }`
     #[test]
     fn utf16_403_replace_range_end_boundary() {
         let arena = Arena::new();
@@ -2839,8 +2720,6 @@ mod utf16_tests {
         assert_eq!(s.len(), 3);
     }
 
-    /// Kills: `utf16_string.rs:418:20` `> -> >=` in `replace_range`
-    /// `if new_len > self.cap { self.grow_to_at_least(new_len); }`
     #[test]
     fn utf16_418_replace_range_grow_boundary() {
         let arena = Arena::new();
@@ -2857,8 +2736,6 @@ mod utf16_tests {
         assert_eq!(s.as_slice()[2], 'X' as u16);
     }
 
-    /// Kills: `utf16_string.rs:424:81` `- -> +` in `replace_range`
-    /// `core::ptr::copy(base.add(end), base.add(start + inserted), self.len - end);`
     #[test]
     fn utf16_424_replace_range_copy() {
         let arena = Arena::new();
@@ -2885,12 +2762,6 @@ mod utf16_tests {
 mod utf16_round2 {
     use multitude::Arena;
 
-    /// Kills: `utf16_string.rs:337:76` `- -> +` in `insert_slice` copy
-    /// `core::ptr::copy(base.add(idx), base.add(idx + s_len), self.len - idx)`
-    /// If `- -> +`: copy count is `self.len + idx` instead of `self.len - idx`.
-    /// For a string "ABCDE" (len=5) inserting at idx=2:
-    ///   Correct count = 5 - 2 = 3 (shift C,D,E right)
-    ///   Mutated count = 5 + 2 = 7 (reads 7 u16s starting at idx, goes OOB)
     #[test]
     fn utf16_337_insert_copy_oob() {
         let arena = Arena::new();
@@ -2918,15 +2789,6 @@ mod utf16_round2 {
         assert_eq!(slice[10], 'J' as u16);
     }
 
-    /// Kills: `utf16_string.rs:356:72` `- -> +` and 356:78 `- -> +` / `- -> /`
-    /// In remove: copy(base.add(idx + n), base.add(idx), self.len - idx - n)
-    /// 356:72 is the outer `-`: `self.len - idx` becomes `self.len + idx`
-    /// 356:78 is the inner `-`: `(self.len - idx) - n` or `(self.len + idx) - n`
-    /// For "ABCDEFGHIJ" (len=10), remove at idx=2 (n=1):
-    ///   Correct: copy 7 elements from idx=3 to idx=2
-    ///   356:72 `+ -> +`: copy `10 + 2 - 1 = 11` elements (OOB)
-    ///   356:78 `- -> +`: copy `10 - 2 + 1 = 9` elements (reads past end)
-    ///   356:78 `- -> /`: copy `10 - 2 / 1 = 8` elements (wrong count)
     #[test]
     fn utf16_356_remove_long_string() {
         let arena = Arena::new();
@@ -2946,12 +2808,6 @@ mod utf16_round2 {
         assert_eq!(s.as_slice(), &expected);
     }
 
-    /// Kills: `utf16_string.rs:403:16` `> -> ==` — end boundary check
-    /// `if end > 0 && end < self.len { check boundary }`
-    /// With ==: `if end == 0 && end < self.len` — only checks boundary
-    /// when end==0, which is never valid (end==0 && end < len means
-    /// end is 0 but we check character at index 0, which is always valid).
-    /// Need to test: end > 0 && end < len where end is at a valid boundary.
     #[test]
     fn utf16_403_end_boundary_mid_string() {
         let arena = Arena::new();
@@ -2970,9 +2826,6 @@ mod utf16_round2 {
         assert_eq!(s.as_slice()[3], 'X' as u16);
     }
 
-    /// Kills: `utf16_string.rs:403:16` `> -> >=` — end boundary
-    /// If `>= 0` is always true for usize, the boundary check always runs.
-    /// This means end==0 (which is valid) would try to check character boundary.
     #[test]
     fn utf16_403_end_zero() {
         let arena = Arena::new();
@@ -2985,16 +2838,6 @@ mod utf16_round2 {
         assert_eq!(s.len(), 2);
     }
 
-    /// Kills: `utf16_string.rs:403:27` `< -> >` — end boundary
-    /// `if end > 0 && end < self.len` becomes `end > 0 && end > self.len`
-    /// Would check boundary when end > len, which is already rejected by
-    /// the `assert!(start <= end && end <= self.len)` above. So this should
-    /// be equivalent — the `end > len` case never reaches this check.
-    /// But wait: `end == self.len` skips the check with `<`. With `>`,
-    /// `end > self.len` also skips it. So the only difference is `end < self.len`
-    /// vs `end > self.len`. When end < len, we need to check boundary.
-    /// With `>`, we skip the check when end is in the middle, allowing
-    /// `replace_range` to split a surrogate pair at the end boundary.
     #[test]
     fn utf16_403_27_end_surrogate_check() {
         let arena = Arena::new();
@@ -3011,15 +2854,7 @@ mod utf16_round2 {
         assert!(result.is_err(), "replace_range ending at low surrogate must panic");
     }
 
-    /// Kills: `utf16_string.rs:418:20` `> -> >=` in `replace_range` grow
-    /// `if new_len > self.cap { grow }`
-    /// With >=: `new_len` == cap triggers unnecessary grow.
-    /// The grow is a no-op since `grow_to_at_least` returns early for `min_cap` <= cap.
-    /// So this is EQUIVALENT.
     // ---
-    /// Kills: `utf16_string.rs:424:81` `- -> +` in `replace_range` copy
-    /// `copy(base.add(end), base.add(start + inserted), self.len - end)`
-    /// With +: `self.len + end` (huge copy, OOB)
     #[test]
     fn utf16_424_replace_range_tail_copy() {
         let arena = Arena::new();
@@ -3037,9 +2872,6 @@ mod utf16_round2 {
         assert_eq!(s.as_slice(), &expected);
     }
 
-    /// Kills: `utf16_string.rs:206:38` `- -> /` in `shrink_to_fit`
-    /// `reclaim_units = self.cap - self.len` becomes `self.cap / self.len`
-    /// For cap=20, len=2: correct=18, mutated=10. Wrong reclaim.
     #[test]
     fn utf16_206_shrink_reclaim_v2() {
         let arena = Arena::new();
@@ -3054,10 +2886,6 @@ mod utf16_round2 {
         assert_eq!(s.as_slice()[0], 'A' as u16);
     }
 
-    /// Kills: `utf16_string.rs:207:43` `* -> +` and `* -> /` in `shrink_to_fit`
-    /// `reclaim_bytes = reclaim_units * size_of::<u16>()` (= `reclaim_units` * 2)
-    /// With +: `reclaim_bytes` = `reclaim_units` + 2 (wrong)
-    /// With /: `reclaim_bytes` = `reclaim_units` / 2 (wrong)
     #[test]
     fn utf16_207_shrink_bytes_v2() {
         let arena = Arena::new();
@@ -3078,7 +2906,6 @@ mod utf16_round2 {
     // reclaim_bytes = 0, try_shrink_at_cursor(end, 0) is a no-op. EQUIVALENT.
 }
 
-// === relocated from coverage_extras.rs (utf16-gated tests) ===
 mod from_coverage_extras_utf16 {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
@@ -3229,7 +3056,6 @@ mod from_coverage_extras_utf16 {
     }
 }
 
-// === relocated from mutants_extras.rs (utf16-gated tests) ===
 mod from_mutants_extras_utf16_scattered {
     #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
     #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
@@ -3258,10 +3084,6 @@ mod from_mutants_extras_utf16_scattered {
     // vec/vec.rs mutants
     // =====================================================================
 
-    /// Kills: vec.rs:362:21 `< -> <=` in `shrink_to_fit`
-    /// `if self.len < self.cap && self.realloc(self.len).is_err() { ... }`
-    /// If `<` becomes `<=`, len == cap would trigger a realloc to same
-    /// size, which is a no-op but shouldn't happen.
     #[test]
     fn vec_362_shrink_to_fit_boundary() {
         let arena = Arena::new();
@@ -3284,11 +3106,6 @@ mod from_mutants_extras_utf16_scattered {
     // Vec stronger tests
     // =====================================================================
 
-    /// Kills: vec.rs:451:34 `- -> +` in resize
-    /// `self.reserve(new_len - self.len)` becomes `self.reserve(new_len + self.len)`
-    /// For len=2, `new_len=5`: correct reserve=3, mutated=7.
-    /// Extra reservation succeeds but wastes space.
-    /// With tight budget, the extra reservation might fail.
     #[test]
     fn vec_451_resize_tight_budget() {
         let arena = Arena::builder().byte_budget(128 * 1024).build();
@@ -3304,17 +3121,6 @@ mod from_mutants_extras_utf16_scattered {
         assert_eq!(v[4], 42);
     }
 
-    /// Kills `utf16_string.rs:207:43 * → +` in `Utf16String::shrink_to_fit`.
-    ///
-    /// `reclaim_bytes = reclaim_units * sizeof::<u16>()`:
-    /// * Original `*`: with `reclaim_units = 8, sizeof(u16) = 2`,
-    ///   `reclaim_bytes = 16`.
-    /// * Mutated `+`: `reclaim_bytes = 10`.
-    ///
-    /// We observe through the arena cursor: after a `shrink_to_fit`, the
-    /// next allocation should re-use the freed tail. With the wrong
-    /// `reclaim_bytes`, the cursor moves back by a different amount and
-    /// the next allocation lands at a different offset.
     #[test]
     fn utf16_shrink_to_fit_uses_multiplication() {
         use multitude::strings::Utf16String;
@@ -3349,28 +3155,6 @@ mod from_mutants_extras_utf16_scattered {
         assert_eq!(last, u16::from(b'z'));
     }
 
-    /// Kills `utf16_string.rs:356:72 - → +` and `356:78 - → +` in `Utf16String::remove`.
-    ///
-    /// `core::ptr::copy(base.add(idx + n), base.add(idx), self.len - idx - n)`:
-    /// * Original: shifts the tail left by `n`, copying `len - idx - n` units.
-    /// * Mutated col 72 `- → +`: shifts `len + idx - n` units → wildly large
-    ///   and writes out-of-bounds garbage into the buffer.
-    /// * Mutated col 78 `- → +`: shifts `len - idx + n` units → off-by-`2n`
-    ///   into the tail, leaving the wrong content.
-    ///
-    /// We assert exact post-remove content over many calls.
-    /// Kills `utf16_string.rs:260:19`, `277:19`, `298:19`, `318:16`, `396:18`,
-    /// `418:20` — all `> → >=` boundary mutations on
-    /// `if needed > self.cap { grow }`.
-    ///
-    /// At `needed == self.cap` (exactly fits): original skips the grow
-    /// (no-op). Mutated `>=` invokes `try_grow_to_at_least(cap)` which is
-    /// itself a no-op (returns Ok immediately when `min_cap` <= cap).
-    ///
-    /// These mutations are therefore **equivalent**. We document this in
-    /// `MUTANTS_EQUIVALENT.md` and verify the observable: after the push
-    /// that lands exactly at cap, the content and cap are identical to
-    /// what they would be under either operator.
     #[test]
     fn utf16_exact_fit_push_is_observably_identical() {
         use multitude::strings::Utf16String;

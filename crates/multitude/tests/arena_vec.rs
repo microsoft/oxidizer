@@ -1398,7 +1398,6 @@ mod io_write {
     }
 }
 
-// === merged from tests/mutants_vec.rs ===
 mod mutants_for_vec {
     #![allow(clippy::std_instead_of_core, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
@@ -1424,15 +1423,6 @@ mod mutants_for_vec {
         }
     }
 
-    /// Kills `vec/vec.rs:362:21 < → <=` in `shrink_to_fit`.
-    ///
-    /// `if self.len < self.cap && self.realloc(self.len).is_err()`.
-    /// With `<=`, the realloc branch runs even when `len == cap` (full
-    /// vec → spurious realloc to same size). With `<`, full vecs skip
-    /// the realloc.
-    ///
-    /// We can detect by ptr-identity: a no-op shrink at `len == cap`
-    /// must not relocate the buffer.
     #[test]
     fn shrink_to_fit_full_vec_is_noop() {
         let arena = Arena::new();
@@ -1442,23 +1432,12 @@ mod mutants_for_vec {
         }
         assert_eq!(v.len(), v.capacity());
         let ptr_before = v.as_ptr();
-        // Folded mutant-kill: vec.rs:359 `< -> <=` must still skip realloc at len == cap.
         v.shrink_to_fit();
         let ptr_after = v.as_ptr();
         assert_eq!(ptr_before, ptr_after, "shrink_to_fit at len==cap must not reallocate");
         assert_eq!(v.len(), 8);
     }
 
-    /// Kills `vec/vec.rs:451:34 - → +` (`reserve(new_len - self.len)`) and
-    /// `460:46 - → +/`, `461:30 > → >=` (guard's `added > 0` check), and
-    /// `473:37 - → +`, `474:26 > → >=` (the loop bound `total_new` and
-    /// `self.len < new_len - 1`).
-    ///
-    /// `resize` to a larger length must clone the value into each new
-    /// slot exactly once and drop the original `value` argument once.
-    /// Strict assertions: final length, every element equals the value,
-    /// and the drop counter for the value matches the expected clone-
-    /// and-move count.
     #[test]
     fn resize_grows_with_correct_clone_count() {
         let arena = Arena::new();
@@ -1496,15 +1475,6 @@ mod mutants_for_vec {
         assert_eq!(counter.load(Ordering::Relaxed), 10);
     }
 
-    /// Kills `vec/vec.rs:474:26 > → >=` and `473:37 - → +` via the
-    /// degenerate `total_new == 0` path of `resize`.
-    ///
-    /// When `new_len == self.len`, `total_new == 0` and the loop body
-    /// must not run. With mutations the loop boundary is misaligned →
-    /// either an extra clone happens or the last slot is written twice
-    /// (UB / wrong content). Concretely: resize(5, …) on a vec of length
-    /// 5 must drop the `value` argument exactly once and leave the vec
-    /// unchanged.
     #[test]
     fn resize_to_same_length_is_noop() {
         let arena = Arena::new();
@@ -1534,25 +1504,6 @@ mod mutants_for_vec {
         assert_eq!(counter.load(Ordering::Relaxed), 6);
     }
 
-    /// Kills the `realloc` boundary mutants `vec/vec.rs:808:31 && → ||`,
-    /// `808:20 > → >=`, `808:43 > → >=`, `819:21 > → >=`, `828:20 > → ==`,
-    /// `828:20 > → >=`.
-    ///
-    /// `realloc(new_cap)`:
-    /// - line 808: `if new_cap > self.cap && self.cap > 0` (try in-place
-    ///   growth gate). With `>=` we'd attempt in-place at exact size (no
-    ///   change but harmless). With `||` we'd attempt in-place even for
-    ///   shrinks → wrong path → copy semantics differ.
-    /// - line 819: `if self.len > 0 { copy_nonoverlapping(…) }`. With
-    ///   `>=` zero-length vec triggers a memcpy of 0 bytes — harmless but
-    ///   observable via behavior identical, so this might be equivalent
-    ///   to original. We still pin via a 0-length grow.
-    /// - line 828: `if old_cap > 0 { bump_relocation }`. The relocation
-    ///   counter is only bumped when there was a prior alloc. With `==`
-    ///   or `>=` the counter is wrong.
-    ///
-    /// We exercise growing past initial capacity, repeated pushes, and
-    /// shrink_to_fit. Stats counter `relocations` is the observable.
     #[cfg(feature = "stats")]
     #[test]
     fn realloc_growth_and_relocation_counter() {
@@ -1579,12 +1530,6 @@ mod mutants_for_vec {
         let _ = s.relocations;
     }
 
-    /// Kills `vec/vec.rs:762:17 += → -=` and `762:17 += → *=` in
-    /// `into_box`.
-    ///
-    /// `idx += 1` after each read. With `-=` idx underflows → next read
-    /// is wildly out of bounds → segfault/UB. With `*=` idx stays 0 →
-    /// the same element is read N times → wrong output.
     #[test]
     fn into_box_yields_distinct_elements() {
         use multitude::vec::Vec as MVec;

@@ -158,7 +158,7 @@ macro_rules! impl_utf16_str_common {
         #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
         impl<A: allocator_api2::alloc::Allocator + Clone> serde::ser::Serialize for $Ty<A> {
             fn serialize<S: serde::ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_str(&self.as_utf16_str().to_string())
+                serializer.collect_str(self.as_utf16_str())
             }
         }
     };

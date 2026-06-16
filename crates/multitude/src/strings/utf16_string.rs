@@ -71,9 +71,18 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Construct an `Utf16String` containing `s`, copied into `arena`.
     #[must_use]
     pub fn from_utf16_str_in(s: &Utf16Str, arena: &'a Arena<A>) -> Self {
-        let mut out = Self::with_capacity_in(s.len(), arena);
-        out.push_str(s);
-        out
+        crate::arena::ExpectAlloc::expect_alloc(Self::try_from_utf16_str_in(s, arena))
+    }
+
+    /// Fallible variant of [`Self::from_utf16_str_in`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    pub fn try_from_utf16_str_in(s: &Utf16Str, arena: &'a Arena<A>) -> Result<Self, AllocError> {
+        let mut out = Self::try_with_capacity_in(s.len(), arena)?;
+        out.try_push_str(s)?;
+        Ok(out)
     }
 
     /// Construct an `Utf16String` by transcoding a `&str` into UTF-16,
@@ -173,9 +182,23 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-16
     /// character boundary, or if the backing allocator fails on growth.
     pub fn insert(&mut self, idx: usize, ch: char) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, ch));
+    }
+
+    /// Fallible variant of [`Self::insert`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is greater than `self.len()` or not on a UTF-16
+    /// character boundary.
+    pub fn try_insert(&mut self, idx: usize, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u16; 2];
         let units = ch.encode_utf16(&mut buf);
-        self.insert_units(idx, units);
+        self.try_insert_units(idx, units)
     }
 
     /// Insert a `Utf16Str` at element index `idx`.
@@ -185,11 +208,27 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if `idx` is greater than `self.len()`, if `idx` is not
     /// on a UTF-16 character boundary, if the resulting length would
     /// overflow `usize`, or if the backing allocator fails on growth.
+    /// Use [`Self::try_insert_utf16_str`] for a fallible variant.
     pub fn insert_utf16_str(&mut self, idx: usize, s: &Utf16Str) {
-        self.insert_units(idx, s.as_slice());
+        crate::arena::ExpectAlloc::expect_alloc(self.try_insert_utf16_str(idx, s));
     }
 
-    fn insert_units(&mut self, idx: usize, units: &[u16]) {
+    /// Fallible variant of [`Self::insert_utf16_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth, or
+    /// if the resulting length would overflow `usize`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx` is greater than `self.len()` or if `idx` is not on a
+    /// UTF-16 character boundary.
+    pub fn try_insert_utf16_str(&mut self, idx: usize, s: &Utf16Str) -> Result<(), AllocError> {
+        self.try_insert_units(idx, s.as_slice())
+    }
+
+    fn try_insert_units(&mut self, idx: usize, units: &[u16]) -> Result<(), AllocError> {
         let len = self.inner.len();
         assert!(
             idx <= len,
@@ -201,14 +240,15 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         );
         let added = units.len();
         if added == 0 {
-            return;
+            return Ok(());
         }
-        self.inner.reserve(added);
+        self.inner.try_reserve(added)?;
         for &u in units {
             self.inner.push(u);
         }
         let region = &mut self.inner.as_mut_slice()[idx..len + added];
         region.rotate_right(added);
+        Ok(())
     }
 
     /// Remove the character at element index `idx` and return it.
@@ -240,30 +280,52 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// # Panic safety
     ///
-    /// If `f` panics, `self` is left **unchanged** (the original
-    /// contents are preserved). This differs from
-    /// [`crate::strings::String::retain`] which commits the
-    /// already-processed prefix on panic. The difference is internal
-    /// implementation detail: this variant uses a side buffer and
-    /// only commits if the full pass completes without panicking,
-    /// whereas the UTF-8 variant edits in place.
-    ///
-    /// # Allocator
-    ///
-    /// Allocates the side buffer from the **global** allocator, not
-    /// the arena. Callers that require zero arena-foreign allocations
-    /// in their hot path should avoid this method.
+    /// Matches [`std::string::String::retain`] and
+    /// [`String::retain`](crate::strings::String::retain): if `f` panics, the
+    /// characters processed so far are committed (retained ones compacted into
+    /// place) and the unprocessed tail is dropped, leaving `self` well-formed
+    /// UTF-16. Edits happen in place — no transient allocation.
     pub fn retain<F: FnMut(char) -> bool>(&mut self, mut f: F) {
-        let mut kept: allocator_api2::vec::Vec<u16> = allocator_api2::vec::Vec::with_capacity(self.len());
-        for ch in self.as_utf16_str().chars() {
-            if f(ch) {
-                let mut buf = [0u16; 2];
-                let units = ch.encode_utf16(&mut buf);
-                kept.extend_from_slice(units);
+        struct Guard<'g, 'a, A: Allocator + Clone> {
+            inner: &'g mut Vec<'a, u16, A>,
+            idx: usize,
+            del_units: usize,
+        }
+        impl<A: Allocator + Clone> Drop for Guard<'_, '_, A> {
+            fn drop(&mut self) {
+                // `u16` has no `Drop`, so this only lowers the length to the
+                // retained, already-compacted prefix.
+                self.inner.truncate(self.idx - self.del_units);
             }
         }
-        self.inner.clear();
-        self.inner.extend_from_slice(kept.as_slice());
+
+        let len = self.inner.len();
+
+        let mut guard = Guard {
+            inner: &mut self.inner,
+            idx: 0,
+            del_units: 0,
+        };
+        while guard.idx < len {
+            // SAFETY: `guard.idx` always lands on a UTF-16 char boundary (it
+            // advances by whole `char` widths) and is `< len`, so the tail is
+            // well-formed UTF-16 with at least one char.
+            let ch = unsafe { Utf16Str::from_slice_unchecked(&guard.inner.as_slice()[guard.idx..len]) }
+                .chars()
+                .next()
+                .expect("idx < len guarantees a remaining char");
+            let ch_len = ch.len_utf16();
+            if f(ch) {
+                let dst = guard.idx - guard.del_units;
+                guard.inner.as_mut_slice().copy_within(guard.idx..guard.idx + ch_len, dst);
+            } else {
+                guard.del_units += ch_len;
+            }
+            guard.idx += ch_len;
+        }
+        // Normal completion: `idx == len`; the guard truncates to
+        // `len - del_units`, committing the retained units.
+        drop(guard);
     }
 
     /// Replace the elements in `range` with the contents of `replace_with`.
@@ -274,6 +336,22 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// UTF-16 character boundaries, the resulting length would overflow
     /// `usize`, or the backing allocator fails on growth.
     pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &Utf16Str) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_replace_range(range, replace_with));
+    }
+
+    /// Fallible variant of [`Self::replace_range`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth, or
+    /// if the resulting length would overflow `usize`. On error `self` is
+    /// left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either bound is out of range or the bounds are not on
+    /// UTF-16 character boundaries.
+    pub fn try_replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &Utf16Str) -> Result<(), AllocError> {
         let len = self.len();
         let start = match range.start_bound() {
             Bound::Included(&i) => i,
@@ -297,12 +375,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
             "Utf16String::replace_range: end is not on a UTF-16 char boundary"
         );
 
-        let mut staging: allocator_api2::vec::Vec<u16> = allocator_api2::vec::Vec::with_capacity(start + replace_with.len() + (len - end));
-        staging.extend_from_slice(&self.as_slice()[..start]);
-        staging.extend_from_slice(replace_with.as_slice());
-        staging.extend_from_slice(&self.as_slice()[end..]);
-        self.inner.clear();
-        self.inner.extend_from_slice(staging.as_slice());
+        self.inner.try_replace_range_with_slice(start, end, replace_with.as_slice())
     }
 
     /// Consume the string, returning the underlying `u16` vector. The
@@ -331,16 +404,32 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Panics
     ///
     /// Panics if `at` is not on a `char` boundary (i.e. would split a
-    /// surrogate pair), or is past the end.
+    /// surrogate pair), or is past the end. Use [`Self::try_split_off`] for a
+    /// fallible variant.
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+    }
+
+    /// Fallible variant of [`Self::split_off`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails. On error `self`
+    /// is left unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at` is not on a `char` boundary (i.e. would split a
+    /// surrogate pair), or is past the end.
+    pub fn try_split_off(&mut self, at: usize) -> Result<Self, AllocError> {
         assert!(
             self.as_utf16_str().is_char_boundary(at),
             "Utf16String::split_off: `at` is not a char boundary"
         );
-        Self {
-            inner: self.inner.split_off(at),
-        }
+        Ok(Self {
+            inner: self.inner.try_split_off(at)?,
+        })
     }
 
     /// Clone the `u16` units in `src` and append them to the end.
@@ -351,8 +440,23 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Panics
     ///
     /// Panics if the range is out of bounds or its bounds are not on `char`
-    /// boundaries (i.e. would split a surrogate pair).
+    /// boundaries (i.e. would split a surrogate pair). Use
+    /// [`Self::try_extend_from_within`] for a fallible variant.
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+    }
+
+    /// Fallible variant of [`Self::extend_from_within`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails while reserving.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds or its bounds are not on `char`
+    /// boundaries (i.e. would split a surrogate pair).
+    pub fn try_extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) -> Result<(), AllocError> {
         let len = self.inner.len();
         let start = match src.start_bound() {
             Bound::Included(&i) => i,
@@ -369,7 +473,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         let s_ref = self.as_utf16_str();
         assert!(s_ref.is_char_boundary(start), "extend_from_within: start is not on a char boundary");
         assert!(s_ref.is_char_boundary(end), "extend_from_within: end is not on a char boundary");
-        self.inner.extend_from_within(start..end);
+        self.inner.try_extend_from_within(start..end)
     }
 
     /// Freeze into an owned, mutable
@@ -380,10 +484,49 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     ///
     /// # Panics
     ///
-    /// Panics if the underlying allocator fails.
+    /// Panics if the underlying allocator fails. Use
+    /// [`Self::try_into_boxed_utf16_str`] for a fallible variant.
     #[must_use]
     pub fn into_boxed_utf16_str(self) -> BoxUtf16Str<A> {
-        self.inner.arena().alloc_utf16_str_box(self.as_utf16_str())
+        crate::arena::ExpectAlloc::expect_alloc(self.try_into_boxed_utf16_str())
+    }
+
+    /// Fallible variant of [`Self::into_boxed_utf16_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_boxed_utf16_str(self) -> Result<BoxUtf16Str<A>, AllocError> {
+        self.inner.arena().try_alloc_utf16_str_box(self.as_utf16_str())
+    }
+
+    /// Freeze into a shared [`ArcUtf16Str<A>`](crate::strings::ArcUtf16Str).
+    /// [`ArcUtf16Str::from`] is the trait form.
+    ///
+    /// **O(n)** — copies the contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails. Use
+    /// [`Self::try_into_arc_utf16_str`] for a fallible variant.
+    #[must_use]
+    pub fn into_arc_utf16_str(self) -> ArcUtf16Str<A>
+    where
+        A: Send + Sync,
+    {
+        crate::arena::ExpectAlloc::expect_alloc(self.try_into_arc_utf16_str())
+    }
+
+    /// Fallible variant of [`Self::into_arc_utf16_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_arc_utf16_str(self) -> Result<ArcUtf16Str<A>, AllocError>
+    where
+        A: Send + Sync,
+    {
+        self.inner.arena().try_alloc_utf16_str_arc(self.as_utf16_str())
     }
 
     /// Remove the `char`s in the `u16` index range `range`, returning a
@@ -496,7 +639,7 @@ impl<'a, A: Allocator + Clone + Send + Sync> From<Utf16String<'a, A>> for ArcUtf
     /// [`ArcUtf16Str<A>`](crate::strings::ArcUtf16Str).
     #[inline]
     fn from(s: Utf16String<'a, A>) -> Self {
-        s.inner.arena().alloc_utf16_str_arc(s.as_utf16_str())
+        s.into_arc_utf16_str()
     }
 }
 
@@ -636,7 +779,7 @@ impl<'a, A: Allocator + Clone> Extend<&'a str> for Utf16String<'_, A> {
 #[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<A: Allocator + Clone> serde::ser::Serialize for Utf16String<'_, A> {
     fn serialize<S: serde::ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(&self.as_utf16_str().to_string())
+        serializer.collect_str(self.as_utf16_str())
     }
 }
 

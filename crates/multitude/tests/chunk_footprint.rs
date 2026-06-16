@@ -1,12 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! End-to-end regression guards for the chunk allocation *footprint*:
-//! the number of bytes actually requested from the underlying allocator
-//! must match the chunk's size class, not be inflated to `CHUNK_ALIGN`
-//! (64 KiB). This is the gap that previously let every shared chunk be
-//! silently allocated at 64 KiB while the byte budget / stats tracked the
-//! much smaller unpadded size.
+//! End-to-end guards for the chunk allocation *footprint*: the number
+//! of bytes actually requested from the underlying allocator must match
+//! the chunk's size class, not be inflated to `CHUNK_ALIGN` (64 KiB).
 
 #![cfg(feature = "std")]
 #![allow(clippy::unwrap_used, reason = "test code")]
@@ -72,7 +69,7 @@ fn shared_chunk_sizes(log: &RequestLog) -> Vec<usize> {
 
 /// A single small `Arc<u32>` needs only a class-0 shared chunk (512 B).
 /// The allocator must therefore be asked for far less than `CHUNK_ALIGN`
-/// bytes — before the fix it was asked for exactly 64 KiB.
+/// bytes.
 #[test]
 fn small_shared_chunk_is_not_inflated_to_chunk_align() {
     let (rec, log) = recorder();

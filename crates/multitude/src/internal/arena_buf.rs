@@ -554,4 +554,36 @@ mod tests {
         // Drop both halves cleanly.
         drop(tail);
     }
+
+    #[test]
+    fn drop_runs_live_element_destructors() {
+        use core::cell::Cell;
+        use core::mem::ManuallyDrop;
+
+        struct Dropper<'c>(&'c Cell<usize>);
+        impl Drop for Dropper<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+
+        let count = Cell::new(0);
+        // Stack-backed storage that outlives `buf`. `ManuallyDrop` keeps the
+        // array from dropping the elements itself, so `ArenaBuf::drop` is the
+        // sole owner that runs their destructors.
+        let mut storage = [
+            ManuallyDrop::new(Dropper(&count)),
+            ManuallyDrop::new(Dropper(&count)),
+            ManuallyDrop::new(Dropper(&count)),
+        ];
+        let ptr = NonNull::new(storage.as_mut_ptr().cast::<Dropper<'_>>()).expect("array pointer is non-null");
+
+        // SAFETY: `storage` holds three initialized, well-aligned `Dropper`s
+        // and outlives `buf`; `ArenaBuf::drop` only drops them in place and
+        // never frees the (stack-owned) backing memory.
+        let buf = unsafe { ArenaBuf::from_raw_parts(ptr, 3, 3) };
+        assert_eq!(count.get(), 0);
+        drop(buf);
+        assert_eq!(count.get(), 3, "ArenaBuf::drop must run the live elements' destructors");
+    }
 }

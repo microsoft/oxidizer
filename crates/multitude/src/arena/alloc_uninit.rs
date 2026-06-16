@@ -18,6 +18,117 @@ use crate::arc::Arc;
 use crate::r#box::Box;
 
 impl<A: Allocator + Clone> Arena<A> {
+    /// Allocate uninitialized space for a `T`, returning `&mut MaybeUninit<T>`.
+    ///
+    /// The arena-lifetime analog of [`Self::alloc_uninit_box`]: write the value
+    /// (e.g. via [`MaybeUninit::write`]) then read it back with
+    /// [`MaybeUninit::assume_init_mut`].
+    ///
+    /// Unlike [`Self::alloc`], the value's destructor is **never** run — the
+    /// slot holds `MaybeUninit<T>`, which has no drop glue, and there is no way
+    /// to register one after the fact for a bare reference. If you need
+    /// drop-at-teardown semantics use [`Self::alloc`] / [`Self::alloc_with`],
+    /// or freeze into a [`Box`](crate::Box) / [`Arc`](crate::Arc).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_uninit`] for a fallible variant.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn alloc_uninit<T: Send>(&self) -> &mut MaybeUninit<T> {
+        self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
+    }
+
+    /// Fallible variant of [`Self::alloc_uninit`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn try_alloc_uninit<T: Send>(&self) -> Result<&mut MaybeUninit<T>, AllocError> {
+        self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
+    }
+
+    /// Like [`Self::alloc_uninit`] but the value bytes are zeroed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_zeroed`] for a fallible variant.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn alloc_zeroed<T: Send>(&self) -> &mut MaybeUninit<T> {
+        self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
+    }
+
+    /// Fallible variant of [`Self::alloc_zeroed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn try_alloc_zeroed<T: Send>(&self) -> Result<&mut MaybeUninit<T>, AllocError> {
+        self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
+    }
+
+    /// Allocate an uninitialized `[MaybeUninit<T>]` of length `len`.
+    ///
+    /// The arena-lifetime analog of [`Self::alloc_uninit_slice_box`]. Each
+    /// element's destructor is never run (see [`Self::alloc_uninit`]).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_uninit_slice`] for a fallible variant.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn alloc_uninit_slice<T: Send>(&self, len: usize) -> &mut [MaybeUninit<T>] {
+        self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
+    }
+
+    /// Fallible variant of [`Self::alloc_uninit_slice`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn try_alloc_uninit_slice<T: Send>(&self, len: usize) -> Result<&mut [MaybeUninit<T>], AllocError> {
+        self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
+    }
+
+    /// Like [`Self::alloc_uninit_slice`] but the slice bytes are zeroed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_zeroed_slice`] for a fallible variant.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn alloc_zeroed_slice<T: Send>(&self, len: usize) -> &mut [MaybeUninit<T>] {
+        self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
+    }
+
+    /// Fallible variant of [`Self::alloc_zeroed_slice`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[inline]
+    pub fn try_alloc_zeroed_slice<T: Send>(&self, len: usize) -> Result<&mut [MaybeUninit<T>], AllocError> {
+        self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
+    }
+}
+
+impl<A: Allocator + Clone> Arena<A> {
     /// Allocate uninitialized space for a `T` and return an
     /// [`Box<MaybeUninit<T>, A>`](crate::Box). The caller must
     /// initialize the value (e.g., via [`MaybeUninit::write`]) before
