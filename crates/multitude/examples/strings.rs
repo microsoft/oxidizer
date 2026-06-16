@@ -20,7 +20,7 @@ fn main() {
     builder.push_str("up ");
     builder.push_str("incrementally");
     println!("ArenaString (mutable): {}", builder.as_str());
-    let s2: Box<str> = builder.into_arena_box_str();
+    let s2: Box<str> = builder.into_boxed_str();
     println!("frozen: {}", &*s2);
 
     let name = "Alice";

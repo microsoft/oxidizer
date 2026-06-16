@@ -185,109 +185,109 @@ fn setup_alloc() -> Arena {
 
 #[library_benchmark]
 #[bench::run(setup_box_u64())]
-fn drop_box_u64(state: (Vec<Box<u64>>, Arena)) {
+fn box_u64(state: (Vec<Box<u64>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_rc_u64())]
-fn drop_rc_u64(state: (Vec<Arc<u64>>, Arena)) {
+fn rc_u64(state: (Vec<Arc<u64>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_arc_u64())]
-fn drop_arc_u64(state: (Vec<Arc<u64>>, Arena)) {
+fn arc_u64(state: (Vec<Arc<u64>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_box_droppy())]
-fn drop_box_droppy(state: (Vec<Box<DroppyT>>, Arena)) {
+fn box_droppy(state: (Vec<Box<DroppyT>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_rc_droppy())]
-fn drop_rc_droppy(state: (Vec<Arc<DroppyT>>, Arena)) {
+fn rc_droppy(state: (Vec<Arc<DroppyT>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_arc_droppy())]
-fn drop_arc_droppy(state: (Vec<Arc<DroppyT>>, Arena)) {
+fn arc_droppy(state: (Vec<Arc<DroppyT>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_str_box())]
-fn drop_str_box(state: (Vec<Box<str>>, Arena)) {
+fn str_box(state: (Vec<Box<str>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_str_rc())]
-fn drop_str_rc(state: (Vec<Arc<str>>, Arena)) {
+fn str_rc(state: (Vec<Arc<str>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_str_arc())]
-fn drop_str_arc(state: (Vec<Arc<str>>, Arena)) {
+fn str_arc(state: (Vec<Arc<str>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_box_u64())]
-fn drop_slice_box_u64(state: (Vec<Box<[u64]>>, Arena)) {
+fn slice_box_u64(state: (Vec<Box<[u64]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_rc_u64())]
-fn drop_slice_rc_u64(state: (Vec<Arc<[u64]>>, Arena)) {
+fn slice_rc_u64(state: (Vec<Arc<[u64]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_arc_u64())]
-fn drop_slice_arc_u64(state: (Vec<Arc<[u64]>>, Arena)) {
+fn slice_arc_u64(state: (Vec<Arc<[u64]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_box_droppy())]
-fn drop_slice_box_droppy(state: (Vec<Box<[DroppyT]>>, Arena)) {
+fn slice_box_droppy(state: (Vec<Box<[DroppyT]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_rc_droppy())]
-fn drop_slice_rc_droppy(state: (Vec<Arc<[DroppyT]>>, Arena)) {
+fn slice_rc_droppy(state: (Vec<Arc<[DroppyT]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_slice_arc_droppy())]
-fn drop_slice_arc_droppy(state: (Vec<Arc<[DroppyT]>>, Arena)) {
+fn slice_arc_droppy(state: (Vec<Arc<[DroppyT]>>, Arena)) {
     black_box(state);
 }
 
 #[library_benchmark]
 #[bench::run(setup_alloc())]
-fn drop_alloc(state: Arena) {
+fn alloc(state: Arena) {
     black_box(state);
 }
 
 library_benchmark_group!(
     name = drop_group;
     benchmarks =
-        drop_box_u64, drop_rc_u64, drop_arc_u64,
-        drop_box_droppy, drop_rc_droppy, drop_arc_droppy,
-        drop_str_box, drop_str_rc, drop_str_arc,
-        drop_slice_box_u64, drop_slice_rc_u64, drop_slice_arc_u64,
-        drop_slice_box_droppy, drop_slice_rc_droppy, drop_slice_arc_droppy,
-        drop_alloc
+        box_u64, rc_u64, arc_u64,
+        box_droppy, rc_droppy, arc_droppy,
+        str_box, str_rc, str_arc,
+        slice_box_u64, slice_rc_u64, slice_arc_u64,
+        slice_box_droppy, slice_rc_droppy, slice_arc_droppy,
+        alloc
 );
 
 main!(

@@ -16,15 +16,11 @@ use core::str;
 
 use allocator_api2::alloc::{AllocError, Allocator, Global};
 
-use crate::Arena;
 use crate::strings::string_common::impl_arena_string_common;
+use crate::vec::{FromIteratorIn, Vec};
+use crate::{Arc, Arena, Box, FromIn};
 
 /// A growable, mutable UTF-8 string that lives in an [`Arena`].
-///
-/// `String` is a **transient builder**: 32 bytes on 64-bit (data pointer +
-/// length + capacity + arena reference). Its purpose is to be filled and
-/// then frozen via [`Self::into_arena_box_str`] into a compact, immutable
-/// [`Box<str>`](crate::Box) (8 bytes).
 ///
 /// # Example
 ///
@@ -36,11 +32,11 @@ use crate::strings::string_common::impl_arena_string_common;
 /// s.push_str("hello, ");
 /// s.push_str("world!");
 /// assert_eq!(s.as_str(), "hello, world!");
-/// let frozen = s.into_arena_box_str();
+/// let frozen = s.into_boxed_str();
 /// assert_eq!(&*frozen, "hello, world!");
 /// ```
 pub struct String<'a, A: Allocator + Clone = Global> {
-    pub(super) inner: crate::vec::Vec<'a, u8, A>,
+    pub(super) inner: Vec<'a, u8, A>,
 }
 
 impl<'a, A: Allocator + Clone> String<'a, A> {
@@ -79,7 +75,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Panics if the backing allocator fails.
     #[must_use]
-    pub fn from_str_in(s: &str, arena: &'a Arena<A>) -> Self {
+    pub(crate) fn from_str_in(s: &str, arena: &'a Arena<A>) -> Self {
         let mut out = Self::with_capacity_in(s.len(), arena);
         out.push_str(s);
         out
@@ -179,7 +175,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         // processed so far (retained chars shifted into place) and drops
         // the unprocessed tail, leaving the string valid UTF-8.
         struct Guard<'g, 'a, A: Allocator + Clone> {
-            inner: &'g mut crate::vec::Vec<'a, u8, A>,
+            inner: &'g mut Vec<'a, u8, A>,
             idx: usize,
             del_bytes: usize,
         }
@@ -308,17 +304,215 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         self.inner.try_extend_from_slice(s.as_ref().as_bytes())
     }
 
-    /// Freeze into an owned, mutable [`Box<str, A>`](crate::Box).
-    ///
-    /// **O(n)** — copies the bytes into a compact, length-prefixed
-    /// allocation in the arena's shared chunks and produces an owned
-    /// [`Box<str, A>`](crate::Box) (8 bytes) whose `Drop` releases
-    /// the chunk hold. The copy is the deliberate trade-off for
-    /// `Box<str, A>` being a `Send`-safe, atomically-refcounted single
-    /// pointer that can outlive the arena.
+    /// Consume the `String`, returning the underlying byte vector. Mirrors
+    /// [`std::string::String::into_bytes`].
     #[must_use]
-    pub fn into_arena_box_str(self) -> crate::Box<str, A> {
+    pub fn into_bytes(self) -> Vec<'a, u8, A> {
+        self.inner
+    }
+
+    /// Returns a mutable reference to the underlying byte vector. Mirrors
+    /// [`std::string::String::as_mut_vec`].
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the bytes remain valid UTF-8 before the
+    /// borrow ends; the `String` invariant is otherwise violated.
+    #[must_use]
+    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<'a, u8, A> {
+        &mut self.inner
+    }
+
+    /// Split the string in two at byte index `at`, returning the tail.
+    ///
+    /// Returns `[at, len)` as a new `String` in the same arena and leaves
+    /// `[0, at)` in `self`. Mirrors [`std::string::String::split_off`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at` is not on a `char` boundary, or is past the end.
+    #[must_use]
+    pub fn split_off(&mut self, at: usize) -> Self {
+        assert!(self.as_str().is_char_boundary(at), "String::split_off: `at` is not a char boundary");
+        Self {
+            inner: self.inner.split_off(at),
+        }
+    }
+
+    /// Clone the bytes in `src` and append them to the end.
+    ///
+    /// `src` is a byte-index range into `self`. Mirrors
+    /// [`std::string::String::extend_from_within`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the range is out of bounds or its bounds are not on `char`
+    /// boundaries.
+    pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
+        let len = self.len();
+        let start = match src.start_bound() {
+            Bound::Included(&i) => i,
+            Bound::Excluded(&i) => i.checked_add(1).expect("extend_from_within: start bound overflows usize"),
+            Bound::Unbounded => 0,
+        };
+        let end = match src.end_bound() {
+            Bound::Included(&i) => i.checked_add(1).expect("extend_from_within: end bound overflows usize"),
+            Bound::Excluded(&i) => i,
+            Bound::Unbounded => len,
+        };
+        assert!(start <= end, "extend_from_within: start > end");
+        assert!(end <= len, "extend_from_within: end > len");
+        let s_ref = self.as_str();
+        assert!(s_ref.is_char_boundary(start), "extend_from_within: start is not on a char boundary");
+        assert!(s_ref.is_char_boundary(end), "extend_from_within: end is not on a char boundary");
+        self.inner.extend_from_within(start..end);
+    }
+
+    /// Remove the `char`s in byte range `range`, returning a draining iterator.
+    ///
+    /// Mirrors [`std::string::String::drain`].
+    ///
+    /// The drained range is removed immediately; the returned iterator yields
+    /// the removed characters (it is also double-ended).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range`'s bounds are out of range or not on `char`
+    /// boundaries.
+    pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, 'a, A> {
+        let len = self.len();
+        let start = match range.start_bound() {
+            Bound::Included(&i) => i,
+            Bound::Excluded(&i) => i.checked_add(1).expect("drain: start bound overflows usize"),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&i) => i.checked_add(1).expect("drain: end bound overflows usize"),
+            Bound::Excluded(&i) => i,
+            Bound::Unbounded => len,
+        };
+        assert!(start <= end, "drain: start > end");
+        assert!(end <= len, "drain: end > len");
+        let s_ref = self.as_str();
+        assert!(s_ref.is_char_boundary(start), "drain: start is not on a char boundary");
+        assert!(s_ref.is_char_boundary(end), "drain: end is not on a char boundary");
+        Drain {
+            inner: self.inner.drain(start..end),
+        }
+    }
+
+    /// Freeze into an owned, mutable [`Box<str, A>`](crate::Box). Mirrors
+    /// [`std::string::String::into_boxed_str`]; [`Box::from`] is the trait
+    /// form.
+    ///
+    /// **O(n)** — copies the contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails.
+    #[must_use]
+    pub fn into_boxed_str(self) -> Box<str, A> {
         self.inner.arena().alloc_str_box(self.as_str())
+    }
+
+    /// Consume the `String`, returning an arena-lifetime mutable string
+    /// reference `&'a mut str`. Mirrors [`std::string::String::leak`].
+    ///
+    /// **O(1) and allocation-free**: reinterprets the existing UTF-8 buffer
+    /// in place.
+    #[must_use]
+    pub fn leak(self) -> &'a mut str {
+        let bytes = self.inner.leak();
+        // SAFETY: `String` maintains the UTF-8 invariant over its bytes.
+        unsafe { str::from_utf8_unchecked_mut(bytes) }
+    }
+}
+
+/// Number of bytes in the UTF-8 sequence whose leading byte is `b0`.
+const fn utf8_seq_len(b0: u8) -> usize {
+    if b0 < 0x80 {
+        1
+    } else if b0 < 0xE0 {
+        2
+    } else if b0 < 0xF0 {
+        3
+    } else {
+        4
+    }
+}
+
+/// Draining iterator over a byte range of a [`String`], returned by
+/// [`String::drain`]. Yields the removed [`char`]s (double-ended). The
+/// arena-bound analog of [`std::string::Drain`].
+pub struct Drain<'d, 'a, A: Allocator + Clone> {
+    inner: crate::vec::Drain<'d, 'a, u8, A>,
+}
+
+impl<A: Allocator + Clone> fmt::Debug for Drain<'_, '_, A> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Drain").finish_non_exhaustive()
+    }
+}
+
+impl<A: Allocator + Clone> Iterator for Drain<'_, '_, A> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        let b0 = self.inner.next()?;
+        let len = utf8_seq_len(b0);
+        let mut buf = [b0, 0, 0, 0];
+        for slot in buf.iter_mut().take(len).skip(1) {
+            *slot = self.inner.next().expect("Drain holds valid UTF-8");
+        }
+        // SAFETY: `String::drain` validated the range on `char` boundaries, so
+        // the drained bytes form well-formed UTF-8.
+        unsafe { core::str::from_utf8_unchecked(&buf[..len]) }.chars().next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // Each remaining `char` is 1–4 bytes.
+        let bytes = self.inner.len();
+        (bytes.div_ceil(4), Some(bytes))
+    }
+}
+
+impl<A: Allocator + Clone> DoubleEndedIterator for Drain<'_, '_, A> {
+    fn next_back(&mut self) -> Option<char> {
+        let last = self.inner.next_back()?;
+        let mut buf = [0_u8; 4];
+        buf[3] = last;
+        let mut n = 1;
+        let mut b = last;
+        // Pull continuation bytes (`0b10xxxxxx`) from the back until the
+        // leading byte; the drained range is valid UTF-8 so this terminates.
+        while b & 0xC0 == 0x80 {
+            b = self.inner.next_back().expect("Drain holds valid UTF-8");
+            n += 1;
+            buf[4 - n] = b;
+        }
+        // SAFETY: see `next`.
+        unsafe { core::str::from_utf8_unchecked(&buf[4 - n..]) }.chars().next()
+    }
+}
+
+impl<A: Allocator + Clone> core::iter::FusedIterator for Drain<'_, '_, A> {}
+
+impl<'a, A: Allocator + Clone> From<String<'a, A>> for Box<str, A> {
+    /// Freeze a [`String`] into an immutable [`Box<str, A>`](crate::Box).
+    /// Mirrors `std`'s `From<String> for Box<str>`.
+    #[inline]
+    fn from(s: String<'a, A>) -> Self {
+        s.into_boxed_str()
+    }
+}
+
+impl<'a, A: Allocator + Clone + Send + Sync> From<String<'a, A>> for Arc<str, A> {
+    /// Freeze a [`String`] into a shared [`Arc<str, A>`](crate::Arc).
+    /// Mirrors `std`'s `From<String> for Arc<str>`.
+    #[inline]
+    fn from(s: String<'a, A>) -> Self {
+        s.inner.arena().alloc_str_arc(s.as_str())
     }
 }
 
@@ -400,10 +594,38 @@ impl<A: Allocator + Clone> PartialEq<str> for String<'_, A> {
     }
 }
 
+impl<A: Allocator + Clone> PartialEq<String<'_, A>> for str {
+    #[inline]
+    fn eq(&self, other: &String<'_, A>) -> bool {
+        self == other.as_str()
+    }
+}
+
 impl<A: Allocator + Clone> PartialEq<&str> for String<'_, A> {
     #[inline]
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+
+impl<A: Allocator + Clone> PartialEq<String<'_, A>> for &str {
+    #[inline]
+    fn eq(&self, other: &String<'_, A>) -> bool {
+        *self == other.as_str()
+    }
+}
+
+impl<A: Allocator + Clone> PartialEq<alloc::borrow::Cow<'_, str>> for String<'_, A> {
+    #[inline]
+    fn eq(&self, other: &alloc::borrow::Cow<'_, str>) -> bool {
+        self.as_str() == &**other
+    }
+}
+
+impl<A: Allocator + Clone> PartialEq<String<'_, A>> for alloc::borrow::Cow<'_, str> {
+    #[inline]
+    fn eq(&self, other: &String<'_, A>) -> bool {
+        &**self == other.as_str()
     }
 }
 
@@ -440,22 +662,201 @@ impl<A: Allocator + Clone> serde::ser::Serialize for String<'_, A> {
         serializer.serialize_str(self.as_str())
     }
 }
-impl<'a, A: Allocator + Clone> crate::vec::FromIteratorIn<char> for String<'a, A> {
-    type Allocator = &'a Arena<A>;
-
-    fn from_iter_in<I: IntoIterator<Item = char>>(iter: I, allocator: &'a Arena<A>) -> Self {
-        let mut s = Self::new_in(allocator);
+impl<'a, A: Allocator + Clone> FromIteratorIn<'a, char, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = char>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
         s.extend(iter);
         s
     }
 }
 
-impl<'a, 'b, A: Allocator + Clone> crate::vec::FromIteratorIn<&'b str> for String<'a, A> {
-    type Allocator = &'a Arena<A>;
-
-    fn from_iter_in<I: IntoIterator<Item = &'b str>>(iter: I, allocator: &'a Arena<A>) -> Self {
-        let mut s = Self::new_in(allocator);
+impl<'a, 'b, A: Allocator + Clone> FromIteratorIn<'a, &'b str, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = &'b str>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
         s.extend(iter);
         s
+    }
+}
+
+impl<'a, 'b, A: Allocator + Clone> FromIteratorIn<'a, &'b char, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = &'b char>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
+        s.extend(iter);
+        s
+    }
+}
+
+impl<'a, A: Allocator + Clone> FromIteratorIn<'a, alloc::string::String, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = alloc::string::String>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
+        s.extend(iter);
+        s
+    }
+}
+
+impl<'a, A: Allocator + Clone> FromIteratorIn<'a, alloc::boxed::Box<str>, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = alloc::boxed::Box<str>>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
+        s.extend(iter);
+        s
+    }
+}
+
+impl<'a, 'b, A: Allocator + Clone> FromIteratorIn<'a, alloc::borrow::Cow<'b, str>, A> for String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = alloc::borrow::Cow<'b, str>>>(iter: I, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
+        s.extend(iter);
+        s
+    }
+}
+
+impl<I: core::slice::SliceIndex<str>, A: Allocator + Clone> core::ops::Index<I> for String<'_, A> {
+    type Output = I::Output;
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
+        core::ops::Index::index(self.as_str(), index)
+    }
+}
+
+impl<I: core::slice::SliceIndex<str>, A: Allocator + Clone> core::ops::IndexMut<I> for String<'_, A> {
+    #[inline]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        core::ops::IndexMut::index_mut(self.as_mut_str(), index)
+    }
+}
+
+impl<A: Allocator + Clone> AsRef<[u8]> for String<'_, A> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<A: Allocator + Clone> AsRef<std::ffi::OsStr> for String<'_, A> {
+    #[inline]
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.as_str().as_ref()
+    }
+}
+
+#[cfg(feature = "std")]
+impl<A: Allocator + Clone> AsRef<std::path::Path> for String<'_, A> {
+    #[inline]
+    fn as_ref(&self) -> &std::path::Path {
+        self.as_str().as_ref()
+    }
+}
+
+impl<A: Allocator + Clone> core::ops::Add<&str> for String<'_, A> {
+    type Output = Self;
+    /// Concatenates a `&str` onto the end of this `String`. Mirrors
+    /// `std`'s `Add<&str> for String`.
+    #[inline]
+    fn add(mut self, rhs: &str) -> Self {
+        self.push_str(rhs);
+        self
+    }
+}
+
+impl<A: Allocator + Clone> core::ops::AddAssign<&str> for String<'_, A> {
+    #[inline]
+    fn add_assign(&mut self, rhs: &str) {
+        self.push_str(rhs);
+    }
+}
+
+impl<'b, A: Allocator + Clone> Extend<&'b char> for String<'_, A> {
+    fn extend<I: IntoIterator<Item = &'b char>>(&mut self, iter: I) {
+        for c in iter {
+            self.push(*c);
+        }
+    }
+}
+
+impl<'b, A: Allocator + Clone> Extend<alloc::borrow::Cow<'b, str>> for String<'_, A> {
+    fn extend<I: IntoIterator<Item = alloc::borrow::Cow<'b, str>>>(&mut self, iter: I) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+impl<A: Allocator + Clone> Extend<alloc::string::String> for String<'_, A> {
+    fn extend<I: IntoIterator<Item = alloc::string::String>>(&mut self, iter: I) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+impl<A: Allocator + Clone> Extend<alloc::boxed::Box<str>> for String<'_, A> {
+    fn extend<I: IntoIterator<Item = alloc::boxed::Box<str>>>(&mut self, iter: I) {
+        for s in iter {
+            self.push_str(&s);
+        }
+    }
+}
+
+impl<'a, 'b, A: Allocator + Clone> FromIn<'a, &'b str, A> for String<'a, A> {
+    /// Copy `value` into a fresh arena string. Mirrors `std`'s `From<&str>`.
+    #[inline]
+    fn from_in(value: &'b str, arena: &'a Arena<A>) -> Self {
+        Self::from_str_in(value, arena)
+    }
+}
+
+impl<'a, 'b, A: Allocator + Clone> FromIn<'a, &'b mut str, A> for String<'a, A> {
+    /// Copy `value` into a fresh arena string. Mirrors `std`'s `From<&mut str>`.
+    #[inline]
+    fn from_in(value: &'b mut str, arena: &'a Arena<A>) -> Self {
+        Self::from_str_in(value, arena)
+    }
+}
+
+impl<'a, A: Allocator + Clone> FromIn<'a, char, A> for String<'a, A> {
+    /// Build a one-character arena string. Mirrors `std`'s `From<char>`.
+    #[inline]
+    fn from_in(value: char, arena: &'a Arena<A>) -> Self {
+        let mut s = Self::new_in(arena);
+        s.push(value);
+        s
+    }
+}
+
+impl<'a, 'b, A: Allocator + Clone> FromIn<'a, alloc::borrow::Cow<'b, str>, A> for String<'a, A> {
+    /// Copy a clone-on-write string into the arena. Mirrors `std`'s `From<Cow<str>>`.
+    #[inline]
+    fn from_in(value: alloc::borrow::Cow<'b, str>, arena: &'a Arena<A>) -> Self {
+        Self::from_str_in(&value, arena)
+    }
+}
+
+impl<'a, A: Allocator + Clone> FromIn<'a, alloc::boxed::Box<str>, A> for String<'a, A> {
+    /// Copy a boxed string into the arena. Mirrors `std`'s `From<Box<str>>`.
+    #[inline]
+    fn from_in(value: alloc::boxed::Box<str>, arena: &'a Arena<A>) -> Self {
+        Self::from_str_in(&value, arena)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf8_seq_len;
+
+    /// Pins [`utf8_seq_len`] at every UTF-8 lead-byte class boundary. The
+    /// drain decoder relies on these exact lengths, and the boundary
+    /// comparisons (`<`) must not drift to `<=`: e.g. `0xE0` leads a 3-byte
+    /// sequence, never a 2-byte one.
+    #[test]
+    fn utf8_seq_len_matches_every_class_boundary() {
+        assert_eq!(utf8_seq_len(0x00), 1);
+        assert_eq!(utf8_seq_len(0x7F), 1);
+        assert_eq!(utf8_seq_len(0x80), 2);
+        assert_eq!(utf8_seq_len(0xDF), 2);
+        assert_eq!(utf8_seq_len(0xE0), 3);
+        assert_eq!(utf8_seq_len(0xEF), 3);
+        assert_eq!(utf8_seq_len(0xF0), 4);
+        assert_eq!(utf8_seq_len(0xFF), 4);
     }
 }

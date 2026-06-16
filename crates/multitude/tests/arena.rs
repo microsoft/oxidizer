@@ -2038,7 +2038,7 @@ mod mutants_for_kill_boundaries {
         // original `>` semantics, but forces a refill under the `>=`
         // mutant (which pins the boundary chunk into the simple-ref pin
         // list, leaving `current_local` empty).
-        let arena = ArenaBuilder::new().max_normal_alloc(5000).build();
+        let arena = Arena::builder().max_normal_alloc(5000).build();
         let _: &mut str = arena.alloc_str("x".repeat(5000));
         let _: &mut str = arena.alloc_str("y");
         assert_eq!(
@@ -2053,7 +2053,7 @@ mod mutants_for_kill_boundaries {
         // Past-boundary sanity: kills `> → <` / `> → ==` on the same line
         // — any flip leaves the oversized path unused for a strictly
         // larger string, breaking the no-cap promise of `alloc_str`.
-        let arena = ArenaBuilder::new().max_normal_alloc(5000).build();
+        let arena = Arena::builder().max_normal_alloc(5000).build();
         let _: &mut str = arena.alloc_str("x".repeat(5001));
         assert!(arena.stats().oversized_local_chunks_allocated >= 1);
     }
@@ -2078,7 +2078,7 @@ mod mutants_for_kill_boundaries {
         // wrongly routes to the normal cache instead of oversized,
         // and `oversized_shared_chunks_allocated == 0` fails the
         // assertion.
-        let arena: Arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let arena: Arena = Arena::builder().max_normal_alloc(4096).build();
         // 2049 u16s = 4098 payload bytes, strictly above 4 KiB.
         let len_u16 = 2049_usize;
         let buf: Vec<u16> = vec![u16::from(b'a'); len_u16];
@@ -2477,7 +2477,7 @@ mod coverage_arena_gaps {
 
     #[test]
     fn try_alloc_slice_fill_with_oversized() {
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let slice: &mut [u32] = arena.try_alloc_slice_fill_with(2048, |i| u32::try_from(i).unwrap()).unwrap();
         assert_eq!(slice[0], 0);
         assert_eq!(slice[2047], 2047);
@@ -2485,7 +2485,7 @@ mod coverage_arena_gaps {
 
     #[test]
     fn try_alloc_slice_copy_oversized() {
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let src: alloc::vec::Vec<u32> = (0..2048_u32).collect();
         let slice = arena.try_alloc_slice_copy(&*src).unwrap();
         assert_eq!(slice[0], 0);
@@ -2494,7 +2494,7 @@ mod coverage_arena_gaps {
 
     #[test]
     fn alloc_slice_copy_oversized() {
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let src: alloc::vec::Vec<u32> = (0..2048_u32).collect();
         let slice = arena.alloc_slice_copy(&*src);
         assert_eq!(slice[0], 0);
@@ -2503,7 +2503,7 @@ mod coverage_arena_gaps {
 
     #[test]
     fn try_alloc_slice_copy_arc_oversized() {
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let src: alloc::vec::Vec<u32> = (0..2048_u32).collect();
         let arc = arena.try_alloc_slice_copy_arc(&*src).unwrap();
         assert_eq!(arc[0], 0);
@@ -2512,7 +2512,7 @@ mod coverage_arena_gaps {
 
     #[test]
     fn alloc_slice_fill_with_arc_oversized() {
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         let arc: Arc<[u32]> = arena.alloc_slice_fill_with_arc(2048, |i| u32::try_from(i).unwrap());
         assert_eq!(arc[0], 0);
         assert_eq!(arc[2047], 2047);
@@ -2552,21 +2552,27 @@ mod coverage_arena_gaps {
     #[cfg(feature = "std")]
     #[test]
     fn alloc_with_closure_induced_eviction_commits_drop_entry() {
-        use std::cell::Cell;
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
-        struct D<'a>(&'a Cell<u32>);
-        impl Drop for D<'_> {
+        // `Send` drop type (the deferred-drop `alloc_with` path requires
+        // `T: Send`; a `!Send` value here would be a soundness hazard at
+        // cross-thread arena teardown).
+        struct D(StdArc<AtomicU32>);
+        impl Drop for D {
             fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
+                self.0.fetch_add(1, Ordering::Relaxed);
             }
         }
 
-        let drops = Cell::new(0_u32);
-        let arena = ArenaBuilder::<Global>::new().max_normal_alloc(4096).build();
+        let drops = StdArc::new(AtomicU32::new(0));
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         // Warm up so the outer `alloc_with` below takes the fast path
         // (the cold slow path bypasses the eviction-commit branch).
         let _ = arena.alloc::<u64>(0);
-        let _outer: &mut D<'_> = arena.alloc_with(|| {
+        let counter = drops.clone();
+        let arena_ref = &arena;
+        let _outer: &mut D = arena.alloc_with(move || {
             // Fill the current_local chunk so the OUTER allocation's
             // reserved slot ends up in a chunk that gets evicted before
             // the closure returns. The outer must then take the
@@ -2574,19 +2580,19 @@ mod coverage_arena_gaps {
             // 2048 u64 allocs still force multiple refills with this 4 KiB
             // normal-allocation cap, so the reserved chunk is evicted.
             for _ in 0..2048_u32 {
-                let _ = arena.alloc::<u64>(0);
+                let _ = arena_ref.alloc::<u64>(0);
             }
-            D(&drops)
+            D(counter)
         });
         drop(arena);
-        assert_eq!(drops.get(), 1, "outer D's drop must run via eviction commit path");
+        assert_eq!(drops.load(Ordering::Relaxed), 1, "outer D's drop must run via eviction commit path");
     }
 
     #[test]
     fn refill_local_oversized_chunk_capacity() {
         // `with_capacity_local` preallocates space; verify the arena
         // works correctly when a generous capacity is requested.
-        let arena = ArenaBuilder::<Global>::new().with_capacity_local(128 * 1024).build();
+        let arena = Arena::builder().with_capacity_local(128 * 1024).build();
         let _ = arena.alloc::<u8>(0);
     }
 
@@ -2597,7 +2603,7 @@ mod coverage_arena_gaps {
     // the regular test runner exercises this path.
     #[cfg_attr(miri, ignore)]
     fn refill_shared_oversized_chunk_capacity() {
-        let arena = ArenaBuilder::<Global>::new().with_capacity_shared(128 * 1024).build();
+        let arena = Arena::builder().with_capacity_shared(128 * 1024).build();
         let _ = arena.alloc_arc::<u8>(0);
     }
 
@@ -2772,7 +2778,7 @@ mod from_mutants_extras_stats {
     #[test]
     fn min_class_for_bytes_classifies_513_below_saturation() {
         // 4 KiB budget easily covers (header + 1 KiB) but not a 64 KiB chunk.
-        let res = ArenaBuilder::new().byte_budget(4 * 1024).with_capacity_local(513).try_build();
+        let res = Arena::builder().byte_budget(4 * 1024).with_capacity_local(513).try_build();
         assert!(res.is_ok(), "513 must resolve to class 1 (1 KiB), fitting a 4 KiB budget");
     }
 
@@ -2793,7 +2799,7 @@ mod from_mutants_extras_stats {
         // Probe: an unbudgeted arena easily allocates a 1 KiB chunk and a
         // 2 KiB chunk; the difference is observed only via the budget.
         // (Header is bounded; we pick numbers with comfortable margin.)
-        let ok = ArenaBuilder::new().byte_budget(1500).with_capacity_local(513).try_build();
+        let ok = Arena::builder().byte_budget(1500).with_capacity_local(513).try_build();
         assert!(
             ok.is_ok(),
             "513 must resolve to class 1 (1 KiB); a budget of 1500 bytes (>1 KiB) admits one chunk"
@@ -2821,10 +2827,10 @@ mod from_mutants_extras_stats {
     #[test]
     fn reserve_budget_admits_exact_equal() {
         fn ok_local(b: usize) -> bool {
-            ArenaBuilder::new().byte_budget(b).with_capacity_local(512).try_build().is_ok()
+            Arena::builder().byte_budget(b).with_capacity_local(512).try_build().is_ok()
         }
         fn ok_shared(b: usize) -> bool {
-            ArenaBuilder::new().byte_budget(b).with_capacity_shared(512).try_build().is_ok()
+            Arena::builder().byte_budget(b).with_capacity_shared(512).try_build().is_ok()
         }
         fn bisect(probe: impl Fn(usize) -> bool) -> usize {
             let (mut lo, mut hi) = (1_usize, 64 * 1024_usize);
@@ -2842,7 +2848,7 @@ mod from_mutants_extras_stats {
         let bl = bisect(ok_local);
         let bs = bisect(ok_shared);
         let combined = bl + bs - 1;
-        let res = ArenaBuilder::new()
+        let res = Arena::builder()
             .byte_budget(combined)
             .with_capacity_local(512)
             .with_capacity_shared(512)
@@ -2884,7 +2890,7 @@ mod from_mutants_extras_stats {
     /// allocation panics with `AllocError`.
     #[test]
     fn release_budget_frees_accounted_bytes() {
-        let arena = ArenaBuilder::new().byte_budget(128 * 1024).max_normal_alloc(4 * 1024).build();
+        let arena = Arena::builder().byte_budget(128 * 1024).max_normal_alloc(4 * 1024).build();
         let big1 = arena.alloc_box([0u8; 80 * 1024]);
         let s1 = arena.stats();
         assert_eq!(s1.oversized_shared_chunks_allocated, 1);
@@ -2908,7 +2914,7 @@ mod from_mutants_extras_stats {
     /// the budget check rejects; original admits.
     #[test]
     fn acquire_shared_total_bytes_is_sum_not_product() {
-        let arena = ArenaBuilder::new().byte_budget(2 * 1024).build();
+        let arena = Arena::builder().byte_budget(2 * 1024).build();
         // First arc forces a fresh shared chunk. Unmutated header + 512
         // <= 2 KiB succeeds; mutated header * 512 >> 2 KiB fails.
         let res = arena.try_alloc_arc(0u32);
@@ -2930,7 +2936,7 @@ mod from_mutants_extras_stats {
     /// fast-path stub state fails, slow path runs, hits line 728.
     #[test]
     fn arc_with_size_equal_max_normal_routes_normal() {
-        let arena = ArenaBuilder::new().max_normal_alloc(4096).build();
+        let arena = Arena::builder().max_normal_alloc(4096).build();
         #[repr(align(8))]
         struct Block([u64; 512]); // 4096 bytes exactly
         let _a = arena.alloc_arc(Block([0u64; 512]));
@@ -2950,7 +2956,7 @@ mod from_mutants_extras_stats {
     /// and the next allocation fails.
     #[test]
     fn oversized_shared_guard_drop_releases_chunk_on_panic() {
-        let arena = ArenaBuilder::new().byte_budget(256 * 1024).max_normal_alloc(4096).build();
+        let arena = Arena::builder().byte_budget(256 * 1024).max_normal_alloc(4096).build();
         // First oversized arc with a panicking initialiser.
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // 8 KiB arc whose init panics.
@@ -3071,7 +3077,7 @@ mod from_mutants_extras_stats {
     #[test]
     fn arena_builder_capacity_preallocates_correct_chunk_count() {
         use multitude::ArenaBuilder;
-        let arena: Arena = ArenaBuilder::new().with_capacity_local(64 * 1024).build();
+        let arena: Arena = Arena::builder().with_capacity_local(64 * 1024).build();
         // Preallocation creates >= 1 chunk before any user allocation.
         assert!(arena.stats().normal_local_chunks_allocated >= 1);
     }
@@ -3079,7 +3085,7 @@ mod from_mutants_extras_stats {
     #[test]
     fn shared_chunk_release_returns_budget() {
         use multitude::ArenaBuilder;
-        let arena: Arena = ArenaBuilder::new().byte_budget(64 * 1024 * 1024).build();
+        let arena: Arena = Arena::builder().byte_budget(64 * 1024 * 1024).build();
         for _ in 0..32 {
             let a: Arc<u32> = arena.alloc_arc(7);
             drop(a);
@@ -3181,21 +3187,21 @@ mod from_mutants_extras_stats {
     }
 
     #[test]
-    fn vec_into_arena_box_nonempty_nonzst_takes_inplace_path() {
+    fn vec_into_box_allocates_no_additional_local_chunk() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(8);
         for i in 0..4_u32 {
             v.push(i);
         }
         let chunks_before = arena.stats().normal_local_chunks_allocated;
-        let _b: ArenaBox<[u32]> = v.into_arena_box();
+        let _b: ArenaBox<[u32]> = v.into_boxed_slice();
         assert_eq!(arena.stats().normal_local_chunks_allocated, chunks_before);
     }
 
     #[test]
     fn shared_chunk_release_budget_remains_bounded_through_many_cycles() {
         use multitude::ArenaBuilder;
-        let arena: Arena = ArenaBuilder::new().byte_budget(2 * 1024 * 1024).build();
+        let arena: Arena = Arena::builder().byte_budget(2 * 1024 * 1024).build();
         // Any leak in the release-budget bookkeeping compounds linearly
         // with the cycle count, so a handful of iterations is enough
         // to expose a leak; the test gains nothing from a large count

@@ -148,15 +148,11 @@ impl<A: Allocator + Clone> Arena<A> {
         let len = s.len();
         loop {
             if let Some(u) = self.try_reserve_local_bytes(len) {
-                #[cfg(feature = "stats")]
-                self.record_alloc(len);
                 return Ok(u.init_copy_from_str(s));
             }
             if self.is_oversized_local(len) {
                 let ptr = self.alloc_oversized_local_with(len, |mutator| {
                     let ticket = mutator.try_alloc_bytes(len).expect("dedicated oversized chunk sized to fit string");
-                    #[cfg(feature = "stats")]
-                    self.record_alloc(len);
                     // `init_copy_from_str` returns `&mut str` bound to the
                     // mutator's borrow; we hand back a raw pointer + len so
                     // the lifetime can be re-attached to `&Arena` once the
