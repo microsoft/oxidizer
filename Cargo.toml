@@ -24,6 +24,7 @@ homepage = "https://github.com/microsoft/oxidizer"
 
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.5.4" }
+anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.0" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.5.4" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.5.5" }
 cachet = { path = "crates/cachet", default-features = false, version = "0.7.0" }
@@ -35,6 +36,7 @@ data_privacy_core = { path = "crates/data_privacy_core", default-features = fals
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.2" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.2" }
 fetch = { path = "crates/fetch", default-features = false, version = "0.11.1" }
+fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.1.0" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.1" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.2" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.3" }
@@ -66,6 +68,10 @@ allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 argh = { version = "0.1.13", default-features = false }
 async-once-cell = { version = "0.5.0", default-features = false }
+async-trait = { version = "0.1.89", default-features = false }
+azure_core = { version = "1.0.0", default-features = false }
+azure_identity = { version = "1.0.0", default-features = false }
+azure_storage_blob = { version = "1.0.0", default-features = false }
 base64 = { version = "0.22.0", default-features = false, features = ["alloc"] }
 bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
@@ -170,9 +176,17 @@ unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
 # Allow our special-purpose nonstandard cfg attributes.
+# - coverage / coverage_nightly: set by cargo-llvm-cov to enable nightly coverage attributes.
+# - loom: set via RUSTFLAGS to swap in the loom model-checker for atomics in select crates.
+# - utc_backend: opt-in flag for the UTC (Microsoft) Rust codegen backend, which caps type
+#   alignment at 8192 bytes. Crates that intentionally exercise larger alignments (e.g.
+#   multitude's over-alignment guard tests) gate the offending items on this cfg so they
+#   compile out when targeting UTC. Set via RUSTFLAGS="--cfg utc_backend" in pipelines
+#   that pin a UTC toolchain (ms-prod-1.95+).
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
     'cfg(loom)',
+    'cfg(utc_backend)',
 ] }
 
 [workspace.lints.clippy]

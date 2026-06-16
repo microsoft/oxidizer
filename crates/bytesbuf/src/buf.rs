@@ -152,6 +152,8 @@ impl BytesBuf {
     where
         I: IntoIterator<Item = Block>,
     {
+        // Blocks represent exclusively owned memory, so their combined capacity is bounded by the
+        // virtual address space and can never exceed `usize::MAX` - no overflow check is needed.
         Self::from_span_builders(blocks.into_iter().map(Block::into_span_builder))
     }
 
@@ -161,6 +163,10 @@ impl BytesBuf {
     {
         let span_builders: SmallVec<[SpanBuilder; MAX_INLINE_SPANS]> = span_builders.into_iter().collect();
 
+        // No overflow check is needed here: span builders reference exclusively owned memory, so
+        // their combined capacity is bounded by the virtual address space and can never exceed
+        // `usize::MAX`. This differs from `BytesView`, which references shared (immutable) memory
+        // that may be aliased by multiple views and therefore requires an explicit overflow guard.
         let available = span_builders.iter().map(SpanBuilder::remaining_capacity).sum();
 
         Self {
