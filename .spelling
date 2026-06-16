@@ -593,6 +593,13 @@ deterministically
 dereferences
 honour
 MPSC
+Azure
+SDK
+TypeSpec
+typespec
+Seekable
+Spawner
+awaitable
 precomputed
 u32
 2^30
