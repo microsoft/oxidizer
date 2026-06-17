@@ -45,6 +45,7 @@ impl AbandonedPolicy {
     /// This is [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] with a threshold
     /// of `1.0`.
     #[must_use]
+    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: Default::default() resolves to Mode::AbandonRateThreshold(1.0), the same value returned here.
     pub fn when_all_abandoned() -> Self {
         Self::abandon_rate_threshold(1.0)
     }
