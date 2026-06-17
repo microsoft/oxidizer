@@ -14,12 +14,12 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
-use crate::internal::Chunk;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::drop_entry::DropEntry;
 use crate::internal::shared_chunk::SharedChunk;
-use crate::internal::uninit::{Uninit, UninitDrop};
+use crate::internal::uninit::Uninit;
+use crate::internal::{Chunk, thin_dst};
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
 /// a chunk: value bytes + alignment padding, plus one [`DropEntry`] slot
@@ -33,6 +33,18 @@ const fn worst_case_payload<T>() -> usize {
     } else {
         base
     }
+}
+
+/// Worst-case bytes consumed by a single `Arc<T>` value allocation: the
+/// per-`Arc` strong-count prefix + value bytes + front alignment slack.
+#[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
+#[inline]
+const fn worst_case_arc_payload<T>() -> usize {
+    let align = mem::align_of::<T>();
+    let value_bytes = if mem::size_of::<T>() == 0 { 1 } else { mem::size_of::<T>() };
+    thin_dst::strong_prefix_bytes_for(align, 0)
+        .saturating_add(value_bytes)
+        .saturating_add(thin_dst::arc_block_align(align))
 }
 
 /// Maximum `align_of::<T>()` accepted by smart-pointer allocations.
@@ -445,7 +457,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 return Ok(u.init(f()));
             }
             let wcp = worst_case_payload::<T>();
-            if self.is_oversized_local(wcp) {
+            if self.is_oversized(wcp) {
                 return self.alloc_oversized_value_with::<T, F>(wcp, f);
             }
             self.refill_local(wcp)?;
@@ -497,45 +509,53 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_box_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Box<T, A>, AllocError> {
         // SAFETY: `impl_alloc_smart_with` returns a `NonNull<T>` to a
         // freshly-written `T` whose containing chunk has just been
-        // bumped by +1 in the new smart pointer's name. `Box` runs
-        // `T::drop` eagerly in its own `Drop`, so it does *not* register
-        // a chunk drop entry (`REGISTER_DROP = false`); otherwise the
-        // value would be dropped twice (once by `Box::drop`, once by the
-        // chunk teardown replay). `Box::from_raw` adopts that +1.
-        self.impl_alloc_smart_with::<T, F, false>(f)
+        // bumped by +1 in the new `Box`'s name. `Box` runs `T::drop`
+        // eagerly in its own `Drop` and adopts that +1 via
+        // `Box::from_raw`.
+        self.impl_alloc_smart_with::<T, F>(f)
             .map(|ptr| unsafe { Box::from_raw(ptr.cast::<u8>()) })
     }
 
-    /// Shared fast-path body for the `alloc_arc` family. Identical
-    /// shape to [`Self::impl_alloc_box_with`] — the only differences
-    /// between `Box` and `Arc` live in their `Clone`/`Send`/`Sync`
-    /// impls, not at allocation time.
+    /// Shared fast-path body for the `alloc_arc` family.
+    ///
+    /// Unlike [`Box`], an [`Arc`] reserves a per-`Arc` strong reference
+    /// count in the chunk prefix (initialized to `1`), takes one chunk
+    /// refcount for the whole `Arc` family, and runs `T::drop` eagerly
+    /// when the strong count reaches zero — never via a chunk
+    /// drop-entry.
     #[inline(always)]
+    #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn impl_alloc_arc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Arc<T, A>, AllocError>
     where
         A: Send + Sync,
         T: Send + Sync,
     {
-        // SAFETY: see `Self::impl_alloc_box_with` — `Arc::from_raw`
-        // adopts the fresh +1 on the containing chunk. Unlike `Box`,
-        // `Arc` keeps the value alive until the chunk is torn down, so a
-        // drop entry IS registered for `T: Drop` (`REGISTER_DROP = true`).
-        self.impl_alloc_smart_with::<T, F, true>(f)
-            .map(|ptr| unsafe { Arc::from_raw(ptr.cast::<u8>()) })
+        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
+            return Err(AllocError);
+        }
+        let mut f = Some(f);
+        loop {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_value::<T>() {
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let f = f.take().expect("closure taken twice");
+                let ptr = init_smart_slot::<T, A, _>(uninit, chunk_ref, f);
+                // SAFETY: the strong prefix was written (count = 1) and the
+                // chunk holds a fresh +1 for this `Arc` family.
+                return Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) });
+            }
+            let wcp = worst_case_arc_payload::<T>();
+            if self.is_oversized(wcp) {
+                let f = f.take().expect("closure taken twice");
+                return self.alloc_oversized_arc_with::<T, F>(wcp, f);
+            }
+            self.refill_shared(wcp)?;
+        }
     }
 
-    /// Bump-allocates `T` in the arena's current shared chunk, takes a
-    /// +1 refcount on that chunk for the resulting smart pointer, and
-    /// writes the value into the reservation. When `REGISTER_DROP` is
-    /// `true` and `T` needs drop, a drop entry is committed so the
-    /// chunk's teardown runs `T::drop` when the last reference releases
-    /// the chunk ([`Arc`] semantics). [`Box`] passes `REGISTER_DROP =
-    /// false` because it runs `T::drop` eagerly in its own `Drop`;
-    /// registering an entry as well would drop the value twice.
-    ///
-    /// The returned `NonNull<T>` carries no ownership marker; the
-    /// caller wraps it in the appropriate smart pointer ([`Box`] or
-    /// [`Arc`]) and that wrapper owns the +1.
+    /// Bump-allocates `T` in the arena's current shared chunk for a
+    /// [`Box`], takes a +1 refcount on that chunk, and writes the value
+    /// into the reservation. [`Box`] runs `T::drop` eagerly in its own
+    /// `Drop`, so no chunk drop entry is reserved.
     ///
     /// Rejects alignments at or above [`MAX_SMART_PTR_ALIGN`]: such
     /// values cannot live inside the first [`CHUNK_ALIGN`] bytes of a
@@ -543,222 +563,70 @@ impl<A: Allocator + Clone> Arena<A> {
     /// smart pointers' `Drop` impls.
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
-    fn impl_alloc_smart_with<T, F: FnOnce() -> T, const REGISTER_DROP: bool>(&self, f: F) -> Result<NonNull<T>, AllocError> {
+    fn impl_alloc_smart_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<T>, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
             return Err(AllocError);
         }
         loop {
-            // A ZST whose allocation reserves no drop entry does not
-            // advance the bump cursor (`try_alloc(0, _)` is a no-op on
-            // the cursor), so back-to-back handouts would never refill
-            // the chunk. The per-allocation handout count is tracked in
-            // the non-atomic `local_shared_count` and draws down the
-            // pre-credited ref surplus; an unbounded run from a single
-            // chunk could exhaust that surplus, driving the chunk's
-            // atomic refcount to zero while it is still installed
-            // (use-after-free) or underflowing the surplus reconciliation
-            // at retire (double-free). Pre-reserve a 1-byte tag so each
-            // such handout advances the cursor, bounding per-chunk
-            // handouts to the chunk capacity (well below the surplus).
-            // The drop-entry path below already advances `drop_top`, so
-            // drop-registering reservations need no tag. Mirrors the
-            // guard in `impl_alloc_uninit_smart`.
-            if const { mem::size_of::<T>() == 0 && !(REGISTER_DROP && mem::needs_drop::<T>()) }
-                && self.current_shared().try_alloc(1, 1).is_none()
-            {
+            // A non-drop ZST allocation does not advance the bump cursor
+            // (`try_alloc(0, _)` is a no-op), so back-to-back handouts
+            // would never refill the chunk. The per-allocation handout
+            // count draws down the pre-credited ref surplus; an unbounded
+            // run could exhaust it (use-after-free) or underflow the
+            // surplus reconciliation at retire (double-free). Pre-reserve
+            // a 1-byte tag so each such handout advances the cursor,
+            // bounding per-chunk handouts to the chunk capacity.
+            if const { mem::size_of::<T>() == 0 } && self.current_shared().try_alloc(1, 1).is_none() {
                 self.refill_shared(worst_case_payload::<T>())?;
                 continue;
             }
-            if const { REGISTER_DROP && mem::needs_drop::<T>() } {
-                if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_with_drop::<T>() {
-                    let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
-                    return Ok(init_smart_slot_with_drop::<T, A, F>(uninit, chunk_ref, f));
-                }
-            } else if let Some((uninit, chunk_ptr)) = self.try_reserve_shared::<T>() {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared::<T>() {
                 let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 return Ok(init_smart_slot::<T, A, F>(uninit, chunk_ref, f));
             }
-            // Worst-case payload includes a drop entry for `T: Drop`
-            // so refill always sizes the chunk for the with-drop
-            // reservation above.
             let wcp = worst_case_payload::<T>();
-            if self.is_oversized_shared(wcp) {
-                return self.alloc_oversized_smart_with::<T, F, REGISTER_DROP>(wcp, f);
+            if self.is_oversized(wcp) {
+                return self.alloc_oversized_smart_with::<T, F>(wcp, f);
             }
             self.refill_shared(wcp)?;
         }
     }
 
-    /// Cold oversized-smart-pointer fallback for
-    /// [`Self::impl_alloc_smart_with`].
-    ///
-    /// Kept `#[inline(never)]` for the same reason as
-    /// [`Self::alloc_oversized_value_with`]: the fast-path body must
-    /// stay small enough for the public smart-pointer entry points to
-    /// inline; closure-free in `f` to avoid spilling the user closure's
-    /// environment to memory on the hot path.
+    /// Cold oversized-`Box` fallback for [`Self::impl_alloc_smart_with`].
     #[cold]
     #[inline(never)]
-    fn alloc_oversized_smart_with<T, F: FnOnce() -> T, const REGISTER_DROP: bool>(
-        &self,
-        wcp: usize,
-        f: F,
-    ) -> Result<NonNull<T>, AllocError> {
+    fn alloc_oversized_smart_with<T, F: FnOnce() -> T>(&self, wcp: usize, f: F) -> Result<NonNull<T>, AllocError> {
         let (mutator, chunk_ptr) = self.acquire_oversized_shared_mutator(wcp)?;
-        let ptr = if const { REGISTER_DROP && mem::needs_drop::<T>() } {
-            let ticket = mutator
-                .try_alloc_uninit_with_drop::<T>()
-                .expect("dedicated oversized chunk sized to fit one value + drop entry");
-            let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-            init_smart_slot_with_drop::<T, A, F>(ticket, chunk_ref, f)
-        } else {
-            let ticket = mutator
-                .try_alloc_uninit::<T>()
-                .expect("dedicated oversized chunk sized to fit one value");
-            let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-            init_smart_slot::<T, A, F>(ticket, chunk_ref, f)
-        };
+        let ticket = mutator
+            .try_alloc_uninit::<T>()
+            .expect("dedicated oversized chunk sized to fit one value");
+        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+        let ptr = init_smart_slot::<T, A, F>(ticket, chunk_ref, f);
         // `mutator` drops here, releasing its `+1`. The smart-pointer
         // `chunk_ref` taken above owns the surviving `+1`.
         drop(mutator);
         Ok(ptr)
     }
 
-    /// Shared body for the uninit/zeroed `Arc<MaybeUninit<T>>` family,
-    /// **for `T: Drop` only** (callers route `T: !Drop` to the ordinary
-    /// no-entry value-Arc path).
-    ///
-    /// Reserves a placeholder [`DropEntry`] alongside the value, writes the
-    /// uninitialized (or zeroed) `MaybeUninit<T>` without committing the
-    /// entry, and eagerly publishes the chunk's drop-entry count so a later
-    /// [`Arc::<MaybeUninit<T>>::assume_init`](crate::Arc) can locate and
-    /// commit it while the chunk is still the arena's active chunk.
-    #[inline]
-    #[cfg_attr(test, mutants::skip)] // ZST tag branch && → || ⇒ refill spin
-    pub(crate) fn impl_alloc_uninit_arc<T>(&self, zeroed: bool) -> Result<Arc<mem::MaybeUninit<T>, A>, AllocError>
+    /// Cold oversized-`Arc` fallback for [`Self::impl_alloc_arc_with`].
+    #[cold]
+    #[inline(never)]
+    fn alloc_oversized_arc_with<T, F: FnOnce() -> T>(&self, wcp: usize, f: F) -> Result<Arc<T, A>, AllocError>
     where
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
-            return Err(AllocError);
-        }
-        loop {
-            // For ZST `T: Drop`, `size_of::<T>() == 0`, so the bump
-            // cursor doesn't advance per allocation. Back-to-back
-            // `alloc_uninit_arc<ZST_Drop>()` calls would otherwise
-            // produce placeholders that share `(value_offset, len = 1)`,
-            // and `commit_placeholder_drop_fn`'s lookup (which matches
-            // on that key) would re-commit the first placeholder on
-            // every subsequent `assume_init`, silently leaving the
-            // others uncommitted and skipping their destructors.
-            //
-            // Pre-reserve a 1-byte tag so each placeholder lands at a
-            // distinct `value_offset`. For ZST `T` the returned
-            // value-pointer points one byte past the previous cursor,
-            // which is fine because writes/reads/drops of a ZST touch
-            // zero bytes — the pointer's address only serves as the
-            // placeholder's lookup key.
-            if const { mem::size_of::<T>() == 0 } && self.current_shared().try_alloc(1, 1).is_none() {
-                self.refill_shared(worst_case_payload::<T>())?;
-                continue;
-            }
-            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_with_drop::<T>() {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
-                let value = if zeroed {
-                    mem::MaybeUninit::<T>::zeroed()
-                } else {
-                    mem::MaybeUninit::<T>::uninit()
-                };
-                let ptr = uninit.into_uninit_placeholder(value);
-                let _ = chunk_ref.forget();
-                // Publish the just-written placeholder so `assume_init` sees it.
-                self.current_shared().publish_drop_count();
-                // SAFETY: the chunk was bumped +1 for this `Arc` and a
-                // placeholder drop entry is reserved and published;
-                // `assume_init` commits the real shim once the value is set.
-                return Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) });
-            }
-            let wcp = worst_case_payload::<T>();
-            if self.is_oversized_shared(wcp) {
-                return self.alloc_oversized_shared_with(wcp, |mutator, chunk_ptr| {
-                    let ticket = mutator
-                        .try_alloc_uninit_with_drop::<T>()
-                        .expect("dedicated oversized chunk sized to fit one value + drop entry");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-                    let value = if zeroed {
-                        mem::MaybeUninit::<T>::zeroed()
-                    } else {
-                        mem::MaybeUninit::<T>::uninit()
-                    };
-                    let ptr = ticket.into_uninit_placeholder(value);
-                    let _ = chunk_ref.forget();
-                    // SAFETY: see the non-oversized branch above. The
-                    // temporary mutator's `Drop` publishes the drop-entry
-                    // count before this function returns, so `assume_init`
-                    // can locate the placeholder via the chunk header.
-                    unsafe { Arc::from_raw(ptr.cast::<u8>()) }
-                });
-            }
-            self.refill_shared(wcp)?;
-        }
+        let (mutator, chunk_ptr) = self.acquire_oversized_shared_mutator(wcp)?;
+        let (ticket, _chunk) = mutator
+            .try_alloc_arc_value::<T>()
+            .expect("dedicated oversized chunk sized to fit one Arc value + strong prefix");
+        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+        let ptr = init_smart_slot::<T, A, F>(ticket, chunk_ref, f);
+        drop(mutator);
+        // SAFETY: the strong prefix was written (count = 1) and the chunk
+        // holds a fresh +1 for this `Arc` family.
+        Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) })
     }
-
-    /// Slice mirror of [`Self::impl_alloc_uninit_arc`], **for `T: Drop`
-    /// only**. Reserves a placeholder slice drop entry, fills the buffer
-    /// (uninitialized or zeroed) without committing, and publishes the
-    /// drop-entry count for a later
-    /// [`Arc::<[MaybeUninit<T>]>::assume_init`](crate::Arc).
-    #[inline]
-    pub(crate) fn impl_alloc_uninit_slice_arc<T>(&self, len: usize, zeroed: bool) -> Result<Arc<[mem::MaybeUninit<T>], A>, AllocError>
-    where
-        A: Send + Sync,
-        T: Send + Sync,
-    {
-        if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
-            return Err(AllocError);
-        }
-        reject_uninit_slice_arc_too_long(len)?;
-        // Refill hint accounts for prefix + payload alignment slack +
-        // payload bytes + drop entry.
-        let min_payload = super::alloc_prefixed::worst_case_thin_slice_payload::<T>(len);
-        loop {
-            if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice_with_drop::<T>(len) {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
-                let ptr = uninit.into_uninit_slice_placeholder(zeroed);
-                let _ = chunk_ref.forget();
-                self.current_shared().publish_drop_count();
-                // SAFETY: as in `impl_alloc_uninit_arc`; the placeholder slice
-                // drop entry is reserved and published for `assume_init`.
-                return Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) });
-            }
-            if self.is_oversized_shared(min_payload) {
-                return self.alloc_oversized_shared_with(min_payload, |mutator, chunk_ptr| {
-                    let ticket = mutator
-                        .try_alloc_uninit_slice_with_drop_prefixed::<T>(len)
-                        .expect("dedicated oversized chunk sized to fit slice + drop entry");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-                    let ptr = ticket.into_uninit_slice_placeholder(zeroed);
-                    let _ = chunk_ref.forget();
-                    // SAFETY: see the non-oversized branch above.
-                    unsafe { Arc::from_raw(ptr.cast::<u8>()) }
-                });
-            }
-            self.refill_shared(min_payload)?;
-        }
-    }
-}
-/// Reject slice-arc uninit requests whose `len > u16::MAX`: the chunk
-/// drop entry packs the element count into a `u16`, so a longer slice
-/// can never be encoded and the caller's refill loop would otherwise
-/// spin allocating chunks until OOM.
-#[cfg_attr(test, mutants::skip)] // see `alloc_slice_ref::reject_drop_slice_too_long`
-#[inline]
-fn reject_uninit_slice_arc_too_long(len: usize) -> Result<(), AllocError> {
-    if len > u16::MAX as usize {
-        return Err(AllocError);
-    }
-    Ok(())
 }
 
 /// writes the value produced by `f` into the reservation. Factored out
@@ -766,20 +634,6 @@ fn reject_uninit_slice_arc_too_long(len: usize) -> Result<(), AllocError> {
 /// the refcount-release guard.
 #[inline(always)]
 fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(uninit: Uninit<'_, T>, chunk_ref: ChunkRef<A>, f: F) -> NonNull<T> {
-    let value = f();
-    let _ = chunk_ref.forget();
-    uninit.init_raw(value)
-}
-
-/// Parallel to [`init_smart_slot`] but consumes a
-/// [`UninitDrop`](crate::internal::uninit::UninitDrop) ticket so the
-/// value's `Drop` runs from the chunk's drop-list at teardown.
-#[inline(always)]
-fn init_smart_slot_with_drop<T, A: Allocator + Clone, F: FnOnce() -> T>(
-    uninit: UninitDrop<'_, T>,
-    chunk_ref: ChunkRef<A>,
-    f: F,
-) -> NonNull<T> {
     let value = f();
     let _ = chunk_ref.forget();
     uninit.init_raw(value)

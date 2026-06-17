@@ -466,13 +466,16 @@ mod dst_box {
         assert_eq!(COUNT.load(Ordering::SeqCst), before + 4);
     }
 
-    /// Regression: a slice DST with `len > u16::MAX` and `T: Drop` must be
-    /// rejected at allocation time (returns `AllocError`) so that a future
-    /// `Box::<[T]>::into_rc()` call cannot find itself with no drop entry
-    /// to retarget. Matches the non-DST slice-alloc paths which use the
-    /// same `entry_size != 0 && len > u16::MAX` guard.
+    /// A slice DST with `len > u16::MAX` and `T: Drop` is accepted: a
+    /// `Box<[T]>` drops via `drop_in_place::<[T]>` on a full-width fat
+    /// pointer, so there is no `u16` element-count cap (matching the
+    /// `Arc<[T]>` family). Every element is constructed and, on drop,
+    /// every destructor runs.
     #[test]
-    fn try_alloc_dst_box_rejects_drop_slice_with_overflowing_len() {
+    // Skipped under Miri: building + dropping ~65K elements exceeds
+    // Miri's test budget; native + cargo-careful runs cover it.
+    #[cfg_attr(miri, ignore)]
+    fn try_alloc_dst_box_accepts_drop_slice_with_overflowing_len() {
         struct DropCounter(std::sync::Arc<AtomicUsize>);
         impl Drop for DropCounter {
             fn drop(&mut self) {
@@ -482,20 +485,28 @@ mod dst_box {
 
         let arena = Arena::new();
         let n: usize = (u16::MAX as usize) + 1;
-        // Layout::array fits since u16::MAX+1 elements at small size are well under isize::MAX.
         let Ok(layout) = core::alloc::Layout::array::<DropCounter>(n) else {
             // Allocator wouldn't even build the layout; the test isn't meaningful.
             return;
         };
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let c = std::sync::Arc::clone(&counter);
 
-        // SAFETY: init would write all `n` elements; we never reach that point
-        // because the allocation is rejected up front by the new guard.
-        let result = unsafe {
-            arena.try_alloc_dst_box::<[DropCounter]>(layout, n, |_fat: *mut [DropCounter]| {
-                unreachable!("alloc must be rejected before init runs");
+        // SAFETY: `layout` describes `[DropCounter; n]`; `init` writes a
+        // valid `DropCounter` into every slot before the `Box` is
+        // observed, so `drop_in_place::<[DropCounter]>` runs on live values.
+        let b = unsafe {
+            arena.try_alloc_dst_box::<[DropCounter]>(layout, n, |fat: *mut [DropCounter]| {
+                let base = fat.cast::<DropCounter>();
+                for i in 0..n {
+                    base.add(i).write(DropCounter(std::sync::Arc::clone(&c)));
+                }
             })
-        };
-        assert!(result.is_err(), "DST slice with len > u16::MAX and T: Drop must be rejected");
+        }
+        .expect("DST slice with len > u16::MAX and T: Drop is accepted");
+        assert_eq!(b.len(), n);
+        drop(b);
+        assert_eq!(counter.load(Ordering::Relaxed), n, "every element's destructor must run");
     }
 }
 

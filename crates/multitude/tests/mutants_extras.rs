@@ -2082,25 +2082,32 @@ mod mutants_for_audit {
     // tests above that refill across many chunk classes.)
 
     // ============================================================================
-    // arena.rs:3036 / 3608 — `if entry_size != 0 && len > u16::MAX as usize`
-    // `> with ==` mutant: only panics when len exactly equals u16::MAX.
-    // `> with >=` mutant: panics at len == u16::MAX (one short of original).
-    // Kill: a Drop-aware slice of len == u16::MAX must succeed (original)
-    // and must panic for len > u16::MAX.
+    // Per-`Arc` reference counting removes the `u16` element-count cap on
+    // `Arc<[T]>` slices: a Drop-typed slice with `len > u16::MAX` now
+    // allocates (via the oversized path) and drops each element through
+    // `drop_in_place::<[T]>` in `Arc::drop`.
     // ============================================================================
 
+    #[cfg(not(miri))]
     #[test]
-    fn alloc_slice_shared_drop_aware_above_u16_max_returns_err() {
+    fn alloc_slice_shared_drop_aware_above_u16_max_succeeds() {
         use std::sync::Arc as StdArc;
-        use std::sync::atomic::AtomicU32;
-        struct D(#[allow(dead_code)] StdArc<AtomicU32>);
+        use std::sync::atomic::{AtomicU32, Ordering};
+        struct D(StdArc<AtomicU32>);
         impl Drop for D {
-            fn drop(&mut self) {}
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
         }
         let drops = StdArc::new(AtomicU32::new(0));
         let arena = Arena::builder().max_normal_alloc(60 * 1024).build();
-        let result = arena.try_alloc_slice_fill_with_arc(65_536, |_| D(drops.clone()));
-        assert!(result.is_err());
+        let n = 65_536_usize;
+        let arc = arena
+            .try_alloc_slice_fill_with_arc(n, |_| D(drops.clone()))
+            .expect("Arc slices have no u16 element-count cap");
+        assert_eq!(arc.len(), n);
+        drop(arc);
+        assert_eq!(drops.load(Ordering::Relaxed), n as u32);
     }
 
     // ============================================================================

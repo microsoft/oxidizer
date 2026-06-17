@@ -4,31 +4,23 @@
 //! Safe "ticket" wrappers that turn raw [`InChunk`] storage into initialized
 //! arena allocations.
 //!
-//! Each ticket type is constructed only by [`ChunkMutator`](super::ChunkMutator)
-//! when it reserves storage. Consumers obtain a ticket and call the matching
-//! `init*` method, which writes the value (and any drop entry) and returns a
-//! safe reference. This isolates `unsafe` to a small number of methods in
-//! this file; the higher layers of the crate (arena, smart pointers, vec,
-//! strings) use only the safe ticket API.
+//! [`ChunkMutator`](super::chunk_mutator::ChunkMutator) creates tickets for reserved storage.
+//! `init*` methods write values, commit drop entries when needed, and return
+//! safe references.
 
 use core::marker::PhantomData;
-use core::mem::{self, MaybeUninit};
 use core::ptr::{self, NonNull};
-use core::str;
+use core::{mem, str};
 
 use super::drop_entry::{DropEntry, DropFn, drop_shim};
 use super::in_chunk::InChunk;
 
 /// Storage reserved for a value (or slice) that has no drop requirements.
 ///
-/// Created by [`ChunkMutator::try_alloc_uninit`](super::ChunkMutator::try_alloc_uninit)
-/// or [`try_alloc_uninit_slice`](super::ChunkMutator::try_alloc_uninit_slice).
-/// Consume with [`init`](Self::init) (single value) or
-/// [`init_copy_from_slice`](Self::init_copy_from_slice) (slice).
+/// Created by [`ChunkMutator::try_alloc_uninit`](super::chunk_mutator::ChunkMutator::try_alloc_uninit)
+/// or [`try_alloc_uninit_slice`](super::chunk_mutator::ChunkMutator::try_alloc_uninit_slice).
 ///
-/// If the ticket is dropped without being initialized, the reserved bump
-/// space is leaked until the owning chunk is torn down — but no unsafe
-/// behavior occurs.
+/// Dropping without initialization leaks the reservation until chunk teardown.
 pub(crate) struct Uninit<'a, T: ?Sized> {
     ptr: InChunk<T>,
     _phantom: PhantomData<&'a mut T>,
@@ -49,11 +41,7 @@ impl<T: ?Sized> Uninit<'_, T> {
     ///
     /// # Safety
     ///
-    /// Caller asserts that the reserved storage backing this ticket
-    /// remains valid for the new lifetime `'b`. The intended use is
-    /// inside [`Arena`](crate::Arena), where the chunk that hosts the
-    /// slot is retained until the arena is reset or dropped — i.e.
-    /// at least for the `&Arena` borrow lifetime.
+    /// Caller guarantees the reserved storage remains valid for `'b`.
     #[inline]
     pub(crate) unsafe fn rebind<'b>(self) -> Uninit<'b, T> {
         Uninit {
@@ -90,10 +78,7 @@ impl<'a, T> Uninit<'a, T> {
         unsafe { &mut *ptr.as_ptr() }
     }
 
-    /// Same as [`init`](Self::init) but returns a raw pointer with no
-    /// lifetime. Used by the arena layer when the resulting reference's
-    /// lifetime must be tied to `&Arena` rather than to the consumed
-    /// ticket's borrow scope.
+    /// Same as [`init`](Self::init) but returns a raw pointer with no lifetime.
     #[inline]
     pub(crate) fn init_raw(self, value: T) -> NonNull<T> {
         let raw = self.ptr.as_ptr();
@@ -147,9 +132,7 @@ impl<'a, T> Uninit<'a, [T]> {
         unsafe { slice_ptr.as_mut() }
     }
 
-    /// Like [`Self::init_copy_from_slice`] but returns the raw
-    /// `NonNull<[T]>` with chunk-wide provenance. See
-    /// [`Uninit::init_with_ptr`] for the rationale.
+    /// Like [`Self::init_copy_from_slice`] but returns raw `NonNull<[T]>`.
     #[inline]
     pub(crate) fn init_copy_from_slice_ptr(self, src: &[T]) -> NonNull<[T]>
     where
@@ -201,13 +184,8 @@ impl<'a, T> Uninit<'a, [T]> {
         unsafe { slice_ptr.as_mut() }
     }
 
-    /// Like [`Self::init_with`] but returns the raw `NonNull<[T]>` with
-    /// chunk-wide provenance instead of an `&mut [T]` retag. Callers
-    /// that hand the slice to a smart-pointer constructor (which then
-    /// recovers the chunk header via `byte_sub`) need the chunk-wide
-    /// provenance; rounding through `&mut [T]` would narrow the
-    /// borrow-stack tag to the slice payload and trip strict provenance
-    /// / Stacked Borrows when the header bytes are later read.
+    /// Like [`Self::init_with`] but returns raw `NonNull<[T]>` to preserve
+    /// chunk-wide provenance for smart-pointer header recovery.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // `+= → *=` on counter ⇒ infinite loop
     pub(crate) fn init_with_ptr<F>(self, mut f: F) -> NonNull<[T]>
@@ -264,14 +242,10 @@ impl<'a, T> Uninit<'a, [T]> {
         })
     }
 
-    /// Consume this slice ticket and return the raw start pointer plus
-    /// capacity. The caller takes over responsibility for tracking
-    /// which slots are initialized and for dropping the initialized
-    /// prefix before the chunk is torn down.
+    /// Consumes this slice ticket and returns the raw start pointer plus
+    /// capacity; caller tracks initialization and drops.
     ///
-    /// Intended for growable container backings (`Vec`, `String`)
-    /// where the reservation is filled in incrementally rather than in
-    /// a single `init_*` call.
+    /// Used by growable containers filled incrementally.
     #[inline]
     pub(crate) fn into_raw_buffer(self) -> (NonNull<T>, usize) {
         let slice_ptr = self.ptr.as_non_null();
@@ -280,9 +254,7 @@ impl<'a, T> Uninit<'a, [T]> {
     }
 }
 
-/// Drop-guard used by `init_with` / `init_clone_from_slice` / `init_from_iter`
-/// implementations: if the producing closure panics part-way through, drop the
-/// elements written so far.
+/// Drops the initialized prefix if slice initialization panics.
 struct InitGuard<T> {
     dst: *mut T,
     initialized: usize,
@@ -303,13 +275,11 @@ impl<T> Drop for InitGuard<T> {
 
 /// Storage reserved for a value, paired with a pre-reserved drop entry slot.
 ///
-/// Created by [`ChunkMutator::try_alloc_uninit_with_drop`](super::ChunkMutator::try_alloc_uninit_with_drop)
-/// or [`try_alloc_uninit_slice_with_drop`](super::ChunkMutator::try_alloc_uninit_slice_with_drop).
+/// Created by [`ChunkMutator::try_alloc_uninit_with_drop`](super::chunk_mutator::ChunkMutator::try_alloc_uninit_with_drop)
+/// or [`try_alloc_uninit_slice_with_drop`](super::chunk_mutator::ChunkMutator::try_alloc_uninit_slice_with_drop).
 ///
-/// On `init*`, the value is written into its storage and the drop entry is
-/// committed (its `drop_fn` is set to a shim for `T`). If the ticket is
-/// dropped without being initialized, the placeholder entry remains with no
-/// drop shim — the replay loop will skip it.
+/// `init*` writes the value and commits the drop entry. Dropping without
+/// initialization leaves a skipped placeholder entry.
 pub(crate) struct UninitDrop<'a, T: ?Sized> {
     value: InChunk<T>,
     drop_slot: InChunk<DropEntry>,
@@ -339,10 +309,7 @@ impl<'a, T> UninitDrop<'a, T> {
         // storage exclusively.
         unsafe { &mut *ptr.as_ptr() }
     }
-    /// Same as [`init`](Self::init) but returns a raw pointer with no
-    /// lifetime. Used by the arena layer when the resulting reference's
-    /// lifetime must be tied to `&Arena` rather than to the consumed
-    /// ticket's borrow scope.
+    /// Same as [`init`](Self::init) but returns a raw pointer with no lifetime.
     #[inline]
     pub(crate) fn init_raw(self, value: T) -> NonNull<T> {
         let raw = self.value.as_ptr();
@@ -362,40 +329,14 @@ impl<'a, T> UninitDrop<'a, T> {
             NonNull::new_unchecked(raw)
         }
     }
-
-    /// Writes a (possibly uninitialized) `MaybeUninit<T>` into the value
-    /// slot and returns a pointer to it, leaving the pre-reserved drop entry
-    /// as an **uncommitted** placeholder.
-    ///
-    /// Used by the uninit-`Arc` allocation path: the entry is committed
-    /// later by [`Arc::<MaybeUninit<T>>::assume_init`](crate::Arc) once the
-    /// value is initialized. If the resulting handle is dropped without
-    /// `assume_init`, the placeholder stays `None` and the replay loop skips
-    /// it, so no destructor runs on uninitialized memory.
-    #[inline]
-    pub(crate) fn into_uninit_placeholder(self, value: MaybeUninit<T>) -> NonNull<MaybeUninit<T>> {
-        let raw = self.value.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: `raw` is non-null, aligned for `T` (identical to
-        // `MaybeUninit<T>`), and exclusively owned by this consumed ticket;
-        // the slot is uninitialized so `write` drops nothing. The drop slot
-        // is intentionally left as the placeholder written at reservation.
-        unsafe {
-            ptr::write(raw, value);
-            NonNull::new_unchecked(raw)
-        }
-    }
 }
 
 impl<'a, T> UninitDrop<'a, [T]> {
-    /// Initializes the reserved slice by cloning each element of `src`,
-    /// commits the drop entry, and returns a mutable reference bound by
-    /// the arena's lifetime.
+    /// Clones `src` into the reservation, commits the drop entry, and returns
+    /// the initialized slice.
     ///
-    /// If any `T::clone` panics, all previously-cloned elements are
-    /// dropped before the panic propagates; the drop entry is *not*
-    /// committed (the chunk's drop-replay loop will skip the placeholder),
-    /// so partially-initialized memory cannot be re-dropped at arena
-    /// teardown.
+    /// On panic, initialized elements are dropped and the placeholder remains
+    /// uncommitted.
     #[inline]
     pub(crate) fn init_clone_from_slice(self, src: &[T]) -> &'a mut [T]
     where
@@ -409,11 +350,8 @@ impl<'a, T> UninitDrop<'a, [T]> {
         self.init_with(|i| src[i].clone())
     }
 
-    /// Initializes the reserved slice by calling `f(i)` for each index
-    /// `i` in `0..len`, then commits the drop entry on success. If `f`
-    /// panics, already-initialized elements are dropped and the drop
-    /// entry is *not* committed (the chunk's drop-replay loop skips the
-    /// placeholder).
+    /// Initializes with `f(i)` and commits the drop entry on success. On panic,
+    /// initialized elements are dropped and the placeholder remains uncommitted.
     #[inline]
     pub(crate) fn init_with<F>(self, f: F) -> &'a mut [T]
     where
@@ -425,9 +363,7 @@ impl<'a, T> UninitDrop<'a, [T]> {
         unsafe { slice_ptr.as_mut() }
     }
 
-    /// Like [`Self::init_with`] but returns the raw `NonNull<[T]>` with
-    /// chunk-wide provenance. See [`Uninit::init_with_ptr`] for the
-    /// rationale.
+    /// Like [`Self::init_with`] but returns raw `NonNull<[T]>`.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // counter mutation += → *= ⇒ infinite loop
     pub(crate) fn init_with_ptr<F>(self, mut f: F) -> NonNull<[T]>
@@ -453,11 +389,8 @@ impl<'a, T> UninitDrop<'a, [T]> {
         slice_ptr
     }
 
-    /// Initializes the reserved slice by pulling `len` values from
-    /// `iter` and commits the drop entry on success. Panics if `iter`
-    /// yields fewer elements than the reservation; in that case,
-    /// already-initialized elements are dropped and the drop entry is
-    /// not committed.
+    /// Pulls `len` values from `iter` and commits on success. If `iter` is
+    /// short, initialized elements are dropped and the entry is not committed.
     #[inline]
     pub(crate) fn init_from_iter<I>(self, mut iter: I) -> &'a mut [T]
     where
@@ -467,27 +400,5 @@ impl<'a, T> UninitDrop<'a, [T]> {
             iter.next()
                 .expect("iterator yielded fewer elements than ExactSizeIterator::len() reported")
         })
-    }
-
-    /// Slice analogue of [`UninitDrop::into_uninit_placeholder`]: optionally
-    /// zero-fills the reserved elements and returns the buffer as
-    /// `MaybeUninit<T>`s, leaving the pre-reserved drop entry **uncommitted**.
-    ///
-    /// The uninit-slice-`Arc` path commits the entry later via
-    /// [`Arc::<[MaybeUninit<T>]>::assume_init`](crate::Arc).
-    #[inline]
-    pub(crate) fn into_uninit_slice_placeholder(self, zeroed: bool) -> NonNull<[MaybeUninit<T>]> {
-        let slice_ptr = self.value.as_non_null();
-        let len = slice_ptr.len();
-        let base = slice_ptr.cast::<MaybeUninit<T>>();
-        if zeroed {
-            // SAFETY: `base` addresses `len` exclusively-owned `MaybeUninit<T>`
-            // slots inside chunk storage reserved for this consumed ticket;
-            // zeroing their bytes leaves valid `MaybeUninit<T>` values.
-            unsafe {
-                ptr::write_bytes(base.as_ptr().cast::<u8>(), 0, len.saturating_mul(mem::size_of::<T>()));
-            }
-        }
-        NonNull::slice_from_raw_parts(base, len)
     }
 }

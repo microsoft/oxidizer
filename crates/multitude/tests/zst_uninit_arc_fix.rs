@@ -123,7 +123,7 @@ fn zst_alloc_arc_never_returns_one_past_chunk_end() {
 }
 
 /// Regression from post-fix audit: `impl_alloc_dst_box` used to check
-/// `is_oversized_shared(total)` but refill with `total + align`. At
+/// `is_oversized(total)` but refill with `total + align`. At
 /// `total == max_normal_alloc` but `total + align > max_normal_alloc`,
 /// the in-arena fast path failed, the oversized branch was skipped,
 /// and `refill_shared(refill_hint)` hit the new `debug_assert!` in

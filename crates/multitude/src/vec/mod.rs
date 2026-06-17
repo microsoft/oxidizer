@@ -132,7 +132,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
             if let Some(u) = self.arena.try_reserve_local_slice::<T>(new_cap) {
                 break u;
             }
-            if self.arena.is_oversized_local(refill_hint) {
+            if self.arena.is_oversized(refill_hint) {
                 let (new_ptr, new_cap_actual) = self.arena.alloc_oversized_local_with(refill_hint, |mutator| {
                     let ticket = mutator
                         .try_alloc_uninit_slice::<T>(new_cap)

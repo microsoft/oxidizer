@@ -4,35 +4,20 @@
 //! Per-arena chunk cache and allocation source.
 //!
 //! [`ChunkProvider`] owns the arena's allocator clone, enforces a byte
-//! budget, and maintains a freed-chunk cache of the **current floor
-//! class**, so steady-state allocate/release pairs avoid hitting the
-//! system allocator.
+//! budget, and maintains freed-chunk caches at the current class floor.
 //!
-//! Each cache holds at most one freelist. The associated **class floor**
-//! (`local_cache_class` / `shared_cache_class`) ratchets monotonically
-//! upward as the arena progresses to larger chunks. Chunks released
-//! below the floor are returned to the system; cached chunks below the
-//! floor are evicted at the next floor bump. The intent is that the
-//! arena settles into the largest class it needs with the minimum
-//! number of chunks retained.
+//! Each cache holds one freelist. The class floor ratchets upward as the
+//! arena needs larger chunks; below-floor chunks are evicted or destroyed.
 //!
 //! Two cache shapes coexist:
 //!
-//! - **Local cache**: single freelist guarded by an [`OwnerThreadCell`].
-//!   The provider's owning thread is the arena's thread; only that
-//!   thread allocates from or releases into the local cache.
-//! - **Shared cache**: lock-free Treiber-style stack of
-//!   `AtomicPtr<SharedChunk<A>>`. Any thread can push a chunk (when its
-//!   last refcount handle drops); only the owning thread pops. A
-//!   concurrent push by a thread that has yet to observe the latest
-//!   floor bump may add a below-floor chunk; that straggler is destroyed
-//!   when the owner thread pops it (see [`ChunkProvider::pop_shared`]).
+//! - Local: single freelist in [`OwnerThreadCell`], accessed only by the
+//!   arena thread.
+//! - Shared: lock-free Treiber stack; any thread can push, only the owner
+//!   pops. Below-floor stragglers are destroyed by [`ChunkProvider::pop_shared`].
 
-// `release_local`, `release_shared`, `pop_shared`, `push_shared`, and the
-// `destroy_or_cache_just_acquired` helpers are `unsafe fn` with their full
-// safety contracts documented on the items themselves; the inner unsafe
-// wrappers edition 2024 would otherwise require do not add a safety
-// boundary, so we drop them.
+// These `unsafe fn`s have item-level safety contracts; inner unsafe blocks
+// would not add a boundary here.
 #![allow(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
 #![allow(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
 
@@ -46,7 +31,7 @@ use core::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::chunk::Chunk;
-use super::chunk_alloc::chunk_alloc_size;
+use super::chunk_ops::ChunkOps;
 use super::constants::{MAX_CHUNK_BYTES, MAX_NORMAL_ALLOC, MIN_CHUNK_BYTES, SizeClass};
 use super::drop_entry::DropEntry;
 use super::local_chunk::LocalChunk;
@@ -135,17 +120,10 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// Bytes currently outstanding (allocated, not yet freed). Updated via
     /// `AcqRel` speculative-add.
     bytes_outstanding: AtomicUsize,
-    /// Single-thread local-chunk cache: thin `*mut u8` header pointer to
-    /// the freelist head (chunks linked via [`LocalChunk::set_next`]
-    /// / [`LocalChunk::next`]). Holds at most one freelist for
-    /// the **current class floor** ([`Self::local_cache_class`]); chunks
-    /// below the floor are destroyed instead of cached.
+    /// Local-cache freelist head as a thin header pointer. Holds chunks at or
+    /// above [`Self::local_cache_class`].
     local_cache: OwnerThreadCell<*mut u8>,
-    /// Current class floor for the local cache. Only chunks at class
-    /// greater than or equal to `local_cache_class` are cached; the
-    /// floor ratchets monotonically upward as the arena allocates
-    /// progressively larger chunks, and stale below-floor chunks are
-    /// evicted at each bump.
+    /// Current class floor for the local cache; below-floor chunks are evicted.
     local_cache_class: AtomicU8,
     /// Lock-free shared-chunk cache: single Treiber-stack head for the
     /// current class floor ([`Self::shared_cache_class`]).
@@ -167,11 +145,8 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
     /// Lifetime count of oversized one-shot shared chunks allocated.
     #[cfg(feature = "stats")]
     oversized_shared_chunks_allocated: AtomicU64,
-    /// Bytes currently "wasted" in the unused free region of chunks that have
-    /// been retired from an arena's `current_*` slot but have not yet been
-    /// returned to the cache or freed back to the underlying allocator. Bumped
-    /// up when a chunk is retired, bumped back down when the same chunk is
-    /// later cached or destroyed.
+    /// Unused tail bytes in retired chunks not yet cached or freed. Retire
+    /// increments; cache/destroy decrements.
     #[cfg(feature = "stats")]
     wasted_tail_bytes: AtomicU64,
 }
@@ -270,17 +245,10 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         &self.allocator
     }
 
-    /// Acquires a normal-class local chunk whose payload has at least
-    /// `min_payload` bytes. The caller MUST have already verified the
-    /// request is not oversized (i.e. `min_payload <= max_normal_alloc`
-    /// and total fits in `MAX_CHUNK_BYTES`); use
-    /// [`Self::acquire_oversized_local`] otherwise. Returns with refcount
-    /// = 1.
+    /// Acquires a normal-class local chunk with at least `min_payload` bytes.
+    /// Caller must route oversized requests to [`Self::acquire_oversized_local`].
     ///
-    /// `ratchet_class` is the caller's size-class floor (the refill
-    /// ratchet): the chosen chunk is sized to the larger of the class
-    /// needed for `min_payload` and `ratchet_class`, so the chunk can
-    /// grow with arena usage.
+    /// `ratchet_class` is the caller's size-class floor for refill growth.
     pub(crate) fn acquire_local(&self, min_payload: usize, ratchet_class: SizeClass) -> Result<NonNull<LocalChunk<A>>, AllocError> {
         let header = LocalChunk::<A>::header_size();
         let needed_total = header.checked_add(min_payload).ok_or(AllocError)?;
@@ -291,13 +259,9 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         self.acquire_normal_local(SizeClass::min_for_bytes(needed_total).max(ratchet_class))
     }
 
-    /// Acquires a normal (cacheable) local chunk in the given size `class`,
-    /// reusing a cached chunk when available. Never routes to oversized; the
-    /// caller is responsible for any oversized decision.
+    /// Acquires a cacheable local chunk in `class`, reusing cache when possible.
     ///
-    /// If `class` exceeds the cache's current class floor, the floor is
-    /// bumped (monotonically) and stale below-floor chunks in the cache
-    /// are destroyed before the pop attempt.
+    /// Bumps the cache floor and evicts stale chunks when `class` is higher.
     //
     // Mutation testing is suppressed on the `class > floor` branch:
     // `>` with `<` / `==` only changes when the floor advances; the
@@ -334,9 +298,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         self.allocate_fresh_local(class)
     }
 
-    /// Sets the local cache floor to `new_class` and destroys every cached
-    /// chunk whose total allocation is smaller than the new floor.
-    /// Idempotent: caller already verified `new_class > current_floor`.
+    /// Sets the local cache floor and destroys cached chunks below it.
+    /// Caller already verified `new_class > current_floor`.
     ///
     /// # Safety
     ///
@@ -356,7 +319,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                     let fat = LocalChunk::<A>::header_to_fat(cur);
                     let chunk_nn = NonNull::new_unchecked(fat);
                     let next = LocalChunk::next(chunk_nn);
-                    let total = LocalChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
+                    let total = LocalChunk::<A>::footprint((*chunk_nn.as_ptr()).capacity())
+                        .expect("evicted chunk's layout was valid when it was allocated");
                     if total >= new_min_total {
                         LocalChunk::set_next(chunk_nn, new_head);
                         new_head = cur;
@@ -371,11 +335,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
-    /// Allocates a brand-new normal local chunk of the given size `class`,
-    /// bypassing the cache. Increments the lifetime allocation counter.
-    /// Used both on a cache miss in [`acquire_normal_local`](Self::acquire_normal_local)
-    /// and by [`preallocate_local`](Self::preallocate_local) (which must add
-    /// fresh chunks to the cache rather than recycle existing ones).
+    /// Allocates a fresh normal local chunk, bypassing the cache.
     fn allocate_fresh_local(&self, class: SizeClass) -> Result<NonNull<LocalChunk<A>>, AllocError> {
         let header = LocalChunk::<A>::header_size();
         let total = class.bytes();
@@ -394,11 +354,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
-    /// Acquires a normal-class shared chunk whose payload has at least
-    /// `min_payload` bytes. The caller MUST have already verified the
-    /// request is not oversized; use [`Self::acquire_oversized_shared`]
-    /// otherwise. See [`Self::acquire_local`] for `ratchet_class`
-    /// semantics. Returns with refcount = 1.
+    /// Acquires a normal-class shared chunk with at least `min_payload` bytes.
+    /// Caller must route oversized requests to [`Self::acquire_oversized_shared`].
     pub(crate) fn acquire_shared(&self, min_payload: usize, ratchet_class: SizeClass) -> Result<NonNull<SharedChunk<A>>, AllocError> {
         let header = SharedChunk::<A>::header_size();
         let needed_total = header.checked_add(min_payload).ok_or(AllocError)?;
@@ -409,10 +366,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         self.acquire_normal_shared(SizeClass::min_for_bytes(needed_total).max(ratchet_class))
     }
 
-    /// Acquires a normal (cacheable) shared chunk in the given size `class`.
-    /// If `class` exceeds the cache's current class floor, the floor is
-    /// bumped (monotonically) and stale below-floor chunks in the cache
-    /// are destroyed before the pop attempt.
+    /// Acquires a cacheable shared chunk in `class`, bumping the floor first
+    /// when needed.
     //
     // Mutation testing is suppressed on the `class > floor` branch for
     // the same reason as `acquire_normal_local`.
@@ -435,12 +390,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         self.allocate_fresh_shared(class)
     }
 
-    /// Sets the shared cache floor to `new_class` and destroys every
-    /// cached chunk whose total allocation is smaller than the new floor.
-    /// Called only by the owning thread; concurrent pushers (releasing
-    /// threads) may race a below-floor chunk into the cache after the
-    /// floor is observed-as-lower — those stragglers are caught by the
-    /// pop-time class check in [`Self::pop_shared`].
+    /// Sets the shared cache floor and destroys detached chunks below it.
+    /// Racing below-floor pushes are handled by [`Self::pop_shared`].
     ///
     /// # Safety
     ///
@@ -453,9 +404,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // subsequent Acquire load sees it.
         self.shared_cache_class.store(new_class.raw(), Ordering::Release);
         let new_min_total = new_class.bytes();
-        // Atomically detach the whole freelist. Concurrent pushers will
-        // push onto the now-empty head; the post-bump pushers may push
-        // either above-floor (kept) or below-floor (caught at pop) chunks.
+        // Detach the freelist; racing pushers target the empty head.
         let mut cur = self.shared_cache.swap(ptr::null_mut(), Ordering::AcqRel);
         // SAFETY: each linked chunk is a refcount-zero, uniquely-owned
         // chunk we just detached; we walk the list, re-push survivors,
@@ -466,7 +415,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
                 let chunk_nn = NonNull::new_unchecked(fat);
                 let link = SharedChunk::cache_link(chunk_nn);
                 let next = (*link).load(Ordering::Acquire);
-                let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
+                let total = SharedChunk::<A>::footprint((*chunk_nn.as_ptr()).capacity())
+                    .expect("evicted chunk's layout was valid when it was allocated");
                 if total >= new_min_total {
                     self.push_shared(chunk_nn);
                 } else {
@@ -478,8 +428,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
-    /// Allocates a brand-new normal shared chunk of the given size `class`,
-    /// bypassing the cache. See [`allocate_fresh_local`](Self::allocate_fresh_local).
+    /// Allocates a fresh normal shared chunk, bypassing the cache.
     #[cfg_attr(test, mutants::skip)] // `total - header → total / header` ⇒ runaway allocations
     fn allocate_fresh_shared(&self, class: SizeClass) -> Result<NonNull<SharedChunk<A>>, AllocError> {
         let header = SharedChunk::<A>::header_size();
@@ -512,27 +461,16 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // outright or push the chunk onto the (single-threaded) cache by
         // writing its cache-link slot.
         let capacity = (*chunk.as_ptr()).capacity();
-        // Match the rounded `Layout::size()` that `chunk_layout` allocated, so
-        // the byte budget / `total_bytes_allocated` track the real footprint
-        // (the round-up matters for oversized chunks whose header+capacity is
-        // not `value_align`-aligned).
-        let total = chunk_alloc_size(LocalChunk::<A>::header_size(), capacity, LocalChunk::<A>::value_align())
-            .expect("released chunk's layout was valid when it was allocated");
+        let total = LocalChunk::<A>::footprint(capacity).expect("released chunk's layout was valid when it was allocated");
         #[cfg(feature = "stats")]
         {
-            // Decrement the wasted-tail counter by the value stashed on
-            // the chunk header at retire time (0 for chunks that never
-            // went through a mutator, e.g. preallocated cache fills).
+            // Subtract the retire-time wasted-tail value, if any.
             let wasted = u64::from((*chunk.as_ptr()).wasted_at_retire());
             if wasted != 0 {
                 self.release_wasted_tail(wasted);
             }
         }
-        // Bypass the cache for non-class-size totals (oversized one-shots
-        // whose total isn't a power of two) and for chunks below the
-        // current cache class floor. The floor ratchets monotonically as
-        // the arena moves to larger chunks; smaller chunks released
-        // afterward are returned to the system so the cache stays uniform.
+        // Bypass the cache for oversized/non-class totals and below-floor chunks.
         if !is_cacheable_size(total) || total < SizeClass::new(self.local_cache_class.load(Ordering::Relaxed)).bytes() {
             LocalChunk::destroy(chunk, &self.allocator);
             self.release_bytes(total);
@@ -552,15 +490,10 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     pub(crate) unsafe fn release_shared(&self, chunk: NonNull<SharedChunk<A>>) {
         // SAFETY: chunk is live and uniquely owned by caller.
         let capacity = (*chunk.as_ptr()).capacity();
-        // See `release_local`: round to the allocated `Layout::size()` so byte
-        // accounting matches the real footprint for oversized chunks.
-        let total = chunk_alloc_size(SharedChunk::<A>::header_size(), capacity, SharedChunk::<A>::value_align())
-            .expect("released chunk's layout was valid when it was allocated");
+        let total = SharedChunk::<A>::footprint(capacity).expect("released chunk's layout was valid when it was allocated");
         #[cfg(feature = "stats")]
         {
-            // See `release_local` for the symmetric subtract semantics.
-            // Acquire load on the shared chunk's atomic — the store may
-            // have happened on a different thread (last `Arc::drop`).
+            // Acquire load pairs with retire on another thread.
             let wasted = u64::from((*chunk.as_ptr()).wasted_at_retire());
             if wasted != 0 {
                 self.release_wasted_tail(wasted);
@@ -577,10 +510,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Pre-warms the local cache with one chunk in the given size class.
     ///
-    /// Always allocates through the normal (cacheable) class path: a
-    /// preallocated chunk is a size-classed chunk regardless of the
-    /// configured `max_normal_alloc`, so it must never route to the
-    /// oversized (one-shot, non-cacheable) path even when its payload
+    /// Always allocates through the normal class path, even when the payload
     /// exceeds `max_normal_alloc`.
     pub(crate) fn preallocate_local(&self, class: SizeClass) -> Result<(), AllocError> {
         let chunk = self.allocate_fresh_local(class)?;
@@ -626,25 +556,16 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         self.bytes_outstanding.fetch_sub(n, Ordering::AcqRel);
     }
 
-    /// Allocates a one-shot oversized local chunk whose payload is sized
-    /// to fit a single allocation of `min_payload` bytes (plus rounding
-    /// for drop-entry alignment). The chunk bypasses the size-class cache.
+    /// Allocates a one-shot oversized local chunk sized for `min_payload`.
     ///
-    /// Used by [`Arena`](crate::Arena) for allocations whose worst-case
-    /// payload exceeds `max_normal_alloc`: the caller wraps the chunk
-    /// in a temporary [`ChunkMutator`](super::ChunkMutator), performs the
-    /// single allocation, and the current chunk is left untouched so
-    /// subsequent small allocations continue to use it.
+    /// The caller uses a temporary [`ChunkMutator`](super::chunk_mutator::ChunkMutator), so
+    /// the current chunk remains available for later small allocations.
     pub(crate) fn acquire_oversized_local(&self, min_payload: usize) -> Result<NonNull<LocalChunk<A>>, AllocError> {
-        // Add `oversized_payload_align_slack()` to absorb the worst-case
-        // alignment skew the bump cursor pays at the start of an unaligned
-        // payload (chunk headers do not pad the payload to be 8-aligned).
-        // Callers requesting an `elem_align > align_of::<DropEntry>()` must
-        // pre-size `min_payload` to cover the extra skew themselves.
+        // Add worst-case payload-start alignment skew. Callers with larger
+        // element alignment pre-size `min_payload` themselves.
         let payload = round_up_to_drop_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
-        // Reserve the rounded `Layout::size()` that `LocalChunk::allocate`
-        // will actually request, so the byte budget is enforced accurately.
-        let total = chunk_alloc_size(LocalChunk::<A>::header_size(), payload, LocalChunk::<A>::value_align())?;
+        // Reserve the exact rounded allocation size.
+        let total = LocalChunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
         match LocalChunk::<A>::allocate(&self.allocator, ptr::from_ref(self), payload) {
             Ok(chunk) => {
@@ -664,7 +585,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         // See `acquire_oversized_local` for the alignment-slack rationale.
         let payload = round_up_to_drop_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
         // See `acquire_oversized_local`: reserve the rounded allocation size.
-        let total = chunk_alloc_size(SharedChunk::<A>::header_size(), payload, SharedChunk::<A>::value_align())?;
+        let total = SharedChunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
         match SharedChunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
             Ok(chunk) => {
@@ -679,10 +600,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
-    /// Pops a cached shared chunk at or above the current class floor.
-    /// Stale below-floor chunks (pushed by a release thread that raced
-    /// against [`Self::advance_shared_cache_floor`]) are destroyed and
-    /// the next chunk is tried.
+    /// Pops a cached shared chunk at or above the current class floor,
+    /// destroying below-floor stragglers.
     ///
     /// # Safety
     ///
@@ -706,7 +625,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
             let Ok(popped) = updated else { return None };
             let fat = SharedChunk::<A>::header_to_fat(popped);
             let chunk_nn = NonNull::new_unchecked(fat);
-            let total = SharedChunk::<A>::header_size() + (*chunk_nn.as_ptr()).capacity();
+            let total = SharedChunk::<A>::footprint((*chunk_nn.as_ptr()).capacity())
+                .expect("popped chunk's layout was valid when it was allocated");
             if total >= floor_min_total {
                 return Some(chunk_nn);
             }
@@ -726,16 +646,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let head = &self.shared_cache;
         let link = SharedChunk::cache_link(chunk);
         let new = chunk.cast::<u8>().as_ptr();
-        // The chunk is exclusively ours until the publishing CAS below
-        // succeeds, so the link can be initialized via a non-atomic
-        // pointer write through `AtomicPtr::as_ptr()`. Doing the first
-        // write atomically triggers a Miri weak-memory ICE
-        // ("cannot have empty store buffer when previous write was
-        // atomic") on freshly-allocated chunk payload bytes; the
-        // non-atomic init sidesteps it. After the CAS, all subsequent
-        // mutations to the link go through atomic ops, and any popper
-        // observes the link via `head.load(Acquire)` which
-        // synchronizes-with the `Release` half of our CAS.
+        // Exclusive ownership permits non-atomic link initialization before
+        // the publishing CAS; later link changes use atomics.
         let mut cur = head.load(Ordering::Acquire);
         loop {
             ptr::write((*link).as_ptr(), cur);
@@ -752,7 +664,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         }
     }
 
-    /// Drains every cached chunk and deallocates its backing memory.
+    /// Drains cached chunks and deallocates their backing memory.
     fn drain_all(&self) {
         // SAFETY: drain runs in Drop with no outstanding mutators; the
         // provider is single-owner at this point, so the OwnerThreadCell
@@ -799,10 +711,8 @@ pub(crate) fn is_cacheable_size(total: usize) -> bool {
 /// `align_of::<DropEntry>()`. Returns `None` on overflow.
 ///
 /// [`ChunkMutator::from_owned`](super::chunk_mutator::ChunkMutator::from_owned)
-/// aligns the chunk's `drop_top` *down* to `align_of::<DropEntry>()`,
-/// shaving up to `align - 1` bytes off the usable payload. Without this
-/// rounding the usable capacity could fall below `min_payload` and
-/// `impl_alloc_*`'s reserve/refill loop would spin until OOM.
+/// aligns `drop_top` down, so rounding prevents usable capacity from falling
+/// below `min_payload`.
 #[cfg_attr(test, mutants::skip)] // mask mutations underfit payload → OOM spin
 #[inline]
 fn round_up_to_drop_align(min_payload: usize) -> Result<usize, AllocError> {
@@ -834,9 +744,7 @@ fn exceeds_max_chunk_bytes(needed_total: usize) -> bool {
 // --- Helpers wired into chunk types via inherent impls ------------------------
 
 impl<A: Allocator + Clone> LocalChunk<A> {
-    /// Used by `preallocate_local`: route a just-acquired refcount-1 chunk
-    /// back to its provider's cache (refcount → 0) without going through
-    /// `ChunkMutator`.
+    /// Routes a just-acquired refcount-1 chunk to the provider cache.
     ///
     /// # Safety
     ///
@@ -889,11 +797,7 @@ mod tests {
         static PUSH_RETRY_COUNT: Cell<usize> = const { Cell::new(0) };
     }
 
-    /// Test hook invoked by `push_shared` just before its CAS. If the
-    /// thread-local injection slot is armed, splice that chunk onto the
-    /// stack as if a concurrent pusher had installed it: link it to the
-    /// value the pusher loaded, then publish it as the new head so the
-    /// pending CAS (still expecting `cur`) fails exactly once.
+    /// Test hook that injects a competing shared-cache push before the CAS.
     ///
     /// # Safety
     ///
@@ -924,12 +828,8 @@ mod tests {
         assert_eq!(c.max_normal_alloc(), MAX_NORMAL_ALLOC);
     }
 
-    // Covers `pop_shared`'s below-floor straggler arm: a cached shared
-    // chunk smaller than the current class floor is destroyed (not
-    // returned) and the pop continues. Single-threaded code never caches
-    // a below-floor chunk via `release_shared`, so we model the
-    // push-races-floor-bump state directly: raise the floor on an empty
-    // cache, then inject a small (class-0) chunk via `push_shared`.
+    // Covers `pop_shared`'s below-floor straggler arm by raising the floor,
+    // then pushing a smaller chunk.
     #[test]
     fn pop_shared_destroys_below_floor_straggler() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
@@ -969,13 +869,8 @@ mod tests {
         assert!(!is_cacheable_size(0));
     }
 
-    // Covers `push_shared`'s contended CAS retry arm (the `Err(actual)`
-    // branch). A real concurrent push is non-deterministic, so we model
-    // the race directly: arm a thread-local injection so the test hook
-    // publishes a competing chunk onto the stack head between our load and
-    // CAS, forcing the pending CAS to fail and the loop to retry exactly
-    // once before it settles. Thread-local state keeps this isolated from
-    // other tests running in parallel.
+    // Covers `push_shared`'s contended CAS retry arm via deterministic
+    // thread-local race injection.
     #[test]
     fn push_shared_retries_on_contended_cas() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());

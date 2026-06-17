@@ -290,7 +290,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)]
     fn refill_or_alloc_oversized_slice_copy<T: Copy>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let refill_hint = worst_case_slice_payload::<T>(src.len());
-        if self.is_oversized_local(refill_hint) {
+        if self.is_oversized(refill_hint) {
             return Ok(Some(self.alloc_oversized_slice_copy::<T>(refill_hint, src)?));
         }
         self.refill_local(refill_hint)?;
@@ -363,7 +363,7 @@ impl<A: Allocator + Clone> Arena<A> {
     fn refill_or_alloc_oversized_slice_clone<T: Clone>(&self, src: &[T]) -> Result<Option<&mut [T]>, AllocError> {
         let len = src.len();
         let refill_hint = worst_case_slice_payload::<T>(len);
-        if self.is_oversized_local(refill_hint) {
+        if self.is_oversized(refill_hint) {
             let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
                 if const { mem::needs_drop::<T>() } {
                     let ticket = mutator
@@ -413,7 +413,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let f = f.take().expect("with closure taken twice");
                 return Ok(u.init_with(f));
             }
-            if self.is_oversized_local(refill_hint) {
+            if self.is_oversized(refill_hint) {
                 let f = f.take().expect("with closure taken twice");
                 let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
                     if const { mem::needs_drop::<T>() } {
@@ -468,7 +468,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let it = iter.take().expect("iterator taken twice");
                 return Ok(u.init_from_iter(it));
             }
-            if self.is_oversized_local(refill_hint) {
+            if self.is_oversized(refill_hint) {
                 let mut it = iter.take().expect("iterator taken twice");
                 let mut ptr = self.alloc_oversized_local_with(refill_hint, |mutator| {
                     if const { mem::needs_drop::<T>() } {

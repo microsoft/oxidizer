@@ -42,7 +42,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_prefixed_shared::<u16>(s.as_ref().as_slice()).map(|ptr|
+        self.impl_alloc_prefixed_shared_arc::<u16>(s.as_ref().as_slice()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
             unsafe { ArcUtf16Str::from_raw(ptr) })
     }
@@ -90,7 +90,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_utf16_prefixed_from_str(s.as_ref()).map(|ptr|
+        self.impl_alloc_utf16_prefixed_from_str_arc(s.as_ref()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
             unsafe { ArcUtf16Str::from_raw(ptr) })
     }
@@ -182,7 +182,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 return Ok(payload);
             }
-            if self.is_oversized_shared(total) {
+            if self.is_oversized(total) {
                 return self.alloc_oversized_shared_with(total, |mutator, chunk_ptr| {
                     let (base, _chunk_unused) = mutator
                         .try_alloc_with_chunk(total, elem_align)
@@ -194,6 +194,38 @@ impl<A: Allocator + Clone> Arena<A> {
                 });
             }
             self.refill_shared(total)?;
+        }
+    }
+
+    /// Strong-prefixed [`ArcUtf16Str`](crate::strings::ArcUtf16Str)
+    /// variant of [`Self::impl_alloc_utf16_prefixed_from_str`]: reserves
+    /// a per-`Arc` strong count and slice-length prefix, transcodes `s`
+    /// into the `u16` payload, and returns a thin pointer to the first
+    /// payload element.
+    #[inline(always)]
+    #[cfg_attr(test, mutants::skip)] // size-hint mutation ⇒ refill spin (OOM)
+    fn impl_alloc_utf16_prefixed_from_str_arc(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
+        let exact: usize = s.chars().map(char::len_utf16).sum();
+        let bytes_needed = super::alloc_prefixed::worst_case_arc_slice_payload::<u16>(exact);
+        loop {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<u16>(exact) {
+                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let payload = uninit.init_from_iter_ptr(s.encode_utf16());
+                let _ = chunk_ref.forget();
+                return Ok(payload.cast::<u16>());
+            }
+            if self.is_oversized(bytes_needed) {
+                return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
+                    let (ticket, _chunk) = mutator
+                        .try_alloc_arc_slice::<u16>(exact)
+                        .expect("dedicated oversized chunk sized to fit utf-16 Arc payload");
+                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let payload = ticket.init_from_iter_ptr(s.encode_utf16());
+                    let _ = chunk_ref.forget();
+                    payload.cast::<u16>()
+                });
+            }
+            self.refill_shared(bytes_needed)?;
         }
     }
 }
