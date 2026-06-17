@@ -2372,6 +2372,7 @@ dependencies = [
 name = "multitude"
 version = "0.3.0"
 dependencies = [
+ "alloc_tracker",
  "allocator-api2 0.4.0",
  "bolero",
  "bumpalo",

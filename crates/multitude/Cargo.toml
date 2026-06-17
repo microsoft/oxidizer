@@ -61,6 +61,7 @@ zerocopy = { workspace = true, optional = true }
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
@@ -89,6 +90,10 @@ harness = false
 
 [[bench]]
 name = "criterion_drop"
+harness = false
+
+[[bench]]
+name = "criterion_arc_array"
 harness = false
 
 # Callgrind benches require Linux (Valgrind). The bench files are gated to compile
