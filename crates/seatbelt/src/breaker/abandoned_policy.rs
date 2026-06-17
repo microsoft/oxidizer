@@ -14,6 +14,17 @@
 /// - [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]: the default — `abandon_rate_threshold`
 ///   with a threshold of `1.0`, so abandoned executions only matter when *every* execution was abandoned.
 /// - [`as_failures`][AbandonedPolicy::as_failures]: abandoned executions always count as failures.
+///
+/// # Why cancel safety matters
+///
+/// Consider a hedging strategy across two endpoints. When the first endpoint becomes unresponsive,
+/// every hedged attempt is served by the second endpoint and the in-flight attempt to the first
+/// endpoint is cancelled -- its future dropped before completing -- rather than returning a result.
+/// Without a policy that can treat those cancellations as conclusive, the first endpoint's circuit
+/// only ever observes abandoned executions, never a success or failure, so it never opens. It keeps
+/// admitting doomed attempts, wasting resources on an endpoint that is effectively down. The default
+/// [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned] policy lets a run of purely abandoned
+/// executions open the circuit, so the unhealthy endpoint is shed instead of retried indefinitely.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]

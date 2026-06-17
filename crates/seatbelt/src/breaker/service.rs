@@ -272,7 +272,11 @@ impl<In, Out> AbandonedGuard<In, Out> {
 
 impl<In, Out> Drop for AbandonedGuard<In, Out> {
     fn drop(&mut self) {
-        if !self.armed {
+        // Skip abandonment recording while the thread is already panicking. `exit` acquires the
+        // engine lock (which may be poisoned) and `invoke_on_opened` runs a user-supplied callback,
+        // either of which can panic. A panic escaping `drop` during unwinding aborts the process,
+        // and abandonment bookkeeping is an observability concern that must never escalate a panic.
+        if !self.armed || std::thread::panicking() {
             return;
         }
 

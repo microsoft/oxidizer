@@ -39,11 +39,11 @@ impl CircuitEngine for EngineCore {
         self.state.lock().expect(ERR_POISONED_LOCK).enter(now, &self.options)
     }
 
-    fn exit(&self, result: ExecutionResult, _mode: ExecutionMode) -> ExitCircuitResult {
+    fn exit(&self, result: ExecutionResult, mode: ExecutionMode) -> ExitCircuitResult {
         let now = self.clock.instant();
 
         // NOTE: Remember to execute all expensive operations (like time checks) outside the lock.
-        self.state.lock().expect(ERR_POISONED_LOCK).exit(result, now, &self.options)
+        self.state.lock().expect(ERR_POISONED_LOCK).exit(result, mode, now, &self.options)
     }
 }
 
@@ -84,9 +84,16 @@ impl State {
         }
     }
 
-    fn exit(&mut self, result: ExecutionResult, now: Instant, settings: &EngineOptions) -> ExitCircuitResult {
+    fn exit(&mut self, result: ExecutionResult, mode: ExecutionMode, now: Instant, settings: &EngineOptions) -> ExitCircuitResult {
         match self {
             Self::Closed { health } => {
+                // A `Probe` result here is stale: the caller entered while we were `HalfOpen` and
+                // the circuit has since closed. Ignoring it keeps the health window measuring only
+                // post-recovery normal traffic.
+                if mode == ExecutionMode::Probe {
+                    return ExitCircuitResult::Unchanged;
+                }
+
                 // first, record the result and evaluate the health metrics
                 health.record(result, now);
                 let health = health.health_info();
@@ -106,8 +113,9 @@ impl State {
                 }
             }
             Self::Open { stats, .. } => {
-                // Record lost results for statistics purposes. This happens when the state of the
-                // circuit changes between a probe being allowed and the circuit becoming half-open.
+                // Record a lost result for statistics purposes. Any execution -- a probe or a normal
+                // execution admitted earlier -- can land here if the circuit (re)entered the open
+                // state between its enter and exit, so its result can no longer be acted upon.
                 stats.probes_lost = stats.probes_lost.saturating_add(1);
 
                 // In open state, we don't process results. This can happen when multiple threads are involved and
@@ -116,6 +124,14 @@ impl State {
                 ExitCircuitResult::Unchanged
             }
             Self::HalfOpen { probes, stats } => {
+                // A `Normal` result here is stale: the caller entered while we were `Closed` and
+                // the circuit has since opened and moved to half-open. Treating it as a probe would
+                // let unrelated traffic decide recovery (and, under `AbandonedPolicy::as_failures`,
+                // a stale cancellation could spuriously re-open the circuit).
+                if mode == ExecutionMode::Normal {
+                    return ExitCircuitResult::Unchanged;
+                }
+
                 // Record the result of the probe (abandoned probes are tracked separately). How an
                 // abandoned probe affects the recovery decision is handled inside the probe itself,
                 // honoring the configured `AbandonedPolicy`.
@@ -418,7 +434,7 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
         assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes.succeeded == 1));
     }
@@ -435,7 +451,7 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
 
         assert!(matches!(result, ExitCircuitResult::Reopened));
     }
@@ -609,7 +625,7 @@ mod tests {
         ));
 
         // Successful probe closes the circuit
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
         if let ExitCircuitResult::Closed(stats) = &result {
             assert_eq!(stats.probes.succeeded, 1);
@@ -646,7 +662,7 @@ mod tests {
         engine.enter();
 
         // Failed probe reopens circuit
-        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
         assert!(matches!(result, ExitCircuitResult::Reopened));
 
         // Verify circuit is open again
@@ -657,7 +673,7 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter();
 
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
         if let ExitCircuitResult::Closed(stats) = &result {
             assert_eq!(stats.probes.succeeded, 1);
@@ -814,5 +830,93 @@ mod tests {
         // Record success - should return Unchanged because HealthProbe is still sampling
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
         assert!(matches!(result, ExitCircuitResult::Unchanged));
+    }
+
+    #[test]
+    fn exit_when_half_open_ignores_stale_normal_result() {
+        // Simulates the closed -> open -> half-open transition happening between `enter` (which
+        // returned `Normal`) and `exit` on a separate thread. The stale `Normal` result must not
+        // be treated as a probe.
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Drive the circuit into half-open state.
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open.
+
+        // A stale `Normal` failure must not re-open the circuit.
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        // Probe statistics must remain untouched so recovery is still possible.
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes.failed, 0);
+            assert_eq!(stats.probes.succeeded, 0);
+            assert_eq!(stats.probes.abandoned, 0);
+        } else {
+            panic!("expected engine to remain in HalfOpen state");
+        }
+
+        // A subsequent legitimate probe success still closes the circuit.
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Closed(_)));
+    }
+
+    #[test]
+    fn exit_when_half_open_ignores_stale_normal_abandoned_under_as_failures() {
+        // Regression: with `AbandonedPolicy::as_failures`, a stale `Normal` cancellation arriving
+        // during half-open must not be processed as a failed probe and re-open the circuit.
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::as_failures()),
+        };
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open.
+
+        let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::HalfOpen { .. }));
+    }
+
+    #[test]
+    fn exit_when_closed_ignores_stale_probe_result() {
+        // Simulates the half-open -> closed transition happening between `enter` (which returned
+        // `Probe`) and `exit` on a separate thread. The stale `Probe` result must not feed into
+        // the post-recovery health metrics.
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(
+                Duration::from_secs(30),
+                0.1, // 10% failure threshold
+                3,   // small minimum so a single failure could matter
+                AbandonedPolicy::default(),
+            ),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // The engine starts closed; a stale `Probe` failure arriving here must be ignored.
+        engine.enter();
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        // The health window must not have recorded the stale probe, so a few more failures still
+        // sit below the minimum throughput and the circuit stays closed.
+        for _ in 0..2 {
+            engine.enter();
+            let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+            assert!(matches!(result, ExitCircuitResult::Unchanged));
+        }
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::Closed { .. }));
     }
 }
