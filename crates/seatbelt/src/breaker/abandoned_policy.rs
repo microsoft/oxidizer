@@ -127,7 +127,7 @@ pub(crate) enum Mode {
     /// Abandoned executions are always counted as failures.
     AsFailures,
     /// Abandoned executions are counted as failures once the abandon rate reaches this threshold.
-    AbandonRateThreshold(f32),
+    AbandonRateThreshold(#[cfg_attr(any(feature = "serde", test), serde(deserialize_with = "coerce_abandon_rate_threshold"))] f32),
 }
 
 impl Default for Mode {
@@ -136,6 +136,22 @@ impl Default for Mode {
         // execution was abandoned.
         Self::AbandonRateThreshold(1.0)
     }
+}
+
+/// Coerces a deserialized abandon-rate threshold into the valid `(0.0, 1.0]` range.
+///
+/// Hand-written or generated configuration can carry an out-of-range threshold that the
+/// [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] constructor would reject.
+/// Rather than failing to deserialize, the value is clamped into the valid range: values above
+/// `1.0` collapse to `1.0`, and values at or below `0.0` collapse to the smallest positive `f32`
+/// so the exclusive lower bound is preserved.
+#[cfg(any(feature = "serde", test))]
+fn coerce_abandon_rate_threshold<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let threshold = <f32 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(threshold.clamp(f32::MIN_POSITIVE, 1.0))
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -192,5 +208,26 @@ mod tests {
     #[test]
     fn default_is_when_all_abandoned() {
         assert_eq!(AbandonedPolicy::default(), AbandonedPolicy::when_all_abandoned());
+    }
+
+    #[test]
+    fn deserialize_preserves_valid_threshold() {
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":0.5}"#).unwrap();
+        assert_eq!(policy.mode(), Mode::AbandonRateThreshold(0.5));
+    }
+
+    #[test]
+    fn deserialize_coerces_threshold_above_one_to_one() {
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":1.5}"#).unwrap();
+        assert_eq!(policy.mode(), Mode::AbandonRateThreshold(1.0));
+    }
+
+    #[test]
+    fn deserialize_coerces_non_positive_threshold_to_smallest_positive() {
+        let zero: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":0.0}"#).unwrap();
+        assert_eq!(zero.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
+
+        let negative: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":-0.5}"#).unwrap();
+        assert_eq!(negative.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
     }
 }
