@@ -134,8 +134,10 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         strategy.name = %self.telemetry.strategy_name,
                         circuit_breaker.state = CircuitState::Open.as_str(),
                         circuit_breaker.id = %self.breaker_id,
-                        circuit_breaker.health.total = health.counts.total(),
-                        circuit_breaker.health.abandoned = health.counts.abandoned,
+                        circuit_breaker.execs.total = health.counts.total(),
+                        circuit_breaker.execs.succeeded = health.counts.succeeded,
+                        circuit_breaker.execs.failed = health.counts.failed,
+                        circuit_breaker.execs.abandoned = health.counts.abandoned,
                     );
                 }
 
@@ -168,6 +170,7 @@ impl<T: CircuitEngine> EngineTelemetry<T> {
                         circuit_breaker.probes.failed = stats.probes.failed,
                         circuit_breaker.probes.abandoned = stats.probes.abandoned,
                         circuit_breaker.probes.lost = stats.probes_lost,
+                        circuit_breaker.execs.lost = stats.executions_lost,
                         circuit_breaker.rejections = stats.rejected,
                         circuit_breaker.re_opened = stats.re_opened,
                     );

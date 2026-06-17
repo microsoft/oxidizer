@@ -521,7 +521,7 @@ mod tests {
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_circuit");
         log_capture.assert_contains("circuit_breaker.state=\"open\"");
-        log_capture.assert_contains("circuit_breaker.health.total");
+        log_capture.assert_contains("circuit_breaker.execs.total");
 
         // Request should be rejected (emits another open state log)
         let _ = service.execute("test".to_string()).await;

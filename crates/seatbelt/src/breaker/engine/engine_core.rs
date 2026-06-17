@@ -115,8 +115,13 @@ impl State {
             Self::Open { stats, .. } => {
                 // Record a lost result for statistics purposes. Any execution -- a probe or a normal
                 // execution admitted earlier -- can land here if the circuit (re)entered the open
-                // state between its enter and exit, so its result can no longer be acted upon.
-                stats.probes_lost = stats.probes_lost.saturating_add(1);
+                // state between its enter and exit, so its result can no longer be acted upon. We
+                // keep the two counts separate so telemetry can distinguish lost probes (delayed
+                // recovery signal) from lost normal executions (general thread interleaving).
+                match mode {
+                    ExecutionMode::Probe => stats.probes_lost = stats.probes_lost.saturating_add(1),
+                    ExecutionMode::Normal => stats.executions_lost = stats.executions_lost.saturating_add(1),
+                }
 
                 // In open state, we don't process results. This can happen when multiple threads are involved and
                 // the state of circuit breaker changes between enter and exit calls since these are separate
@@ -127,8 +132,11 @@ impl State {
                 // A `Normal` result here is stale: the caller entered while we were `Closed` and
                 // the circuit has since opened and moved to half-open. Treating it as a probe would
                 // let unrelated traffic decide recovery (and, under `AbandonedPolicy::as_failures`,
-                // a stale cancellation could spuriously re-open the circuit).
+                // a stale cancellation could spuriously re-open the circuit). Account for it as a
+                // lost execution so it is still surfaced via `circuit_breaker.execs.lost` when
+                // the circuit eventually closes.
                 if mode == ExecutionMode::Normal {
+                    stats.executions_lost = stats.executions_lost.saturating_add(1);
                     return ExitCircuitResult::Unchanged;
                 }
 
@@ -167,7 +175,12 @@ impl State {
 #[derive(Debug, Clone)]
 pub(crate) struct Stats {
     pub probes: ExecutionInfo,
+    /// Probe-mode executions whose results arrived after the circuit had already moved out of
+    /// `HalfOpen`. They can no longer influence the recovery decision.
     pub probes_lost: usize,
+    /// Normal-mode executions whose results arrived after the circuit had transitioned to a state
+    /// that cannot act on them (`Open`, or `HalfOpen` after a re-open).
+    pub executions_lost: usize,
     pub opened_at: Instant,
     pub re_opened: usize,
     pub rejected: usize,
@@ -179,6 +192,7 @@ impl Stats {
             opened_at,
             probes: ExecutionInfo::default(),
             probes_lost: 0,
+            executions_lost: 0,
             rejected: 0,
             re_opened: 0,
         }
@@ -416,7 +430,8 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes_lost, 1);
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
         } else {
             panic!("expected engine to be in Open state");
         }
@@ -833,6 +848,24 @@ mod tests {
     }
 
     #[test]
+    fn exit_when_open_with_probe_mode_increments_probes_lost() {
+        // A probe admitted while half-open whose result lands after a re-open is counted as a
+        // lost probe, not a lost normal execution.
+        let engine = create_test_engine();
+        open_engine(&engine);
+
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes_lost, 1);
+            assert_eq!(stats.executions_lost, 0);
+        } else {
+            panic!("expected engine to be in Open state");
+        }
+    }
+
+    #[test]
     fn exit_when_half_open_ignores_stale_normal_result() {
         // Simulates the closed -> open -> half-open transition happening between `enter` (which
         // returned `Normal`) and `exit` on a separate thread. The stale `Normal` result must not
@@ -851,18 +884,29 @@ mod tests {
         let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
-        // Probe statistics must remain untouched so recovery is still possible.
+        // Probe statistics must remain untouched so recovery is still possible, but the stale
+        // execution must be counted as a lost execution so it surfaces in telemetry on the next
+        // `Closed`.
         if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
             assert_eq!(stats.probes.failed, 0);
             assert_eq!(stats.probes.succeeded, 0);
             assert_eq!(stats.probes.abandoned, 0);
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
         } else {
             panic!("expected engine to remain in HalfOpen state");
         }
 
-        // A subsequent legitimate probe success still closes the circuit.
+        // A subsequent legitimate probe success still closes the circuit and carries the lost
+        // count through to the reported stats.
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
-        assert!(matches!(result, ExitCircuitResult::Closed(_)));
+        if let ExitCircuitResult::Closed(stats) = result {
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.succeeded, 1);
+        } else {
+            panic!("expected circuit to close after legitimate probe success");
+        }
     }
 
     #[test]
@@ -884,7 +928,13 @@ mod tests {
 
         let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal);
         assert!(matches!(result, ExitCircuitResult::Unchanged));
-        assert!(matches!(engine.state.lock().unwrap().deref(), State::HalfOpen { .. }));
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.abandoned, 0);
+        } else {
+            panic!("expected engine to remain in HalfOpen state");
+        }
     }
 
     #[test]
