@@ -61,6 +61,7 @@ zerocopy = { workspace = true, optional = true }
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
@@ -107,3 +108,8 @@ name = "multitude_basic"
 
 [[example]]
 name = "strings"
+
+[[example]]
+name = "object_tree"
+path = "examples/object_tree/main.rs"
+required-features = ["utf16"]
