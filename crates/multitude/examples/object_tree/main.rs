@@ -75,7 +75,7 @@ fn main() {
     let session = Session::new();
     let mut arena = create_warmed_up_arena(dataset);
 
-    let arena_op = session.operation("arena");
+    let arena_op = session.operation("load-tree");
     let start = Instant::now();
     for _ in 0..ITERATIONS {
         let _span = arena_op.measure_thread();

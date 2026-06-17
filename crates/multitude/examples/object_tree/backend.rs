@@ -8,10 +8,10 @@
 
 /// Tree shape: a forest of `ROOT_ROWS` roots, each `DEPTH` levels deep with
 /// `FANOUT` children per node. Every node carries a name and a binary blob.
-const ROOT_ROWS: usize = 512;
-const FANOUT: usize = 4;
-const DEPTH: usize = 3;
-const BLOB_SIZE: usize = 512;
+const ROOT_ROWS: usize = 12;
+const FANOUT: usize = 2;
+const DEPTH: usize = 2;
+const BLOB_SIZE: usize = 256;
 
 /// A single statically-allocated row of the backing data source.
 struct Row {
