@@ -79,6 +79,19 @@ impl<A: Allocator + Clone> BoxUtf16Str<A> {
 
 impl_utf16_str_common!(BoxUtf16Str);
 
+impl<A: Allocator + Clone> Drop for BoxUtf16Str<A> {
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk` on
+        // which this single-owner `Box` holds a +1 strong reference;
+        // `from_value_ptr` adopts it and releases it on drop. The
+        // `[u16]` payload has no element destructor to run.
+        unsafe {
+            let _ref: crate::internal::chunk_ref::ChunkRef<A> = crate::internal::chunk_ref::ChunkRef::from_value_ptr(self.ptr);
+        }
+    }
+}
+
 impl<A: Allocator + Clone> DerefMut for BoxUtf16Str<A> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Utf16Str {

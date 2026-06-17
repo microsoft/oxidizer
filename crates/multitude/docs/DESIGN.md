@@ -77,8 +77,10 @@ reconciled with a single
 `fetch_sub(LARGE_SHARED_REF_SURPLUS - local_shared_count)`, leaving the
 chunk's atomic count equal to the number of escaped handles. The 2^30
 surplus is large enough that concurrent `Arc::drop` on other threads
-cannot underflow it, while the `u32` counter leaves ~2^30 headroom
-against `Arc::clone` overflow.
+cannot underflow it. `Arc::clone` no longer touches this count at all —
+each `Arc` family takes exactly one chunk refcount at allocation and
+releases it when its last clone drops (clones bump only the per-`Arc`
+strong count; see *Per-`Arc` reference counting*).
 
 **Size-class ratchet.** Each successful refill bumps the matching
 `next_*_class` toward the largest cacheable class (`NUM_CHUNK_CLASSES
@@ -155,7 +157,7 @@ pub(crate) struct SharedChunk<A: Allocator + Clone> {
     capacity:  usize,
     ref_count: AtomicUsize,
     next:      AtomicPtr<u8>,            // intrusive cache-freelist link
-    drop_entry_count: AtomicU16,
+    drop_entry_count: AtomicU16,        // vestigial: shared chunks never register drop entries
     #[cfg(feature = "stats")]
     wasted_at_retire: AtomicU32,
     data: [UnsafeCell<u8>],
@@ -209,7 +211,10 @@ is a **single 8-byte raw pointer** into the chunk's `data` tail. DST
 metadata (slice length, vtable) lives unaligned in the chunk prefix
 immediately preceding the value payload, read with
 `core::ptr::read_unaligned`. For `T: Sized` the metadata is `()` so
-there's no prefix overhead.
+there's no prefix overhead. `Arc<T>` additionally stores its
+per-`Arc` strong count (an `AtomicU32`) in the prefix, before the
+metadata (see *Per-`Arc` reference counting*); `Box` has no such
+prefix.
 
 To recover the owning chunk's header from a smart-pointer value, each
 smart-pointer type **masks the low bits to the 64 KiB boundary**
@@ -237,23 +242,64 @@ Two consequences of the masking scheme:
   refill path if a ZST would otherwise land at the one-past-end
   boundary.
 
+## Per-`Arc` reference counting
+
+Each `Arc<T>` carries **its own** strong reference count — an
+`AtomicU32` stored in the chunk payload immediately *before* the value
+(and before the DST metadata, if any). The layout of an `Arc` value is:
+
+```text
+[strong (AtomicU32, at reservation base)][pad][T::Metadata (unaligned)][T payload]
+                                                                        ^ value pointer
+```
+
+The reservation is aligned to `max(align_of::<T>(), 4)` so the leading
+strong slot is 4-byte aligned; the value pointer is `align_of::<T>()`
+aligned and the metadata sits immediately before it (recovered with
+`read_unaligned`, exactly as for `Box`). The strong count is recovered
+from the value pointer by subtracting a fixed prefix
+(`thin_dst::strong_prefix_bytes_for`) and is accessed only as an
+`AtomicU32` — never through a reference that spans the (possibly
+uninitialized) payload, which keeps the scheme sound under Miri.
+
+The accounting is **Option Y**:
+
+- **Allocation** writes `strong = 1` and takes **one** refcount on the
+  hosting chunk for the whole `Arc` family (via the pre-credited
+  surplus, as for any shared allocation).
+- **`Arc::clone`** bumps only the per-`Arc` `strong` with a single
+  `Relaxed` increment — it does **not** touch the chunk refcount.
+- **`Arc::drop`** does a `Release` decrement of `strong`; on the
+  `strong → 0` transition it runs an `Acquire` fence, drops the value
+  in place (`drop_in_place::<T>`, which natively handles `?Sized`),
+  and releases the family's single chunk refcount (adopted *before*
+  the value drop, so a panicking destructor still releases the chunk).
+
+Because the value's destructor runs eagerly on the last `Arc` (rather
+than being deferred to chunk teardown), nested arena `Arc`s — e.g.
+`Arc<[Arc<T>]>` whose inner and outer handles share a chunk — release
+their storage promptly instead of forming a self-pinning cycle.
+
+`Arc::<MaybeUninit<T>>::assume_init` is a pure reinterpret: `MaybeUninit<T>`
+and `T` share size, alignment, and metadata, so the strong-prefix layout
+is identical and the strong count is untouched.
+
 ## `DropEntry`
 
-`DropEntry` records the deferred destructor work for values whose
-`Drop` cannot be run by the smart pointer itself — i.e. arena
-references (`&mut T` / `&mut [T]`, which have no `Drop` of their own)
-and `Arc<T>` (whose value must be dropped by whichever handle observes
-the last refcount, a moment only the chunk can detect). **No `Box`
-variant registers a drop entry**: `Box::drop` runs `drop_in_place` on
-the (re-fattened) value pointer eagerly, which natively handles `?Sized`
-`T`, so sized `Box<T>`, slice `Box<[T]>`, and DST `Box<dyn Trait>` all
-need no entry.
+`DropEntry` records the deferred destructor work for **local arena
+references only** — `Arena::alloc -> &mut T` and `&mut [T]`, which have
+no `Drop` of their own and whose backing chunk runs the destructor at
+teardown. **Neither `Box` nor `Arc` registers a drop entry, and shared
+chunks never carry one**: `Box::drop` runs `drop_in_place` eagerly on
+the (re-fattened) value pointer, and `Arc::drop` does the same on the
+last strong reference (see *Per-`Arc` reference counting* above). Drop
+entries therefore live exclusively on `LocalChunk`s.
 
-Each such allocation reserves **both** `size_of::<T>()` at the front
-of the free region *and* one `DropEntry` slot at the back. The
-effective remaining capacity is `drop_top - bump`; overflow is
-detected when those two meet. Allocations of `T: !Drop` skip the
-reservation entirely.
+Each such reference allocation reserves **both** `size_of::<T>()` at the
+front of the free region *and* one `DropEntry` slot at the back. The
+effective remaining capacity is `drop_top - bump`; overflow is detected
+when those two meet. Allocations of `T: !Drop` skip the reservation
+entirely.
 
 ```rust
 #[repr(C)]
@@ -266,9 +312,11 @@ struct DropEntry {
 }
 ```
 
-`len` is a `u16`; slice/DST allocations whose `needs_drop` count
+`len` is a `u16`; local slice references whose `needs_drop` count
 exceeds `u16::MAX` are rejected up front by their `alloc_*` orchestrator
-so the placeholder never overflows.
+so the placeholder never overflows. (The `Arc<[T]>` family has **no**
+such cap, since it drops via `drop_in_place::<[T]>` rather than a
+counted entry.)
 
 **Two-phase write.** Allocation paths reserve a *placeholder* (null
 `drop_fn`, real `value_offset`/`len`) up front. After the value is
@@ -279,26 +327,27 @@ initialization closure panicked or whose `Uninit` ticket was dropped
 without `init`. Storing as `AtomicPtr<()>` (not `AtomicUsize`)
 preserves function-pointer provenance under Miri's strict provenance.
 
-The commit is idempotent: concurrent `Arc::<MaybeUninit<T>>::assume_init`
-on cloned handles all install the same `T`-determined shim.
-
-**Replay.** When the chunk's last refcount drops, the chunk walks its
-drop-entry stack **newest-first** (LIFO, matching Rust drop order) and
-invokes `(drop_fn)(data + value_offset, len)` on each committed
-entry. A panic in any shim is contained; replay continues so remaining
-destructors still run.
+**Replay.** When a `LocalChunk`'s refcount drops to zero (at
+`Arena::reset` / `Arena::drop`), the chunk walks its drop-entry stack
+**newest-first** (LIFO, matching Rust drop order) and invokes
+`(drop_fn)(data + value_offset, len)` on each committed entry. Shared
+chunks skip this step entirely. A panic in any shim is contained;
+replay continues so remaining destructors still run.
 
 **Closure-panic safety.** The smart-pointer construction paths take a
 protective `ChunkRef` (`+1` guard) before invoking the user closure.
 On unwinding, the `ChunkRef`'s `Drop` releases the +1; on success the
 caller calls `ChunkRef::forget` to transfer the +1 into the
 freshly-constructed smart pointer. Combined with the two-phase
-placeholder, a panicking closure leaves no `T::drop` queued on
+placeholder (for local references) and eager `drop_in_place` (for
+`Box`/`Arc`), a panicking closure leaves no `T::drop` queued on
 uninitialized memory and no refcount leaked.
 
-**Refcount overflow.** Both `inc_ref` paths check against the
-wraparound boundary and abort (`std::process::abort` or a forced
-double-panic under `no_std`) if exceeded. The abort helper is
-`#[cold] #[inline(never)]` so the hot-path call site stays small.
-This mirrors `std::sync::Arc`: a wraparound would race live pointers
-with a free, and the only sound response is to terminate.
+**Refcount overflow.** Both the chunk `inc_ref` paths and `Arc::clone`'s
+per-`Arc` `strong` increment check against the wraparound boundary and
+abort (`std::process::abort` or a forced double-panic under `no_std`) if
+exceeded. The abort helper is `#[cold] #[inline(never)]` so the hot-path
+call site stays small. This mirrors `std::sync::Arc`: a wraparound would
+race live pointers with a free, and the only sound response is to
+terminate.
+

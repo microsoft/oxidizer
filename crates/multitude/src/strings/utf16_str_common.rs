@@ -6,12 +6,12 @@
 //! [`BoxUtf16Str`](super::BoxUtf16Str)).
 //!
 //! Both types share identical layout (`NonNull<u16>` + `PhantomData`),
-//! prefix-length reading, payload borrowing, `Drop` semantics, and
+//! prefix-length reading, payload borrowing, and
 //! formatting/comparison/hash/`Pointer`/`Serialize` impls. The macro
 //! below emits all of that for a given struct name; per-file blocks
 //! supply the items that legitimately differ (`Send`/`Sync` bounds,
-//! `Clone` for `Arc`, `DerefMut`/`AsMut`/`BorrowMut` and
-//! `as_mut_utf16_str` for `Box`).
+//! `Clone` and `Drop` for `Arc`, `Drop` for `Box`, `DerefMut`/`AsMut`/
+//! `BorrowMut` and `as_mut_utf16_str` for `Box`).
 
 /// Emit shared inherent shape + trait impls for a single-pointer
 /// UTF-16 string type with field layout `{ ptr: NonNull<u16>, _phantom }`.
@@ -52,18 +52,6 @@ macro_rules! impl_utf16_str_common {
             #[inline]
             pub fn is_empty(&self) -> bool {
                 self.u16_len() == 0
-            }
-        }
-
-        impl<A: allocator_api2::alloc::Allocator + Clone> Drop for $Ty<A> {
-            #[inline]
-            fn drop(&mut self) {
-                // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk`
-                // on which `self` owns a +1 strong reference. The
-                // `[u16]` payload has no element drop to run.
-                unsafe {
-                    let _ref: $crate::internal::chunk_ref::ChunkRef<A> = $crate::internal::chunk_ref::ChunkRef::from_value_ptr(self.ptr);
-                }
             }
         }
 

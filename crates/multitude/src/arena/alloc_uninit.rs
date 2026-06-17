@@ -7,13 +7,12 @@
 //! groups the `alloc_uninit_*` / `alloc_zeroed_*` family together to
 //! keep the central `mod.rs` smaller.
 
-use core::mem;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::{Arena, ExpectAlloc};
+use super::Arena;
 use crate::arc::Arc;
 use crate::r#box::Box;
 
@@ -200,11 +199,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            (self.impl_alloc_uninit_arc::<T>(false)).expect_alloc()
-        } else {
-            self.alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
-        }
+        self.alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
     }
 
     /// Fallible variant of [`Self::alloc_uninit_arc`].
@@ -219,11 +214,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            self.impl_alloc_uninit_arc::<T>(false)
-        } else {
-            self.try_alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
-        }
+        self.try_alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
     }
 
     /// Like [`Self::alloc_uninit_arc`] but the value bytes are zeroed.
@@ -239,11 +230,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            (self.impl_alloc_uninit_arc::<T>(true)).expect_alloc()
-        } else {
-            self.alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
-        }
+        self.alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
     /// Fallible variant of [`Self::alloc_zeroed_arc`].
@@ -258,11 +245,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            self.impl_alloc_uninit_arc::<T>(true)
-        } else {
-            self.try_alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
-        }
+        self.try_alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
     /// Allocate `len` uninitialized `T` slots and return an
@@ -284,11 +267,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            (self.impl_alloc_uninit_slice_arc::<T>(len, false)).expect_alloc()
-        } else {
-            self.alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
-        }
+        self.alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
     }
 
     /// Fallible variant of [`Self::alloc_uninit_slice_arc`].
@@ -303,11 +282,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            self.impl_alloc_uninit_slice_arc::<T>(len, false)
-        } else {
-            self.try_alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
-        }
+        self.try_alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
     }
 
     /// Like [`Self::alloc_uninit_slice_arc`] but the slice bytes are zeroed.
@@ -323,11 +298,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            (self.impl_alloc_uninit_slice_arc::<T>(len, true)).expect_alloc()
-        } else {
-            self.alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
-        }
+        self.alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 
     /// Fallible variant of [`Self::alloc_zeroed_slice_arc`].
@@ -342,11 +313,7 @@ impl<A: Allocator + Clone> Arena<A> {
         A: Send + Sync,
         T: Send + Sync,
     {
-        if const { mem::needs_drop::<T>() } {
-            self.impl_alloc_uninit_slice_arc::<T>(len, true)
-        } else {
-            self.try_alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
-        }
+        self.try_alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 
     /// Allocate `len` uninitialized `T` slots and return an

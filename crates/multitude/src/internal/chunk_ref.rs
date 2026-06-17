@@ -15,7 +15,6 @@ use core::ptr::NonNull;
 
 use allocator_api2::alloc::Allocator;
 
-use super::chunk::Chunk;
 use super::shared_chunk::SharedChunk;
 
 /// Owns a single strong reference on a [`SharedChunk`]; releases the
@@ -60,29 +59,6 @@ impl<A: Allocator + Clone> ChunkRef<A> {
             let chunk_fat = SharedChunk::<A>::header_to_fat(header.as_ptr());
             Self {
                 chunk: NonNull::new_unchecked(chunk_fat),
-                _phantom: PhantomData,
-            }
-        }
-    }
-
-    /// Bumps the strong refcount on the chunk containing `value` and
-    /// returns a [`ChunkRef`] owning the new +1.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`Self::from_value_ptr`], plus caller must already hold
-    /// a live strong reference on the chunk.
-    #[inline]
-    pub(crate) unsafe fn clone_from_value_ptr<T: ?Sized>(value: NonNull<T>) -> Self {
-        // SAFETY: see from_value_ptr; caller's pre-existing +1 prevents
-        // teardown races.
-        unsafe {
-            let header = SharedChunk::<A>::header_from_value_ptr(value.cast::<u8>());
-            let chunk_fat = SharedChunk::<A>::header_to_fat(header.as_ptr());
-            let chunk = NonNull::new_unchecked(chunk_fat);
-            chunk.as_ref().inc_ref();
-            Self {
-                chunk,
                 _phantom: PhantomData,
             }
         }

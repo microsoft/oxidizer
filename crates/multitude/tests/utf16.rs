@@ -3011,7 +3011,7 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_arc_from_str_oversized_routes_via_oversized_shared() {
-        let len = 16 * 1024;
+        let len = 4096;
         let src = "a".repeat(len);
 
         // First exercise the default arena so any default-config code paths
@@ -3020,11 +3020,13 @@ mod from_coverage_extras_utf16 {
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
 
-        // Then force a small `max_normal_alloc` (in bytes) so the ~32 KiB
-        // UTF-16 payload transcoded from a 16 KiB ASCII string (2 bytes per
-        // code unit, plus the length prefix) deterministically takes the
-        // oversized-shared branch regardless of any future change to the
-        // default threshold.
+        // Then force a small `max_normal_alloc` (in bytes) so the 8 KiB
+        // UTF-16 payload transcoded from a 4096-char ASCII string (2 bytes
+        // per code unit, plus the length prefix) deterministically takes
+        // the oversized-shared branch regardless of any future change to
+        // the default threshold. (A shorter string than before keeps the
+        // one-shot transcode affordable under Miri while still clearing the
+        // 4 KiB threshold.)
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
@@ -3034,7 +3036,7 @@ mod from_coverage_extras_utf16 {
 
     #[test]
     fn alloc_utf16_str_box_from_str_oversized_routes_via_oversized_shared() {
-        let len = 16 * 1024;
+        let len = 4096;
         let src = "a".repeat(len);
 
         // First exercise the default arena so any default-config code paths
@@ -3043,11 +3045,13 @@ mod from_coverage_extras_utf16 {
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
 
-        // Then force a small `max_normal_alloc` (in bytes) so the ~32 KiB
-        // UTF-16 payload transcoded from a 16 KiB ASCII string (2 bytes per
-        // code unit, plus the length prefix) deterministically takes the
-        // oversized-shared branch regardless of any future change to the
-        // default threshold.
+        // Then force a small `max_normal_alloc` (in bytes) so the 8 KiB
+        // UTF-16 payload transcoded from a 4096-char ASCII string (2 bytes
+        // per code unit, plus the length prefix) deterministically takes
+        // the oversized-shared branch regardless of any future change to
+        // the default threshold. (A shorter string than before keeps the
+        // one-shot transcode affordable under Miri while still clearing the
+        // 4 KiB threshold.)
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
@@ -3213,5 +3217,52 @@ mod from_mutants_extras_utf16_scattered {
         s.replace_range(7..12, utf16str!("Rust"));
         let actual: std::string::String = std::char::decode_utf16(s.as_slice().iter().copied()).map(|r| r.unwrap()).collect();
         assert_eq!(actual, "Hello, Rust!");
+    }
+
+    /// Regression guard for the prefixed shared-allocation routing
+    /// (`impl_alloc_prefixed_shared`): an odd-length `u8` (str) allocation
+    /// leaves the shared bump cursor odd, then a `u16` (utf16) allocation
+    /// requests 2-byte alignment. The routing reserves exactly `total`
+    /// bytes (no `+ elem_align` slack) because `align_of::<T>() <=
+    /// align_of::<usize>()` guarantees a freshly refilled chunk's payload
+    /// base is already aligned. Sweeping `u16` lengths across the
+    /// `max_normal_alloc` boundary must always terminate (a `total` vs
+    /// `total + align` mismatch would spin the refill loop) and produce
+    /// correct contents.
+    #[test]
+    fn prefixed_shared_alloc_boundary_terminates_for_mixed_u8_u16() {
+        // `max_normal_alloc` must be >= MIN_MAX_NORMAL_ALLOC (4096), so the
+        // u16 normal/oversized boundary sits at `chars = mna / 2`. Sweep a
+        // few char lengths right around that boundary for an even and an
+        // odd `mna` (the parity drives the alignment edge case) plus one
+        // larger boundary position. Verifying length + a handful of
+        // sentinel code units (rather than decoding every unit) keeps the
+        // per-iteration cost down to the unavoidable one-shot transcode,
+        // which is what makes this affordable under Miri.
+        for &mna in &[4096_usize, 4097, 6144] {
+            let arena = Arena::builder().max_normal_alloc(mna).build();
+            let center = mna / 2;
+            for chars in center.saturating_sub(1)..=(center + 1).min(mna) {
+                // Odd-length u8 (str) alloc to misalign the shared cursor.
+                let narrow = "x".repeat(2 * (chars % 50) + 1);
+                let narrow_arc = arena.alloc_str_arc(&narrow);
+                assert_eq!(&*narrow_arc, narrow.as_str(), "str payload corrupted at mna={mna}, chars={chars}");
+                // u16 (utf16) alloc right after at a boundary-spanning length.
+                let wide = "y".repeat(chars);
+                let wide_arc = arena.alloc_utf16_str_arc_from_str(&wide);
+                // Sentinel checks instead of a full decode: the payload is
+                // uniform ('y'), so a routing bug that returns the wrong
+                // length or corrupts an edge/middle unit is still caught,
+                // without an O(chars) decode loop per iteration.
+                assert_eq!(wide_arc.len(), chars, "utf16 length wrong at mna={mna}, chars={chars}");
+                if chars > 0 {
+                    let units = wide_arc.as_slice();
+                    let yy = u16::from(b'y');
+                    assert_eq!(units[0], yy, "utf16 head corrupted at mna={mna}, chars={chars}");
+                    assert_eq!(units[chars / 2], yy, "utf16 mid corrupted at mna={mna}, chars={chars}");
+                    assert_eq!(units[chars - 1], yy, "utf16 tail corrupted at mna={mna}, chars={chars}");
+                }
+            }
+        }
     }
 }

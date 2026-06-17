@@ -4,13 +4,16 @@
 //! DST (unsized) value allocation API on [`Arena`].
 //!
 //! Implements `alloc_dst_arc`, `alloc_dst_box` and their `try_*`
-//! variants under the `dst` Cargo feature. The trailing drop entry
-//! stores the pointer-metadata as a `u16`, which limits supported DSTs
-//! to those whose pointer-metadata is either zero-sized (sized `T`) or
-//! `usize`-sized AND fits in `u16` (slices of length up to
-//! `u16::MAX`). For drop-aware slices with more than `u16::MAX`
-//! elements, the non-DST `alloc_slice_arc` / `_box` family stores the
-//! length in a separate prefix word and has no such cap.
+//! variants under the `dst` Cargo feature. The pointer-metadata is
+//! stored verbatim in the chunk prefix (immediately before the
+//! payload), so supported DSTs are those whose metadata is either
+//! zero-sized (sized `T`) or `usize`-sized (slice DSTs and trait
+//! objects). `Arc` runs `T`'s destructor eagerly on the last clone via
+//! `drop_in_place::<T>`; `Box` does so in its own `Drop`.
+//!
+//! The legacy `Box` path additionally rejects `T: Drop` DSTs whose
+//! metadata does not pack into a `u16` (preserved for parity); the
+//! `Arc` path has no such restriction.
 
 use core::alloc::Layout;
 use core::mem;
@@ -25,7 +28,6 @@ use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::constants::max_smart_ptr_align;
-use crate::internal::drop_entry::DropFn;
 
 /// Maximum `layout.align()` accepted by smart-pointer allocations.
 /// Mirrors the constant of the same name in [`alloc_value`](super::alloc_value):
@@ -38,8 +40,10 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// The closure `init` receives a typed fat pointer to the buffer
     /// (built from `(thin_ptr, metadata)`) and is responsible for
-    /// writing a valid `T` through it. multitude reconstructs the same
-    /// metadata at chunk teardown so `T`'s destructor runs correctly.
+    /// writing a valid `T` through it. The metadata is stored in the
+    /// chunk prefix and recovered on demand, so `T`'s destructor runs
+    /// eagerly (via `drop_in_place::<T>`) when the last `Arc` clone is
+    /// dropped.
     ///
     /// For sized `T`, prefer [`Self::alloc_arc`] / [`Self::alloc_arc_with`].
     ///
@@ -57,11 +61,9 @@ impl<A: Allocator + Clone> Arena<A> {
     /// - `init` must initialize all bytes covered by `layout` to a valid `T`.
     /// - `metadata` must be valid for the value just written.
     /// - `T::Metadata` must be either zero-sized (sized `T`) or
-    ///   `usize`-sized AND fit in `u16` after reinterpretation. This
-    ///   means **slices** (`[U]`, where the metadata is the slice
-    ///   length) and **sized** `T` are supported; trait objects (`dyn
-    ///   Trait`) and other DSTs whose metadata cannot be packed into
-    ///   `u16` are **not** supported.
+    ///   `usize`-sized (slice DSTs `[U]` and trait objects `dyn Trait`,
+    ///   whose metadata — slice length or vtable pointer — is stored
+    ///   verbatim in the chunk prefix).
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
         &self,
@@ -237,7 +239,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 // hosting chunk now holds +1 in the new `Box`'s name.
                 return Ok(unsafe { Box::from_raw(payload_nn) });
             }
-            if self.is_oversized_shared(refill_hint) {
+            if self.is_oversized(refill_hint) {
                 let init = init.take().expect("init taken twice");
                 return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
                     let (reservation, _chunk) = mutator
@@ -256,10 +258,12 @@ impl<A: Allocator + Clone> Arena<A> {
         }
     }
 
-    /// Reserve raw storage + drop entry in the current shared chunk,
-    /// run `init` on a typed fat pointer, commit the DST drop shim,
-    /// and return the fat `NonNull<T>`. Skips the drop entry when `T`
-    /// is drop-free.
+    /// Reserve a strong-prefixed `Arc<T>` slot in the current shared
+    /// chunk (per-`Arc` strong count + `T::Metadata` prefix + payload),
+    /// run `init` on a typed fat pointer, and return the thin payload
+    /// pointer. No chunk drop entry is reserved:
+    /// [`Arc::drop`](crate::Arc) runs `drop_in_place::<T>` (which natively
+    /// handles `?Sized`) on the last reference.
     ///
     /// # Safety
     ///
@@ -274,72 +278,36 @@ impl<A: Allocator + Clone> Arena<A> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
             return Err(AllocError);
         }
-
-        let needs_drop = mem::needs_drop::<T>();
-
-        // For DST values that need drop, the drop entry packs `metadata`
-        // into a `u16`. Reject metadata that doesn't fit before doing
-        // any allocation.
-        if needs_drop && !metadata_fits_u16::<T>(metadata) {
-            return Err(AllocError);
-        }
-        let metadata_u16 = if needs_drop { encode_metadata_u16::<T>(metadata) } else { 0 };
         let meta_bytes = mem::size_of::<T::Metadata>();
-        // Payload starts at the lowest layout-aligned offset >=
-        // meta_bytes. For sized T (meta_bytes = 0) payload starts at 0.
-        let payload_offset = if meta_bytes == 0 { 0 } else { meta_bytes.max(layout.align()) };
+        let value_align = layout.align().max(1);
         // Floor the value byte count to 1 so the returned payload pointer
-        // is strictly inside the reservation; see `impl_alloc_dst_box`.
-        let value_bytes = layout.size().max(1);
-        let total = payload_offset.checked_add(value_bytes).ok_or(AllocError)?;
+        // is strictly inside the reservation (mask-recovery invariant).
+        let payload_bytes = layout.size().max(1);
+        let refill_hint = worst_case_arc_dst(payload_bytes, value_align, meta_bytes);
 
         let mut init = Some(init);
         loop {
-            let reservation = self.current_shared().try_alloc_thin_dst_smart_with_chunk(
-                total,
-                layout.align().max(1),
-                payload_offset,
-                needs_drop,
-                metadata_u16,
-            );
-
-            if let Some((base_in_chunk, drop_slot_opt, chunk_ptr)) = reservation {
+            if let Some((value_ptr, chunk_ptr)) = self.current_shared().try_alloc_arc_dst(payload_bytes, value_align, meta_bytes) {
                 let init = init.take().expect("init taken twice");
                 let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
-                // SAFETY: see `write_dst_prefix_and_init`.
-                let payload_nn =
-                    unsafe { write_dst_prefix_and_init::<T>(base_in_chunk.as_non_null(), payload_offset, meta_bytes, metadata, init) };
-                if let Some(slot) = drop_slot_opt {
-                    // SAFETY: `slot.as_ptr()` references a freshly
-                    // placed `DropEntry::placeholder` we own
-                    // exclusively until commit.
-                    unsafe {
-                        (*slot.as_ptr()).commit_drop_fn(dst_drop_shim::<T> as DropFn);
-                    }
-                }
+                // SAFETY: `value_ptr` is the freshly reserved payload
+                // pointer (strong prefix written, count = 1); we write
+                // metadata at `value_ptr - meta_bytes` and hand `init` a
+                // fat pointer.
+                let payload_nn = unsafe { write_dst_meta_and_init::<T>(value_ptr, meta_bytes, metadata, init) };
                 let _ = chunk_ref.forget();
                 return Ok(payload_nn);
             }
 
-            let refill_hint = total
-                .saturating_add(layout.align())
-                .saturating_add(mem::size_of::<crate::internal::drop_entry::DropEntry>());
-            if self.is_oversized_shared(refill_hint) {
+            if self.is_oversized(refill_hint) {
                 let init = init.take().expect("init taken twice");
                 return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
-                    let (base_in_chunk, drop_slot_opt) = mutator
-                        .try_alloc_thin_dst_smart(total, layout.align().max(1), payload_offset, needs_drop, metadata_u16)
-                        .expect("dedicated oversized chunk sized to fit DST value + optional drop entry");
+                    let (value_ptr, _chunk) = mutator
+                        .try_alloc_arc_dst(payload_bytes, value_align, meta_bytes)
+                        .expect("dedicated oversized chunk sized to fit DST value + strong prefix");
                     let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     // SAFETY: see the in-arena branch above.
-                    let payload_nn =
-                        unsafe { write_dst_prefix_and_init::<T>(base_in_chunk.as_non_null(), payload_offset, meta_bytes, metadata, init) };
-                    if let Some(slot) = drop_slot_opt {
-                        // SAFETY: see the in-arena branch above.
-                        unsafe {
-                            (*slot.as_ptr()).commit_drop_fn(dst_drop_shim::<T> as DropFn);
-                        }
-                    }
+                    let payload_nn = unsafe { write_dst_meta_and_init::<T>(value_ptr, meta_bytes, metadata, init) };
                     let _ = chunk_ref.forget();
                     payload_nn
                 });
@@ -455,38 +423,6 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 }
 
-/// Reinterpret the pointer-metadata for `T` as a `u16`.
-///
-/// Returns the low 16 bits of the metadata value when interpreted as a
-/// `usize`. For metadata kinds we don't support packing
-/// (vtable-bearing trait objects), the returned value is meaningless;
-/// [`metadata_fits_u16`] gates this.
-///
-/// For sized `T` (`Metadata = ()`), returns `0`.
-#[inline]
-#[cfg_attr(test, mutants::skip)] // saturating cast; callers gate via `metadata_fits_u16`
-fn encode_metadata_u16<T: ?Sized + Pointee>(metadata: T::Metadata) -> u16 {
-    if mem::size_of::<T::Metadata>() == 0 {
-        return 0;
-    }
-    debug_assert_eq!(
-        mem::size_of::<T::Metadata>(),
-        mem::size_of::<usize>(),
-        "alloc_dst_*: T::Metadata must be either ZST or usize-sized"
-    );
-    // SAFETY: branch above ensures `T::Metadata` is `usize`-sized; we
-    // read it through a `usize` window, which is layout-compatible for
-    // the supported subset (`[U]` slices: metadata is the length).
-    let raw: usize = unsafe { mem::transmute_copy::<T::Metadata, usize>(&metadata) };
-    // Saturating cast: if the value exceeds u16::MAX we set u16::MAX
-    // and `metadata_fits_u16` will reject it.
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "saturating cast: value > u16::MAX is guarded by the branch above"
-    )]
-    if raw > u16::MAX as usize { u16::MAX } else { raw as u16 }
-}
-
 /// Returns whether `metadata` packs losslessly into a `u16`.
 #[cfg_attr(test, mutants::skip)] // see `alloc_slice_ref::reject_drop_slice_too_long`
 #[inline]
@@ -502,19 +438,69 @@ fn metadata_fits_u16<T: ?Sized + Pointee>(metadata: T::Metadata) -> bool {
     u16::try_from(raw).is_ok()
 }
 
-/// Write `T::Metadata` (if any) at `base + payload_offset - meta_bytes`,
-/// reconstruct the fat `*mut T`, run the caller-provided `init` on
-/// it, and return the thin payload pointer adopted by the smart
-/// pointer (metadata is recovered on demand from the chunk prefix).
+/// Worst-case byte budget for a single strong-prefixed `Arc<T>` DST
+/// allocation: per-`Arc` strong count + `T::Metadata` prefix + payload +
+/// front alignment slack.
+#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
+#[inline]
+fn worst_case_arc_dst(payload_bytes: usize, value_align: usize, meta_bytes: usize) -> usize {
+    use crate::internal::thin_dst;
+    thin_dst::strong_prefix_bytes_for(value_align, meta_bytes)
+        .saturating_add(payload_bytes)
+        .saturating_add(thin_dst::arc_block_align(value_align))
+}
+
+/// Write `T::Metadata` (if any) at `value_ptr - meta_bytes`, reconstruct
+/// the fat `*mut T`, run the caller-provided `init` on it, and return
+/// the thin payload pointer. Used by the strong-prefixed `Arc<T>` DST
+/// path, where the strong count already sits before the metadata.
+///
+/// # Safety
+///
+/// - `value_ptr` must be the payload pointer of a strong-prefixed `Arc`
+///   reservation whose prefix has room for `meta_bytes` immediately
+///   before it.
+/// - `init` must initialize a valid `T` through the fat pointer it
+///   receives.
+#[inline(always)]
+unsafe fn write_dst_meta_and_init<T: ?Sized + Pointee>(
+    value_ptr: NonNull<u8>,
+    meta_bytes: usize,
+    metadata: T::Metadata,
+    init: impl FnOnce(*mut T),
+) -> NonNull<u8> {
+    // SAFETY: per the function contract. The metadata word sits in
+    // `[value_ptr - meta_bytes, value_ptr)`, inside the reservation
+    // prefix; `write_unaligned` tolerates any alignment. For sized T
+    // (meta_bytes == 0) the write is skipped.
+    let fat = unsafe {
+        if meta_bytes != 0 {
+            let prefix_ptr = value_ptr.as_ptr().sub(meta_bytes).cast::<T::Metadata>();
+            ptr::write_unaligned(prefix_ptr, metadata);
+        }
+        ptr_meta::from_raw_parts_mut::<T>(value_ptr.as_ptr().cast::<()>(), metadata)
+    };
+    // Caller's contract: `init` writes a valid `T` through `fat`. If it
+    // panics, callers' `ChunkRef` guard releases the chunk's `+1`.
+    init(fat);
+    value_ptr
+}
+
+/// `Box` DST variant of [`write_dst_meta_and_init`]: takes the
+/// reservation `base` and a `payload_offset`, writes `T::Metadata` at
+/// `base + payload_offset - meta_bytes`, runs `init` on the fat
+/// pointer, and returns the thin payload pointer
+/// (`base + payload_offset`). `Box` has no strong-count prefix, so its
+/// reservation starts at the metadata region rather than the strong
+/// slot.
 ///
 /// # Safety
 ///
 /// - `base` must reference `payload_offset + layout.size()` bytes of
 ///   exclusively-owned chunk storage aligned to `layout.align()`.
-/// - `payload_offset` must equal the value computed at the call site
-///   (i.e. `meta_bytes.max(layout.align())` for DST or `0` for sized).
-/// - `init` must initialize a valid `T` through the fat pointer it
-///   receives.
+/// - `payload_offset` must equal `meta_bytes.max(layout.align())` for
+///   DST or `0` for sized `T`.
+/// - `init` must initialize a valid `T` through the fat pointer.
 #[inline(always)]
 unsafe fn write_dst_prefix_and_init<T: ?Sized + Pointee>(
     base: NonNull<u8>,
@@ -525,10 +511,8 @@ unsafe fn write_dst_prefix_and_init<T: ?Sized + Pointee>(
 ) -> NonNull<u8> {
     // SAFETY: per the function contract. `byte_add(payload_offset)`
     // stays within the reservation. The prefix at `payload - meta_bytes`
-    // lies in `[base, base + payload_offset)` (low-align T fills the
-    // prefix region; high-align T leaves the prefix in the padding).
-    // For sized T (meta_bytes == 0) the prefix write is a no-op.
-    // `from_raw_parts_mut` rebuilds the fat pointer for `init`'s call.
+    // lies in `[base, base + payload_offset)`. For sized T (meta_bytes
+    // == 0) the prefix write is a no-op.
     let (payload_nn, fat) = unsafe {
         let payload_nn = base.byte_add(payload_offset);
         if meta_bytes != 0 {
@@ -538,40 +522,10 @@ unsafe fn write_dst_prefix_and_init<T: ?Sized + Pointee>(
         let fat = ptr_meta::from_raw_parts_mut::<T>(payload_nn.as_ptr().cast::<()>(), metadata);
         (payload_nn, fat)
     };
-    // Caller's contract: `init` writes a valid `T` through `fat`. If
-    // it panics, callers' `ChunkRef` guard releases the chunk's `+1`.
+    // Caller's contract: `init` writes a valid `T` through `fat`. If it
+    // panics, callers' `ChunkRef` guard releases the chunk's `+1`.
     init(fat);
     payload_nn
-}
-
-/// Drop shim used by the DST path. Reconstructs the fat `*mut T` from
-/// `(thin, metadata_u16)` and runs `drop_in_place::<T>` on it.
-///
-/// # Safety
-///
-/// - `thin` must point at a fully-initialized `T` whose size/alignment
-///   match the [`Layout`] used at allocation time.
-/// - `T::Metadata` must be either zero-sized or `usize`-sized
-///   (enforced at the public API by `encode_metadata_u16` /
-///   `metadata_fits_u16`).
-/// - `metadata_raw`, when interpreted as `T::Metadata`, must equal the
-///   metadata that was paired with the value at allocation time.
-unsafe fn dst_drop_shim<T: ?Sized + Pointee>(thin: *mut u8, metadata_raw: usize) {
-    // Recover `T::Metadata` from the stored `usize`. For sized `T`
-    // (Metadata = `()`), the read is a zero-byte no-op.
-    let metadata: T::Metadata = if mem::size_of::<T::Metadata>() == 0 {
-        // SAFETY: `T::Metadata` is zero-sized; read produces the
-        // single uninhabited-by-data unit value.
-        unsafe { mem::zeroed() }
-    } else {
-        // SAFETY: by the function's safety contract.
-        unsafe { mem::transmute_copy::<usize, T::Metadata>(&metadata_raw) }
-    };
-    let fat: *mut T = ptr_meta::from_raw_parts_mut(thin.cast::<()>(), metadata);
-    // SAFETY: by the function's safety contract `fat` references a
-    // fully-initialized `T`; we hold exclusive access (chunk refcount
-    // is zero on the teardown path that invokes this shim).
-    unsafe { ptr::drop_in_place(fat) };
 }
 
 #[cfg(test)]
@@ -579,9 +533,9 @@ mod tests {
     use super::*;
     use crate::Arena as TestArena;
 
-    /// Cover `encode_metadata_u16` / `metadata_fits_u16` zero-sized
-    /// branches (lines 434, 458) and `dst_drop_shim`'s `Metadata = ()`
-    /// branch (line 486) via an `alloc_dst_arc` of a sized drop-bearing `T`.
+    /// Exercises `alloc_dst_arc` of a sized drop-bearing `T`: the value's
+    /// destructor must run eagerly when the last `Arc` clone drops
+    /// (before the arena is torn down).
     #[test]
     fn dst_arc_sized_drop_type_metadata_zero_sized_paths() {
         use std::sync::Arc as StdArc;

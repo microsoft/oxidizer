@@ -750,24 +750,32 @@ mod drop_slice_over_u16_max_returns_err {
         assert!(a.try_alloc_slice_fill_iter::<D, _>((0..TOO_LONG).map(|i| D(i as u8))).is_err());
     }
 
+    // `Arc<[T]>` uninit/zeroed slices have no `u16` element-count cap
+    // under per-`Arc` reference counting (they drop via
+    // `drop_in_place::<[T]>`, not a `u16`-counted chunk entry), so a
+    // Drop-typed slice longer than `u16::MAX` now allocates successfully.
+    #[cfg(not(miri))]
     #[test]
-    fn try_alloc_uninit_slice_arc_over_u16_err() {
+    fn uninit_slice_arc_over_u16_succeeds() {
         struct D(u32);
         impl Drop for D {
             fn drop(&mut self) {}
         }
         let a = Arena::new();
-        assert!(a.try_alloc_uninit_slice_arc::<D>(TOO_LONG).is_err());
+        let arc = a.try_alloc_uninit_slice_arc::<D>(TOO_LONG).expect("Arc slices have no u16 cap");
+        assert_eq!(arc.len(), TOO_LONG);
     }
 
+    #[cfg(not(miri))]
     #[test]
-    fn try_alloc_zeroed_slice_arc_over_u16_err() {
+    fn zeroed_slice_arc_over_u16_succeeds() {
         struct D(u32);
         impl Drop for D {
             fn drop(&mut self) {}
         }
         let a = Arena::new();
-        assert!(a.try_alloc_zeroed_slice_arc::<D>(TOO_LONG).is_err());
+        let arc = a.try_alloc_zeroed_slice_arc::<D>(TOO_LONG).expect("Arc slices have no u16 cap");
+        assert_eq!(arc.len(), TOO_LONG);
     }
 }
 
@@ -925,10 +933,10 @@ mod uninit_drop_init_from_iter {
 }
 
 // ============================================================================
-// internal/uninit.rs:487–489 — `into_uninit_slice_placeholder(zeroed=true)`
-// exercised by `alloc_zeroed_slice_arc` for drop types.
+// `alloc_zeroed_slice_arc` for a drop type zero-fills the payload (the
+// `MaybeUninit::zeroed` fill path).
 // ============================================================================
-mod uninit_into_uninit_slice_placeholder_zeroed {
+mod zeroed_slice_arc_zeroes_payload {
     use core::mem::MaybeUninit;
 
     use multitude::Arena;
@@ -1103,34 +1111,39 @@ mod arc_borrow {
 }
 
 // ============================================================================
-// arc.rs — slice assume_init missing-drop-entry panic (287–290).
+// arc.rs — slice assume_init is a pure reinterpret under per-`Arc`
+// reference counting; element destructors run eagerly in `Arc::drop`.
 // ============================================================================
-mod arc_assume_init_slice_panics_when_drop_entry_missing {
+mod arc_assume_init_slice_drops_each_element {
     use core::mem::MaybeUninit;
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use multitude::Arena;
 
     #[test]
-    fn slice_assume_init_for_drop_type_without_placeholder_panics() {
-        // `MaybeUninit<D>` is itself never-drop (MaybeUninit suppresses
-        // drops), so allocating an `Arc<[MaybeUninit<D>]>` via the regular
-        // fill helper does NOT reserve a placeholder slice drop entry.
-        // Calling `assume_init` on the resulting handle then triggers the
-        // slice-side panic message because `needs_drop::<D>()` is true.
-        #[derive(Clone)]
-        struct D(#[expect(dead_code, reason = "field gives the type a non-zero size")] u32);
+    fn slice_assume_init_for_drop_type_drops_each_element() {
+        // `alloc_slice_fill_with_arc::<MaybeUninit<D>>` + `assume_init`
+        // used to be rejected (no placeholder drop entry). Now
+        // `assume_init` is a pure reinterpret and `Arc::drop` runs each
+        // element's destructor via `drop_in_place::<[D]>`.
+        struct D(StdArc<AtomicUsize>);
         impl Drop for D {
-            fn drop(&mut self) {}
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
         }
-        let arena = Arena::new();
-        let r = catch_unwind(AssertUnwindSafe(|| {
-            let arc: multitude::Arc<[MaybeUninit<D>]> = arena.alloc_slice_fill_with_arc(2, |_| MaybeUninit::new(D(0)));
-            // SAFETY: elements are initialized above; the panic comes from
-            // the missing placeholder drop entry, not from undefined behavior.
-            let _: multitude::Arc<[D]> = unsafe { arc.assume_init() };
-        }));
-        assert!(r.is_err());
+        let counter = StdArc::new(AtomicUsize::new(0));
+        {
+            let arena = Arena::new();
+            let arc: multitude::Arc<[MaybeUninit<D>]> =
+                arena.alloc_slice_fill_with_arc(2, |_| MaybeUninit::new(D(StdArc::clone(&counter))));
+            // SAFETY: both elements were initialized above.
+            let init: multitude::Arc<[D]> = unsafe { arc.assume_init() };
+            assert_eq!(init.len(), 2);
+            drop(init);
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 2);
     }
 }
 
@@ -1455,8 +1468,11 @@ mod allocator_impl_grow_to_zero_overlap {
 }
 
 // ============================================================================
-// alloc_unsized.rs — metadata-too-large rejection for `[D]` slice DSTs
+// alloc_unsized.rs — metadata-too-large handling for `[D]` slice DSTs
 // and refill-failure path for `try_alloc_dst_box` (lines 229–230, 261).
+// The `Box` path rejects `T: Drop` DSTs whose metadata does not pack
+// into the chunk drop-list's `u16` slot; the `Arc` path stores metadata
+// verbatim and runs `drop_in_place` eagerly, so it has no such limit.
 // Lives here rather than as a `src/` unit test so the empty `Drop`
 // impl on the probe type doesn't bloat src-coverage counts.
 // ============================================================================
@@ -1475,14 +1491,44 @@ mod alloc_unsized_extras {
     }
 
     #[test]
-    fn try_alloc_dst_arc_slice_drop_metadata_too_large_returns_err() {
+    fn try_alloc_dst_box_slice_drop_metadata_too_large_returns_err() {
         let arena = Arena::new();
         let len = (u16::MAX as usize) + 1;
         let layout = Layout::array::<D>(len).unwrap();
         // SAFETY: the metadata-too-large rejection fires before `init`
         // is invoked, so no actual initialization happens.
-        let r = unsafe { arena.try_alloc_dst_arc::<[D]>(layout, len, |_p: *mut [D]| {}) };
+        let r = unsafe { arena.try_alloc_dst_box::<[D]>(layout, len, |_p: *mut [D]| {}) };
         assert!(r.is_err());
+    }
+
+    #[test]
+    // Skipped under Miri: writing + dropping `u16::MAX + 1` elements
+    // (~65K) to exercise the slice-length boundary exceeds Miri's test
+    // budget (~8 min observed). The lifted-restriction behavior is a
+    // runtime property, not a memory-safety one; native + cargo-careful
+    // runs verify it on every CI execution.
+    #[cfg_attr(miri, ignore)]
+    fn try_alloc_dst_arc_slice_drop_metadata_too_large_succeeds() {
+        // Unlike the `Box` path, the `Arc` path stores slice metadata
+        // verbatim (not in the `u16` drop-list slot), so a `T: Drop`
+        // slice longer than `u16::MAX` is accepted.
+        let arena = Arena::new();
+        let len = (u16::MAX as usize) + 1;
+        let layout = Layout::array::<D>(len).unwrap();
+        // SAFETY: `layout` describes `[D; len]`; `init` writes a valid
+        // `D` into every element before the `Arc` is observed, so the
+        // eager `drop_in_place::<[D]>` on teardown runs on live values.
+        let r = unsafe {
+            arena.try_alloc_dst_arc::<[D]>(layout, len, |p: *mut [D]| {
+                let base = p.cast::<D>();
+                for i in 0..len {
+                    // SAFETY: `base..base + len` is the freshly reserved
+                    // `[D]` buffer described by `layout`.
+                    base.add(i).write(D::default());
+                }
+            })
+        };
+        assert!(r.is_ok());
     }
 
     #[test]

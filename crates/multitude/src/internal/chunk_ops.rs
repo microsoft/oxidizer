@@ -131,17 +131,13 @@ impl<A: Allocator + Clone> ChunkOps for SharedChunk<A> {
     #[cold]
     #[inline(never)]
     unsafe fn teardown_and_release(chunk: NonNull<Self>) {
-        // SAFETY: see local variant. Replay drops + clear count before the
-        // chunk is recycled to the shared cache (where its payload's first
-        // bytes are reused as a Treiber-stack next-link).
+        // SAFETY: caller owns the unique remaining reference. Shared
+        // chunks never register drop entries — per-`Arc` values run their
+        // destructors eagerly in `Arc::drop` on the last strong reference
+        // — so there is nothing to replay before the chunk is recycled to
+        // the shared cache (where its payload's first bytes are reused as
+        // a Treiber-stack next-link).
         let chunk_ref = &*chunk.as_ptr();
-        let drop_count = chunk_ref.drop_entry_count();
-        if drop_count != 0 {
-            let payload = SharedChunk::payload_ptr(chunk).as_ptr();
-            let capacity = chunk_ref.capacity();
-            super::drop_entry::replay_drops(payload, capacity, drop_count);
-            chunk_ref.set_drop_entry_count(0);
-        }
         // Shared chunks CAN outlive their provider (an Arc<T> backed by
         // a shared chunk can be held past Arena::drop), so we still need
         // the Weak::upgrade dance here.

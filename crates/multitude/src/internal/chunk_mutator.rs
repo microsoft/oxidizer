@@ -262,29 +262,6 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         Some((in_chunk, unsafe { self.chunk_ptr_unchecked() }))
     }
 
-    /// [`Self::try_alloc_thin_dst_smart`] paired with the owning chunk
-    /// pointer. See [`Self::try_alloc_with_chunk`].
-    #[inline]
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[allow(
-        clippy::type_complexity,
-        reason = "matches try_alloc_thin_dst_smart's shape plus the chunk pointer"
-    )]
-    #[cfg(feature = "dst")]
-    pub(crate) fn try_alloc_thin_dst_smart_with_chunk(
-        &self,
-        total: usize,
-        align: usize,
-        payload_offset: usize,
-        needs_drop: bool,
-        metadata_u16: u16,
-    ) -> Option<(InChunk<u8>, Option<InChunk<DropEntry>>, NonNull<C>)> {
-        let (base, drop_slot) = self.try_alloc_thin_dst_smart(total, align, payload_offset, needs_drop, metadata_u16)?;
-        // SAFETY: a successful reservation proves the mutator owns a
-        // chunk.
-        Some((base, drop_slot, unsafe { self.chunk_ptr_unchecked() }))
-    }
-
     /// Byte-slice fast path: skips the alignment mask, `checked_mul`,
     /// and ZST branch. Only valid for `T = u8` (align 1, size 1).
     #[inline]
@@ -370,6 +347,123 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         // SAFETY: forwarded to the caller.
         let (payload, _) = unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }?;
         Some(Uninit::new(payload))
+    }
+
+    /// Reserve storage for one `Arc<T>`-style value with a leading
+    /// per-`Arc` strong reference count.
+    ///
+    /// Layout: `[strong (AtomicU32, at base)][pad][meta (meta_bytes,
+    /// unaligned)][payload (payload_bytes)]`. The strong count is
+    /// initialized to `1`. Returns a chunk-wide-provenance pointer to
+    /// the payload (the value pointer the `Arc` will store); the caller
+    /// writes `T::Metadata` at `value_ptr - meta_bytes` and the payload.
+    ///
+    /// `payload_bytes` is floored to `1` so the value pointer stays
+    /// strictly inside the chunk (never one-past the `CHUNK_ALIGN`
+    /// tile), preserving the smart-pointer header-recovery mask.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "reservation is aligned to >= STRONG_ALIGN, so the leading strong slot is aligned for AtomicU32"
+    )]
+    fn try_alloc_arc_prefixed(&self, payload_bytes: usize, value_align: usize, meta_bytes: usize) -> Option<NonNull<u8>> {
+        use super::thin_dst::{arc_block_align, strong_prefix_bytes_for};
+        let prefix = strong_prefix_bytes_for(value_align, meta_bytes);
+        let total = prefix.checked_add(payload_bytes.max(1))?;
+        let base = self.try_alloc(total, arc_block_align(value_align))?;
+        // SAFETY: `base` is aligned to `arc_block_align(value_align)` (>=
+        // STRONG_ALIGN), so the leading `AtomicU32` write is aligned and
+        // in chunk provenance; `base + prefix` is `value_align`-aligned
+        // and stays within the reservation.
+        unsafe {
+            base.as_ptr()
+                .cast::<core::sync::atomic::AtomicU32>()
+                .write(core::sync::atomic::AtomicU32::new(1));
+            Some(NonNull::new_unchecked(base.as_ptr().add(prefix)))
+        }
+    }
+
+    /// [`Self::try_alloc_arc_prefixed`] paired with the owning chunk
+    /// pointer (a successful reservation proves the mutator owns a
+    /// chunk). Returns a [`Uninit<T>`] ticket addressing the payload.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    pub(crate) fn try_alloc_arc_value<T>(&self) -> Option<(Uninit<'_, T>, NonNull<C>)> {
+        let value_ptr = self.try_alloc_arc_prefixed(mem::size_of::<T>(), mem::align_of::<T>(), 0)?;
+        // SAFETY: a successful reservation proves the mutator owns a chunk.
+        Some((Uninit::new(InChunk::from_raw(value_ptr).cast::<T>()), unsafe {
+            self.chunk_ptr_unchecked()
+        }))
+    }
+
+    /// Slice form of [`Self::try_alloc_arc_value`]: reserves a strong
+    /// prefix, a `usize` slice-length metadata word, and `len` `T`s,
+    /// writing the length into the metadata word.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    #[allow(
+        clippy::type_complexity,
+        reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
+    )]
+    pub(crate) fn try_alloc_arc_slice<T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<C>)> {
+        let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
+        // SAFETY: `payload_bytes == size_of::<T>() * len` (just checked).
+        unsafe { self.try_alloc_arc_slice_with_size::<T>(len, payload_bytes) }
+    }
+
+    /// Like [`Self::try_alloc_arc_slice`] but takes the precomputed
+    /// payload byte size (held by callers with a live `&[T]`), skipping
+    /// the `checked_mul` overflow guard.
+    ///
+    /// # Safety
+    ///
+    /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    #[allow(
+        clippy::type_complexity,
+        reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
+    )]
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "slice-length metadata is written/read unaligned immediately before the payload"
+    )]
+    pub(crate) unsafe fn try_alloc_arc_slice_with_size<T>(
+        &self,
+        len: usize,
+        payload_bytes: usize,
+    ) -> Option<(Uninit<'_, [T]>, NonNull<C>)> {
+        debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
+        let value_ptr = self.try_alloc_arc_prefixed(payload_bytes, mem::align_of::<T>(), mem::size_of::<usize>())?;
+        // SAFETY: the reservation placed `size_of::<usize>()` metadata
+        // bytes immediately before the payload; `write_unaligned`
+        // tolerates any alignment.
+        unsafe {
+            ptr::write_unaligned(value_ptr.as_ptr().sub(mem::size_of::<usize>()).cast::<usize>(), len);
+        }
+        // SAFETY: a successful reservation proves the mutator owns a chunk.
+        Some((Uninit::new(InChunk::from_raw(value_ptr).into_slice::<T>(len)), unsafe {
+            self.chunk_ptr_unchecked()
+        }))
+    }
+
+    /// DST form of [`Self::try_alloc_arc_value`]: reserves a strong
+    /// prefix, `meta_bytes` of metadata, and `payload_bytes` of payload.
+    /// Returns the value pointer; the caller writes `T::Metadata` at
+    /// `value_ptr - meta_bytes` and runs `init`.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    #[cfg(feature = "dst")]
+    pub(crate) fn try_alloc_arc_dst(
+        &self,
+        payload_bytes: usize,
+        value_align: usize,
+        meta_bytes: usize,
+    ) -> Option<(NonNull<u8>, NonNull<C>)> {
+        let value_ptr = self.try_alloc_arc_prefixed(payload_bytes, value_align, meta_bytes)?;
+        // SAFETY: a successful reservation proves the mutator owns a chunk.
+        Some((value_ptr, unsafe { self.chunk_ptr_unchecked() }))
     }
 
     /// Layout + alloc + prefix-write for "thin DST slice" reservations.
@@ -478,35 +572,6 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         Some(UninitDrop::new(value, drop_slot))
     }
 
-    /// Like [`Self::try_alloc_uninit_slice_with_drop`] but additionally
-    /// writes a thin-pointer DST length prefix (`size_of::<usize>()`
-    /// bytes, unaligned) immediately before the payload. See
-    /// [`Self::try_alloc_uninit_slice_prefixed`].
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
-    )]
-    pub(crate) fn try_alloc_uninit_slice_with_drop_prefixed<T>(&self, len: usize) -> Option<UninitDrop<'_, [T]>> {
-        // `len` must fit in the drop entry's `u16` element-count field.
-        let len_u16 = u16::try_from(len).ok()?;
-        let drop_slot = self.try_reserve_drop_entry()?;
-        let Some((value, payload_addr)) = self.try_alloc_prefixed_slice_payload::<T>(len) else {
-            self.unwind_drop_entry();
-            return None;
-        };
-        // The drop entry's `value_offset` encodes the *payload* address
-        // (post-prefix) so `replay_drops` runs `drop_in_place::<[T]>`
-        // on the real elements.
-        let value_offset = self.offset_or_unwind(payload_addr)?;
-        // SAFETY: `drop_slot` is freshly reserved, aligned, exclusively
-        // owned slot in the chunk's drop region.
-        unsafe {
-            ptr::write(drop_slot.as_ptr(), DropEntry::placeholder(value_offset, len_u16));
-        }
-        Some(UninitDrop::new(value, drop_slot))
-    }
-
     /// Attempts to reclaim the unused tail of the most recent bump
     /// allocation in O(1).
     ///
@@ -569,49 +634,6 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         true
     }
 
-    /// Thin-DST smart-pointer reservation. Reserves `total` bytes
-    /// aligned to `align`, optionally pre-reserves a drop entry that
-    /// will point at the *payload* address (i.e. `reservation_start +
-    /// payload_offset`, not the reservation start), and returns the
-    /// reservation start plus the drop slot. The caller is responsible
-    /// for writing the metadata prefix at `[0, payload_offset)` and the
-    /// payload at `[payload_offset, total)`.
-    ///
-    /// Used by the thin generic-DST smart-pointer alloc paths
-    /// ([`Arc<T>`](crate::Arc) / [`Box<T>`](crate::Box) for `T: ?Sized`).
-    #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[cfg(feature = "dst")]
-    pub(crate) fn try_alloc_thin_dst_smart(
-        &self,
-        total: usize,
-        align: usize,
-        payload_offset: usize,
-        needs_drop: bool,
-        metadata_u16: u16,
-    ) -> Option<(InChunk<u8>, Option<InChunk<DropEntry>>)> {
-        debug_assert!(align.is_power_of_two(), "align must be a power of two");
-        debug_assert!(payload_offset <= total, "payload_offset must fit inside the reservation");
-        if needs_drop {
-            let drop_slot = self.try_reserve_drop_entry()?;
-            let Some(base) = self.try_alloc(total, align) else {
-                self.unwind_drop_entry();
-                return None;
-            };
-            // Drop entry encodes the payload address (post-prefix), so
-            // `replay_drops` runs `drop_in_place::<T>` on the real
-            // value bytes.
-            let payload_addr = base.addr().wrapping_add(payload_offset);
-            let value_offset = self.offset_or_unwind(payload_addr)?;
-            // SAFETY: freshly reserved, aligned, exclusively owned slot.
-            unsafe {
-                ptr::write(drop_slot.as_ptr(), DropEntry::placeholder(value_offset, metadata_u16));
-            }
-            Some((base, Some(drop_slot)))
-        } else {
-            let base = self.try_alloc(total, align)?;
-            Some((base, None))
-        }
-    }
     /// Reserves a [`DropEntry`]-sized slot at the top of the drop-entry
     /// region. Entries are packed end-to-end from the payload's high end
     /// downward, matching the layout walked by

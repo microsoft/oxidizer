@@ -103,8 +103,7 @@ impl DropEntry {
     /// Fills in the real drop shim pointer. Idempotent under races: when
     /// two threads commit the same slot, both writes are the same value
     /// (the shim is determined by `T`), so a relaxed-store is sufficient
-    /// once paired with the `Acquire` load in [`replay_drops`] /
-    /// [`commit_placeholder_drop_fn`].
+    /// once paired with the `Acquire` load in [`replay_drops`].
     #[inline]
     pub(crate) fn commit_drop_fn(&self, drop_fn: DropFn) {
         // Cast the fn pointer to `*mut ()` for atomic storage; this
@@ -146,74 +145,6 @@ impl DropEntry {
     pub(crate) fn len(&self) -> u16 {
         self.len
     }
-}
-
-/// Scans the `drop_entry_count` `DropEntry`s packed against the high end of
-/// `payload` for the unique uncommitted placeholder whose `value_offset` and
-/// `len` match, and commits `drop_fn` into it. Returns `true` if such an
-/// entry was found and committed, `false` otherwise.
-///
-/// Used by `Arc::<MaybeUninit<T>>::assume_init` to retarget the placeholder
-/// reserved by `Arena::alloc_uninit_arc` once the value is initialized. The
-/// entry walk mirrors [`replay_drops`] exactly so the located slot is the
-/// same one the teardown replay will later read.
-///
-/// # Safety
-///
-/// - `payload` / `payload_len` / `drop_entry_count` carry the same contract
-///   as [`replay_drops`]: they must describe the live chunk's payload and the
-///   number of entries previously written by the allocator at the tail.
-/// - The caller must own a strong reference on the chunk (so it stays live)
-///   and must not let another thread commit the same placeholder concurrently
-///   (see the `assume_init` "called at most once per allocation" contract).
-#[allow(
-    clippy::cast_ptr_alignment,
-    reason = "caller guarantees entries are naturally aligned within the payload; see DropEntry layout"
-)]
-pub(crate) unsafe fn commit_placeholder_drop_fn(
-    payload: *mut u8,
-    payload_len: usize,
-    drop_entry_count: usize,
-    value_offset: usize,
-    len: usize,
-    drop_fn: DropFn,
-) -> bool {
-    let entry_size = mem::size_of::<DropEntry>();
-    let entry_align = mem::align_of::<DropEntry>();
-    // Align the *absolute* payload-end address down to `entry_align`,
-    // matching `ChunkMutator::from_owned`'s `aligned_end_addr` formula.
-    // Doing the alignment on absolute addresses (rather than on
-    // `payload_len` alone) keeps the entry positions valid even when
-    // `payload` itself is not `entry_align`-aligned — the chunk
-    // headers don't pad their payload start anymore.
-    let payload_addr = payload as usize;
-    let aligned_end_offset = ((payload_addr.wrapping_add(payload_len)) & !(entry_align - 1)).wrapping_sub(payload_addr);
-    // Find the placeholder by (value_offset, len) and unconditionally
-    // store the real shim. Concurrent `assume_init` calls on cloned
-    // handles for the same allocation race here; both calls compute
-    // the same `drop_fn` (the monomorphisation of `drop_shim_*` for
-    // `T`), so racing atomic stores are idempotent and well-defined.
-    //
-    // A two-phase "check-then-write" alternative would have to compare
-    // the stored function pointer to a freshly-cast `drop_fn as *mut ()`
-    // on the loser's path, which is fragile under Miri: the
-    // fn-pointer-to-data-pointer cast can synthesise distinct data
-    // addresses across invocations of the same function. The single-
-    // pass unconditional store sidesteps the comparison entirely.
-    for i in 0..drop_entry_count {
-        let entry_off = aligned_end_offset - (i + 1) * entry_size;
-        // SAFETY: `entry_off + entry_size <= aligned_end_offset <= payload_len`,
-        // so the entry lies inside the payload; the caller guarantees an
-        // initialized `DropEntry` was written there. We hold a chunk
-        // reference, so the slot stays live for this read/write.
-        let entry = &*(payload.add(entry_off).cast::<DropEntry>());
-        if entry.value_offset() as usize != value_offset || entry.len() as usize != len {
-            continue;
-        }
-        entry.commit_drop_fn(drop_fn);
-        return true;
-    }
-    false
 }
 
 /// A type-erased drop shim for `count` consecutive `T`s.
@@ -301,77 +232,16 @@ pub(crate) unsafe fn replay_drops(payload: *mut u8, payload_len: usize, drop_ent
 mod tests {
     use super::*;
 
-    /// Direct test: when `drop_entry_count == 0`, the single-pass walk
-    /// of `commit_placeholder_drop_fn` skips its loop and returns
-    /// `false`.
-    #[test]
-    fn commit_placeholder_drop_fn_returns_false_when_count_is_zero() {
-        let mut buf = [0u8; 64];
-        let shim_fn = drop_shim::<u8> as DropFn;
-        // SAFETY: buffer is exclusively owned and the count is 0 so no entry
-        // is read from it; we only need a valid pointer/length pair.
-        let result = unsafe { commit_placeholder_drop_fn(buf.as_mut_ptr(), buf.len(), 0, 0, 1, shim_fn) };
-        assert!(!result);
-    }
-
-    /// Direct test: the single-pass walk skips a non-matching
-    /// `(value_offset, len)` entry (`continue`) and commits the next
-    /// matching entry (return `true`). Covers both the skip arm and the
-    /// success arm of the loop body.
-    #[test]
-    fn commit_placeholder_drop_fn_skips_non_matching_then_commits_match() {
-        let entry_size = mem::size_of::<DropEntry>();
-        let entry_align = mem::align_of::<DropEntry>();
-        let buf_size = entry_size * 4;
-        let mut buf = std::vec![0u8; buf_size + entry_align];
-        let base_addr = buf.as_mut_ptr() as usize;
-        let aligned_base = (base_addr + entry_align - 1) & !(entry_align - 1);
-        let payload_offset = aligned_base - base_addr;
-        // SAFETY: `payload_offset` is within `buf`'s allocation by construction.
-        let payload_ptr = unsafe { buf.as_mut_ptr().add(payload_offset) };
-        let payload_len = buf_size;
-        let aligned_len = payload_len & !(entry_align - 1);
-
-        let shim_fn = drop_shim::<u8> as DropFn;
-        let value_offset: u16 = 0;
-        let len: u16 = 1;
-
-        // Top slot: a *non-matching* placeholder (different value_offset).
-        let top_off = aligned_len - entry_size;
-        // Second slot: the matching placeholder.
-        let next_off = aligned_len - 2 * entry_size;
-        // SAFETY: see above; placements are within the aligned region and
-        // both writes target `DropEntry`-aligned addresses.
-        unsafe {
-            let top_ptr = payload_ptr.add(top_off).cast::<DropEntry>();
-            ptr::write(top_ptr, DropEntry::placeholder(99, 1));
-            let next_ptr = payload_ptr.add(next_off).cast::<DropEntry>();
-            ptr::write(next_ptr, DropEntry::placeholder(value_offset, len));
-        }
-
-        // SAFETY: the buffer contains 2 placeholder `DropEntry`s, the
-        // second one matching `(value_offset, len)`.
-        let result = unsafe { commit_placeholder_drop_fn(payload_ptr, payload_len, 2, value_offset as usize, len as usize, shim_fn) };
-        assert!(result);
-
-        // The matching slot now has the real drop fn installed.
-        // SAFETY: `next_ptr` was initialized above and stays valid for
-        // the test's lifetime.
-        let next_ptr = unsafe { payload_ptr.add(next_off).cast::<DropEntry>() };
-        // SAFETY: the slot is initialized.
-        let installed = unsafe { (*next_ptr).drop_fn() };
-        assert!(installed.is_some());
-    }
-
     /// When `payload_ptr` is **not** `align_of::<DropEntry>()`-aligned,
-    /// both `commit_placeholder_drop_fn` and `replay_drops` must still
-    /// place drop entries at absolutely-aligned addresses near the
-    /// payload tail. The buffer below intentionally offsets the payload
-    /// start by `entry_align - 1` bytes from an aligned base, so the
-    /// payload start address is 1-aligned but the *end* of the
-    /// reserved payload still lands on an `entry_align` multiple.
+    /// [`replay_drops`] must still locate drop entries at
+    /// absolutely-aligned addresses near the payload tail. The buffer
+    /// below intentionally offsets the payload start by `entry_align - 1`
+    /// bytes from an aligned base, so the payload start address is
+    /// 1-aligned but the *end* of the reserved payload still lands on an
+    /// `entry_align` multiple. Only the committed (matching) placeholder
+    /// runs; the non-matching one stays without a shim.
     #[test]
-    fn replay_and_commit_tolerate_unaligned_payload_start() {
+    fn replay_tolerates_unaligned_payload_start() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static CALLS: AtomicUsize = AtomicUsize::new(0);
         fn counting_shim(_p: *mut u8, _n: usize) {
@@ -400,32 +270,25 @@ mod tests {
         let aligned_end_addr = (payload_start_addr + payload_len) & !(entry_align - 1);
         let aligned_end_offset = aligned_end_addr - payload_start_addr;
 
-        let value_offset: u16 = 0;
-        let len: u16 = 1;
         let shim_fn = counting_shim as DropFn;
 
-        // Write two placeholders at the correctly-aligned offsets.
+        // Write a committed entry and a non-committed placeholder at the
+        // correctly-aligned offsets.
         // SAFETY: both offsets are within the payload buffer and produce
         // entry_align-aligned addresses by construction.
         unsafe {
             let top_off = aligned_end_offset - entry_size;
             let next_off = aligned_end_offset - 2 * entry_size;
-            // Top: non-matching placeholder.
+            // Top: placeholder left uncommitted (no shim).
             ptr::write(payload_ptr.add(top_off).cast::<DropEntry>(), DropEntry::placeholder(99, 1));
-            // Below: matching placeholder.
-            ptr::write(
-                payload_ptr.add(next_off).cast::<DropEntry>(),
-                DropEntry::placeholder(value_offset, len),
-            );
+            // Below: placeholder committed to the counting shim.
+            let next_ptr = payload_ptr.add(next_off).cast::<DropEntry>();
+            ptr::write(next_ptr, DropEntry::placeholder(0, 1));
+            (*next_ptr).commit_drop_fn(shim_fn);
         }
 
-        // Commit phase must locate the matching entry and install the shim.
-        // SAFETY: both entries are initialized; payload_len includes them.
-        let committed = unsafe { commit_placeholder_drop_fn(payload_ptr, payload_len, 2, value_offset as usize, len as usize, shim_fn) };
-        assert!(committed);
-
-        // Replay phase must invoke the installed shim exactly once
-        // (the non-matching placeholder still has no shim).
+        // Replay phase must invoke the committed shim exactly once
+        // (the uncommitted placeholder still has no shim).
         // SAFETY: payload_ptr + payload_len bounds the live buffer.
         unsafe { replay_drops(payload_ptr, payload_len, 2) };
         assert_eq!(CALLS.load(Ordering::Relaxed), 1);

@@ -243,7 +243,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 return Ok(base);
             }
-            if self.is_oversized_shared(bytes_needed) {
+            if self.is_oversized(bytes_needed) {
                 let init_owned = init.take().expect("reserve_slice_box init taken twice");
                 return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
                     let ticket = mutator

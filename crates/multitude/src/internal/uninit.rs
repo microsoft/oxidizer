@@ -12,9 +12,8 @@
 //! strings) use only the safe ticket API.
 
 use core::marker::PhantomData;
-use core::mem::{self, MaybeUninit};
 use core::ptr::{self, NonNull};
-use core::str;
+use core::{mem, str};
 
 use super::drop_entry::{DropEntry, DropFn, drop_shim};
 use super::in_chunk::InChunk;
@@ -362,28 +361,6 @@ impl<'a, T> UninitDrop<'a, T> {
             NonNull::new_unchecked(raw)
         }
     }
-
-    /// Writes a (possibly uninitialized) `MaybeUninit<T>` into the value
-    /// slot and returns a pointer to it, leaving the pre-reserved drop entry
-    /// as an **uncommitted** placeholder.
-    ///
-    /// Used by the uninit-`Arc` allocation path: the entry is committed
-    /// later by [`Arc::<MaybeUninit<T>>::assume_init`](crate::Arc) once the
-    /// value is initialized. If the resulting handle is dropped without
-    /// `assume_init`, the placeholder stays `None` and the replay loop skips
-    /// it, so no destructor runs on uninitialized memory.
-    #[inline]
-    pub(crate) fn into_uninit_placeholder(self, value: MaybeUninit<T>) -> NonNull<MaybeUninit<T>> {
-        let raw = self.value.as_ptr().cast::<MaybeUninit<T>>();
-        // SAFETY: `raw` is non-null, aligned for `T` (identical to
-        // `MaybeUninit<T>`), and exclusively owned by this consumed ticket;
-        // the slot is uninitialized so `write` drops nothing. The drop slot
-        // is intentionally left as the placeholder written at reservation.
-        unsafe {
-            ptr::write(raw, value);
-            NonNull::new_unchecked(raw)
-        }
-    }
 }
 
 impl<'a, T> UninitDrop<'a, [T]> {
@@ -467,27 +444,5 @@ impl<'a, T> UninitDrop<'a, [T]> {
             iter.next()
                 .expect("iterator yielded fewer elements than ExactSizeIterator::len() reported")
         })
-    }
-
-    /// Slice analogue of [`UninitDrop::into_uninit_placeholder`]: optionally
-    /// zero-fills the reserved elements and returns the buffer as
-    /// `MaybeUninit<T>`s, leaving the pre-reserved drop entry **uncommitted**.
-    ///
-    /// The uninit-slice-`Arc` path commits the entry later via
-    /// [`Arc::<[MaybeUninit<T>]>::assume_init`](crate::Arc).
-    #[inline]
-    pub(crate) fn into_uninit_slice_placeholder(self, zeroed: bool) -> NonNull<[MaybeUninit<T>]> {
-        let slice_ptr = self.value.as_non_null();
-        let len = slice_ptr.len();
-        let base = slice_ptr.cast::<MaybeUninit<T>>();
-        if zeroed {
-            // SAFETY: `base` addresses `len` exclusively-owned `MaybeUninit<T>`
-            // slots inside chunk storage reserved for this consumed ticket;
-            // zeroing their bytes leaves valid `MaybeUninit<T>` values.
-            unsafe {
-                ptr::write_bytes(base.as_ptr().cast::<u8>(), 0, len.saturating_mul(mem::size_of::<T>()));
-            }
-        }
-        NonNull::slice_from_raw_parts(base, len)
     }
 }

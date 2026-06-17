@@ -325,20 +325,10 @@ impl<A: Allocator + Clone> Arena<A> {
     /// outstanding simple references can still be live. Outstanding `Arc`s
     /// from shared chunks continue to hold their backing chunks alive
     /// independently.
-    ///
-    /// The reset is lazy: the current chunk slots are returned to the
-    /// empty state and a fresh chunk is acquired on the first subsequent
-    /// allocation, mirroring the lazy semantics of [`Self::new`].
     #[cold]
     pub fn reset(&mut self) {
-        // Reconcile the surplus on the current shared chunk before
-        // the mutator's Drop fires its own dec_ref — keeps the
-        // chunk's atomic refcount in sync with the number of escaped
-        // handles.
-        self.reconcile_shared_surplus();
         self.retired_local.clear();
         *self.current_local.get_mut() = ChunkMutator::<LocalChunk<A>>::empty();
-        *self.current_shared.get_mut() = ChunkMutator::<SharedChunk<A>>::empty();
     }
 
     /// Returns a [`ZerocopyView`](crate::zerocopy::ZerocopyView)
@@ -381,24 +371,19 @@ impl<A: Allocator + Clone> Arena<A> {
         self.provider.config().max_normal_alloc()
     }
 
-    /// True iff a shared-chunk allocation request of `min_payload` bytes
-    /// must be routed to a one-shot oversized chunk instead of the normal
-    /// size-class pool. Callers that detect this case should use
-    /// [`Self::alloc_oversized_shared_with`] rather than
-    /// [`Self::refill_shared`].
+    /// True iff an allocation request of `min_payload` bytes must be routed
+    /// to a one-shot oversized chunk instead of the normal size-class pool.
+    /// Callers that detect this case should use the matching oversized path
+    /// ([`Self::alloc_oversized_shared_with`] /
+    /// [`Self::alloc_oversized_local_with`]) rather than the normal refill.
     ///
-    /// `ArenaBuilder` caps `max_normal_alloc` at `max_bump_extent`
-    /// (`MAX_CHUNK_BYTES - header_size`), so `min_payload <=
-    /// max_normal_alloc` always implies `header + min_payload <=
-    /// MAX_CHUNK_BYTES` — a single threshold check is enough.
+    /// The threshold is the same for local and shared chunks: `ArenaBuilder`
+    /// caps `max_normal_alloc` at `max_bump_extent` (`MAX_CHUNK_BYTES -
+    /// header_size`), so `min_payload <= max_normal_alloc` always implies
+    /// `header + min_payload <= MAX_CHUNK_BYTES` — a single threshold check
+    /// is enough for both flavors.
     #[inline]
-    pub(crate) fn is_oversized_shared(&self, min_payload: usize) -> bool {
-        min_payload > self.max_normal_alloc()
-    }
-
-    /// Local mirror of [`Self::is_oversized_shared`].
-    #[inline]
-    pub(crate) fn is_oversized_local(&self, min_payload: usize) -> bool {
+    pub(crate) fn is_oversized(&self, min_payload: usize) -> bool {
         min_payload > self.max_normal_alloc()
     }
 
@@ -444,7 +429,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `min_payload` bytes. The previous mutator is dropped immediately —
     /// any outstanding `Arc`s independently keep the prior chunk alive.
     ///
-    /// The caller must have verified `!self.is_oversized_shared(min_payload)`
+    /// The caller must have verified `!self.is_oversized(min_payload)`
     /// before invoking this; oversized requests must go through
     /// [`Self::alloc_oversized_shared_with`] so they don't replace (and
     /// thus waste) the current chunk.

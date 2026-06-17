@@ -63,14 +63,42 @@ impl_utf16_str_common!(ArcUtf16Str);
 impl<A: Allocator + Clone> Clone for ArcUtf16Str<A> {
     #[inline]
     fn clone(&self) -> Self {
-        // SAFETY: `self` owns a live +1 on its chunk so the chunk is
-        // alive; `clone_from_value_ptr` mints a fresh +1 via an
-        // atomic bump and returns a `ChunkRef` that owns it.
-        let r: ChunkRef<A> = unsafe { ChunkRef::clone_from_value_ptr(self.ptr) };
-        let _ = r.forget();
+        // SAFETY: `self` keeps the payload (and its strong-count prefix)
+        // alive; the strong slot is aligned and within chunk provenance.
+        // The conceptual value type is `[u16]` (element align 2,
+        // `usize` metadata), matching the allocator's strong-prefix
+        // layout.
+        let strong = unsafe { crate::internal::thin_dst::strong_ref::<[u16]>(self.ptr.cast::<u8>(), core::mem::align_of::<u16>()) };
+        let prev = strong.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        if prev > (u32::MAX >> 1) {
+            crate::internal::constants::refcount_overflow_abort();
+        }
         Self {
             ptr: self.ptr,
             _phantom: PhantomData,
+        }
+    }
+}
+
+impl<A: Allocator + Clone> Drop for ArcUtf16Str<A> {
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: the payload (and its strong-count prefix) is live while
+        // this handle exists; the strong slot is aligned and in chunk
+        // provenance (conceptual value type `[u16]`).
+        let strong = unsafe { crate::internal::thin_dst::strong_ref::<[u16]>(self.ptr.cast::<u8>(), core::mem::align_of::<u16>()) };
+        if strong.fetch_sub(1, core::sync::atomic::Ordering::Release) != 1 {
+            return;
+        }
+        core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+        // Last strong reference: release the chunk +1. The `[u16]`
+        // payload has no element destructor to run.
+        //
+        // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk` holding
+        // exactly one outstanding +1 for this `Arc` family;
+        // `from_value_ptr` adopts and releases it.
+        unsafe {
+            let _ref: ChunkRef<A> = ChunkRef::from_value_ptr(self.ptr);
         }
     }
 }
@@ -94,5 +122,79 @@ impl<A: Allocator + Clone> From<ArcUtf16Str<A>> for crate::Arc<[u16], A> {
         // into the new `Arc<[u16]>` (whose `as_fat_ptr` recovers the
         // length from the same prefix on demand).
         unsafe { Self::from_raw(me.ptr.cast::<u8>()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    use super::*;
+    use crate::Arena;
+    use crate::internal::thin_dst::strong_ref;
+
+    // The per-string strong count lives in the chunk prefix, accessed as
+    // an `[u16]` strong reference (element align 2) — exactly as the
+    // `Clone`/`Drop` impls do.
+    fn strong_of<A: Allocator + Clone>(s: &ArcUtf16Str<A>) -> &AtomicU32 {
+        // SAFETY: `s` keeps the payload and its strong-count prefix live,
+        // so the strong slot is aligned and within chunk provenance.
+        unsafe { strong_ref::<[u16]>(s.ptr.cast::<u8>(), core::mem::align_of::<u16>()) }
+    }
+
+    // `Drop` must decrement the per-string strong count (and release the
+    // chunk on the last handle). Kills the `drop -> ()` mutant: cloning
+    // bumps the count, so dropping the clone must bring it back down.
+    #[test]
+    fn drop_decrements_strong_count() {
+        let arena = Arena::new();
+        let s = arena.alloc_utf16_str_arc_from_str("hi");
+        let strong = strong_of(&s);
+        let base = strong.load(Ordering::Relaxed);
+        let s2 = s.clone();
+        assert_eq!(strong.load(Ordering::Relaxed), base + 1, "clone must bump the strong count");
+        drop(s2);
+        assert_eq!(strong.load(Ordering::Relaxed), base, "drop must decrement the strong count");
+        // `s` (still live) holds the chunk; it drops normally at scope end.
+    }
+
+    // `Clone` checks `prev > (u32::MAX >> 1)` on the value returned by
+    // `fetch_add` (the count *before* the increment), so a clone
+    // observing `prev == u32::MAX >> 1` must NOT abort. Kills the
+    // `>` -> `==` and `>` -> `>=` mutants on that comparison.
+    #[test]
+    fn clone_at_max_refcount_threshold_does_not_abort() {
+        let arena = Arena::new();
+        let s = arena.alloc_utf16_str_arc_from_str("hi");
+        let strong = strong_of(&s);
+        strong.store(u32::MAX >> 1, Ordering::Relaxed);
+        let clone = s.clone();
+        // Reached here without panic. Restore the true live-handle count
+        // (`s` + `clone`) so teardown releases the chunk instead of
+        // leaking the strong count above 1 forever.
+        strong.store(2, Ordering::Relaxed);
+        drop(clone);
+    }
+
+    // A clone observing `prev > u32::MAX >> 1` MUST abort. Driving the
+    // strong count one past the threshold kills the `>` -> `==` mutant
+    // (it would not fire) and the `>>` -> `<<` mutant (which raises the
+    // threshold to `0xFFFF_FFFE`, so the guard would not fire here).
+    #[test]
+    #[should_panic(expected = "refcount overflow")]
+    fn clone_above_max_refcount_threshold_aborts() {
+        let arena = Arena::new();
+        let s = arena.alloc_utf16_str_arc_from_str("hi");
+        let strong = strong_of(&s);
+        strong.store((u32::MAX >> 1) + 1, Ordering::Relaxed);
+        // The clone panics in its overflow guard before returning, so no
+        // clone is produced. Catch it, restore the real live-handle count
+        // (just `s`) so teardown releases the chunk instead of leaking
+        // (keeps Miri happy), then resume so `should_panic` sees it.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _c = s.clone();
+        }));
+        strong.store(1, Ordering::Relaxed);
+        std::panic::resume_unwind(result.expect_err("clone past the threshold must panic"));
     }
 }

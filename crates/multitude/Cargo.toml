@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.3.1"
+version = "0.3.2"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -91,6 +91,10 @@ harness = false
 name = "criterion_drop"
 harness = false
 
+[[bench]]
+name = "criterion_arc_array"
+harness = false
+
 # Callgrind benches require Linux (Valgrind). The bench files are gated to compile
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
 # cfg-gated, so it is unconditional here.
@@ -100,6 +104,10 @@ harness = false
 
 [[bench]]
 name = "gungraun_drop"
+harness = false
+
+[[bench]]
+name = "gungraun_arc_array"
 harness = false
 
 [[example]]

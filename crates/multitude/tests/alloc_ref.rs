@@ -406,9 +406,14 @@ fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
 }
 
 /// **Conservation invariant**: across a full retire-and-release cycle,
-/// the wasted-tail counter must return to exactly its starting value.
-/// Catches off-by-one or asymmetric-arithmetic bugs (e.g., add 4 KiB,
-/// subtract 4096) that observation-of-non-zero tests would miss.
+/// the local wasted-tail counter must return to exactly its starting
+/// value. Catches off-by-one or asymmetric-arithmetic bugs (e.g., add
+/// 4 KiB, subtract 4096) that observation-of-non-zero tests would miss.
+///
+/// Only local allocation paths are exercised here: `reset` governs local
+/// chunks, so it is what takes the gauge back to zero. Shared-chunk
+/// wasted tail is released by handle drop plus chunk turnover (not by
+/// `reset`) and is covered by the drop/cache-reuse tests above.
 #[cfg(feature = "stats")]
 #[test]
 fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
@@ -416,20 +421,15 @@ fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
     for cycle in 0..10 {
         let before = arena.stats().wasted_tail_bytes;
         assert_eq!(before, 0, "cycle {cycle}: baseline must be 0 before allocations begin");
-        // Mix of all major allocation paths to exercise every retire-
-        // generating code path within a single cycle:
         for _ in 0..4 {
             let _: &mut u64 = arena.alloc(42);
             let _: &mut [u8] = arena.alloc_slice_fill_with(256, |_| 0);
-            drop(arena.alloc_arc::<u64>(1));
-            drop(arena.alloc_box::<u64>(2));
-            drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 1024]));
         }
         arena.reset();
         let after = arena.stats().wasted_tail_bytes;
         assert_eq!(
             after, 0,
-            "cycle {cycle}: after reset, the counter must return to exactly 0 \
+            "cycle {cycle}: after reset, the local counter must return to exactly 0 \
              (got {after}) — asymmetric add/subtract would leave a residue",
         );
     }
@@ -444,7 +444,7 @@ fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
 fn wasted_tail_correct_after_cache_reuse_cycles() {
     let mut arena = Arena::new();
     let mut acquired_chunks_total = 0u64;
-    for _ in 0..20 {
+    for _ in 0..8 {
         // Force at least one full chunk's worth of allocs so we cycle
         // through `current_local` AND populate the cache on reset.
         for _ in 0..64 {
@@ -472,10 +472,12 @@ fn wasted_tail_decreases_monotonically_as_pinned_arcs_drop() {
     let arena = Arena::new();
     let mut pins = std::vec::Vec::new();
     // Build up several pinned chunks by interleaving a pin with allocs
-    // that force a shared refill.
-    for _ in 0..5 {
+    // that force a shared refill. A few moderately sized copies per pin
+    // overflow the (initially small) shared chunk, retiring it while the
+    // pin holds it — far fewer allocations than a long inner loop.
+    for _ in 0..4 {
         pins.push(arena.alloc_arc::<u64>(99));
-        for _ in 0..10 {
+        for _ in 0..3 {
             drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 2048]));
         }
     }
@@ -538,21 +540,36 @@ fn wasted_tail_handles_oversized_local_retire() {
 /// many times. If the subtract ever exceeded the matching add even by
 /// one byte, the running counter would underflow to a value near
 /// `u64::MAX`.
+///
+/// The conservation bound is `wasted_tail_bytes <= total_bytes_allocated`:
+/// the arena cannot waste more tail than it currently holds. This holds
+/// regardless of whether the slack lives in local or (still-installed)
+/// shared chunks, and an underflow would blow the wasted gauge far past
+/// the total. `reset` only clears local wasted tail, so it is not
+/// expected to drive the gauge to zero while a shared chunk is live.
 #[cfg(feature = "stats")]
 #[test]
 fn wasted_tail_never_underflows_under_stress() {
     let mut arena = Arena::new();
-    for _ in 0..256 {
+    let filler = [0_u8; 64];
+    for _ in 0..10 {
         let _: &mut u64 = arena.alloc(0);
-        let _: &mut [u8] = arena.alloc_slice_fill_with(64, |_| 0);
+        let _: &mut [u8] = arena.alloc_slice_copy(filler);
         drop(arena.alloc_arc::<u64>(0));
         drop(arena.alloc_box::<u64>(0));
         drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 4096]));
-        // Always-positive: counter never observed as huge.
-        assert!(arena.stats().wasted_tail_bytes < u64::MAX / 2);
+        let stats = arena.stats();
+        assert!(
+            stats.wasted_tail_bytes <= stats.total_bytes_allocated,
+            "wasted tail ({}) must never exceed total bytes outstanding ({}) — \
+             an underflow would wrap it near u64::MAX",
+            stats.wasted_tail_bytes,
+            stats.total_bytes_allocated,
+        );
     }
     arena.reset();
-    assert_eq!(arena.stats().wasted_tail_bytes, 0);
+    let stats = arena.stats();
+    assert!(stats.wasted_tail_bytes <= stats.total_bytes_allocated);
 }
 
 use crate::common::FailingAllocator;

@@ -22,7 +22,6 @@ use allocator_api2::alloc::{AllocError, Allocator};
 use super::chunk::Chunk;
 use super::chunk_provider::ChunkProvider;
 use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
-use super::drop_entry::replay_drops;
 
 /// A bump-allocation chunk whose allocations can outlive the arena.
 ///
@@ -223,8 +222,9 @@ impl<A: Allocator + Clone> SharedChunk<A> {
         let header = Self::header_size();
         let header_ref = &*chunk.as_ptr();
         let capacity = header_ref.capacity;
-        let drop_count = header_ref.drop_entry_count.load(Ordering::Acquire) as usize;
-        replay_drops(Self::payload_ptr(chunk).as_ptr(), capacity, drop_count);
+        // Shared chunks never register drop entries: per-`Arc` values run
+        // their destructors eagerly in `Arc::drop` (the last strong
+        // reference), so there is nothing to replay here.
         let allocator: A = ptr::read(&raw const (*chunk.as_ptr()).allocator);
         ptr::drop_in_place(&raw mut (*chunk.as_ptr()).provider);
         let layout = crate::internal::chunk_alloc::chunk_layout(header, capacity, Self::value_align(), Self::struct_align())
@@ -262,21 +262,6 @@ impl<A: Allocator + Clone> SharedChunk<A> {
         let r = &*chunk.as_ptr();
         r.ref_count.store(1, Ordering::Relaxed);
         r.drop_entry_count.store(0, Ordering::Relaxed);
-    }
-
-    /// Loads the drop-entry count with `Acquire` ordering.
-    ///
-    /// The [`Chunk::drop_entry_count`](super::chunk::Chunk::drop_entry_count)
-    /// accessor uses `Relaxed`, which suffices for the owner thread. This
-    /// `Acquire` variant is for cross-thread readers (the deferred-init
-    /// commit in [`Arc`](crate::Arc)): it pairs with the owner thread's
-    /// `Release` publish in
-    /// [`set_drop_entry_count`](super::chunk::Chunk::set_drop_entry_count)
-    /// (via `ChunkMutator::publish_drop_count`) so the placeholder slot's
-    /// bytes are visible before the count is read.
-    #[inline]
-    pub(crate) fn drop_entry_count_acquire(&self) -> usize {
-        self.drop_entry_count.load(Ordering::Acquire) as usize
     }
 
     /// Overwrites the refcount. Test-only seam so unit tests can drive
@@ -520,6 +505,27 @@ mod tests {
             );
             assert!(SharedChunk::<Global>::struct_align() >= real);
             chunk.as_ref().set_ref_count_for_test(0);
+            SharedChunk::destroy(chunk);
+        }
+    }
+
+    /// Round-trips `drop_entry_count` through `set_drop_entry_count` with
+    /// a non-trivial value. Shared chunks never register drop entries in
+    /// practice (the count stays 0), so this is the only thing that pins
+    /// both accessors: it kills the mutants that hard-code the getter to
+    /// `0` or `1` and the one that turns the setter into a no-op.
+    #[test]
+    fn drop_entry_count_round_trips_through_setter() {
+        // SAFETY: single-threaded test; refcount forced to 0 before destroy.
+        unsafe {
+            let chunk = SharedChunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            let c = chunk.as_ref();
+            assert_eq!(c.drop_entry_count(), 0, "fresh chunk starts at zero");
+            c.set_drop_entry_count(7);
+            assert_eq!(c.drop_entry_count(), 7, "setter must persist the value the getter reads back");
+            c.set_drop_entry_count(0);
+            assert_eq!(c.drop_entry_count(), 0, "setter must restore zero");
+            c.set_ref_count_for_test(0);
             SharedChunk::destroy(chunk);
         }
     }

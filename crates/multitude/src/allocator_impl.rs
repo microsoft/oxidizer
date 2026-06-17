@@ -56,7 +56,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
                 let _ = chunk_ref.forget();
                 return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
             }
-            if self.is_oversized_shared(refill_hint) {
+            if self.is_oversized(refill_hint) {
                 return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
                     let (slot, _chunk) = mutator
                         .try_alloc_with_chunk(layout.size(), layout.align())
