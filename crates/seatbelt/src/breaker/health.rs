@@ -66,6 +66,10 @@ impl ExecutionInfo {
 #[must_use]
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct HealthInfo {
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        expect(dead_code, reason = "only read by the logs telemetry path")
+    )]
     pub(crate) counts: ExecutionInfo,
     pub(crate) status: HealthStatus,
 }
