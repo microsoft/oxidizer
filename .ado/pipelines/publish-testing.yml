@@ -15,6 +15,15 @@ parameters:
 - name: previousVersion
   type: string
   default: 'HEAD^'
+# Whether to perform the publish. Defaults to false on the unofficial
+# (Testing) pipeline so per-commit runs skip publishing entirely. Set it to
+# true to exercise the publish path as a dry-run (the template forces
+# `execute: false` for Testing); note that the cargo release dry-run can fail
+# when multiple crates must be published in one run.
+- name: executePublish
+  displayName: 'Publish crates (dry-run on this unofficial pipeline)'
+  type: boolean
+  default: false
 
 resources:
   repositories:
@@ -33,3 +42,4 @@ extends:
     validationProfiles: ${{ parameters.validationProfiles }}
     previousVersion: ${{ parameters.previousVersion }}
     pipelineType: 'Testing'
+    executePublish: ${{ parameters.executePublish }}
