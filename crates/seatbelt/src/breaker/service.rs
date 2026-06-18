@@ -273,17 +273,21 @@ impl<In, Out> AbandonedGuard<In, Out> {
 impl<In, Out> Drop for AbandonedGuard<In, Out> {
     #[cfg_attr(test, mutants::skip)] // The thread::panicking() guard only triggers during unwind, which is impractical to exercise in a unit test.
     fn drop(&mut self) {
-        // Skip abandonment recording while the thread is already panicking. `exit` acquires the
-        // engine lock (which may be poisoned) and `invoke_on_opened` runs a user-supplied callback,
-        // either of which can panic. A panic escaping `drop` during unwinding aborts the process,
-        // and abandonment bookkeeping is an observability concern that must never escalate a panic.
+        // Skip abandonment recording while the thread is already panicking: recording during an
+        // unwind is meaningless and `exit` may touch a lock poisoned by that very panic.
         if !self.armed || std::thread::panicking() {
             return;
         }
 
-        if let ExitCircuitResult::Opened(_health) = self.engine.exit(ExecutionResult::Abandoned, self.mode) {
-            self.shared.invoke_on_opened(None, &self.breaker_id);
-        }
+        // Recording abandonment is best-effort observability and must never let a panic escape the
+        // destructor -- a panic leaving `drop` while an unwind is in progress elsewhere aborts the
+        // process. `exit` can panic on a poisoned engine lock and `invoke_on_opened` runs a
+        // user-supplied callback, so the whole best-effort path is contained with `catch_unwind`.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let ExitCircuitResult::Opened(_health) = self.engine.exit(ExecutionResult::Abandoned, self.mode) {
+                self.shared.invoke_on_opened(None, &self.breaker_id);
+            }
+        }));
     }
 }
 

@@ -34,14 +34,6 @@ impl HealthEvaluator {
     /// contribute to the failure rate and minimum-throughput check is decided by [`Self::decision`]
     /// according to the configured [`AbandonedPolicy`].
     pub(crate) fn evaluate(&self, counts: ExecutionInfo) -> HealthInfo {
-        // not enough data to make decision
-        if counts.total() == 0 {
-            return HealthInfo {
-                counts,
-                status: HealthStatus::Healthy,
-            };
-        }
-
         let (decision_failures, decision_total) = self.evaluate_core(counts);
 
         HealthInfo {
