@@ -580,7 +580,7 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "bytesbuf"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "bytesbuf",
  "futures",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1230,7 +1230,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alloc_tracker",
  "bytes",
@@ -2370,7 +2370,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "allocator-api2 0.4.0",
  "bolero",
@@ -3298,7 +3298,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "futures",
  "http",

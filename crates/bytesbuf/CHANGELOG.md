@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.5] - 2026-06-18
+
+- ✨ Features
+
+  - add BytesView::to_vec() ([#495](https://github.com/microsoft/oxidizer/pull/495))
+
+- 🐛 Bug Fixes
+
+  - correct put_bytes panic docs ([#496](https://github.com/microsoft/oxidizer/pull/496))
+
 ## [0.5.4] - 2026-06-11
 
 - 🔧 Maintenance
