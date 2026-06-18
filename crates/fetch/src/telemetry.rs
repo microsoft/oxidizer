@@ -19,9 +19,12 @@ pub use fetch_options::ConnectionInfo;
 use http::Version;
 use http::uri::Scheme;
 use opentelemetry::metrics::{Meter, MeterProvider};
-use opentelemetry::{KeyValue, Value};
+use opentelemetry::{InstrumentationScope, KeyValue, Value};
 
 pub(crate) const METER_NAME: &str = "fetch";
+
+/// Instrumentation-scope attribute identifying the transport handler a client uses.
+pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
@@ -61,26 +64,47 @@ impl Extend<KeyValue> for TelemetryAttributes {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) enum Metering {
-    #[default]
-    Global,
+    Global(InstrumentationScope),
     Custom(Meter),
 }
 
 impl Metering {
-    pub(crate) fn custom(meter_provider: &dyn MeterProvider) -> Self {
-        Self::Custom(meter_provider.meter(METER_NAME))
+    /// Metering against the global meter provider, materialized lazily at build
+    /// time. The `scope` is retained so the eventual meter carries it.
+    pub(crate) fn global(scope: InstrumentationScope) -> Self {
+        Self::Global(scope)
+    }
+
+    /// Metering against a caller-supplied provider. The scoped meter is created
+    /// eagerly because the provider is only borrowed, not retained.
+    pub(crate) fn custom(meter_provider: &dyn MeterProvider, scope: InstrumentationScope) -> Self {
+        Self::Custom(meter_provider.meter_with_scope(scope))
     }
 }
 
 impl From<Metering> for Meter {
     fn from(metering: Metering) -> Self {
         match metering {
-            Metering::Global => opentelemetry::global::meter(METER_NAME),
+            Metering::Global(scope) => opentelemetry::global::meter_with_scope(scope),
             Metering::Custom(meter) => meter,
         }
     }
+}
+
+/// Builds the `fetch` instrumentation scope carrying the `fetch.transport`
+/// attribute, attached to every metric a client records.
+pub(crate) fn transport_scope(transport: &str) -> InstrumentationScope {
+    InstrumentationScope::builder(METER_NAME)
+        .with_attributes([KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport.to_string())])
+        .build()
+}
+
+/// Builds the attribute-less `fetch` instrumentation scope used by the
+/// standalone [`MetricsLayer`](crate::handlers::Metrics), which has no transport.
+pub(crate) fn base_scope() -> InstrumentationScope {
+    InstrumentationScope::builder(METER_NAME).build()
 }
 
 pub(crate) const fn http_method_name(method: &http::Method) -> &'static str {
@@ -144,21 +168,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn metering_default() {
-        let metering = Metering::default();
-        assert!(matches!(metering, Metering::Global));
+    fn metering_global() {
+        let metering = Metering::global(base_scope());
+        assert!(matches!(metering, Metering::Global(_)));
     }
 
     #[test]
     fn metering_custom() {
-        let metering = Metering::custom(opentelemetry::global::meter_provider().as_ref());
+        let metering = Metering::custom(opentelemetry::global::meter_provider().as_ref(), base_scope());
         assert!(matches!(metering, Metering::Custom(_expected_meter)));
     }
 
     #[test]
     fn from_metering_global() {
-        let metering = Metering::Global;
+        let metering = Metering::global(transport_scope("hyper-on-tokio"));
         let _meter: Meter = metering.into();
+    }
+
+    #[test]
+    fn transport_scope_carries_attribute() {
+        let scope = transport_scope("fake");
+        let attribute = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == FETCH_TRANSPORT_ATTRIBUTE)
+            .expect("transport scope must carry the fetch.transport attribute");
+        assert_eq!(attribute.value, Value::from("fake"));
+    }
+
+    #[test]
+    fn base_scope_has_no_attributes() {
+        let scope = base_scope();
+        assert_eq!(scope.attributes().count(), 0);
     }
 
     #[test]

@@ -9,6 +9,21 @@
 //! a custom provider supplied via
 //! [`HttpClientBuilder::meter_provider`](crate::HttpClientBuilder::meter_provider).
 //!
+//! # Instrumentation scope
+//!
+//! Every client carries a single attribute on the **instrumentation scope** of
+//! its `fetch` meter, so it applies to *all* metrics the client emits (both
+//! request and connection metrics):
+//!
+//! | Scope attribute | Description | Sample value |
+//! |-----------------|-------------|--------------|
+//! | `fetch.transport` | Identifies the transport handler the client dispatches through | `"hyper-on-tokio"` |
+//!
+//! The bundled transports report fixed values — `"hyper-on-tokio"` for the
+//! default Tokio + hyper transport and `"fake"` for the transport used by fake
+//! HTTP clients. A custom transport reports the `name` passed to
+//! [`custom::create_builder`](crate::custom::create_builder).
+//!
 //! # Metrics
 //!
 //! | Metric | Instrument | Unit | Emitted when |

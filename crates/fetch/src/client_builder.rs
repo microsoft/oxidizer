@@ -19,7 +19,7 @@ use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::Metering;
+use crate::telemetry::{Metering, transport_scope};
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -56,7 +56,7 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::Global,
+            metering: Metering::global(transport_scope(transport.name())),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -241,7 +241,7 @@ impl HttpClientBuilder {
     pub fn meter_provider(self, meter_provider: &dyn MeterProvider) -> Self {
         // Update the metering at all relevant places
         Self {
-            metering: Metering::custom(meter_provider),
+            metering: Metering::custom(meter_provider, transport_scope(self.transport.name())),
             resilience_context: self.resilience_context.use_metrics(meter_provider),
             ..self
         }
@@ -728,7 +728,7 @@ mod tests {
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
 
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-        assert!(matches!(builder.metering, Metering::Global));
+        assert!(matches!(builder.metering, Metering::Global(_)));
 
         let builder = builder.meter_provider(&provider);
         assert!(matches!(builder.metering, Metering::Custom(_)));

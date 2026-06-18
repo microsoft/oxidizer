@@ -13,6 +13,7 @@
 //! an [`HttpClientBuilder`] so the pipeline (middleware, options, …) can be
 //! tailored before [`HttpClientBuilder::build`] is called.
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -98,6 +99,10 @@ pub struct CustomContext<Extras = ()> {
 
 /// Creates a builder for an HTTP client backed by a custom transport handler.
 ///
+/// `name` identifies the transport in telemetry: it is reported as the
+/// `fetch.transport` attribute on the instrumentation scope of every metric the
+/// resulting client emits. Use a short, stable identifier (e.g. `"http3_experimental"`).
+///
 /// `factory` is invoked lazily, once per pool slot, with a [`CustomContext`] for that
 /// slot, and must return a [`RequestHandler`] that becomes the transport stage of the
 /// pipeline. The full request pipeline (resilience, telemetry, logging, ...)
@@ -139,6 +144,7 @@ pub struct CustomContext<Extras = ()> {
 ///
 /// # async fn example(deps: CustomDeps) -> Result<(), HttpError> {
 /// let client = create_builder(
+///     "my-transport",
 ///     |ctx: CustomContext| MyTransportHandler {
 ///         body_builder: ctx.body_builder,
 ///     },
@@ -153,7 +159,12 @@ pub struct CustomContext<Extras = ()> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn create_builder<F, R, Extras>(factory: F, isolation: Isolation, deps: impl Into<CustomDeps<Extras>>) -> HttpClientBuilder
+pub fn create_builder<F, R, Extras>(
+    name: impl Into<Cow<'static, str>>,
+    factory: F,
+    isolation: Isolation,
+    deps: impl Into<CustomDeps<Extras>>,
+) -> HttpClientBuilder
 where
     F: Fn(CustomContext<Extras>) -> R + Send + Sync + 'static,
     R: RequestHandler + 'static,
@@ -161,7 +172,7 @@ where
 {
     // Type-erase the user-supplied handler into `TransportHandler` once, then
     // delegate to the in-crate path shared with the bundled transports.
-    HttpClient::builder_custom_internal(move |cx| TransportHandler::new(factory(cx)), isolation, deps.into())
+    HttpClient::builder_custom_internal(name, move |cx| TransportHandler::new(factory(cx)), isolation, deps.into())
 }
 
 impl HttpClient {
@@ -170,7 +181,12 @@ impl HttpClient {
     /// redundant boxing step for transports that branch over multiple concrete handler
     /// types. The `tls`/`meter` fields on [`CustomContext`] are populated unconditionally
     /// for the bundled transports; user-supplied factories may read or ignore them.
-    pub(crate) fn builder_custom_internal<F, Extras>(factory: F, isolation: Isolation, deps: CustomDeps<Extras>) -> HttpClientBuilder
+    pub(crate) fn builder_custom_internal<F, Extras>(
+        name: impl Into<Cow<'static, str>>,
+        factory: F,
+        isolation: Isolation,
+        deps: CustomDeps<Extras>,
+    ) -> HttpClientBuilder
     where
         F: Fn(CustomContext<Extras>) -> TransportHandler + Send + Sync + 'static,
         Extras: ThreadAware + Send + Sync + Clone + 'static,
@@ -181,6 +197,7 @@ impl HttpClient {
         let factory = Arc::new(factory);
 
         let transport = Transport {
+            name: name.into(),
             clock: deps.clock.clone(),
             global_pool: deps.global_pool.clone(),
             isolation,
@@ -208,6 +225,8 @@ type TransportFn = Arc<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandl
 
 #[derive(Clone, ThreadAware)]
 pub(crate) struct Transport {
+    #[thread_aware(skip)]
+    name: Cow<'static, str>,
     inner: thread_aware::Arc<TransportFn, PerCore>,
     clock: Clock,
     global_pool: GlobalPool,
@@ -217,6 +236,10 @@ pub(crate) struct Transport {
 impl Transport {
     pub(crate) fn create_transport_handler(&self, options: ClientOptions, meter: Meter, index: PoolIndex) -> TransportHandler {
         self.inner.as_ref()(options, meter, index)
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
     }
 
     pub(crate) fn clock(&self) -> &Clock {
@@ -276,7 +299,7 @@ mod tests {
     async fn create_builder_serves_requests_through_custom_pipeline() {
         // `create_builder` exposes the full builder so callers can tweak the pipeline
         // (here: switch to the minimal pipeline) before driving a real request.
-        let client = create_builder(ok_factory, Isolation::Shared, custom_deps())
+        let client = create_builder("test", ok_factory, Isolation::Shared, custom_deps())
             .insecure_allow_http()
             .minimal_pipeline()
             .build();
@@ -292,7 +315,7 @@ mod tests {
     async fn isolated_runtime_uses_per_core_handler() {
         // `Isolation::Isolated` is the right choice for thread-per-core transports;
         // it must still serve requests correctly when there is only one core in play.
-        let client = create_builder(ok_factory, Isolation::Isolated, custom_deps())
+        let client = create_builder("test", ok_factory, Isolation::Isolated, custom_deps())
             .insecure_allow_http()
             .build();
 
@@ -313,6 +336,7 @@ mod tests {
         };
 
         let client = create_builder(
+            "test",
             |ctx: CustomContext<thread_aware::Unaware<Arc<AtomicUsize>>>| {
                 // Touching `extras` during factory invocation proves the value travels
                 // all the way through the transport plumbing.
@@ -336,7 +360,7 @@ mod tests {
     fn transport_has_type_name_debug_representation() {
         // `Transport` holds non-Debug closures, so its Debug impl falls back to the type
         // name. The builder embeds the transport, so formatting it exercises that impl.
-        let builder = create_builder(ok_factory, Isolation::Shared, custom_deps());
+        let builder = create_builder("test", ok_factory, Isolation::Shared, custom_deps());
 
         assert!(format!("{builder:?}").contains("Transport"));
     }

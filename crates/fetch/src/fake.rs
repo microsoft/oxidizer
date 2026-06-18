@@ -78,6 +78,7 @@ impl HttpClient {
         // `FakeHandler` travels through `CustomDeps::extras` and is cloned
         // into a fresh `TransportHandler` for every connection pool slot.
         Self::builder_custom_internal(
+            crate::constants::FAKE_TRANSPORT_NAME,
             move |cx: CustomContext<FakeHandler>| TransportHandler::new(cx.extras),
             Isolation::Shared,
             CustomDeps {
