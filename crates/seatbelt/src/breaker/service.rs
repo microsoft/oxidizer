@@ -96,9 +96,9 @@ where
             ControlFlow::Break(output) => return output,
         };
 
+        let mut guard = AbandonedGuard::new(Arc::clone(&self.shared), engine, breaker_id, mode);
         let output = self.inner.execute(input).await;
-
-        self.shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+        guard.complete(&output);
 
         output
     }
@@ -164,13 +164,18 @@ where
             }
         };
 
-        let shared = Arc::clone(&self.shared);
+        // Construct the guard BEFORE building the inner future and move it into the returned future
+        // so that dropping the future before it is ever polled still records the abandonment. `enter`
+        // already ran synchronously above (inside `before_execute`), so a pre-poll drop would
+        // otherwise leak an accepted-but-never-exited execution. The guard owns the only handles it
+        // needs, so the normal-completion `after_execute` runs through `complete`.
+        let mut guard = AbandonedGuard::new(Arc::clone(&self.shared), engine, breaker_id, mode);
         let future = self.inner.call(input);
 
         BreakerFuture {
             inner: Box::pin(async move {
                 let output = future.await;
-                shared.after_execute(engine.as_ref(), &output, mode, &breaker_id);
+                guard.complete(&output);
                 output
             }),
         }
@@ -210,7 +215,7 @@ impl<In, Out> BreakerShared<In, Out> {
         match engine.exit(execution_result, mode) {
             ExitCircuitResult::Unchanged | ExitCircuitResult::Reopened => {}
             ExitCircuitResult::Opened(_health) => {
-                self.invoke_on_opened(output, breaker_id);
+                self.invoke_on_opened(Some(output), breaker_id);
             }
             ExitCircuitResult::Closed(stats) => {
                 self.invoke_on_closed(output, breaker_id, stats.opened_duration(self.clock.instant()));
@@ -224,7 +229,7 @@ impl<In, Out> BreakerShared<In, Out> {
         }
     }
 
-    fn invoke_on_opened(&self, output: &Out, breaker_id: &BreakerId) {
+    fn invoke_on_opened(&self, output: Option<&Out>, breaker_id: &BreakerId) {
         if let Some(on_opened) = &self.on_opened {
             on_opened.call(output, OnOpenedArgs { breaker_id });
         }
@@ -234,6 +239,55 @@ impl<In, Out> BreakerShared<In, Out> {
         if let Some(on_closed) = &self.on_closed {
             on_closed.call(output, OnClosedArgs { breaker_id, open_duration });
         }
+    }
+}
+
+/// Guard that records an *abandoned* execution if it is dropped before completing.
+struct AbandonedGuard<In, Out> {
+    shared: Arc<BreakerShared<In, Out>>,
+    engine: Arc<Engine>,
+    breaker_id: BreakerId,
+    mode: ExecutionMode,
+    armed: bool,
+}
+
+impl<In, Out> AbandonedGuard<In, Out> {
+    fn new(shared: Arc<BreakerShared<In, Out>>, engine: Arc<Engine>, breaker_id: BreakerId, mode: ExecutionMode) -> Self {
+        Self {
+            shared,
+            engine,
+            breaker_id,
+            mode,
+            armed: true,
+        }
+    }
+
+    /// Completes the guard on the normal execution path: it disarms the abandonment handling and
+    /// runs the explicit `exit`/callback logic for the produced output.
+    fn complete(&mut self, output: &Out) {
+        self.armed = false;
+        self.shared.after_execute(self.engine.as_ref(), output, self.mode, &self.breaker_id);
+    }
+}
+
+impl<In, Out> Drop for AbandonedGuard<In, Out> {
+    #[cfg_attr(test, mutants::skip)] // The thread::panicking() guard only triggers during unwind, which is impractical to exercise in a unit test.
+    fn drop(&mut self) {
+        // Skip abandonment recording while the thread is already panicking: recording during an
+        // unwind is meaningless and `exit` may touch a lock poisoned by that very panic.
+        if !self.armed || std::thread::panicking() {
+            return;
+        }
+
+        // Recording abandonment is best-effort observability and must never let a panic escape the
+        // destructor -- a panic leaving `drop` while an unwind is in progress elsewhere aborts the
+        // process. `exit` can panic on a poisoned engine lock and `invoke_on_opened` runs a
+        // user-supplied callback, so the whole best-effort path is contained with `catch_unwind`.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let ExitCircuitResult::Opened(_health) = self.engine.exit(ExecutionResult::Abandoned, self.mode) {
+                self.shared.invoke_on_opened(None, &self.breaker_id);
+            }
+        }));
     }
 }
 
@@ -383,7 +437,7 @@ mod tests {
 
         let service = create_ready_breaker_layer(&Clock::new_frozen())
             .on_opened(move |output, _| {
-                assert_eq!(output, "error_response");
+                assert_eq!(output, Some(&"error_response".to_string()));
                 opened_called.store(true, Ordering::SeqCst);
             })
             .on_closed(|_, _| panic!("on_closed should not be called"))
@@ -393,7 +447,9 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(1, 1, 1.0, 1)),
+            ExitCircuitResult::Opened(
+                HealthEvaluator::new(1.0, 1, AbandonedPolicy::rate_threshold(1.0)).evaluate(ExecutionInfo::new(1, 1, 0)),
+            ),
         );
 
         service
@@ -470,7 +526,7 @@ mod tests {
         log_capture.assert_contains("log_test_pipeline");
         log_capture.assert_contains("log_test_circuit");
         log_capture.assert_contains("circuit_breaker.state=\"open\"");
-        log_capture.assert_contains("circuit_breaker.health.failure_rate");
+        log_capture.assert_contains("circuit_breaker.execs.total");
 
         // Request should be rejected (emits another open state log)
         let _ = service.execute("test".to_string()).await;

@@ -4,7 +4,7 @@
 use std::time::Duration;
 use std::vec::IntoIter;
 
-use crate::breaker::HealthMetricsBuilder;
+use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
 
 /// The minimum throughput during probing stage is set to 1, so at least one request must come
 /// through in each probing stage to evaluate the health.
@@ -17,7 +17,10 @@ pub(crate) enum ProbeOptions {
     ///
     /// After the initial probe is allowed, it enters a cool-down period during which
     /// no further probes are allowed.
-    SingleProbe { cooldown: Duration },
+    SingleProbe {
+        cooldown: Duration,
+        abandoned_policy: AbandonedPolicy,
+    },
 
     /// A health-based probe that uses health metrics to determine the health of the system.
     HealthProbe(HealthProbeOptions),
@@ -30,22 +33,43 @@ pub(crate) struct ProbesOptions {
 }
 
 impl ProbesOptions {
-    pub(crate) fn quick(cooldown: Duration) -> Self {
-        Self::new([ProbeOptions::SingleProbe { cooldown }])
+    pub(crate) fn quick(cooldown: Duration, abandoned_policy: &AbandonedPolicy) -> Self {
+        Self::new([ProbeOptions::SingleProbe {
+            cooldown,
+            abandoned_policy: abandoned_policy.clone(),
+        }])
     }
 
-    pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32) -> Self {
-        Self::gradual(&[0.001, 0.01, 0.05, 0.1, 0.25, 0.5], stage_duration, failure_threshold)
+    pub(crate) fn progressive(stage_duration: Duration, failure_threshold: f32, abandoned_policy: &AbandonedPolicy) -> Self {
+        Self::gradual(
+            &[0.001, 0.01, 0.05, 0.1, 0.25, 0.5],
+            stage_duration,
+            failure_threshold,
+            abandoned_policy,
+        )
     }
 
-    pub(crate) fn gradual(probing_ratio: &[f64], stage_duration: Duration, failure_threshold: f32) -> Self {
+    pub(crate) fn gradual(
+        probing_ratio: &[f64],
+        stage_duration: Duration,
+        failure_threshold: f32,
+        abandoned_policy: &AbandonedPolicy,
+    ) -> Self {
         // Start with a single probe
-        let initial = std::iter::once(ProbeOptions::SingleProbe { cooldown: stage_duration });
+        let initial = std::iter::once(ProbeOptions::SingleProbe {
+            cooldown: stage_duration,
+            abandoned_policy: abandoned_policy.clone(),
+        });
 
         // Then continue with health-based probes
-        let health = probing_ratio
-            .iter()
-            .map(|probing_ratio| ProbeOptions::HealthProbe(HealthProbeOptions::new(stage_duration, failure_threshold, *probing_ratio)));
+        let health = probing_ratio.iter().map(|probing_ratio| {
+            ProbeOptions::HealthProbe(HealthProbeOptions::new(
+                stage_duration,
+                failure_threshold,
+                *probing_ratio,
+                abandoned_policy.clone(),
+            ))
+        });
 
         Self::new(initial.chain(health))
     }
@@ -68,7 +92,7 @@ pub(crate) struct HealthProbeOptions {
 }
 
 impl HealthProbeOptions {
-    pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64) -> Self {
+    pub(crate) fn new(stage_duration: Duration, failure_threshold: f32, probing_ratio: f64, abandoned_policy: AbandonedPolicy) -> Self {
         assert!(probing_ratio > 0.0 && probing_ratio <= 1.0, "probing_ratio must be in (0.0, 1.0]");
         assert!((0.0..1.0).contains(&failure_threshold), "failure_threshold must be in [0.0, 1.0)");
         assert!(stage_duration > Duration::ZERO, "stage_duration must be greater than zero");
@@ -76,7 +100,7 @@ impl HealthProbeOptions {
         Self {
             // The min throughput is set to 0, so if no requests come in during the probing stage,
             // the health will be considered healthy by default.
-            builder: HealthMetricsBuilder::new(stage_duration, failure_threshold, MIN_THROUGHPUT),
+            builder: HealthMetricsBuilder::new(stage_duration, failure_threshold, MIN_THROUGHPUT, abandoned_policy),
             probing_ratio,
         }
     }
@@ -104,13 +128,13 @@ mod tests {
     #[test]
     fn single_probe_constructor_creates_correct_options() {
         let cooldown = Duration::from_secs(15);
-        let options = ProbesOptions::quick(cooldown);
+        let options = ProbesOptions::quick(cooldown, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 1);
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown: c } if *c == Duration::from_secs(15)
+            ProbeOptions::SingleProbe { cooldown: c, .. } if *c == Duration::from_secs(15)
         ));
     }
 
@@ -119,25 +143,28 @@ mod tests {
         let options = ProbesOptions::new([
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(10),
+                abandoned_policy: AbandonedPolicy::default(),
             },
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(20),
+                abandoned_policy: AbandonedPolicy::default(),
             },
             ProbeOptions::SingleProbe {
                 cooldown: Duration::from_secs(30),
+                abandoned_policy: AbandonedPolicy::default(),
             },
         ]);
 
         let probes: Vec<_> = options.probes().collect();
         assert_eq!(probes.len(), 3);
-        assert!(matches!(&probes[0], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(10)));
-        assert!(matches!(&probes[1], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(20)));
-        assert!(matches!(&probes[2], ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30)));
+        assert!(matches!(&probes[0], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(10)));
+        assert!(matches!(&probes[1], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(20)));
+        assert!(matches!(&probes[2], ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(30)));
     }
 
     #[test]
     fn clone_preserves_probe_count() {
-        let options = ProbesOptions::quick(Duration::from_secs(25));
+        let options = ProbesOptions::quick(Duration::from_secs(25), &AbandonedPolicy::default());
         let cloned = options.clone();
 
         assert_eq!(options.probes().count(), cloned.probes().count());
@@ -145,7 +172,7 @@ mod tests {
 
     #[test]
     fn probes_iterator_is_reusable() {
-        let options = ProbesOptions::quick(Duration::from_secs(30));
+        let options = ProbesOptions::quick(Duration::from_secs(30), &AbandonedPolicy::default());
 
         assert_eq!(options.probes().count(), 1);
         assert_eq!(options.probes().count(), 1);
@@ -163,7 +190,7 @@ mod tests {
         let failure_threshold = 0.2;
         let probing_ratio = 0.1;
 
-        let options = HealthProbeOptions::new(sampling_duration, failure_threshold, probing_ratio);
+        let options = HealthProbeOptions::new(sampling_duration, failure_threshold, probing_ratio, AbandonedPolicy::default());
 
         assert_eq!(options.stage_duration(), sampling_duration);
         assert_eq!(options.probing_ratio, probing_ratio);
@@ -174,30 +201,30 @@ mod tests {
     #[should_panic(expected = "stage_duration must be greater than zero")]
     #[test]
     fn health_probe_options_ctor_sampling_duration() {
-        let _ = HealthProbeOptions::new(Duration::ZERO, 0.1, 0.5);
+        let _ = HealthProbeOptions::new(Duration::ZERO, 0.1, 0.5, AbandonedPolicy::default());
     }
 
     #[should_panic(expected = "failure_threshold must be in [0.0, 1.0)")]
     #[test]
     fn health_probe_options_ctor_failure_threshold() {
-        let _ = HealthProbeOptions::new(Duration::from_secs(10), 1.0, 0.5);
+        let _ = HealthProbeOptions::new(Duration::from_secs(10), 1.0, 0.5, AbandonedPolicy::default());
     }
 
     #[should_panic(expected = "probing_ratio must be in (0.0, 1.0]")]
     #[test]
     fn health_probe_options_ctor_probing_ratio() {
-        let _ = HealthProbeOptions::new(Duration::from_secs(10), 0.1, 0.0);
+        let _ = HealthProbeOptions::new(Duration::from_secs(10), 0.1, 0.0, AbandonedPolicy::default());
     }
 
     #[test]
     fn probes_options_progressive_ok() {
-        let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2);
+        let options = ProbesOptions::progressive(Duration::from_secs(30), 0.2, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 7);
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == Duration::from_secs(30)
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == Duration::from_secs(30)
         ));
 
         let expected_ratios = [0.001, 0.01, 0.05, 0.1, 0.25, 0.5];

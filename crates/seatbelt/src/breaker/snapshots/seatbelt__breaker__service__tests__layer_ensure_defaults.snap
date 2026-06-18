@@ -43,5 +43,10 @@ BreakerLayer {
             None,
         ),
     },
+    abandoned_policy: AbandonedPolicy {
+        inner: RateThreshold(
+            1.0,
+        ),
+    },
     _state: PhantomData<fn(alloc::string::String, seatbelt::typestates::Set, seatbelt::typestates::Set) -> alloc::string::String>,
 }

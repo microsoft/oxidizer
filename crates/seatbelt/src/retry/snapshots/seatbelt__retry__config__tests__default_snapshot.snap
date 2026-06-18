@@ -4,7 +4,7 @@ expression: config
 ---
 {
   "enabled": true,
-  "backoff_type": "Exponential",
+  "backoff_type": "exponential",
   "base_delay": "10ms",
   "max_delay": null,
   "use_jitter": true,

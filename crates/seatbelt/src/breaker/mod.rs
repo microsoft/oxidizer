@@ -128,6 +128,17 @@
 //! - [`RecoveryKind::Retry`][crate::RecoveryKind::Retry]
 //! - [`RecoveryKind::Unavailable`][crate::RecoveryKind::Unavailable]
 //!
+//! # Abandoned Executions
+//!
+//! An execution is *abandoned* when it is accepted by the circuit breaker but its future is dropped
+//! before completing — for example when the caller cancels or times out the request. Abandoned
+//! executions are **always** counted towards the reported throughput for telemetry, but how they
+//! influence the open/close decision is governed by [`AbandonedPolicy`] (configured via
+//! [`abandoned_policy`][BreakerLayer::abandoned_policy]). See [`AbandonedPolicy`] for the behavior
+//! of each individual policy variant.
+//!
+//! The same policy applies both to the closed-state health window and to the half-open probes.
+//!
 //! # Isolated Circuit Breaker Instances
 //!
 //! Circuit breakers can maintain separate states for different logical groups of inputs
@@ -150,6 +161,7 @@
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
 //! | Breaker isolation | Shared circuit (default) | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
 //! | Half-open mode | `Progressive` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
+//! | Abandoned policy | `rate_threshold(1.0)` | How abandoned (cancelled) executions affect the health decision | [`abandoned_policy`][BreakerLayer::abandoned_policy] |
 //! | Enable condition | Always enabled | Circuit breaker protection is applied to all inputs | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
 //! These defaults provide a reasonable starting point for most use cases, offering a balance
@@ -174,7 +186,7 @@
 //!   - `resilience.circuit_breaker.state`: Current circuit state (`closed`, `open`, or `half_open`)
 //!   - `resilience.circuit_breaker.probe.result`: Result of probe execution (`success` or `failure`, only present for probe events)
 //!
-//! Additional structured logging events are emitted with detailed health metrics (failure rate, throughput) for circuit state transitions.
+//! Additional structured logging events are emitted with detailed health metrics (total and abandoned executions) for circuit state transitions.
 //!
 //! # Examples
 //!
@@ -304,6 +316,9 @@ pub(super) use execution_result::ExecutionResult;
 mod health;
 pub(super) use health::*;
 
+mod health_eval;
+pub(super) use health_eval::HealthEvaluator;
+
 mod constants;
 mod engine;
 
@@ -316,3 +331,6 @@ pub use breaker_id::BreakerId;
 
 mod half_open_mode;
 pub use half_open_mode::HalfOpenMode;
+
+mod abandoned_policy;
+pub use abandoned_policy::AbandonedPolicy;

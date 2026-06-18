@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.2] - 2026-06-18
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.5` of `bytesbuf`
+
 ## [0.6.1] - 2026-06-11
 
 - 🔧 Maintenance

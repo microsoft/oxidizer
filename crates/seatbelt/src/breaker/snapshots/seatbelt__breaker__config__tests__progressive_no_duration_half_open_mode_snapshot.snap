@@ -1,6 +1,5 @@
 ---
 source: crates/seatbelt/src/breaker/config.rs
-assertion_line: 101
 expression: config
 ---
 {
@@ -10,6 +9,9 @@ expression: config
   "sampling_duration": "30s",
   "break_duration": "5s",
   "half_open_mode": {
-    "Progressive": null
+    "progressive": null
+  },
+  "abandoned_policy": {
+    "rate_threshold": 1.0
   }
 }

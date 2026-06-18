@@ -9,7 +9,7 @@ use tick::Clock;
 use super::{EngineOptions, EnterCircuitResult, ExitCircuitResult};
 use crate::breaker::constants::ERR_POISONED_LOCK;
 use crate::breaker::engine::probing::{AllowProbeResult, Probes, ProbingResult};
-use crate::breaker::{CircuitEngine, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
+use crate::breaker::{CircuitEngine, ExecutionInfo, ExecutionMode, ExecutionResult, HealthMetrics, HealthStatus};
 
 /// Engine that manages the state of the circuit breaker.
 #[derive(Debug)]
@@ -39,11 +39,11 @@ impl CircuitEngine for EngineCore {
         self.state.lock().expect(ERR_POISONED_LOCK).enter(now, &self.options)
     }
 
-    fn exit(&self, result: ExecutionResult, _mode: ExecutionMode) -> ExitCircuitResult {
+    fn exit(&self, result: ExecutionResult, mode: ExecutionMode) -> ExitCircuitResult {
         let now = self.clock.instant();
 
         // NOTE: Remember to execute all expensive operations (like time checks) outside the lock.
-        self.state.lock().expect(ERR_POISONED_LOCK).exit(result, now, &self.options)
+        self.state.lock().expect(ERR_POISONED_LOCK).exit(result, mode, now, &self.options)
     }
 }
 
@@ -84,15 +84,22 @@ impl State {
         }
     }
 
-    fn exit(&mut self, result: ExecutionResult, now: Instant, settings: &EngineOptions) -> ExitCircuitResult {
+    fn exit(&mut self, result: ExecutionResult, mode: ExecutionMode, now: Instant, settings: &EngineOptions) -> ExitCircuitResult {
         match self {
             Self::Closed { health } => {
+                // A `Probe` result here is stale: the caller entered while we were `HalfOpen` and
+                // the circuit has since closed. Ignoring it keeps the health window measuring only
+                // post-recovery normal traffic.
+                if mode == ExecutionMode::Probe {
+                    return ExitCircuitResult::Unchanged;
+                }
+
                 // first, record the result and evaluate the health metrics
                 health.record(result, now);
                 let health = health.health_info();
 
                 // decide the next state based on health status
-                match health.status() {
+                match health.status {
                     // Health is good, remain in a closed state
                     HealthStatus::Healthy => ExitCircuitResult::Unchanged,
                     // Health is poor, transition to Open state
@@ -106,8 +113,15 @@ impl State {
                 }
             }
             Self::Open { stats, .. } => {
-                // Record lost results for statistics purposes
-                stats.probes_lost = stats.probes_lost.saturating_add(1);
+                // Record a lost result for statistics purposes. Any execution -- a probe or a normal
+                // execution admitted earlier -- can land here if the circuit (re)entered the open
+                // state between its enter and exit, so its result can no longer be acted upon. We
+                // keep the two counts separate so telemetry can distinguish lost probes (delayed
+                // recovery signal) from lost normal executions (general thread interleaving).
+                match mode {
+                    ExecutionMode::Probe => stats.probes_lost = stats.probes_lost.saturating_add(1),
+                    ExecutionMode::Normal => stats.executions_lost = stats.executions_lost.saturating_add(1),
+                }
 
                 // In open state, we don't process results. This can happen when multiple threads are involved and
                 // the state of circuit breaker changes between enter and exit calls since these are separate
@@ -115,7 +129,20 @@ impl State {
                 ExitCircuitResult::Unchanged
             }
             Self::HalfOpen { probes, stats } => {
-                // record the result of the probe
+                // A `Normal` result here is stale: the caller entered while we were `Closed` and
+                // the circuit has since opened and moved to half-open. Treating it as a probe would
+                // let unrelated traffic decide recovery (and, under `AbandonedPolicy::as_failures`,
+                // a stale cancellation could spuriously re-open the circuit). Account for it as a
+                // lost execution so it is still surfaced via `circuit_breaker.execs.lost` when
+                // the circuit eventually closes.
+                if mode == ExecutionMode::Normal {
+                    stats.executions_lost = stats.executions_lost.saturating_add(1);
+                    return ExitCircuitResult::Unchanged;
+                }
+
+                // Record the result of the probe (abandoned probes are tracked separately). How an
+                // abandoned probe affects the recovery decision is handled inside the probe itself,
+                // honoring the configured `AbandonedPolicy`.
                 stats.record_probe_execution_result(result);
 
                 match probes.record(result, now) {
@@ -147,12 +174,15 @@ impl State {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Stats {
+    pub probes: ExecutionInfo,
+    /// Probe-mode executions whose results arrived after the circuit had already moved out of
+    /// `HalfOpen`. They can no longer influence the recovery decision.
+    pub probes_lost: usize,
+    /// Normal-mode executions whose results arrived after the circuit had transitioned to a state
+    /// that cannot act on them (`Open`, or `HalfOpen` after a re-open).
+    pub executions_lost: usize,
     pub opened_at: Instant,
     pub re_opened: usize,
-    pub probes_total: usize,
-    pub probes_lost: usize,
-    pub probes_successes: usize,
-    pub probes_failures: usize,
     pub rejected: usize,
 }
 
@@ -160,10 +190,9 @@ impl Stats {
     pub(crate) fn new(opened_at: Instant) -> Self {
         Self {
             opened_at,
-            probes_total: 0,
+            probes: ExecutionInfo::default(),
             probes_lost: 0,
-            probes_successes: 0,
-            probes_failures: 0,
+            executions_lost: 0,
             rejected: 0,
             re_opened: 0,
         }
@@ -174,22 +203,16 @@ impl Stats {
     }
 
     fn record_allow_result(&mut self, allow: AllowProbeResult) {
-        if allow == AllowProbeResult::Accepted {
-            self.probes_total = self.probes_total.saturating_add(1);
-        } else {
+        if allow != AllowProbeResult::Accepted {
             self.rejected = self.rejected.saturating_add(1);
         }
     }
 
     fn record_probe_execution_result(&mut self, result: ExecutionResult) {
-        match result {
-            ExecutionResult::Success => {
-                self.probes_successes = self.probes_successes.saturating_add(1);
-            }
-            ExecutionResult::Failure => {
-                self.probes_failures = self.probes_failures.saturating_add(1);
-            }
-        }
+        // Successes, failures and abandoned probes are all tallied in `probes`; how an abandoned
+        // probe affects the recovery decision is governed by the configured `AbandonedPolicy`
+        // (see `Probe::record`).
+        self.probes.record(result);
     }
 }
 
@@ -201,8 +224,8 @@ mod tests {
     use tick::ClockControl;
 
     use super::*;
-    use crate::breaker::HealthMetricsBuilder;
     use crate::breaker::engine::probing::ProbesOptions;
+    use crate::breaker::{AbandonedPolicy, HealthMetricsBuilder};
 
     fn create_test_settings() -> EngineOptions {
         EngineOptions {
@@ -211,8 +234,9 @@ mod tests {
                 Duration::from_secs(30),
                 0.1, // 10% failure threshold
                 10,  // minimum 10 requests
+                AbandonedPolicy::default(),
             ),
-            probes: ProbesOptions::quick(Duration::from_secs(2)),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         }
     }
 
@@ -356,8 +380,9 @@ mod tests {
                 Duration::from_secs(30),
                 0.1, // 10% failure threshold
                 20,  // minimum 20 requests (higher than default 10 for this test)
+                AbandonedPolicy::default(),
             ),
-            probes: ProbesOptions::quick(Duration::from_secs(2)),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let clock = Clock::new_frozen();
         let engine = EngineCore::new(settings, clock);
@@ -405,7 +430,8 @@ mod tests {
         assert!(matches!(result, ExitCircuitResult::Unchanged));
 
         if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
-            assert_eq!(stats.probes_lost, 1);
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
         } else {
             panic!("expected engine to be in Open state");
         }
@@ -423,9 +449,9 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
-        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes_successes == 1 && stats.probes_total == 1));
+        assert!(matches!(result, ExitCircuitResult::Closed(stats) if stats.probes.succeeded == 1));
     }
 
     #[test]
@@ -440,9 +466,144 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
 
         assert!(matches!(result, ExitCircuitResult::Reopened));
+    }
+
+    #[test]
+    fn exit_when_half_open_with_abandoned_keeps_circuit_half_open() {
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open then half-open
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open
+
+        // Under the default `rate_threshold(1.0)` policy an abandoned probe is inconclusive: it
+        // cannot confirm recovery, but it must not re-open the circuit either, otherwise a high
+        // rate of abandoned executions (e.g. immediate hedging cancelling the in-flight probe)
+        // would pin the circuit open and block recovery.
+        let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe);
+
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes.abandoned, 1);
+            assert_eq!(stats.probes.failed, 0);
+            assert_eq!(stats.probes.succeeded, 0);
+        } else {
+            panic!("expected engine to remain in HalfOpen state");
+        }
+    }
+
+    #[test]
+    fn exit_when_half_open_with_abandoned_reopens_under_as_failures_policy() {
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::as_failures()),
+        };
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open then half-open
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open
+
+        // With the `as_failures` policy an abandoned probe is treated as a definitive failure and
+        // re-opens the circuit.
+        let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe);
+
+        assert!(matches!(result, ExitCircuitResult::Reopened));
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::Open { .. }));
+    }
+
+    #[test]
+    fn exit_when_half_open_abandoned_then_success_closes_circuit() {
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Force to open then half-open
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open
+
+        // An abandoned probe leaves the circuit half-open and a fresh probe can still recover it.
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Probe),
+            ExitCircuitResult::Unchanged
+        ));
+
+        // After the probe cool-down a new probe is allowed and a success closes the circuit.
+        control.advance(Duration::from_secs(3));
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Success, ExecutionMode::Probe),
+            ExitCircuitResult::Closed(_)
+        ));
+
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::Closed { .. }));
+    }
+
+    #[test]
+    fn exit_when_closed_with_abandoned_opens_only_without_successes() {
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // The first two abandoned executions are below the minimum throughput.
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Unchanged
+        ));
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Unchanged
+        ));
+
+        // The third abandoned execution (still no successes) opens the circuit.
+        engine.enter();
+        assert!(matches!(
+            engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+            ExitCircuitResult::Opened(_)
+        ));
+    }
+
+    #[test]
+    fn exit_when_closed_with_abandoned_ignored_when_successes_present() {
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 3, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // A single success means abandoned executions are ignored from then on.
+        engine.enter();
+        engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+
+        for _ in 0..10 {
+            engine.enter();
+            assert!(matches!(
+                engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal),
+                ExitCircuitResult::Unchanged
+            ));
+        }
     }
 
     #[test]
@@ -479,13 +640,12 @@ mod tests {
         ));
 
         // Successful probe closes the circuit
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes_successes, 1);
-            assert_eq!(stats.probes_total, 1);
+            assert_eq!(stats.probes.succeeded, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes_failures, 0);
+            assert_eq!(stats.probes.failed, 0);
             assert_eq!(stats.probes_lost, 0);
             assert_eq!(stats.re_opened, 0);
         } else {
@@ -517,7 +677,7 @@ mod tests {
         engine.enter();
 
         // Failed probe reopens circuit
-        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
         assert!(matches!(result, ExitCircuitResult::Reopened));
 
         // Verify circuit is open again
@@ -528,13 +688,12 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter();
 
-        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Normal);
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
 
         if let ExitCircuitResult::Closed(stats) = &result {
-            assert_eq!(stats.probes_successes, 1);
-            assert_eq!(stats.probes_total, 2);
+            assert_eq!(stats.probes.succeeded, 1);
             assert_eq!(stats.rejected, 1);
-            assert_eq!(stats.probes_failures, 1);
+            assert_eq!(stats.probes.failed, 1);
             assert_eq!(stats.probes_lost, 0);
             assert_eq!(stats.re_opened, 1);
         } else {
@@ -563,8 +722,8 @@ mod tests {
     fn engine_with_custom_break_duration() {
         let settings = EngineOptions {
             break_duration: Duration::from_millis(100),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 50),
-            probes: ProbesOptions::quick(Duration::from_secs(2)),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 50, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -597,8 +756,9 @@ mod tests {
                 Duration::from_secs(30),
                 0.5, // 50% failure threshold
                 10,  // minimum 10 requests
+                AbandonedPolicy::default(),
             ),
-            probes: ProbesOptions::quick(Duration::from_secs(2)),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
         };
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -626,12 +786,12 @@ mod tests {
         let mut stats = Stats::new(Instant::now());
 
         stats.record_probe_execution_result(ExecutionResult::Success);
-        assert_eq!(stats.probes_successes, 1);
-        assert_eq!(stats.probes_failures, 0);
+        assert_eq!(stats.probes.succeeded, 1);
+        assert_eq!(stats.probes.failed, 0);
 
         stats.record_probe_execution_result(ExecutionResult::Failure);
-        assert_eq!(stats.probes_successes, 1);
-        assert_eq!(stats.probes_failures, 1);
+        assert_eq!(stats.probes.succeeded, 1);
+        assert_eq!(stats.probes.failed, 1);
     }
 
     #[test]
@@ -639,11 +799,9 @@ mod tests {
         let mut stats = Stats::new(Instant::now());
 
         stats.record_allow_result(AllowProbeResult::Accepted);
-        assert_eq!(stats.probes_total, 1);
         assert_eq!(stats.rejected, 0);
 
         stats.record_allow_result(AllowProbeResult::Rejected);
-        assert_eq!(stats.probes_total, 1);
         assert_eq!(stats.rejected, 1);
     }
 
@@ -664,9 +822,14 @@ mod tests {
 
         let settings = EngineOptions {
             break_duration: Duration::from_secs(5),
-            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
             // Use a HealthProbe with long sampling duration so it returns Pending
-            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(Duration::from_mins(1), 0.2, 1.0))]),
+            probes: ProbesOptions::new([ProbeOptions::HealthProbe(HealthProbeOptions::new(
+                Duration::from_mins(1),
+                0.2,
+                1.0,
+                AbandonedPolicy::default(),
+            ))]),
         };
         let control = ClockControl::new();
         let clock = control.to_clock();
@@ -682,5 +845,128 @@ mod tests {
         // Record success - should return Unchanged because HealthProbe is still sampling
         let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
         assert!(matches!(result, ExitCircuitResult::Unchanged));
+    }
+
+    #[test]
+    fn exit_when_open_with_probe_mode_increments_probes_lost() {
+        // A probe admitted while half-open whose result lands after a re-open is counted as a
+        // lost probe, not a lost normal execution.
+        let engine = create_test_engine();
+        open_engine(&engine);
+
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        if let State::Open { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes_lost, 1);
+            assert_eq!(stats.executions_lost, 0);
+        } else {
+            panic!("expected engine to be in Open state");
+        }
+    }
+
+    #[test]
+    fn exit_when_half_open_ignores_stale_normal_result() {
+        // Simulates the closed -> open -> half-open transition happening between `enter` (which
+        // returned `Normal`) and `exit` on a separate thread. The stale `Normal` result must not
+        // be treated as a probe.
+        let settings = create_test_settings();
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        // Drive the circuit into half-open state.
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open.
+
+        // A stale `Normal` failure must not re-open the circuit.
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        // Probe statistics must remain untouched so recovery is still possible, but the stale
+        // execution must be counted as a lost execution so it surfaces in telemetry on the next
+        // `Closed`.
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.probes.failed, 0);
+            assert_eq!(stats.probes.succeeded, 0);
+            assert_eq!(stats.probes.abandoned, 0);
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
+        } else {
+            panic!("expected engine to remain in HalfOpen state");
+        }
+
+        // A subsequent legitimate probe success still closes the circuit and carries the lost
+        // count through to the reported stats.
+        let result = engine.exit(ExecutionResult::Success, ExecutionMode::Probe);
+        if let ExitCircuitResult::Closed(stats) = result {
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.succeeded, 1);
+        } else {
+            panic!("expected circuit to close after legitimate probe success");
+        }
+    }
+
+    #[test]
+    fn exit_when_half_open_ignores_stale_normal_abandoned_under_as_failures() {
+        // Regression: with `AbandonedPolicy::as_failures`, a stale `Normal` cancellation arriving
+        // during half-open must not be processed as a failed probe and re-open the circuit.
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(Duration::from_secs(30), 0.1, 10, AbandonedPolicy::default()),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::as_failures()),
+        };
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let engine = EngineCore::new(settings, clock);
+
+        open_engine(&engine);
+        control.advance(Duration::from_secs(6));
+        engine.enter(); // Transitions to half-open.
+
+        let result = engine.exit(ExecutionResult::Abandoned, ExecutionMode::Normal);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+        if let State::HalfOpen { stats, .. } = engine.state.lock().unwrap().deref() {
+            assert_eq!(stats.executions_lost, 1);
+            assert_eq!(stats.probes_lost, 0);
+            assert_eq!(stats.probes.abandoned, 0);
+        } else {
+            panic!("expected engine to remain in HalfOpen state");
+        }
+    }
+
+    #[test]
+    fn exit_when_closed_ignores_stale_probe_result() {
+        // Simulates the half-open -> closed transition happening between `enter` (which returned
+        // `Probe`) and `exit` on a separate thread. The stale `Probe` result must not feed into
+        // the post-recovery health metrics.
+        let settings = EngineOptions {
+            break_duration: Duration::from_secs(5),
+            health_metrics_builder: HealthMetricsBuilder::new(
+                Duration::from_secs(30),
+                0.1, // 10% failure threshold
+                3,   // small minimum so a single failure could matter
+                AbandonedPolicy::default(),
+            ),
+            probes: ProbesOptions::quick(Duration::from_secs(2), &AbandonedPolicy::default()),
+        };
+        let clock = Clock::new_frozen();
+        let engine = EngineCore::new(settings, clock);
+
+        // The engine starts closed; a stale `Probe` failure arriving here must be ignored.
+        engine.enter();
+        let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Probe);
+        assert!(matches!(result, ExitCircuitResult::Unchanged));
+
+        // The health window must not have recorded the stale probe, so a few more failures still
+        // sit below the minimum throughput and the circuit stays closed.
+        for _ in 0..2 {
+            engine.enter();
+            let result = engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);
+            assert!(matches!(result, ExitCircuitResult::Unchanged));
+        }
+        assert!(matches!(engine.state.lock().unwrap().deref(), State::Closed { .. }));
     }
 }

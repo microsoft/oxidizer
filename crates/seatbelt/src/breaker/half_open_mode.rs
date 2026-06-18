@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::breaker::AbandonedPolicy;
 use crate::breaker::constants::MIN_SAMPLING_DURATION;
 use crate::breaker::engine::probing::ProbesOptions;
 
@@ -61,10 +62,17 @@ impl HalfOpenMode {
         }
     }
 
-    pub(super) fn to_options(&self, default_stage_duration: Duration, failure_threshold: f32) -> ProbesOptions {
+    pub(super) fn to_options(
+        &self,
+        default_stage_duration: Duration,
+        failure_threshold: f32,
+        abandoned_policy: &AbandonedPolicy,
+    ) -> ProbesOptions {
         match self.inner {
-            Mode::Quick => ProbesOptions::quick(default_stage_duration),
-            Mode::Progressive(duration) => ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold),
+            Mode::Quick => ProbesOptions::quick(default_stage_duration, abandoned_policy),
+            Mode::Progressive(duration) => {
+                ProbesOptions::progressive(duration.unwrap_or(default_stage_duration), failure_threshold, abandoned_policy)
+            }
         }
     }
 }
@@ -79,6 +87,7 @@ impl Default for HalfOpenMode {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
 enum Mode {
     Quick,
     Progressive(
@@ -100,7 +109,7 @@ mod tests {
     #[test]
     fn quick_mode_creates_single_probe() {
         let mode = HalfOpenMode::quick();
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert_eq!(probes.len(), 1);
@@ -111,19 +120,21 @@ mod tests {
     fn quick_mode_uses_default_duration() {
         let mode = HalfOpenMode::quick();
         let default = Duration::from_secs(30);
-        let options = mode.to_options(default, 0.1);
+        let options = mode.to_options(default, 0.1, &AbandonedPolicy::as_failures());
         let probes: Vec<_> = options.probes().collect();
 
+        // The configured abandoned policy is threaded through to the single probe gate.
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == default
+            ProbeOptions::SingleProbe { cooldown, abandoned_policy }
+                if *cooldown == default && *abandoned_policy == AbandonedPolicy::as_failures()
         ));
     }
 
     #[test]
     fn progressive_mode_creates_seven_probes() {
         let mode = HalfOpenMode::progressive(None);
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
 
         assert_eq!(options.probes().len(), 7);
     }
@@ -132,12 +143,12 @@ mod tests {
     fn progressive_mode_with_custom_duration() {
         let custom = Duration::from_secs(45);
         let mode = HalfOpenMode::progressive(custom);
-        let options = mode.to_options(Duration::from_secs(30), 0.1);
+        let options = mode.to_options(Duration::from_secs(30), 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == custom
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == custom
         ));
 
         for probe in &probes[1..] {
@@ -153,12 +164,12 @@ mod tests {
     fn progressive_mode_with_default_duration() {
         let mode = HalfOpenMode::progressive(None);
         let default = Duration::from_mins(1);
-        let options = mode.to_options(default, 0.1);
+        let options = mode.to_options(default, 0.1, &AbandonedPolicy::default());
         let probes: Vec<_> = options.probes().collect();
 
         assert!(matches!(
             &probes[0],
-            ProbeOptions::SingleProbe { cooldown } if *cooldown == default
+            ProbeOptions::SingleProbe { cooldown, .. } if *cooldown == default
         ));
 
         for probe in &probes[1..] {
@@ -195,7 +206,7 @@ mod tests {
     fn serde_quick_roundtrip() {
         let mode = HalfOpenMode::quick();
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#""Quick""#);
+        assert_eq!(json, r#""quick""#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -205,7 +216,7 @@ mod tests {
     fn serde_progressive_no_duration_roundtrip() {
         let mode = HalfOpenMode::progressive(None);
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":null}"#);
+        assert_eq!(json, r#"{"progressive":null}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -215,7 +226,7 @@ mod tests {
     fn serde_progressive_with_duration_roundtrip() {
         let mode = HalfOpenMode::progressive(Duration::from_secs(605));
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":"10m 5s"}"#);
+        assert_eq!(json, r#"{"progressive":"10m 5s"}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -225,7 +236,7 @@ mod tests {
     fn serde_progressive_with_short_duration() {
         let mode = HalfOpenMode::progressive(Duration::from_secs(5));
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":"5s"}"#);
+        assert_eq!(json, r#"{"progressive":"5s"}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -233,7 +244,7 @@ mod tests {
 
     #[test]
     fn serde_deserialize_verbose_duration() {
-        let deserialized: HalfOpenMode = serde_json::from_str(r#"{"Progressive":"1 hour, 30 minutes"}"#).unwrap();
+        let deserialized: HalfOpenMode = serde_json::from_str(r#"{"progressive":"1 hour, 30 minutes"}"#).unwrap();
         assert_eq!(deserialized, HalfOpenMode::progressive(Duration::from_mins(90)));
     }
 
@@ -246,7 +257,7 @@ mod tests {
 
     #[test]
     fn serde_deserialize_invalid_duration() {
-        let err = serde_json::from_str::<HalfOpenMode>(r#"{"Progressive":"not_a_duration"}"#).unwrap_err();
+        let err = serde_json::from_str::<HalfOpenMode>(r#"{"progressive":"not_a_duration"}"#).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("friendly"), "expected jiff parse error, got: {msg}");
     }
