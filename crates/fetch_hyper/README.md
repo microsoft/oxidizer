@@ -39,11 +39,11 @@ The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuNS40gmtmZXRjaF9oeXBlcmUwLjQuMYJtZmV0Y2hfb3B0aW9uc2UwLjIuMoJvaHR0cF9leHRlbnNpb25zZTAuNi4x
- [__link0]: https://docs.rs/fetch_hyper/0.4.1/fetch_hyper/?search=HyperTransportBuilder
- [__link1]: https://docs.rs/fetch_hyper/0.4.1/fetch_hyper/?search=Connect
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuNS40gmtmZXRjaF9oeXBlcmUwLjQuMoJtZmV0Y2hfb3B0aW9uc2UwLjIuMoJvaHR0cF9leHRlbnNpb25zZTAuNi4y
+ [__link0]: https://docs.rs/fetch_hyper/0.4.2/fetch_hyper/?search=HyperTransportBuilder
+ [__link1]: https://docs.rs/fetch_hyper/0.4.2/fetch_hyper/?search=Connect
  [__link2]: https://docs.rs/fetch_options/0.2.2/fetch_options/?search=TransportOptions
- [__link3]: https://docs.rs/fetch_hyper/0.4.1/fetch_hyper/?search=HyperTransport
- [__link4]: https://docs.rs/http_extensions/0.6.1/http_extensions/?search=RequestHandler
- [__link5]: https://docs.rs/fetch_hyper/0.4.1/fetch_hyper/?search=HyperTransportBuilder::build
+ [__link3]: https://docs.rs/fetch_hyper/0.4.2/fetch_hyper/?search=HyperTransport
+ [__link4]: https://docs.rs/http_extensions/0.6.2/http_extensions/?search=RequestHandler
+ [__link5]: https://docs.rs/fetch_hyper/0.4.2/fetch_hyper/?search=HyperTransportBuilder::build
  [__link6]: https://docs.rs/anyspawn/0.5.4/anyspawn/?search=Spawner

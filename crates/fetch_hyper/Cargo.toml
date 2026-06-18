@@ -4,7 +4,7 @@
 [package]
 name = "fetch_hyper"
 description = "Hyper-based HTTP transport utilities for fetch."
-version = "0.4.1"
+version = "0.4.2"
 readme = "README.md"
 keywords = ["oxidizer", "hyper", "fetch", "http", "tls"]
 categories = ["network-programming"]
