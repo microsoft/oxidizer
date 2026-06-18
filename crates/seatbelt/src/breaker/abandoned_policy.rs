@@ -121,6 +121,7 @@ impl AbandonedPolicy {
 /// [`HealthEvaluator`][super::HealthEvaluator] matches on when deriving a verdict.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
 pub(crate) enum Mode {
     /// Abandoned executions never influence the decision.
     Ignore,
@@ -212,22 +213,22 @@ mod tests {
 
     #[test]
     fn deserialize_preserves_valid_threshold() {
-        let policy: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":0.5}"#).unwrap();
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":0.5}"#).unwrap();
         assert_eq!(policy.mode(), Mode::AbandonRateThreshold(0.5));
     }
 
     #[test]
     fn deserialize_coerces_threshold_above_one_to_one() {
-        let policy: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":1.5}"#).unwrap();
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":1.5}"#).unwrap();
         assert_eq!(policy.mode(), Mode::AbandonRateThreshold(1.0));
     }
 
     #[test]
     fn deserialize_coerces_non_positive_threshold_to_smallest_positive() {
-        let zero: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":0.0}"#).unwrap();
+        let zero: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":0.0}"#).unwrap();
         assert_eq!(zero.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
 
-        let negative: AbandonedPolicy = serde_json::from_str(r#"{"AbandonRateThreshold":-0.5}"#).unwrap();
+        let negative: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":-0.5}"#).unwrap();
         assert_eq!(negative.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
     }
 }

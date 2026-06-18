@@ -9,9 +9,9 @@ expression: config
   "sampling_duration": "30s",
   "break_duration": "5s",
   "half_open_mode": {
-    "Progressive": null
+    "progressive": null
   },
   "abandoned_policy": {
-    "AbandonRateThreshold": 1.0
+    "abandon_rate_threshold": 1.0
   }
 }

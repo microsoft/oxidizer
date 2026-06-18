@@ -87,6 +87,7 @@ impl Default for HalfOpenMode {
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
 enum Mode {
     Quick,
     Progressive(
@@ -205,7 +206,7 @@ mod tests {
     fn serde_quick_roundtrip() {
         let mode = HalfOpenMode::quick();
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#""Quick""#);
+        assert_eq!(json, r#""quick""#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -215,7 +216,7 @@ mod tests {
     fn serde_progressive_no_duration_roundtrip() {
         let mode = HalfOpenMode::progressive(None);
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":null}"#);
+        assert_eq!(json, r#"{"progressive":null}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -225,7 +226,7 @@ mod tests {
     fn serde_progressive_with_duration_roundtrip() {
         let mode = HalfOpenMode::progressive(Duration::from_secs(605));
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":"10m 5s"}"#);
+        assert_eq!(json, r#"{"progressive":"10m 5s"}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -235,7 +236,7 @@ mod tests {
     fn serde_progressive_with_short_duration() {
         let mode = HalfOpenMode::progressive(Duration::from_secs(5));
         let json = serde_json::to_string(&mode).unwrap();
-        assert_eq!(json, r#"{"Progressive":"5s"}"#);
+        assert_eq!(json, r#"{"progressive":"5s"}"#);
 
         let deserialized: HalfOpenMode = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, mode);
@@ -243,7 +244,7 @@ mod tests {
 
     #[test]
     fn serde_deserialize_verbose_duration() {
-        let deserialized: HalfOpenMode = serde_json::from_str(r#"{"Progressive":"1 hour, 30 minutes"}"#).unwrap();
+        let deserialized: HalfOpenMode = serde_json::from_str(r#"{"progressive":"1 hour, 30 minutes"}"#).unwrap();
         assert_eq!(deserialized, HalfOpenMode::progressive(Duration::from_mins(90)));
     }
 
@@ -256,7 +257,7 @@ mod tests {
 
     #[test]
     fn serde_deserialize_invalid_duration() {
-        let err = serde_json::from_str::<HalfOpenMode>(r#"{"Progressive":"not_a_duration"}"#).unwrap_err();
+        let err = serde_json::from_str::<HalfOpenMode>(r#"{"progressive":"not_a_duration"}"#).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("friendly"), "expected jiff parse error, got: {msg}");
     }

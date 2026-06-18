@@ -8,8 +8,8 @@ expression: config
   "min_throughput": 100,
   "sampling_duration": "30s",
   "break_duration": "5s",
-  "half_open_mode": "Quick",
+  "half_open_mode": "quick",
   "abandoned_policy": {
-    "AbandonRateThreshold": 1.0
+    "abandon_rate_threshold": 1.0
   }
 }
