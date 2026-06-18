@@ -44,7 +44,7 @@ BreakerLayer {
         ),
     },
     abandoned_policy: AbandonedPolicy {
-        inner: AbandonRateThreshold(
+        inner: RateThreshold(
             1.0,
         ),
     },

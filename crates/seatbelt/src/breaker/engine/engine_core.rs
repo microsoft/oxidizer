@@ -483,7 +483,7 @@ mod tests {
         control.advance(Duration::from_secs(6));
         engine.enter(); // Transitions to half-open
 
-        // Under the default `when_all_abandoned` policy an abandoned probe is inconclusive: it
+        // Under the default `rate_threshold(1.0)` policy an abandoned probe is inconclusive: it
         // cannot confirm recovery, but it must not re-open the circuit either, otherwise a high
         // rate of abandoned executions (e.g. immediate hedging cancelling the in-flight probe)
         // would pin the circuit open and block recovery.

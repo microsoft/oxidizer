@@ -12,6 +12,6 @@ expression: config
     "progressive": null
   },
   "abandoned_policy": {
-    "abandon_rate_threshold": 1.0
+    "rate_threshold": 1.0
   }
 }

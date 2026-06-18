@@ -9,10 +9,9 @@
 /// they contribute to the open/close decision.
 ///
 /// - [`ignore`][AbandonedPolicy::ignore]: abandoned executions never affect the decision.
-/// - [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold]: abandoned executions count
-///   as failures once their proportion of the throughput reaches a threshold.
-/// - [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]: the default — `abandon_rate_threshold`
-///   with a threshold of `1.0`, so abandoned executions only matter when *every* execution was abandoned.
+/// - [`rate_threshold`][AbandonedPolicy::rate_threshold]: abandoned executions count
+///   as failures once their proportion of the throughput reaches a threshold. The default,
+///   `rate_threshold(1.0)`, only counts abandoned executions when *every* execution was abandoned.
 /// - [`as_failures`][AbandonedPolicy::as_failures]: abandoned executions always count as failures.
 ///
 /// # Why cancel safety matters
@@ -23,8 +22,8 @@
 /// Without a policy that can treat those cancellations as conclusive, the first endpoint's circuit
 /// only ever observes abandoned executions, never a success or failure, so it never opens. It keeps
 /// admitting doomed attempts, wasting resources on an endpoint that is effectively down. The default
-/// [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned] policy lets a run of purely abandoned
-/// executions open the circuit, so the unhealthy endpoint is shed instead of retried indefinitely.
+/// policy — [`rate_threshold`][AbandonedPolicy::rate_threshold] at `1.0` — lets a run of purely
+/// abandoned executions open the circuit, so the unhealthy endpoint is shed instead of retried indefinitely.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(feature = "serde", test), serde(transparent))]
@@ -46,22 +45,8 @@ impl AbandonedPolicy {
         Self { inner: Mode::Ignore }
     }
 
-    /// **Default.** Abandoned executions only count when *every* execution was abandoned.
-    ///
-    /// As long as there is at least one conclusive result (a success or a failure), abandoned
-    /// executions are ignored and the decision is made purely on successes and failures. Only in the
-    /// degenerate case where everything was abandoned do they count as failures, so the circuit can
-    /// still react instead of deadlocking on a service that never returns a result.
-    ///
-    /// This is [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] with a threshold
-    /// of `1.0`.
-    #[must_use]
-    #[cfg_attr(test, mutants::skip)] // Equivalent mutant: Default::default() resolves to Mode::AbandonRateThreshold(1.0), the same value returned here.
-    pub fn when_all_abandoned() -> Self {
-        Self::abandon_rate_threshold(1.0)
-    }
-
-    /// Abandoned executions count as failures once their share of the throughput reaches `threshold`.
+    /// **Default** (at `threshold` `1.0`). Abandoned executions count as failures once their share
+    /// of the throughput reaches `threshold`.
     ///
     /// The *abandon rate* is `abandoned / total`, where `total` counts successes, failures and
     /// abandoned executions. Once the abandon rate reaches `threshold`, each abandoned execution is
@@ -70,19 +55,21 @@ impl AbandonedPolicy {
     /// `threshold`, abandoned executions are ignored and the decision rests on successes and failures
     /// alone.
     ///
-    /// `threshold` is a rate in `(0.0, 1.0]`; `1.0` is equivalent to
-    /// [`when_all_abandoned`][AbandonedPolicy::when_all_abandoned]. To count abandoned executions as
-    /// failures unconditionally, use [`as_failures`][AbandonedPolicy::as_failures] instead.
+    /// `threshold` is a rate in `(0.0, 1.0]`. The default `1.0` means abandoned executions only
+    /// matter when *every* execution was abandoned — as long as there is at least one conclusive
+    /// result they are ignored, so the circuit can still react instead of deadlocking on a service
+    /// that never returns a result. To count abandoned executions as failures unconditionally, use
+    /// [`as_failures`][AbandonedPolicy::as_failures] instead.
     ///
     /// # Panics
     ///
     /// Panics if `threshold` is not in `(0.0, 1.0]`.
     #[must_use]
-    pub fn abandon_rate_threshold(threshold: f32) -> Self {
+    pub fn rate_threshold(threshold: f32) -> Self {
         assert!(threshold > 0.0 && threshold <= 1.0, "threshold must be in (0.0, 1.0]");
 
         Self {
-            inner: Mode::AbandonRateThreshold(threshold),
+            inner: Mode::RateThreshold(threshold),
         }
     }
 
@@ -128,26 +115,26 @@ pub(crate) enum Mode {
     /// Abandoned executions are always counted as failures.
     AsFailures,
     /// Abandoned executions are counted as failures once the abandon rate reaches this threshold.
-    AbandonRateThreshold(#[cfg_attr(any(feature = "serde", test), serde(deserialize_with = "coerce_abandon_rate_threshold"))] f32),
+    RateThreshold(#[cfg_attr(any(feature = "serde", test), serde(deserialize_with = "coerce_rate_threshold"))] f32),
 }
 
 impl Default for Mode {
     fn default() -> Self {
-        // The default `when_all_abandoned` policy: abandoned executions only matter when every
+        // The default `rate_threshold(1.0)` policy: abandoned executions only matter when every
         // execution was abandoned.
-        Self::AbandonRateThreshold(1.0)
+        Self::RateThreshold(1.0)
     }
 }
 
 /// Coerces a deserialized abandon-rate threshold into the valid `(0.0, 1.0]` range.
 ///
 /// Hand-written or generated configuration can carry an out-of-range threshold that the
-/// [`abandon_rate_threshold`][AbandonedPolicy::abandon_rate_threshold] constructor would reject.
+/// [`rate_threshold`][AbandonedPolicy::rate_threshold] constructor would reject.
 /// Rather than failing to deserialize, the value is clamped into the valid range: values above
 /// `1.0` collapse to `1.0`, and values at or below `0.0` collapse to the smallest positive `f32`
 /// so the exclusive lower bound is preserved.
 #[cfg(any(feature = "serde", test))]
-fn coerce_abandon_rate_threshold<'de, D>(deserializer: D) -> Result<f32, D::Error>
+fn coerce_rate_threshold<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -166,69 +153,59 @@ mod tests {
     }
 
     #[test]
-    fn when_all_abandoned_maps_to_rate_threshold_one() {
-        assert_eq!(AbandonedPolicy::when_all_abandoned().mode(), Mode::AbandonRateThreshold(1.0));
-    }
-
-    #[test]
     fn as_failures_maps_to_as_failures_mode() {
         assert_eq!(AbandonedPolicy::as_failures().mode(), Mode::AsFailures);
     }
 
     #[test]
-    fn abandon_rate_threshold_maps_to_rate_threshold_mode() {
-        assert_eq!(AbandonedPolicy::abandon_rate_threshold(0.5).mode(), Mode::AbandonRateThreshold(0.5));
+    fn rate_threshold_maps_to_rate_threshold_mode() {
+        assert_eq!(AbandonedPolicy::rate_threshold(0.5).mode(), Mode::RateThreshold(0.5));
     }
 
     #[test]
-    fn when_all_abandoned_equals_abandon_rate_threshold_one() {
-        assert_eq!(AbandonedPolicy::when_all_abandoned(), AbandonedPolicy::abandon_rate_threshold(1.0));
-    }
-
-    #[test]
-    fn abandon_rate_threshold_does_not_count_lone_probe_as_failure() {
+    fn rate_threshold_does_not_count_lone_probe_as_failure() {
         // Intermediate thresholds (and the 1.0 special case) leave the single-probe gate inconclusive.
-        assert!(!AbandonedPolicy::abandon_rate_threshold(0.5).counts_abandoned_as_failure());
-        assert!(!AbandonedPolicy::when_all_abandoned().counts_abandoned_as_failure());
+        assert!(!AbandonedPolicy::rate_threshold(0.5).counts_abandoned_as_failure());
+        assert!(!AbandonedPolicy::rate_threshold(1.0).counts_abandoned_as_failure());
         // The `as_failures` policy does reopen on a lone abandoned probe.
         assert!(AbandonedPolicy::as_failures().counts_abandoned_as_failure());
     }
 
     #[test]
     #[should_panic(expected = "threshold must be in (0.0, 1.0]")]
-    fn abandon_rate_threshold_rejects_above_range() {
-        let _ = AbandonedPolicy::abandon_rate_threshold(1.5);
+    fn rate_threshold_rejects_above_range() {
+        let _ = AbandonedPolicy::rate_threshold(1.5);
     }
 
     #[test]
     #[should_panic(expected = "threshold must be in (0.0, 1.0]")]
-    fn abandon_rate_threshold_rejects_zero() {
-        let _ = AbandonedPolicy::abandon_rate_threshold(0.0);
+    fn rate_threshold_rejects_zero() {
+        let _ = AbandonedPolicy::rate_threshold(0.0);
     }
 
     #[test]
-    fn default_is_when_all_abandoned() {
-        assert_eq!(AbandonedPolicy::default(), AbandonedPolicy::when_all_abandoned());
+    fn default_is_rate_threshold_one() {
+        assert_eq!(AbandonedPolicy::default(), AbandonedPolicy::rate_threshold(1.0));
     }
 
     #[test]
     fn deserialize_preserves_valid_threshold() {
-        let policy: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":0.5}"#).unwrap();
-        assert_eq!(policy.mode(), Mode::AbandonRateThreshold(0.5));
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"rate_threshold":0.5}"#).unwrap();
+        assert_eq!(policy.mode(), Mode::RateThreshold(0.5));
     }
 
     #[test]
     fn deserialize_coerces_threshold_above_one_to_one() {
-        let policy: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":1.5}"#).unwrap();
-        assert_eq!(policy.mode(), Mode::AbandonRateThreshold(1.0));
+        let policy: AbandonedPolicy = serde_json::from_str(r#"{"rate_threshold":1.5}"#).unwrap();
+        assert_eq!(policy.mode(), Mode::RateThreshold(1.0));
     }
 
     #[test]
     fn deserialize_coerces_non_positive_threshold_to_smallest_positive() {
-        let zero: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":0.0}"#).unwrap();
-        assert_eq!(zero.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
+        let zero: AbandonedPolicy = serde_json::from_str(r#"{"rate_threshold":0.0}"#).unwrap();
+        assert_eq!(zero.mode(), Mode::RateThreshold(f32::MIN_POSITIVE));
 
-        let negative: AbandonedPolicy = serde_json::from_str(r#"{"abandon_rate_threshold":-0.5}"#).unwrap();
-        assert_eq!(negative.mode(), Mode::AbandonRateThreshold(f32::MIN_POSITIVE));
+        let negative: AbandonedPolicy = serde_json::from_str(r#"{"rate_threshold":-0.5}"#).unwrap();
+        assert_eq!(negative.mode(), Mode::RateThreshold(f32::MIN_POSITIVE));
     }
 }

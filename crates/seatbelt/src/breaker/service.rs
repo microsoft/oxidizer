@@ -448,7 +448,7 @@ mod tests {
                 mode: ExecutionMode::Normal,
             },
             ExitCircuitResult::Opened(
-                HealthEvaluator::new(1.0, 1, AbandonedPolicy::when_all_abandoned()).evaluate(ExecutionInfo::new(1, 1, 0)),
+                HealthEvaluator::new(1.0, 1, AbandonedPolicy::rate_threshold(1.0)).evaluate(ExecutionInfo::new(1, 1, 0)),
             ),
         );
 

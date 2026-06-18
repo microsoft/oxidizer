@@ -328,7 +328,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     /// the reported throughput; this `policy` only governs whether and how they affect the open/close
     /// decision. See [`AbandonedPolicy`] for the available policies.
     ///
-    /// **Default**: [`AbandonedPolicy::when_all_abandoned`]
+    /// **Default**: [`AbandonedPolicy::rate_threshold`] with a threshold of `1.0`
     #[must_use]
     pub fn abandoned_policy(mut self, policy: AbandonedPolicy) -> Self {
         self.abandoned_policy = policy;

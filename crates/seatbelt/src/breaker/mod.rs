@@ -161,7 +161,7 @@
 //! | Break duration | `5` seconds | Duration circuit remains open before testing recovery | [`break_duration`][BreakerLayer::break_duration] |
 //! | Breaker isolation | Shared circuit (default) | All inputs share the same circuit breaker state | [`breaker_id`][BreakerLayer::breaker_id] |
 //! | Half-open mode | `Progressive` | Gradual recovery with increasing probe percentages | [`half_open_mode`][BreakerLayer::half_open_mode] |
-//! | Abandoned policy | `when_all_abandoned` | How abandoned (cancelled) executions affect the health decision | [`abandoned_policy`][BreakerLayer::abandoned_policy] |
+//! | Abandoned policy | `rate_threshold(1.0)` | How abandoned (cancelled) executions affect the health decision | [`abandoned_policy`][BreakerLayer::abandoned_policy] |
 //! | Enable condition | Always enabled | Circuit breaker protection is applied to all inputs | [`enable_if`][BreakerLayer::enable_if], [`enable_always`][BreakerLayer::enable_always], [`disable`][BreakerLayer::disable] |
 //!
 //! These defaults provide a reasonable starting point for most use cases, offering a balance

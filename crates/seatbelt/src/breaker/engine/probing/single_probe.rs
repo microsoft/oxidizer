@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn record_abandoned_is_inconclusive_under_default_policy() {
-        // Default (`when_all_abandoned`) and `ignore` policies treat an abandoned probe as
+        // Default (`rate_threshold(1.0)`) and `ignore` policies treat an abandoned probe as
         // inconclusive: the circuit stays half-open (Pending) so a high rate of abandoned
         // executions cannot pin the circuit open and block recovery.
         for policy in [AbandonedPolicy::default(), AbandonedPolicy::ignore()] {

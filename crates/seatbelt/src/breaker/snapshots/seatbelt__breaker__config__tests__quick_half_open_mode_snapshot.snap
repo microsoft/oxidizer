@@ -10,6 +10,6 @@ expression: config
   "break_duration": "5s",
   "half_open_mode": "quick",
   "abandoned_policy": {
-    "abandon_rate_threshold": 1.0
+    "rate_threshold": 1.0
   }
 }
