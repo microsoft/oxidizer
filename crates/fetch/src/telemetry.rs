@@ -23,6 +23,9 @@ use opentelemetry::{InstrumentationScope, KeyValue, Value};
 
 pub(crate) const METER_NAME: &str = "fetch";
 
+/// Instrumentation-scope attribute identifying the runtime a client is associated with.
+pub(crate) const FETCH_RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
+
 /// Instrumentation-scope attribute identifying the transport handler a client uses.
 pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
@@ -93,11 +96,14 @@ impl From<Metering> for Meter {
     }
 }
 
-/// Builds the `fetch` instrumentation scope carrying the `fetch.transport`
-/// attribute, attached to every metric a client records.
-pub(crate) fn transport_scope(transport: &str) -> InstrumentationScope {
+/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime` and
+/// `fetch.transport` attributes, attached to every metric a client records.
+pub(crate) fn client_scope(runtime: &str, transport: &str) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
-        .with_attributes([KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport.to_string())])
+        .with_attributes([
+            KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime.to_string()),
+            KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport.to_string()),
+        ])
         .build()
 }
 
@@ -181,18 +187,25 @@ mod tests {
 
     #[test]
     fn from_metering_global() {
-        let metering = Metering::global(transport_scope("hyper-on-tokio"));
+        let metering = Metering::global(client_scope("tokio", "hyper"));
         let _meter: Meter = metering.into();
     }
 
     #[test]
-    fn transport_scope_carries_attribute() {
-        let scope = transport_scope("fake");
-        let attribute = scope
+    fn client_scope_carries_runtime_and_transport_attributes() {
+        let scope = client_scope("tokio", "hyper");
+
+        let runtime = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == FETCH_RUNTIME_ATTRIBUTE)
+            .expect("client scope must carry the fetch.runtime attribute");
+        assert_eq!(runtime.value, Value::from("tokio"));
+
+        let transport = scope
             .attributes()
             .find(|kv| kv.key.as_str() == FETCH_TRANSPORT_ATTRIBUTE)
-            .expect("transport scope must carry the fetch.transport attribute");
-        assert_eq!(attribute.value, Value::from("fake"));
+            .expect("client scope must carry the fetch.transport attribute");
+        assert_eq!(transport.value, Value::from("hyper"));
     }
 
     #[test]

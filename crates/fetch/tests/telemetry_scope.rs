@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Integration tests verifying that the `fetch.transport` instrumentation-scope
-//! attribute is attached to the meter of every HTTP client and therefore lands
-//! on the metrics that client emits.
+//! Integration tests verifying that the `fetch.runtime` and `fetch.transport`
+//! instrumentation-scope attributes are attached to the meter of every HTTP
+//! client and therefore land on the metrics that client emits.
 
 use bytes::Bytes;
 use fetch::custom::{CustomContext, CustomDeps, Isolation, create_builder};
@@ -16,11 +16,12 @@ use tick::Clock;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+const RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 const TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
-/// Returns the `fetch.transport` scope attribute of the scope that recorded
-/// `metric_name`, if any.
-fn transport_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str) -> Option<String> {
+/// Returns the value of scope attribute `attribute_key` on the scope that
+/// recorded `metric_name`, if any.
+fn scope_attribute_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str, attribute_key: &str) -> Option<String> {
     let resource_metrics = exporter.get_finished_metrics().expect("finished metrics must be retrievable");
 
     for resource_metric in &resource_metrics {
@@ -29,7 +30,7 @@ fn transport_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str) ->
                 && let Some(value) = scope_metric
                     .scope()
                     .attributes()
-                    .find(|attribute| attribute.key.as_str() == TRANSPORT_ATTRIBUTE)
+                    .find(|attribute| attribute.key.as_str() == attribute_key)
             {
                 return Some(value.value.as_str().into_owned());
             }
@@ -37,6 +38,15 @@ fn transport_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str) ->
     }
 
     None
+}
+
+/// Returns the `(fetch.runtime, fetch.transport)` scope attributes of the scope
+/// that recorded `metric_name`.
+fn runtime_and_transport_for_metric(exporter: &InMemoryMetricExporter, metric_name: &str) -> (Option<String>, Option<String>) {
+    (
+        scope_attribute_for_metric(exporter, metric_name, RUNTIME_ATTRIBUTE),
+        scope_attribute_for_metric(exporter, metric_name, TRANSPORT_ATTRIBUTE),
+    )
 }
 
 fn exporter_and_provider() -> (InMemoryMetricExporter, SdkMeterProvider) {
@@ -71,9 +81,9 @@ async fn fake_transport_scope_attribute() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        transport_for_metric(&exporter, "http.client.request.duration").as_deref(),
-        Some("fake"),
-        "the fake transport must report fetch.transport=fake on its request metric"
+        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
+        (Some("fake".to_owned()), Some("fake".to_owned())),
+        "the fake client must report fetch.runtime=fake and fetch.transport=fake on its request metric"
     );
 }
 
@@ -89,6 +99,7 @@ async fn custom_transport_scope_attribute() {
     };
 
     let client = create_builder(
+        "my-runtime",
         "my-custom",
         |cx: CustomContext| OkHandler {
             body_builder: cx.body_builder,
@@ -104,9 +115,9 @@ async fn custom_transport_scope_attribute() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        transport_for_metric(&exporter, "http.client.request.duration").as_deref(),
-        Some("my-custom"),
-        "a custom transport must report the name passed to create_builder"
+        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
+        (Some("my-runtime".to_owned()), Some("my-custom".to_owned())),
+        "a custom transport must report the runtime and transport names passed to create_builder"
     );
 }
 
@@ -122,8 +133,9 @@ async fn custom_transport_instrument_inherits_scope() {
     };
 
     // The transport records its own instrument against `cx.meter`; it must
-    // inherit the same `fetch.transport` scope as the built-in fetch metrics.
+    // inherit the same runtime/transport scope as the built-in fetch metrics.
     let client = create_builder(
+        "instrumented-runtime",
         "instrumented",
         |cx: CustomContext| {
             let counter = cx.meter.u64_counter("custom.transport.requests").build();
@@ -143,9 +155,9 @@ async fn custom_transport_instrument_inherits_scope() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        transport_for_metric(&exporter, "custom.transport.requests").as_deref(),
-        Some("instrumented"),
-        "an instrument recorded on cx.meter must inherit the transport scope"
+        runtime_and_transport_for_metric(&exporter, "custom.transport.requests"),
+        (Some("instrumented-runtime".to_owned()), Some("instrumented".to_owned())),
+        "an instrument recorded on cx.meter must inherit the runtime/transport scope"
     );
 }
 
@@ -164,14 +176,14 @@ async fn tokio_transport_connection_metric_scope_attribute() {
     provider.force_flush().unwrap();
 
     assert_eq!(
-        transport_for_metric(&exporter, "http.client.connection.setup.duration").as_deref(),
-        Some("hyper-on-tokio"),
-        "the hyper connection metric must carry the hyper-on-tokio transport scope"
+        runtime_and_transport_for_metric(&exporter, "http.client.connection.setup.duration"),
+        (Some("tokio".to_owned()), Some("hyper".to_owned())),
+        "the hyper connection metric must carry the tokio runtime and hyper transport scope"
     );
     assert_eq!(
-        transport_for_metric(&exporter, "http.client.request.duration").as_deref(),
-        Some("hyper-on-tokio"),
-        "the request metric must carry the hyper-on-tokio transport scope"
+        runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
+        (Some("tokio".to_owned()), Some("hyper".to_owned())),
+        "the request metric must carry the tokio runtime and hyper transport scope"
     );
 }
 

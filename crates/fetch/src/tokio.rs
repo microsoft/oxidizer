@@ -71,7 +71,8 @@ impl HttpClient {
         // per-slot factory has the same data it had with the previous direct
         // transport factory call.
         Self::builder_custom_internal(
-            crate::constants::HYPER_ON_TOKIO_TRANSPORT_NAME,
+            crate::constants::TOKIO_RUNTIME_NAME,
+            crate::constants::HYPER_TRANSPORT_NAME,
             |cx| TransportHandler(build_tokio_handler(cx).into()),
             Isolation::Shared,
             CustomDeps {
