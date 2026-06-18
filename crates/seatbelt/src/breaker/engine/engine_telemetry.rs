@@ -103,7 +103,15 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
 
         let exit_result = self.inner.exit(result, mode);
 
-        // Emit telemetry events for circuit state changes
+        self.report_state_change(&exit_result);
+
+        exit_result
+    }
+}
+
+impl<T: CircuitEngine> EngineTelemetry<T> {
+    /// Emits telemetry events for circuit state changes produced by `exit`.
+    fn report_state_change(&self, exit_result: &ExitCircuitResult) {
         match exit_result {
             ExitCircuitResult::Opened(health) => {
                 #[cfg(any(feature = "metrics", test))]
@@ -126,14 +134,16 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         strategy.name = %self.telemetry.strategy_name,
                         circuit_breaker.state = CircuitState::Open.as_str(),
                         circuit_breaker.id = %self.breaker_id,
-                        circuit_breaker.health.failure_rate = health.failure_rate(),
-                        circuit_breaker.health.throughput = health.throughput(),
+                        circuit_breaker.execs.total = health.counts.total(),
+                        circuit_breaker.execs.succeeded = health.counts.succeeded,
+                        circuit_breaker.execs.failed = health.counts.failed,
+                        circuit_breaker.execs.abandoned = health.counts.abandoned,
                     );
                 }
 
                 _ = health;
             }
-            ExitCircuitResult::Closed(ref stats) => {
+            ExitCircuitResult::Closed(stats) => {
                 #[cfg(any(feature = "metrics", test))]
                 if self.telemetry.metrics_enabled() {
                     self.telemetry.report_metrics(&[
@@ -155,10 +165,12 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                         circuit_breaker.state = CircuitState::Closed.as_str(),
                         circuit_breaker.open.duration = stats.opened_duration(self.clock.instant()).as_secs(),
                         circuit_breaker.id = %self.breaker_id,
-                        circuit_breaker.probes.total = stats.probes_total,
-                        circuit_breaker.probes.successful = stats.probes_successes,
-                        circuit_breaker.probes.failed = stats.probes_failures,
+                        circuit_breaker.probes.total = stats.probes.total(),
+                        circuit_breaker.probes.succeeded = stats.probes.succeeded,
+                        circuit_breaker.probes.failed = stats.probes.failed,
+                        circuit_breaker.probes.abandoned = stats.probes.abandoned,
                         circuit_breaker.probes.lost = stats.probes_lost,
+                        circuit_breaker.execs.lost = stats.executions_lost,
                         circuit_breaker.rejections = stats.rejected,
                         circuit_breaker.re_opened = stats.re_opened,
                     );
@@ -172,8 +184,6 @@ impl<T: CircuitEngine> CircuitEngine for EngineTelemetry<T> {
                 // event, or when there is no state change.
             }
         }
-
-        exit_result
     }
 }
 
@@ -185,7 +195,7 @@ mod tests {
     use opentelemetry::KeyValue;
 
     use super::*;
-    use crate::breaker::{EngineFake, HealthInfo, Stats};
+    use crate::breaker::{AbandonedPolicy, EngineFake, ExecutionInfo, HealthEvaluator, Stats};
     use crate::metrics::{create_meter, create_resilience_event_counter};
     use crate::testing::MetricTester;
 
@@ -267,7 +277,9 @@ mod tests {
             EnterCircuitResult::Accepted {
                 mode: ExecutionMode::Normal,
             },
-            ExitCircuitResult::Opened(HealthInfo::new(1, 0, 0.75, 100)),
+            ExitCircuitResult::Opened(
+                HealthEvaluator::new(0.75, 100, AbandonedPolicy::rate_threshold(1.0)).evaluate(ExecutionInfo::new(1, 0, 0)),
+            ),
         ));
 
         let _ = telemetry_engine.exit(ExecutionResult::Failure, ExecutionMode::Normal);

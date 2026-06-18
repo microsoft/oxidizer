@@ -45,6 +45,7 @@ pub struct BreakerLayer<In, Out, S1 = Set, S2 = Set> {
     sampling_duration: Duration,
     break_duration: Duration,
     half_open_mode: HalfOpenMode,
+    abandoned_policy: AbandonedPolicy,
     _state: PhantomData<fn(In, S1, S2) -> Out>,
 }
 
@@ -66,6 +67,7 @@ impl<In, Out> BreakerLayer<In, Out, NotSet, NotSet> {
             sampling_duration: DEFAULT_SAMPLING_DURATION,
             break_duration: DEFAULT_BREAK_DURATION,
             half_open_mode: HalfOpenMode::progressive(None),
+            abandoned_policy: AbandonedPolicy::default(),
             _state: PhantomData,
         }
     }
@@ -212,18 +214,23 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
             .sampling_duration(config.sampling_duration)
             .break_duration(config.break_duration)
             .half_open_mode(config.half_open_mode.clone())
+            .abandoned_policy(config.abandoned_policy.clone())
             .enable(config.enabled)
     }
 
     /// Sets the callback to be invoked when the circuit breaker opens.
     ///
     /// This `callback` is called whenever the circuit breaker transitions from
-    /// closed to open state due to exceeding the failure threshold. It receives
-    /// a reference to the output and [`OnOpenedArgs`] containing circuit breaker context.
+    /// closed to open state due to exceeding the failure threshold. It receives an
+    /// optional reference to the output and [`OnOpenedArgs`] containing circuit breaker context.
+    ///
+    /// The output is `None` when the circuit was opened by an *abandoned* execution — one that was
+    /// accepted by the circuit breaker but never completed (e.g. a dropped or cancelled future) and
+    /// therefore produced no output.
     ///
     /// **Default**: No callback
     #[must_use]
-    pub fn on_opened(mut self, callback: impl Fn(&Out, OnOpenedArgs) + Send + Sync + 'static) -> Self {
+    pub fn on_opened(mut self, callback: impl Fn(Option<&Out>, OnOpenedArgs) + Send + Sync + 'static) -> Self {
         self.on_opened = Some(OnOpened::new(callback));
         self
     }
@@ -314,6 +321,20 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
         self
     }
 
+    /// Sets how *abandoned* executions are treated by the health calculation.
+    ///
+    /// An execution is abandoned when it is accepted by the circuit breaker but its future is dropped
+    /// before completing (e.g. a cancelled request). Abandoned executions are always counted towards
+    /// the reported throughput; this `policy` only governs whether and how they affect the open/close
+    /// decision. See [`AbandonedPolicy`] for the available policies.
+    ///
+    /// **Default**: [`AbandonedPolicy::rate_threshold`] with a threshold of `1.0`
+    #[must_use]
+    pub fn abandoned_policy(mut self, policy: AbandonedPolicy) -> Self {
+        self.abandoned_policy = policy;
+        self
+    }
+
     /// Optionally enables the circuit breaker middleware based on a condition.
     ///
     /// When disabled, inputs pass through without circuit breaker protection.
@@ -388,14 +409,19 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
     fn probes_options(&self) -> ProbesOptions {
         self.half_open_mode
             // we will use break duration as the sampling duration for probes
-            .to_options(self.break_duration, self.failure_threshold)
+            .to_options(self.break_duration, self.failure_threshold, &self.abandoned_policy)
     }
 
     fn engines(&self) -> Engines {
         Engines::new(
             super::engine::EngineOptions {
                 break_duration: self.break_duration,
-                health_metrics_builder: HealthMetricsBuilder::new(self.sampling_duration, self.failure_threshold, self.min_throughput),
+                health_metrics_builder: HealthMetricsBuilder::new(
+                    self.sampling_duration,
+                    self.failure_threshold,
+                    self.min_throughput,
+                    self.abandoned_policy.clone(),
+                ),
                 probes: self.probes_options(),
             },
             self.context.get_clock().clone(),
@@ -419,6 +445,7 @@ impl<In, Out, S1, S2> BreakerLayer<In, Out, S1, S2> {
             sampling_duration: self.sampling_duration,
             break_duration: self.break_duration,
             half_open_mode: self.half_open_mode,
+            abandoned_policy: self.abandoned_policy,
             _state: PhantomData,
         }
     }
@@ -671,6 +698,7 @@ mod tests {
             sampling_duration: Duration::from_mins(1),
             break_duration: Duration::from_secs(15),
             half_open_mode: HalfOpenMode::quick(),
+            abandoned_policy: AbandonedPolicy::as_failures(),
         };
 
         let layer = create_ready_layer().config(&config);

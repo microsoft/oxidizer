@@ -20,6 +20,7 @@ const EXPONENTIAL_FACTOR: f64 = 2.0;
 /// balancing responsiveness and resource utilization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(any(feature = "serde", test), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(feature = "serde", test), serde(rename_all = "snake_case"))]
 pub enum Backoff {
     /// Constant backoff strategy that maintains consistent delays between attempts.
     ///

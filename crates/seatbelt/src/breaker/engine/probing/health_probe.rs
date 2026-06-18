@@ -44,7 +44,9 @@ impl ProbeOperation for HealthProbe {
     }
 
     fn record(&mut self, result: ExecutionResult, now: Instant) -> ProbingResult {
-        // Always record the result
+        // Always record the result, including abandoned executions: the health metrics apply the
+        // configured `AbandonedPolicy` when deriving the health status, so abandoned probes are
+        // evaluated consistently with the closed-state decision.
         self.metrics.record(result, now);
 
         // If we are still sampling, we cannot make a decision yet
@@ -53,7 +55,7 @@ impl ProbeOperation for HealthProbe {
         }
 
         // Sampling duration elapsed, use the health metrics to determine the result
-        match self.metrics.health_info().status() {
+        match self.metrics.health_info().status {
             HealthStatus::Healthy => ProbingResult::Success,
             HealthStatus::Unhealthy => ProbingResult::Failure,
         }
@@ -86,10 +88,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::breaker::AbandonedPolicy;
 
     #[test]
     fn allow_probe_fallback() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.5, 0.1);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.5, 0.1, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         probe.rnd = Rnd::new_fixed(0.5);
         let now = Instant::now();
@@ -113,7 +116,7 @@ mod tests {
 
     #[test]
     fn allow_probe_rejected_when_at_ratio() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.5, 0.1);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.5, 0.1, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         probe.rnd = Rnd::new_fixed(0.1);
 
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn record_not_allowed_before() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.99, 0.1);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.99, 0.1, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         let now = Instant::now();
 
@@ -131,13 +134,37 @@ mod tests {
         assert_eq!(probe.record(ExecutionResult::Success, now), ProbingResult::Pending,);
 
         let status = probe.metrics.health_info();
-        assert_eq!(status.status(), HealthStatus::Healthy);
-        assert_eq!(status.throughput(), 2);
+        assert_eq!(status.status, HealthStatus::Healthy);
+        assert_eq!(status.counts.total(), 2);
+    }
+
+    #[test]
+    fn record_abandoned_is_sampled_and_evaluated_by_health_infra() {
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0, AbandonedPolicy::default());
+        let mut probe = HealthProbe::new(options);
+        let now = Instant::now();
+
+        assert_eq!(probe.allow_probe(now), AllowProbeResult::Accepted);
+
+        // Abandoned probes are recorded so the health metrics can apply the configured policy.
+        // While still sampling, the decision stays pending.
+        assert_eq!(
+            probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(1)),
+            ProbingResult::Pending,
+        );
+        assert_eq!(probe.metrics.health_info().counts.total(), 1);
+
+        // Once the sampling period elapses with only abandoned probes, the default
+        // when-all-abandoned policy treats the sample as unhealthy, so the probe reports failure.
+        assert_eq!(
+            probe.record(ExecutionResult::Abandoned, now + Duration::from_secs(10)),
+            ProbingResult::Failure,
+        );
     }
 
     #[test]
     fn allow_then_record_after_sampling_period_healthy() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         let now = Instant::now();
 
@@ -157,7 +184,7 @@ mod tests {
 
     #[test]
     fn allow_then_record_after_sampling_period_unhealthy() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.1, 1.0, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         let now = Instant::now();
 
@@ -170,7 +197,7 @@ mod tests {
 
     #[test]
     fn record_multiple_ensure_health_evaluated() {
-        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.6, 1.0);
+        let options = HealthProbeOptions::new(Duration::from_secs(5), 0.6, 1.0, AbandonedPolicy::default());
         let mut probe = HealthProbe::new(options);
         let now = Instant::now();
 
