@@ -196,8 +196,9 @@ mod tests {
     }
 
     #[test]
-    fn base_scope_has_no_attributes() {
+    fn base_scope_is_named_fetch_without_attributes() {
         let scope = base_scope();
+        assert_eq!(scope.name(), METER_NAME);
         assert_eq!(scope.attributes().count(), 0);
     }
 
