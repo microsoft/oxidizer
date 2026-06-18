@@ -4,7 +4,7 @@
 [package]
 name = "anyspawn_azure"
 description = "Azure SDK async runtime and process executor backed by an anyspawn spawner and a tick clock."
-version = "0.1.0"
+version = "0.1.1"
 readme = "README.md"
 keywords = ["oxidizer", "azure", "async", "runtime", "spawner"]
 categories = ["asynchronous"]

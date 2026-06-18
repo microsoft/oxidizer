@@ -280,29 +280,29 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNS41gmZjYWNoZXRlMC43LjGCbWNhY2hldF9tZW1vcnllMC4zLjWCbmNhY2hldF9zZXJ2aWNlZTAuMi42gmtjYWNoZXRfdGllcmUwLjIuNIJkdGlja2UwLjMuNIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjIuNA
- [__link0]: https://docs.rs/cachet/0.7.1/cachet/?search=TimeToRefresh
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNS41gmZjYWNoZXRlMC43LjKCbWNhY2hldF9tZW1vcnllMC4zLjWCbmNhY2hldF9zZXJ2aWNlZTAuMi42gmtjYWNoZXRfdGllcmUwLjIuNIJkdGlja2UwLjMuNIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjIuNA
+ [__link0]: https://docs.rs/cachet/0.7.2/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.2.4
  [__link10]: https://docs.rs/cachet_tier/0.2.4/cachet_tier/?search=CacheTier
- [__link11]: https://docs.rs/cachet/0.7.1/cachet/?search=InsertPolicy
- [__link12]: https://docs.rs/cachet/0.7.1/cachet/?search=TimeToRefresh
+ [__link11]: https://docs.rs/cachet/0.7.2/cachet/?search=InsertPolicy
+ [__link12]: https://docs.rs/cachet/0.7.2/cachet/?search=TimeToRefresh
  [__link13]: https://docs.rs/cachet_tier/0.2.4/cachet_tier/?search=Error
  [__link14]: https://crates.io/crates/cachet_tier/0.2.4
  [__link15]: https://crates.io/crates/cachet_memory/0.3.5
  [__link16]: https://docs.rs/moka
  [__link17]: https://crates.io/crates/cachet_service/0.2.6
- [__link18]: https://docs.rs/cachet/0.7.1/cachet/?search=telemetry::attributes
+ [__link18]: https://docs.rs/cachet/0.7.2/cachet/?search=telemetry::attributes
  [__link19]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesView
- [__link2]: https://docs.rs/cachet/0.7.1/cachet/?search=CacheBuilder::stampede_protection
+ [__link2]: https://docs.rs/cachet/0.7.2/cachet/?search=CacheBuilder::stampede_protection
  [__link20]: https://crates.io/crates/tracing/0.1.44
- [__link21]: https://docs.rs/cachet/0.7.1/cachet/?search=telemetry::attributes
- [__link22]: https://docs.rs/cachet/0.7.1/cachet/?search=telemetry::handler::CacheEventHandler
- [__link23]: https://docs.rs/cachet/0.7.1/cachet/?search=telemetry::handler::CacheTierEvent
- [__link24]: https://docs.rs/cachet/0.7.1/cachet/?search=telemetry::handler::CacheOperationEvent
+ [__link21]: https://docs.rs/cachet/0.7.2/cachet/?search=telemetry::attributes
+ [__link22]: https://docs.rs/cachet/0.7.2/cachet/?search=telemetry::handler::CacheEventHandler
+ [__link23]: https://docs.rs/cachet/0.7.2/cachet/?search=telemetry::handler::CacheTierEvent
+ [__link24]: https://docs.rs/cachet/0.7.2/cachet/?search=telemetry::handler::CacheOperationEvent
  [__link3]: https://docs.rs/cachet_tier/0.2.4/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.2.4/cachet_tier/?search=DynamicCache
- [__link5]: https://docs.rs/cachet/0.7.1/cachet/?search=InsertPolicy
+ [__link5]: https://docs.rs/cachet/0.7.2/cachet/?search=InsertPolicy
  [__link6]: https://docs.rs/tick/0.3.4/tick/?search=Clock
- [__link7]: https://docs.rs/cachet/0.7.1/cachet/?search=Cache
- [__link8]: https://docs.rs/cachet/0.7.1/cachet/?search=CacheBuilder
+ [__link7]: https://docs.rs/cachet/0.7.2/cachet/?search=Cache
+ [__link8]: https://docs.rs/cachet/0.7.2/cachet/?search=CacheBuilder
  [__link9]: https://docs.rs/cachet_tier/0.2.4/cachet_tier/?search=CacheEntry

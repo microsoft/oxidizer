@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.5] - 2026-06-18
+
+- 🔧 Maintenance
+
+  - technical release
+
 ## [0.5.4] - 2026-06-11
 
 - 🔧 Maintenance

@@ -79,7 +79,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "anyspawn"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "criterion",
  "futures",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "anyspawn_azure"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyspawn",
  "async-trait",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1230,7 +1230,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyspawn",
  "bytes",

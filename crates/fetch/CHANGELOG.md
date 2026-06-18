@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.3] - 2026-06-18
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.5` of `anyspawn`
+
 ## [0.11.2] - 2026-06-18
 
 - 🔧 Maintenance
