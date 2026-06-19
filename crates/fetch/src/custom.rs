@@ -208,7 +208,7 @@ impl HttpClient {
 
         let transport = Transport {
             runtime_name: runtime.into(),
-            transport_name: transport.into(),
+            name: transport.into(),
             clock: deps.clock.clone(),
             global_pool: deps.global_pool.clone(),
             isolation,
@@ -238,11 +238,8 @@ type TransportFn = Arc<dyn Fn(ClientOptions, Meter, PoolIndex) -> TransportHandl
 pub(crate) struct Transport {
     #[thread_aware(skip)]
     runtime_name: Cow<'static, str>,
-    // The field genuinely names the transport dimension; the prefix overlap with
-    // the struct name is incidental.
     #[thread_aware(skip)]
-    #[expect(clippy::struct_field_names, reason = "names the fetch.transport dimension")]
-    transport_name: Cow<'static, str>,
+    name: Cow<'static, str>,
     inner: thread_aware::Arc<TransportFn, PerCore>,
     clock: Clock,
     global_pool: GlobalPool,
@@ -254,12 +251,12 @@ impl Transport {
         self.inner.as_ref()(options, meter, index)
     }
 
-    pub(crate) fn runtime(&self) -> &str {
+    pub(crate) fn runtime(&self) -> &Cow<'static, str> {
         &self.runtime_name
     }
 
-    pub(crate) fn transport(&self) -> &str {
-        &self.transport_name
+    pub(crate) fn name(&self) -> &Cow<'static, str> {
+        &self.name
     }
 
     pub(crate) fn clock(&self) -> &Clock {
