@@ -608,3 +608,5 @@ u32
 POV
 lossy
 unrounded
+unpadded
+unyielded

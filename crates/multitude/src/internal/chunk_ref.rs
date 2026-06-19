@@ -4,10 +4,8 @@
 //! [`ChunkRef`] — a RAII handle for a single strong reference on a
 //! [`SharedChunk`].
 //!
-//! Centralizes the "+1 on a chunk that must be released exactly once,
-//! even on panic" pattern used by smart pointers and in-flight slot
-//! initialization. One machine word, `!Send`/`!Sync`, and inhibits
-//! implicit `Copy`/`Clone` so the +1 ownership is linear.
+//! Centralizes linear "+1" chunk ownership used by smart pointers and
+//! in-flight slot initialization.
 
 use core::marker::PhantomData;
 use core::mem;
@@ -15,7 +13,6 @@ use core::ptr::NonNull;
 
 use allocator_api2::alloc::Allocator;
 
-use super::chunk::Chunk;
 use super::shared_chunk::SharedChunk;
 
 /// Owns a single strong reference on a [`SharedChunk`]; releases the
@@ -65,32 +62,7 @@ impl<A: Allocator + Clone> ChunkRef<A> {
         }
     }
 
-    /// Bumps the strong refcount on the chunk containing `value` and
-    /// returns a [`ChunkRef`] owning the new +1.
-    ///
-    /// # Safety
-    ///
-    /// Same as [`Self::from_value_ptr`], plus caller must already hold
-    /// a live strong reference on the chunk.
-    #[inline]
-    pub(crate) unsafe fn clone_from_value_ptr<T: ?Sized>(value: NonNull<T>) -> Self {
-        // SAFETY: see from_value_ptr; caller's pre-existing +1 prevents
-        // teardown races.
-        unsafe {
-            let header = SharedChunk::<A>::header_from_value_ptr(value.cast::<u8>());
-            let chunk_fat = SharedChunk::<A>::header_to_fat(header.as_ptr());
-            let chunk = NonNull::new_unchecked(chunk_fat);
-            chunk.as_ref().inc_ref();
-            Self {
-                chunk,
-                _phantom: PhantomData,
-            }
-        }
-    }
-
-    /// Cancels release-on-drop and returns the raw chunk pointer with
-    /// the +1 still live. Use when ownership of the +1 is being
-    /// handed to another holder (e.g. a freshly-constructed `Box`).
+    /// Cancels release-on-drop and returns the chunk pointer with +1 live.
     #[inline]
     pub(crate) fn forget(self) -> NonNull<SharedChunk<A>> {
         let chunk = self.chunk;

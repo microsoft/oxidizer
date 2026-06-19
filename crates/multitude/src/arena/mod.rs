@@ -319,26 +319,20 @@ impl<A: Allocator + Clone> Arena<A> {
         self.relocations.set(self.relocations.get() + 1);
     }
 
-    /// Reset the arena to a fresh state, ready for a new allocation phase.
+    /// Reset the arena's local-chunk state for a new allocation phase:
+    /// the current local chunk and all retired local chunks are released
+    /// (running any pending drop entries) and their bytes returned to the
+    /// chunk cache.
     ///
     /// Given that this takes `&mut self`, the borrow checker ensures no
-    /// outstanding simple references can still be live. Outstanding `Arc`s
-    /// from shared chunks continue to hold their backing chunks alive
-    /// independently.
-    ///
-    /// The reset is lazy: the current chunk slots are returned to the
-    /// empty state and a fresh chunk is acquired on the first subsequent
-    /// allocation, mirroring the lazy semantics of [`Self::new`].
+    /// outstanding simple references can still be live. The currently
+    /// installed shared chunk is **not** detached or rewound — shared
+    /// allocations continue on it — and outstanding `Arc`s from shared
+    /// chunks keep their backing chunks alive independently.
     #[cold]
     pub fn reset(&mut self) {
-        // Reconcile the surplus on the current shared chunk before
-        // the mutator's Drop fires its own dec_ref — keeps the
-        // chunk's atomic refcount in sync with the number of escaped
-        // handles.
-        self.reconcile_shared_surplus();
         self.retired_local.clear();
         *self.current_local.get_mut() = ChunkMutator::<LocalChunk<A>>::empty();
-        *self.current_shared.get_mut() = ChunkMutator::<SharedChunk<A>>::empty();
     }
 
     /// Returns a [`ZerocopyView`](crate::zerocopy::ZerocopyView)
@@ -381,24 +375,19 @@ impl<A: Allocator + Clone> Arena<A> {
         self.provider.config().max_normal_alloc()
     }
 
-    /// True iff a shared-chunk allocation request of `min_payload` bytes
-    /// must be routed to a one-shot oversized chunk instead of the normal
-    /// size-class pool. Callers that detect this case should use
-    /// [`Self::alloc_oversized_shared_with`] rather than
-    /// [`Self::refill_shared`].
+    /// True iff an allocation request of `min_payload` bytes must be routed
+    /// to a one-shot oversized chunk instead of the normal size-class pool.
+    /// Callers that detect this case should use the matching oversized path
+    /// ([`Self::alloc_oversized_shared_with`] /
+    /// [`Self::alloc_oversized_local_with`]) rather than the normal refill.
     ///
-    /// `ArenaBuilder` caps `max_normal_alloc` at `max_bump_extent`
-    /// (`MAX_CHUNK_BYTES - header_size`), so `min_payload <=
-    /// max_normal_alloc` always implies `header + min_payload <=
-    /// MAX_CHUNK_BYTES` — a single threshold check is enough.
+    /// The threshold is the same for local and shared chunks: `ArenaBuilder`
+    /// caps `max_normal_alloc` at `max_bump_extent` (`MAX_CHUNK_BYTES -
+    /// header_size`), so `min_payload <= max_normal_alloc` always implies
+    /// `header + min_payload <= MAX_CHUNK_BYTES` — a single threshold check
+    /// is enough for both flavors.
     #[inline]
-    pub(crate) fn is_oversized_shared(&self, min_payload: usize) -> bool {
-        min_payload > self.max_normal_alloc()
-    }
-
-    /// Local mirror of [`Self::is_oversized_shared`].
-    #[inline]
-    pub(crate) fn is_oversized_local(&self, min_payload: usize) -> bool {
+    pub(crate) fn is_oversized(&self, min_payload: usize) -> bool {
         min_payload > self.max_normal_alloc()
     }
 
@@ -444,7 +433,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `min_payload` bytes. The previous mutator is dropped immediately —
     /// any outstanding `Arc`s independently keep the prior chunk alive.
     ///
-    /// The caller must have verified `!self.is_oversized_shared(min_payload)`
+    /// The caller must have verified `!self.is_oversized(min_payload)`
     /// before invoking this; oversized requests must go through
     /// [`Self::alloc_oversized_shared_with`] so they don't replace (and
     /// thus waste) the current chunk.
@@ -461,19 +450,15 @@ impl<A: Allocator + Clone> Arena<A> {
         // the replacement so a now-unreferenced chunk frees its bytes and
         // lets the new reservation reuse the budget.
         self.current_shared.drop_replace(ChunkMutator::<SharedChunk<A>>::empty());
-        // The previous `drop_replace` may have run user-supplied drop
-        // shims (chunk teardown). Those can re-enter the arena via
-        // `alloc_arc`/`alloc_box` which call `refill_shared`
-        // recursively and install a fresh chunk into `current_shared`.
-        // Honor that installation as-is: returning `Ok` lets the
-        // caller's retry loop re-attempt the allocation against the
-        // reentry-installed chunk. If it doesn't fit `min_payload`,
-        // the caller will simply call us again and we'll reconcile +
-        // replace that chunk in turn (its own `local_shared_count`
-        // already tracks any nested handouts).
-        if self.current_shared.borrow().chunk_ptr().is_some() {
-            return Ok(());
-        }
+        // Unlike `refill_local`, this `drop_replace` cannot re-enter the
+        // arena: shared chunks register no drop entries, and a refcount-zero
+        // shared chunk is cached (never deallocated) here, so its teardown
+        // runs no user code. `current_shared` is therefore always empty at
+        // this point.
+        debug_assert!(
+            self.current_shared.borrow().chunk_ptr().is_none(),
+            "shared drop_replace cannot install a chunk: shared teardown runs no user code",
+        );
         let new_chunk = self.provider.acquire_shared(min_payload, self.next_shared_class.get())?;
         // Pre-credit a large surplus of refs on the new chunk so the
         // per-allocation hot path can just bump a non-atomic local

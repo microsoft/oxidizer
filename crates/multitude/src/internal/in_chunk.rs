@@ -6,29 +6,18 @@
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
-/// A non-null, well-aligned pointer that — by construction — addresses
-/// storage inside the payload of a live arena chunk (with one narrow
-/// exception for ZSTs, see below).
-///
-/// `InChunk<T>` is the fundamental "I came from the allocator" pointer
-/// abstraction. The rest of the crate carries these around instead of raw
-/// `NonNull<T>` so that the difference between "any pointer" and "a pointer
-/// the allocator handed out" is visible in the type system.
+/// A non-null, well-aligned pointer produced by the chunk allocator.
 ///
 /// # Invariants
 ///
 /// - `self.ptr` is non-null and well-aligned for `T`.
-/// - If `core::mem::size_of_val(&*self.ptr) > 0`, the pointed-to region lies
-///   entirely within the payload of an arena chunk whose lifetime exceeds the
-///   use of this `InChunk`. (Liveness is enforced externally by the holder of
-///   the chunk's `Arc`.)
+/// - If the pointed-to region has nonzero size, it lies entirely within the
+///   payload of a live arena chunk.
 /// - For zero-sized values (ZSTs and empty slices) the pointer is permitted
 ///   to be a dangling, well-aligned non-null address. There is no payload
 ///   storage to reference in that case.
 ///
-/// `InChunk` is `Copy` because copying a pointer cannot violate any of the
-/// above. Mutability and aliasing discipline are enforced by the wrappers
-/// (`Uninit`, `UninitDrop`, `ArenaBuf`, etc.) that consume `InChunk`s.
+/// Aliasing discipline is enforced by wrappers that consume `InChunk`.
 pub(crate) struct InChunk<T: ?Sized> {
     ptr: NonNull<T>,
     _phantom: PhantomData<*const T>,
@@ -47,9 +36,7 @@ impl<T: ?Sized> Copy for InChunk<T> {}
 impl<T: ?Sized> InChunk<T> {
     /// Wraps a raw `NonNull<T>` that satisfies the type invariants above.
     ///
-    /// This constructor is `pub(super)` so only sibling modules in
-    /// `internal/` (notably `ChunkMutator`) can mint `InChunk` values; the
-    /// rest of the crate may only obtain them through allocator outputs.
+    /// Only sibling internal modules can mint `InChunk` values.
     #[inline]
     pub(super) fn from_raw(ptr: NonNull<T>) -> Self {
         Self {
@@ -95,9 +82,8 @@ impl InChunk<u8> {
     /// Builds an `InChunk<[T]>` describing `len` consecutive `T`s starting at
     /// this byte address.
     ///
-    /// The caller (always `ChunkMutator`) is responsible for ensuring that
-    /// the address is aligned for `T` and that `len * size_of::<T>()` bytes
-    /// of valid in-chunk storage start here.
+    /// Caller ensures alignment for `T` and enough in-chunk storage for `len`
+    /// elements.
     #[inline]
     pub(crate) fn into_slice<T>(self, len: usize) -> InChunk<[T]> {
         let slice = NonNull::slice_from_raw_parts(self.ptr.cast::<T>(), len);

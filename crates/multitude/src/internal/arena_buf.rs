@@ -3,16 +3,10 @@
 
 //! Growable, arena-backed buffer of `T`.
 //!
-//! `ArenaBuf<T>` is the internal storage primitive that backs the public
-//! `Vec<'a, T, A>`, `String<'a, A>`, and `Utf16String<'a, A>` types. It owns
-//! an in-chunk pointer plus a length and capacity, and exposes safe slice
-//! accessors. Growth (in-place when possible, copy-to-new-allocation
-//! otherwise) is mediated by [`ChunkMutator`](super::ChunkMutator) so this
-//! type stays free of allocator concerns.
-//!
-//! All `unsafe` related to the `(ptr, len, cap)` invariant of an
-//! arena-backed buffer lives in this file. Higher layers (`vec/*`,
-//! `strings/*`) compose `ArenaBuf` via its safe methods.
+//! Backing storage for `Vec<'a, T, A>`, `String<'a, A>`, and
+//! `Utf16String<'a, A>`. Growth is mediated by
+//! [`ChunkMutator`](super::chunk_mutator::ChunkMutator); this file owns the unsafe
+//! `(ptr, len, cap)` invariant.
 
 use core::iter::FusedIterator;
 use core::marker::PhantomData;
@@ -43,10 +37,8 @@ impl<T> ArenaBuf<'_, T> {
     ///
     /// # Safety
     ///
-    /// The `(ptr, len, cap)` triple must satisfy the type's invariants for
-    /// some live arena chunk that outlives `'a` — e.g. parts taken from
-    /// another `ArenaBuf` (possibly reinterpreted, as in
-    /// [`Vec::into_flattened`](crate::vec::Vec::into_flattened)).
+    /// `(ptr, len, cap)` must satisfy the type invariants for storage in a
+    /// live arena chunk that outlives `'a`.
     #[inline]
     pub(crate) const unsafe fn from_raw_parts(ptr: NonNull<T>, len: usize, cap: usize) -> Self {
         Self {
@@ -59,9 +51,8 @@ impl<T> ArenaBuf<'_, T> {
 }
 
 impl<'a, T> ArenaBuf<'a, T> {
-    /// Creates an empty buffer with no backing storage. ZSTs are
-    /// initialized with `cap = usize::MAX` since no real storage is
-    /// ever needed for them.
+    /// Creates an empty buffer. ZST buffers use `cap = usize::MAX`
+    /// because they need no backing storage.
     #[inline]
     pub(crate) const fn new() -> Self {
         let cap = if mem::size_of::<T>() == 0 { usize::MAX } else { 0 };
@@ -171,10 +162,8 @@ impl<'a, T> ArenaBuf<'a, T> {
         unsafe { self.replace_buffer_raw(new_ptr, new_cap) };
     }
 
-    /// Raw-pointer variant of [`Self::replace_buffer`]. Used by the
-    /// oversized-chunk growth path in [`crate::vec::Vec`], where the
-    /// fresh reservation comes from a temporary [`ChunkMutator`] whose
-    /// ticket lifetime can't be rebound to `'a` through the public API.
+    /// Raw-pointer variant of [`Self::replace_buffer`] for oversized
+    /// growth through a temporary [`ChunkMutator`](super::chunk_mutator::ChunkMutator).
     ///
     /// # Safety
     ///
@@ -329,12 +318,8 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// Splits the buffer at `at`, keeping `[0, at)` in `self` and
     /// returning a new buffer that owns `[at, len)`.
     ///
-    /// The returned buffer shares the same chunk storage as `self`; no
-    /// elements are copied. After the split, `self`'s capacity is capped
-    /// at `at` (so a later push reallocates rather than overwriting the
-    /// tail), and the tail buffer covers the remaining capacity. This is
-    /// sound because chunk storage is reclaimed only at arena teardown,
-    /// which outlives both buffers (lifetime `'a`).
+    /// No elements are copied. `self.cap` is capped at `at`, and the returned
+    /// tail owns the remaining capacity in the same arena chunk.
     ///
     /// Caller must ensure `at <= len`.
     #[inline]
@@ -368,13 +353,9 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// Attempts to absorb `other`'s storage in O(1) when it directly
     /// abuts the end of `self`'s storage in the same chunk.
     ///
-    /// Succeeds only when `self` is exactly full (`len == cap`, so there
-    /// is no uninitialized gap before `other`) and `other`'s buffer
-    /// begins exactly at `self`'s one-past-the-end address. On success,
-    /// `self` grows to cover `other`'s elements and capacity, and `other`
-    /// is reset to empty without dropping its elements (ownership moves
-    /// to `self`). Returns `false` (leaving both buffers untouched) when
-    /// the buffers are not adjacent. Not used for ZSTs.
+    /// Succeeds only when `self` is full and `other` starts at `self`'s
+    /// one-past-end address. On success, `self` owns both ranges and
+    /// `other` is reset to empty without dropping elements.
     #[inline]
     pub(crate) fn try_absorb_adjacent(&mut self, other: &mut Self) -> bool {
         debug_assert!(mem::size_of::<T>() != 0, "try_absorb_adjacent: not for ZSTs");
@@ -382,15 +363,8 @@ impl<'a, T> ArenaBuf<'a, T> {
             return false;
         }
         let self_end = self.ptr.as_ptr().wrapping_add(self.cap);
-        // The exact pointer-equality test below is also a proof that `other`
-        // lives in the *same chunk* as `self` (so `self.ptr`'s chunk-wide
-        // provenance legitimately covers the absorbed region). A distinct
-        // chunk's payload always begins `header_size > 0` bytes after its
-        // base, and chunk allocations never overlap, so a buffer in another
-        // chunk can never start exactly at `self`'s one-past-the-end address:
-        // that would require the other chunk's base to fall *inside* `self`'s
-        // chunk. Hence `ptr::eq(self_end, other.ptr)` can only hold when both
-        // buffers were carved from one chunk's bump region.
+        // Pointer equality proves same-chunk adjacency: another chunk's
+        // payload cannot begin exactly at this chunk's one-past-end address.
         if !ptr::eq(self_end.cast_const(), other.ptr.as_ptr().cast_const()) {
             return false;
         }
@@ -433,25 +407,14 @@ impl<'a, T> ArenaBuf<'a, T> {
         }
     }
 
-    /// Returns an owning, double-ended iterator that yields the live
-    /// elements in order, leaving the buffer empty. The iterator's
-    /// `Drop` drops any elements that were not yielded. The iterator
-    /// is bound to the arena lifetime `'a` of the buffer.
+    /// Returns an owning iterator over the live elements and leaves the
+    /// buffer empty. Dropping the iterator drops any unyielded elements.
     ///
     /// # Caller contract
     ///
-    /// The returned [`DrainAll`] is deliberately bound to the arena
-    /// lifetime `'a` rather than to the `&mut self` borrow, so that an
-    /// owning [`IntoIter`](crate::vec::IntoIter) can hold it past the
-    /// `ManuallyDrop<Vec>` that produced it. Because the borrow checker
-    /// therefore does **not** tie the iterator to this buffer, the
-    /// caller MUST NOT touch `self` (push, grow, drain again, drop the
-    /// elements, etc.) until the returned iterator has been fully
-    /// consumed or dropped: the iterator keeps a *copy* of `self.ptr`
-    /// and still logically owns `[0, len)`, so any concurrent write or
-    /// re-read of those slots would alias and double-own the elements.
-    /// All current callers consume the iterator immediately and never
-    /// reuse the buffer afterwards.
+    /// [`DrainAll`] is bound to arena lifetime `'a`, not the `&mut self`
+    /// borrow. The caller must not touch `self` until the iterator is
+    /// consumed or dropped, because the iterator owns `[0, len)`.
     #[inline]
     pub(crate) fn drain_all(&mut self) -> DrainAll<'a, T> {
         let len = self.len;
@@ -467,9 +430,7 @@ impl<'a, T> ArenaBuf<'a, T> {
     }
 }
 
-/// Owning iterator over every element of an [`ArenaBuf`], in order.
-/// Bound to the arena lifetime `'a` rather than to the buffer that
-/// produced it, so the iterator can outlive the `ArenaBuf`.
+/// Owning iterator over an [`ArenaBuf`]'s live elements.
 pub(crate) struct DrainAll<'a, T> {
     ptr: NonNull<T>,
     head: usize,

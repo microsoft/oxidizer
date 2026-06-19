@@ -1513,18 +1513,21 @@ mod coverage_more {
     }
 
     #[test]
-    #[should_panic(expected = "allocator returned AllocError")]
-    // Skipped under Miri: the test must register `u16::MAX + 1` drop
-    // entries to trigger the overflow panic, and Miri's per-allocation
-    // overhead pushes this past the 10-minute CI budget. The panic is a
-    // runtime-checked assertion, not a memory-safety property, so Miri
-    // adds no value beyond what `cargo test` already verifies.
+    // Skipped under Miri: building + dropping `u16::MAX + 1` elements
+    // (~65K) exceeds Miri's test budget. The lifted restriction is a
+    // runtime property, not a memory-safety one, so native + cargo-careful
+    // runs cover it.
     #[cfg_attr(miri, ignore)]
-    fn vec_into_box_panics_when_drop_slice_is_too_long_for_entry() {
+    fn vec_into_box_drop_slice_longer_than_u16_succeeds() {
+        // `Box<[T]>` drops via `drop_in_place::<[T]>` (no `u16`-counted
+        // drop entry), so a `T: Drop` slice longer than `u16::MAX` freezes
+        // into a `Box` without rejection.
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<Droppy>();
-        v.extend((0..=u16::MAX).map(|_| Droppy("many")));
-        let _ = v.into_boxed_slice();
+        let len = (u16::MAX as usize) + 1;
+        v.extend((0..len).map(|_| Droppy("many")));
+        let b = v.into_boxed_slice();
+        assert_eq!(b.len(), len);
     }
 
     #[test]

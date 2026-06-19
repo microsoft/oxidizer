@@ -6,15 +6,15 @@
 
 use multitude::Arena;
 
-// is_oversized_shared: threshold == max_normal_alloc routes via normal path
+// is_oversized: threshold == max_normal_alloc routes via normal path
 #[test]
-fn is_oversized_shared_routes_at_threshold_via_normal() {
+fn is_oversized_routes_shared_at_threshold_via_normal() {
     const MNA: usize = 4 * 1024;
     let arena = Arena::builder().max_normal_alloc(MNA).build();
     let before_normal = arena.stats().normal_shared_chunks_allocated;
     let before_oversized = arena.stats().oversized_shared_chunks_allocated;
-    // wcp = MNA (size MNA-1 + align 1).
-    let _arc = arena.alloc_arc([0_u8; MNA - 1]);
+    // wcp = MNA exactly: strong prefix (4) + value (MNA-8) + arc block align (4).
+    let _arc = arena.alloc_arc([0_u8; MNA - 8]);
     let after_normal = arena.stats().normal_shared_chunks_allocated;
     let after_oversized = arena.stats().oversized_shared_chunks_allocated;
     assert!(after_normal > before_normal);
@@ -25,11 +25,12 @@ fn is_oversized_shared_routes_at_threshold_via_normal() {
 }
 
 #[test]
-fn is_oversized_shared_routes_above_threshold_via_oversized() {
+fn is_oversized_routes_shared_above_threshold_via_oversized() {
     const MNA: usize = 4 * 1024;
     let arena = Arena::builder().max_normal_alloc(MNA).build();
     let before_oversized = arena.stats().oversized_shared_chunks_allocated;
-    let _arc = arena.alloc_arc([0_u8; MNA]); // wcp = MNA + 1
+    // wcp = MNA + 1: strong prefix (4) + value (MNA-7) + arc block align (4).
+    let _arc = arena.alloc_arc([0_u8; MNA - 7]);
     let after_oversized = arena.stats().oversized_shared_chunks_allocated;
     assert!(
         after_oversized > before_oversized,
@@ -38,7 +39,7 @@ fn is_oversized_shared_routes_above_threshold_via_oversized() {
 }
 
 #[test]
-fn is_oversized_local_routes_at_threshold_via_normal() {
+fn is_oversized_routes_local_at_threshold_via_normal() {
     const MNA: usize = 4 * 1024;
     let arena = Arena::builder().max_normal_alloc(MNA).build();
     let before_normal = arena.stats().normal_local_chunks_allocated;
@@ -52,7 +53,7 @@ fn is_oversized_local_routes_at_threshold_via_normal() {
 }
 
 #[test]
-fn is_oversized_local_routes_above_threshold_via_oversized() {
+fn is_oversized_routes_local_above_threshold_via_oversized() {
     const MNA: usize = 4 * 1024;
     let arena = Arena::builder().max_normal_alloc(MNA).build();
     let before_oversized = arena.stats().oversized_local_chunks_allocated;

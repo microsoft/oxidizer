@@ -46,15 +46,20 @@ fn alloc_box_of_maybeuninit_assume_init_drops_inner() {
     assert_eq!(counter.load(Ordering::Relaxed), 1);
 }
 
-/// Arc variant of the panic-on-misuse fix.
-#[cfg(not(miri))]
+/// With per-`Arc` reference counting, `alloc_arc(MaybeUninit::new(x))`
+/// followed by `assume_init` works correctly: `Arc::drop` runs the inner
+/// value's destructor eagerly on the last clone (no chunk drop entry is
+/// involved), so the previously-unsupported pattern is now sound.
 #[test]
-#[should_panic(expected = "no drop entry reserved")]
-fn alloc_arc_of_maybeuninit_assume_init_panics_when_unsupported() {
+fn alloc_arc_of_maybeuninit_assume_init_drops_inner() {
     let counter = StdArc::new(AtomicUsize::new(0));
-    let arena = Arena::new();
-    let arc_uninit = arena.alloc_arc(MaybeUninit::new(DropCounter(counter.clone())));
-    let _arc = unsafe { arc_uninit.assume_init() };
+    {
+        let arena = Arena::new();
+        let arc_uninit = arena.alloc_arc(MaybeUninit::new(DropCounter(counter.clone())));
+        let arc = unsafe { arc_uninit.assume_init() };
+        drop(arc);
+    }
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
 }
 
 /// `arena.alloc_uninit_arc::<U>()` followed by `assume_init` reserves the
@@ -172,10 +177,12 @@ fn zst_shared_handouts_advance_cursor() {
     let bx2 = arena.alloc_box(());
     assert_ne!(bx1.as_ptr(), bx2.as_ptr(), "ZST Box handouts must get distinct addresses");
 
-    // Many create-and-drop cycles force the chunk to fill (1 byte each)
-    // and refill. Pre-fix the cursor never advanced, so this pattern
-    // could drive the live chunk's atomic refcount to zero.
-    for _ in 0..2_000 {
+    // A few hundred create-and-drop cycles still force the (512-byte
+    // starter) chunk to fill (1 byte each) and refill at least once. Pre-fix
+    // the cursor never advanced, so this pattern could drive the live
+    // chunk's atomic refcount to zero. A few hundred iterations exercise the
+    // refill the tag now forces without a multi-thousand Miri loop.
+    for _ in 0..600 {
         drop(arena.alloc_arc(()));
         drop(arena.alloc_box(()));
     }

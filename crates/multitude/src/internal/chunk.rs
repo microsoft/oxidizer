@@ -5,18 +5,9 @@
 
 /// A contiguous block of memory that an arena carves bump allocations out of.
 ///
-/// Both [`LocalChunk`](super::LocalChunk) and [`SharedChunk`](super::SharedChunk)
-/// implement this trait. They differ in how the chunk and its allocations are
-/// owned and shared:
-///
-/// - `LocalChunk` is used for allocations whose lifetime is tied to the arena
-///   itself and never crosses thread boundaries; no synchronization is needed.
-/// - `SharedChunk` is used for allocations whose lifetime can outlive the
-///   arena (reference-counted handles), and uses atomics for cross-thread
-///   refcounting.
-///
-/// Implementors are dynamically-sized types: the struct ends with a `[u8]`
-/// payload that holds the actual bump-allocation buffer.
+/// Implemented by [`LocalChunk`](super::local_chunk::LocalChunk) and
+/// [`SharedChunk`](super::shared_chunk::SharedChunk). Both are DSTs with a payload tail;
+/// local chunks are arena-thread confined, shared chunks use atomic refcounts.
 pub(crate) trait Chunk {
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     fn capacity(&self) -> usize;
@@ -33,12 +24,4 @@ pub(crate) trait Chunk {
     /// responsible for tearing down the chunk (running drop entries and
     /// routing the backing memory back to the provider or deallocator).
     fn dec_ref(&self) -> bool;
-
-    /// Returns the number of drop entries currently stored at the tail of the
-    /// chunk.
-    fn drop_entry_count(&self) -> usize;
-
-    /// Sets the number of drop entries currently stored at the tail of the
-    /// chunk.
-    fn set_drop_entry_count(&self, count: usize);
 }

@@ -83,6 +83,15 @@ impl<A: Allocator + Clone> Arena<A> {
         // recovery invariant used by the smart pointers' `Drop`.
         let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError)?.max(elem_align);
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
+        // `total` is an exact reservation size, not a worst-case hint: unlike
+        // the slice paths (which permit over-aligned `T` and so add `elem_align`
+        // of front-padding slack to their routing hint), the const-assert above
+        // bounds `elem_align <= align_of::<usize>() <= value_align`. A fresh
+        // chunk's payload base is `value_align`-aligned, so an `elem_align`
+        // reservation on a freshly refilled chunk never consumes front padding.
+        // Routing/refilling with `total` therefore always yields a chunk into
+        // which the retry's `try_alloc_with_chunk(total, elem_align)` fits — no
+        // `total` vs `total + elem_align` boundary loop is possible here.
         loop {
             // Allocate `total` bytes aligned to `align_of::<T>()` so the
             // payload (at offset PREFIX_BYTES, a multiple of any align
@@ -94,7 +103,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 return Ok(payload);
             }
-            if self.is_oversized_shared(total) {
+            if self.is_oversized(total) {
                 return self.alloc_oversized_shared_with(total, |mutator, chunk_ptr| {
                     let (base, _chunk_unused) = mutator
                         .try_alloc_with_chunk(total, elem_align)
@@ -108,6 +117,69 @@ impl<A: Allocator + Clone> Arena<A> {
             self.refill_shared(total)?;
         }
     }
+}
+
+impl<A: Allocator + Clone> Arena<A> {
+    /// Strong-prefixed [`Arc`](crate::Arc) variant of
+    /// [`Self::impl_alloc_prefixed_shared`]: reserves a per-`Arc`
+    /// [`AtomicU32`](core::sync::atomic::AtomicU32) strong count and a
+    /// `usize` length metadata word immediately before the payload,
+    /// initializes the strong count to `1`, writes the length and the
+    /// payload, takes one chunk refcount for the new `Arc` family, and
+    /// returns a thin `NonNull<T>` to the first payload element.
+    ///
+    /// `T` must have `align_of::<T>() <= align_of::<usize>()`; see
+    /// module docs.
+    #[inline(always)]
+    pub(crate) fn impl_alloc_prefixed_shared_arc<T: Copy>(&self, src: &[T]) -> Result<NonNull<T>, AllocError> {
+        const {
+            assert!(
+                mem::align_of::<T>() <= mem::align_of::<usize>(),
+                "impl_alloc_prefixed_shared_arc: T's align must not exceed usize's align",
+            );
+        }
+        let len = src.len();
+        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid usize.
+        let payload_bytes = mem::size_of_val(src);
+        let bytes_needed = worst_case_arc_slice_payload::<T>(len);
+        loop {
+            // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`.
+            let reserved = unsafe { self.try_reserve_arc_slice_with_size::<T>(len, payload_bytes) };
+            if let Some((uninit, chunk_ptr)) = reserved {
+                let chunk_ref: ChunkRef<A> = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let slice_ptr = uninit.init_copy_from_slice_ptr(src);
+                let _ = chunk_ref.forget();
+                return Ok(slice_ptr.cast::<T>());
+            }
+            if self.is_oversized(bytes_needed) {
+                return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
+                    let (ticket, _chunk) = mutator
+                        .try_alloc_arc_slice::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit prefixed Arc payload");
+                    let chunk_ref: ChunkRef<A> = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let slice_ptr = ticket.init_copy_from_slice_ptr(src);
+                    let _ = chunk_ref.forget();
+                    slice_ptr.cast::<T>()
+                });
+            }
+            self.refill_shared(bytes_needed)?;
+        }
+    }
+}
+
+/// Worst-case byte budget for a strong-prefixed `Arc` slice/prefixed
+/// payload of `len` elements: per-`Arc` strong count + slice-length
+/// prefix + payload + front alignment slack. Shared by the `Arc<[T]>`,
+/// `Arc<str>`, and `ArcUtf16Str` allocation paths.
+#[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
+#[inline]
+pub(crate) fn worst_case_arc_slice_payload<T>(len: usize) -> usize {
+    use crate::internal::thin_dst;
+    let align = mem::align_of::<T>();
+    let value_bytes = mem::size_of::<T>().saturating_mul(len).max(1);
+    thin_dst::strong_prefix_bytes_for(align, mem::size_of::<usize>())
+        .saturating_add(value_bytes)
+        .saturating_add(thin_dst::arc_block_align(align))
 }
 
 /// Write the length prefix (unaligned `usize`) at `base` and copy
