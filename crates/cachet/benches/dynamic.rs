@@ -27,7 +27,7 @@ fn rt() -> Runtime {
 fn bench_dynamic_cache(c: &mut Criterion) {
     let rt = rt();
     let mut group = c.benchmark_group("dynamic_cache");
-    let session = Session::new();
+    let session = Session::new().no_stdout().no_file();
 
     // Baseline: MockCache wrapped normally (no dynamic dispatch)
     let static_get_name = "static_get";

@@ -20,7 +20,7 @@ fn get_uri() -> &'static str {
 }
 
 fn entry(c: &mut Criterion) {
-    let session = Session::new();
+    let session = Session::new().no_stdout().no_file();
     let mut group = c.benchmark_group("http_crate");
 
     let uri_allocs = session.operation("uri");
@@ -67,7 +67,7 @@ fn entry(c: &mut Criterion) {
     });
 
     group.finish();
-    session.print_to_stdout();
+    session.to_report().print_to_stdout();
 }
 
 criterion_group!(benches, entry);
