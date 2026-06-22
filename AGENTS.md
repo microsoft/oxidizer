@@ -71,3 +71,44 @@ wrong and it does not explain why we believe this access can never be out of bou
 
 This is good code: `self_span.get(self_offset..).expect("guarded by min() above to never exceed span length")` - this explains
 why we believe the operation can never cause an out of bounds access.
+
+### [docs/benchmarks.md](docs/benchmarks.md)
+
+Criterion benchmark design (single-threaded by default, elementary operations,
+`black_box`) plus the `Box::pin` → `pin!` exception on the measured path, and
+a pointer to the Callgrind chapter. Cross-links to `naming.md`.
+
+**Open this when**: adding or modifying any file in `packages/<pkg>/benches/`;
+deciding how to pin a future inside an `iter` closure.
+
+### [docs/callgrind-benchmarks.md](docs/callgrind-benchmarks.md)
+
+Deep reference for Callgrind / Gungraun instruction-count benchmarks: which
+operations to cover, scenario selection, the bench file template, Cargo.toml
+setup, Gungraun syntax gotchas, the Criterion-pairing convention, and how to
+interpret results.
+
+**Open this when**: adding a `*_cg.rs` benchmark file or deciding whether a hot
+path warrants Callgrind coverage.
+
+### [docs/naming.md](docs/naming.md)
+
+Naming conventions for benchmark files, Criterion groups, and Callgrind
+identifiers — the rules that keep wall-clock and instruction-count benchmarks
+in lockstep and prevent name collisions in `target/.../deps/`.
+
+**Open this when**: naming a new benchmark file, group, or function; pairing a
+Callgrind file with its Criterion counterpart.
+
+### [docs/performance.md](docs/performance.md)
+
+Workspace-wide performance principles: when to add `#[inline]`, the bias
+toward surgical interventions over architectural rewrites, preserving
+defensive runtime checks, staying idiomatic Rust, deprioritizing
+first-insert/teardown optimizations, the no-allocation-on-the-hot-path
+reminder, and the rule on justifying deviations from standard ecosystem
+patterns.
+
+**Open this when**: considering an `#[inline]` annotation; proposing or
+reviewing a performance optimization PR or issue; tempted to reach for a
+hand-rolled construct instead of an ecosystem default.
