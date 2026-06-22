@@ -25,9 +25,14 @@ dependencies = [
 
 [[package]]
 name = "alloc_tracker"
-version = "0.5.25"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70bc5b36f4124124cdeae56ea9527e8db3e90f7ac7382c0b7a07d780163629a4"
+checksum = "0160148c6badd4fb18605f8373adda8d89a43abcacf9a1b7868aa33643eacdb7"
+dependencies = [
+ "folo_utils",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "alloc_tracker"
