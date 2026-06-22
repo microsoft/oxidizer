@@ -17,7 +17,7 @@ use allocator_api2::alloc::{AllocError, Allocator};
 ///   ignoring the align-1 tail). The allocation size is rounded up to this.
 ///
 /// * `base_align` — the alignment of the allocation's **base address**,
-///   which may be much larger for shared chunks. This governs only
+///   which may be much larger for chunks. This governs only
 ///   `Layout::align`; the size is not rounded up to it.
 ///
 /// `base_align >= value_align` and both must be powers of two.
@@ -26,7 +26,12 @@ use allocator_api2::alloc::{AllocError, Allocator};
     reason = "LayoutError carries no payload; only the AllocError variant matters"
 )]
 #[inline]
-pub(crate) fn chunk_layout(header_size: usize, payload_size: usize, value_align: usize, base_align: usize) -> Result<Layout, AllocError> {
+pub(in crate::internal) fn chunk_layout(
+    header_size: usize,
+    payload_size: usize,
+    value_align: usize,
+    base_align: usize,
+) -> Result<Layout, AllocError> {
     debug_assert!(value_align.is_power_of_two(), "value_align must be a power of two");
     debug_assert!(base_align.is_power_of_two(), "base_align must be a power of two");
     debug_assert!(base_align >= value_align, "base_align must be >= value_align");
@@ -39,7 +44,7 @@ pub(crate) fn chunk_layout(header_size: usize, payload_size: usize, value_align:
 /// produced by [`chunk_layout`]. Used for both allocation and byte-budget
 /// accounting.
 #[inline]
-pub(crate) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_align: usize) -> Result<usize, AllocError> {
+pub(in crate::internal) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_align: usize) -> Result<usize, AllocError> {
     debug_assert!(value_align.is_power_of_two(), "value_align must be a power of two");
     let total = header_size.checked_add(payload_size).ok_or(AllocError)?;
     let mask = value_align - 1;
@@ -55,7 +60,7 @@ pub(crate) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_al
 /// freed and `AllocError` is returned.
 #[cfg_attr(test, mutants::skip)]
 #[inline]
-pub(crate) fn alloc_chunk_raw<A: Allocator>(
+pub(in crate::internal) fn alloc_chunk_raw<A: Allocator>(
     allocator: &A,
     header_size: usize,
     payload_size: usize,

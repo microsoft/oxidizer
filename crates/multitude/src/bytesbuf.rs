@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! `bytesbuf::mem::Memory` support backed by arena shared chunks.
+//! `bytesbuf::mem::Memory` support backed by arena chunks.
 //!
 //! # Usage
 //!
@@ -125,7 +125,7 @@ unsafe impl<A: Allocator + Clone + Send + Sync + 'static> BlockRefDynamic for Ar
         let prev = state.ref_count.fetch_add(1, atomic::Ordering::Relaxed);
         // A refcount that wraps back to zero would let a live `BlockRef` race
         // with the teardown in `drop`, causing a use-after-free. Mirror the
-        // crate's chunk refcounts (see `SharedChunk::inc_ref`) and abort.
+        // crate's chunk refcounts (see `Chunk::inc_ref`) and abort.
         if prev == usize::MAX {
             refcount_overflow();
         }

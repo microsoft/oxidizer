@@ -1604,11 +1604,221 @@ fn split_off_sibling_survives_oversized_growth_of_other_half() {
     assert!(sum > 0);
 
     // Drop the sibling explicitly: runs 2048 real destructors over the
-    // shared chunk's storage — must not be a use-after-free.
+    // chunk's storage — must not be a use-after-free.
     drop(tail);
     drop(head);
     drop(arena);
     // 4096 (initial) + 6144 (regrowth) Droppers were created and all
     // must have been dropped exactly once.
     assert_eq!(counter.load(Ordering::Relaxed), 4096 + 6144);
+}
+
+/// Zero-copy freeze: `into_boxed_slice` / `into_arc` reuse the `Vec`'s
+/// backing buffer in place (no allocation, no element copy).
+mod zero_copy_freeze {
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    use multitude::{Arc, Arena, Box};
+
+    #[test]
+    fn into_boxed_slice_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        v.extend([10, 20, 30, 40]);
+        let data_ptr = v.as_slice().as_ptr();
+        let b: Box<[u32]> = v.into_boxed_slice();
+        assert_eq!(&*b, &[10, 20, 30, 40]);
+        // The boxed slice must point at the very same storage.
+        assert_eq!(b.as_ptr().cast::<u32>(), data_ptr, "into_boxed_slice must not copy");
+    }
+
+    #[test]
+    fn into_arc_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u64>();
+        v.extend([1, 2, 3, 4, 5]);
+        let data_ptr = v.as_slice().as_ptr();
+        let a: Arc<[u64]> = Arc::from(v);
+        assert_eq!(&*a, &[1, 2, 3, 4, 5]);
+        assert_eq!(a.as_ptr().cast::<u64>(), data_ptr, "into_arc must not copy");
+        let a2 = a.clone();
+        assert!(Arc::ptr_eq(&a, &a2), "clone shares the same frozen payload");
+        assert_eq!(&*a2, &[1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn into_arc_slice_infallible_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u64>();
+        v.extend([9, 8, 7]);
+        let data_ptr = v.as_slice().as_ptr();
+        let a: Arc<[u64]> = v.into_arc_slice();
+        assert_eq!(&*a, &[9, 8, 7]);
+        assert_eq!(a.as_ptr().cast::<u64>(), data_ptr, "into_arc_slice must not copy");
+    }
+
+    #[test]
+    fn try_into_boxed_slice_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u16>();
+        v.extend([7_u16, 8, 9]);
+        let data_ptr = v.as_slice().as_ptr();
+        let b = v.try_into_boxed_slice().unwrap();
+        assert_eq!(&*b, &[7, 8, 9]);
+        assert_eq!(b.as_ptr().cast::<u16>(), data_ptr);
+    }
+
+    #[test]
+    fn frozen_drop_type_runs_each_destructor_exactly_once() {
+        let counter = AtomicUsize::new(0);
+        struct D<'a>(&'a AtomicUsize);
+        impl Drop for D<'_> {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let arena = Arena::new();
+        {
+            let mut v = arena.alloc_vec::<D<'_>>();
+            for _ in 0..32 {
+                v.push(D(&counter));
+            }
+            let b = v.into_boxed_slice();
+            assert_eq!(b.len(), 32);
+            // Nothing dropped yet.
+            assert_eq!(counter.load(Ordering::Relaxed), 0);
+            drop(b);
+            assert_eq!(counter.load(Ordering::Relaxed), 32, "each element dropped exactly once");
+        }
+    }
+
+    #[test]
+    fn frozen_arc_outlives_arena_and_crosses_threads() {
+        let arc: Arc<[i32]> = {
+            let arena = Arena::new();
+            let mut v = arena.alloc_vec::<i32>();
+            v.extend(0..100);
+            let a = Arc::from(v);
+            // Arena drops here; the Arc must keep its chunk alive.
+            a
+        };
+        let clone = arc.clone();
+        let sum: i32 = thread::spawn(move || clone.iter().copied().sum::<i32>()).join().unwrap();
+        assert_eq!(sum, (0..100).sum::<i32>());
+        assert_eq!(arc.len(), 100);
+        assert_eq!(arc[99], 99);
+    }
+
+    #[test]
+    fn frozen_arc_drop_type_outlives_arena() {
+        let counter = StdArc::new(AtomicUsize::new(0));
+        struct D(StdArc<AtomicUsize>);
+        impl Drop for D {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let frozen: Box<[D]> = {
+            let arena = Arena::new();
+            let mut v = arena.alloc_vec::<D>();
+            for _ in 0..10 {
+                v.push(D(counter.clone()));
+            }
+            v.into_boxed_slice()
+        };
+        assert_eq!(counter.load(Ordering::Relaxed), 0, "no drops while frozen and arena gone");
+        drop(frozen);
+        assert_eq!(counter.load(Ordering::Relaxed), 10);
+    }
+
+    #[test]
+    fn split_off_tail_freezes_correctly_via_fallback() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        v.extend(0..10);
+        let tail = v.split_off(4);
+        // The tail has no freeze prefix; freezing copies into a fresh buffer.
+        let b = tail.into_boxed_slice();
+        assert_eq!(&*b, &[4, 5, 6, 7, 8, 9]);
+        // The head still freezes in place.
+        let head_ptr = v.as_slice().as_ptr();
+        let hb = v.into_boxed_slice();
+        assert_eq!(&*hb, &[0, 1, 2, 3]);
+        assert_eq!(hb.as_ptr().cast::<u32>(), head_ptr, "head retains its freeze prefix");
+    }
+
+    #[test]
+    fn grown_vec_freezes_in_place_after_relocation() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec_with_capacity::<u32>(2);
+        // Force at least one relocation by exceeding the initial capacity.
+        v.extend(0..64);
+        let data_ptr = v.as_slice().as_ptr();
+        let a = Arc::from(v);
+        assert_eq!(a.len(), 64);
+        assert_eq!(a.as_ptr().cast::<u32>(), data_ptr, "relocated buffer still freezes in place");
+        assert_eq!(a[63], 63);
+    }
+
+    #[test]
+    fn empty_vec_freezes_to_empty_slice() {
+        let arena = Arena::new();
+        let v = arena.alloc_vec::<u32>();
+        let b = v.into_boxed_slice();
+        assert_eq!(b.len(), 0);
+        let v2 = arena.alloc_vec::<u32>();
+        let a: Arc<[u32]> = Arc::from(v2);
+        assert_eq!(a.len(), 0);
+    }
+}
+
+/// Zero-copy freeze when the buffer's chunk is no longer the arena's
+/// current chunk — exercising the atomic-`inc_ref` freeze path (as opposed
+/// to the current-chunk surplus path).
+mod zero_copy_freeze_retired {
+    use multitude::{Arc, Arena, Box};
+
+    #[test]
+    fn freeze_in_place_after_chunk_displaced() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u64>();
+        v.extend(0..8);
+        let data_ptr = v.as_slice().as_ptr();
+        // Force a refill so the Vec's chunk is retired (no longer current):
+        // a large allocation that cannot fit beside the Vec's buffer.
+        let _filler: &mut [u64] = arena.alloc_slice_fill_with(60_000 / 8, |i| i as u64);
+        let a: Arc<[u64]> = Arc::from(v);
+        assert_eq!(a.as_ptr().cast::<u64>(), data_ptr, "retired-chunk freeze stays in place");
+        assert_eq!(a.len(), 8);
+        assert_eq!(&*a, &[0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn freeze_oversized_backed_vec_in_place() {
+        let arena: Arena = Arena::builder().max_normal_alloc(4096).build();
+        // A capacity above max_normal_alloc lands in a dedicated oversized
+        // chunk (retired, never current).
+        let mut v = arena.alloc_vec_with_capacity::<u32>(2048);
+        v.extend(0..2048);
+        let data_ptr = v.as_slice().as_ptr();
+        let b: Box<[u32]> = v.into_boxed_slice();
+        assert_eq!(b.as_ptr().cast::<u32>(), data_ptr, "oversized freeze stays in place");
+        assert_eq!(b.len(), 2048);
+        assert_eq!(b[2047], 2047);
+    }
+
+    #[test]
+    fn retired_chunk_frozen_arc_outlives_arena() {
+        let arc: Arc<[u32]> = {
+            let arena = Arena::new();
+            let mut v = arena.alloc_vec::<u32>();
+            v.extend(0..16);
+            let _filler: &mut [u8] = arena.alloc_slice_fill_with(60_000, |_| 0u8);
+            Arc::from(v)
+        };
+        assert_eq!(arc.len(), 16);
+        assert_eq!(arc[15], 15);
+    }
 }

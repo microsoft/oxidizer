@@ -40,14 +40,13 @@ use cases. The main features that set `multitude` apart are:
 1. **Early Reclamation.** In many situations, `multitude` can reclaim memory from individual chunks as soon as their reference counts drop to zero,
    without waiting for the entire arena to be dropped. This allows for more efficient memory usage in long-running arenas with many short-lived allocations.
 
-1. **Smart Pointers Can Outlive the Arena.** The reference-counted smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
+1. **Smart Pointers Can Outlive the Arena.** The smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
    allowing for more flexible memory management and longer-lived data structures.
 
 1. **Drop Support.** `multitude` automatically runs `Drop` for allocated values at the appropriate time.
 
 1. **Uniformly Thin Smart Pointers.** `multitude`’s [`Arc<T>`][__link7] and [`Box<T>`][__link8] are **8 bytes** on 64-bit
-   for *every* `T`, including DST `T` such as `str`, `[U]`, and `dyn Trait`. DST metadata (slice length, vtable)
-   is stored unaligned in the chunk prefix, so `Vec<Arc<str>>` and similar collections are 2× denser than `Vec<std::sync::Arc<str>>`.
+   for *every* `T`.
 
 1. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`][__link9] and [`Vec`][__link10] which are growable collections that live in the arena.
 
@@ -57,10 +56,13 @@ use cases. The main features that set `multitude` apart are:
 1. **`format!`-style Macro.** `multitude` includes a [`format!`][__link12]-style macro that allows you to create formatted strings directly in the arena, avoiding intermediate allocations and copies.
 
 1. **UTF-16 Support.** With the `utf16` Cargo feature, `multitude` provides a parallel set of arena-resident UTF-16 string types
-   ([`ArcUtf16Str`][__link13], [`BoxUtf16Str`][__link14], [`Utf16String`][__link15]) and a [`format_utf16!`][__link16] macro for FFI / Windows / JS-engine
+   (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`][__link13]) and a [`format_utf16!`][__link14] macro for FFI / Windows / JS-engine
    interop without per-call transcoding at every boundary.
 
 1. **`#![no_std]` Support.** `multitude` can be used in `#![no_std]` environments, making it suitable for embedded systems and other resource-constrained contexts.
+
+See [`BUMPALO.md`][__link15]
+for a feature-by-feature comparison with [`bumpalo`][__link16].
 
 ## Example
 
@@ -113,7 +115,7 @@ references are the way to go.
 
 ### Smart Pointers
 
-Smart pointers ([`Arc`][__link17], [`Box`][__link18] and their `str` variations) work in a way similar to the like-named types
+Smart pointers ([`Arc`][__link17], [`Box`][__link18]) work in a way similar to the like-named types
 in the standard library, except that they reference addresses within an arena.
 
 ```rust
@@ -145,8 +147,7 @@ let h = std::thread::spawn(move || *shared);
 assert_eq!(42, h.join().unwrap());
 ```
 
-[`Box`][__link24] is a unique owner whose `Drop` runs `T::drop` immediately
-when the smart pointer is dropped and provides `&mut T` access, similar to
+[`Box`][__link24] is a unique owner that provides `&mut T` access, similar to
 [`alloc::boxed::Box`][__link25] but backed by the arena.
 
 ```rust
@@ -159,11 +160,11 @@ drop(v); // The vec drop runs here, freeing its heap buffer.
 
 ### Collections
 
-[`Vec`][__link26] and [`String`][__link27] are growable collections that live in
+[`Vec`][__link26], [`String`][__link27], and [`Utf16String`][__link28] are growable collections that live in
 the arena.
 
 Additionally, you can use an arena as
-the allocator for any type from the [`allocator-api2`][__link28] ecosystem
+the allocator for any type from the [`allocator-api2`][__link29] ecosystem
 (including `hashbrown::HashMap`).
 
 ```rust
@@ -184,27 +185,27 @@ assert_eq!(squares.as_slice(), &[1, 4, 9, 16, 25]);
 
 ### Freezing
 
-[`String`][__link29] and [`Vec`][__link30] are designed as **transient
+[`String`][__link30] and [`Vec`][__link31] are designed as **transient
 builders**. They carry a data pointer + length + capacity + arena reference.
 
 Once you’re done building, you can **freeze them** into immutable smart pointers:
 
-* [`String::into_boxed_str`][__link31] →
-  [`Box<str>`][__link32] (**8 bytes**, thin), or `Box::from(string)`.
+* [`String::into_boxed_str`][__link32] →
+  [`Box<str>`][__link33] (**8 bytes**, thin), or `Box::from(string)`.
   The freeze is **O(n)** — it copies the bytes into a compact,
   length-prefixed allocation so the resulting single pointer can outlive
-  the arena. (Like any [`Box`][__link33], it is `Send`/`Sync` only when the
+  the arena. (Like any [`Box`][__link34], it is `Send`/`Sync` only when the
   allocator `A` is.)
-* [`Vec::into_boxed_slice`][__link34] →
-  [`Box<[T]>`][__link35] (**8 bytes**, thin), or `Box::from(vec)`.
+* [`Vec::into_boxed_slice`][__link35] →
+  [`Box<[T]>`][__link36] (**8 bytes**, thin), or `Box::from(vec)`.
   The freeze is **O(n)** — it moves the elements into a fresh compact,
   length-prefixed allocation so the resulting single pointer can outlive
-  the arena. (Like any [`Box`][__link36], it is `Send`/`Sync` only when `T` and the
+  the arena. (Like any [`Box`][__link37], it is `Send`/`Sync` only when `T` and the
   allocator `A` are.)
-* `Arc::from(vec)` / `Arc::from(string)` → [`Arc<[T]>`][__link37] /
-  [`Arc<str>`][__link38], the shared, reference-counted freeze
+* `Arc::from(vec)` / `Arc::from(string)` → [`Arc<[T]>`][__link38] /
+  [`Arc<str>`][__link39], the shared, reference-counted freeze
   (mirroring `std`’s `From<Vec<T>> for Arc<[T]>`).
-* [`Vec::leak`][__link39] → `&mut [T]` (or `&*v.leak()` for `&[T]`)
+* [`Vec::leak`][__link40] → `&mut [T]` (or `&*v.leak()` for `&[T]`)
   borrowed for the arena’s lifetime. For `T: !Drop`, this freeze is
   **O(1) and allocation-free** — the existing buffer is reinterpreted in
   place. Unlike the `Box`/`Arc` freezes, the slice does not outlive the arena.
@@ -232,13 +233,10 @@ Use this pattern whenever you’d be storing many strings or slices
 long-term — the per-pointer savings (8 bytes for both strings and
 slices) add up quickly across millions of items.
 
-See [`BUMPALO.md`][__link40]
-for a feature-by-feature comparison with [`bumpalo`][__link41].
-
 ## Strings
 
 `multitude` provides a family of arena-resident string types in the
-[`strings`][__link42] module. The model is the same one used for arbitrary
+[`strings`][__link41] module. The model is the same one used for arbitrary
 values elsewhere in the crate — bump-allocation backed by a per-chunk
 refcount — but specialized for UTF-8 / UTF-16 text and a compact
 single-pointer representation.
@@ -247,36 +245,35 @@ There are two roles a string type can play:
 
 1. **Smart pointers (immutable / owned).** Compact handles to string
    data already stored in the arena. They use a single-pointer (8
-   bytes on 64-bit) layout — half the size of `&str` — by storing
-   the length unaligned in the chunk prefix. They differ in how
-   sharing and mutability work:
+   bytes on 64-bit) layout — half the size of `&str`. They differ in
+   how sharing and mutability work:
    
    |UTF-8|UTF-16|Sharing|Mutable|Notes|
    |-----|------|-------|-------|-----|
-   |[`Arc<str>`][__link43]|[`ArcUtf16Str`][__link44]|atomic refcount; `Clone`, `Send + Sync`|no|cross-thread sharing|
-   |[`Box<str>`][__link45]|[`BoxUtf16Str`][__link46]|unique owner; `Send + Sync` (not `Clone`)|yes|drops eagerly|
+   |[`Arc<str>`][__link42]|`Arc<Utf16Str>`|atomic refcount; `Clone`, `Send + Sync`|no|cross-thread sharing|
+   |[`Box<str>`][__link43]|`Box<Utf16Str>`|unique owner; `Send + Sync` (not `Clone`)|yes|drops eagerly|
    
    Like the other arena smart pointers, they keep their owning chunk
-   alive via a refcount, so they can outlive the [`Arena`][__link47] they came
+   alive via a refcount, so they can outlive the [`Arena`][__link44] they came
    from.
 
-1. **Builders (mutable, growable).** [`String`][__link48] and
-   [`Utf16String`][__link49] are transient growable
+1. **Builders (mutable, growable).** [`String`][__link45] and
+   [`Utf16String`][__link46] are transient growable
    buffers — small structs (32 bytes) carrying a data pointer +
    length + capacity + arena reference. You build them up with
-   `push_str` / `push` / [`format!`][__link50] /
-   [`format_utf16!`][__link51], then **freeze** them
+   `push_str` / `push` / [`format!`][__link47] /
+   [`format_utf16!`][__link48], then **freeze** them
    into one of the smart pointers above:
    
    |Builder|Freeze method|Result|
    |-------|-------------|------|
-   |[`String`][__link52]|[`into_boxed_str`][__link53]|[`Box<str>`][__link54]|
-   |[`Utf16String`][__link55]|[`into_boxed_utf16_str`][__link56]|[`BoxUtf16Str`][__link57]|
+   |[`String`][__link49]|[`into_boxed_str`][__link50]|[`Box<str>`][__link51]|
+   |[`Utf16String`][__link52]|[`into_boxed_utf16_str`][__link53]|`Box<Utf16Str>`|
    
    The UTF-16 freeze reuses the buffer in place (O(1)) and returns
    any unused tail capacity to the chunk’s bump cursor when it can.
    The UTF-8 freeze copies the bytes (O(n)) into a compact,
-   length-prefixed allocation so [`Box<str>`][__link58] stays a
+   length-prefixed allocation so [`Box<str>`][__link54] stays a
    single, `Send`-safe pointer.
 
 UTF-16 support requires the `utf16` Cargo feature. Strict (validated)
@@ -341,16 +338,16 @@ assert_eq!(greeting.as_utf16_str(), utf16str!("Hello, Alice!"));
 
 ## Building DSTs
 
-With the `dst` Cargo feature enabled, [`Arena`][__link59] exposes
-[`Arena::alloc_dst_arc`][__link60] and
-[`Arena::alloc_dst_box`][__link61] (and their `try_*` siblings) for
+With the `dst` Cargo feature enabled, [`Arena`][__link55] exposes
+[`Arena::alloc_dst_arc`][__link56] and
+[`Arena::alloc_dst_box`][__link57] (and their `try_*` siblings) for
 constructing values whose layout is only known at runtime (custom
 DSTs, fat pointers, trait objects).
 
-Each of these takes a [`Layout`][__link62], a
+Each of these takes a [`Layout`][__link58], a
 pointer-metadata value (e.g. a slice length, a `DynMetadata`), and
 a closure that initializes the buffer through a typed fat pointer.
-For most users, the [`dst-factory`][__link63] companion crate is the
+For most users, the [`dst-factory`][__link59] companion crate is the
 recommended high-level driver; the low-level interface looks like:
 
 ```rust
@@ -381,15 +378,15 @@ existing `_arc` slice methods).
 
 |Feature|Description|
 |-------|-----------|
-|`std` *(default)*|Enables [`std::io::Write`][__link64] on [`Vec<u8>`][__link65] for use with `write!`, `std::io::copy`, `serde_json::to_writer`, and similar. Disable for `#![no_std]` environments (the crate still requires `alloc`).|
+|`std` *(default)*|Enables [`std::io::Write`][__link60] on [`Vec<u8>`][__link61] for use with `write!`, `std::io::copy`, `serde_json::to_writer`, and similar. Disable for `#![no_std]` environments (the crate still requires `alloc`).|
 |`stats`|Enables runtime instrumentation counters returned by `Arena::stats`. Disable for the tightest allocation throughput when you don’t need observability.|
-|`serde`|Adds `Serialize` impls for [`Arc<str>`][__link66], [`Box<str>`][__link67], [`String`][__link68], and [`Vec`][__link69]. With `serde + utf16`, also adds impls for the UTF-16 types (transcoded to UTF-8 on the wire).|
-|`dst`|Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`][__link70] / [`Arena::alloc_dst_box`][__link71], plus eight `Arena::alloc_slice_*_box` methods.|
-|`utf16`|Adds a parallel UTF-16 string surface ([`ArcUtf16Str`][__link72], [`BoxUtf16Str`][__link73], [`Utf16String`][__link74], and [`format_utf16!`][__link75]) backed by the [`widestring`][__link76] crate. Lengths are counted in `u16` elements.|
-|`zerocopy`|Provides [`ZerocopyView`][__link77] for safe zero-initialized allocation of types implementing [`zerocopy::FromZeros`][__link78]. Access via [`Arena::zerocopy()`][__link79].|
-|`bytemuck`|Provides [`BytemuckView`][__link80] for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`][__link81]. Access via [`Arena::bytemuck()`][__link82].|
-|`bytes`|Adds [`From`][__link83] conversions from [`Arc<[u8]>`][__link84] and [`Arc<str>`][__link85] into [`bytes::Bytes`][__link86], enabling zero-copy integration with the Tokio / Hyper async ecosystem.|
-|`bytesbuf`|Implements [`bytesbuf::mem::Memory`][__link87] directly on [`Arena`][__link88], so that [`BytesBuf`][__link89] buffers can be backed by arena chunks. Implies `std`.|
+|`serde`|Adds `Serialize` impls for [`Arc<str>`][__link62], [`Box<str>`][__link63], [`String`][__link64], and [`Vec`][__link65]. With `serde + utf16`, also adds impls for the UTF-16 types (transcoded to UTF-8 on the wire).|
+|`dst`|Enables the `dst` module for constructing true dynamically-sized types and trait objects in the arena via [`Arena::alloc_dst_arc`][__link66] / [`Arena::alloc_dst_box`][__link67], plus eight `Arena::alloc_slice_*_box` methods.|
+|`utf16`|Adds a parallel UTF-16 string surface (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`][__link68], and [`format_utf16!`][__link69]) backed by the [`widestring`][__link70] crate. Lengths are counted in `u16` elements.|
+|`zerocopy`|Provides [`ZerocopyView`][__link71] for safe zero-initialized allocation of types implementing [`zerocopy::FromZeros`][__link72]. Access via [`Arena::zerocopy()`][__link73].|
+|`bytemuck`|Provides [`BytemuckView`][__link74] for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`][__link75]. Access via [`Arena::bytemuck()`][__link76].|
+|`bytes`|Adds [`From`][__link77] conversions from [`Arc<[u8]>`][__link78] and [`Arc<str>`][__link79] into [`bytes::Bytes`][__link80], enabling zero-copy integration with the Tokio / Hyper async ecosystem.|
+|`bytesbuf`|Implements [`bytesbuf::mem::Memory`][__link81] directly on [`Arena`][__link82], so that [`BytesBuf`][__link83] buffers can be backed by arena chunks. Implies `std`.|
 
 
 <hr/>
@@ -397,94 +394,88 @@ existing `_arc` slice methods).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbBzV3ofWgqIgbt8brW1MeN_Mb9N6Ac8XJFEIbIYjmnKUrOjRhZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMS4xgmhieXRlc2J1ZmUwLjUuNYJpbXVsdGl0dWRlZTAuMy4ygmh6ZXJvY29weWYwLjguNTA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbthyuxcg2AB8bi0p7i2BdeqwbfWFeq_iC9Ggb_RlacpRPgHZhZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMS4xgmhieXRlc2J1ZmUwLjUuNYJpbXVsdGl0dWRlZTAuNC4wgmh6ZXJvY29weWYwLjguNTA
  [__link0]: https://crates.io/crates/bumpalo
- [__link1]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link10]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec
+ [__link1]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link10]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec
  [__link11]: https://crates.io/crates/dst-factory
- [__link12]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::format
- [__link13]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::ArcUtf16Str
- [__link14]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::BoxUtf16Str
- [__link15]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::Utf16String
- [__link16]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::format_utf16
- [__link17]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link18]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link19]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena
- [__link2]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
+ [__link12]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::format
+ [__link13]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String
+ [__link14]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::format_utf16
+ [__link15]: https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md
+ [__link16]: https://crates.io/crates/bumpalo
+ [__link17]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link18]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link19]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena
+ [__link2]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
  [__link20]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link21]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link22]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link23]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link24]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
+ [__link21]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link22]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link23]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link24]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
  [__link25]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
- [__link26]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec
- [__link27]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
- [__link28]: https://crates.io/crates/allocator-api2
- [__link29]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
- [__link3]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link30]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec
- [__link31]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String::into_boxed_str
- [__link32]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link33]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link34]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec::into_boxed_slice
- [__link35]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link36]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link37]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link38]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link39]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec::leak
- [__link4]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link40]: https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md
- [__link41]: https://crates.io/crates/bumpalo
- [__link42]: https://docs.rs/multitude/0.3.2/multitude/strings/index.html
- [__link43]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link44]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::ArcUtf16Str
- [__link45]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link46]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::BoxUtf16Str
- [__link47]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena
- [__link48]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
- [__link49]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::Utf16String
- [__link5]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link50]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::format
- [__link51]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::format_utf16
- [__link52]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
- [__link53]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String::into_boxed_str
- [__link54]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link55]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::Utf16String
- [__link56]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::Utf16String::into_boxed_utf16_str
- [__link57]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::BoxUtf16Str
- [__link58]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link59]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena
- [__link6]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link60]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::alloc_dst_arc
- [__link61]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::alloc_dst_box
- [__link62]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout
- [__link63]: https://crates.io/crates/dst-factory
- [__link64]: https://doc.rust-lang.org/stable/std/?search=io::Write
- [__link65]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec
- [__link66]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link67]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link68]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
- [__link69]: https://docs.rs/multitude/0.3.2/multitude/?search=vec::Vec
- [__link7]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link70]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::alloc_dst_arc
- [__link71]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::alloc_dst_box
- [__link72]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::ArcUtf16Str
- [__link73]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::BoxUtf16Str
- [__link74]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::Utf16String
- [__link75]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::format_utf16
- [__link76]: https://crates.io/crates/widestring
- [__link77]: https://docs.rs/multitude/0.3.2/multitude/?search=zerocopy::ZerocopyView
- [__link78]: https://docs.rs/zerocopy/0.8.50/zerocopy/?search=FromZeros
- [__link79]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::zerocopy
- [__link8]: https://docs.rs/multitude/0.3.2/multitude/?search=Box
- [__link80]: https://docs.rs/multitude/0.3.2/multitude/?search=bytemuck::BytemuckView
- [__link81]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
- [__link82]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena::bytemuck
- [__link83]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
- [__link84]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link85]: https://docs.rs/multitude/0.3.2/multitude/?search=Arc
- [__link86]: https://docs.rs/bytes/1.11.1/bytes/?search=Bytes
- [__link87]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=mem::Memory
- [__link88]: https://docs.rs/multitude/0.3.2/multitude/?search=Arena
- [__link89]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesBuf
- [__link9]: https://docs.rs/multitude/0.3.2/multitude/?search=strings::String
+ [__link26]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec
+ [__link27]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String
+ [__link28]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String
+ [__link29]: https://crates.io/crates/allocator-api2
+ [__link3]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link30]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String
+ [__link31]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec
+ [__link32]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String::into_boxed_str
+ [__link33]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link34]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link35]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec::into_boxed_slice
+ [__link36]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link37]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link38]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link39]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link4]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link40]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec::leak
+ [__link41]: https://docs.rs/multitude/0.4.0/multitude/strings/index.html
+ [__link42]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link43]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link44]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena
+ [__link45]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String
+ [__link46]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String
+ [__link47]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::format
+ [__link48]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::format_utf16
+ [__link49]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String
+ [__link5]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link50]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String::into_boxed_str
+ [__link51]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link52]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String
+ [__link53]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String::into_boxed_utf16_str
+ [__link54]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link55]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena
+ [__link56]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::alloc_dst_arc
+ [__link57]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::alloc_dst_box
+ [__link58]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout
+ [__link59]: https://crates.io/crates/dst-factory
+ [__link6]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link60]: https://doc.rust-lang.org/stable/std/?search=io::Write
+ [__link61]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec
+ [__link62]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link63]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link64]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String
+ [__link65]: https://docs.rs/multitude/0.4.0/multitude/?search=vec::Vec
+ [__link66]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::alloc_dst_arc
+ [__link67]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::alloc_dst_box
+ [__link68]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::Utf16String
+ [__link69]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::format_utf16
+ [__link7]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link70]: https://crates.io/crates/widestring
+ [__link71]: https://docs.rs/multitude/0.4.0/multitude/?search=zerocopy::ZerocopyView
+ [__link72]: https://docs.rs/zerocopy/0.8.50/zerocopy/?search=FromZeros
+ [__link73]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::zerocopy
+ [__link74]: https://docs.rs/multitude/0.4.0/multitude/?search=bytemuck::BytemuckView
+ [__link75]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
+ [__link76]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena::bytemuck
+ [__link77]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
+ [__link78]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link79]: https://docs.rs/multitude/0.4.0/multitude/?search=Arc
+ [__link8]: https://docs.rs/multitude/0.4.0/multitude/?search=Box
+ [__link80]: https://docs.rs/bytes/1.11.1/bytes/?search=Bytes
+ [__link81]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=mem::Memory
+ [__link82]: https://docs.rs/multitude/0.4.0/multitude/?search=Arena
+ [__link83]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesBuf
+ [__link9]: https://docs.rs/multitude/0.4.0/multitude/?search=strings::String

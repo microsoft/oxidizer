@@ -345,7 +345,7 @@ fn zeroed_arc_produces_zero_bytes() {
     assert_eq!(*a, 0);
 }
 
-// Coverage for the `needs_drop::<T>` branches of the Arc-flavored
+// Coverage for the `needs_drop::<T>` branches of the Arc
 // uninit/zeroed APIs in `alloc_uninit.rs`. The other tests in this file
 // only exercise these with no-drop `u64`, so the slice-path branch
 // (which reserves a noop drop entry retargeted by `assume_init`) was

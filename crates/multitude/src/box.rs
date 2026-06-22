@@ -20,6 +20,7 @@ use ptr_meta::Pointee;
 
 use crate::internal::chunk_ref::ChunkRef;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
+use crate::vec::Vec;
 
 /// An owned, mutable smart pointer to a `T` stored in an
 /// [`Arena`](crate::Arena).
@@ -42,9 +43,9 @@ use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 ///
 /// `Box<T, A>` is [`Send`] when `T: Send` and `A: Send + Sync`, and
 /// [`Sync`] when `T: Sync` and `A: Sync`. The backing storage lives in a
-/// shared chunk whose refcount is atomic; a last-reference `Drop` on the
+/// chunk whose refcount is atomic; a last-reference `Drop` on the
 /// receiving thread tears that chunk down through its
-/// `Weak<ChunkProvider<A>>` (which touches the shared provider/allocator),
+/// `Weak<ChunkProvider<A>>` (which touches the provider/allocator),
 /// so `Send` requires `A: Sync` too — exactly as `Arc<T, A>` does, rather
 /// than `std::boxed::Box<T, A>`'s `A: Send` (whose `A` is uniquely owned).
 ///
@@ -70,7 +71,7 @@ use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 /// ```
 pub struct Box<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
     /// **Thin** pointer to the first byte of the contained value, which
-    /// lives in a 64K-aligned [`SharedChunk`]'s payload. The chunk
+    /// lives in a 64K-aligned [`Chunk`]'s payload. The chunk
     /// header is recovered by masking, and `T`'s pointer metadata (if
     /// any) is stored in the `size_of::<T::Metadata>()` bytes
     /// immediately preceding the payload (read with
@@ -91,16 +92,15 @@ pub struct Box<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
 // sound when `T: Send` (the value moves).
 //
 // Unlike `std::boxed::Box<T, A>`, which uniquely owns `A`, this `Box`
-// does NOT own its allocator: `A` lives in the shared, refcounted
-// chunk header alongside a `Weak<ChunkProvider<A>>`, and a *last*-ref
-// `Drop` on the receiving thread tears the chunk down through that
-// shared provider (`teardown_and_release` -> `Weak::upgrade` ->
-// `ChunkProvider::release_shared`, which may run `A::deallocate`). That
-// foreign-thread access to the shared provider requires `A: Sync` (and
-// `Weak<ChunkProvider<A>>: Send` needs `A: Send + Sync`), exactly as
-// `Arc<T, A>` requires. Hence the `Send` bound is `A: Send + Sync`, not
-// `std`'s `A: Send`. The `Pointee` bound is implicit (already on the
-// `Box` struct).
+// does NOT own its allocator: `A` lives in the refcounted chunk header
+// alongside a `Weak<ChunkProvider<A>>`, and a *last*-ref `Drop` on the
+// receiving thread tears the chunk down through that provider
+// (`teardown_and_release` -> `Weak::upgrade` -> `ChunkProvider::release`,
+// which may run `A::deallocate`). That foreign-thread access to the
+// provider requires `A: Sync` (and `Weak<ChunkProvider<A>>: Send` needs
+// `A: Send + Sync`), exactly as `Arc<T, A>` requires. Hence the `Send`
+// bound is `A: Send + Sync`, not `std`'s `A: Send`. The `Pointee` bound
+// is implicit (already on the `Box` struct).
 unsafe impl<T: ?Sized + Pointee + Send, A: Allocator + Clone + Send + Sync> Send for Box<T, A> {}
 // SAFETY: see the `Send` impl above for the cross-thread invariants.
 // Sharing `&Box<T, A>` across threads exposes only `&T` (`Deref` is
@@ -117,7 +117,7 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Box<T, A> {
     /// # Safety
     ///
     /// - `thin` must reference the payload of a fully-initialized `T`
-    ///   whose storage was bump-allocated from a [`SharedChunk<A>`].
+    ///   whose storage was bump-allocated from a [`Chunk<A>`].
     ///   For DST `T` the chunk prefix must carry the matching
     ///   `T::Metadata`.
     /// - The caller must have just acquired a +1 refcount on that
@@ -164,7 +164,7 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Box<T, A> {
         // during unwinding (the in-chunk slot leaks, per documented panic
         // semantics).
         //
-        // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk` we hold a +1
+        // SAFETY: `ptr` is hosted in a 64K-aligned `Chunk` we hold a +1
         // strong reference on; `ChunkRef::from_value_ptr` adopts that +1 and
         // releases it on drop. `T::drop` then runs in place (elided when
         // `needs_drop::<T>()` is false).
@@ -325,11 +325,14 @@ impl<I: ExactSizeIterator + ?Sized + Pointee, A: Allocator + Clone> ExactSizeIte
 
 impl<I: FusedIterator + ?Sized + Pointee, A: Allocator + Clone> FusedIterator for Box<I, A> {}
 
-impl<'a, T, A: Allocator + Clone> From<crate::vec::Vec<'a, T, A>> for Box<[T], A> {
+impl<'a, T, A: Allocator + Clone> From<Vec<'a, T, A>> for Box<[T], A> {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable
     /// [`Box<[T], A>`](crate::Box). Mirrors `std`'s `From<Vec<T>> for Box<[T]>`.
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     #[inline]
-    fn from(v: crate::vec::Vec<'a, T, A>) -> Self {
+    fn from(v: Vec<'a, T, A>) -> Self {
         v.into_boxed_slice()
     }
 }

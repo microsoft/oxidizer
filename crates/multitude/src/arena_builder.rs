@@ -20,8 +20,7 @@ pub struct ArenaBuilder<A: Allocator + Clone = Global> {
     allocator: A,
     max_normal_alloc: usize,
     byte_budget: Option<usize>,
-    capacity_local: usize,
-    capacity_shared: usize,
+    capacity: usize,
     _phantom: PhantomData<A>,
 }
 
@@ -52,8 +51,7 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
             allocator,
             max_normal_alloc: MAX_NORMAL_ALLOC,
             byte_budget: None,
-            capacity_local: 0,
-            capacity_shared: 0,
+            capacity: 0,
             _phantom: PhantomData,
         }
     }
@@ -82,21 +80,14 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
         self
     }
 
-    /// Preallocate `bytes` bytes of total local chunk allocation up front
-    /// (header + payload). `bytes` must be `0` or at least 512.
+    /// Preallocate `bytes` bytes of total chunk allocation up front
+    /// (header + payload), warming the arena's chunk cache. `bytes` must be
+    /// `0` or at least 512. One capacity knob covers references and smart
+    /// pointers alike.
     #[must_use]
     #[inline]
-    pub const fn with_capacity_local(mut self, bytes: usize) -> Self {
-        self.capacity_local = bytes;
-        self
-    }
-
-    /// Preallocate `bytes` bytes of total shared chunk allocation up front
-    /// (header + payload). `bytes` must be `0` or at least 512.
-    #[must_use]
-    #[inline]
-    pub const fn with_capacity_shared(mut self, bytes: usize) -> Self {
-        self.capacity_shared = bytes;
+    pub const fn with_capacity(mut self, bytes: usize) -> Self {
+        self.capacity = bytes;
         self
     }
 
@@ -109,8 +100,7 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
             allocator,
             max_normal_alloc: self.max_normal_alloc,
             byte_budget: self.byte_budget,
-            capacity_local: self.capacity_local,
-            capacity_shared: self.capacity_shared,
+            capacity: self.capacity,
             _phantom: PhantomData,
         }
     }
@@ -119,21 +109,16 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// out of range.
     #[cold]
     fn validate(&self) {
-        let upper = crate::internal::local_chunk::max_bump_extent::<A>().min(crate::internal::shared_chunk::max_bump_extent::<A>());
+        let upper = crate::internal::chunk::max_bump_extent::<A>();
         assert!(
             (MIN_MAX_NORMAL_ALLOC..=upper).contains(&self.max_normal_alloc),
             "max_normal_alloc must be in [{MIN_MAX_NORMAL_ALLOC}, {upper}], got {}",
             self.max_normal_alloc,
         );
         assert!(
-            self.capacity_local == 0 || self.capacity_local >= MIN_CHUNK_BYTES,
-            "with_capacity_local(bytes) must be either 0 or at least {MIN_CHUNK_BYTES}, got {}",
-            self.capacity_local,
-        );
-        assert!(
-            self.capacity_shared == 0 || self.capacity_shared >= MIN_CHUNK_BYTES,
-            "with_capacity_shared(bytes) must be either 0 or at least {MIN_CHUNK_BYTES}, got {}",
-            self.capacity_shared,
+            self.capacity == 0 || self.capacity >= MIN_CHUNK_BYTES,
+            "with_capacity(bytes) must be either 0 or at least {MIN_CHUNK_BYTES}, got {}",
+            self.capacity,
         );
     }
 
@@ -185,17 +170,11 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
         A: 'static,
     {
         self.validate();
-        let local = Self::resolve_capacity(self.capacity_local);
-        let shared = Self::resolve_capacity(self.capacity_shared);
+        let capacity = Self::resolve_capacity(self.capacity);
         let arena = Arena::try_from_config(self.allocator, self.max_normal_alloc, self.byte_budget)?;
-        if let Some((class, n)) = local {
+        if let Some((class, n)) = capacity {
             for _ in 0..n {
-                arena.preallocate_one_local(class)?;
-            }
-        }
-        if let Some((class, n)) = shared {
-            for _ in 0..n {
-                arena.preallocate_one_shared(class)?;
+                arena.preallocate_one(class)?;
             }
         }
         Ok(arena)
@@ -211,8 +190,7 @@ impl<A: Allocator + Clone> fmt::Debug for ArenaBuilder<A> {
         f.debug_struct("ArenaBuilder")
             .field("max_normal_alloc", &self.max_normal_alloc)
             .field("byte_budget", &self.byte_budget)
-            .field("capacity_local", &self.capacity_local)
-            .field("capacity_shared", &self.capacity_shared)
+            .field("capacity", &self.capacity)
             .finish()
     }
 }

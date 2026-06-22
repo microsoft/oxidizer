@@ -45,12 +45,14 @@ fn clear_when_unallocated_is_noop() {
 }
 
 #[test]
-fn size_32_bytes_on_64bit() {
-    // 32 bytes = data ptr + cached len + cap + arena ref. The cached len
-    // (added for perf) avoids a chunk-memory load on every read; it costs
-    // 8 extra bytes vs. the previous 24-byte builder.
+fn size_40_bytes_on_64bit() {
+    // 40 bytes = data ptr + cached len + cap + a freeze-prefix flag + arena
+    // ref. The cached len (added for perf) avoids a chunk-memory load on every
+    // read; the freeze-prefix flag records whether the backing buffer carries
+    // the `Arc<[T]>` freeze prefix, letting `into_arc` / `into_boxed_slice`
+    // reuse the buffer in place with no copy.
     if size_of::<usize>() == 8 {
-        assert_eq!(size_of::<String<'_>>(), 32);
+        assert_eq!(size_of::<String<'_>>(), 40);
     }
 }
 
@@ -771,7 +773,7 @@ mod arena_str {
             arena.alloc_str_arc("survives the arena")
         };
         assert_eq!(&*s, "survives the arena");
-        drop(s); // teardown_chunk(chunk, false) for the Shared chunk.
+        drop(s); // teardown_chunk(chunk, false) for the Chunk.
     }
 
     #[test]
@@ -1049,7 +1051,7 @@ mod mutants_for_string {
     }
 
     /// An `Arc<str>` produced by `into_arc` outlives the arena it was
-    /// built from (the backing shared chunk is held by the refcount).
+    /// built from (the backing chunk is held by the refcount).
     #[test]
     fn into_arc_outlives_arena() {
         use multitude::Arc;
@@ -1122,5 +1124,77 @@ mod format_macro {
 
         s.write_char('!').unwrap();
         assert_eq!(s.as_str(), "x=42!");
+    }
+}
+
+/// Zero-copy freeze: `String::into_boxed_str` / `into_arc_str` reuse the
+/// backing `Vec<u8>` storage in place (retag `[u8] → str`, no copy).
+mod string_zero_copy_freeze {
+    use std::thread;
+
+    use multitude::strings::String;
+    use multitude::{Arc, Arena, Box};
+
+    #[test]
+    fn into_boxed_str_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        s.push_str("hello, world");
+        let data_ptr = s.as_str().as_ptr();
+        let b: Box<str> = s.into_boxed_str();
+        assert_eq!(&*b, "hello, world");
+        assert_eq!(b.as_str().as_ptr(), data_ptr, "into_boxed_str must not copy");
+    }
+
+    #[test]
+    fn into_arc_str_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        s.push_str("shared string");
+        let data_ptr = s.as_str().as_ptr();
+        let a: Arc<str> = Arc::from(s);
+        assert_eq!(&*a, "shared string");
+        assert_eq!(a.as_str().as_ptr(), data_ptr, "into_arc_str must not copy");
+        let a2 = a.clone();
+        assert!(Arc::ptr_eq(&a, &a2), "clone shares the same frozen payload");
+        assert_eq!(&*a2, "shared string");
+    }
+
+    #[test]
+    fn frozen_arc_str_outlives_arena_and_crosses_threads() {
+        let arc: Arc<str> = {
+            let arena = Arena::new();
+            let mut s = arena.alloc_string();
+            s.push_str("survives teardown");
+            Arc::from(s)
+        };
+        let clone = arc.clone();
+        let len = thread::spawn(move || clone.len()).join().unwrap();
+        assert_eq!(len, "survives teardown".len());
+        assert_eq!(&*arc, "survives teardown");
+    }
+
+    #[test]
+    fn grown_string_freezes_in_place_after_relocation() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        for _ in 0..64 {
+            s.push_str("abcd");
+        }
+        let data_ptr = s.as_str().as_ptr();
+        let b = s.into_boxed_str();
+        assert_eq!(b.len(), 256);
+        assert_eq!(b.as_str().as_ptr(), data_ptr, "relocated buffer still freezes in place");
+    }
+
+    #[test]
+    fn empty_string_freezes_to_empty_str() {
+        let arena = Arena::new();
+        let s = arena.alloc_string();
+        let b = s.into_boxed_str();
+        assert_eq!(&*b, "");
+        let s2 = arena.alloc_string();
+        let a: Arc<str> = Arc::from(s2);
+        assert_eq!(&*a, "");
     }
 }

@@ -269,7 +269,7 @@ mod arena_drop_reentrancy {
     #[test]
     fn reentrant_in_chunk_alloc_does_not_overlap_outer_slot() {
         use multitude::Arena;
-        let arena: Arena = Arena::builder().max_normal_alloc(60 * 1024).with_capacity_local(64 * 1024).build();
+        let arena: Arena = Arena::builder().max_normal_alloc(60 * 1024).with_capacity(64 * 1024).build();
         let arena_ptr: *const Arena = &raw const arena;
 
         // Allocate a u64 via `alloc_with`, and inside the init closure

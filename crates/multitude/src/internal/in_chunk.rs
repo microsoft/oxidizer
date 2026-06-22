@@ -47,7 +47,7 @@ impl<T: ?Sized> InChunk<T> {
 
     /// Returns the underlying raw pointer.
     #[inline]
-    pub(crate) fn as_ptr(self) -> *mut T {
+    pub(in crate::internal) fn as_ptr(self) -> *mut T {
         self.ptr.as_ptr()
     }
 
@@ -64,7 +64,7 @@ impl<T: ?Sized> InChunk<T> {
     /// The caller is responsible for ensuring the target type `U` is a valid
     /// interpretation of the same storage (matching size and alignment).
     #[inline]
-    pub(crate) fn cast<U>(self) -> InChunk<U> {
+    pub(in crate::internal) fn cast<U>(self) -> InChunk<U> {
         InChunk {
             ptr: self.ptr.cast(),
             _phantom: PhantomData,
@@ -75,7 +75,7 @@ impl<T: ?Sized> InChunk<T> {
 impl InChunk<u8> {
     /// Returns the integer address of the pointer.
     #[inline]
-    pub(crate) fn addr(self) -> usize {
+    pub(in crate::internal) fn addr(self) -> usize {
         self.ptr.as_ptr() as usize
     }
 
@@ -85,7 +85,7 @@ impl InChunk<u8> {
     /// Caller ensures alignment for `T` and enough in-chunk storage for `len`
     /// elements.
     #[inline]
-    pub(crate) fn into_slice<T>(self, len: usize) -> InChunk<[T]> {
+    pub(in crate::internal) fn into_slice<T>(self, len: usize) -> InChunk<[T]> {
         let slice = NonNull::slice_from_raw_parts(self.ptr.cast::<T>(), len);
         InChunk {
             ptr: slice,

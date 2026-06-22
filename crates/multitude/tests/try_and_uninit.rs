@@ -336,7 +336,7 @@ mod utf16_tests {
         assert_eq!(tail.as_utf16_str(), utf16str!(" worldHI"));
 
         let boxed = s.try_into_boxed_utf16_str().unwrap();
-        assert_eq!(boxed.as_utf16_str(), utf16str!("HI"));
+        assert_eq!(boxed.as_widestring_utf16_str(), utf16str!("HI"));
     }
 
     #[test]
@@ -344,11 +344,11 @@ mod utf16_tests {
         let arena = Arena::new();
         let s = Utf16String::from_utf16_str_in(utf16str!("shared"), &arena);
         let a = s.into_arc_utf16_str();
-        assert_eq!(a.as_utf16_str(), utf16str!("shared"));
+        assert_eq!(a.as_widestring_utf16_str(), utf16str!("shared"));
 
         let s2 = Utf16String::from_utf16_str_in(utf16str!("again"), &arena);
         let a2 = s2.try_into_arc_utf16_str().unwrap();
-        assert_eq!(a2.as_utf16_str(), utf16str!("again"));
+        assert_eq!(a2.as_widestring_utf16_str(), utf16str!("again"));
     }
 
     #[test]

@@ -24,16 +24,16 @@ use ptr_meta::Pointee;
 /// `0` for `T: Sized` (whose `Metadata = ()`); typically
 /// `size_of::<usize>()` for slice DSTs and trait objects on 64-bit.
 #[inline]
-pub(crate) const fn meta_bytes<T: ?Sized + Pointee>() -> usize {
+const fn meta_bytes<T: ?Sized + Pointee>() -> usize {
     mem::size_of::<<T as Pointee>::Metadata>()
 }
 
 /// Byte size of the per-[`Arc`](crate::Arc) strong reference count
 /// (an [`AtomicU32`]) stored in the chunk prefix.
-pub(crate) const STRONG_BYTES: usize = mem::size_of::<AtomicU32>();
+const STRONG_BYTES: usize = mem::size_of::<AtomicU32>();
 
 /// Alignment of the per-`Arc` strong reference count.
-pub(crate) const STRONG_ALIGN: usize = mem::align_of::<AtomicU32>();
+const STRONG_ALIGN: usize = mem::align_of::<AtomicU32>();
 
 /// Byte distance from an `Arc<T>` value pointer back to its strong
 /// reference count, given the value's alignment and metadata width.
@@ -87,7 +87,7 @@ pub(crate) unsafe fn strong_ref<'a, T: ?Sized + Pointee>(value_ptr: NonNull<u8>,
 ///   prefix was written by [`Arena::impl_alloc_thin_smart`].
 /// - For `T: Sized` the read is a zero-byte no-op and returns `()`.
 #[inline]
-pub(crate) unsafe fn read_metadata<T: ?Sized + Pointee>(value_ptr: NonNull<u8>) -> <T as Pointee>::Metadata {
+unsafe fn read_metadata<T: ?Sized + Pointee>(value_ptr: NonNull<u8>) -> <T as Pointee>::Metadata {
     // SAFETY: per caller. `read_unaligned` works for any element size and
     // alignment; for `T: Sized` (Metadata = ()), this compiles to a no-op
     // returning unit.

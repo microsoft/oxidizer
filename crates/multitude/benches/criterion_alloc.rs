@@ -28,59 +28,54 @@ const SLICE_LEN: usize = 8;
 /// **and fully primed** so the timed region exercises only the warm
 /// bump cursor — no cold `refill_*` call on the first inner iteration.
 ///
-/// 1. `with_capacity_local(64 KiB) + with_capacity_shared(64 KiB)` pin
-///    the very first chunk for each flavor to the largest size class.
-///    The arena's adaptive `1 KiB → 64 KiB` ramp would otherwise call
-///    into the system allocator several times growing through the
-///    smaller classes during the timed region.
-/// 2. The arena's `current_local` / `current_shared` slots start in
-///    the empty-mutator state (lazy first-chunk install — see the
-///    design doc). A single throwaway allocation of each flavor pops
-///    the preallocated chunk from the provider cache and installs it
-///    in the `current_*` slot, so the timed region's very first
-///    allocation hits the warm bump path. This matches bumpalo's
-///    `warm_bump` (which similarly primes its cursor with a no-op
-///    alloc) and isolates the comparison to "in-chunk bump cost
-///    only" with no cold refill amortized into the per-op number.
+/// 1. `with_capacity(128 KiB)` pins the first chunks to the largest
+///    size class. The arena's adaptive `1 KiB → 64 KiB` ramp would
+///    otherwise call into the system allocator several times growing
+///    through the smaller classes during the timed region.
+/// 2. The arena's `current` slot starts in the empty-mutator state
+///    (lazy first-chunk install — see the design doc). A throwaway
+///    reference allocation and a throwaway `Arc` allocation pop the
+///    preallocated chunk(s) from the provider cache and install one in
+///    the `current` slot, so the timed region's very first allocation
+///    hits the warm bump path. This matches bumpalo's `warm_bump`
+///    (which similarly primes its cursor with a no-op alloc) and
+///    isolates the comparison to "in-chunk bump cost only" with no cold
+///    refill amortized into the per-op number.
 ///
-/// Only used by benches that exercise **both** flavors in the timed
-/// region: the `vec_builder` benches build a local `Vec` and then
-/// `into_arc()` it. Benches that touch a single flavor must use
-/// [`warm_arena_local`] / [`warm_arena_shared`] instead: priming the
-/// unused flavor allocates a dead-weight 64 KiB chunk that doubles the
-/// arena's memory footprint and inflates the measured per-op time
-/// through extra cache/TLB pressure at the batch working-set sizes
-/// criterion picks (verified: priming the unused shared chunk made
-/// `alloc_slice_copy` measure ~9x slower than its true cost).
+/// Only used by benches that allocate **both** references and smart
+/// pointers in the timed region: the `vec_builder` benches build a
+/// `Vec` and then `into_arc()` it. Benches that touch only one style
+/// must use [`warm_arena_local`] / [`warm_arena_shared`] instead:
+/// preallocating the extra 64 KiB doubles the arena's memory footprint
+/// and inflates the measured per-op time through extra cache/TLB
+/// pressure at the batch working-set sizes criterion picks (verified:
+/// the extra primed chunk made `alloc_slice_copy` measure ~9x slower
+/// than its true cost).
 fn warm_arena() -> Arena {
-    let arena = Arena::builder()
-        .with_capacity_local(64 * 1024)
-        .with_capacity_shared(64 * 1024)
-        .build();
+    let arena = Arena::builder().with_capacity(128 * 1024).build();
     let _: &mut u64 = arena.alloc(0_u64);
     let _ = arena.alloc_arc(0_u64);
     arena
 }
 
-/// Like [`warm_arena`] but primes **only** the local (ref/value)
-/// flavor. Used by benches whose timed region allocates exclusively
-/// from the local chunk (`alloc`, `alloc_str`, `alloc_slice_*` ref,
-/// `alloc_string*`). Priming the shared flavor here would add a
-/// dead-weight 64 KiB chunk — see [`warm_arena`].
+/// Like [`warm_arena`] but preallocates a single 64 KiB chunk and
+/// primes it with a reference allocation. Used by benches whose timed
+/// region allocates only references (`alloc`, `alloc_str`,
+/// `alloc_slice_*` ref, `alloc_string*`). Preallocating more would add
+/// a dead-weight 64 KiB chunk — see [`warm_arena`].
 fn warm_arena_local() -> Arena {
-    let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+    let arena = Arena::builder().with_capacity(64 * 1024).build();
     let _: &mut u64 = arena.alloc(0_u64);
     arena
 }
 
-/// Like [`warm_arena`] but primes **only** the shared (`Box`/`Arc`)
-/// flavor. Used by benches whose timed region allocates exclusively
-/// from the shared chunk (every `*_box` / `*_arc` bench — both smart
-/// pointers are backed by refcounted shared chunks). Priming the local
-/// flavor here would add a dead-weight 64 KiB chunk — see
-/// [`warm_arena`].
+/// Like [`warm_arena`] but preallocates a single 64 KiB chunk and
+/// primes it with an `Arc` allocation. Used by benches whose timed
+/// region allocates only smart pointers (every `*_box` / `*_arc`
+/// bench). Preallocating more would add a dead-weight 64 KiB chunk —
+/// see [`warm_arena`].
 fn warm_arena_shared() -> Arena {
-    let arena = Arena::builder().with_capacity_shared(64 * 1024).build();
+    let arena = Arena::builder().with_capacity(64 * 1024).build();
     let _ = arena.alloc_arc(0_u64);
     arena
 }

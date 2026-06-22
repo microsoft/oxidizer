@@ -13,6 +13,7 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use core::{mem, slice};
 
+use super::constants::buffer_freezable;
 use super::uninit::Uninit;
 
 /// A growable buffer of `T` whose storage lives in an arena chunk.
@@ -29,6 +30,12 @@ pub(crate) struct ArenaBuf<'a, T> {
     ptr: NonNull<T>,
     len: usize,
     cap: usize,
+    /// Whether `ptr` is immediately preceded by an `Arc<[T]>` freeze prefix
+    /// (`[strong][pad][len]`), letting the buffer freeze into an `Arc<[T]>` /
+    /// `Box<[T]>` in place. True for buffers installed by the freezable
+    /// reservation path; false for empty buffers and `split_off` tails (whose
+    /// base points mid-chunk, with no prefix of their own).
+    freeze_prefix: bool,
     _phantom: PhantomData<&'a mut [T]>,
 }
 
@@ -38,13 +45,15 @@ impl<T> ArenaBuf<'_, T> {
     /// # Safety
     ///
     /// `(ptr, len, cap)` must satisfy the type invariants for storage in a
-    /// live arena chunk that outlives `'a`.
+    /// live arena chunk that outlives `'a`. `freeze_prefix` must be true only
+    /// when `ptr` is immediately preceded by a valid `Arc<[T]>` freeze prefix.
     #[inline]
-    pub(crate) const unsafe fn from_raw_parts(ptr: NonNull<T>, len: usize, cap: usize) -> Self {
+    pub(crate) const unsafe fn from_raw_parts(ptr: NonNull<T>, len: usize, cap: usize, freeze_prefix: bool) -> Self {
         Self {
             ptr,
             len,
             cap,
+            freeze_prefix,
             _phantom: PhantomData,
         }
     }
@@ -60,8 +69,16 @@ impl<'a, T> ArenaBuf<'a, T> {
             ptr: NonNull::dangling(),
             len: 0,
             cap,
+            freeze_prefix: false,
             _phantom: PhantomData,
         }
+    }
+
+    /// Whether this buffer carries the `Arc<[T]>` freeze prefix and can be
+    /// frozen into an `Arc<[T]>` / `Box<[T]>` in place (no copy).
+    #[inline]
+    pub(crate) const fn has_freeze_prefix(&self) -> bool {
+        self.freeze_prefix
     }
 
     /// Returns the current number of initialized elements.
@@ -185,6 +202,10 @@ impl<'a, T> ArenaBuf<'a, T> {
         }
         self.ptr = new_ptr;
         self.cap = new_cap;
+        // The freezable reservation path installs a prefix exactly when `T`
+        // is freezable; `try_grow_to` gates its reservation on the same
+        // predicate, so the flag tracks the buffer that was actually placed.
+        self.freeze_prefix = buffer_freezable::<T>();
     }
 
     /// Bulk-copy `src` into the uninitialized tail.
@@ -332,6 +353,7 @@ impl<'a, T> ArenaBuf<'a, T> {
                 ptr: NonNull::dangling(),
                 len: tail_len,
                 cap: usize::MAX,
+                freeze_prefix: false,
                 _phantom: PhantomData,
             };
         }
@@ -346,6 +368,9 @@ impl<'a, T> ArenaBuf<'a, T> {
             ptr: tail_ptr,
             len: tail_len,
             cap: tail_cap,
+            // The tail's base points mid-chunk: it has no freeze prefix of its
+            // own (the head still owns the buffer's prefix).
+            freeze_prefix: false,
             _phantom: PhantomData,
         }
     }
@@ -441,6 +466,7 @@ pub(crate) struct DrainAll<'a, T> {
 impl<T> Iterator for DrainAll<'_, T> {
     type Item = T;
     #[inline]
+    #[cfg_attr(test, mutants::skip)] // `+= → *=` on `self.head` ⇒ iterator never advances ⇒ infinite loop
     fn next(&mut self) -> Option<T> {
         if self.head == self.tail {
             return None;
@@ -542,7 +568,7 @@ mod tests {
         // SAFETY: `storage` holds three initialized, well-aligned `Dropper`s
         // and outlives `buf`; `ArenaBuf::drop` only drops them in place and
         // never frees the (stack-owned) backing memory.
-        let buf = unsafe { ArenaBuf::from_raw_parts(ptr, 3, 3) };
+        let buf = unsafe { ArenaBuf::from_raw_parts(ptr, 3, 3, false) };
         assert_eq!(count.get(), 0);
         drop(buf);
         assert_eq!(count.get(), 3, "ArenaBuf::drop must run the live elements' destructors");
