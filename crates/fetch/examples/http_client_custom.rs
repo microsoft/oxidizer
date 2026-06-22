@@ -21,6 +21,8 @@ async fn main() -> Result<(), ohno::AppError> {
     };
 
     let client = create_builder(
+        "tokio",
+        "echo",
         |cx| EchoHandler {
             body_builder: cx.body_builder,
         },
