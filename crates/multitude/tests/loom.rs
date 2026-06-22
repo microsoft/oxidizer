@@ -233,10 +233,11 @@ mod loom_arc {
     }
 
     #[test]
-    fn two_workers_clone_and_drop_during_eviction() {
-        // Eviction race: owner evicts a Shared chunk via `reset` while two
-        // workers drop their Arcs. The reconcile must produce a refcount
-        // that reaches 0 exactly once.
+    fn two_workers_clone_and_drop_during_reset_and_arena_drop() {
+        // Two workers drop their Arcs while the owner resets (a no-op on the
+        // shared chunk) and then drops the arena. The shared chunk is torn
+        // down when its last reference releases; reconcile-on-drop must
+        // produce a refcount that reaches 0 exactly once.
         loom::model(|| {
             let baseline = drop_counter().load(StdOrdering::Relaxed);
 
@@ -259,9 +260,10 @@ mod loom_arc {
     }
 
     #[test]
-    fn worker_drop_racing_eviction_then_owner_drops_arena() {
-        // Variant of `deferred_reconciliation_race`: the arena is dropped
-        // after the eviction, so the worker's drop hits the
+    fn worker_drop_racing_reset_then_owner_drops_arena() {
+        // Variant of `deferred_reconciliation_race`: the owner resets (a
+        // no-op on the shared chunk) and then drops the arena, so the
+        // worker's drop may be the last reference and hit the
         // `outstanding_chunks` last-reclaimer path on the now-detached chunk.
         loom::model(|| {
             let baseline = drop_counter().load(StdOrdering::Relaxed);
@@ -282,10 +284,11 @@ mod loom_arc {
     }
 
     #[test]
-    fn arena_drop_with_active_workers_and_chunk_cache_reuse() {
-        // Owner allocates an Arc, resets (chunk cached), allocates again
-        // (cache pop revives), all while a worker drops the first Arc.
-        // Stresses the cache-revive path against in-flight worker drops.
+    fn second_alloc_after_reset_reuses_installed_chunk_with_active_worker() {
+        // Owner allocates an Arc, resets (the shared chunk stays installed),
+        // then allocates a second Arc on that same chunk, all while a worker
+        // drops the first Arc. Stresses an allocation onto a live chunk
+        // against an in-flight worker drop of an earlier handle.
         loom::model(|| {
             let baseline = drop_counter().load(StdOrdering::Relaxed);
 
@@ -369,10 +372,9 @@ mod loom_arc {
 
     #[test]
     fn arena_reset_concurrent_with_clone_and_drop() {
-        // Owner calls `arena.reset()` (NOT drop) while two workers race
-        // on Arc clone/drop. `reset` evicts in-place rather than tearing
-        // down `ArenaInner`, so the orderings exercised differ from the
-        // arena-drop case.
+        // Owner calls `arena.reset()` (NOT drop) while a worker drops an Arc
+        // clone. `reset` leaves the shared chunk untouched, so the chunk is
+        // torn down later at arena drop; Drop must still run exactly once.
         loom::model(|| {
             let baseline = drop_counter().load(StdOrdering::Relaxed);
 
@@ -393,13 +395,11 @@ mod loom_arc {
     }
 
     #[test]
-    fn cache_pop_concurrent_with_prior_generation_worker_drop() {
-        // Owner allocates an Arc on chunk-gen-1, resets (chunk cached),
-        // then allocates a new Arc — which pops the cached chunk and
-        // re-initializes it (gen-2). Concurrently, a worker holding the
-        // gen-1 Arc drops it, hitting the now-revived chunk's refcount.
-        // Tests that cache-revive races a teardown decrement on the
-        // prior generation safely.
+    fn second_alloc_after_reset_shares_chunk_with_prior_generation_worker_drop() {
+        // Owner allocates an Arc, resets (the shared chunk stays installed),
+        // then allocates a second Arc on the same chunk. Concurrently, a
+        // worker holding the first Arc drops it, hitting that chunk's
+        // refcount. Both payloads must drop exactly once.
         loom::model(|| {
             let baseline = drop_counter().load(StdOrdering::Relaxed);
 
@@ -456,10 +456,11 @@ mod loom_arc {
         // re-store its `next` pointer.
         loom::model(|| {
             let arena = fresh_arena();
-            // Each `Arc<[u32; 256]>` takes 1 KiB + drop entry; with
-            // `max_normal_alloc = 4 KiB` chunks, two of these allocate in
-            // separate chunks via refill, so dropping each on a different
-            // worker forces two independent `push_shared_cache` paths.
+            // Each `Arc<[u32; 256]>` takes ~1 KiB + the per-`Arc` strong
+            // prefix; with `max_normal_alloc = 4 KiB` chunks, two of these
+            // allocate in separate chunks via refill, so dropping each on a
+            // different worker forces two independent `push_shared_cache`
+            // paths.
             let a: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
             let b: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
 
@@ -488,9 +489,10 @@ mod loom_arc {
         // installed node's `next` field after the push that installed it.
         loom::model(|| {
             let arena = fresh_arena();
-            // Each `Arc<[u32; 256]>` takes 1 KiB + drop entry; with
-            // `max_normal_alloc = 4 KiB` chunks, these allocations refill
-            // into separate chunks so each drop/pop exercises cache traffic.
+            // Each `Arc<[u32; 256]>` takes ~1 KiB + the per-`Arc` strong
+            // prefix; with `max_normal_alloc = 4 KiB` chunks, these
+            // allocations refill into separate chunks so each drop/pop
+            // exercises cache traffic.
             let cached: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
             let racing: Arc<[u32; 256]> = arena.alloc_arc([0_u32; 256]);
 

@@ -33,9 +33,10 @@ use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 ///
 /// Like [`Arc`](crate::Arc), `Box` keeps its containing chunk alive by
 /// holding a +1 refcount, so it can outlive the arena it came from and
-/// survives [`Arena::reset`](crate::Arena::reset). Unlike `Arc`, the
-/// `T` destructor runs eagerly when the `Box` itself is dropped
-/// (single owner), not at chunk teardown.
+/// survives [`Arena::reset`](crate::Arena::reset), and it runs `T`'s
+/// destructor eagerly — never deferred to chunk teardown. As the sole
+/// owner, `Box` drops `T` when the `Box` itself is dropped, whereas
+/// `Arc` drops `T` when its last clone is dropped.
 ///
 /// # `Send` and `Sync`
 ///

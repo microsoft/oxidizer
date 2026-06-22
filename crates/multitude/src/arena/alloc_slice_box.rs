@@ -163,19 +163,15 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_box_copy<T: Copy>(&self, src: &[T]) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(src.len())?;
         let len = src.len();
-        // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
-        // `usize`. Hoisting it past the refill loop spares the inner
-        // reservation a `checked_mul` overflow guard.
+        // Precompute byte size so the reservation helper skips checked_mul.
         let payload_bytes = mem::size_of_val(src);
         let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
             // SAFETY: `slot_ptr` is the reservation start; `len` elements
             // of `T` fit by construction.
             unsafe { ptr::copy_nonoverlapping(src.as_ptr(), slot_ptr, len) };
         })?;
-        // `ptr` points to `len` initialized `T`s in a shared chunk that
-        // has a fresh +1; `Box::from_raw` adopts that +1 and `Box::drop` runs
-        // `drop_in_place` on the slice when the smart pointer is dropped.
-        // SAFETY: see above.
+        // SAFETY: `ptr` points to `len` initialized `T`s in a shared
+        // chunk with a fresh +1; `Box::from_raw` adopts that +1.
         Ok(unsafe { Box::from_raw(ptr.cast::<u8>()) })
     }
 
@@ -184,10 +180,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(len)?;
-        // Caller-provided `len`: must overflow-check the payload size
-        // up front so the hot loop can skip the `checked_mul`. On
-        // overflow we report `AllocError` immediately rather than spin
-        // refilling.
+        // Check overflow before the refill loop.
         let payload_bytes = mem::size_of::<T>().checked_mul(len).ok_or(AllocError)?;
         let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
             // SAFETY: `slot_ptr` is the reservation start; we init `len` slots
@@ -243,7 +236,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 let _ = chunk_ref.forget();
                 return Ok(base);
             }
-            if self.is_oversized_shared(bytes_needed) {
+            if self.is_oversized(bytes_needed) {
                 let init_owned = init.take().expect("reserve_slice_box init taken twice");
                 return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
                     let ticket = mutator
@@ -292,29 +285,18 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 }
 
-/// Common up-front checks for the `Box<[T]>` slice family. `Box::drop`
-/// runs `drop_in_place` on the entire slice eagerly, so no chunk drop
-/// entry is recorded; however we still reject `T: Drop` slices with
-/// `len > u16::MAX` so a future `Box<[T]> -> Arc<[T]>` conversion has
-/// a slot to populate (parity with the `alloc_dst_box` guard).
-//
-// Mutation testing is suppressed: bypassing the `len > u16::MAX`
-// rejection sends the caller's refill loop into an unbounded
-// chunk-allocation spin (see `alloc_slice_ref::reject_drop_slice_too_long`).
-#[cfg_attr(test, mutants::skip)]
+/// Up-front check for `Box<[T]>`: reject alignments that break
+/// smart-pointer header recovery. Slice length is full-width in the
+/// chunk prefix.
 #[inline]
-fn check_slice_box_layout<T>(len: usize) -> Result<(), AllocError> {
+fn check_slice_box_layout<T>(_len: usize) -> Result<(), AllocError> {
     if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
-        return Err(AllocError);
-    }
-    if mem::needs_drop::<T>() && len > u16::MAX as usize {
         return Err(AllocError);
     }
     Ok(())
 }
 
-/// Drop-guard for partial init in `alloc_slice_*_box`. Mirrors the
-/// `InitGuard` in `internal::uninit`.
+/// Drop guard for partially initialized boxed slices.
 struct InitGuard<T> {
     dst: *mut T,
     initialized: usize,

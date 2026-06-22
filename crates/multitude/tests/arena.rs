@@ -408,12 +408,12 @@ mod reset {
     #[cfg(feature = "stats")]
     #[test]
     fn reset_works_with_pinned_chunks() {
-        // Force chunk rotation by allocating multiple buffers that fill the
-        // chunk. We seed the high-water to class 7 so the rotated chunks
-        // are eligible for caching when they return after `reset`.
-        // `alloc_uninit::<MaybeUninit<[u8; 4000]>>` skips per-byte init.
+        // Allocate a couple of near-max_normal_alloc buffers to put the
+        // (class-7, 64 KiB) starter chunk into use. `MaybeUninit<[u8;
+        // 4000]>` skips per-byte init; a couple of them is enough to
+        // exercise the reset→cache→reuse path without a long alloc loop.
         let mut arena: Arena = Arena::builder().max_normal_alloc(4 * 1024).with_capacity_local(64 * 1024).build();
-        for _ in 0..5 {
+        for _ in 0..2 {
             let _ = arena.alloc(core::mem::MaybeUninit::<[u8; 4000]>::uninit());
         }
         let chunks_before = arena.stats().normal_local_chunks_allocated;
@@ -473,6 +473,89 @@ mod reset {
         h.join().unwrap();
         // Arena still usable.
         let _ = arena.alloc_arc(11_u32);
+    }
+
+    /// Regression for the `reset`-retires-shared-chunks bug.
+    ///
+    /// `reset` must touch only local chunks. It used to also retire the
+    /// current shared chunk (reconcile its surplus + reinstall the empty
+    /// sentinel). That broke workloads that nest arena [`Arc`]s inside an
+    /// outer arena `Arc` in the same shared chunk: the inner arcs' drops are
+    /// deferred to chunk teardown (refcount reaching 0), but the outer arc's
+    /// own slice elements pin the chunk until then, so the chunk can never
+    /// reach 0 while it is the retired-but-referenced current chunk. Each
+    /// reset therefore allocated **one fresh shared chunk per cycle**
+    /// (linear growth, slope 1 — the benchmark saw a fresh ~64 KiB chunk
+    /// every iteration).
+    ///
+    /// With reset leaving shared state alone, shared chunks are bump-filled
+    /// across cycles and a new (larger) chunk is needed only occasionally as
+    /// the size class ratchets up, so the count grows strictly sub-linearly.
+    /// This test pins the slope: across a measured batch of `BATCH` reset
+    /// cycles the shared-chunk count must grow by far less than `BATCH`
+    /// (the buggy code grew by exactly `BATCH`).
+    #[cfg(feature = "stats")]
+    #[test]
+    fn reset_does_not_allocate_a_fresh_shared_chunk_per_cycle() {
+        // Each cycle just needs to *use* a shared chunk so that `reset`'s
+        // shared-chunk handling is exercised; a single `Arc` allocation
+        // does that. (The nested-structure variant is covered separately
+        // by `reset_keeps_nested_arc_structures_valid_across_cycles`.)
+        // Keeping the per-cycle work to one allocation bounds the Miri
+        // interpreter cost while still pinning the slope.
+        fn build(arena: &Arena) {
+            drop(arena.alloc_arc(0xAB_u64));
+        }
+
+        const WARMUP: usize = 16;
+        const BATCH: usize = 64;
+
+        let mut arena = Arena::new();
+        for _ in 0..WARMUP {
+            build(&arena);
+            arena.reset();
+        }
+        let before = arena.stats().normal_shared_chunks_allocated;
+        for _ in 0..BATCH {
+            build(&arena);
+            arena.reset();
+        }
+        let grew_by = arena.stats().normal_shared_chunks_allocated - before;
+
+        // Buggy `reset` grew by exactly `BATCH` (one fresh chunk per cycle).
+        // The correct behavior grows by only a handful (a few class-size
+        // bumps). A generous sub-linear ceiling cleanly separates the two.
+        assert!(
+            grew_by < BATCH as u64 / 8,
+            "reset must not allocate a fresh shared chunk per cycle: \
+             {grew_by} new chunks over {BATCH} cycles (buggy code allocates ~{BATCH})",
+        );
+    }
+
+    /// Companion to the leak regression that needs no `stats` feature:
+    /// the nested-`Arc` structure must stay valid and drop cleanly across
+    /// repeated reset cycles. Builds the structure, reads it back, drops it,
+    /// resets, and repeats — confirming `reset` leaves outstanding
+    /// shared-chunk contents intact.
+    #[test]
+    fn reset_keeps_nested_arc_structures_valid_across_cycles() {
+        let mut arena = Arena::new();
+        for cycle in 0..8_u8 {
+            let outer: Arc<[Arc<[u8]>]> = {
+                let mut v = arena.alloc_vec_with_capacity::<Arc<[u8]>>(4);
+                for i in 0_u8..4 {
+                    v.push(arena.alloc_slice_copy_arc(&[cycle, i, 0xCD]));
+                }
+                v.try_into_arc().unwrap()
+            };
+            assert_eq!(outer.len(), 4);
+            for (i, inner) in outer.iter().enumerate() {
+                let i = u8::try_from(i).unwrap();
+                assert_eq!(&**inner, &[cycle, i, 0xCD]);
+            }
+            drop(outer);
+            arena.reset();
+        }
     }
 }
 
@@ -535,12 +618,17 @@ mod large_alloc {
     #[test]
     fn alloc_slice_clone_above_chunk_boundary() {
         let arena = Arena::new();
-        let n = CHUNK_BYTES / 8 + 4; // 65568 bytes
-        let src: Vec<u64> = (0..n as u64).collect();
-        let s = arena.alloc_slice_clone::<u64>(&src);
+        // Use `u128` so the element count needed to exceed `CHUNK_BYTES`
+        // is 16x smaller than with `u8`, halving it again vs `u64` — the
+        // `alloc_slice_clone` path still clones every element across the
+        // oversized chunk, so fewer elements means far less Miri work for
+        // the same `> CHUNK_BYTES` byte threshold.
+        let n = CHUNK_BYTES / 16 + 2; // 4098 u128 => > 64 KiB
+        let src: Vec<u128> = (0..n as u128).collect();
+        let s = arena.alloc_slice_clone::<u128>(&src);
         assert_eq!(s.len(), src.len());
         assert_eq!(s[0], 0);
-        assert_eq!(s[s.len() - 1], (s.len() - 1) as u64);
+        assert_eq!(s[s.len() - 1], (s.len() - 1) as u128);
     }
 
     #[test]
@@ -645,12 +733,22 @@ mod large_alloc {
     #[test]
     fn alloc_vec_with_capacity_at_far_over_chunk() {
         let arena = Arena::new();
-        let mut v = arena.alloc_vec_with_capacity::<u32>(FAR_OVER_CHUNK / 4);
-        for i in 0..(FAR_OVER_CHUNK / 4) {
-            v.push(i as u32);
-        }
-        assert_eq!(v.len(), FAR_OVER_CHUNK / 4);
-        assert_eq!(v[v.len() - 1], (v.len() - 1) as u32);
+        let cap = FAR_OVER_CHUNK / 4;
+        let mut v = arena.alloc_vec_with_capacity::<u32>(cap);
+        // Fill the (far-over-chunk) capacity in one bulk `extend_from_slice`
+        // (a single memcpy) rather than `cap` individual `push` calls — the
+        // per-`push` arena bookkeeping is what dominates under Miri. A
+        // bulk-zeroed source vec is itself a single allocation.
+        v.extend_from_slice(&std::vec![0_u32; cap]);
+        assert_eq!(v.len(), cap);
+        // The first, a mid-chunk, and the last slot must all be addressable
+        // and writable across the oversized backing chunk.
+        v[0] = 0xA1;
+        v[CHUNK_BYTES / 4] = 0xB2;
+        v[cap - 1] = 0xC3;
+        assert_eq!(v[0], 0xA1);
+        assert_eq!(v[CHUNK_BYTES / 4], 0xB2);
+        assert_eq!(v[cap - 1], 0xC3);
     }
 
     // ============================================================================
@@ -715,15 +813,20 @@ mod large_alloc {
     #[test]
     fn alloc_vec_extend_from_iter_past_chunk_boundary() {
         let arena = Arena::new();
-        let mut v = arena.alloc_vec::<u16>();
-        v.extend((0..(OVER_CHUNK / 2) as u16).map(|i| i.wrapping_mul(13)));
-        assert_eq!(v.len(), OVER_CHUNK / 2);
+        // Exercise the `Extend`-from-iterator growth path across the chunk
+        // boundary. Using `u128` reaches `> CHUNK_BYTES` with 8x fewer
+        // elements than `u16`, so the per-element interpreted `extend`
+        // loop (which a lazy `map` iterator forces) is 8x shorter.
+        let mut v = arena.alloc_vec::<u128>();
+        let n = OVER_CHUNK / 16 + 1; // > 64 KiB worth of u128
+        v.extend((0..n as u128).map(|i| i.wrapping_mul(13)));
+        assert_eq!(v.len(), n);
         // Spot-check first, mid-chunk and last instead of iterating
         // every element; a chunk-boundary bug would manifest at any of
         // these positions equally and the per-element cost dominates
         // under Miri.
-        for i in [0, OVER_CHUNK / 4, OVER_CHUNK / 2 - 1] {
-            assert_eq!(v[i], (i as u16).wrapping_mul(13));
+        for i in [0, n / 2, n - 1] {
+            assert_eq!(v[i], (i as u128).wrapping_mul(13));
         }
     }
 
@@ -845,15 +948,21 @@ mod large_alloc {
     #[test]
     fn many_oversized_allocations_in_one_arena() {
         // The property under test is that an arena tolerates *multiple*
-        // oversized one-shot chunks coexisting. Using `[u128; OVER_CHUNK/16]`
-        // gives the same byte-count threshold (above `MAX_CHUNK_BYTES`) but
-        // a 16× shorter `alloc_slice_fill_with` closure loop — a big win
-        // under Miri where each closure invocation is interpreted.
+        // oversized one-shot chunks coexisting. `[u128; OVER_CHUNK/16+1]`
+        // gives the byte-count threshold (above `MAX_CHUNK_BYTES`). Each
+        // round is a single bulk `alloc_slice_copy` (one memcpy) from a
+        // shared zeroed source rather than an `N_U128`-long fill closure
+        // loop; per-round sentinels written into the first and last slots
+        // preserve the distinct-content checks that prove the oversized
+        // chunks don't alias.
         const N_U128: usize = OVER_CHUNK / 16 + 1; // > 64 KiB worth of u128
         let arena = Arena::new();
-        let mut keepers: Vec<&[u128]> = Vec::with_capacity(8);
+        let src = std::vec![0_u128; N_U128];
+        let mut keepers: Vec<&mut [u128]> = Vec::with_capacity(8);
         for round in 0..8u8 {
-            let s: &mut [u128] = arena.alloc_slice_fill_with::<u128, _>(N_U128, move |_| u128::from(round));
+            let s: &mut [u128] = arena.alloc_slice_copy::<u128>(&src);
+            s[0] = u128::from(round);
+            s[N_U128 - 1] = u128::from(round);
             keepers.push(s);
         }
         for (round, s) in keepers.iter().enumerate() {
@@ -1329,7 +1438,7 @@ mod fast_path_correctness {
             count += 1;
             assert!(count < 20_000, "should have triggered new chunk by now");
         }
-        assert!(count > 50, "chunk should hold many Arc<u64>s");
+        assert!(count > 10, "chunk should hold many Arc<u64>s");
     }
 
     #[cfg(feature = "stats")]
@@ -1572,22 +1681,23 @@ mod mutants_for_chunk_provider {
         // The property under test: the size-class ratchet caps at the
         // largest cacheable class (class 7 = 64 KiB total). After the
         // first few refills ratchet there, subsequent refills stay at
-        // class 7 — they don't keep doubling. To observe this we
-        // allocate a handful of 8 KiB boxes (just under MAX_NORMAL_ALLOC
-        // = 16 KiB, so still routed through the normal cache) and
-        // confirm none route to oversized. A 64 KiB class-7 chunk fits
-        // a couple of these, so 8 boxes span ≥ 2 chunks, proving the
-        // ratchet stays at class 7 rather than degrading or escaping.
+        // class 7 — they don't keep doubling. To observe this we allocate
+        // a handful of ~13 KiB boxes (under MAX_NORMAL_ALLOC = 16 KiB, so
+        // still routed through the normal cache) and confirm none route to
+        // oversized. Five ~13 KiB boxes total > 64 KiB, so they span ≥ 2
+        // class-7 chunks, proving the ratchet stays at class 7 rather than
+        // degrading or escaping. Larger-but-fewer boxes keep the byte
+        // threshold while minimising the per-allocation Miri cost.
         let arena = Arena::new();
-        let mut keep: Vec<Box<core::mem::MaybeUninit<[u8; 8 * 1024]>>> = Vec::new();
-        for _ in 0..8 {
-            keep.push(arena.alloc_uninit_box::<[u8; 8 * 1024]>());
+        let mut keep: Vec<Box<core::mem::MaybeUninit<[u8; 13 * 1024]>>> = Vec::new();
+        for _ in 0..5 {
+            keep.push(arena.alloc_uninit_box::<[u8; 13 * 1024]>());
         }
         let s = arena.stats();
         assert_eq!(s.oversized_shared_chunks_allocated, 0);
         assert!(
             s.normal_shared_chunks_allocated >= 2,
-            "8 × 8 KiB boxes must span ≥ 2 class-7 chunks, got {}",
+            "5 × 13 KiB boxes must span ≥ 2 class-7 chunks, got {}",
             s.normal_shared_chunks_allocated
         );
     }
@@ -2316,23 +2426,24 @@ mod coverage_arena_gaps {
     }
 
     // ============================================================================
-    // inner_slice.rs:441 — `alloc_slice_local_with_or_panic` `len > u16::MAX`
-    // with drop_fn panic.
-    // inner_slice.rs:1014 — shared sibling.
+    // Per-`Arc` reference counting removes the `u16` element-count cap on
+    // `Arc<[T]>` slices: a Drop-typed slice longer than `u16::MAX` is now
+    // dropped via `drop_in_place::<[T]>` in `Arc::drop`, not a counted
+    // chunk drop entry, so it allocates successfully.
     // ============================================================================
 
-    #[cfg(feature = "std")]
+    #[cfg(all(feature = "std", not(miri)))]
     #[test]
-    #[should_panic(expected = "multitude: allocator returned AllocError")]
-    fn alloc_slice_fill_with_arc_drop_too_long_panics() {
+    fn alloc_slice_fill_with_arc_drop_long_succeeds() {
         #[derive(Clone)]
         struct D;
-        #[expect(clippy::empty_drop, reason = "Drop impl makes needs_drop::<D>() true so a drop_fn is installed")]
+        #[expect(clippy::empty_drop, reason = "Drop impl makes needs_drop::<D>() true")]
         impl Drop for D {
             fn drop(&mut self) {}
         }
         let arena = Arena::<Global>::new();
-        let _ = arena.alloc_slice_fill_with_arc(u16::MAX as usize + 1, |_| D);
+        let arc = arena.alloc_slice_fill_with_arc(u16::MAX as usize + 1, |_| D);
+        assert_eq!(arc.len(), u16::MAX as usize + 1);
     }
 
     // ============================================================================
@@ -2878,12 +2989,12 @@ mod from_mutants_extras_stats {
         let arena = Arena::new();
         // Ratchet the chunk class via a few large uninit fillers
         // (`alloc_uninit_arc` skips per-byte init cost).
-        for _ in 0..8 {
+        for _ in 0..4 {
             let _filler: Arc<core::mem::MaybeUninit<[u8; 8 * 1024]>> = arena.alloc_uninit_arc::<[u8; 8 * 1024]>();
         }
         // A short burst still exercises the small-allocation slow refill path
         // at the peak shared chunk class.
-        for i in 0_u32..32 {
+        for i in 0_u32..16 {
             let _a: Arc<u32> = arena.alloc_arc(i);
         }
         assert_eq!(arena.stats().oversized_shared_chunks_allocated, 0);

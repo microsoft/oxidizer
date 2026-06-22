@@ -1,36 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Shared raw-allocation helpers used by `LocalChunk::allocate` and
-//! `SharedChunk::allocate`. Both build a `header + payload_size` byte
-//! allocation aligned for the chunk header, then write fields through a
-//! freshly-constructed fat DST pointer.
+//! Shared raw-allocation helpers for chunk `allocate` / `destroy` paths.
+//! They centralize layout size and alignment.
 
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-/// Computes the canonical `Layout` for a chunk allocation, the single
-/// source of truth shared by every `allocate`/`destroy` pair so the two
-/// can never disagree (a mismatched `deallocate` layout is UB).
+/// Computes the canonical `Layout` for a chunk allocation.
 ///
-/// Two *distinct* alignments are at play and must not be conflated:
+/// Two alignments are distinct:
 ///
 /// * `value_align` — the chunk type's own alignment (`align_of::<Self>()`,
-///   ignoring the `[UnsafeCell<u8>]` tail which is align-1). Rust rounds
-///   the size of any value up to a multiple of its alignment, so a
-///   reference built from the fat pointer covers `round_up(total,
-///   value_align)` bytes. The allocation's **size** is rounded up to this
-///   so the reference's footprint matches the allocation exactly (a
-///   shortfall is UB, caught by Miri; an excess silently over-allocates).
+///   ignoring the align-1 tail). The allocation size is rounded up to this.
 ///
 /// * `base_align` — the alignment of the allocation's **base address**,
-///   which may be far larger than `value_align` (e.g. `CHUNK_ALIGN` =
-///   64 KiB for shared chunks, so the chunk header is recoverable by
-///   masking the low bits of any interior pointer). This governs only the
-///   `Layout` alignment; the **size is never rounded up to it**, otherwise
-///   every shared chunk would inflate to a full `CHUNK_ALIGN`.
+///   which may be much larger for shared chunks. This governs only
+///   `Layout::align`; the size is not rounded up to it.
 ///
 /// `base_align >= value_align` and both must be powers of two.
 #[allow(
@@ -47,13 +35,9 @@ pub(crate) fn chunk_layout(header_size: usize, payload_size: usize, value_align:
     Layout::from_size_align(rounded, base_align).map_err(|_| AllocError)
 }
 
-/// The exact byte footprint of a chunk allocation — the rounded
-/// `Layout::size()` that [`chunk_layout`] produces. This is the single
-/// source of truth for both the allocation `Layout` and the provider's
-/// byte-budget accounting, so the two can never disagree (accounting that
-/// used the unrounded `header_size + payload_size` would under-report the
-/// real allocator footprint when `header_size + payload_size` is not a
-/// multiple of `value_align`, e.g. for oversized chunks).
+/// Exact byte footprint of a chunk allocation: the rounded `Layout::size()`
+/// produced by [`chunk_layout`]. Used for both allocation and byte-budget
+/// accounting.
 #[inline]
 pub(crate) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_align: usize) -> Result<usize, AllocError> {
     debug_assert!(value_align.is_power_of_two(), "value_align must be a power of two");
@@ -62,15 +46,10 @@ pub(crate) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_al
     Ok(total.checked_add(mask).ok_or(AllocError)? & !mask)
 }
 
-/// Allocate a `header + payload_size` byte allocation whose base address
-/// is `base_align`-aligned and whose size is rounded up to `value_align`
-/// (see [`chunk_layout`]).
+/// Allocates a chunk backing allocation using [`chunk_layout`].
 ///
-/// Returns `(raw_u8_ptr, layout)` on success. The pointer carries
-/// provenance over the full allocation and is suitable as the data field
-/// of a slice-DST fat pointer with metadata `payload_size`. The layout is
-/// the exact one passed to `allocator.allocate`, suitable for a matching
-/// `deallocate` call (reproduced by [`chunk_layout`] at destroy time).
+/// Returns `(raw_u8_ptr, layout)`. The pointer covers the full allocation and
+/// can be used as the data field of a slice-DST fat pointer.
 ///
 /// On size-overflow or end-of-address-space overflow, the allocation is
 /// freed and `AllocError` is returned.
@@ -103,18 +82,12 @@ pub(crate) fn alloc_chunk_raw<A: Allocator>(
 mod tests {
     use super::chunk_layout;
 
-    /// `chunk_layout` must round the allocation *size* up to `value_align`.
-    /// Pins the exact round-up so the `value_align - 1` mask can't be
-    /// mutated to `value_align + 1` or `value_align / 1` — both corrupt the
-    /// rounding for totals that aren't already `value_align`-aligned (the
-    /// size-class tests use pre-aligned totals, so they can't catch this).
+    /// `chunk_layout` must round allocation size up to `value_align`.
     #[test]
     fn rounds_size_up_to_value_align() {
-        // A large power-of-two base (mirrors shared chunks); it governs the
-        // layout *alignment* only and must not affect the size rounding.
+        // Large base alignment must not affect size rounding.
         const BASE: usize = 65_536;
-        // (header, payload, value_align, expected_size). Totals are chosen
-        // to be NON-multiples of `value_align` so the mask actually rounds.
+        // Non-multiple totals force the rounding mask to matter.
         let cases = [
             (10_usize, 7_usize, 8_usize, 24_usize), // total 17 -> 24
             (34, 16, 8, 56),                        // total 50 -> 56

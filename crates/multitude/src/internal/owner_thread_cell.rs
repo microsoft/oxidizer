@@ -1,16 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Owner-thread-confined cell: shared-Sync wrapper around an `UnsafeCell`.
+//! Owner-thread-confined `UnsafeCell`.
 //!
-//! The cell is `Sync` so it can live inside a struct that is itself shared
-//! across threads, but every access goes through `unsafe fn with`. The
-//! `unsafe` caller asserts that the call happens on the cell's logical
-//! "owner thread"; concurrent access is undefined behavior.
-//!
-//! Used by [`ChunkProvider`](super::ChunkProvider) to hold the local-chunk
-//! cache head and local high-water mark — both touched exclusively by the
-//! arena's owning thread, even though the provider itself is `Sync`.
+//! The cell is `Sync`, but every access goes through `unsafe fn with`; callers
+//! assert owner-thread, exclusive access. Used by
+//! [`ChunkProvider`](super::chunk_provider::ChunkProvider)'s local cache state.
 
 use core::cell::UnsafeCell;
 

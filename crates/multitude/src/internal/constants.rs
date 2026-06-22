@@ -13,13 +13,8 @@ pub(crate) const MIN_CHUNK_BYTES: usize = 512;
 pub(crate) const MAX_CHUNK_BYTES: usize = 65_536;
 
 /// Required alignment for every [`SharedChunk`](super::shared_chunk::SharedChunk)
-/// allocation. Matches [`MAX_CHUNK_BYTES`] so that for any pointer to a
-/// non-oversized value in the chunk, the chunk header's address can be
-/// recovered by subtracting the low `CHUNK_ALIGN - 1` bits of the pointer.
-///
-/// This in turn allows [`Box`](crate::Box) and similar smart pointers
-/// to store a single value pointer without separately tracking the
-/// chunk header.
+/// allocation. Matching [`MAX_CHUNK_BYTES`] lets smart pointers recover the
+/// chunk header from any non-oversized in-chunk value pointer.
 pub(crate) const CHUNK_ALIGN: usize = MAX_CHUNK_BYTES;
 
 /// Maximum alignment accepted by smart-pointer / `Allocator::allocate`
@@ -42,12 +37,9 @@ pub(crate) const MAX_NORMAL_ALLOC: usize = 16 * 1024;
 
 /// Cache size-class index, range `0..NUM_CHUNK_CLASSES`.
 ///
-/// Wraps the raw `u8` to make invalid classes harder to construct
-/// accidentally and to centralize the
-/// [`bytes`](Self::bytes)/[`saturating_inc`](Self::saturating_inc)
-/// helpers. `#[repr(transparent)]` so that `AtomicU8` cache slots in
-/// [`ChunkProvider`](super::chunk_provider::ChunkProvider) can keep
-/// storing the raw byte without conversion.
+/// `#[repr(transparent)]` wrapper around the raw `u8` used by
+/// [`ChunkProvider`](super::chunk_provider::ChunkProvider)'s atomic cache
+/// floor slots.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[repr(transparent)]
 pub(crate) struct SizeClass(u8);
@@ -132,11 +124,8 @@ impl SizeClass {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(test, mutants::skip)] // unreachable: refcount overflow requires usize::MAX live refs
 pub(crate) fn refcount_overflow_abort() -> ! {
-    // Under `cfg(test)` we panic instead of aborting so the overflow-guard
-    // call sites (otherwise unreachable without `usize::MAX` live references)
-    // can be exercised by `#[should_panic]` unit tests. Production builds are
-    // never compiled with `cfg(test)`, so the abort behavior below is the only
-    // one that ships.
+    // In tests, panic so overflow guards can be asserted with `#[should_panic]`.
+    // Non-test builds abort.
     #[cfg(test)]
     {
         panic!("multitude: refcount overflow (test)");

@@ -120,7 +120,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_prefixed_shared::<u8>(s.as_ref().as_bytes()).map(|ptr|
+        self.impl_alloc_prefixed_shared_arc::<u8>(s.as_ref().as_bytes()).map(|ptr|
             // SAFETY: see `Self::alloc_str_arc`.
             unsafe { Arc::from_raw(ptr) })
     }
@@ -150,7 +150,7 @@ impl<A: Allocator + Clone> Arena<A> {
             if let Some(u) = self.try_reserve_local_bytes(len) {
                 return Ok(u.init_copy_from_str(s));
             }
-            if self.is_oversized_local(len) {
+            if self.is_oversized(len) {
                 let ptr = self.alloc_oversized_local_with(len, |mutator| {
                     let ticket = mutator.try_alloc_bytes(len).expect("dedicated oversized chunk sized to fit string");
                     // `init_copy_from_str` returns `&mut str` bound to the

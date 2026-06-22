@@ -10,35 +10,43 @@ use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
+use core::sync::atomic::{Ordering, fence};
 
 use allocator_api2::alloc::{Allocator, Global};
 use ptr_meta::Pointee;
 
-use crate::internal::chunk::Chunk;
 use crate::internal::chunk_ref::ChunkRef;
-use crate::internal::drop_entry::{self, DropFn};
-use crate::internal::shared_chunk::SharedChunk;
+use crate::internal::constants::refcount_overflow_abort;
 use crate::internal::thin_dst;
 use crate::thin_smart_ptr_common::impl_thin_smart_ptr_common;
 use crate::vec::Vec;
+
+/// Strong-count saturation threshold. Cloning past this aborts the
+/// process, mirroring `std::sync::Arc`'s `MAX_REFCOUNT` guard (using
+/// the `u32` strong counter's half-range instead of `isize::MAX`).
+const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 
 /// A thread-safe reference-counted smart pointer to a `T` stored in an [`Arena`](crate::Arena).
 ///
 /// Safe to share across threads when `T: Send + Sync`.
 ///
 /// Created via [`Arena::alloc_arc`](crate::Arena::alloc_arc). Cloning is
-/// **O(1)** and uses a single Relaxed atomic increment (matching
-/// `std::sync::Arc`). Dropping a clone is one Release decrement plus,
-/// on the final dec to zero, an Acquire fence before chunk teardown.
+/// **O(1)** and uses a single Relaxed atomic increment of the `Arc`'s
+/// own strong count (matching `std::sync::Arc`). Dropping a clone is one
+/// Release decrement plus, on the final dec to zero, an Acquire fence,
+/// the value's destructor (`T::drop`), and the release of the chunk
+/// reference.
 ///
-/// `Arc` keeps its containing chunk alive by holding a +1 refcount on
-/// it, so the smart pointer can outlive the arena it came from and
-/// survives [`Arena::reset`](crate::Arena::reset). For `T: Drop`, a
-/// drop entry is registered at allocation time and `T::drop` runs at
-/// chunk teardown (when the chunk's last reference is released); for
-/// `T: !Drop` (the common case for strings, numbers, slices, etc.),
-/// no drop entry is reserved and the only per-allocation cost beyond
-/// the value itself is the chunk's atomic refcount.
+/// Each `Arc` carries its own strong reference count — an
+/// [`AtomicU32`](core::sync::atomic::AtomicU32) stored in the chunk's
+/// payload immediately before the value. The allocation also holds
+/// **one** refcount on its containing chunk for the whole `Arc` family
+/// (all clones share it); that chunk reference is released only when the
+/// last `Arc` drops. This keeps the value alive across
+/// [`Arena::reset`](crate::Arena::reset) and lets the `Arc` outlive the
+/// arena, while running `T::drop` eagerly on the last drop — so nested
+/// `Arc`s (e.g. `Arc<[Arc<T>]>`) release their storage promptly instead
+/// of deferring to chunk teardown.
 ///
 /// # Pinning
 ///
@@ -86,13 +94,17 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
     ///
     /// - `thin` must reference the payload of a fully-initialized `T`
     ///   whose storage was bump-allocated from a [`SharedChunk<A>`] via
-    ///   the thin-DST allocator path. For DST `T` the chunk prefix
-    ///   must carry the matching `T::Metadata`. For `T: Drop`, a drop
-    ///   entry must already be registered so the destructor runs at
-    ///   chunk teardown.
+    ///   the strong-prefixed `Arc` allocator path: a per-`Arc`
+    ///   [`AtomicU32`](core::sync::atomic::AtomicU32) strong count must
+    ///   already be initialized in the chunk prefix (see
+    ///   [`thin_dst::strong_ref`](crate::internal::thin_dst::strong_ref)),
+    ///   and for DST `T` the prefix must also carry the matching
+    ///   `T::Metadata`.
     /// - The caller must have just acquired a +1 refcount on that chunk
-    ///   in the new `Arc`'s name; the returned `Arc` takes ownership of
-    ///   that +1 and releases it in [`Drop`].
+    ///   for the new `Arc` family, and the strong count must account for
+    ///   this handle; the returned `Arc` owns that strong reference and
+    ///   releases the chunk +1 (plus runs `T::drop`) when the strong
+    ///   count reaches zero.
     /// - `thin` must lie within the first `CHUNK_ALIGN` bytes of the
     ///   chunk so the header-from-mask helper recovers the chunk
     ///   address correctly.
@@ -134,33 +146,17 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     /// The `MaybeUninit<T>` must contain a fully-initialized, valid
     /// `T`. The allocation must come from
     /// [`Arena::alloc_uninit_arc`](crate::Arena::alloc_uninit_arc) or
-    /// [`Arena::alloc_zeroed_arc`](crate::Arena::alloc_zeroed_arc) so a
-    /// drop entry was reserved up front;
-    /// `Arena::alloc_arc(MaybeUninit::new(...))` does not reserve one
-    /// and panics here for `T: Drop`.
-    ///
-    /// # Panics
-    ///
-    /// Panics for `T: Drop` when no drop entry is found in the chunk
-    /// — see the safety contract above.
+    /// [`Arena::alloc_zeroed_arc`](crate::Arena::alloc_zeroed_arc).
     #[inline]
     #[must_use]
     pub unsafe fn assume_init(self) -> Arc<T, A> {
-        if const { mem::needs_drop::<T>() } {
-            // SAFETY: `self.ptr` references a live value inside a
-            // `SharedChunk<A>` this `Arc` holds a +1 on; `alloc_uninit_arc`
-            // reserved a placeholder drop entry for it. Commit the real shim
-            // so `T::drop` runs at chunk teardown.
-            unsafe {
-                commit_uninit_drop_entry::<A>(self.ptr, 1, drop_entry::drop_shim::<T>, false);
-            }
-        }
         let thin = self.ptr;
         mem::forget(self);
-        // SAFETY: `thin` carries the +1 the consumed handle held; the value is
-        // now a valid `T` per the caller's contract. `Arc<MaybeUninit<T>>` and
-        // `Arc<T>` for sized `T` share the same chunk layout (no metadata
-        // prefix), so no prefix rewrite is needed.
+        // SAFETY: `thin` carries the strong-count prefix and the live
+        // reference the consumed handle held; the value is now a valid
+        // `T` per the caller's contract. `MaybeUninit<T>` and `T` share
+        // size, alignment, and (empty) metadata, so the strong-prefix
+        // chunk layout is identical and no rewrite is needed.
         unsafe { Arc::from_raw(thin) }
     }
 
@@ -198,33 +194,17 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
     /// [`Arena::alloc_uninit_slice_arc`](crate::Arena::alloc_uninit_slice_arc)
     /// or
     /// [`Arena::alloc_zeroed_slice_arc`](crate::Arena::alloc_zeroed_slice_arc).
-    ///
-    /// # Panics
-    ///
-    /// Panics for `T: Drop` when no drop entry is found in the chunk.
     #[inline]
     #[must_use]
     pub unsafe fn assume_init(self) -> Arc<[T], A> {
-        // SAFETY: `Arc<[MaybeUninit<T>]>` and `Arc<[T]>` share an
-        // identical chunk prefix layout (the slice length, written as
-        // `usize` by the allocator); read the length from the prefix
-        // directly rather than relying on the (now-thin) `self.ptr`.
-        let len: usize = unsafe { thin_dst::read_metadata::<[T]>(self.ptr) };
-        if const { mem::needs_drop::<T>() } {
-            // SAFETY: see the scalar `assume_init`; the placeholder slice
-            // drop entry reserved by `alloc_uninit_slice_arc` is committed to
-            // `drop_shim::<T>` so all `len` elements drop at chunk teardown.
-            unsafe {
-                commit_uninit_drop_entry::<A>(self.ptr, len, drop_entry::drop_shim::<T>, true);
-            }
-        }
         let thin = self.ptr;
         mem::forget(self);
-        // SAFETY: `thin` carries the +1 the consumed handle held; every
-        // element is now a valid `T` per the caller's contract.
-        // `Arc<[MaybeUninit<T>]>` and `Arc<[T]>` share the same chunk
-        // prefix layout, so the length already stored there matches the
-        // new fat pointer's metadata.
+        // SAFETY: `thin` carries the strong-count prefix and the live
+        // reference the consumed handle held; every element is now a
+        // valid `T`. `[MaybeUninit<T>]` and `[T]` share an identical
+        // chunk prefix layout (the slice length, stored as `usize`), so
+        // the metadata already in the prefix matches the new fat
+        // pointer.
         unsafe { Arc::from_raw(thin) }
     }
 
@@ -249,67 +229,29 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
     }
 }
 
-/// Locates the placeholder [`DropEntry`](crate::internal::drop_entry) that
-/// `Arena::alloc_uninit_arc` / `alloc_uninit_slice_arc` reserved for the
-/// value at `value` and commits `drop_fn` into it, so the value's destructor
-/// runs when the hosting chunk is torn down.
-///
-/// `len` is `1` for a scalar value or the element count for a slice.
-/// `is_slice` only selects the panic message.
-///
-/// # Safety
-///
-/// - `value` must point at a value reserved via the uninit-`Arc` path, living
-///   in the first `CHUNK_ALIGN` bytes of a live `SharedChunk<A>` on which the
-///   caller holds a strong reference.
-/// - `assume_init` must be called at most once per allocation (the placeholder
-///   commit is a non-atomic write; concurrent commits on cloned handles are
-///   not supported).
-#[inline]
-unsafe fn commit_uninit_drop_entry<A: Allocator + Clone>(value: NonNull<u8>, len: usize, drop_fn: DropFn, is_slice: bool) {
-    let header = SharedChunk::<A>::header_from_value_ptr(value);
-    // SAFETY: `header` has full chunk provenance via `with_addr`;
-    // reconstruct the fat DST pointer for typed field access.
-    let chunk = unsafe { NonNull::new_unchecked(SharedChunk::<A>::header_to_fat(header.as_ptr())) };
-    // SAFETY: `chunk` is a live `SharedChunk<A>` (caller holds a +1).
-    let chunk_ref = unsafe { chunk.as_ref() };
-    // SAFETY: `chunk` is live; `payload_ptr` returns its payload start.
-    let payload = unsafe { SharedChunk::<A>::payload_ptr(chunk) }.as_ptr();
-    let payload_len = chunk_ref.capacity();
-    let value_offset = (value.as_ptr() as usize) - (payload as usize);
-    // Acquire pairs with the owner thread's Release publish of the count in
-    // `ChunkMutator::publish_drop_count`, so the placeholder slot's bytes are
-    // visible to this (possibly different) thread before we read/commit it.
-    let count = chunk_ref.drop_entry_count_acquire();
-    // SAFETY: `payload`, `payload_len`, and `count` describe the live chunk's
-    // drop region; we hold a +1 and the contract forbids concurrent commits.
-    let committed = unsafe { drop_entry::commit_placeholder_drop_fn(payload, payload_len, count, value_offset, len, drop_fn) };
-    assert!(
-        committed,
-        "{}",
-        if is_slice {
-            "Arc::<[MaybeUninit<T>]>::assume_init: no drop entry reserved for this allocation. \
-             Use `Arena::alloc_uninit_slice_arc::<T>()` / `alloc_zeroed_slice_arc`; allocating \
-             a `MaybeUninit<T>` slice via the ordinary slice-Arc helpers does not reserve one \
-             and would silently leak each `T::drop`."
-        } else {
-            "Arc::<MaybeUninit<T>>::assume_init: no drop entry reserved for this allocation. \
-             Use `Arena::alloc_uninit_arc::<T>()` / `alloc_zeroed_arc`; \
-             `Arena::alloc_arc(MaybeUninit::new(...))` does not reserve an entry and would \
-             silently leak `T::drop`."
-        }
-    );
+/// Saturation guard for [`Arc::clone`]: aborts the process when the
+/// strong count would overflow, mirroring `std::sync::Arc`.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[inline(never)]
+#[cold]
+fn strong_overflow_abort() -> ! {
+    refcount_overflow_abort()
 }
 
 impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Arc<T, A> {
     #[inline]
     fn clone(&self) -> Self {
-        // SAFETY: `self` owns a live +1 on its chunk so the chunk is
-        // alive; `clone_from_value_ptr` mints a fresh +1 via an
-        // atomic bump and returns a `ChunkRef` that owns it. We
-        // `forget` that `ChunkRef`, handing the +1 to the new `Arc`.
-        let chunk_ref = unsafe { ChunkRef::<A>::clone_from_value_ptr(self.ptr) };
-        let _ = chunk_ref.forget();
+        let value_align = mem::align_of_val::<T>(&**self);
+        // SAFETY: `self` keeps the value (and its strong-count prefix)
+        // alive, so the strong slot is live, aligned, and within the
+        // chunk's provenance.
+        let strong = unsafe { thin_dst::strong_ref::<T>(self.ptr, value_align) };
+        // Relaxed suffices (as `std::sync::Arc`): the new handle need not
+        // synchronize until it is dropped.
+        let prev = strong.fetch_add(1, Ordering::Relaxed);
+        if prev > MAX_STRONG_REFCOUNT {
+            strong_overflow_abort();
+        }
         Self {
             ptr: self.ptr,
             _phantom: PhantomData,
@@ -320,15 +262,30 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Clone for Arc<T, A> {
 impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Arc<T, A> {
     #[inline]
     fn drop(&mut self) {
-        // SAFETY: `ptr` is hosted in a 64K-aligned SharedChunk we
-        // hold a +1 strong reference on. `ChunkRef::from_value_ptr`
-        // adopts that +1 and releases it on its own drop. We do not
-        // invoke `T::drop` here — for `T: Drop`, a drop entry was
-        // registered at allocation time so the chunk's teardown runs
-        // `T::drop` when the last reference releases the chunk; for
-        // `T: !Drop` no destructor is needed.
+        let value_align = mem::align_of_val::<T>(&**self);
+        // SAFETY: the value (and its strong-count prefix) is still live
+        // while this handle exists; the strong slot is aligned and
+        // within chunk provenance.
+        let strong = unsafe { thin_dst::strong_ref::<T>(self.ptr, value_align) };
+        // Release so prior accesses happen-before teardown (as `std::sync::Arc`).
+        if strong.fetch_sub(1, Ordering::Release) != 1 {
+            return;
+        }
+        // Last strong reference: Acquire-fence so other handles' writes are
+        // visible before we drop the value and release the chunk.
+        fence(Ordering::Acquire);
+        // Adopt the chunk's +1 *before* `T::drop` so a panicking destructor
+        // still releases the chunk via `ChunkRef`'s `Drop` (the in-chunk slot
+        // leaks, per the `alloc_arc*` panic semantics).
+        //
+        // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk` that
+        // holds exactly one outstanding +1 for this whole allocation;
+        // `from_value_ptr` adopts it. The value is a valid `T` and is
+        // dropped exactly once (only on the strong → 0 transition).
         unsafe {
-            let _ref: ChunkRef<A> = ChunkRef::from_value_ptr(self.ptr);
+            let _chunk: ChunkRef<A> = ChunkRef::from_value_ptr(self.ptr);
+            let fat = self.as_fat_ptr();
+            ptr::drop_in_place(fat.as_ptr());
         }
     }
 }
@@ -349,5 +306,74 @@ where
     #[inline]
     fn from(v: Vec<'a, T, A>) -> Self {
         v.freeze_into_arc()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Arena;
+
+    // Pins the saturation threshold to the `u32` half-range, killing the
+    // mutant that swaps `>>` for `<<` in the constant (which would yield
+    // `0xFFFF_FFFE`). Behavioral tests cannot reach this — the boundary
+    // sits ~2 billion clones away — so assert the value directly.
+    #[test]
+    fn max_strong_refcount_is_u32_half_range() {
+        assert_eq!(MAX_STRONG_REFCOUNT, u32::MAX >> 1);
+        assert_eq!(MAX_STRONG_REFCOUNT, 0x7FFF_FFFF);
+    }
+
+    // `Arc::clone` checks `prev > MAX_STRONG_REFCOUNT` on the value
+    // returned by `fetch_add` (the count *before* the increment), so a
+    // clone observing `prev == MAX_STRONG_REFCOUNT` must NOT abort.
+    // Driving the strong count to exactly the threshold and cloning kills
+    // the `>` -> `==` and `>` -> `>=` mutants on that comparison: both
+    // would abort the process here.
+    #[test]
+    fn clone_at_max_refcount_threshold_does_not_abort() {
+        let arena = Arena::new();
+        let arc = arena.alloc_arc(0xABCD_u32);
+        // SAFETY: `arc` keeps the value and its strong-count prefix live,
+        // so the strong slot is aligned and within chunk provenance.
+        let strong = unsafe { thin_dst::strong_ref::<u32>(arc.thin_ptr(), mem::align_of::<u32>()) };
+        // Force the next clone to observe `prev == MAX_STRONG_REFCOUNT`.
+        strong.store(MAX_STRONG_REFCOUNT, Ordering::Relaxed);
+        #[expect(
+            clippy::redundant_clone,
+            reason = "exercising Arc::clone's overflow guard at the threshold is the point of the test"
+        )]
+        let clone = arc.clone();
+        assert_eq!(*clone, 0xABCD);
+        // Restore the true live-handle count (`arc` + `clone`) so the two
+        // drops tear the value and chunk down correctly instead of
+        // leaking the strong count above 1 forever.
+        strong.store(2, Ordering::Relaxed);
+    }
+
+    // A clone observing `prev > MAX_STRONG_REFCOUNT` MUST abort. Driving
+    // the strong count one past the threshold reaches the
+    // `strong_overflow_abort()` call site in `Arc::clone` (which panics
+    // instead of aborting under `cfg(test)`), covering that guard and
+    // killing the `>` -> `==` mutant (which would not fire here).
+    #[test]
+    #[should_panic(expected = "refcount overflow")]
+    fn clone_above_max_refcount_threshold_aborts() {
+        let arena = Arena::new();
+        let arc = arena.alloc_arc(0xABCD_u32);
+        // SAFETY: `arc` keeps the value and its strong-count prefix live,
+        // so the strong slot is aligned and within chunk provenance.
+        let strong = unsafe { thin_dst::strong_ref::<u32>(arc.thin_ptr(), mem::align_of::<u32>()) };
+        strong.store(MAX_STRONG_REFCOUNT + 1, Ordering::Relaxed);
+        // The clone panics in its overflow guard before returning, so no
+        // clone is produced (but `fetch_add` already bumped the count).
+        // Catch it, restore the real live-handle count (just `arc`) so
+        // teardown releases the chunk instead of leaking (keeps Miri
+        // happy), then resume so `should_panic` observes the panic.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _c = arc.clone();
+        }));
+        strong.store(1, Ordering::Relaxed);
+        std::panic::resume_unwind(result.expect_err("clone past the threshold must panic"));
     }
 }

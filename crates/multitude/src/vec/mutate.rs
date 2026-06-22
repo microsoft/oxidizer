@@ -7,12 +7,11 @@ use core::mem;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::Vec;
+use crate::arena::panic_alloc;
 use crate::internal::arena_buf::ArenaBuf;
 
-/// Rollback guard for `resize`/`resize_with`: if a user `clone` or
-/// closure panics partway through a grow, the guard's `Drop` truncates
-/// the buffer back to `old_len`, dropping every element written so far.
-/// On the success path the caller disarms it via [`mem::forget`].
+/// Rollback guard for `resize`/`resize_with`.
+/// On panic, truncates to `old_len`; success disarms it via [`mem::forget`].
 struct ResizeGuard<'b, 'a, T> {
     buf: &'b mut ArenaBuf<'a, T>,
     old_len: usize,
@@ -133,11 +132,8 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
 
     /// Shrink the capacity of the vector as much as possible.
     ///
-    /// O(1) reclamation when the buffer sits at the current bump cursor
-    /// of its chunk (no later allocation has moved the cursor past it):
-    /// the unused tail is returned to the chunk and the data pointer is
-    /// unchanged. Otherwise this is a no-op — the arena never relocates
-    /// or copies to shrink, so capacity simply stays put.
+    /// O(1) when the buffer is still at the chunk's bump cursor: returns the
+    /// unused tail without moving data. Otherwise this is a no-op.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // thin delegation; logic covered via `reclaim_capacity_tail`
     pub fn shrink_to_fit(&mut self) {
@@ -146,10 +142,8 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
 
     /// Shrink the capacity with a lower bound.
     ///
-    /// The capacity will remain at least as large as both `self.len()` and
-    /// `min_capacity`. Reclamation only succeeds while the buffer still sits
-    /// at the chunk's bump cursor; otherwise this is a no-op (matching
-    /// [`std::vec::Vec::shrink_to`]'s "best-effort" contract).
+    /// Capacity remains at least `max(self.len(), min_capacity)`. Reclamation
+    /// only succeeds while the buffer is still at the chunk's bump cursor.
     #[cfg_attr(test, mutants::skip)]
     pub fn shrink_to(&mut self, min_capacity: usize) {
         if const { mem::size_of::<T>() == 0 } {
@@ -159,17 +153,12 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let _ = self.reclaim_capacity_tail(target);
     }
 
-    /// Reclaim the capacity tail `[target_cap, cap)` back to the chunk's
-    /// bump cursor when this buffer is still the chunk's last allocation
-    /// (an O(1) cursor rewind — no copy, data pointer unchanged). Returns
-    /// whether storage was reclaimed. A no-op when the buffer has been
-    /// overtaken by a later allocation, sits in a retired or oversized
-    /// chunk, or is a ZST.
+    /// Reclaim `[target_cap, cap)` with an O(1) cursor rewind when this buffer
+    /// is still the chunk's last allocation. Returns whether storage was
+    /// reclaimed; no-op for later allocations, retired/oversized chunks, or ZSTs.
     ///
-    /// Callers must ensure the slots in `[target_cap, cap)` hold no live
-    /// element (either never initialized, or already dropped): the
-    /// reclaimed bytes return to the arena and may be overwritten by the
-    /// next allocation.
+    /// Callers must ensure `[target_cap, cap)` contains no live elements
+    /// because the next arena allocation may overwrite it.
     #[inline]
     // Mutation testing is suppressed on the `total_bytes > max_normal_alloc`
     // early-return: `>` with `==` / `>=` mutations only differ at the exact
@@ -190,14 +179,9 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         }
         let elem = mem::size_of::<T>();
         let data_addr = self.buf.as_ptr() as usize;
-        // One-past-the-end address of the current allocation. The product
-        // is the buffer's real byte size, bounded by its chunk, so it
-        // cannot overflow.
+        // Buffer byte size is bounded by its chunk, so this cannot overflow.
         let total_bytes = cap * elem;
-        // Buffers large enough to have been served by an oversized chunk
-        // are never at the `current_local` bump cursor; skip them so the
-        // cheap cursor check below never spuriously reclaims a one-shot
-        // chunk's storage.
+        // Oversized buffers are never at the `current_local` bump cursor.
         if total_bytes > self.arena.max_normal_alloc() {
             return false;
         }
@@ -259,8 +243,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         assert!(start <= end, "extend_from_within: start > end");
         assert!(end <= len, "extend_from_within: range end out of bounds");
         let count = end - start;
-        // Reserve up front so the subsequent pushes cannot relocate the
-        // buffer (which would invalidate the source indices we read from).
+        // Reserve first so pushes cannot relocate the source indices.
         self.try_reserve(count)?;
         for i in start..end {
             let cloned = self.buf.as_slice()[i].clone();
@@ -366,7 +349,13 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         Ok(())
     }
 
-    /// Reserve the minimum capacity for at least `additional` more elements.
+    /// Reserve capacity for exactly `additional` more elements.
+    ///
+    /// Unlike [`Self::reserve`], this does not over-allocate via
+    /// amortized doubling: the resulting capacity is exactly
+    /// `len + additional` (modulo whatever the backing chunk's in-place
+    /// growth already provides). Prefer [`Self::reserve`] when more
+    /// elements are expected to be inserted afterwards.
     ///
     /// # Panics
     ///
@@ -374,9 +363,9 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Use [`Self::try_reserve_exact`] for a fallible variant.
     #[inline]
     pub fn reserve_exact(&mut self, additional: usize) {
-        // No tighter guarantee than `reserve`: the arena's slice
-        // reservation policy already returns the requested capacity.
-        self.reserve(additional);
+        if self.try_reserve_exact(additional).is_err() {
+            panic_alloc!();
+        }
     }
 
     /// Fallible variant of [`Self::reserve_exact`].
@@ -387,7 +376,13 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// alignment is at least 32 KiB.
     #[inline]
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), AllocError> {
-        self.try_reserve(additional)
+        let needed = self.buf.len().checked_add(additional).ok_or(AllocError)?;
+        if needed <= self.buf.cap() {
+            return Ok(());
+        }
+        // Grow to exactly `needed` (no amortized-doubling slack), matching
+        // `alloc::vec::Vec::reserve_exact` semantics.
+        self.try_grow_to(needed)
     }
 
     /// Resize the vector to `new_len`, cloning `value` to fill new slots.
@@ -419,10 +414,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         }
         let added = new_len - len;
         self.try_reserve(added)?;
-        // If a `clone` (or the final move) panics partway through, the
-        // guard rolls the length back to `len`, dropping every element
-        // written so far. This keeps the vector in a consistent state and
-        // never leaks the partially-grown tail.
+        // Roll back on panic so partially written elements are dropped.
         let guard = ResizeGuard {
             buf: &mut self.buf,
             old_len: len,
@@ -459,8 +451,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         }
         let added = new_len - len;
         self.try_reserve(added)?;
-        // See `resize`: roll back on a panic in `f` so the elements
-        // written before the panic are dropped and the length is restored.
+        // See `resize`: roll back on panic in `f`.
         let guard = ResizeGuard {
             buf: &mut self.buf,
             old_len: len,
@@ -499,15 +490,12 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let len = self.buf.len();
         assert!(at <= len, "split index out of bounds (at is {at}, len is {len})");
         let tail_len = len - at;
-        // Copy/empty path for ZSTs, an unallocated head, or an empty
-        // tail: produce an independent tail and leave the head's storage
-        // (and capacity) intact.
+        // ZST, unallocated-head, and empty-tail cases produce an independent
+        // tail and leave the head's storage intact.
         if const { mem::size_of::<T>() == 0 } || self.buf.cap() == 0 || tail_len == 0 {
             let mut tail = Self::try_with_capacity_in(tail_len, self.arena)?;
-            // Only ZSTs reach here with `tail_len > 0` (a non-ZST `cap == 0`
-            // forces `tail_len == 0`). ZSTs carry no data, so popping the
-            // suffix straight into `tail` — which reverses order — is fine; no
-            // staging buffer is needed.
+            // Only ZSTs reach here with `tail_len > 0`; reversing them while
+            // popping is unobservable.
             for _ in 0..tail_len {
                 tail.buf
                     .push_within_cap(self.buf.pop().expect("tail length matches"))
@@ -516,9 +504,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
             }
             return Ok(tail);
         }
-        // Zero-copy split: the tail shares the same chunk storage as the
-        // head (storage is reclaimed only at arena teardown, which
-        // outlives both halves), so no elements are copied.
+        // Zero-copy split: both halves share chunk storage until arena teardown.
         let tail_buf = self.buf.split_off_buf(at);
         Ok(Self::from_buf(tail_buf, self.arena))
     }

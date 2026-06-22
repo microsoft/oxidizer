@@ -3,17 +3,15 @@
 
 //! Single-slot interior-mutable holder for a [`ChunkMutator`].
 //!
-//! [`CurrentChunk`] is a `repr(transparent)` newtype over
-//! `UnsafeCell<ChunkMutator<C>>` that encapsulates the `unsafe` access
-//! patterns needed by [`Arena`](crate::Arena)'s hot path.
+//! [`CurrentChunk`] wraps `UnsafeCell<ChunkMutator<C>>` for
+//! [`Arena`](crate::Arena)'s hot path.
 //!
 //! # Soundness contract
 //!
-//! `CurrentChunk` does **not** track borrows at runtime. The holder
-//! (currently [`Arena`](crate::Arena)) must obey two invariants:
+//! `CurrentChunk` does not track borrows at runtime. The holder must ensure:
 //!
-//! 1. *Single-threaded access*: the holder is `!Sync`.
-//! 2. *No re-entry during borrow*: the shared reference returned by
+//! 1. Single-threaded access (`!Sync` holder).
+//! 2. No re-entry during borrow: the shared reference returned by
 //!    [`borrow`](CurrentChunk::borrow) must not be held across any
 //!    `replace`/`drop_replace` on the same cell.
 
@@ -35,11 +33,7 @@ impl<C: ?Sized + ChunkOps> CurrentChunk<C> {
         Self(UnsafeCell::new(mutator))
     }
 
-    /// Borrow the contained mutator. Hot-path entry; inlines fully.
-    ///
-    /// The returned reference is valid only until the next
-    /// `replace`/`drop_replace` on this cell. See module docs for the
-    /// soundness contract.
+    /// Borrow the mutator until the next `replace` / `drop_replace`.
     #[expect(clippy::inline_always, reason = "hot-path entry; must inline fully for arena performance")]
     #[inline(always)]
     pub(crate) fn borrow(&self) -> &ChunkMutator<C> {

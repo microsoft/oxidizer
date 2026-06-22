@@ -10,7 +10,7 @@ use core::pin::Pin;
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
-use super::alloc_prefixed::worst_case_thin_slice_payload;
+use super::alloc_prefixed::worst_case_arc_slice_payload;
 use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_shared_chunk_ref};
 use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
@@ -149,34 +149,34 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Arc + Copy: no element-drop runs, but we still take an Arc-owned
-    /// refcount on the chunk.
+    /// refcount on the chunk and reserve the strong-count prefix.
     #[inline]
     fn impl_alloc_slice_arc_copy<T: Copy>(&self, src: &[T]) -> Result<Arc<[T], A>, AllocError> {
-        check_slice_arc_layout::<T>(src.len())?;
+        check_slice_arc_layout::<T>()?;
         let len = src.len();
-        // Copy is never `Drop`, so use the no-drop reservation.
-        let bytes_needed = worst_case_thin_slice_payload::<T>(len);
+        let bytes_needed = worst_case_arc_slice_payload::<T>(len);
         // `src` is a live `&[T]`, so `size_of_val(src)` is a valid
         // `usize`. Hoisting the precomputed byte size lets the inner
         // reservation helper skip the `checked_mul` overflow guard.
         let payload_bytes = mem::size_of_val(src);
         loop {
             // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`.
-            let reserved = unsafe { self.try_reserve_shared_slice_with_size::<T>(len, payload_bytes) };
+            let reserved = unsafe { self.try_reserve_arc_slice_with_size::<T>(len, payload_bytes) };
             if let Some((uninit, chunk_ptr)) = reserved {
                 let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let slice_ptr = uninit.init_copy_from_slice_ptr(src);
                 let _ = chunk_ref.forget();
                 // SAFETY: `slice_ptr` points to `len` initialized `T`s in a
-                // shared chunk with a fresh +1; `Arc::from_raw` adopts that
-                // +1. Chunk-wide provenance preserved via `init_copy_from_slice_ptr`.
+                // shared chunk with a fresh +1 and an initialized strong
+                // prefix; `Arc::from_raw` adopts that family. Chunk-wide
+                // provenance preserved via `init_copy_from_slice_ptr`.
                 return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
             }
-            if self.is_oversized_shared(bytes_needed) {
+            if self.is_oversized(bytes_needed) {
                 return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
-                    let ticket = mutator
-                        .try_alloc_uninit_slice_prefixed::<T>(len)
-                        .expect("dedicated oversized chunk sized to fit slice");
+                    let (ticket, _chunk) = mutator
+                        .try_alloc_arc_slice::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit slice + strong prefix");
                     let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
                     let slice_ptr = ticket.init_copy_from_slice_ptr(src);
                     let _ = chunk_ref.forget();
@@ -188,32 +188,16 @@ impl<A: Allocator + Clone> Arena<A> {
         }
     }
 
-    /// Arc + closure fill: records a chunk drop entry when `T: Drop`,
-    /// so the chunk's teardown runs `T::drop` on each element after the
-    /// last `Arc` releases.
+    /// Arc + closure fill: `T::drop` (if any) runs eagerly in
+    /// [`Arc::drop`](crate::Arc) on the last reference via
+    /// `drop_in_place::<[T]>`, so no chunk drop entry is reserved.
     #[inline]
     fn impl_alloc_slice_arc_with<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Arc<[T], A>, AllocError> {
-        check_slice_arc_layout::<T>(len)?;
-        // Refill hint accounts for the length prefix, payload alignment
-        // slack, payload bytes, and (for `T: Drop`) a drop-entry slot.
-        let bytes_needed = worst_case_thin_slice_payload::<T>(len);
+        check_slice_arc_layout::<T>()?;
+        let bytes_needed = worst_case_arc_slice_payload::<T>(len);
         let mut f = Some(f);
         loop {
-            // Branch on needs_drop at const time so monomorphizations
-            // pick the right reservation helper.
-            if const { mem::needs_drop::<T>() } {
-                if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice_with_drop::<T>(len) {
-                    let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
-                    let f = f.take().expect("with closure taken twice");
-                    let slice_ptr = uninit.init_with_ptr(f);
-                    let _ = chunk_ref.forget();
-                    // SAFETY: see `impl_alloc_slice_arc_copy`; the drop entry
-                    // was committed by `init_with_ptr` for the chunk-teardown
-                    // path. `slice_ptr` carries chunk-wide provenance so the
-                    // Arc's later `byte_sub` to the chunk header is sound.
-                    return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
-                }
-            } else if let Some((uninit, chunk_ptr)) = self.try_reserve_shared_slice::<T>(len) {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<T>(len) {
                 let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
                 let f = f.take().expect("with closure taken twice");
                 let slice_ptr = uninit.init_with_ptr(f);
@@ -222,27 +206,16 @@ impl<A: Allocator + Clone> Arena<A> {
                 // provenance preserved via `init_with_ptr`.
                 return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
             }
-            if self.is_oversized_shared(bytes_needed) {
+            if self.is_oversized(bytes_needed) {
                 let fclosure = f.take().expect("with closure taken twice");
                 return self.alloc_oversized_shared_with(bytes_needed, |mutator, chunk_ptr| {
-                    let slice_ptr = if const { mem::needs_drop::<T>() } {
-                        let ticket = mutator
-                            .try_alloc_uninit_slice_with_drop_prefixed::<T>(len)
-                            .expect("dedicated oversized chunk sized to fit slice + drop entry");
-                        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-                        let p = ticket.init_with_ptr(fclosure);
-                        let _ = chunk_ref.forget();
-                        p
-                    } else {
-                        let ticket = mutator
-                            .try_alloc_uninit_slice_prefixed::<T>(len)
-                            .expect("dedicated oversized chunk sized to fit slice");
-                        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
-                        let p = ticket.init_with_ptr(fclosure);
-                        let _ = chunk_ref.forget();
-                        p
-                    };
-                    // SAFETY: see the non-oversized branches above.
+                    let (ticket, _chunk) = mutator
+                        .try_alloc_arc_slice::<T>(len)
+                        .expect("dedicated oversized chunk sized to fit slice + strong prefix");
+                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let slice_ptr = ticket.init_with_ptr(fclosure);
+                    let _ = chunk_ref.forget();
+                    // SAFETY: see the non-oversized branch above.
                     unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
                 });
             }
@@ -289,24 +262,14 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 }
 
-/// Common up-front checks for the `Arc<[T]>` slice family. Rejects
-/// over-aligned `T` (would break the smart-pointer header recovery) and
-/// `T: Drop` slices whose `len > u16::MAX` (the chunk drop entry packs
-/// the element count into a `u16`).
-//
-// Mutation testing is suppressed here: any mutation that bypasses the
-// `len > u16::MAX` rejection (e.g. `&&`→`||`, `>`→`==`) sends the
-// caller's refill loop into an unbounded chunk-allocation spin (see the
-// detailed note in `alloc_slice_ref::reject_drop_slice_too_long`).
-// Correctness is exercised by integration tests in `coverage_gaps.rs`,
-// `arena.rs`, and `mutants_extras.rs`.
-#[cfg_attr(test, mutants::skip)]
+/// Up-front check for the `Arc<[T]>` slice family. Rejects over-aligned
+/// `T` (would break the smart-pointer header recovery). Unlike the
+/// old drop-entry design, there is no `len > u16::MAX` restriction:
+/// element destructors run via `drop_in_place::<[T]>` in
+/// [`Arc::drop`](crate::Arc), not a `u16`-counted chunk drop entry.
 #[inline]
-fn check_slice_arc_layout<T>(len: usize) -> Result<(), AllocError> {
+fn check_slice_arc_layout<T>() -> Result<(), AllocError> {
     if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
-        return Err(AllocError);
-    }
-    if mem::needs_drop::<T>() && len > u16::MAX as usize {
         return Err(AllocError);
     }
     Ok(())
