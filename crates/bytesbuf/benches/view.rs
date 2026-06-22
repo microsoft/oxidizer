@@ -32,7 +32,7 @@ const MANY_SPANS: usize = 32;
 
 #[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {
-    let allocs = Session::new().no_stdout().no_file();
+    let allocs = Session::new().no_file();
 
     let memory = FixedBlockMemory::new(TEST_SPAN_SIZE);
 
@@ -292,6 +292,4 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.finish();
-
-    allocs.to_report().print_to_stdout();
 }

@@ -14,7 +14,7 @@ static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("breaker");
-    let session = Session::new().no_stdout().no_file();
+    let session = Session::new().no_file();
 
     // No circuit breaker
     let service = Execute::new(|_input: Input| async move { Output });
@@ -47,7 +47,6 @@ fn entry(c: &mut Criterion) {
     });
 
     group.finish();
-    session.to_report().print_to_stdout();
 }
 
 criterion_group!(benches, entry);

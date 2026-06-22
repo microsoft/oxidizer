@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn bodies_benchmarks(c: &mut Criterion) {
-    let session = Session::new().no_stdout().no_file();
+    let session = Session::new().no_file();
     let mut group = c.benchmark_group("http_response_builder_bodies");
     let body_builder = HttpBodyBuilder::new_fake();
 
@@ -65,7 +65,6 @@ fn bodies_benchmarks(c: &mut Criterion) {
     });
 
     group.finish();
-    session.to_report().print_to_stdout();
 }
 
 criterion_group!(benches, bodies_benchmarks);

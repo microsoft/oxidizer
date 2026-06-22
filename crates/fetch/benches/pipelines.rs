@@ -34,7 +34,7 @@ fn get_uri() -> &'static str {
 }
 
 fn entry(c: &mut Criterion) {
-    let session = Session::new().no_stdout().no_file();
+    let session = Session::new().no_file();
     let mut group = c.benchmark_group("http_client_pipelines");
 
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen()).build();
@@ -95,7 +95,6 @@ fn entry(c: &mut Criterion) {
     });
 
     group.finish();
-    session.to_report().print_to_stdout();
 }
 
 criterion_group!(benches, entry);
