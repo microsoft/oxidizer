@@ -18,7 +18,6 @@ mod common;
 mod utf16_smoke {
 
     use multitude::Arena;
-    use multitude::strings::{ArcUtf16Str, BoxUtf16Str};
     use widestring::utf16str;
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
@@ -36,7 +35,7 @@ mod utf16_smoke {
     fn alloc_utf16_str_arc() {
         let arena = Arena::new();
         let s = arena.alloc_utf16_str_arc(utf16str!("shared"));
-        let _: ArcUtf16Str = s;
+        let _: multitude::Arc<multitude::strings::Utf16Str> = s;
         assert_eq!(&*s, utf16str!("shared"));
     }
 
@@ -1014,8 +1013,7 @@ mod utf16_coverage {
     // From<ArenaUtf16String> for ArenaRcUtf16Str (exercises the
     // `into` arrow that the From impl wraps).
 
-    // Display impl chain: ArenaArcUtf16Str / ArenaBoxUtf16Str / ArenaRcUtf16Str
-    // pass through to Utf16Str's Display.
+    // Display passes through to `Utf16Str`'s Display.
 
     #[test]
     fn insert_grows_capacity() {
@@ -1063,7 +1061,7 @@ mod utf16_coverage {
     }
 
     // from_str helpers: allocator-failure paths. The from-str variants now
-    // transcode directly into the target-flavor chunk in a single allocation,
+    // transcode directly into the target chunk in a single allocation,
     // so the only failure point is that one allocation.
 
     #[test]
@@ -1415,22 +1413,20 @@ mod mutants_for_utf16_strings {
     }
 
     /// `Utf16String::into_arc` freezes into a shared, reference-counted
-    /// `ArcUtf16Str` whose contents match the builder, for both empty
+    /// `Arc<Utf16Str>` whose contents match the builder, for both empty
     /// and non-empty inputs, and which can be cloned and outlive the
     /// arena.
     #[test]
     fn into_arc_handles_empty_and_non_empty() {
-        use multitude::strings::ArcUtf16Str;
-
         let arena = Arena::new();
 
         let s_empty = arena.alloc_utf16_string();
-        let a_empty: ArcUtf16Str = ArcUtf16Str::from(s_empty);
+        let a_empty: multitude::Arc<multitude::strings::Utf16Str> = multitude::Arc::<multitude::strings::Utf16Str>::from(s_empty);
         assert_eq!(&*a_empty, utf16str!(""));
         assert_eq!(a_empty.len(), 0);
 
         let s = Utf16String::from_utf16_str_in(utf16str!("hello, world"), &arena);
-        let a: ArcUtf16Str = ArcUtf16Str::from(s);
+        let a: multitude::Arc<multitude::strings::Utf16Str> = multitude::Arc::<multitude::strings::Utf16Str>::from(s);
         assert_eq!(&*a, utf16str!("hello, world"));
         assert_eq!(a.len(), 12);
 
@@ -1440,16 +1436,14 @@ mod mutants_for_utf16_strings {
         assert_eq!(a.as_ptr(), a2.as_ptr());
     }
 
-    /// An `ArcUtf16Str` produced by `into_arc` outlives the arena it was
-    /// built from (the backing shared chunk is held by the refcount).
+    /// An `Arc<Utf16Str>` produced by `into_arc` outlives the arena it was
+    /// built from (the backing chunk is held by the refcount).
     #[test]
     fn into_arc_outlives_arena() {
-        use multitude::strings::ArcUtf16Str;
-
-        let escaped: ArcUtf16Str = {
+        let escaped: multitude::Arc<multitude::strings::Utf16Str> = {
             let arena = Arena::new();
             let s = Utf16String::from_utf16_str_in(utf16str!("survives"), &arena);
-            let a = ArcUtf16Str::from(s);
+            let a = multitude::Arc::<multitude::strings::Utf16Str>::from(s);
             drop(arena);
             a
         };
@@ -1488,7 +1482,7 @@ mod mutation_coverage {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use multitude::strings::{BoxUtf16Str, String as ArenaString, Utf16String};
+    use multitude::strings::{String as ArenaString, Utf16String};
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arena, ArenaBuilder, Box, FromIn as _};
     use widestring::{Utf16Str, utf16str};
@@ -1738,7 +1732,7 @@ mod mutation_coverage {
     #[test]
     fn test_box_utf16_str_partial_eq_distinguishes_different_values() {
         let arena = Arena::new();
-        let boxed: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("alpha"));
+        let boxed: multitude::Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("alpha"));
         let beta = utf16str!("beta");
 
         assert!(boxed != utf16str!("beta"));
@@ -1748,7 +1742,7 @@ mod mutation_coverage {
     #[test]
     fn test_box_utf16_str_drop_releases_chunk_after_arena_drop() {
         let alloc = common::TrackingAllocator::new();
-        let boxed: BoxUtf16Str<_> = {
+        let boxed: multitude::Box<multitude::strings::Utf16Str, _> = {
             let arena = Arena::builder().allocator_in(alloc.clone()).build();
             arena.alloc_utf16_str_box(utf16str!("hello"))
         };
@@ -1954,8 +1948,11 @@ mod mutation_coverage {
     #[test]
     fn test_box_utf16_str_partial_eq_utf16str_returns_false_for_mismatch() {
         let arena = Arena::new();
-        let boxed: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("alpha"));
-        assert!(!<BoxUtf16Str as PartialEq<Utf16Str>>::eq(&boxed, utf16str!("beta")));
+        let boxed: multitude::Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("alpha"));
+        assert!(!<multitude::Box<multitude::strings::Utf16Str> as PartialEq<Utf16Str>>::eq(
+            &boxed,
+            utf16str!("beta")
+        ));
     }
 
     #[test]
@@ -3031,7 +3028,7 @@ mod from_coverage_extras_utf16 {
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
         #[cfg(feature = "stats")]
-        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
+        assert_eq!(arena.stats().oversized_chunks_allocated, 1);
     }
 
     #[test]
@@ -3056,7 +3053,7 @@ mod from_coverage_extras_utf16 {
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
         #[cfg(feature = "stats")]
-        assert_eq!(arena.stats().oversized_shared_chunks_allocated, 1);
+        assert_eq!(arena.stats().oversized_chunks_allocated, 1);
     }
 }
 
@@ -3222,7 +3219,7 @@ mod from_mutants_extras_utf16_scattered {
     /// Regression guard for the prefixed shared-allocation routing
     /// (`impl_alloc_prefixed_shared_arc`): an odd-length `u8` (`Arc<str>`)
     /// allocation leaves the shared bump cursor odd, then a `u16`
-    /// (`ArcUtf16Str`) allocation reserves a block aligned to 4 bytes (so
+    /// (`Arc<Utf16Str>`) allocation reserves a block aligned to 4 bytes (so
     /// the per-`Arc` `AtomicU32` strong prefix is aligned, via
     /// `arc_block_align(u16) = max(2, 4)`). The routing sizes the refill /
     /// oversized hint with `worst_case_arc_slice_payload` (strong prefix +
@@ -3265,5 +3262,56 @@ mod from_mutants_extras_utf16_scattered {
                 }
             }
         }
+    }
+}
+
+mod utf16_zero_copy_freeze {
+    use std::thread;
+
+    use multitude::Arena;
+
+    #[test]
+    fn into_boxed_utf16_str_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_from_str("hello, world");
+        let data_ptr = s.as_utf16_str().as_slice().as_ptr();
+        let b: multitude::Box<multitude::strings::Utf16Str> = s.into_boxed_utf16_str();
+        assert_eq!(b.len(), 12);
+        assert_eq!(
+            b.as_widestring_utf16_str().as_slice().as_ptr(),
+            data_ptr,
+            "into_boxed_utf16_str must not copy"
+        );
+    }
+
+    #[test]
+    fn into_arc_utf16_str_reuses_buffer_in_place() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_utf16_string();
+        s.push_from_str("shared utf16");
+        let data_ptr = s.as_utf16_str().as_slice().as_ptr();
+        let a: multitude::Arc<multitude::strings::Utf16Str> = s.into_arc_utf16_str();
+        assert_eq!(
+            a.as_widestring_utf16_str().as_slice().as_ptr(),
+            data_ptr,
+            "into_arc_utf16_str must not copy"
+        );
+        let a2 = a.clone();
+        assert_eq!(a2.as_widestring_utf16_str(), a.as_widestring_utf16_str());
+    }
+
+    #[test]
+    fn frozen_arc_utf16_str_outlives_arena_and_crosses_threads() {
+        let arc: multitude::Arc<multitude::strings::Utf16Str> = {
+            let arena = Arena::new();
+            let mut s = arena.alloc_utf16_string();
+            s.push_from_str("survives teardown");
+            s.into_arc_utf16_str()
+        };
+        let clone = arc.clone();
+        let len = thread::spawn(move || clone.len()).join().unwrap();
+        assert_eq!(len, 17);
+        assert_eq!(arc.len(), 17);
     }
 }

@@ -148,9 +148,9 @@ mod bolero_lifecycle {
     /// length, so any value is meaningful (no rejection sampling needed).
     #[derive(Clone, Copy, Debug, TypeGenerator)]
     enum Op {
-        /// `alloc_box(Tracker)` — Box flavor, has a [`DropEntry`].
+        /// `alloc_box(Tracker)` — Box path, has a [`DropEntry`].
         AllocBox(u64),
-        /// `alloc_arc(Tracker)` — Shared-flavor, deferred-reconciliation
+        /// `alloc_arc(Tracker)` — Arc, deferred-reconciliation
         /// refcount.
         AllocArc(u64),
         /// `Arc::clone` — atomic increment on a `Shared` chunk.
@@ -293,11 +293,11 @@ mod bolero_lifecycle {
         let mut built_str_boxes: Vec<multitude::Box<str>> = Vec::new();
 
         #[cfg(feature = "utf16")]
-        let mut utf16_str_boxes: Vec<multitude::strings::BoxUtf16Str> = Vec::new();
+        let mut utf16_str_boxes: Vec<multitude::Box<multitude::strings::Utf16Str>> = Vec::new();
         #[cfg(feature = "utf16")]
-        let mut utf16_str_arcs: Vec<multitude::strings::ArcUtf16Str> = Vec::new();
+        let mut utf16_str_arcs: Vec<multitude::Arc<multitude::strings::Utf16Str>> = Vec::new();
         #[cfg(feature = "utf16")]
-        let mut built_utf16_str_boxes: Vec<multitude::strings::BoxUtf16Str> = Vec::new();
+        let mut built_utf16_str_boxes: Vec<multitude::Box<multitude::strings::Utf16Str>> = Vec::new();
 
         for op in ops {
             match *op {
@@ -542,10 +542,7 @@ mod bolero_lifecycle {
         {
             let s = stats_before_drop;
             if created_n > 0 {
-                let total_chunks = s.normal_local_chunks_allocated
-                    + s.oversized_local_chunks_allocated
-                    + s.normal_shared_chunks_allocated
-                    + s.oversized_shared_chunks_allocated;
+                let total_chunks = s.normal_chunks_allocated + s.oversized_chunks_allocated;
                 assert!(
                     total_chunks >= 1,
                     "at least one chunk must have been allocated (created={created_n}, stats={s:?})",

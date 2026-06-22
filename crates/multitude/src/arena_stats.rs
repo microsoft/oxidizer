@@ -15,30 +15,17 @@
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct ArenaStats {
-    /// Total normal-size local chunks ever allocated by this arena.
+    /// Total normal-size chunks ever allocated by this arena.
     ///
-    /// Local chunks back simple references and `Local`-flavor smart
-    /// pointers (`Arc`, `Box`).
-    pub normal_local_chunks_allocated: u64,
+    /// A normal-size chunk is a cacheable power-of-two chunk that backs any
+    /// mix of arena-lifetime references and `Arc`/`Box` smart pointers.
+    pub normal_chunks_allocated: u64,
 
-    /// Total oversized stand-alone local chunks ever allocated by
-    /// this arena.
+    /// Total oversized stand-alone chunks ever allocated by this arena.
     ///
-    /// Oversized chunks hold a single allocation that
-    /// exceeded `max_normal_alloc`; they are never cached.
-    pub oversized_local_chunks_allocated: u64,
-
-    /// Total normal-size shared chunks ever allocated by this arena.
-    ///
-    /// Shared chunks back `Arc`-flavor smart pointers.
-    pub normal_shared_chunks_allocated: u64,
-
-    /// Total oversized stand-alone shared chunks ever allocated by
-    /// this arena.
-    ///
-    /// See `oversized_local_chunks_allocated` for the
-    /// definition of "oversized".
-    pub oversized_shared_chunks_allocated: u64,
+    /// Oversized chunks hold a single allocation that exceeded
+    /// `max_normal_alloc`; they are never cached.
+    pub oversized_chunks_allocated: u64,
 
     /// Total bytes currently held from the underlying allocator.
     ///
@@ -59,9 +46,9 @@ pub struct ArenaStats {
     ///
     /// The free region between the bump cursor and the drop-entry top, summed
     /// across every chunk the arena currently holds — both the active
-    /// `current_local` / `current_shared` chunks and any chunks that have been
-    /// retired but not yet returned to the cache or freed back to the underlying
-    /// allocator (e.g. chunks held alive by outstanding `Arc`/`Box` handles).
+    /// `current` chunk and any chunks that have been retired but not yet
+    /// returned to the cache or freed back to the underlying allocator (e.g.
+    /// chunks held alive by outstanding `Arc`/`Box` handles).
     ///
     /// Bumped up when a chunk is retired from a current slot, bumped
     /// back down when the same chunk is later released to the size-

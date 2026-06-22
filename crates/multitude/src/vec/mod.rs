@@ -1,19 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(
-    clippy::items_after_statements,
-    clippy::single_match_else,
-    clippy::panic,
-    clippy::manual_assert,
-    clippy::undocumented_unsafe_blocks,
-    clippy::match_wild_err_arm,
-    clippy::missing_panics_doc,
-    clippy::manual_saturating_arithmetic,
-    clippy::struct_field_names,
-    reason = "reachable panics are programmer error; keep this close to `allocator_api2::vec::Vec`; `drain_*` names mirror `std::vec::Drain`"
-)]
-
 //! Arena-backed growable vectors and the `vec!` macro.
 
 use core::marker::PhantomData;
@@ -23,6 +10,7 @@ use allocator_api2::alloc::{AllocError, Allocator, Global};
 
 use crate::Arena;
 use crate::internal::arena_buf::ArenaBuf;
+use crate::internal::constants::buffer_freezable;
 
 mod basic;
 mod collect_in;
@@ -64,8 +52,8 @@ pub use crate::__multitude_vec as vec;
 /// assert_eq!(&*frozen, &[1, 2, 3]);
 /// ```
 pub struct Vec<'a, T, A: Allocator + Clone = Global> {
-    pub(super) buf: ArenaBuf<'a, T>,
-    pub(super) arena: &'a Arena<A>,
+    buf: ArenaBuf<'a, T>,
+    arena: &'a Arena<A>,
     /// Marker for covariance in `T` and to enforce `!Send`/`!Sync`.
     _phantom: PhantomData<*const T>,
 }
@@ -79,7 +67,7 @@ pub struct Vec<'a, T, A: Allocator + Clone = Global> {
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Construct a `Vec` wrapping the given (empty) buffer.
     #[inline]
-    pub(super) const fn from_buf(buf: ArenaBuf<'a, T>, arena: &'a Arena<A>) -> Self {
+    const fn from_buf(buf: ArenaBuf<'a, T>, arena: &'a Arena<A>) -> Self {
         Self {
             buf,
             arena,
@@ -103,15 +91,24 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     #[cold]
     #[inline(never)]
     #[cfg_attr(test, mutants::skip)] // `>` vs `>=` observationally equivalent at old_cap == 0
-    pub(super) fn try_grow_to(&mut self, new_cap: usize) -> Result<(), AllocError> {
+    fn try_grow_to(&mut self, new_cap: usize) -> Result<(), AllocError> {
         if const { mem::size_of::<T>() == 0 } {
             return Ok(());
         }
         debug_assert!(new_cap > self.buf.cap(), "try_grow_to: callers must ensure new_cap > current cap");
-        let refill_hint = mem::size_of::<T>()
-            .checked_mul(new_cap)
-            .and_then(|b| b.checked_add(mem::align_of::<T>()))
-            .ok_or(AllocError)?;
+        // Reject capacities whose raw payload overflows `usize` up front so
+        // both buffer kinds surface a recoverable `AllocError`, rather than the
+        // freezable hint saturating into the oversized path (where the in-chunk
+        // reservation would later overflow and panic on the `expect` below).
+        let payload_bytes = mem::size_of::<T>().checked_mul(new_cap).ok_or(AllocError)?;
+        let refill_hint = if const { buffer_freezable::<T>() } {
+            // Freezable buffers carry the `Arc<[T]>` freeze prefix; the
+            // refill hint must budget for it so the chunk fits prefix +
+            // payload + alignment slack.
+            crate::arena::alloc_prefixed::worst_case_arc_slice_payload::<T>(new_cap)
+        } else {
+            payload_bytes.checked_add(mem::align_of::<T>()).ok_or(AllocError)?
+        };
         let old_cap = self.buf.cap();
         // Fast path: if our storage sits at the chunk's bump cursor and the
         // chunk has room, extend it in place with no copy and no relocation.
@@ -129,15 +126,24 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
             }
         }
         let uninit = loop {
-            if let Some(u) = self.arena.try_reserve_local_slice::<T>(new_cap) {
+            let reserved = if const { buffer_freezable::<T>() } {
+                self.arena.try_reserve_freezable_slice::<T>(new_cap)
+            } else {
+                self.arena.try_reserve_local_slice::<T>(new_cap)
+            };
+            if let Some(u) = reserved {
                 break u;
             }
             if self.arena.is_oversized(refill_hint) {
                 let (new_ptr, new_cap_actual) = self.arena.alloc_oversized_local_with(refill_hint, |mutator| {
-                    let ticket = mutator
-                        .try_alloc_uninit_slice::<T>(new_cap)
-                        .expect("dedicated oversized chunk sized to fit growable buffer");
-                    ticket.into_raw_buffer()
+                    let ticket = if const { buffer_freezable::<T>() } {
+                        mutator.try_alloc_freezable_slice::<T>(new_cap)
+                    } else {
+                        mutator.try_alloc_uninit_slice::<T>(new_cap)
+                    };
+                    ticket
+                        .expect("dedicated oversized chunk sized to fit growable buffer")
+                        .into_raw_buffer()
                 })?;
                 #[cfg(feature = "stats")]
                 if old_cap > 0 {
@@ -155,7 +161,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
                 // half's growth would dangle the other (use-after-free).
                 return Ok(());
             }
-            self.arena.refill_local(refill_hint)?;
+            self.arena.refill(refill_hint)?;
         };
         #[cfg(feature = "stats")]
         if old_cap > 0 {

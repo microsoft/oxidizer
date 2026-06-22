@@ -61,22 +61,19 @@ fn warm_bump() -> bumpalo::Bump {
 }
 
 fn warm_arena() -> Arena {
-    // Warm: preallocate one chunk of the largest size class for each
-    // flavor AND prime the arena's current_local / current_shared
-    // mutators by performing a throwaway allocation of each flavor.
+    // Warm: preallocate chunks of the largest size class AND prime the
+    // arena's `current` mutator by performing a throwaway reference
+    // allocation and a throwaway `Arc` allocation.
     // The preallocated chunks live in the provider cache; the
-    // current_* slots start in the empty-mutator state and are only
+    // `current` slot starts in the empty-mutator state and is only
     // populated lazily on the first allocation. Without the prime,
-    // every bench fn entry would pay one cold `refill_*` (chunk-cache
+    // every bench fn entry would pay one cold `refill` (chunk-cache
     // pop + mutator install) on the first inner iteration, hiding
     // ~50 cold-path instructions inside the per-op instruction count
     // and adding cache-miss latency that doesn't reflect steady-state
     // performance. This mirrors bumpalo's `warm_bump` (which itself
     // primes its cursor with a no-op alloc).
-    let arena = Arena::builder()
-        .with_capacity_local(64 * 1024)
-        .with_capacity_shared(64 * 1024)
-        .build();
+    let arena = Arena::builder().with_capacity(128 * 1024).build();
     let _: &mut u64 = arena.alloc(0_u64);
     let _ = arena.alloc_arc(0_u64);
     arena

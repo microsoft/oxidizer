@@ -74,6 +74,10 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         clippy::inline_always,
         reason = "hot path; mirror of `push` — keep cap-check + bump + write tight in callers' loops"
     )]
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "fallible API: the internal `.expect` guards capacity just grown above and is unreachable; a `# Panics` section would contradict the `try_` contract"
+    )]
     pub fn try_push(&mut self, value: T) -> Result<(), AllocError> {
         if let Err(value) = self.buf.push_within_cap(value) {
             self.try_grow_one()?;

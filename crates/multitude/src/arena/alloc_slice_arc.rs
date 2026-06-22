@@ -11,12 +11,12 @@ use core::pin::Pin;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::alloc_prefixed::worst_case_arc_slice_payload;
-use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_shared_chunk_ref};
+use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
 use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Copy `slice` into a `Shared`-flavor chunk and return an [`Arc`].
+    /// Copy `slice` into a chunk and return an [`Arc`].
     ///
     /// # Panics
     ///
@@ -45,7 +45,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_slice_arc_copy::<T>(slice.as_ref())
     }
 
-    /// Clone every element of `slice` into a `Shared`-flavor chunk and return an [`Arc`].
+    /// Clone every element of `slice` into a chunk and return an [`Arc`].
     ///
     /// # Panics
     ///
@@ -76,7 +76,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_slice_arc_with::<T, _>(s.len(), |i| s[i].clone())
     }
 
-    /// Allocate a slice of `len` elements in a `Shared`-flavor chunk via `f(i)`.
+    /// Allocate a slice of `len` elements in a chunk via `f(i)`.
     ///
     /// # Panics
     ///
@@ -109,7 +109,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_slice_arc_with::<T, F>(len, f)
     }
 
-    /// Allocate a slice in a `Shared`-flavor chunk and fill it from `iter`.
+    /// Allocate a slice in a chunk and fill it from `iter`.
     ///
     /// # Panics
     ///
@@ -163,11 +163,11 @@ impl<A: Allocator + Clone> Arena<A> {
             // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`.
             let reserved = unsafe { self.try_reserve_arc_slice_with_size::<T>(len, payload_bytes) };
             if let Some((uninit, chunk_ptr)) = reserved {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let slice_ptr = uninit.init_copy_from_slice_ptr(src);
                 let _ = chunk_ref.forget();
                 // SAFETY: `slice_ptr` points to `len` initialized `T`s in a
-                // shared chunk with a fresh +1 and an initialized strong
+                // chunk with a fresh +1 and an initialized strong
                 // prefix; `Arc::from_raw` adopts that family. Chunk-wide
                 // provenance preserved via `init_copy_from_slice_ptr`.
                 return Ok(unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) });
@@ -177,14 +177,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (ticket, _chunk) = mutator
                         .try_alloc_arc_slice::<T>(len)
                         .expect("dedicated oversized chunk sized to fit slice + strong prefix");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let slice_ptr = ticket.init_copy_from_slice_ptr(src);
                     let _ = chunk_ref.forget();
                     // SAFETY: see the non-oversized branch.
                     unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
                 });
             }
-            self.refill_shared(bytes_needed)?;
+            self.refill(bytes_needed)?;
         }
     }
 
@@ -198,7 +198,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let mut f = Some(f);
         loop {
             if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<T>(len) {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let f = f.take().expect("with closure taken twice");
                 let slice_ptr = uninit.init_with_ptr(f);
                 let _ = chunk_ref.forget();
@@ -212,14 +212,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (ticket, _chunk) = mutator
                         .try_alloc_arc_slice::<T>(len)
                         .expect("dedicated oversized chunk sized to fit slice + strong prefix");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let slice_ptr = ticket.init_with_ptr(fclosure);
                     let _ = chunk_ref.forget();
                     // SAFETY: see the non-oversized branch above.
                     unsafe { Arc::from_raw(slice_ptr.cast::<u8>()) }
                 });
             }
-            self.refill_shared(bytes_needed)?;
+            self.refill(bytes_needed)?;
         }
     }
 

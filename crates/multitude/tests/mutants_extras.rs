@@ -41,7 +41,7 @@ mod mutants_for_kill {
 
     // --------------------------------------------------------------------
     // C/D/E. Drop-counter exhaustive coverage. Many missed mutants live in
-    // the per-flavor allocation hot paths and corrupt either the bump
+    // the allocation hot paths and corrupt either the bump
     // cursor (`+ → -/*`), the drop-entry index/chain (`+1 → *1`), or the
     // fit/refill comparisons (`> → >=/==`). A test that allocates many
     // drop-tracking values, drops them, and asserts the exact count would
@@ -66,7 +66,7 @@ mod mutants_for_kill {
         {
             let arena = Arena::new();
             let mut keep: std::vec::Vec<Arc<DropCounter>> = std::vec::Vec::new();
-            // 256 Arc allocations still exercise multiple shared chunks and the
+            // 256 Arc allocations still exercise multiple chunks and the
             // same drop-entry paths this test is targeting.
             for _ in 0..256_u32 {
                 keep.push(arena.alloc_arc_with(|| DropCounter(counter.clone())));
@@ -220,7 +220,7 @@ mod mutants_for_kill {
     }
 
     // --------------------------------------------------------------------
-    // Misc: confirm the && operator in the oversized-value flavor gate.
+    // Misc: confirm the && operator in the oversized-value gate.
     // --------------------------------------------------------------------
 
     #[test]
@@ -327,7 +327,7 @@ mod mutants_for_kill2 {
     #[test]
     fn arc_with_non_drop_t_does_not_install_drop_entry() {
         const N: u32 = 64;
-        let arena = multitude::Arena::builder().with_capacity_shared(64 * 1024).build();
+        let arena = multitude::Arena::builder().with_capacity(64 * 1024).build();
         // 4 × 16 KiB uninit fillers walk the bump cursor to the chunk's true end.
         let _fillers: Vec<multitude::Arc<core::mem::MaybeUninit<[u8; 16 * 1024]>>> =
             (0..4).map(|_| arena.alloc_uninit_arc::<[u8; 16 * 1024]>()).collect();
@@ -631,8 +631,8 @@ mod mutants_for_kill3 {
         // Both should succeed through normal path, not oversized
         let stats = arena.stats();
         assert_eq!(
-            stats.oversized_shared_chunks_allocated, 0,
-            "small arcs should use normal shared chunks, not oversized"
+            stats.oversized_chunks_allocated, 0,
+            "small arcs should use normal chunks, not oversized"
         );
     }
 
@@ -708,7 +708,7 @@ mod mutants_for_kill3 {
     fn arena_2261_slice_local_and_to_or() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Allocate a zero-length slice of a Drop type (local flavor)
+        // Allocate a zero-length slice of a Drop type (reference)
         let empty: &mut [DropTracker] = arena.alloc_slice_fill_with(0, |_| DropTracker(0));
         assert_eq!(empty.len(), 0);
         // Allocate a non-empty slice of a non-Drop type (no drop_fn)
@@ -805,7 +805,7 @@ mod mutants_for_kill3 {
     fn arena_2739_refill_shared_entry_size_check() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Force the slow refill path by filling the shared chunk
+        // Force the slow refill path by filling the chunk
         let mut keep = Vec::new();
         for _ in 0..100 {
             keep.push(arena.alloc_slice_fill_with_arc(3, |i| DropTracker(i as u64)));
@@ -873,11 +873,11 @@ mod mutants_for_kill3 {
     // =====================================================================
 
     // =====================================================================
-    // local_chunk.rs / shared_chunk.rs mutants
+    // local_chunk.rs / chunk.rs mutants
     // =====================================================================
 
     #[test]
-    fn shared_chunk_143_max_bump_extent() {
+    fn chunk_143_max_bump_extent() {
         let arena = Arena::new();
         let mut keep = Vec::new();
         for i in 0u64..1000 {
@@ -889,7 +889,7 @@ mod mutants_for_kill3 {
     }
 
     #[test]
-    fn shared_chunk_168_to_thin_ptr() {
+    fn chunk_168_to_thin_ptr() {
         let arena = Arena::new();
         // Allocate and drop arcs to trigger chunk caching (which uses to_thin_ptr)
         for _ in 0..5 {
@@ -906,10 +906,10 @@ mod mutants_for_kill3 {
     }
 
     #[test]
-    fn shared_chunk_186_payload_rounding() {
+    fn chunk_186_payload_rounding() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Allocate arc values with Drop to exercise the shared chunk allocation
+        // Allocate arc values with Drop to exercise the chunk allocation
         // with proper payload rounding for drop entries
         let mut keep = Vec::new();
         for i in 0..50 {
@@ -1207,11 +1207,11 @@ mod mutants_for_kill3 {
     }
 
     #[test]
-    fn shared_chunk_143_max_bump_many() {
+    fn chunk_143_max_bump_many() {
         let _guard = reset_drop_counter();
         const N: u64 = 64;
 
-        let arena = Arena::builder().with_capacity_shared(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
 
         // 4 × 16 KiB uninit fillers walk the bump cursor to the chunk's true end.
         let _fillers: Vec<multitude::Arc<core::mem::MaybeUninit<[u8; 16 * 1024]>>> =
@@ -1233,9 +1233,9 @@ mod mutants_for_kill3 {
     }
 
     #[test]
-    fn shared_chunk_168_force_cache_reuse() {
+    fn chunk_168_force_cache_reuse() {
         let arena = Arena::new();
-        // Round 1: allocate arcs, fill a shared chunk
+        // Round 1: allocate arcs, fill a chunk
         let mut batch1: Vec<multitude::Arc<u64>> = Vec::new();
         for i in 0u64..100 {
             batch1.push(arena.alloc_arc(i));
@@ -1254,7 +1254,7 @@ mod mutants_for_kill3 {
     }
 
     #[test]
-    fn shared_chunk_186_payload_rounding_stress() {
+    fn chunk_186_payload_rounding_stress() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
         // Stress test with many shared allocations of varying sizes
@@ -1605,7 +1605,7 @@ mod mutants_for_audit {
     //
     // The boundary at `u16::MAX` (65535) is unreachable in the in-place
     // branch: that branch requires the Vec data buffer to live in the arena's
-    // `current_local`, which in turn requires `len * size_of::<T>() <=
+    // `current`, which in turn requires `len * size_of::<T>() <=
     // max_normal_alloc`. With `max_normal_alloc <= max_bump_extent < 64 KiB`
     // and `size_of::<T>() >= 1` (the in-place branch already short-circuits
     // the ZST/empty case), `len * size_of::<T>() <= max_bump_extent <
@@ -2023,11 +2023,10 @@ mod mutants_for_audit {
     }
 
     // ============================================================================
-    // arena.rs:3102 / 3664 — slice paths' `if !matches!(flavor, AllocFlavor::Box)
-    // && let Some(drop_fn) = drop_fn.filter(|_| len != 0)` and the shared
-    // equivalent. Mutants delete the `!`/swap `!=` to `==`.
+    // The slice paths' drop-fn install guard (`is-Box && drop_fn && len != 0`).
+    // Mutants delete the `!`/swap `!=` to `==`.
     //
-    // `delete !` mutant: skips the drop_fn install for non-Box flavors.
+    // `delete !` mutant: skips the drop_fn install for non-Box paths.
     // Without the install, the noop_drop_shim stays in the entry → elements
     // leak. Kill: Rc slice of Drop type, drop the Rc, drop the arena, count
     // drops.
@@ -2637,7 +2636,7 @@ mod mutants_for_complete {
     // ----------------------------------------------------------------------------
 
     // ----------------------------------------------------------------------------
-    // internal/local_chunk.rs:132 / shared_chunk.rs:155 — max_bump_extent
+    // internal/local_chunk.rs:132 / chunk.rs:155 — max_bump_extent
     //   `capacity - drop_count * size_of::<DropEntry>()`
     // Mutants: `-` → `+`, `-` → `/`. These would change the available
     // space for bump allocations.
@@ -2650,7 +2649,7 @@ mod mutants_for_complete {
     // ----------------------------------------------------------------------------
 
     // ----------------------------------------------------------------------------
-    // internal/local_chunk.rs:158 / shared_chunk.rs:167 — entries_top_offset's
+    // internal/local_chunk.rs:158 / chunk.rs:167 — entries_top_offset's
     // boundary: `if drop_count < entries_top_offset(capacity) / sizeof::<DropEntry>()`
     // Mutant: `<` → `<=`.
     //

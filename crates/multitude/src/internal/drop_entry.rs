@@ -17,7 +17,7 @@ use core::{mem, ptr};
 /// `(value_ptr, count)` runs `drop_in_place::<[T]>` on `count` consecutive
 /// `T`s starting at `value_ptr`. The element type `T` is baked into the
 /// concrete shim instantiation, so the replay loop is type-erased.
-pub(crate) type DropFn = unsafe fn(*mut u8, usize);
+pub(in crate::internal) type DropFn = unsafe fn(*mut u8, usize);
 
 /// Alignment we want each in-place drop entry to sit at, so a packed sequence
 /// of entries at the chunk tail stays naturally aligned.
@@ -78,7 +78,7 @@ pub(crate) struct DropEntry {
 impl DropEntry {
     /// Constructs a placeholder entry with no drop shim attached.
     #[inline]
-    pub(crate) const fn placeholder(value_offset: u16, len: u16) -> Self {
+    pub(in crate::internal) const fn placeholder(value_offset: u16, len: u16) -> Self {
         Self {
             drop_fn: AtomicPtr::new(ptr::null_mut()),
             value_offset,
@@ -92,7 +92,7 @@ impl DropEntry {
     /// (the shim is determined by `T`), so a relaxed-store is sufficient
     /// once paired with the `Acquire` load in [`replay_drops`].
     #[inline]
-    pub(crate) fn commit_drop_fn(&self, drop_fn: DropFn) {
+    pub(in crate::internal) fn commit_drop_fn(&self, drop_fn: DropFn) {
         // Cast the fn pointer to `*mut ()` for atomic storage; this
         // preserves the function pointer's provenance, which a
         // `fn-as-usize` round-trip would lose (yielding a `noalloc`
@@ -107,7 +107,7 @@ impl DropEntry {
 
     /// Returns the committed drop shim, if any.
     #[inline]
-    pub(crate) fn drop_fn(&self) -> Option<DropFn> {
+    fn drop_fn(&self) -> Option<DropFn> {
         let raw = self.drop_fn.load(Ordering::Acquire);
         if raw.is_null() {
             None
@@ -123,13 +123,13 @@ impl DropEntry {
     /// Returns the byte offset of the value from the start of the chunk's
     /// payload.
     #[inline]
-    pub(crate) fn value_offset(&self) -> u16 {
+    fn value_offset(&self) -> u16 {
         self.value_offset
     }
 
     /// Returns the number of `T` elements at the value offset.
     #[inline]
-    pub(crate) fn len(&self) -> u16 {
+    fn len(&self) -> u16 {
         self.len
     }
 }
@@ -144,7 +144,7 @@ impl DropEntry {
 /// Callers must guarantee the alignment and initialization preconditions
 /// described above; calling this on uninitialized storage or with a mismatched
 /// `T` is undefined behavior.
-pub(crate) unsafe fn drop_shim<T>(ptr: *mut u8, count: usize) {
+pub(in crate::internal) unsafe fn drop_shim<T>(ptr: *mut u8, count: usize) {
     let slice = ptr::slice_from_raw_parts_mut(ptr.cast::<T>(), count);
     // SAFETY: by the function's safety contract.
     ptr::drop_in_place(slice);
@@ -170,7 +170,7 @@ pub(crate) unsafe fn drop_shim<T>(ptr: *mut u8, count: usize) {
     clippy::cast_ptr_alignment,
     reason = "caller guarantees entries are naturally aligned within the payload; see DropEntry layout"
 )]
-pub(crate) unsafe fn replay_drops(payload: *mut u8, payload_len: usize, drop_entry_count: usize) {
+pub(in crate::internal) unsafe fn replay_drops(payload: *mut u8, payload_len: usize, drop_entry_count: usize) {
     if drop_entry_count == 0 {
         return;
     }
@@ -254,6 +254,15 @@ mod tests {
         // SAFETY: payload_ptr + payload_len bounds the live buffer.
         unsafe { replay_drops(payload_ptr, payload_len, 2) };
         assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+    }
+
+    /// `replay_drops` with a zero entry count returns immediately without
+    /// touching the payload.
+    #[test]
+    fn replay_drops_zero_count_is_noop() {
+        // SAFETY: a count of 0 returns before dereferencing `payload`, so a
+        // dangling pointer and zero length are sound here.
+        unsafe { replay_drops(core::ptr::NonNull::<u8>::dangling().as_ptr(), 0, 0) };
     }
 
     /// `raw_used` returns the unpadded field-size sum.

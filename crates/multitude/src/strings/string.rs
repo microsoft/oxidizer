@@ -1,12 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(
-    clippy::missing_panics_doc,
-    clippy::undocumented_unsafe_blocks,
-    reason = "reachable panics are programmer error, and unsafe code follows the documented `data`/`len`/`cap` invariants"
-)]
-
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter};
@@ -16,6 +10,7 @@ use core::str;
 
 use allocator_api2::alloc::{AllocError, Allocator, Global};
 
+use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
 use crate::{Arc, Arena, Box, FromIn};
@@ -36,7 +31,7 @@ use crate::{Arc, Arena, Box, FromIn};
 /// assert_eq!(&*frozen, "hello, world!");
 /// ```
 pub struct String<'a, A: Allocator + Clone = Global> {
-    pub(super) inner: Vec<'a, u8, A>,
+    inner: Vec<'a, u8, A>,
 }
 
 impl<'a, A: Allocator + Clone> String<'a, A> {
@@ -125,7 +120,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// character boundary, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert`] for a fallible variant.
     pub fn insert(&mut self, idx: usize, ch: char) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, ch));
+        self.try_insert(idx, ch).expect_alloc();
     }
 
     /// Fallible variant of [`Self::insert`].
@@ -153,7 +148,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// overflow `usize`, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert_str`] for a fallible variant.
     pub fn insert_str(&mut self, idx: usize, s: &str) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_insert_str(idx, s));
+        self.try_insert_str(idx, s).expect_alloc();
     }
 
     /// Fallible variant of [`Self::insert_str`].
@@ -208,6 +203,10 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Retain only the characters for which `f` returns `true`, in
     /// order.
     #[cfg_attr(test, mutants::skip)] // `+= → *=` on counter ⇒ infinite loop
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the internal `.expect` guards a char-boundary invariant (`idx < len`) and is unreachable; a `# Panics` section would be misleading"
+    )]
     pub fn retain<F: FnMut(char) -> bool>(&mut self, mut f: F) {
         // In-place compaction that matches `std::string::String::retain`'s
         // panic contract: if `f` panics, the guard commits the prefix
@@ -266,7 +265,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// `usize`, or the backing allocator fails on growth. Use
     /// [`Self::try_replace_range`] for a fallible variant.
     pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_replace_range(range, replace_with));
+        self.try_replace_range(range, replace_with).expect_alloc();
     }
 
     /// Fallible variant of [`Self::replace_range`].
@@ -384,7 +383,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// [`Self::try_split_off`] for a fallible variant.
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+        self.try_split_off(at).expect_alloc()
     }
 
     /// Fallible variant of [`Self::split_off`].
@@ -414,7 +413,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// Panics if the range is out of bounds or its bounds are not on `char`
     /// boundaries. Use [`Self::try_extend_from_within`] for a fallible variant.
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+        self.try_extend_from_within(src).expect_alloc();
     }
 
     /// Fallible variant of [`Self::extend_from_within`].
@@ -484,7 +483,8 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// [`std::string::String::into_boxed_str`]; [`Box::from`] is the trait
     /// form.
     ///
-    /// **O(n)** — copies the contents.
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     ///
     /// # Panics
     ///
@@ -492,7 +492,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     /// [`Self::try_into_boxed_str`] for a fallible variant.
     #[must_use]
     pub fn into_boxed_str(self) -> Box<str, A> {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_into_boxed_str())
+        self.try_into_boxed_str().expect_alloc()
     }
 
     /// Fallible variant of [`Self::into_boxed_str`].
@@ -501,13 +501,22 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
     pub fn try_into_boxed_str(self) -> Result<Box<str, A>, AllocError> {
-        self.inner.arena().try_alloc_str_box(self.as_str())
+        // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u8] → str`.
+        let bytes = core::mem::ManuallyDrop::new(self.inner.try_into_boxed_slice()?);
+        // SAFETY: the bytes are valid UTF-8 (`String`'s invariant), and
+        // `Box<[u8]>` / `Box<str>` share the identical length-prefixed chunk
+        // layout (the `usize` prefix holds the byte length either way). The
+        // chunk `+1` transfers from `bytes` (kept from dropping) to the new
+        // `Box<str>`; `thin_ptr` keeps chunk-wide provenance.
+        Ok(unsafe { Box::<str, A>::from_raw(bytes.thin_ptr()) })
     }
 
     /// Freeze into a shared [`Arc<str, A>`](crate::Arc). [`Arc::from`] is the
     /// trait form.
     ///
-    /// **O(n)** — copies the contents.
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     ///
     /// # Panics
     ///
@@ -518,7 +527,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     where
         A: Send + Sync,
     {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_into_arc_str())
+        self.try_into_arc_str().expect_alloc()
     }
 
     /// Fallible variant of [`Self::into_arc_str`].
@@ -530,7 +539,13 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     where
         A: Send + Sync,
     {
-        self.inner.arena().try_alloc_str_arc(self.as_str())
+        // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u8] → str`.
+        let bytes = core::mem::ManuallyDrop::new(self.inner.try_into_arc_slice()?);
+        // SAFETY: see `try_into_boxed_str`; `Arc<[u8]>` / `Arc<str>` also
+        // share the strong-count + length prefix, so the strong count
+        // initialized by the freeze is exactly what `Arc<str>` expects.
+        Ok(unsafe { Arc::<str, A>::from_raw(bytes.thin_ptr()) })
     }
 
     /// Consume the `String`, returning an arena-lifetime mutable string
@@ -584,7 +599,7 @@ impl<A: Allocator + Clone> Iterator for Drain<'_, '_, A> {
         }
         // SAFETY: `String::drain` validated the range on `char` boundaries, so
         // the drained bytes form well-formed UTF-8.
-        unsafe { core::str::from_utf8_unchecked(&buf[..len]) }.chars().next()
+        unsafe { str::from_utf8_unchecked(&buf[..len]) }.chars().next()
     }
 
     #[inline]
@@ -610,7 +625,7 @@ impl<A: Allocator + Clone> DoubleEndedIterator for Drain<'_, '_, A> {
             buf[4 - n] = b;
         }
         // SAFETY: see `next`.
-        unsafe { core::str::from_utf8_unchecked(&buf[4 - n..]) }.chars().next()
+        unsafe { str::from_utf8_unchecked(&buf[4 - n..]) }.chars().next()
     }
 }
 
@@ -749,7 +764,7 @@ impl<A: Allocator + Clone> PartialEq<String<'_, A>> for alloc::borrow::Cow<'_, s
 
 impl<A: Allocator + Clone> Clone for String<'_, A> {
     fn clone(&self) -> Self {
-        Self::from_str_in(self.as_str(), self.inner.arena)
+        Self::from_str_in(self.as_str(), self.inner.arena())
     }
 }
 

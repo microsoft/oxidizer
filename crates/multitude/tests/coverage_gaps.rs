@@ -30,7 +30,7 @@
 mod common;
 
 /// Sync version of `common::FailingAllocator`, needed for tests that
-/// allocate `Arc`/`Arc<str>`/`ArcUtf16Str` (whose builders require
+/// allocate `Arc`/`Arc<str>`/`Arc<Utf16Str>` (whose builders require
 /// `A: Send + Sync`).
 mod sync_failing {
     use core::alloc::Layout;
@@ -80,7 +80,7 @@ mod sync_failing {
 }
 
 // ============================================================================
-// strings/box_utf16_str.rs — trait impls (Deref/AsRef/Borrow/Display/Debug/
+// strings/utf16_str.rs / utf16_str_impls.rs — Box<Utf16Str> trait impls (Deref/AsRef/Borrow/Display/Debug/
 // PartialEq/Ord/Hash/Pointer/Unpin); lines 36–137.
 // ============================================================================
 #[cfg(feature = "utf16")]
@@ -99,7 +99,7 @@ mod box_utf16_str_traits {
         let mut b = arena.alloc_utf16_str_box(utf16str!("hello"));
         assert_eq!(b.len(), 5);
         assert!(!b.is_empty());
-        let _: &mut Utf16Str = b.as_mut_utf16_str();
+        let _ = b.as_mut_widestring_utf16_str();
         let empty = arena.alloc_utf16_str_box(utf16str!(""));
         assert!(empty.is_empty());
         assert_eq!(empty.len(), 0);
@@ -163,7 +163,7 @@ mod box_utf16_str_traits {
     #[test]
     fn unpin_impl_compiles() {
         fn assert_unpin<T: Unpin>() {}
-        assert_unpin::<multitude::strings::BoxUtf16Str>();
+        assert_unpin::<multitude::Box<multitude::strings::Utf16Str>>();
     }
 }
 
@@ -780,13 +780,13 @@ mod drop_slice_over_u16_max_returns_err {
 }
 
 // ============================================================================
-// vec/freeze.rs — `try_into_arc` (lines 46–60). The infallible
+// vec/freeze.rs — `try_into_arc_slice` (lines 46–60). The infallible
 // `into_arc` is exercised elsewhere; this targets the fallible
 // variant and its allocator-error path via `FailingAllocator(1)` (the
 // initial vec buffer consumes the one allowed chunk, the freeze refill
 // then fails).
 // ============================================================================
-mod vec_freeze_try_into_arc {
+mod vec_freeze_try_into_arc_slice {
     use multitude::Arena;
 
     use crate::sync_failing::SyncFailingAllocator;
@@ -798,16 +798,21 @@ mod vec_freeze_try_into_arc {
         v.push(1);
         v.push(2);
         v.push(3);
-        let arc = v.try_into_arc().unwrap();
+        let arc = v.try_into_arc_slice().unwrap();
         assert_eq!(&*arc, &[1, 2, 3][..]);
     }
 
     #[test]
     fn try_into_arc_err_on_failing_allocator() {
         let a = Arena::new_in(SyncFailingAllocator::new(1));
-        let mut v = a.alloc_vec::<u32>();
-        v.push(1);
-        let r = v.try_into_arc();
+        // Fill most of the first chunk, then split: the tail has no freeze
+        // prefix of its own, so freezing it into an `Arc` (a copy of equal
+        // size) must acquire a second chunk, which the failing allocator
+        // rejects.
+        let mut v = a.alloc_vec_with_capacity::<u32>(100);
+        v.extend(0..100);
+        let tail = v.split_off(50);
+        let r = tail.try_into_arc_slice();
         assert!(r.is_err());
     }
 }
@@ -981,7 +986,7 @@ mod vec_intoiterator_impl {
 
 // ============================================================================
 // strings/arc_str.rs — PartialEq<str>, PartialEq<&str>, Pointer fmt;
-// strings/arc_utf16_str.rs — is_empty, PartialEq, Display, etc.
+// strings/utf16_str.rs / utf16_str_impls.rs — Arc<Utf16Str>: is_empty, PartialEq, Display, etc.
 // ============================================================================
 mod arc_str_traits {
     use multitude::Arena;
@@ -1195,11 +1200,8 @@ mod vec_try_grow_to_within_cap {
 }
 
 // ============================================================================
-// internal/chunk_ops.rs — `SharedChunk::teardown_and_release` destroy
-// branch when the provider Weak no longer upgrades. (The corresponding
-// LocalChunk branch was removed entirely once LocalChunk's back-pointer
-// stopped being a Weak: a LocalChunk can never outlive its provider, so
-// the orphan path was dead in practice.)
+// `Chunk::teardown_and_release` destroy branch — taken when the provider
+// `Weak` no longer upgrades (the chunk outlived the arena).
 // ============================================================================
 mod chunk_ops_destroy_branch {
     use multitude::Arena;
@@ -1209,7 +1211,7 @@ mod chunk_ops_destroy_branch {
         // Create an arena, allocate a Box, drop the arena. The Box keeps
         // its (shared) chunk alive via +1; when the Box drops, the chunk's
         // release path runs after the arena (and its ChunkProvider) is
-        // already gone, exercising the `SharedChunk::destroy` arm.
+        // already gone, exercising the `Chunk::destroy` arm.
         let arena = Arena::new();
         let b = arena.alloc_box(42_u32);
         drop(arena);
@@ -1804,5 +1806,67 @@ mod freeze_and_slice_edges {
         assert_eq!(s.len(), 5000);
         assert_eq!(s[0], 0);
         assert_eq!(s[4999], 4999_u32.wrapping_mul(3));
+    }
+}
+
+mod refactor_coverage_gaps {
+    use multitude::Arena;
+
+    // `reserve_slice_box` oversized branch (+ `try_alloc_uninit_slice_prefixed`
+    // and `try_alloc_prefixed_slice_payload`): a `Box<[T]>` built via the
+    // fill path whose payload exceeds MAX_NORMAL_ALLOC routes through the
+    // dedicated oversized chunk.
+    #[test]
+    fn oversized_fill_box_routes_through_reserve_slice_box() {
+        let arena = Arena::new();
+        // 5000 × u32 = 20 KiB > MAX_NORMAL_ALLOC (16 KiB) ⇒ oversized box path.
+        let b: multitude::Box<[u32]> = arena.alloc_slice_fill_with_box(5000, |i| i as u32);
+        assert_eq!(b.len(), 5000);
+        assert_eq!(b[0], 0);
+        assert_eq!(b[4999], 4999);
+    }
+
+    // vec/mod.rs non-freezable paths: the refill-hint else-branch,
+    // `try_reserve_local_slice`, and the non-freezable oversized arm. An
+    // over-aligned element (align ≥ max_smart_ptr_align == CHUNK_ALIGN/2) is
+    // non-freezable, and at 32 KiB each it forces the oversized refill.
+    #[test]
+    fn non_freezable_overaligned_vec_grows_via_oversized_path() {
+        #[repr(align(32768))]
+        #[derive(Clone, Copy)]
+        struct Over(u8);
+        let arena = Arena::new();
+        // Reserve (rather than `push`) capacity for the over-aligned element:
+        // this drives the same non-freezable oversized growth path without
+        // ever materializing a 32 KiB-aligned `Over` on the stack — such
+        // over-aligned stack temporaries fault on Windows.
+        let mut v = arena.alloc_vec::<Over>();
+        v.try_reserve(2).expect("reserve over-aligned capacity");
+        assert!(v.capacity() >= 2);
+        assert!(v.is_empty());
+    }
+
+    // A grow request whose raw payload (`size_of::<T>() * new_cap`) overflows
+    // `usize` must be a recoverable `AllocError`, never a panic.
+    #[test]
+    fn vec_try_reserve_overflowing_capacity_returns_err() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u64>();
+        // size_of::<u64>() (8) * (usize::MAX / 4) overflows usize.
+        v.try_reserve(usize::MAX / 4)
+            .expect_err("overflowing capacity must be a recoverable error");
+    }
+
+    // `From<Box<Utf16Str>> for Box<[u16]>` zero-copy retag.
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn box_utf16str_into_box_u16_slice_retags_without_copy() {
+        use widestring::utf16str;
+        let arena = Arena::new();
+        let b = arena.alloc_utf16_str_box(utf16str!("hello"));
+        let raw = b.as_widestring_utf16_str().as_slice().as_ptr();
+        let u16box: multitude::Box<[u16]> = multitude::Box::from(b);
+        assert_eq!((*u16box).as_ptr(), raw, "Box<Utf16Str> -> Box<[u16]> retag must not copy");
+        assert_eq!(&*u16box, utf16str!("hello").as_slice());
     }
 }

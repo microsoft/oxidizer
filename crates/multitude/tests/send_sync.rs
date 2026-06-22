@@ -75,7 +75,7 @@ fn arc_is_send_sync_when_t_is() {
 fn box_is_send_sync_when_t_is() {
     // `Box<T, A>` mirrors `std::Box`: `Send` when `T: Send` and
     // `A: Send`; `Sync` when `T: Sync` and `A: Sync`. The backing
-    // storage uses an atomic-refcounted shared chunk, so dropping the
+    // storage uses an atomic-refcounted chunk, so dropping the
     // `Box` on a different thread is sound.
     assert_send::<Box<u64>>();
     assert_sync::<Box<u64>>();
