@@ -113,6 +113,12 @@ struct GlobalPoolInner {
     // might), but that even if memory is requested from a thread-specific pool, it may later be
     // released on a different thread, so the pool must be able to handle that.
     //
+    // We intentionally use a plain mutex here to keep the code simple. We never expect the mutex
+    // to be contended because we target a thread-isolated architecture (any single pool is
+    // effectively owned by one thread/core at a time). We have measured that, at least on the x64
+    // platform, an uncontended mutex is sufficiently cheap to be almost an annotation, so there is
+    // no need to reach for a more complex lock-free or per-core fast-path design.
+    //
     // Each sub-pool is wrapped in an Arc because each pool item has a reference back to the sub-pool
     // that contains it. This means there is a reference cycle in there! The sub-pool can only be
     // dropped once all items in the sub-pool have been returned. This is both good and bad.
