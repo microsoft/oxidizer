@@ -108,3 +108,66 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         Ok(new)
     }
 }
+
+/// Legacy `allocator-api2` 0.2 `Allocator` impl, so `&Arena<A>` can directly
+/// back collections from crates (notably `hashbrown`) that have not yet moved
+/// to the modern allocator API. Every method forwards verbatim to the 0.4 impl
+/// above; when those crates upgrade, this impl can simply be deleted.
+// SAFETY: forwards to the 0.4 `Allocator` impl; the 0.2 and 0.4 trait contracts
+// are identical, and the only version-specific type (`AllocError`) is a
+// zero-payload marker.
+unsafe impl<A: Allocator + Clone> allocator_api2_02::alloc::Allocator for &Arena<A> {
+    #[inline]
+    #[allow(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
+        <&Arena<A> as Allocator>::allocate(self, layout).map_err(|_| allocator_api2_02::alloc::AllocError)
+    }
+
+    #[inline]
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded to the 0.4 impl under the same contract.
+        unsafe { <&Arena<A> as Allocator>::deallocate(self, ptr, layout) };
+    }
+
+    #[inline]
+    #[allow(clippy::map_err_ignore, reason = "AllocError carries no payload; only the variant is bridged")]
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, allocator_api2_02::alloc::AllocError> {
+        // SAFETY: forwarded to the 0.4 impl under the same contract.
+        unsafe { <&Arena<A> as Allocator>::grow(self, ptr, old_layout, new_layout) }.map_err(|_| allocator_api2_02::alloc::AllocError)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::alloc::Layout;
+
+    use allocator_api2_02::alloc::Allocator as LegacyAllocator;
+
+    use crate::Arena;
+
+    // Exercises the legacy (`allocator-api2` 0.2) `Allocator` impl directly,
+    // independent of the optional `hashbrown` feature: allocate, grow, and
+    // deallocate, plus the rejected-alignment error arm.
+    #[test]
+    fn arena_backs_legacy_allocator_api2() {
+        let arena = Arena::new();
+        let handle: &Arena = &arena;
+        let layout = Layout::from_size_align(64, 8).unwrap();
+        let p = LegacyAllocator::allocate(&handle, layout).expect("legacy allocate");
+        let new_layout = Layout::from_size_align(128, 8).unwrap();
+        // SAFETY: `p` came from `allocate` with `layout`, and `new_layout` is larger.
+        let p = unsafe { LegacyAllocator::grow(&handle, p.cast::<u8>(), layout, new_layout) }.expect("legacy grow");
+        // SAFETY: `p` came from `grow` with `new_layout`.
+        unsafe { LegacyAllocator::deallocate(&handle, p.cast::<u8>(), new_layout) };
+
+        // An alignment at/above the smart-pointer ceiling is rejected as a
+        // recoverable error through the legacy impl's `map_err` arm.
+        let over_aligned = Layout::from_size_align(8, super::MAX_SMART_PTR_ALIGN).unwrap();
+        LegacyAllocator::allocate(&handle, over_aligned).expect_err("over-aligned request must be rejected");
+    }
+}

@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.4.0"
+version = "0.4.1"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -21,6 +21,7 @@ allowed_external_types = [
     "allocator_api2::*",
     "bytemuck::*",
     "bytesbuf::*",
+    "hashbrown::*",
     "ptr_meta::*",
     "ptr_meta_derive::*",
     "serde::*",
@@ -44,12 +45,18 @@ bytes = ["dep:bytes"]
 bytemuck = ["dep:bytemuck", "dst"]
 bytesbuf = ["dep:bytesbuf", "std"]
 zerocopy = ["dep:zerocopy", "dst"]
+hashbrown = ["dep:hashbrown"]
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
+# Legacy `allocator-api2` 0.2 line, used by hashbrown (and other crates) that
+# have not yet migrated to the modern API. `&Arena` implements *both* this and
+# the 0.4 `Allocator` trait so it can back hashbrown collections directly.
+allocator-api2-02 = { package = "allocator-api2", version = "0.2", default-features = false, features = ["alloc"] }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 bytes = { workspace = true, optional = true }
 bytesbuf = { workspace = true, optional = true }
+hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"], optional = true }
 ptr_meta = { workspace = true }
 serde = { workspace = true, optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
@@ -61,6 +68,7 @@ zerocopy = { workspace = true, optional = true }
 loom = { workspace = true }
 
 [dev-dependencies]
+alloc_tracker = "0.6"
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
 # `std` transitively enables `bolero-engine/any`, which is required
