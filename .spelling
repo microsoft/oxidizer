@@ -339,6 +339,7 @@ globals
 glommio
 grey
 growable
+hashbrown
 hasher
 hashers
 hedges
@@ -479,6 +480,7 @@ repr
 repurpose
 repurposed
 repurposing
+resizing
 retag
 retags
 retarget

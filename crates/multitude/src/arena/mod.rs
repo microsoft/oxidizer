@@ -40,6 +40,8 @@ use crate::internal::current_chunk::CurrentChunk;
 const LARGE_SHARED_REF_SURPLUS: u32 = 1 << 30;
 
 mod alloc_growable;
+#[cfg(feature = "hashbrown")]
+mod alloc_hashbrown;
 pub(crate) mod alloc_prefixed;
 mod alloc_slice_arc;
 mod alloc_slice_box;
