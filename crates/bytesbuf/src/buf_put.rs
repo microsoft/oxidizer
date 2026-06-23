@@ -31,8 +31,20 @@ impl BytesBuf {
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
     pub fn put_slice(&mut self, src: impl Borrow<[u8]>) {
-        let mut src = src.borrow();
+        self.put_small(src.borrow());
+    }
 
+    /// Writes a slice that may span multiple capacity slices, copying one slice at a time.
+    ///
+    /// This is the general fallback for [`put_small()`]; callers that may fit within a single
+    /// unfilled slice should go through `put_small` to take its fused fast path.
+    ///
+    /// [`put_small()`]: Self::put_small
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is insufficient remaining capacity in the buffer.
+    pub(crate) fn put_slice_looped(&mut self, mut src: &[u8]) {
         assert!(self.remaining_capacity() >= src.len());
 
         while !src.is_empty() {
@@ -194,7 +206,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_le<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_le_bytes();
-        self.put_slice(bytes);
+        self.put_small(bytes.borrow());
     }
 
     /// Appends a number of type `T` in big-endian representation to the buffer.
@@ -221,7 +233,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_be<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_be_bytes();
-        self.put_slice(bytes);
+        self.put_small(bytes.borrow());
     }
 
     /// Appends a number of type `T` in native-endian representation to the buffer.
@@ -249,7 +261,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_ne<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_ne_bytes();
-        self.put_slice(bytes);
+        self.put_small(bytes.borrow());
     }
 }
 

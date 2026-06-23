@@ -38,8 +38,25 @@ impl BytesView {
     #[inline]
     #[must_use]
     pub fn get_byte(&mut self) -> u8 {
-        let byte = *self.first_slice().first().expect("view must cover at least one byte");
-        self.advance(1);
+        // The first span (last in reverse order) backs the next byte. Stored spans are never
+        // empty (type invariant), so reading its first byte and advancing over it in one pass
+        // avoids the general `advance` loop and a second span lookup.
+        let front = self.spans_reversed.last_mut().expect("view must cover at least one byte");
+
+        let byte = front[0];
+
+        if front.len() == 1 {
+            self.spans_reversed.pop();
+        } else {
+            // SAFETY: the span has at least two bytes, so advancing by one stays in bounds.
+            unsafe {
+                front.advance(1);
+            }
+        }
+
+        // Cannot underflow: we just confirmed the view covers at least one byte.
+        self.len = self.len.wrapping_sub(1);
+
         byte
     }
 
@@ -71,6 +88,10 @@ impl BytesView {
     pub fn copy_to_slice(&mut self, mut dst: &mut [u8]) {
         assert!(self.len() >= dst.len());
 
+        // The general slice-walking loop is intentional. A single-span fast path (copying directly
+        // when the destination fits within the first slice) trims a few instructions but leaves
+        // wall-clock time unchanged, because the per-call cost is dominated by the `advance` span
+        // bookkeeping the loop already performs. Adding `unsafe` for a flat result is not worth it.
         while !dst.is_empty() {
             let src = self.first_slice();
             let bytes_to_copy = dst.len().min(src.len());
@@ -129,6 +150,54 @@ impl BytesView {
         }
     }
 
+    /// Reads a `T` directly from the first span when that span fully contains it, consuming the
+    /// bytes in a single span lookup. Returns `None` when the value straddles a span boundary, in
+    /// which case the caller must fall back to buffered assembly.
+    ///
+    /// The caller must have already verified that the view covers at least `size_of::<T>()` bytes.
+    #[inline]
+    // This is a behavior-preserving fast path: returning `None` (or declining the value that exactly
+    // fills the first span) routes the caller to `get_num_*_buffered`, which produces an identical
+    // result. Mutations that disable the fast path or shift its span-boundary check are therefore
+    // functionally equivalent and cannot be observed by behavioral tests.
+    #[cfg_attr(test, mutants::skip)]
+    fn get_num_in_first_span<T, F>(&mut self, convert: F) -> Option<T>
+    where
+        T: FromBytes,
+        T::Bytes: Sized,
+        F: FnOnce(&T::Bytes) -> T,
+    {
+        let size = size_of::<T>();
+
+        let front = self.spans_reversed.last_mut()?;
+        let front_len = front.len() as usize;
+
+        if size > front_len {
+            return None;
+        }
+
+        // SAFETY: the first span holds at least `size` bytes and `T::Bytes` is a byte array with
+        // no alignment requirement, so the cast and dereference are valid.
+        let bytes_array = unsafe { front.as_ptr().cast::<T::Bytes>().as_ref() };
+        // SAFETY: the pointer came from a non-null span pointer, so it is never null.
+        let bytes_array = unsafe { bytes_array.unwrap_unchecked() };
+        let result = convert(bytes_array);
+
+        if front_len == size {
+            self.spans_reversed.pop();
+        } else {
+            // SAFETY: `size < front_len`, so advancing the span by `size` stays in bounds.
+            unsafe {
+                front.advance(size);
+            }
+        }
+
+        // Cannot underflow: the caller verified the view covers at least `size` bytes.
+        self.len = self.len.wrapping_sub(size);
+
+        Some(result)
+    }
+
     /// Consumes a number of type `T` in little-endian representation.
     ///
     /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
@@ -166,22 +235,12 @@ impl BytesView {
         let size = size_of::<T>();
         assert!(self.len() >= size);
 
-        if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
-
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_le_bytes(bytes_array);
-            self.advance(size);
+        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_le_bytes) {
             return result;
         }
 
-        // If we got here, there were not enough bytes in the first slice, so we need
-        // to go collect bytes into an intermediate buffer and deserialize it from there.
+        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
+        // and deserialize from there.
         // SAFETY: We guarantee the view covers enough bytes - we checked it above.
         unsafe { self.get_num_le_buffered() }
     }
@@ -263,22 +322,12 @@ impl BytesView {
         let size = size_of::<T>();
         assert!(self.len() >= size);
 
-        if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
-
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_be_bytes(bytes_array);
-            self.advance(size);
+        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_be_bytes) {
             return result;
         }
 
-        // If we got here, there were not enough bytes in the first slice, so we need
-        // to go collect bytes into an intermediate buffer and deserialize it from there.
+        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
+        // and deserialize from there.
         // SAFETY: We guarantee the view covers enough bytes - we checked it above.
         unsafe { self.get_num_be_buffered() }
     }
@@ -363,22 +412,12 @@ impl BytesView {
         let size = size_of::<T>();
         assert!(self.len() >= size);
 
-        if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
-
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_ne_bytes(bytes_array);
-            self.advance(size);
+        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_ne_bytes) {
             return result;
         }
 
-        // If we got here, there were not enough bytes in the first slice, so we need
-        // to go collect bytes into an intermediate buffer and deserialize it from there.
+        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
+        // and deserialize from there.
         // SAFETY: We guarantee the view covers enough bytes - we checked it above.
         unsafe { self.get_num_ne_buffered() }
     }

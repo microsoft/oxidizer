@@ -306,7 +306,7 @@ Install once:
 
 ```bash
 sudo apt install -y valgrind
-cargo install gungraun-runner --version 0.19.2 --locked
+cargo install gungraun-runner --version 0.19.1 --locked
 ```
 
 The `gungraun-runner` version must match the `gungraun` library version

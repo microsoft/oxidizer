@@ -190,6 +190,14 @@ fn allocate_uniform<const SIZE: usize>(
     let mut pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
     pool.reserve(block_count);
 
+    // The overwhelmingly common reservation fits in a single block. Building the buffer directly
+    // from that block skips the iterator/collect/sum machinery the multi-block path requires.
+    if block_count == 1 {
+        let block = allocate_block(&mut pool, pool_arc, vtable);
+        drop(pool);
+        return BytesBuf::from_block(block);
+    }
+
     let blocks = iter::repeat_with(|| allocate_block(&mut *pool, pool_arc, vtable)).take(block_count);
 
     BytesBuf::from_blocks(blocks)

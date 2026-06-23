@@ -56,7 +56,10 @@ static_assertions = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 windows-sys = { workspace = true }
 
+# Gungraun (Callgrind) requires Valgrind, which is Linux-only. Gating the dependency on Linux keeps
+# it out of Windows and macOS resolution so `cargo-machete`/`cargo-udeps` do not flag it as unused.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
 libc = { workspace = true }
 
 [lints]
@@ -78,6 +81,16 @@ harness = false
 
 [[bench]]
 name = "view"
+harness = false
+required-features = ["test-util"]
+
+[[bench]]
+name = "view_cg"
+harness = false
+required-features = ["test-util"]
+
+[[bench]]
+name = "buf_cg"
 harness = false
 required-features = ["test-util"]
 

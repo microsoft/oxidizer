@@ -4,6 +4,7 @@
 use std::any::type_name;
 use std::mem::{self, MaybeUninit};
 use std::num::NonZero;
+use std::ptr;
 
 use smallvec::SmallVec;
 
@@ -157,6 +158,23 @@ impl BytesBuf {
         Self::from_span_builders(blocks.into_iter().map(Block::into_span_builder))
     }
 
+    /// Creates a buffer backed by the capacity of a single memory block.
+    pub(crate) fn from_block(block: Block) -> Self {
+        let span_builder = block.into_span_builder();
+        let available = span_builder.remaining_capacity();
+
+        let mut span_builders_reversed = SmallVec::new_const();
+        span_builders_reversed.push(span_builder);
+
+        Self {
+            frozen_spans: SmallVec::new_const(),
+            span_builders_reversed,
+            len: 0,
+            frozen: 0,
+            available,
+        }
+    }
+
     pub(crate) fn from_span_builders<I>(span_builders: I) -> Self
     where
         I: IntoIterator<Item = SpanBuilder>,
@@ -276,6 +294,59 @@ impl BytesBuf {
         self.frozen = self.frozen.wrapping_add(bytes_len);
 
         self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
+    }
+
+    /// Writes a small byte slice into the buffer, fusing the common case where it fits entirely
+    /// within the first unfilled slice of capacity into a single span-builder lookup.
+    ///
+    /// Falls back to the general [`put_slice()`] path when the data straddles a capacity boundary.
+    ///
+    /// [`put_slice()`]: Self::put_slice
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is insufficient remaining capacity in the buffer.
+    pub(crate) fn put_small(&mut self, src: &[u8]) {
+        assert!(self.remaining_capacity() >= src.len());
+
+        if let Some(builder) = self.span_builders_reversed.last_mut() {
+            let dst = builder.unfilled_slice_mut();
+
+            if dst.len() >= src.len() {
+                // SAFETY: both are byte regions and `dst` has at least `src.len()` bytes of room.
+                unsafe {
+                    ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr().cast(), src.len());
+                }
+
+                // SAFETY: we just initialized `src.len()` bytes at the front of the unfilled region.
+                unsafe {
+                    builder.advance(src.len());
+                }
+
+                let freeze_len = (builder.remaining_capacity() == 0)
+                    .then(|| NonZero::new(builder.len()).expect("a builder with no remaining capacity must hold at least one filled byte"));
+
+                self.len = self
+                    .len
+                    .checked_add(src.len())
+                    .expect("usize overflow is impossible because buffer capacity is bounded by virtual memory size");
+
+                self.available = self
+                    .available
+                    .checked_sub(src.len())
+                    .expect("guarded by the remaining_capacity() assertion above");
+
+                if let Some(len) = freeze_len {
+                    // The builder filled up exactly, so freeze it into a span like the general path.
+                    self.freeze_from_first(len);
+                }
+
+                return;
+            }
+        }
+
+        // The value straddles a capacity boundary (or there is no builder yet); use the general path.
+        self.put_slice_looped(src);
     }
 
     /// Peeks at the contents of the filled bytes region.
@@ -597,6 +668,10 @@ impl BytesBuf {
     /// assert!(buf.is_empty());
     /// ```
     pub fn consume_all(&mut self) -> BytesView {
+        // Delegating to the general consume path is intentional. A dedicated all-at-once path that
+        // skips the per-span consume bookkeeping lowers the simulated instruction count but yields
+        // no wall-clock improvement: the cost here is dominated by transferring span ownership
+        // (BlockRef refcount atomics), which both paths pay equally. Keep this thin.
         // SAFETY: Consuming len() bytes from self cannot possibly be out of bounds.
         unsafe { self.consume_checked(self.len()).unwrap_unchecked() }
     }

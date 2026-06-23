@@ -17,6 +17,13 @@ pub(crate) const ERR_POISONED_LOCK: &str =
 /// This is purely an efficiency fine-tuning knob and does not have any effect on correctness.
 /// We should fine-tune this based on real-world data if/when we get any.
 ///
+/// Benchmark before changing this value: lowering it to 4 speeds up operations on
+/// sequences that stay within 4 spans but regresses those of 5 to 8 spans (which then spill to the
+/// heap), and raising it to 16 is slower across the board because the larger inline metadata costs
+/// more to move and clone than the heap allocations it avoids. Gather a real-world distribution of
+/// span counts at view-creation time before re-tuning, rather than optimizing for a synthetic
+/// workload.
+///
 /// This is contractually PRIVATE but is marked `pub` so benchmarks can reference it.
 /// We may also reference it in other Oxidizer crates to ensure that the same constant is
 /// used where it needs to match on higher layers for efficiency. Once we separate this
