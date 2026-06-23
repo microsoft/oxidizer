@@ -49,7 +49,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// pointing to it.
     ///
     /// `Arc<str, A>` is a thin 8-byte refcounted smart pointer to a
-    /// length-prefixed UTF-8 payload in a shared chunk. Clone is
+    /// length-prefixed UTF-8 payload in a chunk. Clone is
     /// O(1) via a single atomic refcount bump on the hosting chunk.
     ///
     /// # Panics
@@ -164,7 +164,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 // the bytes are valid UTF-8 (copied from `s`).
                 return Ok(unsafe { &mut *ptr.as_ptr() });
             }
-            self.refill_local(len)?;
+            self.refill(len)?;
         }
     }
 }

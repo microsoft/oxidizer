@@ -67,7 +67,7 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// ```
 pub struct Arc<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
     /// **Thin** pointer to the first byte of the contained value, which
-    /// lives in a 64K-aligned [`SharedChunk`](crate::internal::shared_chunk::SharedChunk)'s
+    /// lives in a 64K-aligned [`Chunk`](crate::internal::chunk::Chunk)'s
     /// payload. The chunk header is recovered by masking, and `T`'s
     /// pointer metadata (if any — `()` for `T: Sized`, `usize` for
     /// slice DSTs / `str`, vtable for trait objects) is stored in the
@@ -93,7 +93,7 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
     /// # Safety
     ///
     /// - `thin` must reference the payload of a fully-initialized `T`
-    ///   whose storage was bump-allocated from a [`SharedChunk<A>`] via
+    ///   whose storage was bump-allocated from a [`Chunk<A>`] via
     ///   the strong-prefixed `Arc` allocator path: a per-`Arc`
     ///   [`AtomicU32`](core::sync::atomic::AtomicU32) strong count must
     ///   already be initialized in the chunk prefix (see
@@ -118,10 +118,10 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Arc<T, A> {
 
     /// Returns the thin chunk pointer — the byte address of the
     /// value's payload inside its hosting chunk. Carries chunk-wide
-    /// provenance (no `&T` narrowing). Used by string-flavored
-    /// conversions in `strings/str_impls.rs` to retag between
-    /// `Arc<str>` and `Arc<[u8]>` without losing the chunk-recovery
-    /// borrow-stack tag the smart pointer's `Drop` walks back through.
+    /// provenance (no `&T` narrowing). Used by string conversions in
+    /// `strings/str_impls.rs` to retag between `Arc<str>` and
+    /// `Arc<[u8]>` without losing the chunk-recovery borrow-stack tag
+    /// the smart pointer's `Drop` walks back through.
     #[inline]
     pub(crate) fn thin_ptr(&self) -> NonNull<u8> {
         self.ptr
@@ -278,7 +278,7 @@ impl<T: ?Sized + Pointee, A: Allocator + Clone> Drop for Arc<T, A> {
         // still releases the chunk via `ChunkRef`'s `Drop` (the in-chunk slot
         // leaks, per the `alloc_arc*` panic semantics).
         //
-        // SAFETY: `ptr` is hosted in a 64K-aligned `SharedChunk` that
+        // SAFETY: `ptr` is hosted in a 64K-aligned `Chunk` that
         // holds exactly one outstanding +1 for this whole allocation;
         // `from_value_ptr` adopts it. The value is a valid `T` and is
         // dropped exactly once (only on the strong → 0 transition).
@@ -303,9 +303,12 @@ where
 {
     /// Freeze a [`Vec`](crate::vec::Vec) into an immutable
     /// [`Arc<[T], A>`](crate::Arc). Mirrors `std`'s `From<Vec<T>> for Arc<[T]>`.
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     #[inline]
     fn from(v: Vec<'a, T, A>) -> Self {
-        v.freeze_into_arc()
+        v.into_arc_slice()
     }
 }
 

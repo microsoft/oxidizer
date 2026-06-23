@@ -47,7 +47,7 @@ fn build_arena(arena: &Arena, payload: &[u8]) -> ArenaArc<[ArenaArc<[u8]>]> {
     for _ in 0..PROPERTIES {
         properties.push(arena.alloc_slice_copy_arc(payload));
     }
-    properties.try_into_arc().unwrap()
+    properties.try_into_arc_slice().unwrap()
 }
 
 fn build_arena_from_slice(arena: &Arena, properties: &[StdArc<[u8]>]) -> ArenaArc<[StdArc<[u8]>]> {

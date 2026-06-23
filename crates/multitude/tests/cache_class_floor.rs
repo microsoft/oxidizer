@@ -24,10 +24,10 @@ fn cache_floor_evicts_smaller_chunks_on_bump() {
         let _slice: &mut [u8] = arena.alloc_slice_fill_with(bytes, |_| 0);
     }
     let stats = arena.stats();
-    // The provider should have allocated multiple normal local chunks
+    // The provider should have allocated multiple normal chunks
     // (one per refill), and most of the smaller ones should have been
     // evicted (returned to the backing allocator) as the floor advanced.
-    assert!(stats.normal_local_chunks_allocated >= 1);
+    assert!(stats.normal_chunks_allocated >= 1);
 }
 
 /// After enough refills to saturate the ratchet at class 7, the cache
@@ -48,7 +48,7 @@ fn release_below_floor_bypasses_cache() {
     // and the cache holds at most one chunk per refill that hasn't been
     // released yet. The point is that we don't accumulate `NUM_REFILLS`
     // chunks worth of memory.
-    assert!(stats.normal_shared_chunks_allocated <= NUM_REFILLS as u64);
+    assert!(stats.normal_chunks_allocated <= NUM_REFILLS as u64);
 }
 
 const NUM_REFILLS: usize = 32;

@@ -52,7 +52,7 @@ fn vec_try_into_arc_and_boxed_slice() {
     let arena = Arena::new();
     let mut v: MVec<'_, u32> = arena.alloc_vec();
     v.extend([1, 2]);
-    let a = v.try_into_arc().unwrap();
+    let a = v.try_into_arc_slice().unwrap();
     assert_eq!(&*a, &[1, 2]);
 
     let mut v2: MVec<'_, u32> = arena.alloc_vec();
@@ -189,18 +189,19 @@ fn string_extend_variants() {
 #[cfg(feature = "utf16")]
 #[test]
 fn utf16_freeze_add_into_vec() {
-    use multitude::strings::{ArcUtf16Str, BoxUtf16Str};
+    use multitude::strings::Utf16Str;
+    use multitude::{Arc, Box};
     use widestring::utf16str;
     let arena = Arena::new();
 
     let mut s = arena.alloc_utf16_string();
     s.push_str(utf16str!("hi"));
-    let b = BoxUtf16Str::from(s);
+    let b = Box::<Utf16Str>::from(s);
     assert_eq!(&*b, utf16str!("hi"));
 
     let mut s2 = arena.alloc_utf16_string();
     s2.push_str(utf16str!("yo"));
-    let a = ArcUtf16Str::from(s2);
+    let a = Arc::<Utf16Str>::from(s2);
     assert_eq!(&*a, utf16str!("yo"));
 
     let mut s3 = arena.alloc_utf16_string();

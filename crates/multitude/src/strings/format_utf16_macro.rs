@@ -5,7 +5,7 @@
 /// [`Utf16String`](crate::strings::Utf16String).
 ///
 /// Freeze the result with [`Utf16String::into_boxed_utf16_str`](crate::strings::Utf16String::into_boxed_utf16_str)
-/// if you want an immutable [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
+/// if you want an immutable `Box<Utf16Str>`.
 ///
 /// # Panics
 ///

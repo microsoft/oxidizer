@@ -26,9 +26,9 @@ fn chunk_provider_config_returns_custom_max_normal_alloc_local() {
     // Default max_normal_alloc = 16 KiB. Set 4 KiB and request a 12 KiB
     // local allocation: original → oversized; mutant (default) → normal.
     let arena: Arena = Arena::builder().max_normal_alloc(4 * 1024).build();
-    let baseline = arena.stats().oversized_local_chunks_allocated;
+    let baseline = arena.stats().oversized_chunks_allocated;
     let _: &mut [u8] = arena.alloc_slice_fill_with::<u8, _>(12 * 1024, |_| 0);
-    let after = arena.stats().oversized_local_chunks_allocated;
+    let after = arena.stats().oversized_chunks_allocated;
     assert!(
         after > baseline,
         "12 KiB local allocation with 4 KiB max_normal_alloc must route to an oversized chunk; stats: {after} vs baseline {baseline}",
@@ -39,12 +39,12 @@ fn chunk_provider_config_returns_custom_max_normal_alloc_local() {
 #[test]
 fn chunk_provider_config_returns_custom_max_normal_alloc_shared() {
     let arena: Arena = Arena::builder().max_normal_alloc(4 * 1024).build();
-    let baseline = arena.stats().oversized_shared_chunks_allocated;
+    let baseline = arena.stats().oversized_chunks_allocated;
     // `alloc_str_box` runs through the shared-chunk path
     // (`impl_alloc_str_box_prefixed_shared`).
     let s: std::string::String = (0..12 * 1024).map(|_| 'a').collect();
     let _ = arena.alloc_str_box(&s);
-    let after = arena.stats().oversized_shared_chunks_allocated;
+    let after = arena.stats().oversized_chunks_allocated;
     assert!(
         after > baseline,
         "12 KiB shared allocation with 4 KiB max_normal_alloc must route to an oversized chunk; stats: {after} vs baseline {baseline}",
@@ -57,7 +57,7 @@ fn chunk_provider_config_returns_custom_max_normal_alloc_shared() {
 // `>` → `>=` flips routing at `min_payload == max_normal_alloc`: the
 // original routes through the normal cache; the mutant escapes to
 // `allocate_oversized_*`. Stats expose the difference via
-// `oversized_local_chunks_allocated` / `oversized_shared_chunks_allocated`.
+// `oversized_chunks_allocated` / `oversized_chunks_allocated`.
 // Without the `stats` feature we still observe routing through
 // `Arena::max_normal_alloc` plus a successful normal-sized allocation
 // that the mutant would mis-route. We use the `stats` feature here.
@@ -67,7 +67,7 @@ fn chunk_provider_config_returns_custom_max_normal_alloc_shared() {
 fn acquire_local_at_max_normal_alloc_boundary_stays_normal_class() {
     let mna = 4 * 1024;
     let arena: Arena = Arena::builder().max_normal_alloc(mna).build();
-    let baseline = arena.stats().oversized_local_chunks_allocated;
+    let baseline = arena.stats().oversized_chunks_allocated;
     // `worst_case_slice_payload::<u8>(len) = len * 1 + align_of::<u8>()
     //  = len + 1`; choose `len == mna - 1` so the refill_hint =
     // `min_payload` arrives at `acquire_local` exactly equal to
@@ -75,7 +75,7 @@ fn acquire_local_at_max_normal_alloc_boundary_stays_normal_class() {
     // mutant `>=` routes to oversized.
     let len = mna - 1;
     let _: &mut [u8] = arena.alloc_slice_fill_with::<u8, _>(len, |_| 0);
-    let after = arena.stats().oversized_local_chunks_allocated;
+    let after = arena.stats().oversized_chunks_allocated;
     assert_eq!(
         after - baseline,
         0,
@@ -88,7 +88,7 @@ fn acquire_local_at_max_normal_alloc_boundary_stays_normal_class() {
 fn acquire_shared_at_max_normal_alloc_boundary_stays_normal_class() {
     let mna = 4 * 1024;
     let arena: Arena = Arena::builder().max_normal_alloc(mna).build();
-    let baseline = arena.stats().oversized_shared_chunks_allocated;
+    let baseline = arena.stats().oversized_chunks_allocated;
     // `impl_alloc_str_box_prefixed_shared` calls
     // `refill_shared(words * size_of::<usize>())`. With
     // `words = 1 + len.div_ceil(8).max(1)`, picking `len` so that
@@ -100,7 +100,7 @@ fn acquire_shared_at_max_normal_alloc_boundary_stays_normal_class() {
     debug_assert_eq!(1 + len.div_ceil(core::mem::size_of::<usize>()).max(1), 512);
     let s: std::string::String = (0..len).map(|_| 'a').collect();
     let _ = arena.alloc_str_box(&s);
-    let after = arena.stats().oversized_shared_chunks_allocated;
+    let after = arena.stats().oversized_chunks_allocated;
     assert_eq!(
         after - baseline,
         0,
@@ -127,11 +127,12 @@ fn acquire_shared_at_max_normal_alloc_boundary_stays_normal_class() {
 fn vec_shrink_to_fit_at_max_normal_alloc_boundary_reclaims() {
     let mna = 4 * 1024;
     let arena: Arena = Arena::builder().max_normal_alloc(mna).build();
-    // u8 keeps `total_bytes == cap`. Pick the largest cap whose
-    // `refill_hint = cap + align_of::<u8>()` still fits in a normal
-    // chunk (`refill_hint <= mna`), so the Vec lives in `current_local`
-    // and `try_reclaim_tail` has a chance to fire.
-    let cap = mna - 1;
+    // u8 keeps `total_bytes == cap`. Pick the largest cap whose refill hint
+    // still fits in a normal chunk (`refill_hint <= mna`), so the Vec lives in
+    // `current` and `try_reclaim_tail` has a chance to fire. The freezable
+    // buffer reserves the `Arc<[u8]>` freeze prefix, so the hint is
+    // `cap + 16` (≈12B strong+len prefix + 4B alignment slack).
+    let cap = mna - 16;
     let mut v: ArenaVec<'_, u8> = arena.alloc_vec_with_capacity(cap);
     v.extend_from_slice([7_u8; 16]);
     assert_eq!(v.capacity(), cap);

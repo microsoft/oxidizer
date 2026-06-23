@@ -264,6 +264,10 @@ name = "requests"
 required-features = ["tokio", "rustls", "test-util"]
 
 [[test]]
+name = "telemetry_scope"
+required-features = ["tokio", "rustls", "test-util"]
+
+[[test]]
 name = "uri_handling"
 required-features = ["test-util"]
 

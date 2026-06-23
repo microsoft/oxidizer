@@ -68,7 +68,7 @@ fn build_arena(arena: &Arena, payload: &[u8]) -> ArenaArrayOfArena {
     for _ in 0..PROPERTIES {
         properties.push(arena.alloc_slice_copy_arc(payload));
     }
-    properties.try_into_arc().unwrap()
+    properties.try_into_arc_slice().unwrap()
 }
 
 fn build_arena_from_slice(arena: &Arena, properties: &[StdArc<[u8]>]) -> ArenaArrayOfGlobal {
@@ -87,14 +87,11 @@ fn global_properties() -> Vec<StdArc<[u8]>> {
 }
 
 fn warm_arena() -> Arena {
-    // Warm: preallocate one chunk of the largest size class for each flavor
-    // AND prime the arena's current_local / current_shared mutators with a
-    // throwaway allocation, so the timed body never pays a cold `refill_*`.
-    // Mirrors `gungraun_alloc::warm_arena`.
-    let arena = Arena::builder()
-        .with_capacity_local(64 * 1024)
-        .with_capacity_shared(64 * 1024)
-        .build();
+    // Warm: preallocate chunks of the largest size class AND prime the
+    // arena's `current` mutator with a throwaway reference allocation
+    // and a throwaway `Arc` allocation, so the timed body never pays a
+    // cold `refill`. Mirrors `gungraun_alloc::warm_arena`.
+    let arena = Arena::builder().with_capacity(128 * 1024).build();
     let _: &mut u64 = arena.alloc(0_u64);
     let _ = arena.alloc_arc(0_u64);
     arena

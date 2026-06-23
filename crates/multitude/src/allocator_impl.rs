@@ -7,7 +7,7 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use crate::Arena;
-use crate::arena::alloc_value::acquire_shared_chunk_ref;
+use crate::arena::alloc_value::acquire_chunk_ref;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
 
@@ -18,7 +18,7 @@ use crate::internal::constants::max_smart_ptr_align;
 const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 /// `&Arena<A>` is the allocator handle: cheap to copy and backed by
-/// local chunks. `allocate` bumps the chunk refcount; `deallocate`
+/// chunks. `allocate` bumps the chunk refcount; `deallocate`
 /// releases it.
 ///
 /// # Safety
@@ -29,7 +29,7 @@ const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 // matching `deallocate`.
 unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        // Route through the shared-chunk path so the returned pointer can
+        // Route through the chunk path so the returned pointer can
         // outlive the current mutator borrow via a per-allocation +1 refcount.
         // Reject alignments at/above the smart-pointer ceiling (as `alloc_box` /
         // `alloc_arc` do): the header-from-mask helper requires the value to lie
@@ -50,8 +50,8 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
         // for this allocation, regardless of the bump cursor's pre-alignment.
         let refill_hint = layout.size().saturating_add(layout.align());
         loop {
-            if let Some((slot, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(layout.size(), layout.align()) {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+            if let Some((slot, chunk_ptr)) = self.current().try_alloc_with_chunk(layout.size(), layout.align()) {
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let ptr = slot.as_non_null();
                 let _ = chunk_ref.forget();
                 return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
@@ -61,13 +61,13 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
                     let (slot, _chunk) = mutator
                         .try_alloc_with_chunk(layout.size(), layout.align())
                         .expect("dedicated oversized chunk sized to fit allocation + alignment slack");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let ptr = slot.as_non_null();
                     let _ = chunk_ref.forget();
                     NonNull::slice_from_raw_parts(ptr, layout.size())
                 });
             }
-            self.refill_shared(refill_hint)?;
+            self.refill(refill_hint)?;
         }
     }
 
@@ -78,7 +78,7 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
             return;
         }
         // SAFETY: caller guarantees `ptr` was returned by `Self::allocate`
-        // on the same arena, so it is hosted in a `SharedChunk<A>` we hold
+        // on the same arena, so it is hosted in a `Chunk<A>` we hold
         // a +1 strong reference on. `ChunkRef::from_value_ptr` adopts that
         // +1 and releases it on drop.
         let _ref: ChunkRef<A> = unsafe { ChunkRef::from_value_ptr(ptr) };

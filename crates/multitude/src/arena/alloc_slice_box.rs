@@ -12,7 +12,7 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::alloc_prefixed::worst_case_thin_slice_payload;
-use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_shared_chunk_ref};
+use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
 use super::{Arena, ExpectAlloc};
 use crate::r#box::Box;
 
@@ -178,6 +178,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Box: with-closure fill path. Uses an `InitGuard`-equivalent loop
     /// so a panicking `f` drops the already-initialized prefix.
     #[inline]
+    #[cfg_attr(test, mutants::skip)] // `+= → *=` on the fill counter ⇒ infinite loop
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(len)?;
         // Check overflow before the refill loop.
@@ -211,7 +212,7 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Reserve `len` `T` slots (with precomputed `payload_bytes ==
-    /// size_of::<T>() * len`) in the current shared chunk, bump the
+    /// size_of::<T>() * len`) in the current chunk, bump the
     /// chunk's strong refcount, call `init(slot_ptr)`, and return the
     /// base pointer on success. On allocator failure, refills and
     /// retries; on `init` panic, the refcount bump is released via
@@ -227,7 +228,7 @@ impl<A: Allocator + Clone> Arena<A> {
             // SAFETY: `payload_bytes == size_of::<T>() * len` per caller contract.
             let reserved = unsafe { self.try_reserve_shared_slice_with_size::<T>(len, payload_bytes) };
             if let Some((uninit, chunk_ptr)) = reserved {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let (base, _len) = uninit.into_raw_buffer();
                 // Run the init under the chunk_ref's Drop guard: a panic
                 // releases the +1 so the chunk is not leaked.
@@ -242,14 +243,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let ticket = mutator
                         .try_alloc_uninit_slice_prefixed::<T>(len)
                         .expect("dedicated oversized chunk sized to fit slice");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let (base, _len) = ticket.into_raw_buffer();
                     init_owned(base.as_ptr());
                     let _ = chunk_ref.forget();
                     base
                 });
             }
-            self.refill_shared(bytes_needed)?;
+            self.refill(bytes_needed)?;
         }
     }
 }

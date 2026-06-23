@@ -187,7 +187,7 @@ fn zst_shared_handouts_advance_cursor() {
         drop(arena.alloc_box(()));
     }
 
-    // Arena remains usable for both flavors after the churn.
+    // Arena remains usable for references and smart pointers after the churn.
     let z = arena.alloc_arc(());
     let _ = arena.alloc_arc(7_u64);
     assert!(!z.as_ptr().is_null());

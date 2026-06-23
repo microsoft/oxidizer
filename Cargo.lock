@@ -2371,7 +2371,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "allocator-api2 0.4.0",
  "bolero",

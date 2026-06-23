@@ -9,7 +9,8 @@
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::Arena;
-use crate::strings::String;
+use crate::arena::ExpectAlloc;
+use crate::strings::{FromUtf16Error, String};
 use crate::vec::Vec;
 
 impl<A: Allocator + Clone> Arena<A> {
@@ -90,7 +91,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the backing allocator fails.
     #[must_use]
     pub fn alloc_string_from_utf8_lossy(&self, bytes: &[u8]) -> String<'_, A> {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf8_lossy(bytes))
+        self.try_alloc_string_from_utf8_lossy(bytes).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_string_from_utf8_lossy`].
@@ -125,7 +126,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[must_use]
     pub unsafe fn alloc_string_from_utf8_unchecked(&self, bytes: &[u8]) -> String<'_, A> {
         // SAFETY: the caller guarantees `bytes` is valid UTF-8.
-        crate::arena::ExpectAlloc::expect_alloc(unsafe { self.try_alloc_string_from_utf8_unchecked(bytes) })
+        unsafe { self.try_alloc_string_from_utf8_unchecked(bytes) }.expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_string_from_utf8_unchecked`].
@@ -171,7 +172,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the backing allocator fails.
     #[must_use]
     pub fn alloc_string_from_utf16_lossy(&self, units: &[u16]) -> String<'_, A> {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf16_lossy(units))
+        self.try_alloc_string_from_utf16_lossy(units).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_string_from_utf16_lossy`].
@@ -192,14 +193,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Errors
     ///
-    /// Returns a [`FromUtf16Error`](crate::strings::FromUtf16Error) if `bytes`
+    /// Returns a [`FromUtf16Error`](FromUtf16Error) if `bytes`
     /// has an odd length or contains an unpaired surrogate.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails. Allocation failure is reported
     /// via a panic, not the returned `Result`.
-    pub fn alloc_string_from_utf16le(&self, bytes: &[u8]) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+    pub fn alloc_string_from_utf16le(&self, bytes: &[u8]) -> Result<String<'_, A>, FromUtf16Error> {
         self.alloc_string_from_utf16_bytes(bytes, false)
     }
 
@@ -208,14 +209,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Errors
     ///
-    /// Returns a [`FromUtf16Error`](crate::strings::FromUtf16Error) if `bytes`
+    /// Returns a [`FromUtf16Error`](FromUtf16Error) if `bytes`
     /// has an odd length or contains an unpaired surrogate.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails. Allocation failure is reported
     /// via a panic, not the returned `Result`.
-    pub fn alloc_string_from_utf16be(&self, bytes: &[u8]) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+    pub fn alloc_string_from_utf16be(&self, bytes: &[u8]) -> Result<String<'_, A>, FromUtf16Error> {
         self.alloc_string_from_utf16_bytes(bytes, true)
     }
 
@@ -269,9 +270,9 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::map_err_ignore,
         reason = "FromUtf16Error is intentionally opaque; the DecodeUtf16Error carries no extra recoverable detail"
     )]
-    fn alloc_string_from_utf16_bytes(&self, bytes: &[u8], big_endian: bool) -> Result<String<'_, A>, crate::strings::FromUtf16Error> {
+    fn alloc_string_from_utf16_bytes(&self, bytes: &[u8], big_endian: bool) -> Result<String<'_, A>, FromUtf16Error> {
         if !bytes.len().is_multiple_of(2) {
-            return Err(crate::strings::FromUtf16Error::new());
+            return Err(FromUtf16Error::new());
         }
         let mut out = self.alloc_string_with_capacity(bytes.len() / 2);
         let units = bytes.chunks_exact(2).map(|pair| {
@@ -283,14 +284,14 @@ impl<A: Allocator + Clone> Arena<A> {
             }
         });
         for unit in char::decode_utf16(units) {
-            out.push(unit.map_err(|_| crate::strings::FromUtf16Error::new())?);
+            out.push(unit.map_err(|_| FromUtf16Error::new())?);
         }
         Ok(out)
     }
 
     /// Shared body for the lossy byte-oriented UTF-16 constructors.
     fn alloc_string_from_utf16_bytes_lossy(&self, bytes: &[u8], big_endian: bool) -> String<'_, A> {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_alloc_string_from_utf16_bytes_lossy(bytes, big_endian))
+        self.try_alloc_string_from_utf16_bytes_lossy(bytes, big_endian).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_string_from_utf16_bytes_lossy`].

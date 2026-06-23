@@ -18,12 +18,12 @@ use allocator_api2::alloc::{AllocError, Allocator, Global};
 /// Send-and-Sync allocator that fails after a fixed number of successful
 /// allocations.
 #[derive(Clone)]
-pub(crate) struct FailingAllocator {
+struct FailingAllocator {
     remaining: Arc<AtomicUsize>,
 }
 
 impl FailingAllocator {
-    pub(crate) fn new(allow_n_allocs: usize) -> Self {
+    fn new(allow_n_allocs: usize) -> Self {
         Self {
             remaining: Arc::new(AtomicUsize::new(allow_n_allocs)),
         }

@@ -142,4 +142,4 @@ macro_rules! impl_arena_string_common {
     };
 }
 
-pub(crate) use impl_arena_string_common;
+pub(in crate::strings) use impl_arena_string_common;
