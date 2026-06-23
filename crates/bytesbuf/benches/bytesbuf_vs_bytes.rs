@@ -34,7 +34,7 @@ const WORKING_SLICE_LEN: usize = 256;
 
 #[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {
-    let allocs = Session::new().no_file();
+    let allocs = Session::new();
 
     let memory = TransparentMemory::new();
 

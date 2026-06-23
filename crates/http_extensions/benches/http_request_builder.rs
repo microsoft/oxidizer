@@ -28,7 +28,7 @@ fn get_uri() -> Uri {
 
 #[expect(clippy::too_many_lines, reason = "bench code, such is life")]
 fn entry(c: &mut Criterion) {
-    let session = Session::new().no_file();
+    let session = Session::new();
     let mut group = c.benchmark_group("http_request_builder");
     let body_builder = HttpBodyBuilder::new_fake();
 

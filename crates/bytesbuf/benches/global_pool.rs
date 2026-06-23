@@ -21,7 +21,7 @@ const ONE_MB: usize = 1024 * 1024;
 const TINY: usize = 128;
 
 fn entrypoint(c: &mut Criterion) {
-    let allocs = Session::new().no_file();
+    let allocs = Session::new();
 
     let warm_memory = GlobalPool::new();
 

@@ -20,7 +20,7 @@ static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("observability");
-    let session = Session::new().no_file();
+    let session = Session::new();
 
     // No telemetry
     let context = ResilienceContext::new(Clock::new_frozen());

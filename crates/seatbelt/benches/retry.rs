@@ -17,7 +17,7 @@ static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("retry");
-    let session = Session::new().no_file();
+    let session = Session::new();
 
     // No retries
     let service = Execute::new(|v: Input| async move { Output::from(v) });

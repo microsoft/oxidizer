@@ -13,7 +13,7 @@ static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("typed-vs-dynamic");
-    let session = Session::new().no_file();
+    let session = Session::new();
 
     let service = Execute::new(|v| async move { v });
     let operation = session.operation("typed");
