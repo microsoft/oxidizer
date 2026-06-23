@@ -3,16 +3,18 @@
 
 //! Bump allocator over a single chunk.
 //!
-//! [`ChunkMutator<C>`] owns one strong chunk reference and hands out
+//! [`ChunkMutator<A>`] owns one strong chunk reference and hands out
 //! [`InChunk`], [`Uninit`], and [`UninitDrop`] tickets. Drop publishes pending
-//! drop entries, releases the refcount, and may trigger
-//! [`ChunkOps::teardown_and_release`].
+//! drop entries, replays them, releases the refcount, and may trigger
+//! [`Chunk::teardown_and_release`].
 
 use core::cell::Cell;
 use core::ptr::{self, NonNull};
 use core::{hint, mem};
 
-use super::chunk_ops::ChunkOps;
+use allocator_api2::alloc::Allocator;
+
+use super::chunk::Chunk;
 use super::drop_entry::DropEntry;
 use super::in_chunk::InChunk;
 use super::uninit::{Uninit, UninitDrop};
@@ -22,8 +24,8 @@ use super::uninit::{Uninit, UninitDrop};
 ///
 /// Hot-path layout stores only `chunk`, `bump`, and `drop_top`; cold paths
 /// re-derive payload bounds from `chunk`.
-pub(crate) struct ChunkMutator<C: ?Sized + ChunkOps> {
-    chunk: Option<NonNull<C>>,
+pub(crate) struct ChunkMutator<A: Allocator + Clone> {
+    chunk: Option<NonNull<Chunk<A>>>,
     /// Bump cursor stored as a pointer to preserve chunk provenance under
     /// Stacked / Tree Borrows.
     bump: Cell<NonNull<u8>>,
@@ -33,11 +35,12 @@ pub(crate) struct ChunkMutator<C: ?Sized + ChunkOps> {
 }
 
 // SAFETY: the mutator owns one strong chunk ref and moves that ownership
-// across threads only when `C: Send`. `LocalChunk` follows the owning thread;
-// `SharedChunk` uses atomics. The `Cell` fields intentionally make this `!Sync`.
-unsafe impl<C: ?Sized + ChunkOps + Send> Send for ChunkMutator<C> {}
+// across threads only when `Chunk<A>: Send` (i.e. `A: Send`). The chunk's
+// refcounts and links are atomic. The `Cell` fields intentionally make this
+// `!Sync`.
+unsafe impl<A: Allocator + Clone + Send> Send for ChunkMutator<A> {}
 
-impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
+impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Builds a mutator owning the +1 already on `chunk`.
     ///
     /// # Safety
@@ -45,12 +48,12 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// `chunk` must reference a live chunk whose refcount is already
     /// incremented in this mutator's name. The mutator becomes the unique
     /// owner of that +1 and will release it on drop.
-    pub(crate) unsafe fn from_owned(chunk: NonNull<C>) -> Self {
+    pub(crate) unsafe fn from_owned(chunk: NonNull<Chunk<A>>) -> Self {
         // SAFETY: caller asserts `chunk` is live; `payload_range_for` only
         // dereferences `chunk` to read `payload_ptr()` and `capacity()`.
         let (start_addr, end_addr) = unsafe { Self::payload_range_for(chunk) };
         // SAFETY: caller asserts `chunk` is live.
-        let start = unsafe { C::payload_ptr(chunk) };
+        let start = unsafe { Chunk::payload_ptr(chunk) };
         let aligned_end_offset = end_addr - start_addr;
         // SAFETY: `aligned_end_offset <= cap`; `start.byte_add` lands
         // within (or at one-past-end of) the chunk payload.
@@ -79,7 +82,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg_attr(test, mutants::skip)] // test-only helper
-    pub(crate) fn free_bytes(&self) -> usize {
+    fn free_bytes(&self) -> usize {
         let top = self.drop_top.get().as_ptr() as usize;
         let cur = self.bump.get().as_ptr() as usize;
         top.saturating_sub(cur)
@@ -117,21 +120,15 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     ///
     /// `chunk` must reference a live chunk.
     #[inline]
-    unsafe fn payload_range_for(chunk: NonNull<C>) -> (usize, usize) {
+    unsafe fn payload_range_for(chunk: NonNull<Chunk<A>>) -> (usize, usize) {
         // SAFETY: caller asserts `chunk` is live.
-        let (start, cap) = unsafe { (C::payload_ptr(chunk), chunk.as_ref().capacity()) };
+        let (start, cap) = unsafe { (Chunk::<A>::payload_ptr(chunk), chunk.as_ref().capacity()) };
         let start_addr = start.as_ptr() as usize;
-        let end_addr = if C::REGISTERS_DROPS {
-            // Align the reported end down to `align_of::<DropEntry>()` so the
-            // drop-entry region (entries grow down from this point) stays
-            // naturally aligned regardless of payload-start alignment.
-            let entry_align = mem::align_of::<DropEntry>();
-            (start_addr + cap) & !(entry_align - 1)
-        } else {
-            // Flavors that never register drop entries let the bump cursor use
-            // the whole payload — no tail region is reserved.
-            start_addr + cap
-        };
+        // Reserve a drop-aligned tail: arena-reference allocations register
+        // drop entries that grow down from the aligned end, regardless of
+        // payload-start alignment. Smart-pointer allocations never touch it.
+        let entry_align = mem::align_of::<DropEntry>();
+        let end_addr = (start_addr + cap) & !(entry_align - 1);
         (start_addr, end_addr)
     }
 
@@ -145,7 +142,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// `try_reserve_*` on this mutator immediately prior (without
     /// intervening `CurrentChunk::replace` / `drop_replace`).
     #[inline]
-    pub(crate) unsafe fn chunk_ptr_unchecked(&self) -> NonNull<C> {
+    pub(crate) unsafe fn chunk_ptr_unchecked(&self) -> NonNull<Chunk<A>> {
         // SAFETY: see contract.
         unsafe { self.chunk.unwrap_unchecked() }
     }
@@ -153,7 +150,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// Returns the chunk this mutator owns, or `None` for the empty
     /// (sentinel) mutator that has no chunk installed.
     #[inline]
-    pub(crate) fn chunk_ptr(&self) -> Option<NonNull<C>> {
+    pub(crate) fn chunk_ptr(&self) -> Option<NonNull<Chunk<A>>> {
         self.chunk
     }
 
@@ -219,7 +216,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// would require an `unsafe` block) afterwards.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
-    pub(crate) fn try_alloc_with_chunk(&self, size: usize, align: usize) -> Option<(InChunk<u8>, NonNull<C>)> {
+    pub(crate) fn try_alloc_with_chunk(&self, size: usize, align: usize) -> Option<(InChunk<u8>, NonNull<Chunk<A>>)> {
         let in_chunk = self.try_alloc(size, align)?;
         // SAFETY: a successful `try_alloc` proves the mutator owns a
         // chunk.
@@ -339,7 +336,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// [`Self::try_alloc_arc_prefixed`] plus the owning chunk pointer.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
-    pub(crate) fn try_alloc_arc_value<T>(&self) -> Option<(Uninit<'_, T>, NonNull<C>)> {
+    pub(crate) fn try_alloc_arc_value<T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let value_ptr = self.try_alloc_arc_prefixed(mem::size_of::<T>(), mem::align_of::<T>(), 0)?;
         // SAFETY: a successful reservation proves the mutator owns a chunk.
         Some((Uninit::new(InChunk::from_raw(value_ptr).cast::<T>()), unsafe {
@@ -355,7 +352,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
-    pub(crate) fn try_alloc_arc_slice<T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<C>)> {
+    pub(crate) fn try_alloc_arc_slice<T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
         let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
         // SAFETY: `payload_bytes == size_of::<T>() * len` (just checked).
         unsafe { self.try_alloc_arc_slice_with_size::<T>(len, payload_bytes) }
@@ -380,7 +377,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         &self,
         len: usize,
         payload_bytes: usize,
-    ) -> Option<(Uninit<'_, [T]>, NonNull<C>)> {
+    ) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
         debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
         let value_ptr = self.try_alloc_arc_prefixed(payload_bytes, mem::align_of::<T>(), mem::size_of::<usize>())?;
         // SAFETY: the reservation placed `size_of::<usize>()` metadata
@@ -395,6 +392,36 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         }))
     }
 
+    /// Reserves a growable-buffer slot carrying the full freeze prefix
+    /// (`[strong][pad][len][payload]`, the `Arc<[T]>` layout) so the buffer
+    /// can later be frozen into an `Arc<[T]>` / `Box<[T]>` in place — no copy.
+    ///
+    /// Writes `strong = 1` and reserves the length slot (left uninitialized;
+    /// the final length is written at freeze time). Takes **no** chunk
+    /// refcount — the caller pins the chunk through the reference machinery
+    /// and acquires the refcount only at freeze. Returns the payload ticket.
+    ///
+    /// # Safety
+    ///
+    /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    unsafe fn try_alloc_freezable_slice_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
+        debug_assert_eq!(payload_bytes, mem::size_of::<T>().wrapping_mul(len));
+        let value_ptr = self.try_alloc_arc_prefixed(payload_bytes, mem::align_of::<T>(), mem::size_of::<usize>())?;
+        // The returned pointer addresses `len` `T` slots after the freeze prefix.
+        Some(Uninit::new(InChunk::from_raw(value_ptr).into_slice::<T>(len)))
+    }
+
+    /// Checked form of [`Self::try_alloc_freezable_slice_with_size`].
+    #[inline]
+    #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
+    pub(crate) fn try_alloc_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
+        let payload_bytes = mem::size_of::<T>().checked_mul(len)?;
+        // SAFETY: `payload_bytes == size_of::<T>() * len` (just checked).
+        unsafe { self.try_alloc_freezable_slice_with_size::<T>(len, payload_bytes) }
+    }
+
     /// DST form of [`Self::try_alloc_arc_value`]. The caller writes metadata
     /// before the returned value pointer and initializes the payload.
     #[inline]
@@ -405,7 +432,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         payload_bytes: usize,
         value_align: usize,
         meta_bytes: usize,
-    ) -> Option<(NonNull<u8>, NonNull<C>)> {
+    ) -> Option<(NonNull<u8>, NonNull<Chunk<A>>)> {
         let value_ptr = self.try_alloc_arc_prefixed(payload_bytes, value_align, meta_bytes)?;
         // SAFETY: a successful reservation proves the mutator owns a chunk.
         Some((value_ptr, unsafe { self.chunk_ptr_unchecked() }))
@@ -528,7 +555,7 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
         {
             // SAFETY: the `self.chunk.is_none()` early return above
             // guarantees a live chunk; `payload_ptr` only reads its header.
-            let payload_start = unsafe { C::payload_ptr(self.chunk_ptr_unchecked()) }.as_ptr() as usize;
+            let payload_start = unsafe { Chunk::<A>::payload_ptr(self.chunk_ptr_unchecked()) }.as_ptr() as usize;
             debug_assert!(
                 (cur.as_ptr() as usize) - payload_start >= bytes,
                 "try_reclaim_tail: rewind underflows chunk payload",
@@ -640,19 +667,25 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     }
 
     /// Publishes the locally-tracked drop-entry count to the chunk header
-    /// eagerly, before the mutator is dropped. A no-op for chunk flavors that
-    /// never register drop entries ([`ChunkOps::REGISTERS_DROPS`] is `false`).
+    /// eagerly, before the mutator is dropped or transferred, so teardown /
+    /// reset can replay the arena-reference destructors.
     #[inline]
-    pub(crate) fn publish_drop_count(&self) {
-        if !C::REGISTERS_DROPS {
-            return;
-        }
+    fn publish_drop_count(&self) {
         let Some(chunk) = self.chunk else { return };
         // SAFETY: the mutator owns a +1 on `chunk` for its whole lifetime,
         // so the header is live for this store.
         unsafe {
-            C::publish_drop_entry_count(chunk, self.local_drop_entry_count());
+            chunk.as_ref().set_drop_entry_count(self.local_drop_entry_count());
         }
+    }
+
+    /// Whether this mutator's chunk currently carries any drop entries
+    /// (arena-reference destructors that must be replayed at reset). Used by
+    /// the arena to decide whether a displaced chunk must be pinned on the
+    /// retired list or can be released immediately.
+    #[inline]
+    pub(crate) fn has_drop_entries(&self) -> bool {
+        self.chunk.is_some() && self.local_drop_entry_count() != 0
     }
 
     /// Consumes the mutator and returns the owned chunk ref without running
@@ -663,41 +696,47 @@ impl<C: ?Sized + ChunkOps> ChunkMutator<C> {
     /// Returns `None` for the empty (sentinel) mutator that has no
     /// chunk installed.
     #[inline]
-    pub(crate) fn forget_into_chunk(self) -> Option<NonNull<C>> {
+    pub(crate) fn forget_into_chunk(self) -> Option<NonNull<Chunk<A>>> {
         self.publish_drop_count();
         let chunk = self.chunk;
         #[cfg(feature = "stats")]
         if let Some(chunk) = chunk {
             // SAFETY: chunk is live; the mutator still holds its +1
             // (ownership transfers to the caller via `mem::forget` below).
-            unsafe { C::record_retire(chunk, self.wasted_tail_for_stats()) };
+            unsafe { Chunk::<A>::record_retire(chunk, self.wasted_tail_for_stats()) };
         }
         mem::forget(self);
         chunk
     }
 }
 
-impl<C: ?Sized + ChunkOps> Drop for ChunkMutator<C> {
+impl<A: Allocator + Clone> Drop for ChunkMutator<A> {
     fn drop(&mut self) {
         let Some(chunk) = self.chunk else {
             return;
         };
-        // SAFETY: chunk is live; we hold one refcount ticket. Publish the
-        // drop-entry count before releasing it so teardown can replay drops.
+        // SAFETY: chunk is live; we hold one refcount ticket.
         unsafe {
             #[cfg(feature = "stats")]
             {
                 // Record wasted tail before `dec_ref`; release may happen
                 // immediately and subtract the stashed value.
                 let wasted = self.wasted_tail_for_stats();
-                C::record_retire(chunk, wasted);
+                Chunk::<A>::record_retire(chunk, wasted);
             }
             let chunk_ref = chunk.as_ref();
-            // Publish the locally-tracked drop count; a no-op for flavors that
-            // never register drop entries (see `ChunkOps::publish_drop_entry_count`).
-            C::publish_drop_entry_count(chunk, self.local_drop_entry_count());
+            // Publish then replay any pending drop entries eagerly: a mutator
+            // is only dropped (rather than forgotten into the retired list) at
+            // arena reset / drop, where the `&mut Arena` guarantees no live
+            // `&mut T` borrows remain. Replaying here — before `dec_ref` —
+            // runs the reference destructors even when escaped `Arc`s keep
+            // the chunk's refcount above zero. The displaced-at-refill path
+            // only drops chunks that carry no drop entries, so this is a
+            // no-op there.
+            chunk_ref.set_drop_entry_count(self.local_drop_entry_count());
+            Chunk::<A>::replay_pending_drops(chunk);
             if chunk_ref.dec_ref() {
-                C::teardown_and_release(chunk);
+                Chunk::<A>::teardown_and_release(chunk);
             }
         }
     }
@@ -735,10 +774,9 @@ mod tests {
     use allocator_api2::alloc::Global;
 
     use super::*;
-    use crate::internal::local_chunk::LocalChunk;
 
-    fn empty_mutator() -> ChunkMutator<LocalChunk<Global>> {
-        ChunkMutator::<LocalChunk<Global>>::empty()
+    fn empty_mutator() -> ChunkMutator<Global> {
+        ChunkMutator::<Global>::empty()
     }
 
     // Covers try_reclaim_tail's chunk-is-None arm (line 314-316).
@@ -780,7 +818,7 @@ mod tests {
         // The mutator isn't reachable externally, so exercise its
         // free_bytes/capacity arithmetic end-to-end through a real arena
         // chunk (the empty-mutator path is unit-tested above).
-        let arena = crate::Arena::builder().with_capacity_local(1024).build();
+        let arena = crate::Arena::builder().with_capacity(1024).build();
         let _ = arena.alloc(0_u32);
         let v: &u32 = arena.alloc(42_u32);
         assert_eq!(*v, 42);
@@ -815,15 +853,32 @@ mod tests {
     #[test]
     fn try_alloc_bytes_at_exact_remaining_capacity_succeeds() {
         let arena = crate::Arena::new();
-        // Force the first refill so `current_local` carries a live chunk.
+        // Force the first refill so `current` carries a live chunk.
         let _ = arena.alloc(0_u8);
-        let m = arena.current_local();
+        let m = arena.current();
         let free = m.free_bytes();
         assert!(free > 0, "post-refill chunk must have remaining capacity");
         let result = m.try_alloc_bytes(free);
         assert!(result.is_some(), "try_alloc_bytes(free_bytes) must succeed at the exact boundary");
         // After consuming everything, the next byte must fail.
         assert!(m.try_alloc_bytes(1).is_none());
+    }
+
+    // Kills `has_drop_entries` body → `false`: a mutator whose chunk carries a
+    // registered arena-reference drop entry must report `true`.
+    #[test]
+    fn has_drop_entries_true_after_reference_drop_registered() {
+        let arena = crate::Arena::new();
+        // A fresh mutator owns no chunk and has no drop entries.
+        assert!(!arena.current().has_drop_entries());
+        // A `String` needs drop, so allocating one by reference registers a
+        // drop entry on the current chunk; `has_drop_entries()` must then
+        // report `true`.
+        let _s: &mut std::string::String = arena.alloc(std::string::String::from("x"));
+        assert!(
+            arena.current().has_drop_entries(),
+            "a registered arena-reference drop entry must be reflected"
+        );
     }
 
     // Kills `try_grow_in_place`'s `new_bump_addr > drop_top_addr`
@@ -833,7 +888,7 @@ mod tests {
     fn try_grow_in_place_at_exact_remaining_capacity_succeeds() {
         let arena = crate::Arena::new();
         let _ = arena.alloc(0_u8);
-        let m = arena.current_local();
+        let m = arena.current();
         let free = m.free_bytes();
         assert!(free > 16, "need slack for an initial alloc plus grow");
         // Capture the bump cursor *before* the initial alloc so we know
@@ -860,7 +915,7 @@ mod tests {
     fn try_grow_in_place_non_growing_returns_true() {
         let arena = crate::Arena::new();
         let _ = arena.alloc(0_u8);
-        let m = arena.current_local();
+        let m = arena.current();
         let bump_before = m.bump.get().as_ptr() as usize;
         // `prev_addr` is irrelevant here: the `new_len <= prev_len`
         // guard short-circuits before it is inspected.
@@ -881,7 +936,7 @@ mod tests {
     fn try_grow_in_place_new_len_overflow_returns_false() {
         let arena = crate::Arena::new();
         let _ = arena.alloc(0_u8);
-        let m = arena.current_local();
+        let m = arena.current();
         // Capture the cursor before the allocation so we know
         // `prev_addr` exactly (align-1 byte alloc lands here).
         let prev_addr = m.bump.get().as_ptr() as usize;
@@ -911,9 +966,9 @@ mod tests {
             }
         }
         let arena = crate::Arena::new();
-        // Force the first refill so `current_local` carries a live chunk.
+        // Force the first refill so `current` carries a live chunk.
         let _ = arena.alloc(0_u8);
-        let m = arena.current_local();
+        let m = arena.current();
 
         let entry_size = mem::size_of::<DropEntry>();
         // Leave exactly one byte of headroom past the drop slot so the
@@ -941,17 +996,17 @@ mod tests {
         drop(drop_arena);
     }
 
-    // Covers `publish_drop_count`'s early return for chunk flavors that never
-    // register drop entries (`REGISTERS_DROPS == false`): publishing the count
-    // on a shared mutator is a no-op that must leave the arena fully usable.
+    // Publishing the drop count on a smart-pointer-only chunk publishes `0`
+    // (no arena-reference drop entries were registered) and must leave the
+    // arena fully usable.
     #[test]
     fn publish_drop_count_is_noop_for_shared_mutator() {
         let arena = crate::Arena::new();
-        // Force a live shared chunk into `current_shared`.
+        // Force a live chunk to back the smart pointer.
         let a = arena.alloc_arc(1_u32);
         assert_eq!(*a, 1);
-        // Shared chunks register no drop entries, so this returns early.
-        arena.current_shared().publish_drop_count();
+        // An Arc-only chunk has a drop-entry count of 0, so this is a no-op.
+        arena.current().publish_drop_count();
         // The arena keeps working afterward.
         let b = arena.alloc_arc(2_u32);
         assert_eq!(*b, 2);

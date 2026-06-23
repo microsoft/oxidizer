@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 //! [`ChunkRef`] — a RAII handle for a single strong reference on a
-//! [`SharedChunk`].
+//! [`Chunk`].
 //!
 //! Centralizes linear "+1" chunk ownership used by smart pointers and
 //! in-flight slot initialization.
@@ -13,13 +13,13 @@ use core::ptr::NonNull;
 
 use allocator_api2::alloc::Allocator;
 
-use super::shared_chunk::SharedChunk;
+use super::chunk::Chunk;
 
-/// Owns a single strong reference on a [`SharedChunk`]; releases the
+/// Owns a single strong reference on a [`Chunk`]; releases the
 /// ref on drop.
 pub(crate) struct ChunkRef<A: Allocator + Clone> {
-    chunk: NonNull<SharedChunk<A>>,
-    _phantom: PhantomData<*const SharedChunk<A>>,
+    chunk: NonNull<Chunk<A>>,
+    _phantom: PhantomData<*const Chunk<A>>,
 }
 
 impl<A: Allocator + Clone> ChunkRef<A> {
@@ -31,7 +31,7 @@ impl<A: Allocator + Clone> ChunkRef<A> {
     /// is transferred to this `ChunkRef`. After this call the caller
     /// must not release that same reference through any other path.
     #[inline]
-    pub(crate) unsafe fn adopt(chunk: NonNull<SharedChunk<A>>) -> Self {
+    pub(crate) unsafe fn adopt(chunk: NonNull<Chunk<A>>) -> Self {
         Self {
             chunk,
             _phantom: PhantomData,
@@ -43,7 +43,7 @@ impl<A: Allocator + Clone> ChunkRef<A> {
     ///
     /// # Safety
     ///
-    /// - `value` must point inside a 64K-aligned `SharedChunk<A>` and
+    /// - `value` must point inside a 64K-aligned `Chunk<A>` and
     ///   lie within the first `CHUNK_ALIGN` bytes of that chunk's
     ///   allocation.
     /// - Caller must own a strong reference on that chunk whose
@@ -53,8 +53,8 @@ impl<A: Allocator + Clone> ChunkRef<A> {
         // SAFETY: caller contract; `header_from_value_ptr` returns a
         // thin pointer with full chunk provenance via `with_addr`.
         unsafe {
-            let header = SharedChunk::<A>::header_from_value_ptr(value.cast::<u8>());
-            let chunk_fat = SharedChunk::<A>::header_to_fat(header.as_ptr());
+            let header = Chunk::<A>::header_from_value_ptr(value.cast::<u8>());
+            let chunk_fat = Chunk::<A>::header_to_fat(header.as_ptr());
             Self {
                 chunk: NonNull::new_unchecked(chunk_fat),
                 _phantom: PhantomData,
@@ -64,7 +64,7 @@ impl<A: Allocator + Clone> ChunkRef<A> {
 
     /// Cancels release-on-drop and returns the chunk pointer with +1 live.
     #[inline]
-    pub(crate) fn forget(self) -> NonNull<SharedChunk<A>> {
+    pub(crate) fn forget(self) -> NonNull<Chunk<A>> {
         let chunk = self.chunk;
         mem::forget(self);
         chunk
@@ -78,7 +78,7 @@ impl<A: Allocator + Clone> Drop for ChunkRef<A> {
         // on `chunk` by its construction contract; we are releasing
         // that reference now.
         unsafe {
-            SharedChunk::<A>::release_one_ref(self.chunk);
+            Chunk::<A>::release_one_ref(self.chunk);
         }
     }
 }

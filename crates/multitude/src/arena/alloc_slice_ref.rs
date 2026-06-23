@@ -275,7 +275,7 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Cold fall-back for [`Self::impl_alloc_slice_copy`]: either refills
-    /// the current local chunk (return `Ok(None)` so the caller retries)
+    /// the current chunk (return `Ok(None)` so the caller retries)
     /// or returns the slice from a dedicated oversized chunk
     /// (`Ok(Some(_))`). `refill_hint` is computed here so the hot loop
     /// in the caller doesn't keep it live across iterations.
@@ -293,7 +293,7 @@ impl<A: Allocator + Clone> Arena<A> {
         if self.is_oversized(refill_hint) {
             return Ok(Some(self.alloc_oversized_slice_copy::<T>(refill_hint, src)?));
         }
-        self.refill_local(refill_hint)?;
+        self.refill(refill_hint)?;
         Ok(None)
     }
 
@@ -380,7 +380,7 @@ impl<A: Allocator + Clone> Arena<A> {
             // SAFETY: chunk retained in `retired_local` for `&self`.
             return Ok(Some(unsafe { ptr.as_mut() }));
         }
-        self.refill_local(refill_hint)?;
+        self.refill(refill_hint)?;
         Ok(None)
     }
 
@@ -431,7 +431,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 // SAFETY: chunk retained in `retired_local` for `&self`.
                 return Ok(unsafe { ptr.as_mut() });
             }
-            self.refill_local(refill_hint)?;
+            self.refill(refill_hint)?;
         }
     }
 
@@ -486,7 +486,7 @@ impl<A: Allocator + Clone> Arena<A> {
                 // SAFETY: chunk retained in `retired_local` for `&self`.
                 return Ok(unsafe { ptr.as_mut() });
             }
-            self.refill_local(refill_hint)?;
+            self.refill(refill_hint)?;
         }
     }
 }

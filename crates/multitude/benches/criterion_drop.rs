@@ -53,7 +53,7 @@ fn bench_drop(c: &mut Criterion) {
     }
 
     drop_bench!("box_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_box(i as u64));
@@ -61,7 +61,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("rc_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_arc(i as u64));
@@ -69,7 +69,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("arc_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_arc(i as u64));
@@ -78,7 +78,7 @@ fn bench_drop(c: &mut Criterion) {
     });
 
     drop_bench!("box_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_box(make_droppy(i)));
@@ -86,7 +86,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("rc_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_arc(make_droppy(i)));
@@ -94,7 +94,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("arc_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_arc(make_droppy(i)));
@@ -103,7 +103,7 @@ fn bench_drop(c: &mut Criterion) {
     });
 
     drop_bench!("str_box", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Box<str>> = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_str_box(format!("word{i}")));
@@ -111,7 +111,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("str_rc", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<str>> = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_str_arc(format!("word{i}")));
@@ -119,7 +119,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("str_arc", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<str>> = Vec::with_capacity(N);
         for i in 0..N {
             h.push(arena.alloc_str_arc(format!("word{i}")));
@@ -128,7 +128,7 @@ fn bench_drop(c: &mut Criterion) {
     });
 
     drop_bench!("slice_box_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Box<[u64]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_box::<u64, _>(SLICE_LEN, |j| j as u64));
@@ -136,7 +136,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("slice_rc_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<[u64]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_arc::<u64, _>(SLICE_LEN, |j| j as u64));
@@ -144,7 +144,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("slice_arc_u64", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<[u64]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_arc::<u64, _>(SLICE_LEN, |j| j as u64));
@@ -153,7 +153,7 @@ fn bench_drop(c: &mut Criterion) {
     });
 
     drop_bench!("slice_box_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Box<[DroppyT]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_box::<DroppyT, _>(SLICE_LEN, make_droppy));
@@ -161,7 +161,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("slice_rc_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<[DroppyT]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_arc::<DroppyT, _>(SLICE_LEN, make_droppy));
@@ -169,7 +169,7 @@ fn bench_drop(c: &mut Criterion) {
         (h, arena)
     });
     drop_bench!("slice_arc_droppy", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         let mut h: Vec<Arc<[DroppyT]>> = Vec::with_capacity(N);
         for _ in 0..N {
             h.push(arena.alloc_slice_fill_with_arc::<DroppyT, _>(SLICE_LEN, make_droppy));
@@ -178,7 +178,7 @@ fn bench_drop(c: &mut Criterion) {
     });
 
     drop_bench!("alloc", {
-        let arena = Arena::builder().with_capacity_local(64 * 1024).build();
+        let arena = Arena::builder().with_capacity(64 * 1024).build();
         for i in 0..N {
             let _: &mut u64 = arena.alloc(i as u64);
         }

@@ -53,7 +53,7 @@ impl<A: Allocator + Clone> From<Arc<str, A>> for Arc<[u8], A> {
     /// [`Arc<[u8], A>`](crate::Arc) without copying.
     ///
     /// `Arc<str, A>` is a thin 8-byte pointer to a length-prefixed UTF-8
-    /// payload in a shared chunk; this reads the length from the chunk
+    /// payload in a chunk; this reads the length from the chunk
     /// prefix, reconstructs a `NonNull<[u8]>` over the same payload,
     /// and transfers the chunk +1 into the new `Arc<[u8], A>`. O(1),
     /// no copy.
@@ -96,7 +96,7 @@ impl<A: Allocator + Clone> From<Box<str, A>> for Box<[u8], A> {
     /// [`Box<[u8], A>`](crate::Box).
     ///
     /// `Box<str, A>` is a thin 8-byte pointer to a length-prefixed
-    /// UTF-8 payload in a shared chunk; this retags the slice element
+    /// UTF-8 payload in a chunk; this retags the slice element
     /// type from `str` to `[u8]` (the chunk prefix's `usize` length
     /// stays the same regardless). The chunk +1 transfers from the
     /// source `Box<str>` to the new `Box<[u8]>` (no copy).

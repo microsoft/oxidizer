@@ -65,7 +65,7 @@ mod coverage {
         // Drives the AllocError return path in ArenaBuilder::try_build by
         // giving the builder an allocator that refuses to allocate.
         let alloc = FailingAllocator::new(0);
-        let result = Arena::builder().with_capacity_local(512).allocator_in(alloc).try_build();
+        let result = Arena::builder().with_capacity(512).allocator_in(alloc).try_build();
         assert!(result.is_err());
     }
 
@@ -96,7 +96,7 @@ mod coverage {
         // a chunk in the cache is `.preallocate(n)`, which seeds the cache
         // before the first allocation. Then `alloc_arc` pops the cache and
         // revives the chunk as Shared.
-        let arena: Arena = Arena::builder().with_capacity_local(1024).build();
+        let arena: Arena = Arena::builder().with_capacity(1024).build();
         let shared = arena.alloc_arc(99_u64);
         assert_eq!(*shared, 99);
         let join = std::thread::spawn(move || *shared);
@@ -414,10 +414,7 @@ mod coverage {
     #[test]
     #[should_panic(expected = "multitude::ArenaBuilder::build")]
     fn build_panics_on_failing_allocator() {
-        let _: Arena<FailingAllocator> = Arena::builder()
-            .allocator_in(FailingAllocator::new(0))
-            .with_capacity_local(512)
-            .build();
+        let _: Arena<FailingAllocator> = Arena::builder().allocator_in(FailingAllocator::new(0)).with_capacity(512).build();
     }
 
     #[test]
@@ -425,7 +422,7 @@ mod coverage {
     fn build_panics_on_send_failing_allocator() {
         let _: Arena<SendFailingAllocator> = Arena::builder()
             .allocator_in(SendFailingAllocator::new(0))
-            .with_capacity_local(512)
+            .with_capacity(512)
             .build();
     }
 
@@ -895,10 +892,10 @@ mod coverage {
 
     #[test]
     fn shared_bump_fast_path_bail_on_oversize() {
-        // Line 385: try_bump_alloc_in_current_shared returns None for oversize request.
+        // Line 385: the current-chunk bump path returns None for oversize request.
         // Lines 569-570: try_get_chunk_for_shared creates oversized chunk.
         let arena = Arena::builder().max_normal_alloc(4096).build();
-        // This is larger than max_normal_alloc(4096), so fast path bails → oversized shared chunk.
+        // This is larger than max_normal_alloc(4096), so fast path bails → oversized chunk.
         let arc = arena.alloc_arc([0_u64; 1024]); // 8192 bytes > 4096
         assert_eq!(arc[0], 0);
     }
@@ -908,9 +905,9 @@ mod coverage {
         // Lines 593-594: try_get_chunk_for_shared fits in current chunk.
         // This exercises the shared slow-path fit check that returns the current chunk.
         let arena = Arena::new();
-        // Allocate many small Arcs to fill the current shared chunk, then one that
+        // Allocate many small Arcs to fill the current chunk, then one that
         // might go through the slow path on a second chunk. The first Arc establishes
-        // the shared chunk.
+        // the chunk.
         let _a1 = arena.alloc_arc(1_u32);
         let _a2 = arena.alloc_arc(2_u32);
         // Both fit in the same chunk → shared bump fit path is exercised.
@@ -918,7 +915,7 @@ mod coverage {
 
     #[test]
     fn shared_oversized_inc_ref_on_non_normal_chunk() {
-        // Lines 799-802: inc_ref_shared_deferred for non-Normal (oversized) shared chunk.
+        // Lines 799-802: inc_ref_shared_deferred for non-Normal (oversized) chunk.
         // The oversized shared alloc path: alloc_slice_copy_arc with slice > max_normal_alloc.
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let data = [42_u8; 8192]; // > max_normal_alloc(4096)
@@ -929,19 +926,19 @@ mod coverage {
 
     #[test]
     fn shared_eviction_of_pinned_chunk() {
-        // Line 603: push_pinned when evicting a pinned shared chunk.
+        // Line 603: push_pinned when evicting a pinned chunk.
         // Use the smallest possible chunk so a modest number of pushes
         // reliably overflows the current chunk and triggers eviction of
         // the pinned (string-builder-owned) chunk on refill.
-        let arena = Arena::builder().with_capacity_local(512).build();
-        // String builders use local chunks with pin_for_bump=true.
+        let arena = Arena::builder().with_capacity(512).build();
+        // String builders use chunks with pin_for_bump=true.
         let mut s = arena.alloc_string();
         // 600 ASCII chars > 512-byte chunk capacity guarantees the refill
         // path runs while the chunk is pinned, exercising the
         // pinned-eviction branch regardless of host/Miri.
         let n = 600;
         for _ in 0..n {
-            s.push('A'); // This grows the string builder, pinning the local chunk.
+            s.push('A'); // This grows the string builder, pinning the chunk.
         }
         // If the chunk was pinned, it goes to the pinned list (line 603 equivalent in local path).
         assert!(s.len() >= n);
@@ -1065,16 +1062,16 @@ mod coverage {
     }
 
     /// Exercises the fast path in `try_alloc_slice_copy` where
-    /// `try_bump_alloc_in_current_local` succeeds on an already-populated chunk.
-    /// A first small allocation populates `current_local`, then a second
+    /// `the current-chunk bump path` succeeds on an already-populated chunk.
+    /// A first small allocation populates `current`, then a second
     /// `alloc_slice_copy` fits in the same chunk without needing the slow path.
     #[test]
     fn alloc_slice_copy_fast_path_bump() {
         let arena = Arena::new();
-        // First allocation populates current_local with a fresh chunk.
+        // First allocation populates current with a fresh chunk.
         let _x: &mut u8 = arena.alloc(42_u8);
         // Second allocation is small enough to bump within the same chunk,
-        // hitting the `try_bump_alloc_in_current_local` success path.
+        // hitting the `the current-chunk bump path` success path.
         let s = arena.alloc_slice_copy([1_u8, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(s, &[1, 2, 3, 4, 5, 6, 7, 8]);
     }
@@ -1321,7 +1318,7 @@ mod coverage_more {
     fn builder_preallocate_shared_releases_budget_on_allocator_error() {
         assert!(
             Arena::builder_in(SendFailingAllocator::new(0))
-                .with_capacity_shared(512)
+                .with_capacity(512)
                 .try_build()
                 .is_err()
         );
@@ -1335,8 +1332,8 @@ mod coverage_more {
     }
 
     #[test]
-    fn shared_cache_discards_too_small_chunk_before_large_request() {
-        let arena = Arena::builder().with_capacity_shared(512).build();
+    fn cache_discards_too_small_chunk_before_large_request() {
+        let arena = Arena::builder().with_capacity(512).build();
         let big = std::vec![3_u8; 4096];
         let a = arena.alloc_slice_copy_arc(&big);
         assert_eq!(a.len(), big.len());
@@ -1344,7 +1341,7 @@ mod coverage_more {
 
     #[test]
     fn preallocate_local_updates_high_water_on_larger_class() {
-        let arena = Arena::builder().with_capacity_local(1024).build();
+        let arena = Arena::builder().with_capacity(1024).build();
         let value = arena.alloc(42_u32);
         assert_eq!(*value, 42);
     }
@@ -1477,9 +1474,14 @@ mod coverage_more {
     #[should_panic(expected = "allocator returned AllocError")]
     fn vec_into_arc_panics_on_shared_allocator_error() {
         let arena = Arena::builder_in(SendFailingAllocator::new(1)).build();
-        let mut v: ArenaVec<'_, u8, _> = arena.alloc_vec_with_capacity(4);
-        v.extend([1, 2, 3, 4]);
-        let _arc = multitude::Arc::from(v);
+        // Fill most of the first chunk, then split: the tail has no freeze
+        // prefix of its own, so freezing it into an `Arc` (a copy of equal
+        // size) cannot reuse the buffer in place and must acquire a second
+        // chunk, which the failing allocator rejects.
+        let mut v: ArenaVec<'_, u8, _> = arena.alloc_vec_with_capacity(400);
+        v.extend((0..400).map(|_| 0u8));
+        let tail = v.split_off(200);
+        let _arc = multitude::Arc::from(tail);
     }
 
     #[test]
@@ -1558,7 +1560,7 @@ mod coverage_more {
     #[test]
     fn vec_shrink_to_fit_oversized_chunk_is_a_noop() {
         // Buffers allocated in oversized chunks (cap > MAX_NORMAL_ALLOC)
-        // are never at the `current_local` bump cursor, so
+        // are never at the `current` bump cursor, so
         // `shrink_to_fit` must no-op rather than allocate-copy-deallocate
         // (which would just churn fresh chunks for no semantic benefit).
         // Verify the no-op path under a one-shot allocator that would
@@ -1790,11 +1792,11 @@ mod coverage_complete {
     // the shared-cache concurrently to force the CAS retry arm. ----
 
     #[test]
-    fn shared_cache_push_pop_contention_drives_cas_retries() {
+    fn cache_push_pop_contention_drives_cas_retries() {
         use std::sync::Barrier;
         use std::thread;
 
-        // Force CAS contention on shared-cache push/pop and reserve_budget by
+        // Force CAS contention on cache push/pop and reserve_budget by
         // hammering the same arena from many threads simultaneously.
         let arena: Arena = Arena::builder().max_normal_alloc(4096).byte_budget(128 * 1024 * 1024).build();
 
@@ -1802,7 +1804,7 @@ mod coverage_complete {
         // the dropping phase (cross-thread chunk releases).
         //
         // The test makes no assertions: it only exists to give coverage to
-        // the CAS retry branches in `push_shared_cache` / `pop_shared_cache`.
+        // the CAS retry branches in `push` / `pop`.
         // A few dozen concurrent drops per thread is more than enough to
         // exercise those branches; the bottleneck for finding races is
         // scheduler-interleaving variety (covered by Miri's many-seeds race
@@ -1822,7 +1824,7 @@ mod coverage_complete {
             let b = barrier.clone();
             handles.push(thread::spawn(move || {
                 // Synchronize the drop storm so threads race on the
-                // Treiber-stack push CAS in `push_shared_cache`.
+                // Treiber-stack push CAS in `push`.
                 b.wait();
                 for a in set {
                     drop(a);

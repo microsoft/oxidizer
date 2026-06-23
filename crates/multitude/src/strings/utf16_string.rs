@@ -1,26 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::undocumented_unsafe_blocks,
-    reason = "internal docs mirror std-style APIs; unsafe code follows the documented `data`/`len`/`cap` invariants"
-)]
-
+use alloc::borrow::Cow;
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display, Formatter};
 use core::hash::{Hash, Hasher};
-use core::ops::{Bound, Deref, DerefMut, RangeBounds};
+use core::mem::ManuallyDrop;
+use core::ops::{Bound, Deref, DerefMut, Index, IndexMut, RangeBounds};
+use core::slice::SliceIndex;
 
 use allocator_api2::alloc::{AllocError, Allocator, Global};
 use widestring::Utf16Str;
 
+use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
-use crate::strings::{ArcUtf16Str, BoxUtf16Str};
 use crate::vec::{FromIteratorIn, Vec};
-use crate::{Arena, FromIn};
+use crate::{Arc, Arena, Box, FromIn};
 
 /// A growable, mutable UTF-16 string that lives in an [`Arena`].
 ///
@@ -41,7 +37,7 @@ use crate::{Arena, FromIn};
 /// # }
 /// ```
 pub struct Utf16String<'a, A: Allocator + Clone = Global> {
-    pub(super) inner: Vec<'a, u16, A>,
+    inner: Vec<'a, u16, A>,
 }
 
 impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
@@ -71,7 +67,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Construct an `Utf16String` containing `s`, copied into `arena`.
     #[must_use]
     pub fn from_utf16_str_in(s: &Utf16Str, arena: &'a Arena<A>) -> Self {
-        crate::arena::ExpectAlloc::expect_alloc(Self::try_from_utf16_str_in(s, arena))
+        Self::try_from_utf16_str_in(s, arena).expect_alloc()
     }
 
     /// Fallible variant of [`Self::from_utf16_str_in`].
@@ -88,7 +84,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Construct an `Utf16String` by transcoding a `&str` into UTF-16,
     /// copied into `arena`.
     #[must_use]
-    pub(crate) fn from_str_in(s: &str, arena: &'a Arena<A>) -> Self {
+    fn from_str_in(s: &str, arena: &'a Arena<A>) -> Self {
         let mut out = Self::with_capacity_in(s.len(), arena);
         out.push_from_str(s);
         out
@@ -128,6 +124,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 
     /// Fallible variant of [`Self::push`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
     #[inline]
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u16; 2];
@@ -142,6 +142,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 
     /// Fallible variant of [`Self::push_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
     #[inline(always)]
     #[allow(
         clippy::inline_always,
@@ -164,6 +168,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 
     /// Fallible variant of [`Self::push_from_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails on growth.
     pub fn try_push_from_str(&mut self, s: impl AsRef<str>) -> Result<(), AllocError> {
         let s = s.as_ref();
         self.inner.try_reserve(s.len())?;
@@ -182,7 +190,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// Panics if `idx` is greater than `self.len()` or not on a UTF-16
     /// character boundary, or if the backing allocator fails on growth.
     pub fn insert(&mut self, idx: usize, ch: char) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, ch));
+        self.try_insert(idx, ch).expect_alloc();
     }
 
     /// Fallible variant of [`Self::insert`].
@@ -210,7 +218,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// overflow `usize`, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert_utf16_str`] for a fallible variant.
     pub fn insert_utf16_str(&mut self, idx: usize, s: &Utf16Str) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_insert_utf16_str(idx, s));
+        self.try_insert_utf16_str(idx, s).expect_alloc();
     }
 
     /// Fallible variant of [`Self::insert_utf16_str`].
@@ -285,6 +293,10 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// characters processed so far are committed (retained ones compacted into
     /// place) and the unprocessed tail is dropped, leaving `self` well-formed
     /// UTF-16. Edits happen in place — no transient allocation.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the internal `.expect` guards a char-boundary invariant (`idx < len`) and is unreachable; closure-panic behaviour is documented under `# Panic safety`"
+    )]
     pub fn retain<F: FnMut(char) -> bool>(&mut self, mut f: F) {
         struct Guard<'g, 'a, A: Allocator + Clone> {
             inner: &'g mut Vec<'a, u16, A>,
@@ -336,7 +348,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// UTF-16 character boundaries, the resulting length would overflow
     /// `usize`, or the backing allocator fails on growth.
     pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &Utf16Str) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_replace_range(range, replace_with));
+        self.try_replace_range(range, replace_with).expect_alloc();
     }
 
     /// Fallible variant of [`Self::replace_range`].
@@ -408,7 +420,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// fallible variant.
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+        self.try_split_off(at).expect_alloc()
     }
 
     /// Fallible variant of [`Self::split_off`].
@@ -443,7 +455,7 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// boundaries (i.e. would split a surrogate pair). Use
     /// [`Self::try_extend_from_within`] for a fallible variant.
     pub fn extend_from_within<R: RangeBounds<usize>>(&mut self, src: R) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+        self.try_extend_from_within(src).expect_alloc();
     }
 
     /// Fallible variant of [`Self::extend_from_within`].
@@ -477,18 +489,19 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     }
 
     /// Freeze into an owned, mutable
-    /// [`BoxUtf16Str<A>`](crate::strings::BoxUtf16Str). [`BoxUtf16Str::from`]
+    /// `Box<Utf16Str>`. [`Box::from`](crate::Box)
     /// is the trait form.
     ///
-    /// **O(n)** — copies the contents.
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_boxed_utf16_str`] for a fallible variant.
     #[must_use]
-    pub fn into_boxed_utf16_str(self) -> BoxUtf16Str<A> {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_into_boxed_utf16_str())
+    pub fn into_boxed_utf16_str(self) -> Box<crate::strings::Utf16Str, A> {
+        self.try_into_boxed_utf16_str().expect_alloc()
     }
 
     /// Fallible variant of [`Self::into_boxed_utf16_str`].
@@ -496,25 +509,33 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
-    pub fn try_into_boxed_utf16_str(self) -> Result<BoxUtf16Str<A>, AllocError> {
-        self.inner.arena().try_alloc_utf16_str_box(self.as_utf16_str())
+    pub fn try_into_boxed_utf16_str(self) -> Result<Box<crate::strings::Utf16Str, A>, AllocError> {
+        // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
+        let units = ManuallyDrop::new(self.inner.try_into_boxed_slice()?);
+        // SAFETY: the units are well-formed UTF-16 (`Utf16String`'s
+        // invariant), and `Box<Utf16Str>` / `Box<[u16]>` share the identical
+        // length-prefixed `[u16]` chunk layout. The chunk `+1` transfers from
+        // `units` (kept from dropping) to the new `Box<Utf16Str>`; `thin_ptr`
+        // keeps chunk-wide provenance and the payload is `u16`-aligned.
+        Ok(unsafe { Box::<crate::strings::Utf16Str, A>::from_raw(units.thin_ptr()) })
     }
 
-    /// Freeze into a shared [`ArcUtf16Str<A>`](crate::strings::ArcUtf16Str).
-    /// [`ArcUtf16Str::from`] is the trait form.
+    /// Freeze into a shared `Arc<Utf16Str>`. [`Arc::from`](crate::Arc) is the trait form.
     ///
-    /// **O(n)** — copies the contents.
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails. Use
     /// [`Self::try_into_arc_utf16_str`] for a fallible variant.
     #[must_use]
-    pub fn into_arc_utf16_str(self) -> ArcUtf16Str<A>
+    pub fn into_arc_utf16_str(self) -> Arc<crate::strings::Utf16Str, A>
     where
         A: Send + Sync,
     {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_into_arc_utf16_str())
+        self.try_into_arc_utf16_str().expect_alloc()
     }
 
     /// Fallible variant of [`Self::into_arc_utf16_str`].
@@ -522,11 +543,17 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the underlying allocator fails.
-    pub fn try_into_arc_utf16_str(self) -> Result<ArcUtf16Str<A>, AllocError>
+    pub fn try_into_arc_utf16_str(self) -> Result<Arc<crate::strings::Utf16Str, A>, AllocError>
     where
         A: Send + Sync,
     {
-        self.inner.arena().try_alloc_utf16_str_arc(self.as_utf16_str())
+        // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
+        let units = ManuallyDrop::new(self.inner.try_into_arc_slice()?);
+        // SAFETY: see `try_into_boxed_utf16_str`; `Arc<Utf16Str>` / `Arc<[u16]>`
+        // also share the strong-count + length prefix, so the strong count
+        // initialized by the freeze is exactly what `Arc<Utf16Str>` expects.
+        Ok(unsafe { Arc::<crate::strings::Utf16Str, A>::from_raw(units.thin_ptr()) })
     }
 
     /// Remove the `char`s in the `u16` index range `range`, returning a
@@ -625,18 +652,18 @@ impl<A: Allocator + Clone> DoubleEndedIterator for Utf16Drain<'_, '_, A> {
 
 impl<A: Allocator + Clone> core::iter::FusedIterator for Utf16Drain<'_, '_, A> {}
 
-impl<'a, A: Allocator + Clone> From<Utf16String<'a, A>> for BoxUtf16Str<A> {
+impl<'a, A: Allocator + Clone> From<Utf16String<'a, A>> for Box<crate::strings::Utf16Str, A> {
     /// Freeze a [`Utf16String`] into an immutable
-    /// [`BoxUtf16Str<A>`](crate::strings::BoxUtf16Str).
+    /// `Box<Utf16Str>`.
     #[inline]
     fn from(s: Utf16String<'a, A>) -> Self {
         s.into_boxed_utf16_str()
     }
 }
 
-impl<'a, A: Allocator + Clone + Send + Sync> From<Utf16String<'a, A>> for ArcUtf16Str<A> {
+impl<'a, A: Allocator + Clone + Send + Sync> From<Utf16String<'a, A>> for Arc<crate::strings::Utf16Str, A> {
     /// Freeze a [`Utf16String`] into a shared
-    /// [`ArcUtf16Str<A>`](crate::strings::ArcUtf16Str).
+    /// `Arc<Utf16Str>`.
     #[inline]
     fn from(s: Utf16String<'a, A>) -> Self {
         s.into_arc_utf16_str()
@@ -744,7 +771,7 @@ impl<A: Allocator + Clone> PartialEq<Utf16String<'_, A>> for &Utf16Str {
 
 impl<A: Allocator + Clone> Clone for Utf16String<'_, A> {
     fn clone(&self) -> Self {
-        Self::from_utf16_str_in(self.as_utf16_str(), self.inner.arena)
+        Self::from_utf16_str_in(self.as_utf16_str(), self.inner.arena())
     }
 }
 
@@ -838,8 +865,8 @@ impl<'a, A: Allocator + Clone> FromIteratorIn<'a, alloc::boxed::Box<str>, A> for
     }
 }
 
-impl<'a, 'b, A: Allocator + Clone> FromIteratorIn<'a, alloc::borrow::Cow<'b, str>, A> for Utf16String<'a, A> {
-    fn from_iter_in<I: IntoIterator<Item = alloc::borrow::Cow<'b, str>>>(iter: I, arena: &'a Arena<A>) -> Self {
+impl<'a, 'b, A: Allocator + Clone> FromIteratorIn<'a, Cow<'b, str>, A> for Utf16String<'a, A> {
+    fn from_iter_in<I: IntoIterator<Item = Cow<'b, str>>>(iter: I, arena: &'a Arena<A>) -> Self {
         let mut s = Self::new_in(arena);
         s.extend(iter);
         s
@@ -869,24 +896,24 @@ impl<A: Allocator + Clone> core::ops::AddAssign<&Utf16Str> for Utf16String<'_, A
     }
 }
 
-impl<I, A: Allocator + Clone> core::ops::Index<I> for Utf16String<'_, A>
+impl<I, A: Allocator + Clone> Index<I> for Utf16String<'_, A>
 where
-    I: core::ops::RangeBounds<usize> + core::slice::SliceIndex<[u16], Output = [u16]>,
+    I: RangeBounds<usize> + SliceIndex<[u16], Output = [u16]>,
 {
     type Output = Utf16Str;
     #[inline]
     fn index(&self, index: I) -> &Utf16Str {
-        core::ops::Index::index(self.as_utf16_str(), index)
+        Index::index(self.as_utf16_str(), index)
     }
 }
 
-impl<I, A: Allocator + Clone> core::ops::IndexMut<I> for Utf16String<'_, A>
+impl<I, A: Allocator + Clone> IndexMut<I> for Utf16String<'_, A>
 where
-    I: core::ops::RangeBounds<usize> + core::slice::SliceIndex<[u16], Output = [u16]>,
+    I: RangeBounds<usize> + SliceIndex<[u16], Output = [u16]>,
 {
     #[inline]
     fn index_mut(&mut self, index: I) -> &mut Utf16Str {
-        core::ops::IndexMut::index_mut(self.as_mut_utf16_str(), index)
+        IndexMut::index_mut(self.as_mut_utf16_str(), index)
     }
 }
 
@@ -898,8 +925,8 @@ impl<'b, A: Allocator + Clone> Extend<&'b char> for Utf16String<'_, A> {
     }
 }
 
-impl<'b, A: Allocator + Clone> Extend<alloc::borrow::Cow<'b, str>> for Utf16String<'_, A> {
-    fn extend<I: IntoIterator<Item = alloc::borrow::Cow<'b, str>>>(&mut self, iter: I) {
+impl<'b, A: Allocator + Clone> Extend<Cow<'b, str>> for Utf16String<'_, A> {
+    fn extend<I: IntoIterator<Item = Cow<'b, str>>>(&mut self, iter: I) {
         for s in iter {
             self.push_from_str(&s);
         }
@@ -949,18 +976,18 @@ impl<'a, A: Allocator + Clone> FromIn<'a, char, A> for Utf16String<'a, A> {
     }
 }
 
-impl<'a, 'b, A: Allocator + Clone> FromIn<'a, alloc::borrow::Cow<'b, Utf16Str>, A> for Utf16String<'a, A> {
+impl<'a, 'b, A: Allocator + Clone> FromIn<'a, Cow<'b, Utf16Str>, A> for Utf16String<'a, A> {
     /// Copy a clone-on-write UTF-16 string into the arena.
     #[inline]
-    fn from_in(value: alloc::borrow::Cow<'b, Utf16Str>, arena: &'a Arena<A>) -> Self {
+    fn from_in(value: Cow<'b, Utf16Str>, arena: &'a Arena<A>) -> Self {
         Self::from_utf16_str_in(&value, arena)
     }
 }
 
-impl<'a, 'b, A: Allocator + Clone> FromIn<'a, alloc::borrow::Cow<'b, str>, A> for Utf16String<'a, A> {
+impl<'a, 'b, A: Allocator + Clone> FromIn<'a, Cow<'b, str>, A> for Utf16String<'a, A> {
     /// Transcode a clone-on-write UTF-8 string into the arena.
     #[inline]
-    fn from_in(value: alloc::borrow::Cow<'b, str>, arena: &'a Arena<A>) -> Self {
+    fn from_in(value: Cow<'b, str>, arena: &'a Arena<A>) -> Self {
         Self::from_str_in(&value, arena)
     }
 }

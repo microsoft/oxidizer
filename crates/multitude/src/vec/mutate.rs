@@ -7,7 +7,7 @@ use core::mem;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::Vec;
-use crate::arena::panic_alloc;
+use crate::arena::{ExpectAlloc, panic_alloc};
 use crate::internal::arena_buf::ArenaBuf;
 
 /// Rollback guard for `resize`/`resize_with`.
@@ -62,7 +62,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Panics if `idx > len`, or if the backing allocator fails on growth.
     /// Use [`Self::try_insert`] for a fallible variant.
     pub fn insert(&mut self, idx: usize, value: T) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_insert(idx, value));
+        self.try_insert(idx, value).expect_alloc();
     }
 
     /// Fallible variant of [`Self::insert`].
@@ -90,6 +90,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Panics
     ///
     /// Panics if `idx >= len`.
+    #[allow(
+        clippy::panic,
+        reason = "out-of-bounds index is a caller bug; the panic mirrors `std::vec::Vec::remove`"
+    )]
     pub fn remove(&mut self, idx: usize) -> T {
         let len = self.buf.len();
         match self.buf.remove(idx) {
@@ -103,6 +107,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Panics
     ///
     /// Panics if `idx >= len`.
+    #[allow(
+        clippy::panic,
+        reason = "out-of-bounds index is a caller bug; the panic mirrors `std::vec::Vec::swap_remove`"
+    )]
     pub fn swap_remove(&mut self, idx: usize) -> T {
         let len = self.buf.len();
         match self.buf.swap_remove(idx) {
@@ -181,13 +189,13 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
         let data_addr = self.buf.as_ptr() as usize;
         // Buffer byte size is bounded by its chunk, so this cannot overflow.
         let total_bytes = cap * elem;
-        // Oversized buffers are never at the `current_local` bump cursor.
+        // Oversized buffers are never at the `current` bump cursor.
         if total_bytes > self.arena.max_normal_alloc() {
             return false;
         }
         let end_addr = data_addr + total_bytes;
         let reclaim_bytes = (cap - target_cap) * elem;
-        if self.arena.current_local().try_reclaim_tail(end_addr, reclaim_bytes) {
+        if self.arena.current().try_reclaim_tail(end_addr, reclaim_bytes) {
             // SAFETY: the chunk reclaimed `[target_cap*elem, cap*elem)`, so
             // this buffer no longer owns that span; the retained prefix
             // `[0, target_cap)` is untouched and the caller guarantees no
@@ -213,7 +221,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     where
         T: Clone,
     {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_extend_from_within(src));
+        self.try_extend_from_within(src).expect_alloc();
     }
 
     /// Fallible variant of [`Self::extend_from_within`].
@@ -323,7 +331,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Panics if the backing allocator fails on growth. Use
     /// [`Self::try_append`] for a fallible variant.
     pub fn append(&mut self, other: &mut Self) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_append(other));
+        self.try_append(other).expect_alloc();
     }
 
     /// Fallible variant of [`Self::append`].
@@ -332,6 +340,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth. On
     /// error, `other` is left unchanged.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "fallible API: internal `.expect` guards capacity reserved above and is unreachable; a `# Panics` section would contradict the `try_` contract"
+    )]
     pub fn try_append(&mut self, other: &mut Self) -> Result<(), AllocError> {
         let add = other.buf.len();
         if add == 0 {
@@ -395,7 +407,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     where
         T: Clone,
     {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_resize(new_len, value));
+        self.try_resize(new_len, value).expect_alloc();
     }
 
     /// Fallible variant of [`Self::resize`].
@@ -403,6 +415,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "fallible API: internal `.expect` guards capacity reserved above and is unreachable; a `# Panics` section would contradict the `try_` contract"
+    )]
     pub fn try_resize(&mut self, new_len: usize, value: T) -> Result<(), AllocError>
     where
         T: Clone,
@@ -435,7 +451,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// Panics if the backing allocator fails on growth. Use
     /// [`Self::try_resize_with`] for a fallible variant.
     pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, f: F) {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_resize_with(new_len, f));
+        self.try_resize_with(new_len, f).expect_alloc();
     }
 
     /// Fallible variant of [`Self::resize_with`].
@@ -443,6 +459,10 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails on growth.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "fallible API: internal `.expect` guards capacity reserved above and is unreachable; a `# Panics` section would contradict the `try_` contract"
+    )]
     pub fn try_resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut f: F) -> Result<(), AllocError> {
         let len = self.buf.len();
         if new_len <= len {
@@ -472,7 +492,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     #[must_use]
     #[cfg_attr(test, mutants::skip)] // routing mutations produce externally indistinguishable empty tails
     pub fn split_off(&mut self, at: usize) -> Self {
-        crate::arena::ExpectAlloc::expect_alloc(self.try_split_off(at))
+        self.try_split_off(at).expect_alloc()
     }
 
     /// Fallible variant of [`Self::split_off`].
@@ -531,6 +551,10 @@ impl<'a, T, A: Allocator + Clone, const N: usize> Vec<'a, [T; N], A> {
         let len = me.buf.len();
         let cap = me.buf.cap();
         let ptr = me.buf.as_mut_ptr().cast::<T>();
+        // `[T; N]` and `T` share base address and alignment, so the existing
+        // freeze prefix (sized for `align_of::<[T; N]>() == align_of::<T>()`)
+        // remains valid for the flattened `Vec<T>`.
+        let freeze_prefix = me.buf.has_freeze_prefix();
         let new_len = len.checked_mul(N).expect("Vec::into_flattened: length overflow");
         let new_cap = if mem::size_of::<T>() == 0 {
             usize::MAX
@@ -544,7 +568,7 @@ impl<'a, T, A: Allocator + Clone, const N: usize> Vec<'a, [T; N], A> {
         // `[T; N]` equals that of `T`). `ManuallyDrop` keeps the source buffer
         // and its elements from being dropped here; ownership of the elements
         // transfers wholesale to the returned `Vec<T>`.
-        let buf = unsafe { ArenaBuf::from_raw_parts(core::ptr::NonNull::new_unchecked(ptr), new_len, new_cap) };
+        let buf = unsafe { ArenaBuf::from_raw_parts(core::ptr::NonNull::new_unchecked(ptr), new_len, new_cap, freeze_prefix) };
         Vec::from_buf(buf, arena)
     }
 }

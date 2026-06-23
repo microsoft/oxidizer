@@ -3,8 +3,8 @@
 
 //! UTF-16 string allocation helpers on [`Arena`].
 //!
-//! Public docs live on [`Arena`] itself. Both `ArcUtf16Str` and
-//! `BoxUtf16Str` share the same length-prefixed chunk layout
+//! Public docs live on [`Arena`] itself. Both `Arc<Utf16Str>` and
+//! `Box<Utf16Str>` share the same length-prefixed chunk layout
 //! (`[usize u16-count][u16 elements]`, prefix unaligned) and are
 //! thin 8-byte smart pointers.
 
@@ -14,16 +14,17 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::alloc_prefixed::PREFIX_BYTES;
-use super::alloc_value::acquire_shared_chunk_ref;
+use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
-use crate::strings::{ArcUtf16Str, BoxUtf16Str, Utf16String};
+use crate::strings::{Utf16Str, Utf16String};
+use crate::{Arc, Box};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 impl<A: Allocator + Clone> Arena<A> {
-    /// Copy `s` into a `Shared`-flavor chunk and return an [`ArcUtf16Str`](crate::strings::ArcUtf16Str).
+    /// Copy `s` into a chunk and return an `Arc<Utf16Str>`.
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> ArcUtf16Str<A>
+    pub fn alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Arc<Utf16Str, A>
     where
         A: Send + Sync,
     {
@@ -38,19 +39,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<ArcUtf16Str<A>, AllocError>
+    pub fn try_alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<Arc<Utf16Str, A>, AllocError>
     where
         A: Send + Sync,
     {
         self.impl_alloc_prefixed_shared_arc::<u16>(s.as_ref().as_slice()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { ArcUtf16Str::from_raw(ptr) })
+            unsafe { Arc::<Utf16Str, A>::from_raw(ptr.cast::<u8>()) })
     }
 
-    /// Copy `s` into the arena and return a [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
+    /// Copy `s` into the arena and return a `Box<Utf16Str>`.
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> BoxUtf16Str<A> {
+    pub fn alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Box<Utf16Str, A> {
         self.try_alloc_utf16_str_box(s).expect_alloc()
     }
 
@@ -62,16 +63,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<BoxUtf16Str<A>, AllocError> {
+    pub fn try_alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<Box<Utf16Str, A>, AllocError> {
         self.impl_alloc_prefixed_shared::<u16>(s.as_ref().as_slice()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { BoxUtf16Str::from_raw(ptr) })
+            unsafe { Box::<Utf16Str, A>::from_raw(ptr.cast::<u8>()) })
     }
 
-    /// Transcode `s` from UTF-8 to UTF-16 and return an [`ArcUtf16Str`](crate::strings::ArcUtf16Str).
+    /// Transcode `s` from UTF-8 to UTF-16 and return an `Arc<Utf16Str>`.
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> ArcUtf16Str<A>
+    pub fn alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Arc<Utf16Str, A>
     where
         A: Send + Sync,
     {
@@ -86,19 +87,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Result<ArcUtf16Str<A>, AllocError>
+    pub fn try_alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Result<Arc<Utf16Str, A>, AllocError>
     where
         A: Send + Sync,
     {
         self.impl_alloc_utf16_prefixed_from_str_arc(s.as_ref()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { ArcUtf16Str::from_raw(ptr) })
+            unsafe { Arc::<Utf16Str, A>::from_raw(ptr.cast::<u8>()) })
     }
 
-    /// Transcode `s` from UTF-8 to UTF-16 and return a [`BoxUtf16Str`](crate::strings::BoxUtf16Str).
+    /// Transcode `s` from UTF-8 to UTF-16 and return a `Box<Utf16Str>`.
     #[must_use]
     #[inline]
-    pub fn alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> BoxUtf16Str<A> {
+    pub fn alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Box<Utf16Str, A> {
         self.try_alloc_utf16_str_box_from_str(s).expect_alloc()
     }
 
@@ -110,10 +111,10 @@ impl<A: Allocator + Clone> Arena<A> {
     /// exhaustion or oversize-cutover budget) or if the source string
     /// length would overflow the inline length-prefix accounting.
     #[inline]
-    pub fn try_alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Result<BoxUtf16Str<A>, AllocError> {
+    pub fn try_alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Result<Box<Utf16Str, A>, AllocError> {
         self.impl_alloc_utf16_prefixed_from_str(s.as_ref()).map(|ptr|
             // SAFETY: see `Self::alloc_utf16_str_arc`.
-            unsafe { BoxUtf16Str::from_raw(ptr) })
+            unsafe { Box::<Utf16Str, A>::from_raw(ptr.cast::<u8>()) })
     }
 
     /// Create a new, empty growable [`Utf16String`](crate::strings::Utf16String) backed by this arena.
@@ -176,8 +177,8 @@ impl<A: Allocator + Clone> Arena<A> {
         let payload_bytes = exact.checked_mul(elem_size).ok_or(AllocError)?.max(elem_align);
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
         loop {
-            if let Some((uninit, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, elem_align) {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+            if let Some((uninit, chunk_ptr)) = self.current().try_alloc_with_chunk(total, elem_align) {
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let payload = transcode_utf16_into(uninit.as_non_null(), s, exact);
                 let _ = chunk_ref.forget();
                 return Ok(payload);
@@ -187,17 +188,17 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (base, _chunk_unused) = mutator
                         .try_alloc_with_chunk(total, elem_align)
                         .expect("dedicated oversized chunk sized to fit utf-16 payload");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let payload = transcode_utf16_into(base.as_non_null(), s, exact);
                     let _ = chunk_ref.forget();
                     payload
                 });
             }
-            self.refill_shared(total)?;
+            self.refill(total)?;
         }
     }
 
-    /// Strong-prefixed [`ArcUtf16Str`](crate::strings::ArcUtf16Str)
+    /// Strong-prefixed `Arc<Utf16Str>`
     /// variant of [`Self::impl_alloc_utf16_prefixed_from_str`]: reserves
     /// a per-`Arc` strong count and slice-length prefix, transcodes `s`
     /// into the `u16` payload, and returns a thin pointer to the first
@@ -209,7 +210,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let bytes_needed = super::alloc_prefixed::worst_case_arc_slice_payload::<u16>(exact);
         loop {
             if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<u16>(exact) {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let payload = uninit.init_from_iter_ptr(s.encode_utf16());
                 let _ = chunk_ref.forget();
                 return Ok(payload.cast::<u16>());
@@ -219,13 +220,13 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (ticket, _chunk) = mutator
                         .try_alloc_arc_slice::<u16>(exact)
                         .expect("dedicated oversized chunk sized to fit utf-16 Arc payload");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     let payload = ticket.init_from_iter_ptr(s.encode_utf16());
                     let _ = chunk_ref.forget();
                     payload.cast::<u16>()
                 });
             }
-            self.refill_shared(bytes_needed)?;
+            self.refill(bytes_needed)?;
         }
     }
 }
@@ -235,11 +236,9 @@ impl<A: Allocator + Clone> Arena<A> {
 /// returns a thin pointer to the first payload element. `exact` must
 /// match `s.chars().map(char::len_utf16).sum()` from a pre-walk.
 //
-// Skip `inline(always)` under coverage instrumentation so a real
-// out-of-line function body exists for llvm-cov to attribute hits to.
-// With `inline(always)` the source-line mapping for the inlined copies
-// is fragile and shifts with the dep graph (observed: 11 lines went
-// from 100% to missed when PR #478 added optional deps elsewhere).
+// Skip `inline(always)` under coverage: a real out-of-line body lets
+// llvm-cov attribute hits reliably, since the source-line mapping for
+// inlined copies is fragile and shifts with the dep graph.
 #[cfg_attr(not(coverage_nightly), inline(always))]
 #[allow(
     clippy::cast_ptr_alignment,

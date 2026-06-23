@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 //! Mutation-test kills for the string smart-pointer trait impls
-//! (`Arc<str>`, `Box<str>`, `ArcUtf16Str`, `BoxUtf16Str`, `String`,
+//! (`Arc<str>`, `Box<str>`, `Arc<Utf16Str>`, `Box<Utf16Str>`, `String`,
 //! `Utf16String`). Each block targets one or more mutants flagged by
 //! `cargo mutants` as previously surviving — the asserts here are
 //! specifically chosen to fail when the trait body is replaced with
@@ -149,12 +149,12 @@ fn string_partial_eq_ref_str_true_and_false() {
     assert!((s != "neq"));
 }
 
-// --- ArcUtf16Str / BoxUtf16Str / Utf16String -----------------------------
+// --- Arc<Utf16Str> / Box<Utf16Str> / Utf16String -----------------------------
 
 #[cfg(feature = "utf16")]
 mod utf16_kills {
-    use multitude::strings::{ArcUtf16Str, BoxUtf16Str, Utf16String};
-    use multitude::{Arena, FromIn as _};
+    use multitude::strings::Utf16String;
+    use multitude::{Arc, Arena, Box, FromIn as _};
     use widestring::{Utf16Str, utf16str};
 
     use super::hash_of;
@@ -162,8 +162,8 @@ mod utf16_kills {
     #[test]
     fn arc_utf16_str_is_empty_distinguishes() {
         let arena = Arena::new();
-        let empty: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!(""));
-        let full: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("a"));
+        let empty: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!(""));
+        let full: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("a"));
         assert!(empty.is_empty());
         assert!(!full.is_empty());
     }
@@ -171,16 +171,16 @@ mod utf16_kills {
     #[test]
     fn arc_utf16_str_display_renders_contents() {
         let arena = Arena::new();
-        let s: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("hello"));
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("hello"));
         assert_eq!(format!("{s}"), "hello");
     }
 
     #[test]
     fn arc_utf16_str_partial_eq_self_distinguishes() {
         let arena = Arena::new();
-        let a: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("same"));
-        let b: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("same"));
-        let c: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("diff"));
+        let a: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
+        let b: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
+        let c: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("diff"));
         assert!(a == b);
         assert!((a != c));
     }
@@ -188,7 +188,7 @@ mod utf16_kills {
     #[test]
     fn arc_utf16_str_partial_eq_utf16str_distinguishes() {
         let arena = Arena::new();
-        let s: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("xy"));
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("xy"));
         let xy: &Utf16Str = utf16str!("xy");
         let no: &Utf16Str = utf16str!("no");
         assert!(s == *xy);
@@ -200,9 +200,9 @@ mod utf16_kills {
     #[test]
     fn arc_utf16_str_hash_depends_on_contents() {
         let arena = Arena::new();
-        let a: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("foo"));
-        let b: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("foo"));
-        let c: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("bar"));
+        let a: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("foo"));
+        let b: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("foo"));
+        let c: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("bar"));
         assert_eq!(hash_of(&a), hash_of(&b));
         assert_ne!(hash_of(&a), hash_of(&c));
     }
@@ -210,7 +210,7 @@ mod utf16_kills {
     #[test]
     fn arc_utf16_str_pointer_fmt_renders_address() {
         let arena = Arena::new();
-        let s: ArcUtf16Str = arena.alloc_utf16_str_arc(utf16str!("p"));
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("p"));
         let rendered = format!("{s:p}");
         assert!(!rendered.is_empty());
         assert!(rendered.chars().any(|c| c.is_ascii_hexdigit()));
@@ -219,16 +219,16 @@ mod utf16_kills {
     #[test]
     fn box_utf16_str_display_renders_contents() {
         let arena = Arena::new();
-        let s: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("hello"));
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("hello"));
         assert_eq!(format!("{s}"), "hello");
     }
 
     #[test]
     fn box_utf16_str_hash_depends_on_contents() {
         let arena = Arena::new();
-        let a: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("foo"));
-        let b: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("foo"));
-        let c: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("bar"));
+        let a: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("foo"));
+        let b: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("foo"));
+        let c: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("bar"));
         assert_eq!(hash_of(&a), hash_of(&b));
         assert_ne!(hash_of(&a), hash_of(&c));
     }
@@ -236,7 +236,7 @@ mod utf16_kills {
     #[test]
     fn box_utf16_str_pointer_fmt_renders_address() {
         let arena = Arena::new();
-        let s: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("p"));
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("p"));
         let rendered = format!("{s:p}");
         assert!(!rendered.is_empty());
         assert!(rendered.chars().any(|c| c.is_ascii_hexdigit()));
@@ -245,13 +245,24 @@ mod utf16_kills {
     #[test]
     fn box_utf16_str_partial_eq_utf16str_distinguishes() {
         let arena = Arena::new();
-        let s: BoxUtf16Str = arena.alloc_utf16_str_box(utf16str!("xy"));
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
         let xy: &Utf16Str = utf16str!("xy");
         let no: &Utf16Str = utf16str!("no");
         assert!(s == *xy);
         assert!((s != *no));
         assert!(s == xy);
         assert!((s != no));
+    }
+
+    // Exercises `Utf16Str::PartialEq<widestring::Utf16Str>` directly on the
+    // deref'd newtype (the `Box`/`Arc` impls compare via `as_utf16_str`, so
+    // they don't cover the newtype's own impl).
+    #[test]
+    fn utf16str_newtype_partial_eq_widestring_distinguishes() {
+        let arena = Arena::new();
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
+        assert!(*s == *utf16str!("xy"));
+        assert!(*s != *utf16str!("no"));
     }
 
     #[test]

@@ -22,7 +22,7 @@ use core::ptr::{self, NonNull};
 use allocator_api2::alloc::{AllocError, Allocator};
 use ptr_meta::Pointee;
 
-use super::alloc_value::acquire_shared_chunk_ref;
+use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
@@ -205,9 +205,9 @@ impl<A: Allocator + Clone> Arena<A> {
         let refill_hint = total.saturating_add(layout.align());
         let mut init = Some(init);
         loop {
-            if let Some((reservation, chunk_ptr)) = self.current_shared().try_alloc_with_chunk(total, layout.align().max(1)) {
+            if let Some((reservation, chunk_ptr)) = self.current().try_alloc_with_chunk(total, layout.align().max(1)) {
                 let init = init.take().expect("init taken twice");
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 // SAFETY: `reservation` is fresh exclusive storage; metadata
                 // is written before `init` receives the fat payload pointer.
                 let payload_nn =
@@ -223,7 +223,7 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (reservation, _chunk) = mutator
                         .try_alloc_with_chunk(total, layout.align().max(1))
                         .expect("dedicated oversized chunk sized to fit DST value + alignment slack");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     // SAFETY: see the in-arena branch above.
                     let payload_nn =
                         unsafe { write_dst_prefix_and_init::<T>(reservation.as_non_null(), payload_offset, meta_bytes, metadata, init) };
@@ -232,12 +232,12 @@ impl<A: Allocator + Clone> Arena<A> {
                     unsafe { Box::from_raw(payload_nn) }
                 });
             }
-            self.refill_shared(refill_hint)?;
+            self.refill(refill_hint)?;
         }
     }
 
-    /// Reserve a strong-prefixed `Arc<T>` slot in the current shared
-    /// chunk (per-`Arc` strong count + `T::Metadata` prefix + payload),
+    /// Reserve a strong-prefixed `Arc<T>` slot in the current chunk
+    /// (per-`Arc` strong count + `T::Metadata` prefix + payload),
     /// run `init` on a typed fat pointer, and return the thin payload
     /// pointer. No chunk drop entry is reserved:
     /// [`Arc::drop`](crate::Arc) runs `drop_in_place::<T>` (which natively
@@ -264,9 +264,9 @@ impl<A: Allocator + Clone> Arena<A> {
 
         let mut init = Some(init);
         loop {
-            if let Some((value_ptr, chunk_ptr)) = self.current_shared().try_alloc_arc_dst(payload_bytes, value_align, meta_bytes) {
+            if let Some((value_ptr, chunk_ptr)) = self.current().try_alloc_arc_dst(payload_bytes, value_align, meta_bytes) {
                 let init = init.take().expect("init taken twice");
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 // SAFETY: `value_ptr` is fresh payload storage with a
                 // strong prefix; metadata is written before `init`.
                 let payload_nn = unsafe { write_dst_meta_and_init::<T>(value_ptr, meta_bytes, metadata, init) };
@@ -280,14 +280,14 @@ impl<A: Allocator + Clone> Arena<A> {
                     let (value_ptr, _chunk) = mutator
                         .try_alloc_arc_dst(payload_bytes, value_align, meta_bytes)
                         .expect("dedicated oversized chunk sized to fit DST value + strong prefix");
-                    let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
                     // SAFETY: see the in-arena branch above.
                     let payload_nn = unsafe { write_dst_meta_and_init::<T>(value_ptr, meta_bytes, metadata, init) };
                     let _ = chunk_ref.forget();
                     payload_nn
                 });
             }
-            self.refill_shared(refill_hint)?;
+            self.refill(refill_hint)?;
         }
     }
 }

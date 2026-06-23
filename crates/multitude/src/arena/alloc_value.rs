@@ -17,7 +17,6 @@ use crate::r#box::Box;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
 use crate::internal::drop_entry::DropEntry;
-use crate::internal::shared_chunk::SharedChunk;
 use crate::internal::uninit::Uninit;
 use crate::internal::{Chunk, thin_dst};
 
@@ -55,7 +54,7 @@ const fn worst_case_arc_payload<T>() -> usize {
 /// inside the first `CHUNK_ALIGN` bytes. Keeping the alignment well
 /// below `CHUNK_ALIGN` leaves room for the chunk header plus the
 /// value itself in the dedicated oversized case.
-pub(crate) const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
+pub(in crate::arena) const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate `value` and return a `Send + Sync` reference-counted smart pointer.
@@ -91,7 +90,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_arc_with::<T, _>(move || value)
     }
 
-    /// Allocate the result of `f` in a `Shared`-flavor chunk and return an [`Arc`].
+    /// Allocate the result of `f` in a chunk and return an [`Arc`].
     ///
     /// The returned [`Arc`] is safe for cross-thread sharing. The closure
     /// constructs the value in place — no stack copy of `T`.
@@ -341,25 +340,18 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// # Why `T: Send`?
     ///
-    /// At first glance the bound is surprising — single-threaded arena
-    /// use feels like it shouldn't require it, and bump allocators such
-    /// as `bumpalo` allocate without it. The difference is destructors.
-    /// `bumpalo` leaks by default (it never runs `T::drop`), so a
-    /// migrated value is only ever bytes that nobody touches. multitude
-    /// instead registers a drop entry and runs `T::drop` **at arena
-    /// drop**. Because [`Arena`] is itself [`Send`], that teardown — and
-    /// therefore `T::drop` — may execute on a thread other than the one
-    /// that constructed the value. For a thread-affine `!Send` type
-    /// (e.g. holding an [`Rc`](std::rc::Rc) whose other clones live on
-    /// the original thread) that would be unsound, so `alloc` requires
-    /// `T: Send`.
+    /// The value's `T::drop` runs at arena drop (or reset). Because [`Arena`]
+    /// is [`Send`], that teardown may execute on a thread other than the one
+    /// that constructed the value, which would be unsound for a thread-affine
+    /// `!Send` type (e.g. one holding an [`Rc`](std::rc::Rc) whose other
+    /// clones live on the original thread).
     ///
     /// The bound is conservative: it is only strictly necessary for
     /// `T: Drop`, but a static bound can't be conditioned on
     /// `mem::needs_drop::<T>()` without specialization, so it is applied
-    /// uniformly. If you need to arena-allocate a `!Send` value, hold it
-    /// behind a smart pointer that runs its destructor eagerly on the
-    /// owning thread (e.g. [`Self::alloc_box`]).
+    /// uniformly. To arena-allocate a `!Send` value, hold it behind a smart
+    /// pointer that runs its destructor eagerly on the owning thread (e.g.
+    /// [`Self::alloc_box`]).
     ///
     /// # Panics
     ///
@@ -460,7 +452,7 @@ impl<A: Allocator + Clone> Arena<A> {
             if self.is_oversized(wcp) {
                 return self.alloc_oversized_value_with::<T, F>(wcp, f);
             }
-            self.refill_local(wcp)?;
+            self.refill(wcp)?;
         }
     }
 
@@ -536,7 +528,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let mut f = Some(f);
         loop {
             if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_value::<T>() {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let f = f.take().expect("closure taken twice");
                 let ptr = init_smart_slot::<T, A, _>(uninit, chunk_ref, f);
                 // SAFETY: the strong prefix was written (count = 1) and the
@@ -548,11 +540,11 @@ impl<A: Allocator + Clone> Arena<A> {
                 let f = f.take().expect("closure taken twice");
                 return self.alloc_oversized_arc_with::<T, F>(wcp, f);
             }
-            self.refill_shared(wcp)?;
+            self.refill(wcp)?;
         }
     }
 
-    /// Bump-allocates `T` in the arena's current shared chunk for a
+    /// Bump-allocates `T` in the arena's current chunk for a
     /// [`Box`], takes a +1 refcount on that chunk, and writes the value
     /// into the reservation. [`Box`] runs `T::drop` eagerly in its own
     /// `Drop`, so no chunk drop entry is reserved.
@@ -576,19 +568,19 @@ impl<A: Allocator + Clone> Arena<A> {
             // surplus reconciliation at retire (double-free). Pre-reserve
             // a 1-byte tag so each such handout advances the cursor,
             // bounding per-chunk handouts to the chunk capacity.
-            if const { mem::size_of::<T>() == 0 } && self.current_shared().try_alloc(1, 1).is_none() {
-                self.refill_shared(worst_case_payload::<T>())?;
+            if const { mem::size_of::<T>() == 0 } && self.current().try_alloc(1, 1).is_none() {
+                self.refill(worst_case_payload::<T>())?;
                 continue;
             }
             if let Some((uninit, chunk_ptr)) = self.try_reserve_shared::<T>() {
-                let chunk_ref = self.acquire_current_shared_chunk_ref(chunk_ptr);
+                let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 return Ok(init_smart_slot::<T, A, F>(uninit, chunk_ref, f));
             }
             let wcp = worst_case_payload::<T>();
             if self.is_oversized(wcp) {
                 return self.alloc_oversized_smart_with::<T, F>(wcp, f);
             }
-            self.refill_shared(wcp)?;
+            self.refill(wcp)?;
         }
     }
 
@@ -600,7 +592,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let ticket = mutator
             .try_alloc_uninit::<T>()
             .expect("dedicated oversized chunk sized to fit one value");
-        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+        let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
         let ptr = init_smart_slot::<T, A, F>(ticket, chunk_ref, f);
         // `mutator` drops here, releasing its `+1`. The smart-pointer
         // `chunk_ref` taken above owns the surviving `+1`.
@@ -620,7 +612,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let (ticket, _chunk) = mutator
             .try_alloc_arc_value::<T>()
             .expect("dedicated oversized chunk sized to fit one Arc value + strong prefix");
-        let chunk_ref = acquire_shared_chunk_ref::<A>(chunk_ptr);
+        let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
         let ptr = init_smart_slot::<T, A, F>(ticket, chunk_ref, f);
         drop(mutator);
         // SAFETY: the strong prefix was written (count = 1) and the chunk
@@ -645,7 +637,7 @@ fn init_smart_slot<T, A: Allocator + Clone, F: FnOnce() -> T>(uninit: Uninit<'_,
 /// [`Arena::init_arc_slot`] so the unsafe `inc_ref`/`adopt` pair lives
 /// in one place.
 #[inline(always)]
-pub(crate) fn acquire_shared_chunk_ref<A: Allocator + Clone>(chunk_ptr: NonNull<SharedChunk<A>>) -> ChunkRef<A> {
+pub(crate) fn acquire_chunk_ref<A: Allocator + Clone>(chunk_ptr: NonNull<Chunk<A>>) -> ChunkRef<A> {
     // SAFETY: `chunk_ptr` belongs to a currently-installed shared
     // mutator and the arena holds a +1 on it for the duration of
     // `&self`; we bump for the soon-to-be smart pointer and adopt

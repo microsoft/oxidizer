@@ -236,28 +236,28 @@ fn preallocate_with_max_class_capacity_does_not_double_ratchet() {
     // `preallocate_one_local` updates `next_local_class` only if
     // `class > current`. With `> → >=`, setting it equal to the
     // existing value would do a redundant write — observable through
-    // a `with_capacity_local(0)`-built arena (class 0) that then
+    // a `with_capacity(0)`-built arena (class 0) that then
     // calls preallocation again at class 0 implicitly via a
     // user-visible side effect. Best we can observe: a builder that
     // pins class 0 produces exactly one chunk; the second allocation
     // should not trigger a re-preallocation.
-    let arena = Arena::builder().with_capacity_local(512).build();
+    let arena = Arena::builder().with_capacity(512).build();
     let s = arena.stats();
-    assert_eq!(s.normal_local_chunks_allocated, 1);
+    assert_eq!(s.normal_chunks_allocated, 1);
     // Allocate within the preallocated chunk: no new chunk acquired.
     let _ = arena.alloc(0_u32);
     let s2 = arena.stats();
-    assert_eq!(s2.normal_local_chunks_allocated, 1);
+    assert_eq!(s2.normal_chunks_allocated, 1);
 }
 
 #[cfg(feature = "stats")]
 #[test]
 fn preallocate_shared_with_capacity_does_not_double_ratchet() {
-    let arena = Arena::builder().with_capacity_shared(512).build();
+    let arena = Arena::builder().with_capacity(512).build();
     let s = arena.stats();
-    assert_eq!(s.normal_shared_chunks_allocated, 1);
+    assert_eq!(s.normal_chunks_allocated, 1);
     // First arc within preallocated chunk: still 1.
     let _ = arena.alloc_arc(0_u32);
     let s2 = arena.stats();
-    assert_eq!(s2.normal_shared_chunks_allocated, 1);
+    assert_eq!(s2.normal_chunks_allocated, 1);
 }
