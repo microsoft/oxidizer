@@ -78,7 +78,7 @@ Criterion benchmark design (single-threaded by default, elementary operations,
 `black_box`) plus the `Box::pin` → `pin!` exception on the measured path, and
 a pointer to the Callgrind chapter. Cross-links to `naming.md`.
 
-**Open this when**: adding or modifying any file in `packages/<pkg>/benches/`;
+**Open this when**: adding or modifying any file in `crates/<crate>/benches/`;
 deciding how to pin a future inside an `iter` closure.
 
 # [Callgrind benchmarks](docs/callgrind-benchmarks.md)

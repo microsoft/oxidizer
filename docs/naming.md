@@ -14,7 +14,7 @@ names in the shared `target/.../deps/` directory.
 
 ### Benchmark file names
 
-Every file in `packages/<pkg>/benches/` must be prefixed with either:
+Every file in `crates/<crate>/benches/` should be prefixed with either:
 
 * The full name of the package (e.g. `foo/benches/foo_something.rs`), or
 * An abbreviated form of the full package name (e.g.
@@ -28,13 +28,16 @@ not `nm_impl_observe.rs`).
 The crate-name prefix prevents collisions when the resulting bench binaries
 land in the shared `target/.../deps/` directory.
 
+Apply this prefix to new benchmark files; some benches predate this
+convention and remain unprefixed (e.g. `crates/bytesbuf/benches/view.rs`).
+
 Do not append decorator suffixes like `_bench` or `_benches` — the `benches/`
 directory location and `[[bench]]` Cargo table entry already convey that a
 file is a benchmark.
 
 ### Criterion benchmark groups
 
-Every Criterion `benchmark_group()` call must use a name of the form:
+Every Criterion `benchmark_group()` call should use a name of the form:
 
 ```
 <file-basename>/<subgroup>
@@ -59,6 +62,10 @@ Avoid `::` or other custom separators between segments — Criterion already
 uses `/` as the hierarchical separator and that is the only separator that
 should appear in group names.
 
+This applies to new benchmark groups; some pre-existing groups use flat
+names that predate this convention (e.g. `crates/bytesbuf/benches/view.rs`
+uses `"BytesView"` and `"BytesView_slow"`).
+
 ### Callgrind benchmark files
 
 Callgrind benchmark files (suffix `_cg.rs`) live alongside the Criterion
@@ -69,8 +76,8 @@ Criterion benchmark file in the same directory. The Criterion file's name
 equals the Callgrind file's name minus the `_cg` suffix:
 
 ```
-packages/<pkg>/benches/<base>.rs       (Criterion, required)
-packages/<pkg>/benches/<base>_cg.rs    (Callgrind, optional)
+crates/<crate>/benches/<base>.rs       (Criterion, required)
+crates/<crate>/benches/<base>_cg.rs    (Callgrind, optional)
 ```
 
 For example, `region_local_cg.rs` pairs with `region_local.rs`. The reverse

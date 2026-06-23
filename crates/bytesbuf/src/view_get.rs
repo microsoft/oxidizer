@@ -54,8 +54,10 @@ impl BytesView {
             }
         }
 
-        // Cannot underflow: we just confirmed the view covers at least one byte.
-        self.len = self.len.wrapping_sub(1);
+        self.len = self
+            .len
+            .checked_sub(1)
+            .expect("the view was confirmed above to cover at least the one byte just consumed");
 
         byte
     }
@@ -192,8 +194,10 @@ impl BytesView {
             }
         }
 
-        // Cannot underflow: the caller verified the view covers at least `size` bytes.
-        self.len = self.len.wrapping_sub(size);
+        self.len = self
+            .len
+            .checked_sub(size)
+            .expect("the caller guaranteed the view covers at least `size` bytes before this call");
 
         Some(result)
     }

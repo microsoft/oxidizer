@@ -26,7 +26,7 @@ Apply the first matching rule:
    generic or same-crate function on a hot path is not being inlined.** These are
    already inlining candidates by default, so the annotation is an extra hint
    applied only when measurement shows the default decision is wrong. Verify with
-   `just package=<pkg> bench-cg` before and after, comparing instruction counts;
+   `just package=<crate> bench-cg` before and after, comparing instruction counts;
    revert if the numbers do not move.
 
 3. **Do not use `#[inline(always)]` or `#[inline(never)]` without specific

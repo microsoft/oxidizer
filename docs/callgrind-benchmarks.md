@@ -144,10 +144,10 @@ What **not** to do:
 
 ## Adding a Callgrind benchmark
 
-Each Gungraun bench lives alongside the Criterion benches in its package:
+Each Gungraun bench lives alongside the Criterion benches in its crate:
 
 ```
-packages/<pkg>/benches/<crate>_<name>_cg.rs
+crates/<crate>/benches/<crate>_<name>_cg.rs
 ```
 
 The `_cg.rs` filename suffix is required for `just bench-cg` discovery. Use
@@ -157,7 +157,7 @@ with binaries from other crates in the shared `target/.../deps/` directory.
 
 ### Cargo.toml
 
-In `packages/<pkg>/Cargo.toml`, add a target-gated dev-dependency and a
+In `crates/<crate>/Cargo.toml`, add a target-gated dev-dependency and a
 `[[bench]]` entry:
 
 ```toml
@@ -185,7 +185,7 @@ A top-level `gungraun::main!(...)` invocation references the groups via the
 on group names is satisfied.
 
 ```rust
-//! Callgrind benchmarks for <operation> in the `<pkg>` package.
+//! Callgrind benchmarks for <operation> in the `<crate>` crate.
 //!
 //! Paired with <criterion-bench-name>.rs which covers the same operations
 //! under wall-clock measurement.
@@ -256,8 +256,9 @@ These are easy to get wrong on the first attempt:
 * `gungraun::main!(library_benchmark_groups = ...)` accepts simple
   identifiers only, not paths. Re-export the groups at file scope with
   `pub use linux::{group_a, group_b};` so the identifiers resolve.
-* `library_benchmark_group!` requires `benchmarks = [a, b, c]` square
-  brackets around the list of benchmark function names.
+* `library_benchmark_group!` takes the benchmark function names as a
+  bracket-less comma-separated list: `benchmarks = a, b, c` (no square
+  brackets around the list).
 * `#[bench::id(...)]` and `#[benches::sizes(args = [...], setup = ...)]`
   accept either named setup functions or direct value expressions. Closure
   form (`setup = || ...`) is not supported.
@@ -335,8 +336,8 @@ caller's working directory):
 wsl -e bash -l -c "just bench-cg"
 ```
 
-The recipe enumerates every `packages/*/benches/*_cg.rs` file and runs
-each via `cargo bench -p <pkg> --bench <name>`. Subsequent runs automatically
+The recipe enumerates every `crates/*/benches/*_cg.rs` file and runs
+each via `cargo bench -p <crate> --bench <name>`. Subsequent runs automatically
 compare against the previous run's baseline in `target/gungraun/` and exit
 non-zero if any regression is detected.
 
