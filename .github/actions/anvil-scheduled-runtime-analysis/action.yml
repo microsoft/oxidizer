@@ -1,0 +1,44 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+# The token scheduled-runtime-analysis is substituted by cargo-anvil at emit time with
+# the concrete check-group name (pr-fast, pr-test, scheduled-runtime, ...).
+name: anvil-scheduled-runtime-analysis
+description: Run the scheduled-runtime-analysis check group.
+inputs:
+  include_modified:
+    description: |
+      Pre-formatted --package args (e.g. "--package alpha --package beta")
+      for the modified tier, or the sentinel "--skip" when nothing
+      modified. Local invocations leave it unset; recipes default to
+      --workspace.
+    default: ""
+    required: false
+  include_affected:
+    description: |
+      Same shape as include_modified, but for the affected tier
+      (modified ∪ rev-deps).
+    default: ""
+    required: false
+  include_required:
+    description: |
+      Same shape as include_modified, but for the required tier
+      (affected ∪ workspace-internal transitive deps).
+    default: ""
+    required: false
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/anvil-setup
+      with:
+        group: scheduled-runtime-analysis
+    - name: Run just anvil-scheduled-runtime-analysis
+      shell: bash
+      env:
+        ANVIL_INCLUDE_MODIFIED: ${{ inputs.include_modified }}
+        ANVIL_INCLUDE_AFFECTED: ${{ inputs.include_affected }}
+        ANVIL_INCLUDE_REQUIRED: ${{ inputs.include_required }}
+        # cargo-aprz hits the GitHub API (unauthenticated = 60 req/hr); pass the
+        # built-in token so it can use the 1000 req/hr authenticated quota.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: just anvil-scheduled-runtime-analysis

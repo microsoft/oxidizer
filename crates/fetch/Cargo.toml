@@ -171,9 +171,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 uuid = { workspace = true }
 wiremock = { workspace = true }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "http_client_fake"
 required-features = ["test-util"]
@@ -286,3 +283,8 @@ required-features = ["test-util"]
 [[test]]
 name = "timeout"
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

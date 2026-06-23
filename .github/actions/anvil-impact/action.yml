@@ -1,0 +1,133 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-impact
+description: |
+  Compute the cargo-delta impact set for this PR and emit per-tier
+  include lists.
+
+  Outputs:
+    include_modified - "--package X --package Y" string for crates whose
+                       source files changed in the diff, or "--skip" if
+                       the modified set is empty.
+    include_affected - same shape, for crates in the affected set
+                       (modified ∪ rev-deps).
+    include_required - same shape, for crates in the required set
+                       (affected ∪ workspace-internal transitive deps).
+
+  Recipes in checks.just interpret each variable per their tier:
+  modified-tier recipes (fmt, license-headers, spellcheck, ...) short-
+  circuit on "--skip"; affected-tier recipes (clippy, tests, ...) and
+  required-tier recipes (doc, cargo-hack, udeps) splice their include
+  list into the cargo invocation, defaulting to --workspace when unset
+  (local runs without impact wiring).
+
+  Unscoped recipes (deny, audit, aprz, pr-title) ignore all three
+  variables and always run unconditionally.
+outputs:
+  include_modified:
+    description: Pre-formatted --package args for the modified tier.
+    value: ${{ steps.compute.outputs.include_modified }}
+  include_affected:
+    description: Pre-formatted --package args for the affected tier.
+    value: ${{ steps.compute.outputs.include_affected }}
+  include_required:
+    description: Pre-formatted --package args for the required tier.
+    value: ${{ steps.compute.outputs.include_required }}
+runs:
+  using: composite
+  steps:
+    # anvil-setup with group=none bootstraps the rust toolchain +
+    # just + binstall + cache, but skips the full catalog install.
+    # We follow it with just the cargo-delta install (the only tool
+    # this composite needs). This keeps the impact stage lean -- it's
+    # the critical-path gating dep for every PR-tier group job.
+    - uses: ./.github/actions/anvil-setup
+      with:
+        group: none
+    - name: Install cargo-delta
+      shell: bash
+      run: just anvil-tool-cargo-delta-install binstall
+    - id: compute
+      name: Compute impact
+      shell: bash
+      run: |
+        set -euo pipefail
+        # GITHUB_BASE_REF is the target-branch name on a PR event
+        # (e.g. "main"); we resolve it to origin/<name>. Adopters can
+        # override via the BASE_REF env var.
+        base="${BASE_REF:-origin/${GITHUB_BASE_REF:-main}}"
+        # cargo delta has no --base flag; the flow is two snapshots
+        # (baseline at the merge target + current at HEAD) compared by
+        # `cargo delta impact`. We use a temporary worktree to snapshot
+        # the baseline without disturbing the checked-out tree.
+        cargo delta snapshot > "$RUNNER_TEMP/anvil-current.json"
+        git worktree add --detach "$RUNNER_TEMP/anvil-baseline" "$base"
+        ( cd "$RUNNER_TEMP/anvil-baseline" && cargo delta snapshot ) \
+            > "$RUNNER_TEMP/anvil-baseline.json"
+        git worktree remove --force "$RUNNER_TEMP/anvil-baseline"
+        result="$(cargo delta impact \
+            --baseline "$RUNNER_TEMP/anvil-baseline.json" \
+            --current  "$RUNNER_TEMP/anvil-current.json" \
+            --format json)"
+        # cargo-delta emits TitleCase keys (Modified / Affected /
+        # Required), not lowercase. Format each tier into the
+        # `--package X --package Y` shape recipes expect, or the
+        # literal "--skip" sentinel when the tier is empty.
+        #
+        # cargo-delta's impact output uses *library names* (snake_case)
+        # rather than cargo *package names* (which may use hyphens). For
+        # hyphenated packages — e.g. `cargo-anvil` — that means it
+        # emits `cargo_anvil`, which cargo rejects as a --package
+        # specification. We build:
+        #   * `pkg_map`: lib-name -> package-name (and identity for
+        #     package-name -> package-name), for translation;
+        #   * `valid_pkgs`: set of all known package names, for
+        #     validation. Names cargo-delta emits that aren't valid
+        #     packages (e.g. directory-leaf ambiguities like `ffi` /
+        #     `ffi_build` in deeply nested workspaces) are dropped with a
+        #     warning rather than failing the whole build.
+        declare -A pkg_map
+        declare -A valid_pkgs
+        # `tr -d '\r'` strips carriage returns: on Windows runners the
+        # `cargo metadata | jq` (and cargo-delta) output can be CRLF-
+        # terminated, which would otherwise leave a trailing `\r` on the
+        # last `read` field — corrupting the map keys so valid packages
+        # get mis-classified as unknown and silently dropped.
+        while IFS=$'\t' read -r pkg_name lib_name; do
+            valid_pkgs["$pkg_name"]=1
+            pkg_map["$pkg_name"]="$pkg_name"
+            [ -n "$lib_name" ] && pkg_map["$lib_name"]="$pkg_name"
+        done < <(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] as $p | ($p.targets[] | select(.kind | index("lib")) | "\($p.name)\t\(.name)"), "\($p.name)\t"' \
+            | tr -d '\r')
+        format_set() {
+            local field="$1"
+            local pkgs
+            pkgs=$(printf '%s' "$result" | jq -r --arg f "$field" '(.[$f] // []) | .[]' 2>/dev/null | tr -d '\r' || true)
+            if [ -z "$pkgs" ] ; then
+                printf '%s' "--skip"
+            else
+                local out=""
+                while IFS= read -r pkg ; do
+                    [ -z "$pkg" ] && continue
+                    local mapped="${pkg_map[$pkg]:-$pkg}"
+                    if [ -z "${valid_pkgs[$mapped]:-}" ] ; then
+                        echo "anvil impact: dropping unknown package '$pkg' (-> '$mapped') from $field set" >&2
+                        continue
+                    fi
+                    out="$out --package $mapped"
+                done <<EOF
+        $pkgs
+        EOF
+                if [ -z "$out" ] ; then
+                    printf '%s' "--skip"
+                else
+                    # shellcheck disable=SC2001
+                    printf '%s' "${out# }"
+                fi
+            fi
+        }
+        echo "include_modified=$(format_set Modified)" >> "$GITHUB_OUTPUT"
+        echo "include_affected=$(format_set Affected)" >> "$GITHUB_OUTPUT"
+        echo "include_required=$(format_set Required)" >> "$GITHUB_OUTPUT"

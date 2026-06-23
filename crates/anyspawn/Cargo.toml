@@ -78,5 +78,7 @@ required-features = ["tokio"]
 name = "thread_aware"
 required-features = ["tokio"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

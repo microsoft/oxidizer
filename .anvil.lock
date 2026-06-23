@@ -1,0 +1,309 @@
+version = 1
+tool = "anvil"
+tool_version = "0.1.0"
+catalog_checksum = "sha256:1abe6661c04a48acb601d3e52be8dfff3b65540c4ebfa89ce25ed0498b462aa7"
+
+[[file]]
+path = ".github/actions/anvil-impact/action.yml"
+checksum = "sha256:4565d83eb534f382fef5934682e1935704b0a1b2894a457b934dc331ace28305"
+
+[[file]]
+path = ".github/actions/anvil-pr-fast/action.yml"
+checksum = "sha256:6d93a456cdeb9668d713c623cb649732e731ec31a3761b4ad971acb3b9827ea5"
+
+[[file]]
+path = ".github/actions/anvil-pr-mutants/action.yml"
+checksum = "sha256:4053a6023ddcd01eee22911e0080031e1bcd8c502ffc75acfb20d4c02a038685"
+
+[[file]]
+path = ".github/actions/anvil-pr-runtime-analysis/action.yml"
+checksum = "sha256:326cc30bfb67bc1d23be50d37c57e542466bce813a56b38a0c2a015e8d13a540"
+
+[[file]]
+path = ".github/actions/anvil-pr-test/action.yml"
+checksum = "sha256:ba33cd6a826d2a6e63e88fd6e4795496717b697d64bf93f133333d916952cdb5"
+
+[[file]]
+path = ".github/actions/anvil-scheduled-advisories/action.yml"
+checksum = "sha256:c05a587116e84f5da346f8faf994503c6b0ab578fb2534d5e586fa4bbb261cd6"
+
+[[file]]
+path = ".github/actions/anvil-scheduled-exhaustive/action.yml"
+checksum = "sha256:6a56421f666b92239a952e0ef351c803c59f5d24bd22b34f8695581fa175bdea"
+
+[[file]]
+path = ".github/actions/anvil-scheduled-runtime-analysis/action.yml"
+checksum = "sha256:b943525f6d08b1f2b17bd08979c199a214f17305dad7bc8bea3d723fe2fa3091"
+
+[[file]]
+path = ".github/actions/anvil-scheduled-test/action.yml"
+checksum = "sha256:a42cf49d0e203db5545a797888c8c62e1564f5914a2588e2a40cb3b2cf8b0ad3"
+
+[[file]]
+path = ".github/actions/anvil-setup/action.yml"
+checksum = "sha256:065181e093ed68c83d5f974ebde2980f26cc70f954d965b2c0ca1b63042d3a1e"
+
+[[file]]
+path = ".github/workflows/anvil-pr-impl.yml"
+checksum = "sha256:70b2f188d3cc0fee5c9502534611121db9ff8b2c27cd6dfa176bf9a9ba9d2d2e"
+
+[[file]]
+path = ".github/workflows/anvil-pr.yml"
+checksum = "sha256:14c3541e39a7918497cb400ea20232340bc056da6d862a951568c09e32f4f2f7"
+
+[[file]]
+path = ".github/workflows/anvil-scheduled-impl.yml"
+checksum = "sha256:48669cdc1c372d47cbbc5b51ffada9236a2f176ea5a4d37829685fb56a60427a"
+
+[[file]]
+path = ".github/workflows/anvil-scheduled.yml"
+checksum = "sha256:a45359b92a6d851fc39bfa1c03aeb489b544ae37a1cea390dbbf860b2def8205"
+
+[[file]]
+path = "justfiles/anvil/checks.just"
+checksum = "sha256:dd551ba9d70716674817ed0ac6639035c4cd468fa62e7811abfbf672703225af"
+
+[[file]]
+path = "justfiles/anvil/groups.just"
+checksum = "sha256:90dfd2354cde09544d39e3f69231bec48bb78b9963da6a1daef626977f657364"
+
+[[file]]
+path = "justfiles/anvil/mod.just"
+checksum = "sha256:06b486f1d154b36cf1c1a43333addd2e3ade8c69646600f7409a0c6a1c08cedb"
+
+[[file]]
+path = "justfiles/anvil/tiers.just"
+checksum = "sha256:fd65dc16029c0e347f55f406e005ca1b264db4b482e3f1e8f6ef94aad7c51b64"
+
+[[file]]
+path = "justfiles/anvil/tools.just"
+checksum = "sha256:e93424779c81d3855bd9b594e5c7b48435ce75460cc2591a07be29b5e35e58f7"
+
+[[file]]
+path = "justfiles/anvil/versions.just"
+checksum = "sha256:9da2b99b5ce18785b508dc82c593d41ff972a6f1cdd587add0aa9186a6121b93"
+
+[[region]]
+host = ".delta.toml"
+id = "anvil-delta"
+checksum = "sha256:ef049abc4bba5e6dac7dfc07a4852d821de4682fe6ad46aace7ddfb2455cb597"
+
+[[region]]
+host = "Cargo.toml"
+id = "anvil-workspace-lints"
+checksum = "sha256:8257f8c96103501ef0af020ce686ffcd7333fa5704f701b33758468baa9cdd98"
+
+[[region]]
+host = "clippy.toml"
+id = "anvil-clippy"
+checksum = "sha256:aba0733632eac4cb54c4768db578fe1f7b7cfe730aa0d7dc13e2828c9062d67d"
+
+[[region]]
+host = "crates/anyspawn/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/anyspawn_azure/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/automation/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/bytesbuf/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/bytesbuf_io/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/cachet/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/cachet_memory/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/cachet_service/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/cachet_tier/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/data_privacy/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/data_privacy_core/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/data_privacy_macros/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/data_privacy_macros_impl/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fetch/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fetch_azure/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fetch_hyper/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fetch_options/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fetch_tls/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fundle/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fundle_macros/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/fundle_macros_impl/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/http_extensions/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/layered/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/multitude/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/ohno/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/ohno_macros/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/recoverable/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/seatbelt/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/seatbelt_http/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/templated_uri/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/templated_uri_macros/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/templated_uri_macros_impl/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/testing_aids/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/thread_aware/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/thread_aware_macros/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/thread_aware_macros_impl/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/tick/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "crates/uniflight/Cargo.toml"
+id = "anvil-lints"
+checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103ac40"
+
+[[region]]
+host = "deny.toml"
+id = "anvil-deny"
+checksum = "sha256:3d38154ac70567b4b6b39699e244040a1ed869471d3501f7147b5c3c9a748ade"
+
+[[region]]
+host = "justfile"
+id = "anvil-imports"
+checksum = "sha256:f8affd59b69c7083c2f3b6f593c63672116dda974c1e661dcb66a4412eb3eada"
+
+[[region]]
+host = "rustfmt.toml"
+id = "anvil-rustfmt"
+checksum = "sha256:c21c68f3f9e46e8a958513e80ebce393d2e2ec8b90e2ded5416bca4215ffa8b7"
+
+[[region]]
+host = "spellcheck.toml"
+id = "anvil-spellcheck"
+checksum = "sha256:3d85d17a4e9a9a6770738b67d93a801375ffadd159e506eef81e5a9ffe1da0d7"

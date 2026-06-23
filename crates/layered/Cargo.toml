@@ -46,9 +46,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }
 tower-service = { workspace = true }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "custom_layer"
 
@@ -74,3 +71,8 @@ required-features = ["intercept"]
 harness = false
 name = "tower"
 required-features = ["intercept", "tower-service"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

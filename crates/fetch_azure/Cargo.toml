@@ -57,5 +57,7 @@ futures = { workspace = true, features = ["std"] }
 mutants = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

@@ -1,0 +1,19 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-scheduled
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  anvil-scheduled:
+    uses: ./.github/workflows/anvil-scheduled-impl.yml
+    permissions:
+      contents: read
+    secrets: inherit

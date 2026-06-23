@@ -94,9 +94,6 @@ tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "custom_server"
 path = "examples/custom_server.rs"
@@ -110,3 +107,8 @@ required-features = ["test-util", "json"]
 harness = false
 name = "http_response_builder"
 required-features = ["test-util", "json"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

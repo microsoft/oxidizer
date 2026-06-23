@@ -23,3 +23,7 @@ import 'justfiles/extended.just'
 import 'justfiles/format.just'
 import 'justfiles/setup.just'
 import 'justfiles/spelling.just'
+
+# >>> anvil-managed: anvil-imports
+import 'justfiles/anvil/mod.just'
+# <<< anvil-managed: anvil-imports

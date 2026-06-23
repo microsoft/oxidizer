@@ -111,9 +111,6 @@ uuid = { version = "1.21.0", default-features = false }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "criterion_third_party"
 harness = false
@@ -126,3 +123,8 @@ required-features = ["bytes", "http", "jiff02", "uuid"]
 name = "gungraun_third_party"
 harness = false
 required-features = ["bytes", "http", "jiff02", "uuid"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

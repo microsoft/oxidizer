@@ -1,0 +1,112 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-scheduled-impl
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        description: Runner label for x86_64 Linux jobs.
+        type: string
+        default: ubuntu-latest
+      windows_runner:
+        description: Runner label for x86_64 Windows jobs.
+        type: string
+        default: windows-latest
+      linux_arm_runner:
+        description: Runner label for aarch64 Linux jobs.
+        type: string
+        default: ubuntu-24.04-arm
+      windows_arm_runner:
+        description: Runner label for aarch64 Windows jobs.
+        type: string
+        default: windows-11-arm
+    secrets:
+      CODECOV_TOKEN:
+        description: |
+          Codecov upload token. Optional for public repos that have OIDC
+          configured at Codecov; required for private repos.
+        required: false
+
+# Note on matrices: see pr-impl-workflow.yml for the rationale. OS
+# matrices are hardcoded; per-leg runner labels are inputs.
+
+jobs:
+  scheduled-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-scheduled-test
+      - name: Upload coverage to Codecov
+        # Upload from every leg except windows-11-arm (see the matching
+        # comment in pr-impl-workflow.yml for the rationale).
+        # Multi-flag tag combines the OS with a "scheduled" marker so
+        # the Codecov UI can distinguish PR-tier uploads from scheduled
+        # uploads while still tracking each platform separately.
+        if: matrix.os != 'windows-arm'
+        uses: codecov/codecov-action@v5
+        with:
+          files: target/coverage/lcov.info
+          flags: scheduled,${{ matrix.os }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  scheduled-advisories:
+    # Cross-OS / cross-arch because clippy and udeps in this group
+    # compile per host, so cfg-gated code must be linted/scanned on
+    # every leg.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-scheduled-advisories
+
+  scheduled-runtime-analysis:
+    # Full-workspace counterpart of pr-runtime-analysis. OS matrix
+    # mirrors pr-runtime-analysis so any OS already considered "worth
+    # running miri on" gets the stricter profiles (tree-borrows,
+    # strict-provenance, race-coverage) too. Each profile runs in
+    # one job: keeping them as members of one composite action would
+    # serialize them (hours per profile, days per run). The matrix
+    # gives parallelism across OS legs; the per-profile fan-out
+    # inside the composite action runs them sequentially within a
+    # leg, which is the right trade -- the profiles share toolchain
+    # setup and target/ cache.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-scheduled-runtime-analysis
+
+  scheduled-exhaustive:
+    # x86_64-only by design: this group includes mutants-full (which
+    # doesn't build on aarch64-pc-windows-msvc — winapi crate
+    # incompatibility) plus cargo-hack feature powerset and bench.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner || inputs.windows_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-scheduled-exhaustive
