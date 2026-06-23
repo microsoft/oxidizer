@@ -1,0 +1,215 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-pr-impl
+
+on:
+  workflow_call:
+    inputs:
+      linux_runner:
+        description: Runner label for x86_64 Linux jobs.
+        type: string
+        default: ubuntu-latest
+      windows_runner:
+        description: Runner label for x86_64 Windows jobs.
+        type: string
+        default: windows-latest
+      linux_arm_runner:
+        description: Runner label for aarch64 Linux jobs.
+        type: string
+        default: ubuntu-24.04-arm
+      windows_arm_runner:
+        description: Runner label for aarch64 Windows jobs.
+        type: string
+        default: windows-11-arm
+    secrets:
+      CODECOV_TOKEN:
+        description: |
+          Codecov upload token. Optional for public repos that have OIDC
+          configured at Codecov; required for private repos.
+        required: false
+
+# Note on matrices: every multi-OS job below hardcodes its OS axis as
+# an inline YAML array. Per-leg runner *labels* are inputs (so adopters
+# can swap in self-hosted runners), but the OS axis itself is part of
+# the workflow's identity — adopters who need a different shape (add
+# macOS, drop ARM, mix in exotic targets) fork this file. Input-driven
+# matrices were rejected because they added a silent failure mode
+# (mis-formatted inputs produced empty matrices) without meaningfully
+# expanding what adopters could customize.
+
+jobs:
+  # cargo-delta impact runs per OS so that downstream legs consume an
+  # impact set computed against THEIR host's cargo-metadata depgraph.
+  # Without this, an OS-conditional dep change (under
+  # `[target.'cfg(target_os = ...)'.dependencies]`) computed on Linux
+  # wouldn't include the cross-OS reverse-deps that only show up in
+  # the Windows depgraph, so the Windows leg could skip tests that
+  # ought to run. We split per-OS-family (not per-arch) -- arch-only
+  # cfg gates are rare enough that paying for 4 impact jobs isn't
+  # justified; arm legs reuse their OS counterpart's impact set.
+  impact-linux:
+    runs-on: ${{ inputs.linux_runner }}
+    outputs:
+      include_modified: ${{ steps.delta.outputs.include_modified }}
+      include_affected: ${{ steps.delta.outputs.include_affected }}
+      include_required: ${{ steps.delta.outputs.include_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: delta
+        uses: ./.github/actions/anvil-impact
+
+  impact-windows:
+    runs-on: ${{ inputs.windows_runner }}
+    outputs:
+      include_modified: ${{ steps.delta.outputs.include_modified }}
+      include_affected: ${{ steps.delta.outputs.include_affected }}
+      include_required: ${{ steps.delta.outputs.include_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: delta
+        uses: ./.github/actions/anvil-impact
+
+  pr-fast:
+    # Cross-OS / cross-arch because pr-fast contains compile-sensitive
+    # checks (clippy, doc-build, udeps, semver-check, external-types)
+    # whose results can differ across host for crates that use
+    # #[cfg(target_os = ...)] or #[cfg(target_arch = ...)] gating.
+    needs: [impact-linux, impact-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-pr-fast
+        with:
+          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
+          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
+          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+      # Advisory PR comments. Recipes that surface non-blocking findings
+      # (e.g. cargo-semver-checks) write a markdown body to
+      # `target/anvil/comments/<name>.md` and exit 0. The steps below
+      # turn presence/absence of those files into upserts/deletions of
+      # a sticky PR comment. We post from the canonical x86_64 Linux leg
+      # only so the matrix doesn't race on the same comment, and we use
+      # `always()` so the comment is updated even when an unrelated
+      # check in pr-fast failed. The `head.repo.full_name ==
+      # github.repository` guard skips fork PRs (which can't be granted
+      # write tokens).
+      - name: Upsert anvil-semver advisory
+        if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') != ''
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: anvil-semver
+          path: target/anvil/comments/semver.md
+      - name: Clear anvil-semver advisory
+        if: always() && github.event_name == 'pull_request' && matrix.os == 'linux' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('target/anvil/comments/semver.md') == ''
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: anvil-semver
+          delete: true
+
+  pr-test:
+    # Tests + coverage: llvm-cov / doc-test / examples.
+    # 4-leg matrix -- compile and runtime behaviour can differ across
+    # OS and arch for cfg-gated code, so we exercise tests on every leg.
+    # Coverage uploads from the canonical x86_64 Linux leg only to
+    # avoid Codecov double-counting.
+    needs: [impact-linux, impact-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-pr-test
+        with:
+          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
+          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
+          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+      - name: Upload coverage to Codecov
+        # Upload from every leg except windows-11-arm. OS/arch-gated
+        # code only gets exercised on its native target, so a single-
+        # leg upload would systematically under-report coverage on
+        # cfg(target_os = "windows") / cfg(target_arch = "aarch64")
+        # branches. windows-11-arm is excluded because LLVM-coverage
+        # instrumentation on that target produces "malformed
+        # instrumentation profile data: symbol name is empty" errors.
+        # Codecov coalesces multiple uploads against the same commit;
+        # the `flags:` tag distinguishes the per-leg slices in the
+        # Codecov UI without changing the union total.
+        # lcov.info is produced by the anvil-llvm-cov recipe inside
+        # anvil-pr-test; if the affected set was empty the recipe
+        # no-ops and there is no file to upload, so we gate on the
+        # impact output.
+        if: matrix.os != 'windows-arm' && ((startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected != '--skip') || (matrix.os == 'windows' && needs.impact-windows.outputs.include_affected != '--skip'))
+        uses: codecov/codecov-action@v5
+        with:
+          files: target/coverage/lcov.info
+          flags: ${{ matrix.os }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  pr-runtime-analysis:
+    # Stricter-runtime correctness: miri + careful.
+    # 4-leg matrix -- both checks compile per host target and can
+    # surface OS/arch-specific UB. Both are impact-scoped so the
+    # wall-clock is proportional to the PR's blast radius.
+    needs: [impact-linux, impact-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/anvil-pr-runtime-analysis
+        with:
+          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
+          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
+          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+
+  pr-mutants:
+    # Mutation testing: cargo mutants (diff-scoped against the PR base).
+    # 4-leg matrix. cargo-mutants doesn't build on aarch64-pc-windows-msvc
+    # (upstream winapi crate incompat); the anvil-mutants-diff recipe
+    # self-skips on that target so this is a no-op (not a failure) on
+    # the windows-arm leg.
+    needs: [impact-linux, impact-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, linux-arm, windows-arm]
+    runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner
+      || matrix.os == 'windows' && inputs.windows_runner
+      || matrix.os == 'linux-arm' && inputs.linux_arm_runner
+      || inputs.windows_arm_runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/anvil-pr-mutants
+        with:
+          include_modified: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_modified || needs.impact-windows.outputs.include_modified }}
+          include_affected: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected || needs.impact-windows.outputs.include_affected }}
+          include_required: ${{ startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_required || needs.impact-windows.outputs.include_required }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}

@@ -45,9 +45,6 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "app_err_automatic_conversion"
 path = "examples/app/automatic_conversion.rs"
@@ -87,3 +84,8 @@ required-features = ["app-err"]
 name = "app-err_root_cause"
 path = "examples/app/root_cause.rs"
 required-features = ["app-err"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -73,9 +73,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trybuild = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "classified_templating"
 path = "examples/classified_templating.rs"
@@ -83,3 +80,8 @@ path = "examples/classified_templating.rs"
 [[example]]
 name = "uri_templating"
 path = "examples/uri_templating.rs"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

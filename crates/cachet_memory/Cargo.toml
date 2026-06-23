@@ -44,5 +44,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 name = "overhead"
 harness = false
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

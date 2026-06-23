@@ -29,5 +29,7 @@ fundle_macros = { workspace = true }
 [dev-dependencies]
 trybuild = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

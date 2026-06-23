@@ -90,9 +90,6 @@ loom = { workspace = true }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "criterion_alloc"
 harness = false
@@ -137,3 +134,8 @@ name = "multitude_basic"
 
 [[example]]
 name = "strings"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
