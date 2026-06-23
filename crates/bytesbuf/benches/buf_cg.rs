@@ -35,7 +35,6 @@ mod linux {
     use std::hint::black_box;
 
     use bytesbuf::BytesBuf;
-    use bytesbuf::mem::Memory;
     use bytesbuf::mem::testing::TransparentMemory;
     use gungraun::{library_benchmark, library_benchmark_group};
 
