@@ -10,8 +10,6 @@
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::_documentation::telemetry).
 
-use std::borrow::Cow;
-
 /// Diagnostic information about the connection that served an HTTP response.
 ///
 /// Re-exported from [`fetch_options`]. Attached as a response extension by real
@@ -100,14 +98,11 @@ impl From<Metering> for Meter {
 
 /// Builds the `fetch` instrumentation scope carrying the `fetch.runtime` and
 /// `fetch.transport` attributes, attached to every metric a client records.
-// Takes `&Cow<'static, str>` rather than `&str` so the borrowed-'static case is cloned without
-// allocating; lowering to `&str` would force a `to_string()` on every call.
-#[expect(clippy::ptr_arg, reason = "cloning the Cow avoids allocating for the common borrowed-'static case")]
-pub(crate) fn client_scope(runtime: &Cow<'static, str>, transport: &Cow<'static, str>) -> InstrumentationScope {
+pub(crate) fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
         .with_attributes([
-            KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime.clone()),
-            KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport.clone()),
+            KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime),
+            KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport),
         ])
         .build()
 }
@@ -192,13 +187,13 @@ mod tests {
 
     #[test]
     fn from_metering_global() {
-        let metering = Metering::global(client_scope(&Cow::Borrowed("tokio"), &Cow::Borrowed("hyper")));
+        let metering = Metering::global(client_scope("tokio", "hyper"));
         let _meter: Meter = metering.into();
     }
 
     #[test]
     fn client_scope_carries_runtime_and_transport_attributes() {
-        let scope = client_scope(&Cow::Borrowed("tokio"), &Cow::Borrowed("hyper"));
+        let scope = client_scope("tokio", "hyper");
 
         let runtime = scope
             .attributes()
