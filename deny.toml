@@ -1,6 +1,29 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# >>> anvil-managed: anvil-deny
+# Adopter-owned: this region merges anvil's catalog defaults with
+# oxidizer-github's curated license allowlist, advisory ignores, and a
+# relaxed wildcards ban. anvil's drift detector will emit an
+# `.anvil-proposed` sibling on future catalog bumps rather than overwrite.
+[advisories]
+yanked = "deny"
+# Scope of unmaintained-crate checks: "all" surfaces transitive
+# dependencies too; tighten to "workspace" if the noise is high.
+unmaintained = "all"
+ignore = [
+    # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
+    # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
+    # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
+    # this for benchmark-only usage.
+    "RUSTSEC-2025-0141",
+    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
+    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
+    # upstream and no production code path depends on it. Tracked for removal once the
+    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
+    "RUSTSEC-2026-0173",
+]
+
 [licenses]
 allow = [
     # You can add new entries to the list only from "Permissive OSS licenses" on this Microsoft-internal page: https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
@@ -17,49 +40,14 @@ allow = [
     # `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
     "CDLA-Permissive-2.0",
 ]
-
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
 
-[advisories]
-ignore = [
-    # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
-    # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
-    # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
-    # this for benchmark-only usage.
-    "RUSTSEC-2025-0141",
-    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
-    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
-    # upstream and no production code path depends on it. Tracked for removal once the
-    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
-    "RUSTSEC-2026-0173",
-]
-
-# >>> anvil-managed: anvil-deny
-[advisories]
-yanked = "deny"
-# Scope of unmaintained-crate checks: "all" surfaces transitive
-# dependencies too; tighten to "workspace" if the noise is high.
-unmaintained = "all"
-
-[licenses]
-allow = [
-    "MIT",
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "MPL-2.0",
-    "Unicode-DFS-2016",
-    "Unicode-3.0",
-    "Zlib",
-]
-confidence-threshold = 0.93
-
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+# Internal workspace crates use wildcard (`*`) version requirements; warn
+# rather than deny so the established convention keeps working.
+wildcards = "warn"
 
 [sources]
 unknown-registry = "deny"

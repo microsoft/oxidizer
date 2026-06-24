@@ -1,13 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-absolute-paths-max-segments = 3
-allow-panic-in-tests = true
-allow-unwrap-in-tests = true
-avoid-breaking-exported-api = false
-semicolon-outside-block-ignore-multiline = true
-warn-on-all-wildcard-imports = true
-
 # >>> anvil-managed: anvil-clippy
 # Fine-tuning settings for clippy lints. These cannot be expressed in
 # Cargo.toml's [lints] table (which only carries level: warn/allow/deny);
