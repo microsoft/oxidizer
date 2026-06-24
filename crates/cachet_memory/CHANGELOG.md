@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.6] - 2026-06-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `ohno`
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.3.5] - 2026-06-11
 
 - 🔧 Maintenance
