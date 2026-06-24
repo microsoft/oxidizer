@@ -19,9 +19,15 @@
 #   - libclang: required by cargo-spellcheck (clang-sys / hunspell-rs)
 #     at build time.
 #
-# Detection uses presence-only probes (file existence in standard install
-# dirs + `LIBCLANG_PATH` env var). No version checks -- system libs upgrade
-# independently and any reasonably modern libclang works for clang-sys.
+# Detection verifies libclang is *discoverable*, not merely present:
+# bindgen/clang-sys locate it via `LIBCLANG_PATH` or directories on
+# `PATH`, and on Windows the runtime loader resolves the DLL (and its
+# dependents) only via `PATH` -- it does NOT read `LIBCLANG_PATH`. A
+# winget `LLVM.LLVM` install sets neither, so the DLL exists but the
+# hunspell-sys build script fails to load it (STATUS_DLL_NOT_FOUND). We
+# therefore require the libclang directory to be on `PATH` on Windows,
+# catching that case up front. No version checks -- any reasonably modern
+# libclang works for clang-sys.
 #
 # On missing deps the recipe prints copy-paste install hints per OS /
 # package manager and exits non-zero. No auto-install: admin / sudo and
@@ -32,43 +38,48 @@ anvil-system-deps-check:
     $ErrorActionPreference = 'Stop'
     $missing = @()
 
-    # libclang: required to BUILD cargo-spellcheck from source.
-    $haveLibclang = $false
+    # libclang: required to BUILD cargo-spellcheck from source. Locate the
+    # *directory* it lives in (via LIBCLANG_PATH, then standard install
+    # dirs), so we can additionally verify discoverability below.
     $libclangFiles = @('libclang.dll', 'libclang.so', 'libclang.so.1', 'libclang.dylib')
+    $libclangDir = $null
     if ($env:LIBCLANG_PATH) {
         foreach ($f in $libclangFiles) {
-            if (Test-Path (Join-Path $env:LIBCLANG_PATH $f)) { $haveLibclang = $true; break }
+            if (Test-Path (Join-Path $env:LIBCLANG_PATH $f)) { $libclangDir = $env:LIBCLANG_PATH; break }
         }
     }
-    if (-not $haveLibclang) {
+    if (-not $libclangDir) {
         $probes = if ($IsWindows) {
             @(
-                'C:\Program Files\LLVM\bin\libclang.dll',
-                "$env:USERPROFILE\scoop\apps\llvm\current\bin\libclang.dll"
+                'C:\Program Files\LLVM\bin',
+                "$env:USERPROFILE\scoop\apps\llvm\current\bin"
             )
         } elseif ($IsMacOS) {
             @(
-                '/usr/local/opt/llvm/lib/libclang.dylib',
-                '/opt/homebrew/opt/llvm/lib/libclang.dylib'
+                '/usr/local/opt/llvm/lib',
+                '/opt/homebrew/opt/llvm/lib'
             )
         } else {
             @(
-                '/usr/lib/x86_64-linux-gnu/libclang.so.1',
-                '/usr/lib/aarch64-linux-gnu/libclang.so.1',
-                '/usr/lib64/libclang.so',
-                '/usr/lib64/libclang.so.1'
+                '/usr/lib/x86_64-linux-gnu',
+                '/usr/lib/aarch64-linux-gnu',
+                '/usr/lib64'
             )
         }
-        foreach ($p in $probes) {
-            if (Get-Item -LiteralPath $p -ErrorAction SilentlyContinue) { $haveLibclang = $true; break }
+        foreach ($d in $probes) {
+            foreach ($f in $libclangFiles) {
+                if (Test-Path (Join-Path $d $f)) { $libclangDir = $d; break }
+            }
+            if ($libclangDir) { break }
         }
         # Linux distros often add a version suffix (libclang-19.so etc.); glob fallback.
-        if (-not $haveLibclang -and -not $IsWindows -and -not $IsMacOS) {
-            $glob = Get-ChildItem -Path '/usr/lib','/usr/lib64','/usr/lib/x86_64-linux-gnu','/usr/lib/aarch64-linux-gnu' -Filter 'libclang*.so*' -ErrorAction SilentlyContinue
-            if ($glob) { $haveLibclang = $true }
+        if (-not $libclangDir -and -not $IsWindows -and -not $IsMacOS) {
+            $glob = Get-ChildItem -Path '/usr/lib','/usr/lib64','/usr/lib/x86_64-linux-gnu','/usr/lib/aarch64-linux-gnu' -Filter 'libclang*.so*' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($glob) { $libclangDir = $glob.DirectoryName }
         }
     }
-    if (-not $haveLibclang) {
+
+    if (-not $libclangDir) {
         $missing += [pscustomobject]@{
             name = 'libclang'
             why = 'cargo-spellcheck (clang-sys/hunspell-rs) needs libclang at build time'
@@ -76,9 +87,27 @@ anvil-system-deps-check:
                 'Linux (Ubuntu/Debian):    sudo apt-get install -y libclang-dev'
                 'Linux (Azure Linux/RHEL): sudo tdnf install -y clang-devel'
                 'macOS (homebrew):         brew install llvm'
-                'Windows (scoop):          scoop install llvm     # no admin'
-                'Windows (winget, admin):  winget install LLVM.LLVM'
+                'Windows (scoop):          scoop install llvm     # adds LLVM to PATH automatically'
+                'Windows (winget, admin):  winget install LLVM.LLVM   # then set LIBCLANG_PATH + add ...\LLVM\bin to PATH'
             )
+        }
+    } elseif ($IsWindows) {
+        # Present, but on Windows the directory must be on PATH so the
+        # hunspell-sys build script can LOAD libclang.dll at runtime (the
+        # loader ignores LIBCLANG_PATH). Catch the present-but-undiscoverable
+        # case here instead of letting the build fail with STATUS_DLL_NOT_FOUND.
+        $pathDirs = ($env:PATH -split ';') | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
+        if ($pathDirs -notcontains $libclangDir.TrimEnd('\')) {
+            $missing += [pscustomobject]@{
+                name = 'libclang (present but not on PATH)'
+                why = "libclang.dll exists at '$libclangDir' but that directory is not on PATH; the hunspell-sys build script cannot load it (STATUS_DLL_NOT_FOUND)"
+                hints = @(
+                    "Add the libclang directory to PATH and set LIBCLANG_PATH, then restart the shell:"
+                    "  [Environment]::SetEnvironmentVariable('LIBCLANG_PATH', '$libclangDir', 'User')"
+                    "  # then add this directory to your User PATH (Settings > Environment Variables): $libclangDir"
+                    "Or install via scoop, which adds LLVM to PATH automatically: scoop install llvm"
+                )
+            }
         }
     }
 
@@ -267,22 +296,58 @@ _install-component toolchain component:
     }
 
 # _check-component: verify a component is installed on a toolchain.
+#
+# Detection avoids `rustup component list`, which msrustup does not
+# support. Instead each component is probed by the artifact it provides,
+# which works identically under rustup and msrustup:
+#   - clippy / rustfmt / miri expose a cargo subcommand, so we invoke
+#     `cargo [+toolchain] <subcommand> --version` (non-zero exit => absent).
+#   - rust-src / llvm-tools ship no command, so we probe the toolchain
+#     sysroot (`rustc [+toolchain] --print sysroot`) for their files.
+#
+# The `+<toolchain>` override is passed as a single explicit argument
+# rather than via array splat: the Windows rustup proxy mis-parses a
+# splatted toolchain token and reports `invalid toolchain name ''`, so a
+# splat would spuriously flag installed components as missing.
 [script("pwsh")]
 _check-component toolchain component:
     $ErrorActionPreference = 'Stop'
     $toolchain = '{{toolchain}}'
     $component = '{{component}}'
-    $output = if ($toolchain -eq 'default') {
-        rustup component list --installed 2>$null
+    $subcommand = switch ($component) {
+        'clippy'  { 'clippy' }
+        'rustfmt' { 'fmt' }
+        'miri'    { 'miri' }
+        default   { $null }
+    }
+    if ($null -ne $subcommand) {
+        if ($toolchain -eq 'default') {
+            & cargo $subcommand --version *> $null
+        } else {
+            & cargo "+$toolchain" $subcommand --version *> $null
+        }
+        $present = ($LASTEXITCODE -eq 0)
     } else {
-        rustup component list --installed --toolchain $toolchain 2>$null
+        $sysroot = if ($toolchain -eq 'default') {
+            & rustc --print sysroot 2>$null
+        } else {
+            & rustc "+$toolchain" --print sysroot 2>$null
+        }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sysroot)) {
+            Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain --profile minimal"
+            exit 1
+        }
+        $sysroot = $sysroot.Trim()
+        $present = switch ($component) {
+            # rust-src lands the standard-library sources under the sysroot.
+            'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
+            # llvm-tools ships llvm-profdata/llvm-cov under the per-target
+            # bin directory.
+            'llvm-tools' { @(Get-ChildItem (Join-Path $sysroot 'lib/rustlib') -Recurse -Filter 'llvm-profdata*' -ErrorAction SilentlyContinue).Count -gt 0 }
+            default      { $false }
+        }
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain --profile minimal"
-        exit 1
-    }
-    $found = $output | Where-Object { $_ -like "$component*" }
-    if (-not $found) {
+    if (-not $present) {
         $cmd = if ($toolchain -eq 'default') { "rustup component add $component" } else { "rustup component add --toolchain $toolchain $component" }
         Write-Error "anvil: component '$component' not installed on toolchain '$toolchain'. Run: $cmd"
         exit 1
@@ -349,8 +414,9 @@ anvil-component-nightly-rust-src-validate-prereqs: anvil-toolchain-nightly-valid
 # `cfg(coverage_nightly)` that the workspace's
 # `#[cfg_attr(coverage_nightly, coverage(off))]` exclusions depend on).
 # Use the canonical `llvm-tools` name (not the legacy `llvm-tools-preview`
-# alias): `rustup component list` reports it as `llvm-tools-<target>`, so
-# the `-preview` alias never prefix-matches in `_check-component`.
+# alias). Detection probes the sysroot for the `llvm-profdata` binary
+# (see `_check-component`), so the component name only matters for the
+# `rustup component add` install path.
 [group("anvil-setup")]
 anvil-component-nightly-llvm-tools-install: anvil-toolchain-nightly-install (_install-component rust_nightly "llvm-tools")
 

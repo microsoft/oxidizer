@@ -1,16 +1,13 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# >>> anvil-managed: anvil-deny
-# Adopter-owned: this region merges anvil's catalog defaults with
-# oxidizer-github's curated license allowlist, advisory ignores, and a
-# relaxed wildcards ban. anvil's drift detector will emit an
-# `.anvil-proposed` sibling on future catalog bumps rather than overwrite.
+# >>> anvil-managed: anvil-deny-advisories
 [advisories]
 yanked = "deny"
 # Scope of unmaintained-crate checks: "all" surfaces transitive
 # dependencies too; tighten to "workspace" if the noise is high.
 unmaintained = "all"
+# Adopter-owned: repo-specific advisory ignores.
 ignore = [
     # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
     # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
@@ -23,10 +20,13 @@ ignore = [
     # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
     "RUSTSEC-2026-0173",
 ]
+# <<< anvil-managed: anvil-deny-advisories
 
+# >>> anvil-managed: anvil-deny-licenses
 [licenses]
+# Adopter-owned: curated allowlist. Add new entries only from "Permissive OSS
+# licenses" on https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
 allow = [
-    # You can add new entries to the list only from "Permissive OSS licenses" on this Microsoft-internal page: https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
     "MIT",
     "Apache-2.0",
     "ISC",
@@ -42,14 +42,18 @@ allow = [
 ]
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
+# <<< anvil-managed: anvil-deny-licenses
 
+# >>> anvil-managed: anvil-deny-bans
 [bans]
 multiple-versions = "warn"
-# Internal workspace crates use wildcard (`*`) version requirements; warn
-# rather than deny so the established convention keeps working.
+# Adopter-owned: internal workspace crates use wildcard (`*`) version
+# requirements; warn rather than deny so the established convention keeps working.
 wildcards = "warn"
+# <<< anvil-managed: anvil-deny-bans
 
+# >>> anvil-managed: anvil-deny-sources
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# <<< anvil-managed: anvil-deny
+# <<< anvil-managed: anvil-deny-sources

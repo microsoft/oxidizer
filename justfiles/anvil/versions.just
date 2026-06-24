@@ -42,7 +42,7 @@ rust_nightly := "nightly-2026-02-10"
 # with "produces JSON format version X, but this tool requires
 # format version Y" -- which is a tooling-incompat, not a real API
 # violation. Bump this alongside any cargo-check-external-types upgrade.
-rust_nightly_external_types := "nightly-2025-10-18"
+rust_nightly_external_types := "nightly-2026-03-20"
 
 # ============================================================================
 # Cargo subcommands
@@ -52,7 +52,7 @@ cargo_aprz_version := "1.0.0"
 cargo_audit_version := "0.22.2"
 cargo_bolero_version := "0.13.4"
 cargo_careful_version := "0.4.9"
-cargo_check_external_types_version := "0.4.0"
+cargo_check_external_types_version := "0.5.0"
 cargo_coverage_gate_version := "0.1.0"
 cargo_delta_version := "0.3.1"
 cargo_deny_version := "0.19.0"

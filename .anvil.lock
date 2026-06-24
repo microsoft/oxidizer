@@ -1,7 +1,7 @@
 version = 1
 tool = "anvil"
 tool_version = "0.1.0"
-catalog_checksum = "sha256:1abe6661c04a48acb601d3e52be8dfff3b65540c4ebfa89ce25ed0498b462aa7"
+catalog_checksum = "sha256:fe225d3290fff8586f922ddc22a02dba90e23ce9b61931204bad9999c6d8a940"
 
 [[file]]
 path = ".github/actions/anvil-impact/action.yml"
@@ -61,7 +61,7 @@ checksum = "sha256:a45359b92a6d851fc39bfa1c03aeb489b544ae37a1cea390dbbf860b2def8
 
 [[file]]
 path = "justfiles/anvil/checks.just"
-checksum = "sha256:dd551ba9d70716674817ed0ac6639035c4cd468fa62e7811abfbf672703225af"
+checksum = "sha256:24ec1a69ddad87a05d9ea1a1df9d9e7cdc691f0f1ff760c54520a32898376dcf"
 
 [[file]]
 path = "justfiles/anvil/groups.just"
@@ -77,16 +77,21 @@ checksum = "sha256:fd65dc16029c0e347f55f406e005ca1b264db4b482e3f1e8f6ef94aad7c51
 
 [[file]]
 path = "justfiles/anvil/tools.just"
-checksum = "sha256:e93424779c81d3855bd9b594e5c7b48435ce75460cc2591a07be29b5e35e58f7"
+checksum = "sha256:1e7c2dc817f9a24abebb6bfdc1ee206823941e69c32ef8b03dd2d25cb5b40f28"
 
 [[file]]
 path = "justfiles/anvil/versions.just"
-checksum = "sha256:9da2b99b5ce18785b508dc82c593d41ff972a6f1cdd587add0aa9186a6121b93"
+checksum = "sha256:117f243ac4c16c7116d9e8c76ca4c434a488a07fb6069877c44936c061fd4f80"
 
 [[region]]
 host = ".delta.toml"
 id = "anvil-delta"
 checksum = "sha256:ef049abc4bba5e6dac7dfc07a4852d821de4682fe6ad46aace7ddfb2455cb597"
+
+[[region]]
+host = ".gitattributes"
+id = "anvil-gitattributes"
+checksum = "sha256:7d9051a56a2935a3fce2e4d8585fa5bb4ab8a89ace988cbdde77b52b0c4bcc9f"
 
 [[region]]
 host = "Cargo.toml"
@@ -290,8 +295,23 @@ checksum = "sha256:2dd7c0f21339fd17092b8dedfe924aa86732c3520baab84f914c2d8f4103a
 
 [[region]]
 host = "deny.toml"
-id = "anvil-deny"
-checksum = "sha256:3d38154ac70567b4b6b39699e244040a1ed869471d3501f7147b5c3c9a748ade"
+id = "anvil-deny-advisories"
+checksum = "sha256:33c41d1b48567b929fc485915ba8465be2a0fc7186b321fcd55dda2330572b6b"
+
+[[region]]
+host = "deny.toml"
+id = "anvil-deny-bans"
+checksum = "sha256:bd5763f09562715dcdeaf0b5c11c24c8c4e214cc14f6d0ddfe13d30a7ea03880"
+
+[[region]]
+host = "deny.toml"
+id = "anvil-deny-licenses"
+checksum = "sha256:46d7144a403be402bceeabc48e2e0c3b9bd1738339712d4e90b04d6fdab5cabe"
+
+[[region]]
+host = "deny.toml"
+id = "anvil-deny-sources"
+checksum = "sha256:920e1e1fed8cf6ac2173cb489d19153d167e806d26fdb73c8b91b7ddf44d0815"
 
 [[region]]
 host = "justfile"

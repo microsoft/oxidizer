@@ -30,24 +30,30 @@
 #     here. Scheduled-exhaustive recipes (mutants-full) are also unscoped
 #     by design.
 #
-# Local invocation (no impact wiring): all three env vars are unset
-# (recipes use the `?? "--workspace"` null-coalescing fallback below);
-# modified-tier recipes simply skip the splice and run their
+# Local invocation (no impact wiring): all three env vars are unset or
+# empty (recipes fall back to "--workspace" via the truthiness check
+# below); modified-tier recipes simply skip the splice and run their
 # workspace-wide tool; affected/required-tier recipes splat
-# "--workspace" when the env var is unset.
+# "--workspace" when the env var is empty or unset.
 #
 # Preparation contract: when a recipe reaches the cargo call, the
 # env var is one of:
 #
-#   * unset                       - local run; the recipe substitutes
-#                                    "--workspace" via `?? "--workspace"`
+#   * unset or ""                 - local run, or a cloud workflow (e.g.
+#                                    scheduled) that leaves the tier
+#                                    unscoped; the recipe substitutes
+#                                    "--workspace". An empty string is
+#                                    NOT $null, so we test truthiness
+#                                    rather than `?? "--workspace"`
+#                                    (which would only catch $null and
+#                                    splat an empty arg cargo rejects).
 #   * "--package A --package B"   - emitted by the cloud-workflow impact step when
 #                                    the tier has members
 #   * "--skip"                    - emitted by the cloud-workflow impact step when
 #                                    the tier is empty (recipe exits 0)
 #
 # This lets the simple recipes splat the var directly with
-#   & cargo X @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace")) ...
+#   & cargo X @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) ...
 # and reduces the per-recipe boilerplate to a single one-line skip
 # guard plus the cargo invocation.
 #
@@ -61,9 +67,9 @@
 # installer. We chose pwsh over bash because just's shebang dispatch
 # requires `cygpath` on Windows (only on PATH from inside Git Bash),
 # while [script("pwsh")] works from plain PowerShell with no PATH
-# augmentation. The `??` null-coalescing operator used in the splat
-# requires pwsh 7+, which is the floor we already require via
-# _anvil-require pwsh.
+# augmentation. We require pwsh 7+ (enforced via _anvil-require pwsh)
+# for consistent semantics of the array-splat splice and the modern
+# operators used across these recipes.
 #
 # Single-command recipes (cargo deny check, cargo audit) are plain
 # just recipes that inherit the adopter's default shell — they're
@@ -99,7 +105,7 @@ anvil-fmt: anvil-fmt-validate-prereqs
 anvil-clippy: anvil-clippy-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo clippy @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace")) --all-targets --all-features --locked "--" '-D' 'warnings'
+    & cargo clippy @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --all-targets --all-features --locked "--" '-D' 'warnings'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Modified tier.
@@ -149,7 +155,7 @@ anvil-doc-build: anvil-doc-build-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
     $env:RUSTDOCFLAGS = '-D warnings'
-    & cargo doc @(-split ($env:ANVIL_INCLUDE_REQUIRED ?? "--workspace")) --all-features --no-deps
+    & cargo doc @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' }) --all-features --no-deps
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Modified tier.
@@ -259,9 +265,10 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
 # human-edited `.spelling` file at the repo root and preprocess it
 # into the .dic format at check time (Hunspell .dic requires:
 # alphabetical sort, blank/numeric lines removed, line-count header).
-# If `.spelling` is present, we generate `target/spelling.dic` from it
-# automatically; otherwise we run cargo-spellcheck against whatever
-# the repo has already set up.
+# We always (re)generate `target/spelling.dic` so that a spellcheck.toml
+# pointing at it never fails on a missing file -- if `.spelling` is
+# absent we emit an empty dictionary (count `0`, no words) rather than
+# leaving the path dangling.
 [script("pwsh")]
 anvil-spellcheck: anvil-spellcheck-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -269,14 +276,15 @@ anvil-spellcheck: anvil-spellcheck-validate-prereqs
         Write-Host 'anvil-spellcheck: no modified packages; skipping'
         exit 0
     }
+    $output_file = 'target/spelling.dic'
+    $filtered_lines = @()
     if (Test-Path '.spelling') {
-        $output_file = 'target/spelling.dic'
         $lines = Get-Content '.spelling' | Sort-Object
-        $filtered_lines = $lines | Where-Object { $_ -notmatch '^\d+$' -and $_ -ne '' }
-        $line_count = $filtered_lines.Count
-        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($output_file)) | Out-Null
-        @($line_count) + $filtered_lines | Set-Content $output_file
+        $filtered_lines = @($lines | Where-Object { $_ -notmatch '^\d+$' -and $_ -ne '' })
     }
+    $line_count = $filtered_lines.Count
+    [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($output_file)) | Out-Null
+    @($line_count) + $filtered_lines | Set-Content $output_file
     # Pass --cfg explicitly when a spellcheck.toml exists at repo root,
     # otherwise cargo-spellcheck falls back to its built-in defaults and
     # ignores user-curated dictionaries (`extra_dictionaries`, custom
@@ -333,7 +341,7 @@ anvil-audit: anvil-audit-validate-prereqs
 anvil-udeps: anvil-udeps-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
-    & cargo '+{{ rust_nightly }}' udeps @(-split ($env:ANVIL_INCLUDE_REQUIRED ?? "--workspace")) --all-features
+    & cargo '+{{ rust_nightly }}' udeps @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' }) --all-features
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier (compares published API of changed crates against the
@@ -663,7 +671,7 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
 anvil-doc-test: anvil-doc-test-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    $pkg = @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace"))
+    $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     & cargo test --doc @pkg --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & cargo test --doc @pkg --locked
@@ -674,7 +682,7 @@ anvil-doc-test: anvil-doc-test-validate-prereqs
 anvil-examples: anvil-examples-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo build @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace")) --examples --all-features --locked
+    & cargo build @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --examples --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # === pr-mutants member ====================================================
@@ -749,7 +757,7 @@ anvil-miri: anvil-miri-validate-prereqs
     # empty test runs as success for miri only. Other nextest-using
     # recipes (llvm-cov) keep exit-4 as a failure because zero tests
     # there almost always indicates a config mistake.
-    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace"))
+    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Stricter miri profiles. Each runs miri over the full workspace
@@ -808,7 +816,7 @@ anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs
 anvil-careful: anvil-careful-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo '+{{ rust_nightly }}' careful test @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace")) --all-features --locked
+    & cargo '+{{ rust_nightly }}' careful test @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier. `loom` is a permutation-based concurrency model
@@ -904,7 +912,7 @@ anvil-mutants-full: anvil-mutants-full-validate-prereqs
 anvil-cargo-hack: anvil-cargo-hack-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
-    & cargo hack @(-split ($env:ANVIL_INCLUDE_REQUIRED ?? "--workspace")) --feature-powerset --depth 2 check
+    & cargo hack @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' }) --feature-powerset --depth 2 check
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier.
@@ -912,7 +920,7 @@ anvil-cargo-hack: anvil-cargo-hack-validate-prereqs
 anvil-bench: anvil-bench-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo bench @(-split ($env:ANVIL_INCLUDE_AFFECTED ?? "--workspace")) --all-features --no-run
+    & cargo bench @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --all-features --no-run
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
