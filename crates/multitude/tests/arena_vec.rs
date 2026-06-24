@@ -1884,9 +1884,8 @@ mod zero_copy_freeze {
             let arena = Arena::new();
             let mut v = arena.alloc_vec::<i32>();
             v.extend(0..100);
-            let a = Arc::from(v);
-            // Arena drops here; the Arc must keep its chunk alive.
-            a
+            // Arena drops at the end of this block; the Arc must keep its chunk alive.
+            Arc::from(v)
         };
         let clone = arc.clone();
         let sum: i32 = thread::spawn(move || clone.iter().copied().sum::<i32>()).join().unwrap();
