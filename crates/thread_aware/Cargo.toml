@@ -83,13 +83,13 @@ jiff02 = ["dep:jiff"]
 uuid = ["dep:uuid"]
 
 [dependencies]
-many_cpus = { workspace = true, optional = true }
-
-thread_aware_macros = { workspace = true, optional = true }
 
 bytes = { version = "1.11.1", default-features = false, optional = true }
 http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
 jiff = { version = "0.2.21", default-features = false, optional = true }
+many_cpus = { workspace = true, optional = true }
+
+thread_aware_macros = { workspace = true, optional = true }
 uuid = { version = "1.21.0", default-features = false, optional = true }
 
 [dev-dependencies]

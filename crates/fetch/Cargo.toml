@@ -53,11 +53,7 @@ rustls = [
     "fetch_hyper?/rustls",
     "fetch_tls/rustls",
 ]
-native-tls = [
-    "dep:native-tls",
-    "fetch_hyper?/native-tls",
-    "fetch_tls/native-tls",
-]
+native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
@@ -79,71 +75,66 @@ tokio = [
 [dependencies]
 # internal
 anyspawn = { workspace = true, optional = true }
+
+# external
+bytes = { workspace = true }
 bytesbuf = { workspace = true }
 data_privacy = { workspace = true }
 fetch_hyper = { workspace = true, optional = true }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
 fundle = { workspace = true }
+futures = { workspace = true, features = ["std"] }
+http = { workspace = true }
 http_extensions = { workspace = true }
+
+# tokio runtime transport
+hyper-util = { workspace = true, optional = true, features = ["client-legacy"] }
 layered = { workspace = true, features = [
     "dynamic-service",
     "intercept",
 ] }
-ohno.workspace = true
-seatbelt = { workspace = true, features = ["timeout", "retry", "breaker", "hedging", "logs", "metrics"] }
-seatbelt_http = { workspace = true, features = ["timeout", "retry", "breaker", "hedging"] }
-templated_uri = { workspace = true, features = ["uuid"] }
-thread_aware = { workspace = true, features = ["derive"] }
-tick = { workspace = true }
 
-# external
-bytes = { workspace = true }
-futures = { workspace = true, features = ["std"] }
-http = { workspace = true }
+# TLS related crates
+native-tls = { workspace = true, features = ["alpn"], optional = true }
+ohno.workspace = true
 opentelemetry = { workspace = true, features = ["futures", "metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
-smallvec = { workspace = true }
-tracing = { workspace = true }
-
-# tokio runtime transport
-hyper-util = { workspace = true, optional = true, features = ["client-legacy"] }
-tokio = { workspace = true, features = ["rt", "net"], optional = true }
-
-# TLS related crates
-native-tls = { workspace = true, features = ["alpn"], optional = true }
 rustls = { workspace = true, features = [
     "tls12",
     "std",
 ], default-features = false, optional = true }
 rustls-platform-verifier = { workspace = true, optional = true }
+seatbelt = { workspace = true, features = ["timeout", "retry", "breaker", "hedging", "logs", "metrics"] }
+seatbelt_http = { workspace = true, features = ["timeout", "retry", "breaker", "hedging"] }
+smallvec = { workspace = true }
+templated_uri = { workspace = true, features = ["uuid"] }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
+tokio = { workspace = true, features = ["rt", "net"], optional = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-# internal
-anyspawn = { path = "../anyspawn", features = ["tokio"] }
-data_privacy = { path = "../data_privacy" }
-fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
-fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
-http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
-ohno = { path = "../ohno", features = ["test-util", "app-err"] }
-testing_aids = { path = "../testing_aids" }
-tick = { path = "../tick", features = [
-    "test-util",
-    "tokio",
-] }
 
 # external
 alloc_tracker = { workspace = true }
+# internal
+anyspawn = { path = "../anyspawn", features = ["tokio"] }
 argh = { workspace = true }
 criterion = { workspace = true }
+data_privacy = { path = "../data_privacy" }
 fastrand.workspace = true
+fetch_hyper = { path = "../fetch_hyper", features = ["rustls", "native-tls"] }
+fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
+http_extensions = { path = "../http_extensions", features = ["test-util", "json"] }
 hyper = { workspace = true, features = ["http2", "client"] }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 mutants = { workspace = true }
 native-tls = { workspace = true, features = ["alpn"] }
+ohno = { path = "../ohno", features = ["test-util", "app-err"] }
 opentelemetry-stdout = { workspace = true, features = [
     "metrics",
 ], default-features = false }
@@ -160,6 +151,11 @@ rustls-platform-verifier = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
+tick = { path = "../tick", features = [
+    "test-util",
+    "tokio",
+] }
 tokio = { workspace = true, features = [
     "macros",
     "rt-multi-thread",

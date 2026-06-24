@@ -30,31 +30,31 @@ allowed_external_types = [
 all-features = true
 
 [dependencies]
-# internal
-bytesbuf = { workspace = true, features = ["bytes-compat"] }
-fetch = { workspace = true }
-layered = { workspace = true }
 
 # external
 async-trait = { workspace = true }
 azure_core = { workspace = true }
+# internal
+bytesbuf = { workspace = true, features = ["bytes-compat"] }
+fetch = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
+layered = { workspace = true }
 
 [dev-dependencies]
 # internal
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 anyspawn_azure = { path = "../anyspawn_azure", features = ["azure-identity"] }
-fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
-tick = { path = "../tick", features = ["tokio"] }
 
 # external
 async-trait = { workspace = true }
 azure_core = { workspace = true }
 azure_identity = { workspace = true }
 azure_storage_blob = { workspace = true }
+fetch = { path = "../fetch", features = ["test-util", "tokio", "rustls"] }
 futures = { workspace = true, features = ["std"] }
 mutants = { workspace = true }
+tick = { path = "../tick", features = ["tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 # >>> anvil-managed: anvil-lints
