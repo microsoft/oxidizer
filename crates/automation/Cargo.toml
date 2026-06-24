@@ -13,6 +13,13 @@ homepage.workspace = true
 include.workspace = true
 publish = false
 
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
+# public-API surface, so allow all external types — this opts the crate into the
+# external-types check permissively rather than denying its internal use of
+# ohno/serde/etc.
+allowed_external_types = ["*"]
+
 [dependencies]
 ohno = { workspace = true, features = ["app-err"] }
 
