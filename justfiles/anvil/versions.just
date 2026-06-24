@@ -33,7 +33,7 @@
 # nightly-dependent check. Bumped on a regular cadence (monthly is a
 # reasonable default) when an adopter has time to absorb formatting /
 # lint / API-surface drift. Pin only -- do not use bare `nightly` here.
-rust_nightly := "nightly-2026-02-10"
+rust_nightly := "nightly-2026-05-30"
 
 # Pinned narrowly to the rustdoc JSON schema version that the currently
 # selected cargo-check-external-types release accepts. cargo-check-
@@ -58,7 +58,7 @@ cargo_delta_version := "0.3.1"
 cargo_deny_version := "0.19.0"
 cargo_doc2readme_version := "0.6.4"
 cargo_ensure_no_cyclic_deps_version := "0.2.0"
-cargo_ensure_no_default_features_version := "1.0.0"
+cargo_ensure_no_default_features_version := "1.1.0"
 cargo_hack_version := "0.6.41"
 cargo_heather_version := "0.2.1"
 cargo_llvm_cov_version := "0.8.4"
