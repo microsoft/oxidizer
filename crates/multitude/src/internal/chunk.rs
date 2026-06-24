@@ -3,13 +3,13 @@
 
 //! Reference-counted arena chunk.
 //!
-//! A chunk backs every allocation style: arena-lifetime references (`&mut T`,
-//! which register drop entries replayed at reset) and the escape-capable smart
-//! pointers (`Box` / `Arc`, which drop eagerly and take a per-handle chunk
-//! refcount). Refcounts and cache-list links are atomic so handles released
-//! from any thread can race the arena's own teardown, and the chunk holds a
-//! `Weak` provider back-pointer plus its own allocator clone so a smart pointer
-//! that outlives the arena can free the chunk itself.
+//! A chunk backs every allocation style: arena-lifetime references (the
+//! [`Alloc`](crate::Alloc) handles, which run their destructor eagerly) and the
+//! escape-capable smart pointers (`Box` / `Arc` / `Rc`, which also drop eagerly and
+//! take a per-handle chunk refcount). Refcounts and cache-list links are atomic
+//! so handles released from any thread can race the arena's own teardown, and
+//! the chunk holds a `Weak` provider back-pointer plus its own allocator clone
+//! so a smart pointer that outlives the arena can free the chunk itself.
 
 // Raw-memory methods are `unsafe fn` with item-level safety contracts; inner
 // unsafe blocks would not add a boundary here.
@@ -22,14 +22,13 @@ use core::mem;
 use core::ptr::{self, NonNull};
 #[cfg(feature = "stats")]
 use core::sync::atomic::AtomicU32;
-use core::sync::atomic::{AtomicPtr, AtomicU16, AtomicUsize, Ordering, fence};
+use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering, fence};
 
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::chunk_alloc::chunk_alloc_size;
 use super::chunk_provider::ChunkProvider;
 use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
-use super::drop_entry::replay_drops;
 
 /// A bump-allocation chunk whose allocations can outlive the arena.
 ///
@@ -46,13 +45,6 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     /// Intrusive cache-freelist / retired-list link. Atomic because releases
     /// can push from any thread; null when not linked.
     next: AtomicPtr<u8>,
-    /// Number of drop entries packed at the payload tail, published by the
-    /// owning `ChunkMutator` before the chunk is retired so teardown / reset
-    /// can replay them. Stays `0` for chunks that only ever hosted smart
-    /// pointers. Only written and replayed on the owning thread; a
-    /// cross-thread teardown (an escaped `Arc` dropped elsewhere) only ever
-    /// observes it after reset cleared it to `0`.
-    drop_entry_count: AtomicU16,
     /// Wasted tail recorded when a `ChunkMutator` retires this chunk; released
     /// by [`ChunkProvider::release`].
     ///
@@ -62,8 +54,7 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     wasted_at_retire: AtomicU32,
     /// Bump-payload tail. `[UnsafeCell<u8>]` permits payload writes through
     /// chunk borrows and keeps fat-pointer provenance over the full
-    /// allocation. Bump allocations grow up from the front; drop entries
-    /// (for arena-lifetime references) grow down from the aligned tail.
+    /// allocation. Bump allocations grow up from the front.
     data: [UnsafeCell<u8>],
 }
 
@@ -94,15 +85,15 @@ impl<A: Allocator + Clone> Chunk<A> {
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) const fn header_size() -> usize {
         // Under `stats`, `wasted_at_retire` is the last fixed-size field;
-        // otherwise it's `drop_entry_count`. The `[UnsafeCell<u8>]` tail has
-        // align 1 and sits flush against whichever it is.
+        // otherwise it's `next`. The `[UnsafeCell<u8>]` tail has align 1 and
+        // sits flush against whichever it is.
         #[cfg(feature = "stats")]
         {
             mem::offset_of!(Self, wasted_at_retire) + mem::size_of::<AtomicU32>()
         }
         #[cfg(not(feature = "stats"))]
         {
-            mem::offset_of!(Self, drop_entry_count) + mem::size_of::<AtomicU16>()
+            mem::offset_of!(Self, next) + mem::size_of::<AtomicPtr<u8>>()
         }
     }
 
@@ -180,7 +171,6 @@ impl<A: Allocator + Clone> Chunk<A> {
             ptr::write(&raw mut (*fat).capacity, payload_size);
             ptr::write(&raw mut (*fat).ref_count, AtomicUsize::new(1));
             ptr::write(&raw mut (*fat).next, AtomicPtr::new(ptr::null_mut()));
-            ptr::write(&raw mut (*fat).drop_entry_count, AtomicU16::new(0));
             #[cfg(feature = "stats")]
             ptr::write(&raw mut (*fat).wasted_at_retire, AtomicU32::new(0));
             Ok(NonNull::new_unchecked(fat))
@@ -213,13 +203,6 @@ impl<A: Allocator + Clone> Chunk<A> {
         let header = Self::header_size();
         let header_ref = &*chunk.as_ptr();
         let capacity = header_ref.capacity;
-        // Replay any drop entries that were not already replayed (a
-        // standalone destroy of a chunk that still carries arena-reference
-        // drops); cached chunks reach here with the count already at 0.
-        let drop_count = header_ref.drop_entry_count();
-        if drop_count != 0 {
-            replay_drops(Self::payload_ptr(chunk).as_ptr(), capacity, drop_count);
-        }
         let allocator: A = ptr::read(&raw const (*chunk.as_ptr()).allocator);
         ptr::drop_in_place(&raw mut (*chunk.as_ptr()).provider);
         let layout = crate::internal::chunk_alloc::chunk_layout(header, capacity, Self::value_align(), Self::struct_align())
@@ -273,50 +256,10 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// chunk; the cache link is invalidated by this call.
     #[inline]
     pub(in crate::internal) unsafe fn reinit_for_acquire(chunk: NonNull<Self>) {
-        // SAFETY: caller owns the unique reference; the stores are safe to
+        // SAFETY: caller owns the unique reference; the store is safe to
         // issue unconditionally.
         let r = &*chunk.as_ptr();
         r.ref_count.store(1, Ordering::Relaxed);
-        r.drop_entry_count.store(0, Ordering::Relaxed);
-    }
-
-    /// Number of drop entries currently published in the chunk header.
-    #[inline]
-    fn drop_entry_count(&self) -> usize {
-        self.drop_entry_count.load(Ordering::Relaxed) as usize
-    }
-
-    /// Publishes the drop-entry count into the chunk header so teardown /
-    /// reset can replay them.
-    #[inline]
-    pub(in crate::internal) fn set_drop_entry_count(&self, count: usize) {
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "a 64KiB chunk holds at most 4096 drop entries (« u16::MAX); round-trip asserted below"
-        )]
-        let narrowed = count as u16;
-        debug_assert_eq!(usize::from(narrowed), count, "drop-entry count exceeds u16 range");
-        self.drop_entry_count.store(narrowed, Ordering::Relaxed);
-    }
-
-    /// Replays pending drop entries (arena-reference destructors) and clears
-    /// the count, so a later teardown does not run them again. Called on the
-    /// owning thread at reset / arena drop, before the chunk's own `+1` is
-    /// released — escaped `Arc`s may keep the chunk alive afterwards, but the
-    /// reference values are already dropped.
-    ///
-    /// # Safety
-    ///
-    /// Caller must hold a live reference to `chunk` and be the owning thread
-    /// (no concurrent bump / drop-entry registration).
-    #[inline]
-    pub(crate) unsafe fn replay_pending_drops(chunk: NonNull<Self>) {
-        let chunk_ref = &*chunk.as_ptr();
-        let drop_count = chunk_ref.drop_entry_count();
-        if drop_count != 0 {
-            replay_drops(Self::payload_ptr(chunk).as_ptr(), chunk_ref.capacity, drop_count);
-            chunk_ref.set_drop_entry_count(0);
-        }
     }
 
     /// Overwrites the refcount. Test-only seam so unit tests can drive
@@ -427,9 +370,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     /// Routes `chunk` (refcount zero) back to the provider cache, or
-    /// deallocates it if the provider is gone. Replays any drop entries not
-    /// already replayed (e.g. the no-escaped-handle case where the owning
-    /// mutator's release is also the last reference).
+    /// deallocates it if the provider is gone.
     ///
     /// # Safety
     ///
@@ -437,11 +378,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     #[cold]
     #[inline(never)]
     pub(crate) unsafe fn teardown_and_release(chunk: NonNull<Self>) {
-        // SAFETY: caller owns the unique remaining reference. Replay any
-        // pending drops (the reset path replays first, so the count is then
-        // 0 and this is a no-op) before recycling the payload, which the
-        // cache reuses for its next-link.
-        Self::replay_pending_drops(chunk);
+        // SAFETY: caller owns the unique remaining reference.
         let chunk_ref = &*chunk.as_ptr();
         // Chunks can outlive their provider, so release through `Weak`.
         if let Some(provider) = chunk_ref.provider.upgrade() {
@@ -485,15 +422,15 @@ mod tests {
     /// `header_size` is `offset_of!(<last field>) + size_of::<<last field>>()`.
     /// For `Chunk<Global>`, the header layout is fixed:
     /// 0 (allocator ZST) + 8 (provider `Weak`) + 8 (capacity) +
-    /// 8 (`ref_count`) + 8 (`next`) + 2 (`drop_entry_count`) = 34 bytes.
+    /// 8 (`ref_count`) + 8 (`next`) = 32 bytes.
     /// Under the `stats` feature an additional `wasted_at_retire: AtomicU32`
-    /// is appended (aligned to offset 36) for 40 bytes total.
+    /// is appended (at offset 32) for 36 bytes total.
     #[test]
     fn header_size_for_global_matches_layout() {
         #[cfg(not(feature = "stats"))]
-        assert_eq!(Chunk::<Global>::header_size(), 34);
+        assert_eq!(Chunk::<Global>::header_size(), 32);
         #[cfg(feature = "stats")]
-        assert_eq!(Chunk::<Global>::header_size(), 40);
+        assert_eq!(Chunk::<Global>::header_size(), 36);
     }
 
     /// `struct_align` returns the max of `align_of::<A>()`,
@@ -661,47 +598,5 @@ mod tests {
             Chunk::destroy(chunk);
             std::panic::resume_unwind(result.expect_err("pre_credit_refs must panic"));
         }
-    }
-
-    /// `destroy`'s defensive `drop_count != 0` branch: a chunk that reaches
-    /// `destroy` still carrying an un-replayed arena-reference drop entry must
-    /// replay it before the chunk is freed.
-    #[test]
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "payload is value_align(8)-aligned and top_off is entry-aligned, so the cast lands on an aligned DropEntry slot"
-    )]
-    fn destroy_replays_pending_drop_entries() {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-
-        use crate::internal::drop_entry::{DropEntry, DropFn};
-
-        static CALLS: AtomicUsize = AtomicUsize::new(0);
-        fn counting_shim(_p: *mut u8, _n: usize) {
-            CALLS.fetch_add(1, Ordering::Relaxed);
-        }
-        CALLS.store(0, Ordering::Relaxed);
-
-        // SAFETY: single-threaded test. We install one committed drop entry at
-        // the absolute-aligned payload end (where `replay_drops` looks for it),
-        // publish a count of 1, force the refcount to 0, then destroy — which
-        // must replay the entry exactly once.
-        unsafe {
-            let cap = 128usize;
-            let chunk = Chunk::<Global>::allocate(Global, Weak::new(), cap).expect("allocate chunk");
-            let payload = Chunk::<Global>::payload_ptr(chunk);
-            let entry_size = mem::size_of::<DropEntry>();
-            let entry_align = mem::align_of::<DropEntry>();
-            let payload_start = payload.as_ptr() as usize;
-            let aligned_end_off = ((payload_start + cap) & !(entry_align - 1)) - payload_start;
-            let top_off = aligned_end_off - entry_size;
-            let entry_ptr = payload.as_ptr().add(top_off).cast::<DropEntry>();
-            ptr::write(entry_ptr, DropEntry::placeholder(0, 1));
-            (*entry_ptr).commit_drop_fn(counting_shim as DropFn);
-            chunk.as_ref().set_drop_entry_count(1);
-            chunk.as_ref().set_ref_count_for_test(0);
-            Chunk::destroy(chunk);
-        }
-        assert_eq!(CALLS.load(Ordering::Relaxed), 1, "destroy must replay the pending drop entry");
     }
 }

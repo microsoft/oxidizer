@@ -49,7 +49,16 @@ unsafe impl Allocator for FailingAllocator {
             return Err(AllocError);
         }
         self.remaining.set(r - 1);
-        Global.allocate(layout)
+        // Only a *successful* `Global.allocate` counts against the budget; if
+        // the global allocator itself fails, give the claimed slot back so the
+        // "fails after the first `n` successes" contract stays accurate.
+        match Global.allocate(layout) {
+            Ok(p) => Ok(p),
+            Err(e) => {
+                self.remaining.set(r);
+                Err(e)
+            }
+        }
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
@@ -274,5 +283,56 @@ impl DropCounter {
 impl Drop for DropCounter {
     fn drop(&mut self) {
         self.0.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Thread-safe variant of [`FailingAllocator`]: fails its `allocate` calls
+/// after the first `n` successes, using an atomic counter so it is `Send +
+/// Sync` (required by `Arc`/cross-thread tests).
+#[derive(Clone)]
+pub(crate) struct SyncFailingAllocator {
+    remaining: std::sync::Arc<core::sync::atomic::AtomicUsize>,
+}
+
+impl SyncFailingAllocator {
+    pub(crate) fn new(allow_n_allocs: usize) -> Self {
+        Self {
+            remaining: std::sync::Arc::new(core::sync::atomic::AtomicUsize::new(allow_n_allocs)),
+        }
+    }
+}
+
+// SAFETY: forwards to Global on success; fails atomically on exhaustion.
+unsafe impl Allocator for SyncFailingAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        use core::sync::atomic::Ordering;
+        let mut cur = self.remaining.load(Ordering::Relaxed);
+        loop {
+            if cur == 0 {
+                return Err(AllocError);
+            }
+            match self
+                .remaining
+                .compare_exchange_weak(cur, cur - 1, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => break,
+                Err(actual) => cur = actual,
+            }
+        }
+        // Only a *successful* `Global.allocate` counts against the budget; if
+        // the global allocator itself fails, give the claimed slot back so the
+        // "fails after the first `n` successes" contract stays accurate.
+        match Global.allocate(layout) {
+            Ok(p) => Ok(p),
+            Err(e) => {
+                self.remaining.fetch_add(1, Ordering::Relaxed);
+                Err(e)
+            }
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded per Allocator contract.
+        unsafe { Global.deallocate(ptr, layout) };
     }
 }

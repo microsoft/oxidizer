@@ -1,17 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Shared inherent methods and trait impls for the two thin
-//! smart-pointer types ([`Arc`](crate::Arc) and [`Box`](crate::Box)).
+//! Shared inherent methods and trait impls for the three thin
+//! smart-pointer types ([`Arc`](crate::Arc), [`Rc`](crate::Rc), and
+//! [`Box`](crate::Box)).
 //!
-//! Both types share an identical layout (`NonNull<u8>` thin pointer +
+//! All three share an identical layout (`NonNull<u8>` thin pointer +
 //! `PhantomData<(*const T, A)>`), an identical metadata-recovery
 //! helper ([`as_fat_ptr`](crate::internal::thin_dst::as_fat)), and
 //! identical forwarding trait impls (`Deref`, `AsRef`, `Borrow`,
 //! `Debug`, `Display`, ordering, hashing, `Pointer`, `Unpin`,
 //! [`Pin`] conversion). The macro below emits all of that for a given
 //! struct name; per-file blocks supply the items that legitimately
-//! differ (`Send`/`Sync` bounds, `Drop`, `Clone` for `Arc`, mutable
+//! differ (`Send`/`Sync` bounds, `Drop`, `Clone` for `Arc`/`Rc`, mutable
 //! accessors for `Box`, iterator forwarding for `Box`, etc.).
 
 /// Emit shared inherent methods + read-only trait impls for a thin
@@ -48,9 +49,10 @@ macro_rules! impl_thin_smart_ptr_common {
             #[must_use]
             #[inline]
             pub fn into_pin(this: Self) -> core::pin::Pin<Self> {
-                // SAFETY: see the doc comment above; the address of the
-                // pinned value never changes while `this` is alive, and
-                // is finalized through the normal `Drop` path.
+                // SAFETY: the value's address is fixed at allocation time and the
+                // smart pointer keeps the storage alive at that same address
+                // through `Drop`, where the value is finalized — exactly `Pin`'s
+                // contract, so pinning is sound for any `T` (including `!Unpin`).
                 unsafe { core::pin::Pin::new_unchecked(this) }
             }
         }

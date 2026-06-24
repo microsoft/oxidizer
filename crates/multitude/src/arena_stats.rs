@@ -44,7 +44,7 @@ pub struct ArenaStats {
 
     /// Bytes "wasted" as unused tail space across the arena's chunks.
     ///
-    /// The free region between the bump cursor and the drop-entry top, summed
+    /// The free region between the bump cursor and the payload end, summed
     /// across every chunk the arena currently holds — both the active
     /// `current` chunk and any chunks that have been retired but not yet
     /// returned to the cache or freed back to the underlying allocator (e.g.

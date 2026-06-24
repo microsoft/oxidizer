@@ -13,7 +13,7 @@ use allocator_api2::alloc::{AllocError, Allocator, Global};
 use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
-use crate::{Arc, Arena, Box, FromIn};
+use crate::{Arc, Arena, Box, FromIn, Rc};
 
 /// A growable, mutable UTF-8 string that lives in an [`Arena`].
 ///
@@ -542,10 +542,46 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
         // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u8] → str`.
         let bytes = core::mem::ManuallyDrop::new(self.inner.try_into_arc_slice()?);
-        // SAFETY: see `try_into_boxed_str`; `Arc<[u8]>` / `Arc<str>` also
-        // share the strong-count + length prefix, so the strong count
-        // initialized by the freeze is exactly what `Arc<str>` expects.
+        // SAFETY: the bytes are valid UTF-8 (`String`'s invariant), and
+        // `Arc<[u8]>` / `Arc<str>` share the identical chunk layout (strong
+        // count + `usize` length prefix + payload). The strong count
+        // initialized to 1 by the freeze is exactly what `Arc<str>` expects,
+        // and the chunk `+1` transfers from `bytes` (kept from dropping) to the
+        // new `Arc<str>`; `thin_ptr` keeps chunk-wide provenance.
         Ok(unsafe { Arc::<str, A>::from_raw(bytes.thin_ptr()) })
+    }
+
+    /// Freeze into a non-atomic [`Rc<str, A>`](crate::Rc). [`Rc::from`] is the
+    /// trait form.
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails. Use [`Self::try_into_rc_str`]
+    /// for a fallible variant.
+    #[must_use]
+    pub fn into_rc_str(self) -> Rc<str, A> {
+        self.try_into_rc_str().expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::into_rc_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_rc_str(self) -> Result<Rc<str, A>, AllocError> {
+        // Freeze the backing `Vec<u8>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u8] → str`.
+        let bytes = core::mem::ManuallyDrop::new(self.inner.try_into_rc_slice()?);
+        // SAFETY: the bytes are valid UTF-8 (`String`'s invariant), and
+        // `Rc<[u8]>` / `Rc<str>` share the identical chunk layout (strong count
+        // + `usize` length prefix + payload). The strong count initialized to 1
+        // by the freeze reads back as the non-atomic `u32` 1 that `Rc<str>`
+        // expects, and the chunk `+1` transfers from `bytes` (kept from
+        // dropping) to the new `Rc<str>`; `thin_ptr` keeps chunk-wide provenance.
+        Ok(unsafe { Rc::<str, A>::from_raw(bytes.thin_ptr()) })
     }
 
     /// Consume the `String`, returning an arena-lifetime mutable string
@@ -624,7 +660,9 @@ impl<A: Allocator + Clone> DoubleEndedIterator for Drain<'_, '_, A> {
             n += 1;
             buf[4 - n] = b;
         }
-        // SAFETY: see `next`.
+        // SAFETY: `buf[4 - n..]` holds the `n` bytes of one complete UTF-8 code
+        // point reassembled from the leading byte plus its continuation bytes,
+        // drained from a buffer the `Drain` invariant guarantees is valid UTF-8.
         unsafe { str::from_utf8_unchecked(&buf[4 - n..]) }.chars().next()
     }
 }
@@ -646,6 +684,15 @@ impl<'a, A: Allocator + Clone + Send + Sync> From<String<'a, A>> for Arc<str, A>
     #[inline]
     fn from(s: String<'a, A>) -> Self {
         s.into_arc_str()
+    }
+}
+
+impl<'a, A: Allocator + Clone> From<String<'a, A>> for Rc<str, A> {
+    /// Freeze a [`String`] into a non-atomic [`Rc<str, A>`](crate::Rc).
+    /// Mirrors `std`'s `From<String> for Rc<str>`.
+    #[inline]
+    fn from(s: String<'a, A>) -> Self {
+        s.into_rc_str()
     }
 }
 

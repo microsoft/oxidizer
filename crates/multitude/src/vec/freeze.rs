@@ -19,6 +19,7 @@ use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::arena_buf::DrainAll;
 use crate::internal::constants::buffer_freezable;
+use crate::rc::Rc;
 
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Shared body of the `Box`/`Arc` freeze paths: drain every element
@@ -45,6 +46,61 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     fn can_freeze_in_place(&self) -> bool {
         let freezable = const { buffer_freezable::<T>() };
         freezable && self.buf.has_freeze_prefix()
+    }
+
+    /// Try the zero-copy in-place freeze into a [`Box<[T], A>`](crate::Box).
+    /// Returns `Err(self)` (so the caller can fall back to the drain path)
+    /// when the buffer was not reserved with the freeze prefix.
+    #[inline]
+    fn try_freeze_in_place_box(self) -> Result<Box<[T], A>, Self> {
+        if !self.can_freeze_in_place() {
+            return Err(self);
+        }
+        // SAFETY: `can_freeze_in_place` just returned true, satisfying
+        // `freeze_in_place_ptr`'s precondition. It writes the slice length into
+        // the reserved metadata word and returns a thin payload pointer that
+        // already owns one fresh chunk `+1` — exactly the length metadata and
+        // ownership `Box::from_raw` requires to reconstruct an owning `Box<[T]>`.
+        Ok(unsafe { Box::from_raw(self.freeze_in_place_ptr()) })
+    }
+
+    /// Try the zero-copy in-place freeze into an [`Arc<[T], A>`](crate::Arc).
+    /// Returns `Err(self)` (so the caller can fall back to the drain path)
+    /// when the buffer was not reserved with the freeze prefix.
+    #[inline]
+    fn try_freeze_in_place_arc(self) -> Result<Arc<[T], A>, Self>
+    where
+        T: Send + Sync,
+        A: Send + Sync,
+    {
+        if !self.can_freeze_in_place() {
+            return Err(self);
+        }
+        // SAFETY: `can_freeze_in_place` just returned true, satisfying
+        // `freeze_in_place_ptr`'s precondition. It writes the slice length into
+        // the reserved metadata word and returns a thin payload pointer that
+        // already owns one fresh chunk `+1`. The freeze prefix's strong count
+        // was initialized to 1 at reservation, so `Arc::from_raw` reconstructs
+        // a singly-owned `Arc<[T]>` with the correct length metadata.
+        Ok(unsafe { Arc::from_raw(self.freeze_in_place_ptr()) })
+    }
+
+    /// Try the zero-copy in-place freeze into an [`Rc<[T], A>`](crate::Rc).
+    /// Returns `Err(self)` (so the caller can fall back to the drain path)
+    /// when the buffer was not reserved with the freeze prefix.
+    #[inline]
+    fn try_freeze_in_place_rc(self) -> Result<Rc<[T], A>, Self> {
+        if !self.can_freeze_in_place() {
+            return Err(self);
+        }
+        // SAFETY: `can_freeze_in_place` just returned true, satisfying
+        // `freeze_in_place_ptr`'s precondition. It writes the slice length into
+        // the reserved metadata word and returns a thin payload pointer that
+        // already owns one fresh chunk `+1`. The freeze prefix's strong count
+        // was initialized to 1 at reservation; its bit pattern reads back as the
+        // non-atomic `u32` 1 that `Rc::from_raw` expects, reconstructing a
+        // singly-owned `Rc<[T]>` with the correct length metadata.
+        Ok(unsafe { Rc::from_raw(self.freeze_in_place_ptr()) })
     }
 
     /// Zero-copy freeze core. Acquires one chunk refcount for the new
@@ -97,18 +153,10 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Panics if the fallback path's underlying allocator fails.
     #[must_use]
     pub fn into_boxed_slice(self) -> Box<[T], A> {
-        if self.can_freeze_in_place() {
-            // SAFETY: `can_freeze_in_place` holds; `freeze_in_place_ptr`
-            // returns a thin payload pointer with the length metadata written
-            // and a fresh chunk +1 adopted by the `Box`.
-            let payload = unsafe { self.freeze_in_place_ptr() };
-            // SAFETY: `freeze_in_place_ptr` returned a thin payload pointer with
-            // the slice length written at `payload - size_of::<usize>()` and a
-            // fresh chunk `+1` already adopted for the `Box` — `Box::from_raw`'s
-            // contract.
-            return unsafe { Box::from_raw(payload) };
+        match self.try_freeze_in_place_box() {
+            Ok(b) => b,
+            Err(me) => me.drain_freeze(Arena::alloc_slice_fill_iter_box::<T, _>),
         }
-        self.drain_freeze(Arena::alloc_slice_fill_iter_box::<T, _>)
     }
 
     /// Fallible variant of [`Self::into_boxed_slice`].
@@ -122,14 +170,10 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// fails. On error, `self` is consumed and any elements remaining
     /// after a partial move are dropped before this function returns.
     pub fn try_into_boxed_slice(self) -> Result<Box<[T], A>, AllocError> {
-        if self.can_freeze_in_place() {
-            // SAFETY: see `into_boxed_slice`.
-            let payload = unsafe { self.freeze_in_place_ptr() };
-            // SAFETY: see `into_boxed_slice` — `payload` carries the written
-            // length metadata and an adopted chunk `+1`.
-            return Ok(unsafe { Box::from_raw(payload) });
+        match self.try_freeze_in_place_box() {
+            Ok(b) => Ok(b),
+            Err(me) => me.drain_freeze(Arena::try_alloc_slice_fill_iter_box::<T, _>),
         }
-        self.drain_freeze(Arena::try_alloc_slice_fill_iter_box::<T, _>)
     }
 
     /// Fallible variant of the [`Arc<[T], A>`](crate::Arc) freeze
@@ -148,15 +192,26 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         T: Send + Sync,
         A: Send + Sync,
     {
-        if self.can_freeze_in_place() {
-            // SAFETY: see `into_boxed_slice`; the strong count was initialized
-            // to 1 at reservation, matching the new `Arc` family.
-            let payload = unsafe { self.freeze_in_place_ptr() };
-            // SAFETY: `payload` carries the written length metadata and an
-            // adopted chunk `+1`; the strong count is 1 for the new `Arc`.
-            return Ok(unsafe { Arc::from_raw(payload) });
+        match self.try_freeze_in_place_arc() {
+            Ok(a) => Ok(a),
+            Err(me) => me.drain_freeze(Arena::try_alloc_slice_fill_iter_arc::<T, _>),
         }
-        self.drain_freeze(Arena::try_alloc_slice_fill_iter_arc::<T, _>)
+    }
+
+    /// Fallible variant of the [`Rc<[T], A>`](crate::Rc) freeze ([`Rc::from`]).
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocation fails. On error, `self`
+    /// is consumed and any elements remaining after a partial move are dropped.
+    pub fn try_into_rc_slice(self) -> Result<Rc<[T], A>, AllocError> {
+        match self.try_freeze_in_place_rc() {
+            Ok(r) => Ok(r),
+            Err(me) => me.drain_freeze(Arena::try_alloc_slice_fill_iter_rc::<T, _>),
+        }
     }
 
     /// Consume the `Vec`, returning an arena-lifetime mutable slice
@@ -185,7 +240,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // SAFETY: `ptr` addresses `len` initialized `T`s in an arena chunk
         // that outlives `'a`. `ManuallyDrop` prevents dropping the buffer or
         // elements here; `T: !Drop` (const-asserted above) lets arena teardown
-        // reclaim the raw chunk storage without a drop entry.
+        // reclaim the raw chunk storage directly.
         unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 
@@ -205,12 +260,26 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         T: Send + Sync,
         A: Send + Sync,
     {
-        if self.can_freeze_in_place() {
-            // SAFETY: see `try_into_arc_slice`.
-            let payload = unsafe { self.freeze_in_place_ptr() };
-            // SAFETY: see `try_into_arc_slice`.
-            return unsafe { Arc::from_raw(payload) };
+        match self.try_freeze_in_place_arc() {
+            Ok(a) => a,
+            Err(me) => me.drain_freeze(Arena::alloc_slice_fill_iter_arc::<T, _>),
         }
-        self.drain_freeze(Arena::alloc_slice_fill_iter_arc::<T, _>)
+    }
+
+    /// Freeze into an [`Rc<[T], A>`](crate::Rc). [`Rc::from`] is the trait form.
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails. Use [`Self::try_into_rc_slice`]
+    /// for a fallible variant.
+    #[must_use]
+    pub fn into_rc_slice(self) -> Rc<[T], A> {
+        match self.try_freeze_in_place_rc() {
+            Ok(r) => r,
+            Err(me) => me.drain_freeze(Arena::alloc_slice_fill_iter_rc::<T, _>),
+        }
     }
 }

@@ -16,7 +16,7 @@ use widestring::Utf16Str;
 use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
-use crate::{Arc, Arena, Box, FromIn};
+use crate::{Arc, Arena, Box, FromIn, Rc};
 
 /// A growable, mutable UTF-16 string that lives in an [`Arena`].
 ///
@@ -550,10 +550,48 @@ impl<'a, A: Allocator + Clone> Utf16String<'a, A> {
         // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
         // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
         let units = ManuallyDrop::new(self.inner.try_into_arc_slice()?);
-        // SAFETY: see `try_into_boxed_utf16_str`; `Arc<Utf16Str>` / `Arc<[u16]>`
-        // also share the strong-count + length prefix, so the strong count
-        // initialized by the freeze is exactly what `Arc<Utf16Str>` expects.
+        // SAFETY: the units are well-formed UTF-16 (`Utf16String`'s invariant),
+        // and `Arc<Utf16Str>` / `Arc<[u16]>` share the identical chunk layout
+        // (strong count + length prefix + `u16` payload). The strong count
+        // initialized to 1 by the freeze is exactly what `Arc<Utf16Str>`
+        // expects, and the chunk `+1` transfers from `units` (kept from
+        // dropping) to the new `Arc<Utf16Str>`; `thin_ptr` keeps chunk-wide
+        // provenance and the payload is `u16`-aligned.
         Ok(unsafe { Arc::<crate::strings::Utf16Str, A>::from_raw(units.thin_ptr()) })
+    }
+
+    /// Freeze into a non-atomic `Rc<Utf16Str>`. [`Rc::from`](crate::Rc) is the
+    /// trait form.
+    ///
+    /// Generally **O(1)** (reuses the existing storage with no copy), except in
+    /// rare edge cases where it falls back to an **O(n)** element move.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails. Use
+    /// [`Self::try_into_rc_utf16_str`] for a fallible variant.
+    #[must_use]
+    pub fn into_rc_utf16_str(self) -> Rc<crate::strings::Utf16Str, A> {
+        self.try_into_rc_utf16_str().expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::into_rc_utf16_str`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the underlying allocator fails.
+    pub fn try_into_rc_utf16_str(self) -> Result<Rc<crate::strings::Utf16Str, A>, AllocError> {
+        // Freeze the backing `Vec<u16>` (zero-copy when it carries the freeze
+        // prefix, else an O(n) move), then retag `[u16] → Utf16Str`.
+        let units = ManuallyDrop::new(self.inner.try_into_rc_slice()?);
+        // SAFETY: the units are well-formed UTF-16 (`Utf16String`'s invariant),
+        // and `Rc<Utf16Str>` / `Rc<[u16]>` share the identical chunk layout
+        // (strong count + length prefix + `u16` payload). The strong count
+        // initialized to 1 by the freeze reads back as the non-atomic `u32` 1
+        // that `Rc<Utf16Str>` expects, and the chunk `+1` transfers from `units`
+        // (kept from dropping) to the new `Rc<Utf16Str>`; `thin_ptr` keeps
+        // chunk-wide provenance and the payload is `u16`-aligned.
+        Ok(unsafe { Rc::<crate::strings::Utf16Str, A>::from_raw(units.thin_ptr()) })
     }
 
     /// Remove the `char`s in the `u16` index range `range`, returning a
@@ -667,6 +705,14 @@ impl<'a, A: Allocator + Clone + Send + Sync> From<Utf16String<'a, A>> for Arc<cr
     #[inline]
     fn from(s: Utf16String<'a, A>) -> Self {
         s.into_arc_utf16_str()
+    }
+}
+
+impl<'a, A: Allocator + Clone> From<Utf16String<'a, A>> for Rc<crate::strings::Utf16Str, A> {
+    /// Freeze a [`Utf16String`] into a non-atomic `Rc<Utf16Str>`.
+    #[inline]
+    fn from(s: Utf16String<'a, A>) -> Self {
+        s.into_rc_utf16_str()
     }
 }
 

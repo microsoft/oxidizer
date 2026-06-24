@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.4.1"
+version = "0.5.0"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -77,6 +77,7 @@ bolero = { workspace = true, features = ["std"] }
 # but does not itself activate that feature on `bolero-engine`.
 bumpalo = { workspace = true, features = ["collections"] }
 criterion = { workspace = true }
+mimalloc = { workspace = true }
 mutants = { workspace = true }
 serde_json = { workspace = true }
 
@@ -104,6 +105,14 @@ harness = false
 name = "criterion_arc_array"
 harness = false
 
+[[bench]]
+name = "criterion_rc_array"
+harness = false
+
+[[bench]]
+name = "criterion_arena_vs_allocator"
+harness = false
+
 # Callgrind benches require Linux (Valgrind). The bench files are gated to compile
 # to a no-op on non-Linux targets, but the [[bench]] entry itself cannot be
 # cfg-gated, so it is unconditional here.
@@ -117,6 +126,10 @@ harness = false
 
 [[bench]]
 name = "gungraun_arc_array"
+harness = false
+
+[[bench]]
+name = "gungraun_rc_array"
 harness = false
 
 [[example]]

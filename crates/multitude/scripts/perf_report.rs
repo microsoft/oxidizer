@@ -102,6 +102,10 @@ const GROUPS: &[Group] = &[
             ("alloc_arc_with", Some("alloc_arc_with")),
             ("alloc_uninit_arc", Some("alloc_uninit_arc")),
             ("alloc_zeroed_arc", Some("alloc_zeroed_arc")),
+            ("alloc_rc", Some("alloc_rc")),
+            ("alloc_rc_with", Some("alloc_rc_with")),
+            ("alloc_uninit_rc", Some("alloc_uninit_rc")),
+            ("alloc_zeroed_rc", Some("alloc_zeroed_rc")),
             ("bumpalo_alloc", Some("bumpalo_alloc")),
             ("bumpalo_alloc_with", Some("bumpalo_alloc_with")),
         ],
@@ -112,6 +116,7 @@ const GROUPS: &[Group] = &[
             ("alloc_str", Some("alloc_str")),
             ("alloc_str_box", Some("alloc_str_box")),
             ("alloc_str_arc", Some("alloc_str_arc")),
+            ("alloc_str_rc", Some("alloc_str_rc")),
             ("bumpalo_alloc_str", Some("bumpalo_alloc_str")),
         ],
     ),
@@ -134,6 +139,12 @@ const GROUPS: &[Group] = &[
             ("alloc_slice_fill_iter_arc", Some("alloc_slice_fill_iter_arc")),
             ("alloc_uninit_slice_arc", Some("alloc_uninit_slice_arc")),
             ("alloc_zeroed_slice_arc", Some("alloc_zeroed_slice_arc")),
+            ("alloc_slice_copy_rc", Some("alloc_slice_copy_rc")),
+            ("alloc_slice_clone_rc", Some("alloc_slice_clone_rc")),
+            ("alloc_slice_fill_with_rc", Some("alloc_slice_fill_with_rc")),
+            ("alloc_slice_fill_iter_rc", Some("alloc_slice_fill_iter_rc")),
+            ("alloc_uninit_slice_rc", Some("alloc_uninit_slice_rc")),
+            ("alloc_zeroed_slice_rc", Some("alloc_zeroed_slice_rc")),
             ("bumpalo_alloc_slice_copy", Some("bumpalo_alloc_slice_copy")),
             ("bumpalo_alloc_slice_clone", Some("bumpalo_alloc_slice_clone")),
             ("bumpalo_alloc_slice_fill_with", Some("bumpalo_alloc_slice_fill_with")),
@@ -157,6 +168,13 @@ const GROUPS: &[Group] = &[
             ("bumpalo_vec_new_in", Some("bumpalo_vec_new_in")),
             ("bumpalo_vec_with_capacity_in", Some("bumpalo_vec_with_capacity_in")),
         ],
+    ),
+    // Criterion-only whole-lifecycle comparison (allocate a mixed working set,
+    // then release it): `multitude` arena (bulk reset) vs the system allocator.
+    // No gungraun counterpart, so the instruction-count columns show "—".
+    (
+        "arena_vs_allocator",
+        &[("arena", None), ("system", None)],
     ),
     (
         "drop",
@@ -411,6 +429,12 @@ fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEnt
          criterion wall-clock timings.\n",
     );
     out.push_str(
+        "- `cargo bench --bench criterion_arena_vs_allocator` — criterion \
+         wall-clock timing of allocating a mixed working set and then releasing \
+         it, comparing the arena (bulk reset) against the system allocator \
+         (mimalloc, per-object free).\n",
+    );
+    out.push_str(
         "- `cargo bench --bench gungraun_alloc` and `gungraun_drop` — \
          Callgrind instruction-precise counts.\n\n",
     );
@@ -602,6 +626,12 @@ fn run(args: &Args) -> Result<(), AppError> {
         &crit_args,
         &format!("criterion_drop: {samples} samples, {meas}s measurement"),
     )?;
+    let crit_ava_log = run_bench(
+        &crate_dir,
+        "criterion_arena_vs_allocator",
+        &crit_args,
+        &format!("criterion_arena_vs_allocator: {samples} samples, {meas}s measurement"),
+    )?;
     let (gung_alloc_log, gung_drop_log) = if run_gungraun {
         (
             run_bench(&crate_dir, "gungraun_alloc", &[], "gungraun_alloc")?,
@@ -613,9 +643,11 @@ fn run(args: &Args) -> Result<(), AppError> {
 
     println!("==> Building docs/PERF.md");
 
+    // `arena_vs_allocator` is criterion-only and lives in its own bench binary,
+    // so it is excluded from the alloc-log keys and parsed from its own log.
     let alloc_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| *g != "drop")
+        .filter(|(g, _)| *g != "drop" && *g != "arena_vs_allocator")
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let drop_keys: Vec<(&str, &str)> = GROUPS
@@ -623,9 +655,15 @@ fn run(args: &Args) -> Result<(), AppError> {
         .filter(|(g, _)| *g == "drop")
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
+    let ava_keys: Vec<(&str, &str)> = GROUPS
+        .iter()
+        .filter(|(g, _)| *g == "arena_vs_allocator")
+        .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
+        .collect();
 
     let mut crit = parse_criterion(&crit_alloc_log, &alloc_keys);
     crit.extend(parse_criterion(&crit_drop_log, &drop_keys));
+    crit.extend(parse_criterion(&crit_ava_log, &ava_keys));
     let g_alloc = parse_gungraun(&gung_alloc_log, "gungraun_alloc");
     let g_drop = parse_gungraun(&gung_drop_log, "gungraun_drop");
 

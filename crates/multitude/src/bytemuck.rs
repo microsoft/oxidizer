@@ -47,16 +47,16 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
         Self { arena }
     }
 
-    /// Allocate a zero-initialized `T` and return a mutable reference into the arena.
+    /// Allocate a zero-initialized `T` and return an owning [`Alloc<T>`](crate::Alloc) into the arena.
     ///
-    /// The returned reference's lifetime is tied to the arena.
+    /// The returned handle's lifetime is tied to the arena.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater (which exceeds the arena chunk alignment).
     #[must_use]
     #[inline]
-    pub fn alloc<T: Zeroable + Send>(&self) -> &'a mut T {
+    pub fn alloc<T: Zeroable>(&self) -> crate::Alloc<'a, T> {
         self.arena
             .try_alloc_with::<T, _>(T::zeroed)
             .expect("bytemuck: arena allocation failed")
@@ -69,18 +69,18 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc<T: Zeroable + Send>(&self) -> Result<&'a mut T, AllocError> {
+    pub fn try_alloc<T: Zeroable>(&self) -> Result<crate::Alloc<'a, T>, AllocError> {
         self.arena.try_alloc_with::<T, _>(T::zeroed)
     }
 
-    /// Allocate a zero-initialized slice of `T` and return a mutable slice into the arena.
+    /// Allocate a zero-initialized slice of `T` and return an owning [`Alloc<[T]>`](crate::Alloc) into the arena.
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `T` requires alignment of 64 KiB or greater.
     #[must_use]
     #[inline]
-    pub fn alloc_slice<T: Zeroable + Send>(&self, len: usize) -> &'a mut [T] {
+    pub fn alloc_slice<T: Zeroable>(&self, len: usize) -> crate::Alloc<'a, [T]> {
         self.arena
             .try_alloc_slice_fill_with(len, |_| T::zeroed())
             .expect("bytemuck: arena allocation failed")
@@ -93,7 +93,7 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
     #[inline]
-    pub fn try_alloc_slice<T: Zeroable + Send>(&self, len: usize) -> Result<&'a mut [T], AllocError> {
+    pub fn try_alloc_slice<T: Zeroable>(&self, len: usize) -> Result<crate::Alloc<'a, [T]>, AllocError> {
         self.arena.try_alloc_slice_fill_with(len, |_| T::zeroed())
     }
 
@@ -179,6 +179,52 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
         A: Send + Sync,
     {
         self.arena.try_alloc_slice_fill_with_arc::<T, _>(len, |_| T::zeroed())
+    }
+
+    /// Allocate a zero-initialized `T` and return an [`Rc<T, A>`](crate::Rc).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `T` requires alignment of 32 KiB or greater.
+    #[must_use]
+    #[inline]
+    pub fn alloc_rc<T: Zeroable>(&self) -> crate::Rc<T, A> {
+        self.arena
+            .try_alloc_rc_with::<T, _>(T::zeroed)
+            .expect("bytemuck: arena allocation failed")
+    }
+
+    /// Fallible variant of [`Self::alloc_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment greater or equal to 32 KiB.
+    #[inline]
+    pub fn try_alloc_rc<T: Zeroable>(&self) -> Result<crate::Rc<T, A>, AllocError> {
+        self.arena.try_alloc_rc_with::<T, _>(T::zeroed)
+    }
+
+    /// Allocate a zero-initialized slice of `T` and return an [`Rc<[T], A>`](crate::Rc).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `T` requires alignment of 32 KiB or greater.
+    #[must_use]
+    #[inline]
+    pub fn alloc_slice_rc<T: Zeroable>(&self, len: usize) -> crate::Rc<[T], A> {
+        self.arena
+            .try_alloc_slice_fill_with_rc::<T, _>(len, |_| T::zeroed())
+            .expect("bytemuck: arena allocation failed")
+    }
+
+    /// Fallible variant of [`Self::alloc_slice_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment greater or equal to 32 KiB.
+    #[inline]
+    pub fn try_alloc_slice_rc<T: Zeroable>(&self, len: usize) -> Result<crate::Rc<[T], A>, AllocError> {
+        self.arena.try_alloc_slice_fill_with_rc::<T, _>(len, |_| T::zeroed())
     }
 
     /// Allocate a zero-initialized slice of `T` and return a [`Box<[T], A>`](crate::Box).

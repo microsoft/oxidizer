@@ -31,22 +31,11 @@ const MAX_STRONG_REFCOUNT: u32 = u32::MAX >> 1;
 /// Safe to share across threads when `T: Send + Sync`.
 ///
 /// Created via [`Arena::alloc_arc`](crate::Arena::alloc_arc). Cloning is
-/// **O(1)** and uses a single Relaxed atomic increment of the `Arc`'s
-/// own strong count (matching `std::sync::Arc`). Dropping a clone is one
-/// Release decrement plus, on the final dec to zero, an Acquire fence,
-/// the value's destructor (`T::drop`), and the release of the chunk
-/// reference.
-///
-/// Each `Arc` carries its own strong reference count — an
-/// [`AtomicU32`](core::sync::atomic::AtomicU32) stored in the chunk's
-/// payload immediately before the value. The allocation also holds
-/// **one** refcount on its containing chunk for the whole `Arc` family
-/// (all clones share it); that chunk reference is released only when the
-/// last `Arc` drops. This keeps the value alive across
-/// [`Arena::reset`](crate::Arena::reset) and lets the `Arc` outlive the
-/// arena, while running `T::drop` eagerly on the last drop — so nested
-/// `Arc`s (e.g. `Arc<[Arc<T>]>`) release their storage promptly instead
-/// of deferring to chunk teardown.
+/// **O(1)** (an atomic reference-count bump, like `std::sync::Arc`). The
+/// allocation stays alive across [`Arena::reset`](crate::Arena::reset) and can
+/// outlive the arena; `T`'s destructor runs eagerly when the last `Arc` clone
+/// is dropped, so nested arena `Arc`s (e.g. `Arc<[Arc<T>]>`) release their
+/// storage promptly.
 ///
 /// # Pinning
 ///
@@ -172,9 +161,10 @@ impl<T, A: Allocator + Clone> Arc<MaybeUninit<T>, A> {
     where
         A: 'static,
     {
-        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
-        // value's address is unchanged across this cast, and the
-        // caller asserts the contents are a valid `T`.
+        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
+        // re-pin the result, and the value's address is unchanged across the
+        // cast (nothing moves). The caller's `assume_init` contract (the
+        // `MaybeUninit<T>` holds a valid `T`) is forwarded unchanged.
         unsafe {
             let inner: Self = Pin::into_inner_unchecked(this);
             Arc::into_pin(inner.assume_init())
@@ -219,9 +209,10 @@ impl<T, A: Allocator + Clone> Arc<[MaybeUninit<T>], A> {
     where
         A: 'static,
     {
-        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
-        // value's address is unchanged across this cast, and the
-        // caller asserts every element is a valid `T`.
+        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
+        // re-pin the result, and the elements' addresses are unchanged across
+        // the cast (nothing moves). The caller's slice `assume_init` contract
+        // (every element is a valid `T`) is forwarded unchanged.
         unsafe {
             let inner: Self = Pin::into_inner_unchecked(this);
             Arc::into_pin(inner.assume_init())
