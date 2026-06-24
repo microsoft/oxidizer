@@ -71,9 +71,12 @@
 # for consistent semantics of the array-splat splice and the modern
 # operators used across these recipes.
 #
-# Single-command recipes (cargo deny check, cargo audit) are plain
-# just recipes that inherit the adopter's default shell — they're
-# shell-agnostic.
+# Every recipe that runs a command is annotated with [script("pwsh")],
+# including single-command ones (cargo deny check, cargo audit). They do
+# NOT inherit the adopter's default shell: just defaults to `sh`, which is
+# absent on Windows and varies across environments, so relying on it makes
+# these recipes non-portable. Routing every command through pwsh keeps
+# behavior identical on every platform.
 #
 # Note: [script(...)] requires `set unstable`. The adopter's root
 # justfile must declare it (typically as a top-level line). anvil's
@@ -318,13 +321,20 @@ anvil-pr-title: anvil-pr-title-validate-prereqs
     }
 
 # Unscoped (consults external advisory DB; reads Cargo.lock, not
-# workspace members). Single command — inherits adopter's default shell.
+# workspace members). Single command, but run under pwsh so it does not
+# depend on the adopter's default shell (absent/varying on Windows).
+[script("pwsh")]
 anvil-deny: anvil-deny-validate-prereqs
-    cargo deny check
+    $ErrorActionPreference = 'Stop'
+    & cargo deny check
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Unscoped (consults external advisory DB; reads Cargo.lock).
+[script("pwsh")]
 anvil-audit: anvil-audit-validate-prereqs
-    cargo audit
+    $ErrorActionPreference = 'Stop'
+    & cargo audit
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Required tier. cargo-udeps detects unused dependencies by resolving
 # the full crate graph and seeing which deps are referenced; that's
@@ -902,8 +912,11 @@ anvil-bolero: anvil-bolero-validate-prereqs
 
 # Unscoped. Scheduled-exhaustive deliberately runs over the whole
 # workspace regardless of diff.
+[script("pwsh")]
 anvil-mutants-full: anvil-mutants-full-validate-prereqs
-    cargo mutants --workspace --no-shuffle --jobs 0
+    $ErrorActionPreference = 'Stop'
+    & cargo mutants --workspace --no-shuffle --jobs 0
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Required tier. cargo-hack's feature powerset cascades through dep
 # features, so the required set (workspace-internal transitive deps)
