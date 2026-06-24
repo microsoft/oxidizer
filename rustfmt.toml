@@ -1,8 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-max_width = 140
-
 # >>> anvil-managed: anvil-rustfmt
 edition = "2024"
 max_width = 140
