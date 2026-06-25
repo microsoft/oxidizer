@@ -31,14 +31,18 @@ impl BytesBuf {
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
     pub fn put_slice(&mut self, src: impl Borrow<[u8]>) {
-        self.put_small(src.borrow());
+        let src = src.borrow();
+        if !self.put_small(src) {
+            self.put_slice_looped(src);
+        }
     }
 
     /// Writes a slice that may span multiple capacity slices, copying one slice at a time.
     ///
-    /// This is the general fallback for [`put_small()`]; callers that may fit within a single
-    /// unfilled slice should go through `put_small` to take its fused fast path.
+    /// This is the general path used by [`put_slice()`] when [`put_small()`] declines a write that
+    /// does not fit within the first unfilled slice.
     ///
+    /// [`put_slice()`]: Self::put_slice
     /// [`put_small()`]: Self::put_small
     ///
     /// # Panics
@@ -206,7 +210,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_le<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_le_bytes();
-        self.put_small(bytes.borrow());
+        self.put_slice(bytes.borrow());
     }
 
     /// Appends a number of type `T` in big-endian representation to the buffer.
@@ -233,7 +237,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_be<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_be_bytes();
-        self.put_small(bytes.borrow());
+        self.put_slice(bytes.borrow());
     }
 
     /// Appends a number of type `T` in native-endian representation to the buffer.
@@ -261,7 +265,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_ne<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_ne_bytes();
-        self.put_small(bytes.borrow());
+        self.put_slice(bytes.borrow());
     }
 }
 

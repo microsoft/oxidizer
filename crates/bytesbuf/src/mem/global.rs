@@ -194,7 +194,6 @@ fn allocate_uniform<const SIZE: usize>(
     // from that block skips the iterator/collect/sum machinery the multi-block path requires.
     if block_count == 1 {
         let block = allocate_block(&mut pool, pool_arc, vtable);
-        drop(pool);
         return BytesBuf::from_block(block);
     }
 

@@ -296,17 +296,19 @@ impl BytesBuf {
         self.frozen_spans.extend(bytes.into_spans_reversed().into_iter().rev());
     }
 
-    /// Writes a small byte slice into the buffer, fusing the common case where it fits entirely
-    /// within the first unfilled slice of capacity into a single span-builder lookup.
+    /// Tries to write a small byte slice into the buffer by fusing the common case where it fits
+    /// entirely within the first unfilled slice of capacity into a single span-builder lookup.
     ///
-    /// Falls back to the general [`put_slice()`] path when the data straddles a capacity boundary.
+    /// Returns `true` when the fast path handled the write. Returns `false` without modifying the
+    /// buffer when the data does not fit in the first unfilled slice (or there is no builder yet),
+    /// in which case the caller must fall back to [`put_slice_looped()`].
     ///
-    /// [`put_slice()`]: Self::put_slice
+    /// [`put_slice_looped()`]: Self::put_slice_looped
     ///
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
-    pub(crate) fn put_small(&mut self, src: &[u8]) {
+    pub(crate) fn put_small(&mut self, src: &[u8]) -> bool {
         assert!(self.remaining_capacity() >= src.len());
 
         if let Some(builder) = self.span_builders_reversed.last_mut() {
@@ -341,12 +343,13 @@ impl BytesBuf {
                     self.freeze_from_first(len);
                 }
 
-                return;
+                return true;
             }
         }
 
-        // The value straddles a capacity boundary (or there is no builder yet); use the general path.
-        self.put_slice_looped(src);
+        // The value straddles a capacity boundary (or there is no builder yet); signal the caller
+        // to use the general path.
+        false
     }
 
     /// Peeks at the contents of the filled bytes region.
