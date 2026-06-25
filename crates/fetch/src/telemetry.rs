@@ -98,11 +98,11 @@ impl From<Metering> for Meter {
 
 /// Builds the `fetch` instrumentation scope carrying the `fetch.runtime` and
 /// `fetch.transport` attributes, attached to every metric a client records.
-pub(crate) fn client_scope(runtime: &str, transport: &str) -> InstrumentationScope {
+pub(crate) fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
         .with_attributes([
-            KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime.to_string()),
-            KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport.to_string()),
+            KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime),
+            KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport),
         ])
         .build()
 }

@@ -6,7 +6,7 @@
 
 //! Types for creating and manipulating byte sequences.
 //!
-//! <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/doc/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
+//! <img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/docs/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
 //!
 //! Types in this crate enable you to operate on logical sequences of bytes stored in memory,
 //! similar to a `&[u8]` but with some key differences:
