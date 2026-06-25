@@ -442,7 +442,12 @@ jobs:
   external-type-exposure:
     needs: [delta]
     if: needs.delta.outputs.skip != 'true'
-    runs-on: ubuntu-slim
+    # Runs `cargo check-external-types --all-features` sequentially over every
+    # workspace crate, which exceeds the 15-minute `ubuntu-slim` execution cap as
+    # the crate/dependency graph grows. Use a standard runner with an explicit
+    # timeout so the job has headroom.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       # prep
       - name: Checkout
