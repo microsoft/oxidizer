@@ -163,7 +163,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T>();
+        let size = size_of::<T::Bytes>();
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
@@ -199,14 +199,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T>();
+        let mut bytes_remaining = size_of::<T::Bytes>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
@@ -260,7 +260,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T>();
+        let size = size_of::<T::Bytes>();
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
@@ -296,14 +296,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T>();
+        let mut bytes_remaining = size_of::<T::Bytes>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
@@ -360,7 +360,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T>();
+        let size = size_of::<T::Bytes>();
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
@@ -396,14 +396,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T>();
+        let mut bytes_remaining = size_of::<T::Bytes>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
