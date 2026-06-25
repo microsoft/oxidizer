@@ -815,8 +815,9 @@ mod tests {
             let memory = TransparentMemory::new();
 
             // A single leading byte that we drop, leaving the eight value bytes at an odd offset
-            // from the allocation base. That address can never satisfy an eight-byte alignment, so
-            // the fast path reads from a guaranteed-misaligned pointer.
+            // from the allocation base. Whenever that base is itself eight-byte aligned (the
+            // common case for the global allocator), the value bytes are misaligned for an
+            // eight-byte read, so the fast path must not assume the source is aligned.
             let mut data = vec![0xFF_u8];
             data.extend_from_slice(&OVER_ALIGNED_VALUE.to_le_bytes());
             let mut view = BytesView::copied_from_slice(&data, &memory);
