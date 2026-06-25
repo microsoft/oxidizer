@@ -54,8 +54,8 @@ impl BytesView {
             }
         }
 
-        // Cannot underflow: we just confirmed the view covers at least one byte.
-        self.len = self.len.wrapping_sub(1);
+        // The view covered at least one byte, which we just removed from the front span.
+        self.shrink_len(1);
 
         byte
     }
@@ -192,8 +192,8 @@ impl BytesView {
             }
         }
 
-        // Cannot underflow: the caller verified the view covers at least `size` bytes.
-        self.len = self.len.wrapping_sub(size);
+        // The caller verified the view covers at least `size` bytes, which we just removed.
+        self.shrink_len(size);
 
         Some(result)
     }

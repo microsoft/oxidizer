@@ -62,7 +62,7 @@ pub struct BytesView {
     pub(crate) spans_reversed: SmallVec<[Span; MAX_INLINE_SPANS]>,
 
     /// We cache the length so we do not have to recalculate it every time it is queried.
-    pub(crate) len: usize,
+    len: usize,
 }
 
 impl BytesView {
@@ -701,6 +701,17 @@ impl BytesView {
             // Will never overflow because we already handled the count < span_len case.
             count = count.wrapping_sub(span_len);
         }
+    }
+
+    /// Reduces the cached length after the caller has removed `amount` bytes from the front spans.
+    ///
+    /// This keeps the cached length consistent with `spans_reversed` for the fused consumption
+    /// fast paths, which pop or advance the front span directly and then record the removal here.
+    /// The caller must have already removed exactly `amount` bytes from the front of the view.
+    #[inline]
+    pub(crate) fn shrink_len(&mut self, amount: usize) {
+        // Cannot underflow: the caller removed `amount` bytes that the view was already covering.
+        self.len = self.len.wrapping_sub(amount);
     }
 
     /// Appends another view to the end of this one.
