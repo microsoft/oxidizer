@@ -22,11 +22,25 @@ loom FILTER="":
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
+    # Build a manifest-path → package-name map so we use the real Cargo
+    # package name for `-p` instead of the directory name (they can differ).
+    $metadata = cargo metadata --format-version=1 --no-deps --locked | ConvertFrom-Json
+    $packagesByManifest = @{}
+    foreach ($pkg in $metadata.packages) {
+        $norm = [System.IO.Path]::GetFullPath($pkg.manifest_path)
+        $packagesByManifest[$norm] = $pkg.name
+    }
+
     $crates = @()
     foreach ($dir in (Get-ChildItem crates -Directory -ErrorAction SilentlyContinue)) {
         $manifest = Join-Path $dir.FullName "Cargo.toml"
         if ((Test-Path $manifest) -and (Select-String -Path $manifest -Pattern "cfg\(loom\)" -Quiet)) {
-            $crates += $dir.Name
+            $norm = [System.IO.Path]::GetFullPath($manifest)
+            $pkgName = $packagesByManifest[$norm]
+            if (-not $pkgName) {
+                throw "Could not determine cargo package name for $manifest"
+            }
+            $crates += [pscustomobject]@{ Package = $pkgName; Dir = $dir.FullName }
         }
     }
 
@@ -35,7 +49,7 @@ loom FILTER="":
         return
     }
 
-    Write-Host "Loom-enabled crates: $($crates -join ', ')" -ForegroundColor Cyan
+    Write-Host "Loom-enabled crates: $($crates.Package -join ', ')" -ForegroundColor Cyan
 
     # `--release` makes Loom's exploration substantially faster: the
     # instrumented atomic primitives are themselves expensive in debug mode.
@@ -46,19 +60,19 @@ loom FILTER="":
     $env:RUSTFLAGS = if ($original_rustflags) { "$original_rustflags --cfg loom" } else { "--cfg loom" }
     try {
         foreach ($crate in $crates) {
-            $tests_dir = "crates/$crate/tests"
+            $tests_dir = Join-Path $crate.Dir "tests"
             $loom_files = @()
             if (Test-Path $tests_dir) {
                 $loom_files = Get-ChildItem -Path $tests_dir -Filter "loom_*.rs" -File -ErrorAction SilentlyContinue
             }
             if ($loom_files.Count -eq 0) {
-                Write-Host "`n=== $crate has cfg(loom) deps but no tests/loom_*.rs files; skipping ===" -ForegroundColor Yellow
+                Write-Host "`n=== $($crate.Package) has cfg(loom) deps but no tests/loom_*.rs files; skipping ===" -ForegroundColor Yellow
                 continue
             }
             foreach ($f in $loom_files) {
                 $name = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
-                Write-Host "`n=== Loom: $crate::$name ===" -ForegroundColor Cyan
-                cargo +$env:RUST_LATEST test --release -p $crate --test $name --locked -- --test-threads=1 {{ FILTER }}
+                Write-Host "`n=== Loom: $($crate.Package)::$name ===" -ForegroundColor Cyan
+                cargo +$env:RUST_LATEST test --release -p $crate.Package --test $name --locked -- --test-threads=1 {{ FILTER }}
             }
         }
     } finally {
@@ -93,15 +107,32 @@ bolero TIME="60s":
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
+    # Build a manifest-path → package-name map so we use the real Cargo
+    # package name for `-p` instead of the directory name (they can differ).
+    $metadata = cargo metadata --format-version=1 --no-deps --locked | ConvertFrom-Json
+    $packagesByManifest = @{}
+    foreach ($pkg in $metadata.packages) {
+        $norm = [System.IO.Path]::GetFullPath($pkg.manifest_path)
+        $packagesByManifest[$norm] = $pkg.name
+    }
+
     # Discover crates with bolero integration tests.
     $entries = @()
     foreach ($dir in (Get-ChildItem crates -Directory -ErrorAction SilentlyContinue)) {
         $tests_dir = Join-Path $dir.FullName "tests"
         if (-not (Test-Path $tests_dir)) { continue }
         $files = Get-ChildItem -Path $tests_dir -Filter "bolero_*.rs" -File -ErrorAction SilentlyContinue
+        if (-not $files) { continue }
+
+        $manifest = [System.IO.Path]::GetFullPath((Join-Path $dir.FullName "Cargo.toml"))
+        $pkgName = $packagesByManifest[$manifest]
+        if (-not $pkgName) {
+            throw "Could not determine cargo package name for $manifest"
+        }
+
         foreach ($f in $files) {
             $entries += [pscustomobject]@{
-                Crate = $dir.Name
+                Package = $pkgName
                 Harness = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
             }
         }
@@ -113,7 +144,7 @@ bolero TIME="60s":
     }
 
     Write-Host "Bolero harnesses:" -ForegroundColor Cyan
-    foreach ($e in $entries) { Write-Host "  $($e.Crate)::$($e.Harness)" }
+    foreach ($e in $entries) { Write-Host "  $($e.Package)::$($e.Harness)" }
 
     # libfuzzer requires nightly. On non-Linux hosts the engine is unavailable,
     # so we fall back to running the tests as ordinary `cargo test` invocations
@@ -123,15 +154,15 @@ bolero TIME="60s":
     if (-not $is_linux) {
         Write-Host "`nNon-Linux host: running bolero harnesses as plain tests (libfuzzer unavailable)." -ForegroundColor Yellow
         foreach ($e in $entries) {
-            Write-Host "`n=== bolero (plain): $($e.Crate)::$($e.Harness) ===" -ForegroundColor Cyan
-            cargo +$env:RUST_NIGHTLY test -p $e.Crate --test $e.Harness --all-features --locked
+            Write-Host "`n=== bolero (plain): $($e.Package)::$($e.Harness) ===" -ForegroundColor Cyan
+            cargo +$env:RUST_NIGHTLY test -p $e.Package --test $e.Harness --all-features --locked
         }
         return
     }
 
     foreach ($e in $entries) {
-        Write-Host "`n=== bolero list: $($e.Crate)::$($e.Harness) ===" -ForegroundColor Cyan
-        $listing = cargo +$env:RUST_NIGHTLY bolero list -p $e.Crate
+        Write-Host "`n=== bolero list: $($e.Package)::$($e.Harness) ===" -ForegroundColor Cyan
+        $listing = cargo +$env:RUST_NIGHTLY bolero list -p $e.Package
         if (-not $listing) {
             Write-Host "  (no targets)"
             continue
@@ -145,10 +176,10 @@ bolero TIME="60s":
             $target = $entry.test
             if (-not $target) { $target = $entry.test_name }
             if (-not $target) { $target = $entry.target }
-            Write-Host "`n=== bolero test: $($e.Crate)::$($e.Harness)::$target (time={{ TIME }}) ===" -ForegroundColor Cyan
+            Write-Host "`n=== bolero test: $($e.Package)::$($e.Harness)::$target (time={{ TIME }}) ===" -ForegroundColor Cyan
             # Raise the RSS limit from the 2 GiB default. Adaptive chunk sizing
             # allocates more (smaller, 64 KiB-aligned) chunks per arena, which
             # inflates ASan shadow memory and quarantine overhead under libfuzzer.
-            cargo +$env:RUST_NIGHTLY bolero test $target -p $e.Crate --engine libfuzzer -T {{ TIME }} --engine-args=-rss_limit_mb=4096
+            cargo +$env:RUST_NIGHTLY bolero test $target -p $e.Package --engine libfuzzer -T {{ TIME }} --engine-args=-rss_limit_mb=4096
         }
     }
