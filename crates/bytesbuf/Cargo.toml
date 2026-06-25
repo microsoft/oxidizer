@@ -94,6 +94,10 @@ name = "buf_cg"
 harness = false
 required-features = ["test-util"]
 
+[[bench]]
+name = "global_pool_cg"
+harness = false
+
 [[example]]
 name = "bb_has_memory_forwarding"
 required-features = ["test-util"]
