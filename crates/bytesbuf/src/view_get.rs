@@ -167,15 +167,14 @@ impl BytesView {
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
+            // SAFETY: `get(..size)` guarantees the slice covers exactly `size_of::<T::Bytes>()`
+            // bytes, so reading a `T::Bytes` from its start stays in bounds. We use an unaligned
+            // read because the slice is backed by a byte buffer with no alignment guarantee, while
+            // `T::Bytes` may demand a larger alignment; the read materializes a properly aligned
+            // local that we then borrow.
+            let bytes_array = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<T::Bytes>()) };
 
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_le_bytes(bytes_array);
+            let result = T::from_le_bytes(&bytes_array);
             self.advance(size);
             return result;
         }
@@ -264,15 +263,14 @@ impl BytesView {
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
+            // SAFETY: `get(..size)` guarantees the slice covers exactly `size_of::<T::Bytes>()`
+            // bytes, so reading a `T::Bytes` from its start stays in bounds. We use an unaligned
+            // read because the slice is backed by a byte buffer with no alignment guarantee, while
+            // `T::Bytes` may demand a larger alignment; the read materializes a properly aligned
+            // local that we then borrow.
+            let bytes_array = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<T::Bytes>()) };
 
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_be_bytes(bytes_array);
+            let result = T::from_be_bytes(&bytes_array);
             self.advance(size);
             return result;
         }
@@ -364,15 +362,14 @@ impl BytesView {
         assert!(self.len() >= size);
 
         if let Some(bytes) = self.first_slice().get(..size) {
-            let bytes_array_ptr = bytes.as_ptr().cast::<T::Bytes>();
+            // SAFETY: `get(..size)` guarantees the slice covers exactly `size_of::<T::Bytes>()`
+            // bytes, so reading a `T::Bytes` from its start stays in bounds. We use an unaligned
+            // read because the slice is backed by a byte buffer with no alignment guarantee, while
+            // `T::Bytes` may demand a larger alignment; the read materializes a properly aligned
+            // local that we then borrow.
+            let bytes_array = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<T::Bytes>()) };
 
-            // SAFETY: The block is only entered if there are enough bytes in the first slice.
-            // The target type is an array of bytes, so has no alignment requirements.
-            let bytes_array_maybe = unsafe { bytes_array_ptr.as_ref() };
-            // SAFETY: This is never a null pointer because it came from a reference.
-            let bytes_array = unsafe { bytes_array_maybe.unwrap_unchecked() };
-
-            let result = T::from_ne_bytes(bytes_array);
+            let result = T::from_ne_bytes(&bytes_array);
             self.advance(size);
             return result;
         }
@@ -633,5 +630,226 @@ mod tests {
         }
 
         assert!(view_combined.is_empty());
+    }
+
+    /// Soundness coverage for `FromBytes` implementations whose `Bytes` associated type does not
+    /// match the value type `T` in size or alignment.
+    ///
+    /// The standard integer and float types use `Bytes = [u8; size_of::<T>()]`, so for them
+    /// `size_of::<T>() == size_of::<T::Bytes>()` and `align_of::<T::Bytes>() == 1`. The numeric
+    /// reads must size, advance, and bound by `T::Bytes` (not `T`) and must tolerate any source
+    /// alignment, which only these custom types can exercise.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    mod from_bytes_soundness {
+        use std::borrow::{Borrow, BorrowMut};
+
+        use num_traits::FromBytes;
+
+        use crate::BytesView;
+        use crate::mem::testing::TransparentMemory;
+
+        /// `Bytes` is wider than the value it produces: `size_of::<NarrowValue>() == 1` while the
+        /// serialized form is four bytes. Sizing reads by `size_of::<T>()` would read past a
+        /// one-byte first-span slice and leave the buffered path's `MaybeUninit<[u8; 4]>` only
+        /// partially initialized before `assume_init`.
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        struct NarrowValue(u8);
+
+        impl FromBytes for NarrowValue {
+            type Bytes = [u8; 4];
+
+            fn from_le_bytes(bytes: &[u8; 4]) -> Self {
+                Self(bytes[0])
+            }
+
+            fn from_be_bytes(bytes: &[u8; 4]) -> Self {
+                Self(bytes[3])
+            }
+        }
+
+        /// `Bytes` is narrower than the value it produces: `size_of::<WideValue>() == 8` while the
+        /// serialized form is two bytes. Sizing reads by `size_of::<T>()` would over-advance the
+        /// view and, in the buffered path, copy eight bytes into a two-byte `MaybeUninit<[u8; 2]>`
+        /// buffer.
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        struct WideValue(u64);
+
+        impl FromBytes for WideValue {
+            type Bytes = [u8; 2];
+
+            fn from_le_bytes(bytes: &[u8; 2]) -> Self {
+                Self(u16::from_le_bytes(*bytes).into())
+            }
+
+            fn from_be_bytes(bytes: &[u8; 2]) -> Self {
+                Self(u16::from_be_bytes(*bytes).into())
+            }
+        }
+
+        /// A `Bytes` type whose alignment exceeds one. Constructing a `&OverAligned` reference from
+        /// an unaligned byte-slice pointer is undefined behavior, so the read must materialize the
+        /// value through an alignment-agnostic copy. `NumBytes` is satisfied via its blanket impl
+        /// over the manual `AsRef`/`AsMut`/`Borrow`/`BorrowMut` and the derived comparison traits.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(align(8))]
+        struct OverAligned([u8; 8]);
+
+        impl AsRef<[u8]> for OverAligned {
+            fn as_ref(&self) -> &[u8] {
+                &self.0
+            }
+        }
+
+        impl AsMut<[u8]> for OverAligned {
+            fn as_mut(&mut self) -> &mut [u8] {
+                &mut self.0
+            }
+        }
+
+        impl Borrow<[u8]> for OverAligned {
+            fn borrow(&self) -> &[u8] {
+                &self.0
+            }
+        }
+
+        impl BorrowMut<[u8]> for OverAligned {
+            fn borrow_mut(&mut self) -> &mut [u8] {
+                &mut self.0
+            }
+        }
+
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        struct OverAlignedValue(u64);
+
+        impl FromBytes for OverAlignedValue {
+            type Bytes = OverAligned;
+
+            fn from_le_bytes(bytes: &OverAligned) -> Self {
+                Self(u64::from_le_bytes(bytes.0))
+            }
+
+            fn from_be_bytes(bytes: &OverAligned) -> Self {
+                Self(u64::from_be_bytes(bytes.0))
+            }
+        }
+
+        #[test]
+        fn narrow_bytes_le_single_span() {
+            let memory = TransparentMemory::new();
+            let mut view = BytesView::copied_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD], &memory);
+
+            // Four bytes are consumed even though the value occupies a single byte.
+            assert_eq!(view.get_num_le::<NarrowValue>(), NarrowValue(0xAA));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn narrow_bytes_be_single_span() {
+            let memory = TransparentMemory::new();
+            let mut view = BytesView::copied_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD], &memory);
+
+            assert_eq!(view.get_num_be::<NarrowValue>(), NarrowValue(0xDD));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn narrow_bytes_le_multi_span() {
+            let memory = TransparentMemory::new();
+            let view_part1 = BytesView::copied_from_slice(&[0xAA, 0xBB], &memory);
+            let view_part2 = BytesView::copied_from_slice(&[0xCC, 0xDD], &memory);
+            let mut view = BytesView::from_views([view_part1, view_part2]);
+
+            // The value straddles the span boundary, forcing the buffered path to fill all four
+            // bytes of the `MaybeUninit<[u8; 4]>` before `assume_init`.
+            assert_eq!(view.get_num_le::<NarrowValue>(), NarrowValue(0xAA));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn wide_bytes_le_single_span() {
+            let memory = TransparentMemory::new();
+            let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
+
+            // Each read advances by exactly two bytes (the size of `Bytes`), not eight.
+            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x1234));
+            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x5678));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn wide_bytes_be_single_span() {
+            let memory = TransparentMemory::new();
+            let mut view = BytesView::copied_from_slice(&[0x12, 0x34, 0x56, 0x78], &memory);
+
+            assert_eq!(view.get_num_be::<WideValue>(), WideValue(0x1234));
+            assert_eq!(view.get_num_be::<WideValue>(), WideValue(0x5678));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn wide_bytes_le_multi_span() {
+            let memory = TransparentMemory::new();
+            let view_part1 = BytesView::copied_from_slice(&[0x34], &memory);
+            let view_part2 = BytesView::copied_from_slice(&[0x12], &memory);
+            let mut view = BytesView::from_views([view_part1, view_part2]);
+
+            // The buffered path must size its copy by `Bytes` (two bytes), not by the eight-byte
+            // value type, to avoid overflowing the `MaybeUninit<[u8; 2]>` buffer.
+            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x1234));
+            assert!(view.is_empty());
+        }
+
+        const OVER_ALIGNED_VALUE: u64 = 0x0123_4567_89AB_CDEF;
+
+        #[test]
+        fn over_aligned_le_single_span() {
+            let memory = TransparentMemory::new();
+            let mut view = BytesView::copied_from_slice(&OVER_ALIGNED_VALUE.to_le_bytes(), &memory);
+
+            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn over_aligned_le_misaligned_single_span() {
+            let memory = TransparentMemory::new();
+
+            // A single leading byte that we drop, leaving the eight value bytes at an odd offset
+            // from the allocation base. That address can never satisfy an eight-byte alignment, so
+            // the fast path reads from a guaranteed-misaligned pointer.
+            let mut data = vec![0xFF_u8];
+            data.extend_from_slice(&OVER_ALIGNED_VALUE.to_le_bytes());
+            let mut view = BytesView::copied_from_slice(&data, &memory);
+
+            assert_eq!(view.get_byte(), 0xFF);
+            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn over_aligned_le_multi_span() {
+            let memory = TransparentMemory::new();
+            let bytes = OVER_ALIGNED_VALUE.to_le_bytes();
+            let view_part1 = BytesView::copied_from_slice(&bytes[..3], &memory);
+            let view_part2 = BytesView::copied_from_slice(&bytes[3..], &memory);
+            let mut view = BytesView::from_views([view_part1, view_part2]);
+
+            // The buffered path assembles the value in a properly aligned `MaybeUninit<OverAligned>`.
+            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
+            assert!(view.is_empty());
+        }
+
+        #[test]
+        fn over_aligned_ne_misaligned_single_span() {
+            let memory = TransparentMemory::new();
+
+            let mut data = vec![0xFF_u8];
+            data.extend_from_slice(&OVER_ALIGNED_VALUE.to_ne_bytes());
+            let mut view = BytesView::copied_from_slice(&data, &memory);
+
+            assert_eq!(view.get_byte(), 0xFF);
+            assert_eq!(view.get_num_ne::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
+            assert!(view.is_empty());
+        }
     }
 }
