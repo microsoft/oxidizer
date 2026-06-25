@@ -22,7 +22,7 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// refers to the fact that all the memory capacity is obtained from the Rust global memory allocator.
 ///
 /// Clones of this type are equivalent and share the same pool of memory as long as they remain on the same thread.
-#[doc = include_str!("../../doc/snippets/choosing_memory_provider.md")]
+#[doc = include_str!("../../docs/snippets/choosing_memory_provider.md")]
 ///
 /// # Multithreaded use
 ///
