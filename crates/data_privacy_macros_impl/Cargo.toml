@@ -40,7 +40,6 @@ syn = { workspace = true, features = [
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
-mutants = { workspace = true }
 prettyplease = { workspace = true }
 
 [lints]

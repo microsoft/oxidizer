@@ -36,10 +36,8 @@ thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 criterion = { workspace = true }
-futures = { workspace = true, features = ["executor"] }
 mutants = { workspace = true }
 ohno = { path = "../ohno", features = ["test-util"] }
-tick = { path = "../tick", features = ["test-util"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [[bench]]

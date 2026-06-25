@@ -90,7 +90,6 @@ serde_core = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 static_assertions = { workspace = true }
 templated_uri = { path = "../templated_uri", features = ["uuid"] }
-testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
