@@ -200,8 +200,7 @@ on group names is satisfied.
         clippy::exit,
         clippy::missing_docs_in_private_items,
         unused_qualifications,
-        reason = "Triggered by Gungraun macro expansion. Tracking issue drafts live at \
-          c:/Source/gungraun-lint-issues/ pending upstream filing."
+        reason = "Triggered by Gungraun macro expansion. Upstream tracking issues are pending."
     )
 )]
 
@@ -242,9 +241,9 @@ The three lints in the `expect` block are spuriously triggered by Gungraun's
 macro expansions and cannot be fixed in our code. We use `expect` rather
 than `allow` so that when an upstream fix lands (in either Gungraun or
 Clippy), our build immediately surfaces the now-unfulfilled expectation and
-we can remove the suppression. Draft GitHub issues for each suppressed lint
-live in `c:/Source/gungraun-lint-issues/<lint>/{gungraun.md, clippy.md}`,
-to be filed upstream once they have been polished.
+we can remove the suppression. The upstream tracking issues for these lints
+have not been filed yet; once they are, link them here so the suppression can
+be revisited when they are resolved.
 
 ### Gungraun syntax gotchas
 

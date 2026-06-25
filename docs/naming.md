@@ -31,6 +31,13 @@ land in the shared `target/.../deps/` directory.
 Apply this prefix to new benchmark files; some benches predate this
 convention and remain unprefixed (e.g. `crates/bytesbuf/benches/view.rs`).
 
+One exception: a new Callgrind file (`_cg.rs`) must share the name of its
+paired Criterion file (see [Callgrind benchmark files](#callgrind-benchmark-files)
+below). When that Criterion counterpart predates the prefix convention and is
+unprefixed, the new Callgrind file stays unprefixed too so the pair keeps a
+shared base name (e.g. `buf_cg.rs` pairs with the unprefixed `buf.rs`). The
+pairing requirement takes precedence over the prefix rule.
+
 Do not append decorator suffixes like `_bench` or `_benches` — the `benches/`
 directory location and `[[bench]]` Cargo table entry already convey that a
 file is a benchmark.
