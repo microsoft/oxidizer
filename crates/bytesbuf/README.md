@@ -15,7 +15,7 @@
 
 Types for creating and manipulating byte sequences.
 
-<img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/doc/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
+<img src="https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/bytesbuf/docs/diagrams/Introduction.png" alt="Diagram showing byte sequences inside BytesView and BytesBuf" />
 
 Types in this crate enable you to operate on logical sequences of bytes stored in memory,
 similar to a `&[u8]` but with some key differences:
@@ -471,7 +471,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb3Um38gMny5obPDtS9we40N0baM-dMLra_2cbwUZ6yJrd_CNhZIGCaGJ5dGVzYnVmZTAuNS41
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb4gvD4zw9iycbirtUutkkzqcbSlRn3SgH6bsbjAbxNhZA3wBhZIGCaGJ5dGVzYnVmZTAuNS41
  [__link0]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesView
