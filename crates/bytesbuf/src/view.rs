@@ -137,9 +137,10 @@ impl BytesView {
     {
         // The two-level flat_map exposes no usable size hint, so the SmallVec grows on the fly.
         // Counting the spans in a first pass to pre-size the SmallVec is deliberately avoided: it
-        // lowers the simulated instruction count but does not improve wall-clock time, because this
-        // path is dominated by per-span BlockRef refcount atomics and block allocation rather than
-        // by SmallVec growth, and the extra counting pass measured as a net wall-clock regression.
+        // trims SmallVec reallocations and lowers the simulated instruction count, but the extra
+        // counting traversal measured as a net wall-clock regression, costing more than the
+        // reallocations it saves. The spans are moved out of the input views rather than cloned, so
+        // this path performs no BlockRef refcount traffic or block allocation.
 
         // For a given input ABC123.
         let spans_reversed: SmallVec<_> = views
