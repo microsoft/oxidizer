@@ -179,6 +179,28 @@
 //! assert_eq!(squares.as_slice(), &[1, 4, 9, 16, 25]);
 //! ```
 //!
+//! With the `hashbrown` Cargo feature, [`Arena`] can directly back
+//! [`hashbrown`](https://crates.io/crates/hashbrown) collections via
+//! [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`],
+//! [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. The returned
+//! `HashMap` / `HashSet` store their entries in arena chunks.
+//!
+//! ```
+//! # #[cfg(feature = "hashbrown")] {
+//! use multitude::Arena;
+//!
+//! let arena = Arena::new();
+//!
+//! let mut map = arena.alloc_hash_map::<u32, &str>();
+//! map.insert(1, "one");
+//! assert_eq!(map.get(&1), Some(&"one"));
+//!
+//! let mut set = arena.alloc_set::<u32>();
+//! set.insert(7);
+//! assert!(set.contains(&7));
+//! # }
+//! ```
+//!
 //! ## Freezing
 //!
 //! [`String`](strings::String) and [`Vec`](vec::Vec) are designed as **transient
@@ -387,6 +409,7 @@
 //! | `bytemuck` | Provides [`BytemuckView`](bytemuck::BytemuckView) for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`](::bytemuck::Zeroable). Access via [`Arena::bytemuck()`]. |
 //! | `bytes` | Adds [`From`] conversions from [`Arc<[u8]>`](Arc) and [`Arc<str>`](Arc) into [`bytes::Bytes`](::bytes::Bytes), enabling zero-copy integration with the Tokio / Hyper async ecosystem. |
 //! | `bytesbuf` | Implements [`bytesbuf::mem::Memory`](::bytesbuf::mem::Memory) directly on [`Arena`], so that [`BytesBuf`](::bytesbuf::BytesBuf) buffers can be backed by arena chunks. Implies `std`. |
+//! | `hashbrown` | Lets [`Arena`] back [`hashbrown`](https://crates.io/crates/hashbrown) collections via [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`], [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. (`&Arena` always implements the `allocator-api2` 0.2 `Allocator` trait so it can back `hashbrown` directly; this feature adds the convenience constructors.) |
 
 #![no_std]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/multitude/logo.png")]
