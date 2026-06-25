@@ -28,7 +28,7 @@ use crate::{MAX_INLINE_SPANS, MemoryGuard, Span};
 /// * Copy data from a `&[u8]` using [`copied_from_slice()`].
 ///
 /// Some of these methods may require you to first [obtain access to a memory provider].
-#[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+#[doc = include_str!("../docs/snippets/sequence_memory_layout.md")]
 ///
 /// # Example
 ///
@@ -526,7 +526,7 @@ impl BytesView {
     /// References the first slice of bytes in the byte sequence.
     ///
     /// Returns an empty slice if the view is over a zero-sized byte sequence.
-    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    #[doc = include_str!("../docs/snippets/sequence_memory_layout.md")]
     ///
     /// # Example
     ///
@@ -560,7 +560,7 @@ impl BytesView {
     ///
     /// Each item is a tuple of `(data, meta)` where `data` is a byte slice and `meta` is the
     /// optional metadata of the memory block backing that slice.
-    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    #[doc = include_str!("../docs/snippets/sequence_memory_layout.md")]
     ///
     /// # Example
     ///

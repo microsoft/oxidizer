@@ -47,7 +47,7 @@ use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, Span
 ///
 /// Existing [`BytesView`]s can be appended to the `BytesBuf` via [`put_bytes()`] without
 /// consuming capacity as each appended [`BytesView`] brings its own backing memory capacity.
-#[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+#[doc = include_str!("../docs/snippets/sequence_memory_layout.md")]
 ///
 /// # Example
 ///
@@ -848,7 +848,7 @@ impl BytesBuf {
     /// return the remaining range from the same slice in the next call).
     ///
     /// To write to multiple slices concurrently, use [`begin_vectored_write()`].
-    #[doc = include_str!("../doc/snippets/sequence_memory_layout.md")]
+    #[doc = include_str!("../docs/snippets/sequence_memory_layout.md")]
     ///
     /// # Example
     ///
