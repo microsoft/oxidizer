@@ -899,7 +899,7 @@ checksum = "328c0b8c9cc1756ac8179a70ed4adab2ce7d317e9142a0db6d139b540fafdaff"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.3.6",
+ "ohno 0.3.5",
 ]
 
 [[package]]
@@ -2551,9 +2551,9 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.3.6"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79eb560d3cafa8521b27ec748f278f9b97a51d4ef1440f0c653698b9b3a6e730"
+checksum = "82948d54d99b956d012ec2b909ed4331f7064a0726942cc04f8e7ec48ebae9e8"
 dependencies = [
  "ohno_macros 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "typeid",
