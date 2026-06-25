@@ -272,8 +272,10 @@ impl BytesBuf {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use super::*;
-    use crate::mem::testing::TransparentMemory;
+    use crate::mem::testing::{FixedBlockMemory, TransparentMemory};
 
     #[test]
     fn put_slice() {
@@ -290,6 +292,35 @@ mod tests {
 
         assert_eq!(bytes.len(), 5);
         assert_eq!(bytes, &data);
+    }
+
+    #[test]
+    fn put_small_takes_fast_path_when_value_fits() {
+        let memory = TransparentMemory::new();
+        let mut buf = memory.reserve(100);
+
+        // The value fits entirely within the first unfilled slice, so the fast path handles it.
+        let data = [1u8, 2, 3, 4, 5];
+        assert!(buf.put_small(&data));
+
+        assert_eq!(buf.len(), 5);
+        assert_eq!(buf.remaining_capacity(), 95);
+
+        assert_eq!(buf.consume_all(), &data);
+    }
+
+    #[test]
+    fn put_small_declines_when_value_straddles_capacity_boundary() {
+        // Four-byte blocks force a capacity boundary after every four bytes.
+        let memory = FixedBlockMemory::new(NonZero::new(4).unwrap());
+        let mut buf = memory.reserve(8);
+
+        // The value does not fit within the first four-byte unfilled slice, so the fast path
+        // declines and leaves the buffer untouched for the caller to fall back to the looped path.
+        assert!(!buf.put_small(&[1, 2, 3, 4, 5]));
+
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.remaining_capacity(), 8);
     }
 
     #[test]
