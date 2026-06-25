@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.3] - 2026-06-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `ohno`
+
+- ✨ Features
+
+  - implement RedactedDisplay/RedactedDebug for BasePath and BaseUri ([#489](https://github.com/microsoft/oxidizer/pull/489))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.3.2] - 2026-06-11
 
 - 🔧 Maintenance

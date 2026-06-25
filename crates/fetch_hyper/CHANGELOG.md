@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3] - 2026-06-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `ohno`
+  - Now requires `0.5.8` of `seatbelt`
+
 ## [0.4.2] - 2026-06-18
 
 - 🔧 Maintenance

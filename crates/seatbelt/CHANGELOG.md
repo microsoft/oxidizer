@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.8] - 2026-06-24
+
+- ✨ Features
+
+  - add abandoned execution policy for circuit breaker ([#506](https://github.com/microsoft/oxidizer/pull/506))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+  - bump MSRV to 1.93 and adopt new stdlib helpers ([#474](https://github.com/microsoft/oxidizer/pull/474))
+
 ## [0.5.7] - 2026-06-11
 
 - 🔧 Maintenance

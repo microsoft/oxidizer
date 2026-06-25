@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0] - 2026-06-24
+
+- ⚠️ Breaking
+
+  - Now requires `0.12.0` of `fetch`
+  - Now requires `0.3.7` of `ohno`
+  - Now requires `0.5.8` of `seatbelt`
+
 ## [0.1.1] - 2026-06-18
 
 - 🔧 Maintenance
