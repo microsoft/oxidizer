@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 # Owned by cargo-anvil; edit via `cargo anvil`.
 # The token scheduled-runtime-analysis is substituted by cargo-anvil at emit time with
-# the concrete check-group name (pr-fast, pr-test, scheduled-runtime, ...).
+# the concrete check-group name (pr-fast, pr-test, scheduled-runtime-analysis, ...).
 name: anvil-scheduled-runtime-analysis
 description: Run the scheduled-runtime-analysis check group.
 inputs:
@@ -38,7 +38,9 @@ runs:
         ANVIL_INCLUDE_MODIFIED: ${{ inputs.include_modified }}
         ANVIL_INCLUDE_AFFECTED: ${{ inputs.include_affected }}
         ANVIL_INCLUDE_REQUIRED: ${{ inputs.include_required }}
-        # cargo-aprz hits the GitHub API (unauthenticated = 60 req/hr); pass the
-        # built-in token so it can use the 1000 req/hr authenticated quota.
+        # Some checks (e.g. cargo-aprz, run only by groups that include it)
+        # hit the GitHub API; pass the built-in token so they use the
+        # authenticated quota (1000 vs 60 req/hr). Harmless for groups whose
+        # checks never read it.
         GITHUB_TOKEN: ${{ github.token }}
       run: just anvil-scheduled-runtime-analysis

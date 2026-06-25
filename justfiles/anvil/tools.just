@@ -251,10 +251,18 @@ _check-tool name version:
     }
 
 # _install-toolchain: install a specific rustup toolchain (no components).
+# Probe-first: if the toolchain is already installed, skip -- this keeps
+# the recipe idempotent and avoids redundant `rustup` network/update work
+# on warm or cache-restored runners.
 [script("pwsh")]
 _install-toolchain toolchain:
     $ErrorActionPreference = 'Stop'
     $toolchain = '{{toolchain}}'
+    & rustup which --toolchain $toolchain rustc *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "toolchain '$toolchain' already installed; skipping"
+        exit 0
+    }
     Write-Host "rustup toolchain install $toolchain --profile minimal --no-self-update"
     rustup toolchain install $toolchain --profile minimal --no-self-update
     if ($LASTEXITCODE -ne 0) {
@@ -278,11 +286,63 @@ _check-toolchain toolchain:
 # pinned toolchain string (which must already be installed -- the
 # per-component setup recipes ensure this via a dependency on
 # anvil-<toolchain>-install).
+#
+# Probe-first: if the component is already available, skip the
+# `rustup component add`. This is what makes the recipe idempotent and,
+# critically, MSRustup-safe: msrustup `ms-prod` toolchains ship
+# clippy/rustfmt bundled and REJECT `rustup component add` outright, so
+# an unconditional add fails on every ms-prod version (a toolchain bump
+# can't fix it). The probe mirrors `_check-component` exactly -- artifact
+# detection (cargo subcommand / sysroot file), never `rustup component
+# list`, which msrustup does not support -- so the install path now has
+# the same MSRustup-awareness the check path already had.
 [script("pwsh")]
 _install-component toolchain component:
     $ErrorActionPreference = 'Stop'
     $toolchain = '{{toolchain}}'
     $component = '{{component}}'
+
+    # Probe whether the component is already present (see _check-component
+    # for the rationale behind each detection method and the `+toolchain`
+    # single-argument override).
+    $subcommand = switch ($component) {
+        'clippy'  { 'clippy' }
+        'rustfmt' { 'fmt' }
+        'miri'    { 'miri' }
+        default   { $null }
+    }
+    if ($null -ne $subcommand) {
+        if ($toolchain -eq 'default') {
+            & cargo $subcommand --version *> $null
+        } else {
+            & cargo "+$toolchain" $subcommand --version *> $null
+        }
+        $present = ($LASTEXITCODE -eq 0)
+    } else {
+        $sysroot = if ($toolchain -eq 'default') {
+            & rustc --print sysroot 2>$null
+        } else {
+            & rustc "+$toolchain" --print sysroot 2>$null
+        }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sysroot)) {
+            # Toolchain not ready yet: treat as absent and let the add below
+            # surface a clear error (the install dependency should have
+            # installed the toolchain first).
+            $present = $false
+        } else {
+            $sysroot = $sysroot.Trim()
+            $present = switch ($component) {
+                'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
+                'llvm-tools' { @(Get-ChildItem (Join-Path $sysroot 'lib/rustlib') -Recurse -Filter 'llvm-profdata*' -ErrorAction SilentlyContinue).Count -gt 0 }
+                default      { $false }
+            }
+        }
+    }
+    if ($present) {
+        Write-Host "component '$component' already available on toolchain '$toolchain'; skipping install"
+        exit 0
+    }
+
     if ($toolchain -eq 'default') {
         Write-Host "rustup component add $component (default toolchain)"
         rustup component add $component

@@ -47,6 +47,10 @@ bytemuck = ["dep:bytemuck", "dst"]
 bytesbuf = ["dep:bytesbuf", "std"]
 zerocopy = ["dep:zerocopy", "dst"]
 hashbrown = ["dep:hashbrown"]
+# Marker feature selecting the loom model-checking test target via its
+# `required-features`. The feature itself is empty; the actual loom build is
+# driven by `--cfg loom` (see the `target.'cfg(loom)'` tables below).
+loom = []
 
 [dependencies]
 allocator-api2 = { workspace = true, features = ["alloc"] }
@@ -134,6 +138,13 @@ name = "multitude_basic"
 
 [[example]]
 name = "strings"
+
+# Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
+# discover this target authoritatively; the tests still build under `--cfg loom`.
+[[test]]
+name = "loom"
+path = "tests/loom.rs"
+required-features = ["loom"]
 
 # >>> anvil-managed: anvil-lints
 [lints]
