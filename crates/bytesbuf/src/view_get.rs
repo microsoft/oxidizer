@@ -154,7 +154,7 @@ impl BytesView {
     /// bytes in a single span lookup. Returns `None` when the value straddles a span boundary, in
     /// which case the caller must fall back to buffered assembly.
     ///
-    /// The caller must have already verified that the view covers at least `size_of::<T::Bytes>()` bytes.
+    /// The caller must have already verified that the view covers at least `size_of::<T>()` bytes.
     #[inline]
     // This is a behavior-preserving fast path: returning `None` (or declining the value that exactly
     // fills the first span) routes the caller to `get_num_*_buffered`, which produces an identical
@@ -167,7 +167,7 @@ impl BytesView {
         T::Bytes: Sized,
         F: FnOnce(&T::Bytes) -> T,
     {
-        let size = size_of::<T::Bytes>();
+        let size = size_of::<T>();
 
         let front = self.spans_reversed.last_mut()?;
         let front_len = front.len() as usize;
@@ -232,7 +232,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T::Bytes>();
+        let size = size_of::<T>();
         assert!(self.len() >= size);
 
         if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_le_bytes) {
@@ -258,14 +258,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T::Bytes>();
+        let mut bytes_remaining = size_of::<T>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
@@ -319,7 +319,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T::Bytes>();
+        let size = size_of::<T>();
         assert!(self.len() >= size);
 
         if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_be_bytes) {
@@ -345,14 +345,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T::Bytes>();
+        let mut bytes_remaining = size_of::<T>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
@@ -409,7 +409,7 @@ impl BytesView {
     where
         T::Bytes: Sized,
     {
-        let size = size_of::<T::Bytes>();
+        let size = size_of::<T>();
         assert!(self.len() >= size);
 
         if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_ne_bytes) {
@@ -435,14 +435,14 @@ impl BytesView {
         let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
         let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
 
-        let mut bytes_remaining = size_of::<T::Bytes>();
+        let mut bytes_remaining = size_of::<T>();
 
         while bytes_remaining > 0 {
             let first_slice = self.first_slice();
             let bytes_to_copy = bytes_remaining.min(first_slice.len());
 
             // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
+            // We only copy up to bytes_remaining, which is at most size_of::<T>(),
             // so we will not overflow the buffer.
             // Both sides are byte arrays/slices so there are no alignment concerns.
             unsafe {
