@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0] - 2026-06-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `ohno`
+  - Now requires `0.5.8` of `seatbelt`
+
+- ✨ Features
+
+  - report fetch.runtime and fetch.transport telemetry attributes ([#510](https://github.com/microsoft/oxidizer/pull/510))
+
 ## [0.11.2] - 2026-06-18
 
 - 🔧 Maintenance

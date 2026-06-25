@@ -328,7 +328,7 @@ name = "automation"
 version = "0.1.0"
 dependencies = [
  "duct",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "serde",
  "serde_json",
 ]
@@ -618,21 +618,21 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "bytesbuf",
  "futures",
  "futures-core",
  "mutants",
  "new_zealand",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "testing_aids",
  "trait-variant",
 ]
 
 [[package]]
 name = "cachet"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "alloc_tracker 0.5.25",
  "anyspawn",
@@ -645,7 +645,7 @@ dependencies = [
  "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -673,7 +673,7 @@ dependencies = [
  "futures",
  "moka",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "thread_aware",
  "tick",
  "tokio",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_service"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "cachet_tier",
  "layered",
@@ -690,10 +690,10 @@ dependencies = [
 
 [[package]]
 name = "cachet_tier"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "dynosaur",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "parking_lot",
  "recoverable",
  "tick",
@@ -900,7 +900,7 @@ checksum = "328c0b8c9cc1756ac8179a70ed4adab2ce7d317e9142a0db6d139b540fafdaff"
 dependencies = [
  "itertools 0.15.0",
  "new_zealand",
- "ohno 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ohno 0.3.5",
 ]
 
 [[package]]
@@ -1279,7 +1279,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "fetch"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "alloc_tracker 0.5.25",
  "anyspawn",
@@ -1302,7 +1302,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry-stdout",
@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -1350,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_hyper"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyspawn",
  "bytes",
@@ -1369,7 +1369,7 @@ dependencies = [
  "layered",
  "mutants",
  "native-tls",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1399,14 +1399,14 @@ dependencies = [
 
 [[package]]
 name = "fetch_tls"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "base64",
  "http",
  "insta",
  "mutants",
  "native-tls",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "rstest",
  "rustls",
  "rustls-pki-types",
@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "http_extensions"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "alloc_tracker 0.5.25",
  "bytes",
@@ -1846,7 +1846,7 @@ dependencies = [
  "hyper-util",
  "layered",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "pin-project",
  "recoverable",
  "serde",
@@ -2552,7 +2552,17 @@ dependencies = [
 
 [[package]]
 name = "ohno"
-version = "0.3.6"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82948d54d99b956d012ec2b909ed4331f7064a0726942cc04f8e7ec48ebae9e8"
+dependencies = [
+ "ohno_macros 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "typeid",
+]
+
+[[package]]
+name = "ohno"
+version = "0.3.7"
 dependencies = [
  "futures",
  "insta",
@@ -2562,16 +2572,6 @@ dependencies = [
  "testing_aids",
  "thiserror",
  "tokio",
- "typeid",
-]
-
-[[package]]
-name = "ohno"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79eb560d3cafa8521b27ec748f278f9b97a51d4ef1440f0c653698b9b3a6e730"
-dependencies = [
- "ohno_macros 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "typeid",
 ]
 
@@ -3121,7 +3121,7 @@ name = "recoverable"
 version = "0.1.6"
 dependencies = [
  "insta",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "static_assertions",
  "testing_aids",
 ]
@@ -3350,7 +3350,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seatbelt"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "alloc_tracker 0.5.25",
  "criterion",
@@ -3362,7 +3362,7 @@ dependencies = [
  "jiff",
  "layered",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -3382,14 +3382,14 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "futures",
  "http",
  "http_extensions",
  "layered",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "seatbelt",
  "templated_uri",
  "tick",
@@ -3663,12 +3663,12 @@ dependencies = [
 
 [[package]]
 name = "templated_uri"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "data_privacy",
  "http",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "pct-str",
  "serde",
  "serde_json",
@@ -3681,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "mutants",
  "templated_uri_macros_impl",
@@ -3689,13 +3689,13 @@ dependencies = [
 
 [[package]]
 name = "templated_uri_macros_impl"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "chumsky",
  "darling",
  "insta",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "prettyplease",
  "proc-macro2",
  "quote",
@@ -3808,7 +3808,7 @@ dependencies = [
  "insta",
  "jiff",
  "mutants",
- "ohno 0.3.6",
+ "ohno 0.3.7",
  "pin-project-lite",
  "serde",
  "serde_core",

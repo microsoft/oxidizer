@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.4] - 2026-06-24
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.7` of `ohno`
+
+- ✨ Features
+
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.2.3] - 2026-06-11
 
 - 🔧 Maintenance
