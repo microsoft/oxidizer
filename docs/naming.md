@@ -125,8 +125,8 @@ fn read_get_local_warm() -> u32 { /* ... */ }
 fn read_with_local_warm() -> u32 { /* ... */ }
 
 library_benchmark_group!(
-    name = read,
-    benchmarks = [read_get_local_warm, read_with_local_warm]
+    name = read;
+    benchmarks = read_get_local_warm, read_with_local_warm
 );
 ```
 
