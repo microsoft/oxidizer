@@ -953,6 +953,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1065,8 +1074,19 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
 dependencies = [
- "deadpool-runtime",
+ "deadpool-runtime 0.1.4",
  "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883466cb8db62725aee5f4a6011e8a5d42912b42632df32aad57fc91127c6e04"
+dependencies = [
+ "deadpool-runtime 0.3.1",
  "num_cpus",
  "tokio",
 ]
@@ -1076,6 +1096,12 @@ name = "deadpool-runtime"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae"
 
 [[package]]
 name = "defmt"
@@ -2523,6 +2549,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object-pool"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ceffa2e6ccecd71e60a0f06b655df2c66acd1c0c892dafefc96fd49d65f71d53"
+dependencies = [
+ "parking_lot",
+]
+
+[[package]]
 name = "ohno"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2673,6 +2708,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "opool"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd40b720b302b5aa0c78879e2ee393cda363b8cbca87ab59539c9a64146afaa"
+dependencies = [
+ "crossbeam-queue",
+]
+
+[[package]]
 name = "os_pipe"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2802,6 +2846,27 @@ name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
+name = "plurality"
+version = "0.1.0"
+dependencies = [
+ "alloc_tracker 0.6.0",
+ "allocator-api2 0.4.0",
+ "bolero",
+ "criterion",
+ "deadpool 0.13.0",
+ "gungraun",
+ "loom",
+ "mimalloc",
+ "mutants",
+ "object-pool",
+ "opool",
+ "sharded-slab",
+ "slab",
+ "slotmap",
+ "static_assertions",
+]
 
 [[package]]
 name = "polling"
@@ -3496,6 +3561,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "smallvec"
@@ -4647,7 +4721,7 @@ checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
 dependencies = [
  "assert-json-diff",
  "base64",
- "deadpool",
+ "deadpool 0.12.3",
  "futures",
  "http",
  "http-body-util",

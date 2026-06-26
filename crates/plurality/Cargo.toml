@@ -1,0 +1,75 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "plurality"
+version = "0.1.0"
+description = "A highly efficient pooling memory allocator"
+readme = "README.md"
+keywords = ["pool", "memory", "allocator"]
+categories = ["memory-management", "data-structures", "no-std"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/plurality"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["allocator_api2::*"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["std"]
+std = ["allocator-api2/std"]
+
+[dependencies]
+allocator-api2 = { workspace = true, features = ["alloc"] }
+
+[target.'cfg(loom)'.dependencies]
+loom = { workspace = true }
+
+[dev-dependencies]
+alloc_tracker = "0.6"
+allocator-api2 = { workspace = true, features = ["alloc"] }
+bolero = { workspace = true, features = ["std"] }
+criterion = { workspace = true }
+mimalloc = { workspace = true }
+mutants = { workspace = true }
+static_assertions = { workspace = true }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+deadpool = { workspace = true, features = ["unmanaged"] }
+gungraun = { workspace = true, features = ["default"] }
+object-pool = { workspace = true }
+opool = { workspace = true }
+sharded-slab = { workspace = true }
+slab = { workspace = true, features = ["std"] }
+slotmap = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "criterion_alloc"
+harness = false
+
+[[bench]]
+name = "graph_churn"
+harness = false
+
+[[bench]]
+name = "gungraun_alloc"
+harness = false
+
+[[bench]]
+name = "pool_comparison"
+harness = false
