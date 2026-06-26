@@ -109,7 +109,8 @@ impl<T, A: Allocator + Clone> Iterator for Drain<'_, '_, T, A> {
 impl<T, A: Allocator + Clone> DoubleEndedIterator for Drain<'_, '_, T, A> {
     #[inline]
     fn next_back(&mut self) -> Option<T> {
-        // SAFETY: see `next`.
+        // SAFETY: each drained slot is yielded at most once; `ptr::read` moves
+        // the element out and the slot is never read again.
         self.iter.next_back().map(|e| unsafe { ptr::read(e) })
     }
 }

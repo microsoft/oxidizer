@@ -129,6 +129,34 @@ mod dst {
         };
         assert!(r.is_err());
     }
+
+    /// `alloc_dst_arc` of a sized drop-bearing `T`: the value's destructor must
+    /// run eagerly when the last `Arc` clone drops (before the arena is torn
+    /// down).
+    #[test]
+    fn alloc_dst_arc_sized_drop_type_runs_drop_once() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct D(StdArc<AtomicUsize>);
+        impl Drop for D {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let counter = StdArc::new(AtomicUsize::new(0));
+        let counter_for_init = StdArc::clone(&counter);
+        let arena = Arena::new();
+        let layout = core::alloc::Layout::new::<D>();
+        // SAFETY: `init` writes a valid `D` through `ptr`.
+        let h: multitude::Arc<D> = unsafe {
+            arena.alloc_dst_arc::<D>(layout, (), move |p: *mut D| {
+                p.write(D(counter_for_init));
+            })
+        };
+        drop(h);
+        drop(arena);
+        assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
 }
 
 mod dst_box {
@@ -458,7 +486,7 @@ mod dst_box {
 
         COUNT.store(0, Ordering::SeqCst);
         let arena = Arena::new();
-        let _decoy: &mut u8 = arena.alloc(0_u8);
+        let _decoy = arena.alloc(0_u8);
         let b: multitude::Box<[A32]> = arena.alloc_slice_fill_with_box(4, |_| A32(0));
         assert_eq!(b.len(), 4);
         let before = COUNT.load(Ordering::SeqCst);
@@ -868,5 +896,114 @@ mod from_mutants_extras_dst {
         // SAFETY: validation runs before any user-visible state mutation.
         let result = unsafe { arena.try_alloc_dst_arc::<[u8]>(layout, 64, |_| {}) };
         result.unwrap_err();
+    }
+}
+
+#[cfg(feature = "dst")]
+mod alloc_unsized_extras {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use core::alloc::Layout;
+
+    use multitude::Arena;
+
+    use crate::common::SyncFailingAllocator;
+
+    #[derive(Default)]
+    struct D(#[expect(dead_code, reason = "field gives the type a non-zero size")] u32);
+    impl Drop for D {
+        fn drop(&mut self) {}
+    }
+
+    #[test]
+    // Skipped under Miri: writing + dropping `u16::MAX + 1` elements
+    // (~65K) to exercise the slice-length boundary exceeds Miri's test
+    // budget; the lifted restriction is a runtime property, not a
+    // memory-safety one, so native + cargo-careful runs cover it.
+    #[cfg_attr(miri, ignore)]
+    fn try_alloc_dst_box_slice_drop_metadata_too_large_succeeds() {
+        // Like the `Arc` path, the `Box` path stores slice metadata
+        // full-width in the chunk prefix and drops via
+        // `drop_in_place::<[D]>` (no `u16` drop-list slot), so a `T: Drop`
+        // slice longer than `u16::MAX` is accepted.
+        let arena = Arena::new();
+        let len = (u16::MAX as usize) + 1;
+        let layout = Layout::array::<D>(len).unwrap();
+        // SAFETY: `layout` describes `[D; len]`; `init` writes a valid
+        // `D` into every element before the `Box` is observed, so the
+        // eager `drop_in_place::<[D]>` in `Box::drop` runs on live values.
+        let r = unsafe {
+            arena.try_alloc_dst_box::<[D]>(layout, len, |p: *mut [D]| {
+                let base = p.cast::<D>();
+                for i in 0..len {
+                    // SAFETY: `base..base + len` is the freshly reserved
+                    // `[D]` buffer described by `layout`.
+                    base.add(i).write(D::default());
+                }
+            })
+        };
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    // Skipped under Miri: writing + dropping `u16::MAX + 1` elements
+    // (~65K) to exercise the slice-length boundary exceeds Miri's test
+    // budget (~8 min observed). The lifted-restriction behavior is a
+    // runtime property, not a memory-safety one; native + cargo-careful
+    // runs verify it on every CI execution.
+    #[cfg_attr(miri, ignore)]
+    fn try_alloc_dst_arc_slice_drop_metadata_too_large_succeeds() {
+        // Unlike the `Box` path, the `Arc` path stores slice metadata
+        // verbatim (not in the `u16` drop-list slot), so a `T: Drop`
+        // slice longer than `u16::MAX` is accepted.
+        let arena = Arena::new();
+        let len = (u16::MAX as usize) + 1;
+        let layout = Layout::array::<D>(len).unwrap();
+        // SAFETY: `layout` describes `[D; len]`; `init` writes a valid
+        // `D` into every element before the `Arc` is observed, so the
+        // eager `drop_in_place::<[D]>` on teardown runs on live values.
+        let r = unsafe {
+            arena.try_alloc_dst_arc::<[D]>(layout, len, |p: *mut [D]| {
+                let base = p.cast::<D>();
+                for i in 0..len {
+                    // SAFETY: `base..base + len` is the freshly reserved
+                    // `[D]` buffer described by `layout`.
+                    base.add(i).write(D::default());
+                }
+            })
+        };
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn try_alloc_dst_box_refill_failure_returns_err() {
+        let arena = Arena::new_in(SyncFailingAllocator::new(0));
+        let layout = Layout::new::<u32>();
+        // SAFETY: refill failure fires before init.
+        let r = unsafe {
+            arena.try_alloc_dst_box::<u32>(layout, (), |p: *mut u32| {
+                p.write(0);
+            })
+        };
+        assert!(r.is_err());
     }
 }

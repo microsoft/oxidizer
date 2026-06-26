@@ -53,7 +53,7 @@ fn reset_reuses_chunks_without_reallocating() {
     {
         let _span = first.measure_thread();
         for i in 0..WORKLOAD {
-            let _v: &mut u64 = arena.alloc(i as u64);
+            let _v = arena.alloc(i as u64);
         }
     }
     assert!(
@@ -65,7 +65,7 @@ fn reset_reuses_chunks_without_reallocating() {
     // Warm up: repeated fill+reset cycles let the size class settle.
     for _ in 0..WARMUP_CYCLES {
         for i in 0..WORKLOAD {
-            let _v: &mut u64 = arena.alloc(i as u64);
+            let _v = arena.alloc(i as u64);
         }
         arena.reset();
     }
@@ -75,7 +75,7 @@ fn reset_reuses_chunks_without_reallocating() {
     {
         let _span = reused.measure_thread();
         for i in 0..WORKLOAD {
-            let _v: &mut u64 = arena.alloc(i as u64);
+            let _v = arena.alloc(i as u64);
         }
     }
     assert_eq!(

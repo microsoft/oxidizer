@@ -45,7 +45,7 @@ use core::hint::black_box;
 use core::mem::MaybeUninit;
 
 use gungraun::{Callgrind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
-use multitude::{Arc, Arena, Box};
+use multitude::{Alloc, Arc, Arena, Box, Rc};
 
 const N: usize = 1_000;
 const SLICE_LEN: usize = 8;
@@ -56,7 +56,7 @@ fn warm_bump() -> bumpalo::Bump {
     // Warm: force first-chunk allocation so the timed region exercises
     // only the warm-path bump cursor, not the cold-create cliff.
     let bump = bumpalo::Bump::with_capacity(64 * 1024);
-    let _: &mut u64 = bump.alloc(0_u64);
+    let _ = bump.alloc(0_u64);
     bump
 }
 
@@ -74,7 +74,7 @@ fn warm_arena() -> Arena {
     // performance. This mirrors bumpalo's `warm_bump` (which itself
     // primes its cursor with a no-op alloc).
     let arena = Arena::builder().with_capacity(128 * 1024).build();
-    let _: &mut u64 = arena.alloc(0_u64);
+    let _ = arena.alloc(0_u64);
     let _ = arena.alloc_arc(0_u64);
     arena
 }
@@ -149,7 +149,7 @@ fn bump_slices() -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
 #[bench::run(warm_arena())]
 fn alloc(arena: Arena) -> Arena {
     for i in 0..N {
-        let _: &mut u64 = black_box(arena.alloc(black_box(i as u64)));
+        let _ = black_box(arena.alloc(black_box(i as u64)));
     }
     arena
 }
@@ -158,7 +158,7 @@ fn alloc(arena: Arena) -> Arena {
 #[bench::run(warm_arena())]
 fn alloc_with(arena: Arena) -> Arena {
     for i in 0..N {
-        let _: &mut u64 = black_box(arena.alloc_with(|| black_box(i as u64)));
+        let _ = black_box(arena.alloc_with(|| black_box(i as u64)));
     }
     arena
 }
@@ -244,10 +244,50 @@ fn alloc_zeroed_arc(state: (Arena, Vec<Arc<MaybeUninit<u64>>>)) -> (Arena, Vec<A
 }
 
 #[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_rc(state: (Arena, Vec<Rc<u64>>)) -> (Arena, Vec<Rc<u64>>) {
+    let (arena, mut out) = state;
+    for i in 0..N {
+        out.push(black_box(arena.alloc_rc(black_box(i as u64))));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_rc_with(state: (Arena, Vec<Rc<u64>>)) -> (Arena, Vec<Rc<u64>>) {
+    let (arena, mut out) = state;
+    for i in 0..N {
+        out.push(black_box(arena.alloc_rc_with(|| black_box(i as u64))));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_uninit_rc(state: (Arena, Vec<Rc<MaybeUninit<u64>>>)) -> (Arena, Vec<Rc<MaybeUninit<u64>>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(arena.alloc_uninit_rc::<u64>()));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_zeroed_rc(state: (Arena, Vec<Rc<MaybeUninit<u64>>>)) -> (Arena, Vec<Rc<MaybeUninit<u64>>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(arena.alloc_zeroed_rc::<u64>()));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
 #[bench::run(warm_bump())]
 fn bumpalo_alloc(bump: bumpalo::Bump) -> bumpalo::Bump {
     for i in 0..N {
-        let _: &mut u64 = black_box(bump.alloc(black_box(i as u64)));
+        let _ = black_box(bump.alloc(black_box(i as u64)));
     }
     bump
 }
@@ -256,7 +296,7 @@ fn bumpalo_alloc(bump: bumpalo::Bump) -> bumpalo::Bump {
 #[bench::run(warm_bump())]
 fn bumpalo_alloc_with(bump: bumpalo::Bump) -> bumpalo::Bump {
     for i in 0..N {
-        let _: &mut u64 = black_box(bump.alloc_with(|| black_box(i as u64)));
+        let _ = black_box(bump.alloc_with(|| black_box(i as u64)));
     }
     bump
 }
@@ -268,7 +308,7 @@ fn bumpalo_alloc_with(bump: bumpalo::Bump) -> bumpalo::Bump {
 fn alloc_str(state: (Arena, Vec<String>, Vec<*mut str>)) -> (Arena, Vec<String>, Vec<*mut str>) {
     let (arena, words, mut out) = state;
     for w in &words {
-        let s: &mut str = black_box(arena.alloc_str(black_box(w.as_str())));
+        let s = Alloc::leak(black_box(arena.alloc_str(black_box(w.as_str()))));
         out.push(s as *mut str);
     }
     (arena, words, out)
@@ -295,6 +335,16 @@ fn alloc_str_arc(state: (Arena, Vec<String>, Vec<Arc<str>>)) -> (Arena, Vec<Stri
 }
 
 #[library_benchmark]
+#[bench::run(arena_words_out())]
+fn alloc_str_rc(state: (Arena, Vec<String>, Vec<Rc<str>>)) -> (Arena, Vec<String>, Vec<Rc<str>>) {
+    let (arena, words, mut out) = state;
+    for w in &words {
+        out.push(black_box(arena.alloc_str_rc(black_box(w.as_str()))));
+    }
+    (arena, words, out)
+}
+
+#[library_benchmark]
 #[bench::run(bump_words_out())]
 fn bumpalo_alloc_str(state: (bumpalo::Bump, Vec<String>, Vec<*mut str>)) -> (bumpalo::Bump, Vec<String>, Vec<*mut str>) {
     let (bump, words, mut out) = state;
@@ -312,7 +362,7 @@ fn bumpalo_alloc_str(state: (bumpalo::Bump, Vec<String>, Vec<*mut str>)) -> (bum
 fn alloc_slice_copy(state: (Arena, Vec<[u64; SLICE_LEN]>)) -> (Arena, Vec<[u64; SLICE_LEN]>) {
     let (arena, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(arena.alloc_slice_copy(black_box(s.as_slice())));
+        let _ = black_box(arena.alloc_slice_copy(black_box(s.as_slice())));
     }
     (arena, slices)
 }
@@ -322,7 +372,7 @@ fn alloc_slice_copy(state: (Arena, Vec<[u64; SLICE_LEN]>)) -> (Arena, Vec<[u64; 
 fn alloc_slice_clone(state: (Arena, Vec<[u64; SLICE_LEN]>)) -> (Arena, Vec<[u64; SLICE_LEN]>) {
     let (arena, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(arena.alloc_slice_clone(black_box(s.as_slice())));
+        let _ = black_box(arena.alloc_slice_clone(black_box(s.as_slice())));
     }
     (arena, slices)
 }
@@ -331,7 +381,7 @@ fn alloc_slice_clone(state: (Arena, Vec<[u64; SLICE_LEN]>)) -> (Arena, Vec<[u64;
 #[bench::run(warm_arena())]
 fn alloc_slice_fill_with(arena: Arena) -> Arena {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(arena.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
+        let _ = black_box(arena.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
     }
     arena
 }
@@ -340,7 +390,7 @@ fn alloc_slice_fill_with(arena: Arena) -> Arena {
 #[bench::run(warm_arena())]
 fn alloc_slice_fill_iter(arena: Arena) -> Arena {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(arena.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
+        let _ = black_box(arena.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
     }
     arena
 }
@@ -477,6 +527,72 @@ fn alloc_zeroed_slice_arc(state: (Arena, Vec<Arc<[MaybeUninit<u64>]>>)) -> (Aren
     (arena, out)
 }
 
+// rc variants
+
+#[library_benchmark]
+#[bench::run(arena_slices_out())]
+fn alloc_slice_copy_rc(state: (Arena, Vec<[u64; SLICE_LEN]>, Vec<Rc<[u64]>>)) -> (Arena, Vec<[u64; SLICE_LEN]>, Vec<Rc<[u64]>>) {
+    let (arena, slices, mut out) = state;
+    for s in &slices {
+        out.push(black_box(arena.alloc_slice_copy_rc(black_box(s.as_slice()))));
+    }
+    (arena, slices, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_slices_out())]
+fn alloc_slice_clone_rc(state: (Arena, Vec<[u64; SLICE_LEN]>, Vec<Rc<[u64]>>)) -> (Arena, Vec<[u64; SLICE_LEN]>, Vec<Rc<[u64]>>) {
+    let (arena, slices, mut out) = state;
+    for s in &slices {
+        out.push(black_box(arena.alloc_slice_clone_rc(black_box(s.as_slice()))));
+    }
+    (arena, slices, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_slice_fill_with_rc(state: (Arena, Vec<Rc<[u64]>>)) -> (Arena, Vec<Rc<[u64]>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(
+            arena.alloc_slice_fill_with_rc::<u64, _>(SLICE_LEN, |j| black_box(j as u64)),
+        ));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_slice_fill_iter_rc(state: (Arena, Vec<Rc<[u64]>>)) -> (Arena, Vec<Rc<[u64]>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(
+            arena.alloc_slice_fill_iter_rc((0..SLICE_LEN).map(|j| black_box(j as u64))),
+        ));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_uninit_slice_rc(state: (Arena, Vec<Rc<[MaybeUninit<u64>]>>)) -> (Arena, Vec<Rc<[MaybeUninit<u64>]>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(arena.alloc_uninit_slice_rc::<u64>(SLICE_LEN)));
+    }
+    (arena, out)
+}
+
+#[library_benchmark]
+#[bench::run(arena_out())]
+fn alloc_zeroed_slice_rc(state: (Arena, Vec<Rc<[MaybeUninit<u64>]>>)) -> (Arena, Vec<Rc<[MaybeUninit<u64>]>>) {
+    let (arena, mut out) = state;
+    for _ in 0..N {
+        out.push(black_box(arena.alloc_zeroed_slice_rc::<u64>(SLICE_LEN)));
+    }
+    (arena, out)
+}
+
 // bumpalo slice variants
 
 #[library_benchmark]
@@ -484,7 +600,7 @@ fn alloc_zeroed_slice_arc(state: (Arena, Vec<Arc<[MaybeUninit<u64>]>>)) -> (Aren
 fn bumpalo_alloc_slice_copy(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
     let (bump, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(bump.alloc_slice_copy(black_box(s.as_slice())));
+        let _ = black_box(bump.alloc_slice_copy(black_box(s.as_slice())));
     }
     (bump, slices)
 }
@@ -494,7 +610,7 @@ fn bumpalo_alloc_slice_copy(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (b
 fn bumpalo_alloc_slice_clone(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (bumpalo::Bump, Vec<[u64; SLICE_LEN]>) {
     let (bump, slices) = state;
     for s in &slices {
-        let _: &mut [u64] = black_box(bump.alloc_slice_clone(black_box(s.as_slice())));
+        let _ = black_box(bump.alloc_slice_clone(black_box(s.as_slice())));
     }
     (bump, slices)
 }
@@ -503,7 +619,7 @@ fn bumpalo_alloc_slice_clone(state: (bumpalo::Bump, Vec<[u64; SLICE_LEN]>)) -> (
 #[bench::run(warm_bump())]
 fn bumpalo_alloc_slice_fill_with(bump: bumpalo::Bump) -> bumpalo::Bump {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(bump.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
+        let _ = black_box(bump.alloc_slice_fill_with::<u64, _>(SLICE_LEN, |j| black_box(j as u64)));
     }
     bump
 }
@@ -512,7 +628,7 @@ fn bumpalo_alloc_slice_fill_with(bump: bumpalo::Bump) -> bumpalo::Bump {
 #[bench::run(warm_bump())]
 fn bumpalo_alloc_slice_fill_iter(bump: bumpalo::Bump) -> bumpalo::Bump {
     for _ in 0..N {
-        let _: &mut [u64] = black_box(bump.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
+        let _ = black_box(bump.alloc_slice_fill_iter((0..SLICE_LEN).map(|j| black_box(j as u64))));
     }
     bump
 }
@@ -649,9 +765,11 @@ library_benchmark_group!(
         alloc_uninit_box, alloc_zeroed_box,
         alloc_arc, alloc_arc_with,
         alloc_uninit_arc, alloc_zeroed_arc,
+        alloc_rc, alloc_rc_with,
+        alloc_uninit_rc, alloc_zeroed_rc,
         bumpalo_alloc, bumpalo_alloc_with,
         alloc_str, alloc_str_box,
-        alloc_str_arc, bumpalo_alloc_str,
+        alloc_str_arc, alloc_str_rc, bumpalo_alloc_str,
         alloc_slice_copy, alloc_slice_clone,
         alloc_slice_fill_with, alloc_slice_fill_iter,
         alloc_slice_copy_box, alloc_slice_clone_box,
@@ -660,6 +778,9 @@ library_benchmark_group!(
         alloc_slice_copy_arc, alloc_slice_clone_arc,
         alloc_slice_fill_with_arc, alloc_slice_fill_iter_arc,
         alloc_uninit_slice_arc, alloc_zeroed_slice_arc,
+        alloc_slice_copy_rc, alloc_slice_clone_rc,
+        alloc_slice_fill_with_rc, alloc_slice_fill_iter_rc,
+        alloc_uninit_slice_rc, alloc_zeroed_slice_rc,
         bumpalo_alloc_slice_copy, bumpalo_alloc_slice_clone,
         bumpalo_alloc_slice_fill_with, bumpalo_alloc_slice_fill_iter,
         alloc_string, alloc_string_with_capacity,

@@ -24,10 +24,10 @@ fn main() {
     println!("owned = {:?}", *owned);
     drop(owned);
 
-    // -- Simple reference (cheapest; lifetime-bound to arena) --------
-    let bump_ref: &mut u32 = arena.alloc(7);
+    // -- Arena-lifetime allocation (cheapest; lifetime-bound to arena) --------
+    let mut bump_ref = arena.alloc(7_u32);
     *bump_ref *= 6;
-    let bump_str: &mut str = arena.alloc_str("hello, simple reference");
+    let bump_str = arena.alloc_str("hello, arena allocation");
     println!("bump_ref = {bump_ref}, bump_str = {bump_str}");
 
     // -- Single-pointer immutable string smart pointer -----------------------

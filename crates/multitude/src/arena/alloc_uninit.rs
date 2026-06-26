@@ -13,29 +13,29 @@ use core::pin::Pin;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::Arena;
+use crate::Alloc;
 use crate::arc::Arc;
 use crate::r#box::Box;
+use crate::rc::Rc;
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Allocate uninitialized space for a `T`, returning `&mut MaybeUninit<T>`.
+    /// Allocate uninitialized space for a `T`, returning `Alloc<MaybeUninit<T>>`.
     ///
     /// The arena-lifetime analog of [`Self::alloc_uninit_box`]: write the value
     /// (e.g. via [`MaybeUninit::write`]) then read it back with
     /// [`MaybeUninit::assume_init_mut`].
     ///
-    /// Unlike [`Self::alloc`], the value's destructor is **never** run — the
-    /// slot holds `MaybeUninit<T>`, which has no drop glue, and there is no way
-    /// to register one after the fact for a bare reference. If you need
-    /// drop-at-teardown semantics use [`Self::alloc`] / [`Self::alloc_with`],
-    /// or freeze into a [`Box`](crate::Box) / [`Arc`](crate::Arc).
+    /// The slot holds `MaybeUninit<T>`, which has no drop glue, so the inner
+    /// value's destructor is **never** run, even when the [`Alloc`] is dropped.
+    /// If you need drop-on-drop semantics use [`Self::alloc`] / [`Self::alloc_with`],
+    /// or freeze into a [`Box`](crate::Box) / [`Arc`](crate::Arc) / [`Rc`](crate::Rc).
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit`] for a fallible variant.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_uninit<T: Send>(&self) -> &mut MaybeUninit<T> {
+    pub fn alloc_uninit<T>(&self) -> Alloc<'_, MaybeUninit<T>> {
         self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
     }
 
@@ -45,9 +45,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_uninit<T: Send>(&self) -> Result<&mut MaybeUninit<T>, AllocError> {
+    pub fn try_alloc_uninit<T>(&self) -> Result<Alloc<'_, MaybeUninit<T>>, AllocError> {
         self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
     }
 
@@ -57,9 +56,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed`] for a fallible variant.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_zeroed<T: Send>(&self) -> &mut MaybeUninit<T> {
+    pub fn alloc_zeroed<T>(&self) -> Alloc<'_, MaybeUninit<T>> {
         self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
@@ -69,9 +67,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_zeroed<T: Send>(&self) -> Result<&mut MaybeUninit<T>, AllocError> {
+    pub fn try_alloc_zeroed<T>(&self) -> Result<Alloc<'_, MaybeUninit<T>>, AllocError> {
         self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
@@ -84,9 +81,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_slice`] for a fallible variant.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_uninit_slice<T: Send>(&self, len: usize) -> &mut [MaybeUninit<T>] {
+    pub fn alloc_uninit_slice<T>(&self, len: usize) -> Alloc<'_, [MaybeUninit<T>]> {
         self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
     }
 
@@ -96,9 +92,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_uninit_slice<T: Send>(&self, len: usize) -> Result<&mut [MaybeUninit<T>], AllocError> {
+    pub fn try_alloc_uninit_slice<T>(&self, len: usize) -> Result<Alloc<'_, [MaybeUninit<T>]>, AllocError> {
         self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
     }
 
@@ -108,9 +103,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_slice`] for a fallible variant.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc_zeroed_slice<T: Send>(&self, len: usize) -> &mut [MaybeUninit<T>] {
+    pub fn alloc_zeroed_slice<T>(&self, len: usize) -> Alloc<'_, [MaybeUninit<T>]> {
         self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 
@@ -120,9 +114,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_zeroed_slice<T: Send>(&self, len: usize) -> Result<&mut [MaybeUninit<T>], AllocError> {
+    pub fn try_alloc_zeroed_slice<T>(&self, len: usize) -> Result<Alloc<'_, [MaybeUninit<T>]>, AllocError> {
         self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 }
@@ -133,9 +126,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// initialize the value (e.g., via [`MaybeUninit::write`]) before
     /// calling [`Box::<MaybeUninit<T>, A>::assume_init`].
     ///
-    /// No drop entry is reserved for this box allocation. Dropping
-    /// `Box<MaybeUninit<T>>` without `assume_init` is sound and does not
-    /// run `T::drop`.
+    /// Dropping `Box<MaybeUninit<T>>` without `assume_init` is sound and does
+    /// not run `T::drop` (`MaybeUninit<T>` has no drop glue).
     ///
     /// # Panics
     ///
@@ -184,8 +176,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Allocate uninitialized space for a `T` and return an
     /// [`Arc<MaybeUninit<T>, A>`](crate::Arc).
     ///
-    /// No drop entry is reserved. Dropping `Arc<MaybeUninit<T>>` without
-    /// `assume_init` is sound (`MaybeUninit<T>` has no drop glue); after
+    /// Dropping `Arc<MaybeUninit<T>>` without `assume_init` is sound
+    /// (`MaybeUninit<T>` has no drop glue); after
     /// `assume_init`, dropping the last `Arc<T>` runs `T::drop` eagerly
     /// via `drop_in_place::<T>` (see [`Arc`](crate::Arc)'s per-pointer
     /// reference counting).
@@ -253,7 +245,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Allocate `len` uninitialized `T` slots and return an
     /// [`Arc<[MaybeUninit<T>], A>`](crate::Arc).
     ///
-    /// No drop entry is reserved. Dropping `Arc<[MaybeUninit<T>]>`
+    /// Dropping `Arc<[MaybeUninit<T>]>`
     /// without `assume_init` is sound (`MaybeUninit<T>` has no drop
     /// glue); after `assume_init`, dropping the last `Arc<[T]>` runs the
     /// element destructors eagerly via `drop_in_place::<[T]>` (see
@@ -319,12 +311,103 @@ impl<A: Allocator + Clone> Arena<A> {
         self.try_alloc_slice_fill_with_arc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 
+    // ===== `Rc<MaybeUninit<T>>` / `Rc<[MaybeUninit<T>]>` mirror =====
+
+    /// Allocate uninitialized space for a `T` and return an
+    /// [`Rc<MaybeUninit<T>, A>`](crate::Rc). See [`Self::alloc_uninit_arc`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_uninit_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
+        self.alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
+    }
+
+    /// Fallible variant of [`Self::alloc_uninit_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_uninit_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
+        self.try_alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
+    }
+
+    /// Like [`Self::alloc_uninit_rc`] but the value bytes are zeroed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_zeroed_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
+        self.alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
+    }
+
+    /// Fallible variant of [`Self::alloc_zeroed_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_zeroed_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
+        self.try_alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
+    }
+
+    /// Allocate `len` uninitialized `T` slots and return an
+    /// [`Rc<[MaybeUninit<T>], A>`](crate::Rc). See [`Self::alloc_uninit_slice_arc`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_uninit_slice_rc<T>(&self, len: usize) -> Rc<[MaybeUninit<T>], A> {
+        self.alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
+    }
+
+    /// Fallible variant of [`Self::alloc_uninit_slice_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_uninit_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
+        self.try_alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
+    }
+
+    /// Like [`Self::alloc_uninit_slice_rc`] but the slice bytes are zeroed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_zeroed_slice_rc<T>(&self, len: usize) -> Rc<[MaybeUninit<T>], A> {
+        self.alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
+    }
+
+    /// Fallible variant of [`Self::alloc_zeroed_slice_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_zeroed_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
+        self.try_alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
+    }
+
     /// Allocate `len` uninitialized `T` slots and return an
     /// [`Box<[MaybeUninit<T>], A>`](crate::Box).
     ///
-    /// No drop entry is reserved for this box allocation. Dropping
-    /// `Box<[MaybeUninit<T>]>` without `assume_init` is sound and does not
-    /// run any element destructors.
+    /// Dropping `Box<[MaybeUninit<T>]>` without `assume_init` is sound and does
+    /// not run any element destructors (`MaybeUninit<T>` has no drop glue).
     ///
     /// # Panics
     ///
@@ -488,5 +571,59 @@ impl<A: Allocator + Clone> Arena<A> {
         T: Send + Sync,
     {
         self.try_alloc_zeroed_arc::<T>().map(Arc::into_pin)
+    }
+
+    /// `Rc` mirror of [`Self::alloc_uninit_arc_pin`].
+    ///
+    /// # Panics
+    ///
+    /// See [`Self::alloc_uninit_box_pin`].
+    #[must_use]
+    #[inline]
+    pub fn alloc_uninit_rc_pin<T>(&self) -> Pin<Rc<MaybeUninit<T>, A>>
+    where
+        A: 'static,
+    {
+        Rc::into_pin(self.alloc_uninit_rc::<T>())
+    }
+
+    /// Fallible variant of [`Self::alloc_uninit_rc_pin`].
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::alloc_uninit_box_pin`].
+    #[inline]
+    pub fn try_alloc_uninit_rc_pin<T>(&self) -> Result<Pin<Rc<MaybeUninit<T>, A>>, AllocError>
+    where
+        A: 'static,
+    {
+        self.try_alloc_uninit_rc::<T>().map(Rc::into_pin)
+    }
+
+    /// `Rc` mirror of [`Self::alloc_zeroed_arc_pin`].
+    ///
+    /// # Panics
+    ///
+    /// See [`Self::alloc_uninit_box_pin`].
+    #[must_use]
+    #[inline]
+    pub fn alloc_zeroed_rc_pin<T>(&self) -> Pin<Rc<MaybeUninit<T>, A>>
+    where
+        A: 'static,
+    {
+        Rc::into_pin(self.alloc_zeroed_rc::<T>())
+    }
+
+    /// Fallible variant of [`Self::alloc_zeroed_rc_pin`].
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::alloc_uninit_box_pin`].
+    #[inline]
+    pub fn try_alloc_zeroed_rc_pin<T>(&self) -> Result<Pin<Rc<MaybeUninit<T>, A>>, AllocError>
+    where
+        A: 'static,
+    {
+        self.try_alloc_zeroed_rc::<T>().map(Rc::into_pin)
     }
 }

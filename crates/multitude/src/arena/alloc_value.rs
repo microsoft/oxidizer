@@ -12,38 +12,39 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::{Arena, ExpectAlloc};
+use crate::Alloc;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::constants::max_smart_ptr_align;
-use crate::internal::drop_entry::DropEntry;
+use crate::internal::thin_dst::{AtomicStrong, LocalStrong};
 use crate::internal::uninit::Uninit;
 use crate::internal::{Chunk, thin_dst};
+use crate::rc::Rc;
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
-/// a chunk: value bytes + alignment padding, plus one [`DropEntry`] slot
-/// if `T` requires drop.
+/// a chunk: value bytes + alignment padding.
 #[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
 const fn worst_case_payload<T>() -> usize {
-    let base = mem::size_of::<T>().saturating_add(mem::align_of::<T>());
-    if mem::needs_drop::<T>() {
-        base.saturating_add(mem::size_of::<DropEntry>())
-    } else {
-        base
-    }
+    mem::size_of::<T>().saturating_add(mem::align_of::<T>())
 }
 
-/// Worst-case bytes consumed by a single `Arc<T>` value allocation: the
-/// per-`Arc` strong-count prefix + value bytes + front alignment slack.
+/// Worst-case bytes consumed by a single strong-prefixed value allocation
+/// under policy `S` ([`AtomicStrong`](thin_dst::AtomicStrong) for `Arc`,
+/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): the per-handle
+/// strong-count prefix + value bytes + front alignment slack (`S::block_align`).
+/// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
+/// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` is
+/// not strong-prefixed — it allocates through the separate non-prefixed path.)
 #[cfg_attr(test, mutants::skip)] // under-sized hint ⇒ refill loop spin (OOM)
 #[inline]
-const fn worst_case_arc_payload<T>() -> usize {
+fn worst_case_strong_payload<S: thin_dst::Strong, T>() -> usize {
     let align = mem::align_of::<T>();
     let value_bytes = if mem::size_of::<T>() == 0 { 1 } else { mem::size_of::<T>() };
     thin_dst::strong_prefix_bytes_for(align, 0)
         .saturating_add(value_bytes)
-        .saturating_add(thin_dst::arc_block_align(align))
+        .saturating_add(S::block_align(align))
 }
 
 /// Maximum `align_of::<T>()` accepted by smart-pointer allocations.
@@ -59,7 +60,8 @@ pub(in crate::arena) const MAX_SMART_PTR_ALIGN: usize = max_smart_ptr_align();
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate `value` and return a `Send + Sync` reference-counted smart pointer.
     ///
-    /// Costs an atomic RMW per clone/drop.
+    /// Cloning and dropping are **O(1)**. For a cheaper single-thread
+    /// alternative, see [`Self::alloc_rc`].
     ///
     /// # Panics
     ///
@@ -70,7 +72,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        (self.impl_alloc_arc_with::<T, _>(move || value)).expect_alloc()
+        self.try_alloc_arc_with::<T, _>(move || value).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_arc`].
@@ -87,7 +89,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_arc_with::<T, _>(move || value)
+        self.try_alloc_arc_with::<T, _>(move || value)
     }
 
     /// Allocate the result of `f` in a chunk and return an [`Arc`].
@@ -104,7 +106,7 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        (self.impl_alloc_arc_with::<T, F>(f)).expect_alloc()
+        self.try_alloc_arc_with::<T, F>(f).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_arc_with`].
@@ -125,7 +127,62 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_arc_with::<T, F>(f)
+        self.impl_alloc_smart_prefixed_with::<AtomicStrong, T, F>(f)
+    }
+
+    /// Allocate `value` in a chunk and return an [`Rc`] — a non-atomic,
+    /// single-thread reference-counted smart pointer.
+    ///
+    /// Like [`Self::alloc_arc`] but `Rc` is [`!Send`](Send)/[`!Sync`](Sync), so
+    /// `T` needs no `Send`/`Sync` bound, clone/drop are cheaper (non-atomic),
+    /// and `str`/`[u8]` pack slightly tighter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_rc`] for a fallible variant.
+    #[inline]
+    pub fn alloc_rc<T>(&self, value: T) -> Rc<T, A> {
+        self.try_alloc_rc_with::<T, _>(move || value).expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::alloc_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_rc<T>(&self, value: T) -> Result<Rc<T, A>, AllocError> {
+        self.try_alloc_rc_with::<T, _>(move || value)
+    }
+
+    /// Allocate the result of `f` in a chunk and return an [`Rc`].
+    ///
+    /// See [`Self::alloc_rc`]; the closure constructs the value in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    /// Use [`Self::try_alloc_rc_with`] for a fallible variant.
+    #[inline]
+    pub fn alloc_rc_with<T, F: FnOnce() -> T>(&self, f: F) -> Rc<T, A> {
+        self.try_alloc_rc_with::<T, F>(f).expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::alloc_rc_with`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
+    /// is at least 32 KiB.
+    ///
+    /// # Panics
+    ///
+    /// Propagates panics from `f`.
+    #[inline]
+    pub fn try_alloc_rc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Rc<T, A>, AllocError> {
+        self.impl_alloc_smart_prefixed_with::<LocalStrong, T, F>(f)
     }
 
     /// Allocate `value` and return an owned, mutable [`Box`] smart pointer.
@@ -168,7 +225,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// ## Closure-panic safety
     ///
     /// If `f` panics, an internal panic guard releases the protective
-    /// `+1` refcount taken before `f` ran. No drop entry is linked, so
+    /// `+1` refcount taken before `f` ran. No destructor is queued, so
     /// `T::drop` does not run on the partially-constructed value. The
     /// reserved bump bytes leak in-chunk until the chunk is reset or
     /// reclaimed; the chunk's refcount is *not* leaked.
@@ -324,34 +381,83 @@ impl<A: Allocator + Clone> Arena<A> {
         self.try_alloc_arc_with(f).map(Arc::into_pin)
     }
 
-    /// Bump-allocate `value` and return a mutable reference whose
-    /// lifetime is tied to `&self`. The cheapest allocation multitude
-    /// offers — no refcount, no per-pointer bookkeeping. The borrow
-    /// checker bounds the returned reference to the arena's lifetime.
+    /// Allocate `value` and return a pinned [`Rc<T, A>`](crate::Rc).
+    /// Mirror of `std::rc::Rc::pin`.
     ///
-    /// If `T: Drop`, a drop entry is registered in the chunk's drop
-    /// list; `T::drop` runs at arena drop. (For per-pointer
-    /// drop-on-drop semantics, use [`Self::alloc_box`] instead.)
+    /// # Panics
     ///
-    /// The chunk that hosts the value is "pinned" — it lives until
-    /// arena drop (other allocations into the same chunk follow normal
-    /// per-chunk reclamation rules and may extend its life past the
-    /// arena via [`Arc`] smart pointers).
+    /// Panics if the underlying allocator fails or if
+    /// `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_rc_pin<T>(&self, value: T) -> Pin<Rc<T, A>>
+    where
+        A: 'static,
+    {
+        Rc::into_pin(self.alloc_rc(value))
+    }
+
+    /// Fallible variant of [`Self::alloc_rc_pin`].
     ///
-    /// # Why `T: Send`?
+    /// # Errors
     ///
-    /// The value's `T::drop` runs at arena drop (or reset). Because [`Arena`]
-    /// is [`Send`], that teardown may execute on a thread other than the one
-    /// that constructed the value, which would be unsound for a thread-affine
-    /// `!Send` type (e.g. one holding an [`Rc`](std::rc::Rc) whose other
-    /// clones live on the original thread).
+    /// Returns [`AllocError`] if the backing allocator fails or if
+    /// `align_of::<T>()` is at least 32 KiB. The supplied `value` is
+    /// dropped on failure.
+    #[inline]
+    pub fn try_alloc_rc_pin<T>(&self, value: T) -> Result<Pin<Rc<T, A>>, AllocError>
+    where
+        A: 'static,
+    {
+        self.try_alloc_rc(value).map(Rc::into_pin)
+    }
+
+    /// Allocate the result of `f` in place and return a pinned
+    /// [`Rc<T, A>`](crate::Rc).
     ///
-    /// The bound is conservative: it is only strictly necessary for
-    /// `T: Drop`, but a static bound can't be conditioned on
-    /// `mem::needs_drop::<T>()` without specialization, so it is applied
-    /// uniformly. To arena-allocate a `!Send` value, hold it behind a smart
-    /// pointer that runs its destructor eagerly on the owning thread (e.g.
-    /// [`Self::alloc_box`]).
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails or if
+    /// `align_of::<T>()` is at least 32 KiB.
+    #[must_use]
+    #[inline]
+    pub fn alloc_rc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Pin<Rc<T, A>>
+    where
+        A: 'static,
+    {
+        Rc::into_pin(self.alloc_rc_with(f))
+    }
+
+    /// Fallible variant of [`Self::alloc_rc_pin_with`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if
+    /// `align_of::<T>()` is at least 32 KiB.
+    #[inline]
+    pub fn try_alloc_rc_pin_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Pin<Rc<T, A>>, AllocError>
+    where
+        A: 'static,
+    {
+        self.try_alloc_rc_with(f).map(Rc::into_pin)
+    }
+
+    /// Bump-allocate `value` and return an [`Alloc`] handle whose lifetime is
+    /// tied to `&self`. The cheapest owning allocation multitude offers — no
+    /// refcount, no per-pointer bookkeeping. The borrow checker bounds the
+    /// returned handle to the arena's lifetime.
+    ///
+    /// The returned [`Alloc<T>`](Alloc) dereferences to `T` and runs `T`'s
+    /// destructor **eagerly** when it is dropped — never deferred to arena
+    /// reset or teardown. (For an escapable, refcounted owner that can outlive
+    /// the arena, use [`Self::alloc_box`] instead.)
+    ///
+    /// The chunk that hosts the value is "pinned" — it lives until arena drop
+    /// (other allocations into the same chunk follow normal per-chunk
+    /// reclamation rules and may extend its life past the arena via [`Arc`]
+    /// smart pointers). The value's memory is reclaimed in bulk at
+    /// [`Self::reset`] or arena drop, regardless of when the [`Alloc`] handle
+    /// is dropped.
     ///
     /// # Panics
     ///
@@ -362,17 +468,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// ```
     /// let arena = multitude::Arena::new();
-    /// let x: &mut u32 = arena.alloc(42);
-    /// let y: &mut u32 = arena.alloc(100);
+    /// let mut x = arena.alloc(42);
+    /// let mut y = arena.alloc(100);
     /// *x += 1;
     /// *y += 1;
     /// assert_eq!(*x, 43);
     /// assert_eq!(*y, 101);
     /// ```
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn alloc<T: Send>(&self, value: T) -> &mut T {
-        (self.impl_alloc_value_with::<T, _>(move || value)).expect_alloc()
+    pub fn alloc<T>(&self, value: T) -> Alloc<'_, T> {
+        self.impl_alloc_value_with::<T, _>(move || value).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc`].
@@ -385,30 +490,26 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator cannot satisfy
     /// the request.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc<T: Send>(&self, value: T) -> Result<&mut T, AllocError> {
+    pub fn try_alloc<T>(&self, value: T) -> Result<Alloc<'_, T>, AllocError> {
         self.impl_alloc_value_with::<T, _>(move || value)
     }
 
     /// Bump-allocate the result of `f`, constructing it in place in the arena.
     ///
-    /// Avoids a stack copy of `T`. Returns a mutable reference whose
-    /// lifetime is tied to `&self`. See [`Self::alloc`] for full semantics.
+    /// Avoids a stack copy of `T`. Returns an [`Alloc`] handle whose lifetime
+    /// is tied to `&self`. See [`Self::alloc`] for full semantics.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_with`] for a fallible variant.
     ///
-    /// If `f` panics, the reservation is leaked in-chunk (no drop is registered, no
-    /// refcount bumped) but the chunk itself reclaims normally.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    /// If `f` panics, the reservation is leaked in-chunk (no refcount bumped)
+    /// but the chunk itself reclaims normally.
     #[inline]
-    pub fn alloc_with<T: Send, F: FnOnce() -> T>(&self, f: F) -> &mut T {
-        // See `alloc` for why the `Err` arm uses `panic_alloc!()` rather than
-        // `unsafe { unreachable_unchecked() }`.
-        (self.impl_alloc_value_with::<T, F>(f)).expect_alloc()
+    pub fn alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Alloc<'_, T> {
+        self.impl_alloc_value_with::<T, F>(f).expect_alloc()
     }
 
     /// Fallible variant of [`Self::alloc_with`].
@@ -420,32 +521,60 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
-    #[allow(
-        clippy::mut_from_ref,
-        reason = "Simple references: each call returns a fresh, disjoint &mut T; the borrow checker treats the returned reference as exclusive of its own region but harmlessly aliasing-with-shared with the &Arena borrow"
-    )]
     #[inline]
-    pub fn try_alloc_with<T: Send, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
+    pub fn try_alloc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Alloc<'_, T>, AllocError> {
         self.impl_alloc_value_with::<T, F>(f)
     }
 
-    /// Shared fast-path body for the scalar entry points (`alloc`, `try_alloc`,
-    /// `alloc_with`, `try_alloc_with`). Specialized per-monomorphization
-    /// via the const `needs_drop` branch.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    /// Shared body for the scalar entry points (`alloc`, `try_alloc`,
+    /// `alloc_with`, `try_alloc_with`): bump-allocate one `T`, write it, and
+    /// adopt the slot into an owning [`Alloc`] handle.
     #[inline(always)]
-    fn impl_alloc_value_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
+    fn impl_alloc_value_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Alloc<'_, T>, AllocError> {
+        let slot = self.alloc_value_with_raw::<T, F>(f)?;
+        // SAFETY: `alloc_value_with_raw` returns the unique `&mut T` for a
+        // freshly-written arena slot that the arena hands out exactly once and
+        // never drops itself, so `Alloc` may take ownership and run its
+        // destructor exactly once on drop.
+        Ok(unsafe { Alloc::from_mut(slot) })
+    }
+
+    /// Raw scalar allocation returning the bare arena `&mut T` (before adoption
+    /// into [`Alloc`]). Split out so the single `Alloc::from_mut` lives in
+    /// [`Self::impl_alloc_value_with`].
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_value_with"
+    )]
+    #[inline(always)]
+    fn alloc_value_with_raw<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
             return Err(AllocError);
         }
+        // Straight-line fast path: a single in-chunk reservation attempt with
+        // no loop, so the caller's own loop induction variable keeps its tight
+        // register schedule. The refill / oversized retries live in the cold
+        // helper. `f` is moved on exactly one of the two arms.
+        if let Some(u) = self.try_reserve_local::<T>() {
+            return Ok(u.init(f()));
+        }
+        self.alloc_value_refill_with::<T, F>(f)
+    }
+
+    /// Cold continuation of [`Self::impl_alloc_value_with`]: refill the current
+    /// chunk (or fall back to a dedicated oversized chunk) and retry until the
+    /// reservation succeeds or the backing allocator fails.
+    #[cold]
+    #[inline(never)]
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
+    )]
+    fn alloc_value_refill_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         // `f` is only invoked on the success arms that `return`, so it
         // is never moved on the fall-through path.
         loop {
-            if const { mem::needs_drop::<T>() } {
-                if let Some(u) = self.try_reserve_local_with_drop::<T>() {
-                    return Ok(u.init(f()));
-                }
-            } else if let Some(u) = self.try_reserve_local::<T>() {
+            if let Some(u) = self.try_reserve_local::<T>() {
                 return Ok(u.init(f()));
             }
             let wcp = worst_case_payload::<T>();
@@ -472,20 +601,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// spill on the hot path even when this cold branch is never taken.
     #[cold]
     #[inline(never)]
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc at the public boundary"
+    )]
     fn alloc_oversized_value_with<T, F: FnOnce() -> T>(&self, wcp: usize, f: F) -> Result<&mut T, AllocError> {
         let mutator = self.acquire_oversized_local_mutator(wcp)?;
-        let value_ptr = if const { mem::needs_drop::<T>() } {
-            let ticket = mutator
-                .try_alloc_uninit_with_drop::<T>()
-                .expect("dedicated oversized chunk sized to fit one value + drop entry");
-            ticket.init_raw(f())
-        } else {
-            let ticket = mutator
-                .try_alloc_uninit::<T>()
-                .expect("dedicated oversized chunk sized to fit one value");
-            ticket.init_raw(f())
-        };
+        let ticket = mutator
+            .try_alloc_uninit::<T>()
+            .expect("dedicated oversized chunk sized to fit one value");
+        let value_ptr = ticket.init_raw(f());
         self.retain_oversized_local_mutator(mutator);
         // SAFETY: the chunk is retained in `retired_local` for the
         // `&self` borrow, so `value_ptr` stays valid; the value is
@@ -508,37 +633,46 @@ impl<A: Allocator + Clone> Arena<A> {
             .map(|ptr| unsafe { Box::from_raw(ptr.cast::<u8>()) })
     }
 
-    /// Shared fast-path body for the `alloc_arc` family.
+    /// Shared fast-path body for the `alloc_arc` / `alloc_rc` families,
+    /// parameterized by the [`Strong`](thin_dst::Strong) count policy.
     ///
-    /// Unlike [`Box`], an [`Arc`] reserves a per-`Arc` strong reference
-    /// count in the chunk prefix (initialized to `1`), takes one chunk
-    /// refcount for the whole `Arc` family, and runs `T::drop` eagerly
-    /// when the strong count reaches zero — never via a chunk
-    /// drop-entry.
+    /// Unlike [`Box`], an [`Arc`]/[`Rc`](crate::Rc) reserves a per-handle strong
+    /// reference count in the chunk prefix (initialized to `1`), takes one chunk
+    /// refcount for the whole family, and runs `T::drop` eagerly when the strong
+    /// count reaches zero.
+    #[inline(always)]
+    fn impl_alloc_smart_prefixed_with<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<S::Ptr<T, A>, AllocError> {
+        let thin = self.alloc_smart_prefixed_with_raw::<S, T, F>(f)?;
+        // SAFETY: `alloc_smart_prefixed_with_raw` returns a thin pointer to a
+        // freshly-written `T` whose chunk prefix holds a strong count of 1 and
+        // whose hosting chunk it took a `+1` on; the pointer lies in the chunk's
+        // first tile. That is exactly `S::adopt`'s contract.
+        Ok(unsafe { S::adopt::<T, A>(thin) })
+    }
+
+    /// Raw scalar smart allocation returning the thin payload pointer (before
+    /// adoption). Split out so the single `S::adopt` lives in
+    /// [`Self::impl_alloc_smart_prefixed_with`].
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
-    fn impl_alloc_arc_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<Arc<T, A>, AllocError>
-    where
-        A: Send + Sync,
-        T: Send + Sync,
-    {
+    fn alloc_smart_prefixed_with_raw<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<u8>, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
             return Err(AllocError);
         }
         let mut f = Some(f);
         loop {
-            if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_value::<T>() {
+            if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_value::<S, T>() {
                 let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 let f = f.take().expect("closure taken twice");
                 let ptr = init_smart_slot::<T, A, _>(uninit, chunk_ref, f);
-                // SAFETY: the strong prefix was written (count = 1) and the
-                // chunk holds a fresh +1 for this `Arc` family.
-                return Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) });
+                // The strong prefix was written (count = 1) and the chunk holds
+                // a fresh +1 for this smart-pointer family.
+                return Ok(ptr.cast::<u8>());
             }
-            let wcp = worst_case_arc_payload::<T>();
+            let wcp = worst_case_strong_payload::<S, T>();
             if self.is_oversized(wcp) {
                 let f = f.take().expect("closure taken twice");
-                return self.alloc_oversized_arc_with::<T, F>(wcp, f);
+                return self.alloc_oversized_smart_prefixed_with::<S, T, F>(wcp, f);
             }
             self.refill(wcp)?;
         }
@@ -547,7 +681,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Bump-allocates `T` in the arena's current chunk for a
     /// [`Box`], takes a +1 refcount on that chunk, and writes the value
     /// into the reservation. [`Box`] runs `T::drop` eagerly in its own
-    /// `Drop`, so no chunk drop entry is reserved.
+    /// `Drop`.
     ///
     /// Rejects alignments at or above [`MAX_SMART_PTR_ALIGN`]: such
     /// values cannot live inside the first [`CHUNK_ALIGN`] bytes of a
@@ -600,24 +734,24 @@ impl<A: Allocator + Clone> Arena<A> {
         Ok(ptr)
     }
 
-    /// Cold oversized-`Arc` fallback for [`Self::impl_alloc_arc_with`].
+    /// Cold oversized fallback for [`Self::impl_alloc_smart_prefixed_with`].
     #[cold]
     #[inline(never)]
-    fn alloc_oversized_arc_with<T, F: FnOnce() -> T>(&self, wcp: usize, f: F) -> Result<Arc<T, A>, AllocError>
-    where
-        A: Send + Sync,
-        T: Send + Sync,
-    {
+    fn alloc_oversized_smart_prefixed_with<S: thin_dst::Strong, T, F: FnOnce() -> T>(
+        &self,
+        wcp: usize,
+        f: F,
+    ) -> Result<NonNull<u8>, AllocError> {
         let (mutator, chunk_ptr) = self.acquire_oversized_shared_mutator(wcp)?;
         let (ticket, _chunk) = mutator
-            .try_alloc_arc_value::<T>()
-            .expect("dedicated oversized chunk sized to fit one Arc value + strong prefix");
+            .try_alloc_arc_value::<S, T>()
+            .expect("dedicated oversized chunk sized to fit one smart value + strong prefix");
         let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
         let ptr = init_smart_slot::<T, A, F>(ticket, chunk_ref, f);
         drop(mutator);
-        // SAFETY: the strong prefix was written (count = 1) and the chunk
-        // holds a fresh +1 for this `Arc` family.
-        Ok(unsafe { Arc::from_raw(ptr.cast::<u8>()) })
+        // The strong prefix was written (count = 1) and the chunk holds a fresh
+        // +1 for this smart-pointer family.
+        Ok(ptr.cast::<u8>())
     }
 }
 

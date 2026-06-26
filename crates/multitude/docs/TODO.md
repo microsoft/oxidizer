@@ -2,22 +2,11 @@
 
 ## General
 
-- Consider introducing arena-friendly hash map and hash set
-
-- `alloc<T: Send>` requires `T: Send` because `T::drop` runs at arena
-  reset/drop and `Arena: Send`, so teardown may run on a migrated thread.
-  This is an undesirable constraint. We could introduce a Mode generic to
-  Arena to control whether it is `Send` or `!Send` and adjust the constraint
-  on `alloc<T>` accordingly.
-
 - No owning IntoIterator for Box<[T]> (std has it). Minor, but an easy ergonomic win.
 
 - Consider storing the length of arrays in the chunk using a variable integer encoding instead
   of always storing a usize. This would save RAM and CPU cache space, at the cost of a bit of computation
   whenever getting the length.
-
-- Add tests with allocation_tracker to make sure allocation promises are
-in fact maintained.
 
 ## Optional freeze-prefix reservation for `Vec`/`String`/`Utf16String`
 

@@ -285,6 +285,7 @@ mod arena_drop_reentrancy {
             0x1111_2222_3333_4444_u64
         });
         assert_eq!(*outer, 0x1111_2222_3333_4444_u64);
+        drop(outer);
         drop(arena);
     }
 }

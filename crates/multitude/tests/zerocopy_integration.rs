@@ -209,14 +209,14 @@ fn zerocopy_view_debug() {
 #[test]
 fn alloc_ref_scalar_is_zeroed() {
     let arena = Arena::new();
-    let v: &mut u64 = arena.zerocopy().alloc::<u64>();
+    let v = arena.zerocopy().alloc::<u64>();
     assert_eq!(*v, 0);
 }
 
 #[test]
 fn alloc_ref_struct_is_zeroed() {
     let arena = Arena::new();
-    let v: &mut Scalars = arena.zerocopy().alloc::<Scalars>();
+    let v = arena.zerocopy().alloc::<Scalars>();
     assert_eq!(*v, Scalars { a: 0, b: 0, c: 0 });
 }
 
@@ -246,7 +246,7 @@ fn alloc_ref_panics_on_over_aligned() {
 #[test]
 fn alloc_ref_is_mutable() {
     let arena = Arena::new();
-    let v = arena.zerocopy().alloc::<u32>();
+    let mut v = arena.zerocopy().alloc::<u32>();
     assert_eq!(*v, 0);
     *v = 42;
     assert_eq!(*v, 42);
@@ -255,8 +255,8 @@ fn alloc_ref_is_mutable() {
 #[test]
 fn alloc_slice_ref_is_zeroed() {
     let arena = Arena::new();
-    let s: &mut [u32] = arena.zerocopy().alloc_slice::<u32>(5);
-    assert_eq!(s, &[0, 0, 0, 0, 0]);
+    let s = arena.zerocopy().alloc_slice::<u32>(5);
+    assert_eq!(&*s, &[0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn alloc_slice_ref_empty() {
 fn try_alloc_slice_ref_ok() {
     let arena = Arena::new();
     let s = arena.zerocopy().try_alloc_slice::<u16>(3).unwrap();
-    assert_eq!(s, &[0, 0, 0]);
+    assert_eq!(&*s, &[0, 0, 0]);
 }
 
 #[test]
@@ -292,9 +292,9 @@ fn alloc_slice_ref_panics_on_over_aligned() {
 #[test]
 fn alloc_slice_ref_is_mutable() {
     let arena = Arena::new();
-    let s = arena.zerocopy().alloc_slice::<u32>(3);
+    let mut s = arena.zerocopy().alloc_slice::<u32>(3);
     s[1] = 99;
-    assert_eq!(s, &[0, 99, 0]);
+    assert_eq!(&*s, &[0, 99, 0]);
 }
 
 mod from_coverage_extras_zerocopy {

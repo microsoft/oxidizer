@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for Simple-reference allocations: `Arena::alloc`, `alloc_str`,
-//! and the slice variants. These return `&'arena mut T` whose lifetime
-//! is tied to the arena reference, with no per-pointer refcount.
+//! Tests for simple owning reference allocations: `Arena::alloc`, `alloc_str`,
+//! and the slice variants. These return `Alloc<'arena, T>` handles whose
+//! lifetime is tied to the arena reference, with no per-pointer refcount.
 //!
 //! The chunk that hosts each value is "pinned" so it survives past
-//! chunk rotation. The pinning costs one bit per chunk and is released
-//! at arena drop.
+//! chunk rotation. The handle eagerly drops its value; leaked handles keep the
+//! chunk pinned until arena drop.
 
 #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
 #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -30,7 +30,7 @@ use multitude::Arena;
 #[test]
 fn alloc_returns_mutable_reference() {
     let arena = Arena::new();
-    let x: &mut u32 = arena.alloc(42);
+    let mut x = arena.alloc(42);
     assert_eq!(*x, 42);
     *x = 100;
     assert_eq!(*x, 100);
@@ -39,7 +39,7 @@ fn alloc_returns_mutable_reference() {
 #[test]
 fn alloc_with_constructs_in_place() {
     let arena = Arena::new();
-    let v: &mut std::vec::Vec<i32> = arena.alloc_with(|| vec![1, 2, 3]);
+    let mut v = arena.alloc_with(|| vec![1, 2, 3]);
     v.push(4);
     assert_eq!(v.as_slice(), &[1, 2, 3, 4]);
 }
@@ -49,9 +49,9 @@ fn alloc_many_disjoint_mutable_refs_coexist() {
     // Simple references: multiple `&mut T` from the same arena are
     // disjoint, mutually-live mutable references.
     let arena = Arena::new();
-    let a: &mut u64 = arena.alloc(1);
-    let b: &mut u64 = arena.alloc(2);
-    let c: &mut u64 = arena.alloc(3);
+    let mut a = arena.alloc(1);
+    let mut b = arena.alloc(2);
+    let mut c = arena.alloc(3);
     *a += 10;
     *b += 20;
     *c += 30;
@@ -63,26 +63,26 @@ fn alloc_many_disjoint_mutable_refs_coexist() {
 #[test]
 fn alloc_str_copies_and_returns_mut_str() {
     let arena = Arena::new();
-    let s: &mut str = arena.alloc_str("hello");
-    assert_eq!(s, "hello");
+    let mut s = arena.alloc_str("hello");
+    assert_eq!(&*s, "hello");
     s.make_ascii_uppercase();
-    assert_eq!(s, "HELLO");
+    assert_eq!(&*s, "HELLO");
 }
 
 #[test]
 fn alloc_str_empty() {
     let arena = Arena::new();
-    let s: &mut str = arena.alloc_str("");
-    assert_eq!(s, "");
+    let s = arena.alloc_str("");
+    assert_eq!(&*s, "");
 }
 
 #[test]
 fn alloc_slice_copy_mutable() {
     let arena = Arena::new();
-    let s: &mut [u32] = arena.alloc_slice_copy([1, 2, 3, 4, 5]);
-    assert_eq!(s, &[1, 2, 3, 4, 5][..]);
+    let mut s = arena.alloc_slice_copy([1, 2, 3, 4, 5]);
+    assert_eq!(&*s, &[1, 2, 3, 4, 5][..]);
     s[2] = 99;
-    assert_eq!(s, &[1, 2, 99, 4, 5][..]);
+    assert_eq!(&*s, &[1, 2, 99, 4, 5][..]);
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn alloc_slice_clone_works() {
         std::string::String::from("b"),
         std::string::String::from("c"),
     ];
-    let s: &mut [String] = arena.alloc_slice_clone(&originals);
+    let mut s = arena.alloc_slice_clone(&originals);
     assert_eq!(s.len(), 3);
     assert_eq!(s[0], "a");
     s[0].push('!');
@@ -105,7 +105,7 @@ fn alloc_slice_clone_works() {
 #[test]
 fn alloc_slice_fill_with_works() {
     let arena = Arena::new();
-    let s: &mut [u32] = arena.alloc_slice_fill_with(10, |i| (i as u32) * (i as u32));
+    let s = arena.alloc_slice_fill_with(10, |i| (i as u32) * (i as u32));
     assert_eq!(s.len(), 10);
     for i in 0..10 {
         assert_eq!(s[i], (i as u32) * (i as u32));
@@ -116,7 +116,7 @@ fn alloc_slice_fill_with_works() {
 fn try_alloc_slice_clone_works() {
     let arena = Arena::new();
     let originals = [std::string::String::from("x"), std::string::String::from("y")];
-    let s: &mut [String] = arena.try_alloc_slice_clone(&originals).unwrap();
+    let s = arena.try_alloc_slice_clone(&originals).unwrap();
     assert_eq!(s.len(), 2);
     assert_eq!(s[0], "x");
     assert_eq!(s[1], "y");
@@ -125,21 +125,21 @@ fn try_alloc_slice_clone_works() {
 #[test]
 fn alloc_slice_fill_iter_works() {
     let arena = Arena::new();
-    let s: &mut [u64] = arena.alloc_slice_fill_iter([0_u64, 1, 2, 3, 4]);
-    assert_eq!(s, &[0, 1, 2, 3, 4]);
+    let s = arena.alloc_slice_fill_iter([0_u64, 1, 2, 3, 4]);
+    assert_eq!(&*s, &[0, 1, 2, 3, 4]);
 }
 
 #[test]
 fn try_alloc_slice_fill_iter_works() {
     let arena = Arena::new();
-    let s: &mut [i32] = arena.try_alloc_slice_fill_iter([10, 20, 30]).unwrap();
-    assert_eq!(s, &[10, 20, 30]);
+    let s = arena.try_alloc_slice_fill_iter([10, 20, 30]).unwrap();
+    assert_eq!(&*s, &[10, 20, 30]);
 }
 
 #[test]
 fn alloc_slice_fill_iter_empty() {
     let arena = Arena::new();
-    let s: &mut [u32] = arena.alloc_slice_fill_iter(core::iter::empty::<u32>());
+    let s = arena.alloc_slice_fill_iter(core::iter::empty::<u32>());
     assert!(s.is_empty());
 }
 
@@ -148,7 +148,7 @@ fn alloc_survives_chunk_rotation() {
     // Force chunk rotation while a bump-ref is alive. Without pinning,
     // the rotated chunk would be freed and the &mut would dangle.
     let arena = Arena::builder().build();
-    let pinned_value: &mut [u8] = arena.alloc_slice_copy([0xAB; 1024]);
+    let mut pinned_value = arena.alloc_slice_copy([0xAB; 1024]);
     pinned_value[0] = 0xCD;
     // Force chunk rotation: allocate enough to retire the current chunk.
     for _ in 0..10 {
@@ -165,7 +165,7 @@ fn alloc_works_across_many_rotations() {
     // Stress test: many bump-allocs spanning many chunks. All
     // references must remain valid.
     let arena = Arena::builder().build();
-    let mut refs: std::vec::Vec<&mut u32> = std::vec::Vec::with_capacity(1000);
+    let mut refs = std::vec::Vec::with_capacity(1000);
     for i in 0..1000_u32 {
         refs.push(arena.alloc(i));
     }
@@ -175,7 +175,7 @@ fn alloc_works_across_many_rotations() {
 }
 
 #[test]
-fn alloc_drop_runs_at_arena_drop() {
+fn alloc_drop_runs_when_handles_drop() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct DropCounter(std::sync::Arc<AtomicUsize>);
@@ -188,17 +188,17 @@ fn alloc_drop_runs_at_arena_drop() {
     let counter = std::sync::Arc::new(AtomicUsize::new(0));
     {
         let arena = Arena::new();
-        let _r1: &mut DropCounter = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
-        let _r2: &mut DropCounter = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
-        let _r3: &mut DropCounter = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
-        assert_eq!(counter.load(Ordering::SeqCst), 0, "drop must not run before arena drop");
-        // arena drops here → all three DropCounters must run.
+        let _r1 = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
+        let _r2 = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
+        let _r3 = arena.alloc(DropCounter(std::sync::Arc::clone(&counter)));
+        assert_eq!(counter.load(Ordering::SeqCst), 0, "drop must not run before handles drop");
+        // handles drop here → all three DropCounters must run.
     }
     assert_eq!(counter.load(Ordering::SeqCst), 3);
 }
 
 #[test]
-fn alloc_slice_fill_with_drop_runs_at_arena_drop() {
+fn alloc_slice_fill_with_drop_runs_when_handle_drops() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct DropCounter(std::sync::Arc<AtomicUsize>);
@@ -211,7 +211,7 @@ fn alloc_slice_fill_with_drop_runs_at_arena_drop() {
     let counter = std::sync::Arc::new(AtomicUsize::new(0));
     {
         let arena = Arena::new();
-        let _slice: &mut [DropCounter] = arena.alloc_slice_fill_with(7, |_| DropCounter(std::sync::Arc::clone(&counter)));
+        let _slice = arena.alloc_slice_fill_with(7, |_| DropCounter(std::sync::Arc::clone(&counter)));
         assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
     assert_eq!(counter.load(Ordering::SeqCst), 7);
@@ -221,7 +221,7 @@ fn alloc_slice_fill_with_drop_runs_at_arena_drop() {
 fn alloc_lifetime_bound_by_arena_borrow() {
     // Compile-time check: this compiles because the bump-ref's
     // lifetime is bounded by the arena reference.
-    fn use_arena<'a>(arena: &'a Arena) -> &'a mut u32 {
+    fn use_arena(arena: &Arena) -> multitude::Alloc<'_, u32> {
         arena.alloc(7)
     }
     let arena = Arena::new();
@@ -233,7 +233,7 @@ fn alloc_lifetime_bound_by_arena_borrow() {
 #[test]
 fn alloc_charges_stats() {
     let arena = Arena::new();
-    let _r: &mut u64 = arena.alloc(42);
+    let _r = arena.alloc(42);
     // After any successful allocation, the provider must have obtained
     // at least one chunk from the underlying allocator; that chunk is
     // strictly larger than the 8-byte payload.
@@ -254,7 +254,7 @@ fn wasted_tail_bytes_is_live_and_returns_to_zero_after_reset() {
     assert_eq!(arena.stats().wasted_tail_bytes, 0, "fresh arena has no chunks");
     // Force at least one allocation so the arena obtains a chunk.
     for _ in 0..32 {
-        let _r: &mut u64 = arena.alloc(0);
+        let _r = arena.alloc(0);
     }
     // The active chunk now contributes its free tail to the gauge
     // (the chunk has plenty of room left even after 32 u64 allocs).
@@ -283,7 +283,7 @@ fn wasted_tail_bytes_is_live_and_returns_to_zero_after_reset() {
 fn wasted_tail_includes_active_chunks_and_shrinks_with_allocs() {
     let arena = Arena::new();
     // Trigger a single small local alloc to pin a chunk.
-    let _: &mut u8 = arena.alloc(0);
+    let _ = arena.alloc(0);
     let chunks_before = arena.stats().normal_chunks_allocated;
     let after_one = arena.stats().wasted_tail_bytes;
     assert!(after_one > 0, "active chunk's free tail must be included even with 0 retires");
@@ -291,7 +291,7 @@ fn wasted_tail_includes_active_chunks_and_shrinks_with_allocs() {
     // remaining capacity. The free tail must strictly decrease
     // because no refill occurred.
     for _ in 0..16 {
-        let _: &mut u64 = arena.alloc(0);
+        let _ = arena.alloc(0);
     }
     assert_eq!(
         arena.stats().normal_chunks_allocated,
@@ -355,7 +355,7 @@ fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
     let mut arena = Arena::new();
     // Force the first chunk to be acquired so subsequent allocs trigger
     // refills rather than the initial empty-mutator → first-chunk path.
-    let _: &mut u8 = arena.alloc(0);
+    let _ = arena.alloc(0);
     let baseline = arena.stats().wasted_tail_bytes;
     let chunks_before = arena.stats().normal_chunks_allocated;
     let mut refills_observed = 0u64;
@@ -371,7 +371,7 @@ fn wasted_tail_grows_on_local_refill_and_clears_on_reset() {
     // so such a regression fails loudly instead of hanging.
     let mut allocs = 0u64;
     while refills_observed < 8 {
-        let _: &mut [u8] = arena.alloc_slice_fill_with(509, |_| 0_u8);
+        let _ = arena.alloc_slice_fill_with(509, |_| 0_u8);
         allocs += 1;
         assert!(
             allocs < 100_000,
@@ -422,8 +422,8 @@ fn wasted_tail_returns_to_exactly_baseline_across_full_cycle() {
         let before = arena.stats().wasted_tail_bytes;
         assert_eq!(before, 0, "cycle {cycle}: baseline must be 0 before allocations begin");
         for _ in 0..4 {
-            let _: &mut u64 = arena.alloc(42);
-            let _: &mut [u8] = arena.alloc_slice_fill_with(256, |_| 0);
+            let _ = arena.alloc(42);
+            let _ = arena.alloc_slice_fill_with(256, |_| 0);
         }
         arena.reset();
         let after = arena.stats().wasted_tail_bytes;
@@ -448,7 +448,7 @@ fn wasted_tail_correct_after_cache_reuse_cycles() {
         // Force at least one full chunk's worth of allocs so we cycle
         // through `current` AND populate the cache on reset.
         for _ in 0..64 {
-            let _: &mut u64 = arena.alloc(0);
+            let _ = arena.alloc(0);
         }
         let stats = arena.stats();
         acquired_chunks_total = stats.normal_chunks_allocated;
@@ -515,10 +515,10 @@ fn wasted_tail_decreases_monotonically_as_pinned_arcs_drop() {
 fn wasted_tail_handles_oversized_local_retire() {
     let mut arena = Arena::new();
     // Three oversized allocations create three retired oversized chunks.
-    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let _ = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
     let mid = arena.stats().wasted_tail_bytes;
-    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
-    let _: &mut [u8] = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let _ = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
+    let _ = arena.alloc_slice_fill_with(20 * 1024, |_| 0_u8);
     let after = arena.stats().wasted_tail_bytes;
     // Each oversized chunk is sized to its request plus alignment and
     // drop-entry slack; the wasted tail per chunk may be 0 or small
@@ -553,8 +553,8 @@ fn wasted_tail_never_underflows_under_stress() {
     let mut arena = Arena::new();
     let filler = [0_u8; 64];
     for _ in 0..10 {
-        let _: &mut u64 = arena.alloc(0);
-        let _: &mut [u8] = arena.alloc_slice_copy(filler);
+        let _ = arena.alloc(0);
+        let _ = arena.alloc_slice_copy(filler);
         drop(arena.alloc_arc::<u64>(0));
         drop(arena.alloc_box::<u64>(0));
         drop(arena.alloc_slice_copy_arc::<u8>(&[0_u8; 4096]));
@@ -596,15 +596,104 @@ fn alloc_panics_on_failing_allocator() {
 #[test]
 fn pinned_chunk_with_allocator_api2_vec_drops_cleanly() {
     let arena: Arena = Arena::builder().build();
-    let _bump_ref: &mut u32 = arena.alloc(123);
+    let _bump_ref = arena.alloc(123);
     let mut v: allocator_api2::vec::Vec<u8, &Arena> = allocator_api2::vec::Vec::new_in(&arena);
     for _ in 0..5_000_u32 {
         v.push(0);
     }
-    assert!(_bump_ref == &mut 123);
+    assert_eq!(*_bump_ref, 123);
     drop(v);
     // arena drops at end-of-scope; pinned chunk is freed cleanly.
 }
 
 // Slack reclamation interaction with cache: cached chunk should NOT be
 // pinned (cache reuse must reset the flag).
+
+// `Alloc::leak` returns the bare `&'a mut T` and *skips* the destructor: the
+// value lives until arena teardown and its `Drop` never runs. (Validated under
+// Miri for provenance/aliasing of the reconstructed reference.)
+#[test]
+fn alloc_leak_returns_reference_and_skips_drop() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct DropFlag<'f>(&'f AtomicUsize);
+    impl Drop for DropFlag<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let drops = AtomicUsize::new(0);
+    {
+        let arena = Arena::new();
+
+        // Scalar: leak yields a usable, mutating `&mut u32`.
+        let a = arena.alloc(40_u32);
+        let r: &mut u32 = multitude::Alloc::leak(a);
+        *r += 2;
+        assert_eq!(*r, 42);
+
+        // Drop type: leaking suppresses the destructor entirely.
+        let f = arena.alloc(DropFlag(&drops));
+        let leaked: &mut DropFlag<'_> = multitude::Alloc::leak(f);
+        assert_eq!(leaked.0.load(Ordering::SeqCst), 0);
+        // `leaked` is a bare reference now; no `Alloc` remains to drop it.
+    }
+    // Arena teardown reclaims the bytes but runs no reference destructors.
+    assert_eq!(drops.load(Ordering::SeqCst), 0, "Alloc::leak must skip the destructor");
+}
+
+// Exercises the `Alloc` forwarding trait impls (AsRef/AsMut/Borrow/BorrowMut/
+// Debug/Display/Pointer/PartialEq/PartialOrd/Ord/Hash/into_pin/From-for-Pin).
+#[test]
+fn alloc_forwarding_trait_impls() {
+    use core::borrow::{Borrow, BorrowMut};
+    use core::cmp::Ordering;
+    use core::hash::{Hash, Hasher};
+    use core::pin::Pin;
+    use std::collections::hash_map::DefaultHasher;
+
+    use multitude::Alloc;
+
+    let arena = Arena::new();
+    let mut a = arena.alloc(10_u32);
+    let b = arena.alloc(20_u32);
+    let a2 = arena.alloc(10_u32);
+
+    // AsRef / AsMut
+    assert_eq!(*AsRef::<u32>::as_ref(&a), 10);
+    *AsMut::<u32>::as_mut(&mut a) = 11;
+    assert_eq!(*a, 11);
+    *AsMut::<u32>::as_mut(&mut a) = 10;
+
+    // Borrow / BorrowMut
+    assert_eq!(*Borrow::<u32>::borrow(&a), 10);
+    *BorrowMut::<u32>::borrow_mut(&mut a) = 10;
+
+    // Debug / Display / Pointer
+    assert_eq!(std::format!("{a:?}"), "10");
+    assert_eq!(std::format!("{a}"), "10");
+    assert!(std::format!("{a:p}").starts_with("0x"));
+
+    // PartialEq / Eq / PartialOrd / Ord
+    assert_eq!(a, a2);
+    assert_ne!(a, b);
+    assert!(a < b);
+    assert_eq!(Ord::cmp(&a, &b), Ordering::Less);
+    assert_eq!(PartialOrd::partial_cmp(&a, &a2), Some(Ordering::Equal));
+
+    // Hash
+    // Hash — compare the handle's hash against hashing the underlying value
+    // directly, so a no-op `hash` impl diverges (kills the `hash -> ()` mutant).
+    let mut h_handle = DefaultHasher::new();
+    a.hash(&mut h_handle);
+    let mut h_value = DefaultHasher::new();
+    10_u32.hash(&mut h_value);
+    assert_eq!(h_handle.finish(), h_value.finish());
+
+    // into_pin + From<Alloc> for Pin
+    let p: Pin<Alloc<'_, u32>> = Alloc::into_pin(a);
+    assert_eq!(*p, 10);
+    let p2: Pin<Alloc<'_, u32>> = b.into();
+    assert_eq!(*p2, 20);
+}

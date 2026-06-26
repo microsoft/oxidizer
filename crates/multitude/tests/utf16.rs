@@ -1896,7 +1896,7 @@ mod mutation_coverage {
     #[test]
     fn test_arena_alloc_str_keeps_pinned_chunk_alive_across_rotation() {
         let arena = Arena::builder().build();
-        let s: &mut str = arena.alloc_str("hello");
+        let mut s = arena.alloc_str("hello");
 
         let a = arena.alloc_slice_copy(std::vec![1_u8; 4000]);
         let b = arena.alloc_slice_copy(std::vec![2_u8; 4000]);
@@ -1904,7 +1904,7 @@ mod mutation_coverage {
         assert_eq!(b.len(), 4000);
 
         s.make_ascii_uppercase();
-        assert_eq!(s, "HELLO");
+        assert_eq!(&*s, "HELLO");
     }
 
     // `chunk_size` builder method and `BuildError::ChunkSizeOutOfRange` are
@@ -3313,5 +3313,281 @@ mod utf16_zero_copy_freeze {
         let len = thread::spawn(move || clone.len()).join().unwrap();
         assert_eq!(len, 17);
         assert_eq!(arc.len(), 17);
+    }
+}
+
+mod utf16_smart_ptr_traits {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    use multitude::strings::Utf16String;
+    use multitude::{Arc, Arena, Box, FromIn as _};
+    use widestring::{Utf16Str, utf16str};
+
+    fn hash_of<T: Hash>(v: &T) -> u64 {
+        let mut h = DefaultHasher::new();
+        v.hash(&mut h);
+        h.finish()
+    }
+
+    #[test]
+    fn arc_utf16_str_is_empty_distinguishes() {
+        let arena = Arena::new();
+        let empty: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!(""));
+        let full: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("a"));
+        assert!(empty.is_empty());
+        assert!(!full.is_empty());
+    }
+
+    #[test]
+    fn arc_utf16_str_display_renders_contents() {
+        let arena = Arena::new();
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("hello"));
+        assert_eq!(format!("{s}"), "hello");
+    }
+
+    #[test]
+    fn arc_utf16_str_partial_eq_self_distinguishes() {
+        let arena = Arena::new();
+        let a: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
+        let b: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
+        let c: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("diff"));
+        assert!(a == b);
+        assert!((a != c));
+    }
+
+    #[test]
+    fn arc_utf16_str_partial_eq_utf16str_distinguishes() {
+        let arena = Arena::new();
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("xy"));
+        let xy: &Utf16Str = utf16str!("xy");
+        let no: &Utf16Str = utf16str!("no");
+        assert!(s == *xy);
+        assert!((s != *no));
+        assert!(s == xy);
+        assert!((s != no));
+    }
+
+    #[test]
+    fn arc_utf16_str_hash_depends_on_contents() {
+        let arena = Arena::new();
+        let a: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("foo"));
+        let b: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("foo"));
+        let c: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("bar"));
+        assert_eq!(hash_of(&a), hash_of(&b));
+        assert_ne!(hash_of(&a), hash_of(&c));
+    }
+
+    #[test]
+    fn arc_utf16_str_pointer_fmt_renders_address() {
+        let arena = Arena::new();
+        let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("p"));
+        let rendered = format!("{s:p}");
+        assert!(!rendered.is_empty());
+        assert!(rendered.chars().any(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn box_utf16_str_display_renders_contents() {
+        let arena = Arena::new();
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("hello"));
+        assert_eq!(format!("{s}"), "hello");
+    }
+
+    #[test]
+    fn box_utf16_str_hash_depends_on_contents() {
+        let arena = Arena::new();
+        let a: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("foo"));
+        let b: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("foo"));
+        let c: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("bar"));
+        assert_eq!(hash_of(&a), hash_of(&b));
+        assert_ne!(hash_of(&a), hash_of(&c));
+    }
+
+    #[test]
+    fn box_utf16_str_pointer_fmt_renders_address() {
+        let arena = Arena::new();
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("p"));
+        let rendered = format!("{s:p}");
+        assert!(!rendered.is_empty());
+        assert!(rendered.chars().any(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn box_utf16_str_partial_eq_utf16str_distinguishes() {
+        let arena = Arena::new();
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
+        let xy: &Utf16Str = utf16str!("xy");
+        let no: &Utf16Str = utf16str!("no");
+        assert!(s == *xy);
+        assert!((s != *no));
+        assert!(s == xy);
+        assert!((s != no));
+    }
+
+    // Exercises `Utf16Str::PartialEq<widestring::Utf16Str>` directly on the
+    // deref'd newtype (the `Box`/`Arc` impls compare via `as_utf16_str`, so
+    // they don't cover the newtype's own impl).
+    #[test]
+    fn utf16str_newtype_partial_eq_widestring_distinguishes() {
+        let arena = Arena::new();
+        let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
+        assert!(*s == *utf16str!("xy"));
+        assert!(*s != *utf16str!("no"));
+    }
+
+    #[test]
+    fn utf16_string_display_renders_contents() {
+        let arena = Arena::new();
+        let mut s = Utf16String::from_in("hello", &arena);
+        assert_eq!(format!("{s}"), "hello");
+        s.push_from_str(" world");
+        assert_eq!(format!("{s}"), "hello world");
+    }
+}
+
+#[cfg(feature = "utf16")]
+mod box_utf16_str_traits {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use core::borrow::{Borrow, BorrowMut};
+    use core::cmp::Ordering;
+    use core::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+
+    use multitude::Arena;
+    use widestring::{Utf16Str, utf16str};
+
+    #[test]
+    fn methods_len_is_empty_and_as_mut_utf16_str() {
+        let arena = Arena::new();
+        let mut b = arena.alloc_utf16_str_box(utf16str!("hello"));
+        assert_eq!(b.len(), 5);
+        assert!(!b.is_empty());
+        let _ = b.as_mut_widestring_utf16_str();
+        let empty = arena.alloc_utf16_str_box(utf16str!(""));
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+    }
+
+    #[test]
+    fn deref_and_deref_mut() {
+        let arena = Arena::new();
+        let mut b = arena.alloc_utf16_str_box(utf16str!("hi"));
+        let _: &Utf16Str = &b;
+        let _: &mut Utf16Str = &mut b;
+    }
+
+    #[test]
+    fn as_ref_and_as_mut_via_trait() {
+        let arena = Arena::new();
+        let mut b = arena.alloc_utf16_str_box(utf16str!("abc"));
+        let _: &Utf16Str = AsRef::as_ref(&b);
+        let _: &mut Utf16Str = AsMut::as_mut(&mut b);
+    }
+
+    #[test]
+    fn borrow_and_borrow_mut_via_trait() {
+        let arena = Arena::new();
+        let mut b = arena.alloc_utf16_str_box(utf16str!("xyz"));
+        let _: &Utf16Str = Borrow::borrow(&b);
+        let _: &mut Utf16Str = BorrowMut::borrow_mut(&mut b);
+    }
+
+    #[test]
+    fn debug_and_display_format() {
+        let arena = Arena::new();
+        let b = arena.alloc_utf16_str_box(utf16str!("dbg"));
+        let _ = format!("{b:?}");
+        let _ = format!("{b}");
+    }
+
+    #[test]
+    fn eq_ord_partialord() {
+        let arena = Arena::new();
+        let a = arena.alloc_utf16_str_box(utf16str!("alpha"));
+        let b = arena.alloc_utf16_str_box(utf16str!("alpha"));
+        let c = arena.alloc_utf16_str_box(utf16str!("beta"));
+        assert!(a == b);
+        assert!(a != c);
+        assert_eq!(a.cmp(&b), Ordering::Equal);
+        assert_eq!(a.cmp(&c), Ordering::Less);
+        assert_eq!(a.partial_cmp(&c), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn hash_and_pointer_format() {
+        let arena = Arena::new();
+        let a = arena.alloc_utf16_str_box(utf16str!("hh"));
+        let mut h = DefaultHasher::new();
+        a.hash(&mut h);
+        let _ = h.finish();
+        let _ = format!("{a:p}");
+    }
+
+    #[test]
+    fn unpin_impl_compiles() {
+        fn assert_unpin<T: Unpin>() {}
+        assert_unpin::<multitude::Box<multitude::strings::Utf16Str>>();
+    }
+}
+
+#[cfg(feature = "utf16")]
+mod alloc_utf16_try_variants_ok {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+    use widestring::utf16str;
+
+    #[test]
+    fn try_alloc_utf16_str_arc_ok() {
+        let a = Arena::new();
+        let r = a.try_alloc_utf16_str_arc(utf16str!("ok")).unwrap();
+        assert_eq!(r.len(), 2);
+    }
+
+    #[test]
+    fn try_alloc_utf16_str_box_ok() {
+        let a = Arena::new();
+        let r = a.try_alloc_utf16_str_box(utf16str!("ok")).unwrap();
+        assert_eq!(r.len(), 2);
     }
 }

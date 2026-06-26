@@ -439,3 +439,92 @@ fn unpin_impl() {
     #[cfg(feature = "dst")]
     assert_unpin::<Arc<[u8]>>();
 }
+
+mod arc_borrow_coverage {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use core::borrow::Borrow;
+
+    use multitude::Arena;
+
+    #[test]
+    fn arc_borrow_returns_inner() {
+        let a = Arena::new();
+        let arc = a.alloc_arc(42_u32);
+        let b: &u32 = Borrow::borrow(&arc);
+        assert_eq!(*b, 42);
+    }
+}
+
+mod arc_assume_init_slice_drops_each_element {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use core::mem::MaybeUninit;
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use multitude::Arena;
+
+    #[test]
+    fn slice_assume_init_for_drop_type_drops_each_element() {
+        // `alloc_slice_fill_with_arc::<MaybeUninit<D>>` + `assume_init`
+        // used to be rejected (no placeholder drop entry). Now
+        // `assume_init` is a pure reinterpret and `Arc::drop` runs each
+        // element's destructor via `drop_in_place::<[D]>`.
+        struct D(StdArc<AtomicUsize>);
+        impl Drop for D {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let counter = StdArc::new(AtomicUsize::new(0));
+        {
+            let arena = Arena::new();
+            let arc: multitude::Arc<[MaybeUninit<D>]> =
+                arena.alloc_slice_fill_with_arc(2, |_| MaybeUninit::new(D(StdArc::clone(&counter))));
+            // SAFETY: both elements were initialized above.
+            let init: multitude::Arc<[D]> = unsafe { arc.assume_init() };
+            assert_eq!(init.len(), 2);
+            drop(init);
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 2);
+    }
+}

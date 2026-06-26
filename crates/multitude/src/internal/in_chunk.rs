@@ -73,12 +73,6 @@ impl<T: ?Sized> InChunk<T> {
 }
 
 impl InChunk<u8> {
-    /// Returns the integer address of the pointer.
-    #[inline]
-    pub(in crate::internal) fn addr(self) -> usize {
-        self.ptr.as_ptr() as usize
-    }
-
     /// Builds an `InChunk<[T]>` describing `len` consecutive `T`s starting at
     /// this byte address.
     ///

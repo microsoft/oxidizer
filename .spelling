@@ -10,6 +10,7 @@
 2×
 5xx
 =
+>=
 ABA
 ABI
 ACLs
@@ -317,6 +318,7 @@ end_offset
 entry_offset
 enum
 enums
+escapable
 evaluator
 ffi
 fhl-scus4-app-win
@@ -527,6 +529,7 @@ submodules
 substring
 subtrait
 sudo
+superset
 supertrait
 supertraits
 sys
