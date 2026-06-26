@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.4` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - adapt fetch HttpClient to Azure's HttpClient ([#494](https://github.com/microsoft/oxidizer/pull/494))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
 ## [0.1.0]
 
 - ✨ Features

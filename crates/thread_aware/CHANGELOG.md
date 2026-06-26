@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.5] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.4` of `thread_aware_macros_impl`
+
+- ✨ Features
+
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+  - add feature-gated ThreadAware impls for 3rd-party crate types ([#478](https://github.com/microsoft/oxidizer/pull/478))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.7.4] - 2026-06-11
 
 - 🔧 Maintenance

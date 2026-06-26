@@ -39,11 +39,11 @@ The runtime is supplied by the caller via an [`anyspawn::Spawner`][__link6].
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch_hyper">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG9T2nyj0akJzG8nBKPPU3XNSG7O1UdUC-PXlGzVRMS_xpCzDYWSEgmhhbnlzcGF3bmUwLjUuNIJrZmV0Y2hfaHlwZXJlMC40LjOCbWZldGNoX29wdGlvbnNlMC4yLjKCb2h0dHBfZXh0ZW5zaW9uc2UwLjYuMw
- [__link0]: https://docs.rs/fetch_hyper/0.4.3/fetch_hyper/?search=HyperTransportBuilder
- [__link1]: https://docs.rs/fetch_hyper/0.4.3/fetch_hyper/?search=Connect
- [__link2]: https://docs.rs/fetch_options/0.2.2/fetch_options/?search=TransportOptions
- [__link3]: https://docs.rs/fetch_hyper/0.4.3/fetch_hyper/?search=HyperTransport
- [__link4]: https://docs.rs/http_extensions/0.6.3/http_extensions/?search=RequestHandler
- [__link5]: https://docs.rs/fetch_hyper/0.4.3/fetch_hyper/?search=HyperTransportBuilder::build
- [__link6]: https://docs.rs/anyspawn/0.5.4/anyspawn/?search=Spawner
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1PafKPRqQnMbycEo89Tdc1Ibs7VR1QL49eUbNVExL_GkLMNhZISCaGFueXNwYXduZTAuNS41gmtmZXRjaF9oeXBlcmUwLjQuNIJtZmV0Y2hfb3B0aW9uc2UwLjIuM4JvaHR0cF9leHRlbnNpb25zZTAuNi40
+ [__link0]: https://docs.rs/fetch_hyper/0.4.4/fetch_hyper/?search=HyperTransportBuilder
+ [__link1]: https://docs.rs/fetch_hyper/0.4.4/fetch_hyper/?search=Connect
+ [__link2]: https://docs.rs/fetch_options/0.2.3/fetch_options/?search=TransportOptions
+ [__link3]: https://docs.rs/fetch_hyper/0.4.4/fetch_hyper/?search=HyperTransport
+ [__link4]: https://docs.rs/http_extensions/0.6.4/http_extensions/?search=RequestHandler
+ [__link5]: https://docs.rs/fetch_hyper/0.4.4/fetch_hyper/?search=HyperTransportBuilder::build
+ [__link6]: https://docs.rs/anyspawn/0.5.5/anyspawn/?search=Spawner

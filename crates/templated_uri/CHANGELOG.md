@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.4] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.1.2` of `data_privacy_core`
+  - Now requires `0.10.3` of `data_privacy_macros_impl`
+  - Now requires `0.3.5` of `ohno_macros`
+
+- ✨ Features
+
+  - implement RedactedDisplay/RedactedDebug for BasePath and BaseUri ([#489](https://github.com/microsoft/oxidizer/pull/489))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.3.3] - 2026-06-24
 
 - 🔧 Maintenance
