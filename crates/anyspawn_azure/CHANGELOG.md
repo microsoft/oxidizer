@@ -4,7 +4,8 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.7.4` of `thread_aware_macros_impl`
+  - Now requires `0.5.5` of `anyspawn`
+  - Now requires `0.3.5` of `tick`
 
 - ✨ Features
 

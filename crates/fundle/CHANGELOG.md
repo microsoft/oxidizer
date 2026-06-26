@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.4` of `fundle_macros_impl`
+  - Now requires `0.3.4` of `fundle_macros`
 
 - ✨ Features
 

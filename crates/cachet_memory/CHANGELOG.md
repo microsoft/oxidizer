@@ -4,9 +4,9 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.5` of `ohno_macros`
-  - Now requires `0.1.7` of `recoverable`
-  - Now requires `0.7.4` of `thread_aware_macros_impl`
+  - Now requires `0.2.6` of `cachet_tier`
+  - Now requires `0.3.8` of `ohno`
+  - Now requires `0.7.5` of `thread_aware`
 
 - 🐛 Bug Fixes
 

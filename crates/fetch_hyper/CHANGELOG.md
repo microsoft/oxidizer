@@ -4,13 +4,16 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.1.2` of `data_privacy_core`
-  - Now requires `0.10.3` of `data_privacy_macros_impl`
+  - Now requires `0.5.5` of `anyspawn`
+  - Now requires `0.5.6` of `bytesbuf`
   - Now requires `0.2.3` of `fetch_options`
+  - Now requires `0.2.5` of `fetch_tls`
+  - Now requires `0.6.4` of `http_extensions`
   - Now requires `0.3.5` of `layered`
-  - Now requires `0.3.5` of `ohno_macros`
-  - Now requires `0.1.7` of `recoverable`
-  - Now requires `0.7.4` of `thread_aware_macros_impl`
+  - Now requires `0.3.8` of `ohno`
+  - Now requires `0.5.9` of `seatbelt`
+  - Now requires `0.3.4` of `templated_uri`
+  - Now requires `0.3.5` of `tick`
 
 - 🐛 Bug Fixes
 

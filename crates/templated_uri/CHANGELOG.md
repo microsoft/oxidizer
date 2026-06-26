@@ -4,9 +4,9 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.1.2` of `data_privacy_core`
-  - Now requires `0.10.3` of `data_privacy_macros_impl`
-  - Now requires `0.3.5` of `ohno_macros`
+  - Now requires `0.12.3` of `data_privacy`
+  - Now requires `0.3.8` of `ohno`
+  - Now requires `0.2.6` of `templated_uri_macros`
 
 - ✨ Features
 

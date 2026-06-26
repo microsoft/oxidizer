@@ -4,8 +4,8 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.5` of `ohno_macros`
-  - Now requires `0.7.4` of `thread_aware_macros_impl`
+  - Now requires `0.5.6` of `bytesbuf`
+  - Now requires `0.3.8` of `ohno`
 
 - 🐛 Bug Fixes
 

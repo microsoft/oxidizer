@@ -4,9 +4,8 @@
 
 - 🔧 Maintenance
 
+  - Now requires `0.2.6` of `cachet_tier`
   - Now requires `0.3.5` of `layered`
-  - Now requires `0.3.5` of `ohno_macros`
-  - Now requires `0.1.7` of `recoverable`
 
 - 🐛 Bug Fixes
 

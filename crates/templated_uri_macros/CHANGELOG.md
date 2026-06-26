@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.5` of `ohno_macros`
+  - Now requires `0.2.6` of `templated_uri_macros_impl`
 
 - 🐛 Bug Fixes
 

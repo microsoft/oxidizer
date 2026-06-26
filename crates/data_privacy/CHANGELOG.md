@@ -5,7 +5,7 @@
 - 🔧 Maintenance
 
   - Now requires `0.1.2` of `data_privacy_core`
-  - Now requires `0.10.3` of `data_privacy_macros_impl`
+  - Now requires `0.10.3` of `data_privacy_macros`
 
 - ✨ Features
 

@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.3.5` of `ohno_macros`
+  - Now requires `0.3.8` of `ohno`
 
 - ✨ Features
 
