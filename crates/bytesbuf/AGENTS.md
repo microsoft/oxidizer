@@ -20,12 +20,12 @@ We expect our buffers and views to consist of different numbers of spans in real
 scenarios, ranging from 0 to hundreds. Code must handle the full range correctly, not just the
 small-count case.
 
-### Inline spans are performance-critical
+### Inline spans are performance-sensitive
 
-Assembling a buffer/view from a small handful of existing spans is a performance-critical
-scenario for some media services and low-level network services. Therefore, we inline a small
-number of spans directly in our buffer/view objects, avoiding extra heap allocations for the
-common case. We accept that this makes our buffer/view objects larger as a deliberate trade-off.
+Assembling a buffer/view from a small handful of existing spans can be a performance-sensitive
+scenario for some workloads. Therefore, we inline a small number of spans directly in our
+buffer/view objects, avoiding extra heap allocations for the common case. We accept that this makes
+our buffer/view objects larger as a deliberate trade-off.
 
 ### Metrics-driven fine-tuning (via the `nm` crate)
 
