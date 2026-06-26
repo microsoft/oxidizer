@@ -12,6 +12,34 @@ authors = ["The Oxidizer Project Authors"]
 license = "MIT"
 homepage = "https://github.com/microsoft/oxidizer"
 
+# Allowlist of files packaged into published crates (`cargo package`/`publish`).
+# We use an explicit include (allowlist), not exclude, so that non-source
+# artifacts can never leak into the published `.crate` by construction.
+#
+# WARNING: never add a Git LFS-tracked file to a packaged path. `cargo` has no
+# LFS awareness: depending on whether the publishing runner smudged LFS, an
+# LFS-tracked binary is packaged either as its real bytes or as a ~130-byte
+# pointer STUB. That makes the `.crate` non-reproducible, so the checksum a
+# dependent records for this crate can differ from what crates.io ultimately
+# stores - which breaks the dependent's build on docs.rs ("checksum changed
+# between lock files"). The `.gitattributes` LFS globs (*.png, *.ico, *.jpg,
+# *.pdf, *.zip, *.dll, *.exe, ...) therefore must stay OUT of every packaged
+# path (src, examples, tests, benches, docs). Reference such assets by absolute
+# URL instead, e.g. `#![doc(html_logo_url = "https://.../logo.png")]`.
+#
+# The `docs/**/*.md` glob matches only Markdown, so compile-time `include_str!`
+# doc fragments are packaged while binary diagram assets beside them are not.
+include = [
+    "/src/**",
+    "/examples/**",
+    "/benches/**",
+    "/tests/**",
+    "/docs/**/*.md",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE*",
+]
+
 # Adhere to the following rules when adding dependencies:
 # * All dependencies specified here need to have default-features turned off - individual crates can enable the
 #   features they need

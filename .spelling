@@ -616,3 +616,10 @@ zerocopy
 ≤
 ≥
 ≪
+allowlist
+autodiscovers
+denylist
+LFS
+Markdown
+tarball
+tarballs
