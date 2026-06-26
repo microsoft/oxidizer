@@ -4,7 +4,7 @@
 
 - 🔧 Maintenance
 
-  - Now requires `0.7.4` of `thread_aware_macros_impl`
+  - Now requires `0.7.5` of `thread_aware`
 
 - 🐛 Bug Fixes
 
