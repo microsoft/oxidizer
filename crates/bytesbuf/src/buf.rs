@@ -308,6 +308,7 @@ impl BytesBuf {
     /// # Panics
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
+    #[cfg_attr(test, mutants::skip)] // Mutating the bounds check makes copy_nonoverlapping write past the destination, causing UB.
     pub(crate) fn put_small(&mut self, src: &[u8]) -> bool {
         assert!(self.remaining_capacity() >= src.len());
 
