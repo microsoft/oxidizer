@@ -153,14 +153,14 @@ jobs:
         # Codecov coalesces multiple uploads against the same commit;
         # the `flags:` tag distinguishes the per-leg slices in the
         # Codecov UI without changing the union total.
-        # lcov.info is produced by the anvil-llvm-cov recipe inside
-        # anvil-pr-test; if the affected set was empty the recipe
-        # no-ops and there is no file to upload, so we gate on the
-        # impact output.
+        # lcov-*.info are produced by the anvil-llvm-cov recipe inside
+        # anvil-pr-test (one per feature config); if the affected set was
+        # empty the recipe no-ops and there is no file to upload, so we gate
+        # on the impact output. Codecov coalesces the two per-config files.
         if: matrix.os != 'windows-arm' && ((startsWith(matrix.os, 'linux') && needs.impact-linux.outputs.include_affected != '--skip') || (matrix.os == 'windows' && needs.impact-windows.outputs.include_affected != '--skip'))
         uses: codecov/codecov-action@v5
         with:
-          files: target/coverage/lcov.info
+          files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
           flags: ${{ matrix.os }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

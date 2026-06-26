@@ -1,11 +1,11 @@
 version = 1
 tool = "anvil"
 tool_version = "0.1.0"
-catalog_checksum = "sha256:38b60624a7f767d2ab100a15eb663421c56b129e5cb44855a2c44aec55941c44"
+catalog_checksum = "sha256:bd07b2db32a450880fe9c83629cedb7dec39786c519dcd67bb4863ef937c8d4c"
 
 [[file]]
 path = ".github/actions/anvil-impact/action.yml"
-checksum = "sha256:4565d83eb534f382fef5934682e1935704b0a1b2894a457b934dc331ace28305"
+checksum = "sha256:afff26a0c7f19a1b995eb3c7a40ca3d24c99cbe743dd8178d03126a6c0b89217"
 
 [[file]]
 path = ".github/actions/anvil-pr-fast/action.yml"
@@ -45,7 +45,7 @@ checksum = "sha256:065181e093ed68c83d5f974ebde2980f26cc70f954d965b2c0ca1b63042d3
 
 [[file]]
 path = ".github/workflows/anvil-pr-impl.yml"
-checksum = "sha256:70b2f188d3cc0fee5c9502534611121db9ff8b2c27cd6dfa176bf9a9ba9d2d2e"
+checksum = "sha256:24f3c918df3d63c6e72c26a997dabc84c0c4bc7e42bd7cf2043d13565382d244"
 
 [[file]]
 path = ".github/workflows/anvil-pr.yml"
@@ -53,7 +53,7 @@ checksum = "sha256:14c3541e39a7918497cb400ea20232340bc056da6d862a951568c09e32f4f
 
 [[file]]
 path = ".github/workflows/anvil-scheduled-impl.yml"
-checksum = "sha256:48669cdc1c372d47cbbc5b51ffada9236a2f176ea5a4d37829685fb56a60427a"
+checksum = "sha256:45d997685c3037cbda13e8a6cb3708797d1ca4973f648944824d7d3db84f4ef4"
 
 [[file]]
 path = ".github/workflows/anvil-scheduled.yml"
@@ -61,7 +61,7 @@ checksum = "sha256:a45359b92a6d851fc39bfa1c03aeb489b544ae37a1cea390dbbf860b2def8
 
 [[file]]
 path = "justfiles/anvil/checks.just"
-checksum = "sha256:c0578fb92839976bdd9ca86b61f78b22cbb6533e4ad1db62fe2e4037f61645a7"
+checksum = "sha256:3224237e96880dd5e9933e0638e1cae57582422508479300c63d492f0dfba118"
 
 [[file]]
 path = "justfiles/anvil/groups.just"
@@ -81,7 +81,7 @@ checksum = "sha256:220b91507931adb3b2bdc5ecb3c2c92c412bdd4a641ca122c26a2db2ea751
 
 [[file]]
 path = "justfiles/anvil/versions.just"
-checksum = "sha256:e548bee9b12ae3d618bd5c0aedd2939f313defa1a3bbc021c53fcf0c2438059b"
+checksum = "sha256:62c33b15029c29ca3175e324774def26f9c860262c1fd271e34f6925ff7a248f"
 
 [[region]]
 host = ".delta.toml"
