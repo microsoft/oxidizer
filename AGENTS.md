@@ -33,6 +33,17 @@ direction, change type vs version component, release set, pending
 release, elevation), the cascade-organisation invariants, and the
 workflow for `scripts/release-packages.ps1`.
 
+## Packaging
+
+What ships in each published `.crate` is controlled by an explicit `include`
+allowlist in `[workspace.package]` (each crate opts in via
+`include = { workspace = true }`). The key rule: **never place a Git LFS-tracked
+binary (logos, diagrams, etc.) in a packaged path** — it makes the package
+non-reproducible and breaks docs.rs. Reference such assets by absolute URL
+instead. See [docs/packaging-guidelines.md](docs/packaging-guidelines.md) for
+the full policy, the LFS pitfall it prevents, and how to verify a crate's
+packaged contents.
+
 ## Pull Requests
 
 Pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/) naming, e.g. `feat(bytesbuf): add new metric` or `fix(cachet): correct eviction logic`.
