@@ -2556,7 +2556,7 @@ version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82948d54d99b956d012ec2b909ed4331f7064a0726942cc04f8e7ec48ebae9e8"
 dependencies = [
- "ohno_macros 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ohno_macros 0.3.3",
  "typeid",
 ]
 
@@ -2577,11 +2577,10 @@ dependencies = [
 
 [[package]]
 name = "ohno_macros"
-version = "0.3.4"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b562701c8ca9747dcece39363bdd78fe1e5abe946b6c8e3a2e47282b32149959"
 dependencies = [
- "insta",
- "mutants",
- "prettyplease",
  "proc-macro2",
  "quote",
  "syn",
@@ -2590,9 +2589,10 @@ dependencies = [
 [[package]]
 name = "ohno_macros"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfd7c906df7de1bbc79f0030405c47be957227d8e0794fa0910a3403c24d4034"
 dependencies = [
+ "insta",
+ "mutants",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "syn",
