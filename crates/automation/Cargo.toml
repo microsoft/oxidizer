@@ -10,6 +10,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 homepage.workspace = true
+include.workspace = true
 publish = false
 
 [dependencies]
