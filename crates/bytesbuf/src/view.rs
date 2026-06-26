@@ -135,9 +135,12 @@ impl BytesView {
         I: IntoIterator<Item = Self>,
         <I as IntoIterator>::IntoIter: iter::DoubleEndedIterator,
     {
-        // Note that this requires the SmallVec to resize on the fly because thanks to the
-        // two-level mapping here, there is no usable size hint that lets it know the size in
-        // advance. If we had the span count here, we could avoid some allocations.
+        // The two-level flat_map exposes no usable size hint, so the SmallVec grows on the fly.
+        // Counting the spans in a first pass to pre-size the SmallVec is deliberately avoided: it
+        // trims SmallVec reallocations and lowers the simulated instruction count, but the extra
+        // counting traversal measured as a net wall-clock regression, costing more than the
+        // reallocations it saves. The spans are moved out of the input views rather than cloned, so
+        // this path performs no BlockRef refcount traffic or block allocation.
 
         // For a given input ABC123.
         let spans_reversed: SmallVec<_> = views
@@ -304,6 +307,28 @@ impl BytesView {
         if bytes_in_range == 0 {
             // Empty sequence is empty.
             return Some(Self::new());
+        }
+
+        // Fast path: when the entire requested range lies within the first span - always true for
+        // a single-span view (the common case for a sequence backed by one memory block), and also
+        // common when peeking a header at the front of a multi-span view - the result is just a
+        // sub-slice of that one span, needing no cross-span accounting.
+        if let Some(first) = self.spans_reversed.last()
+            && required_len <= first.len() as usize
+        {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "required_len <= first.len() <= BlockSize::MAX, so both casts are lossless"
+            )]
+            let (start, end) = (bytes_until_range as BlockSize, required_len as BlockSize);
+
+            let mut spans_reversed = SmallVec::with_capacity(1);
+            spans_reversed.push(first.slice(start..end));
+
+            return Some(Self {
+                spans_reversed,
+                len: bytes_in_range,
+            });
         }
 
         // Take the spans from the end of our spans_reversed (the logical beginning), while taking
@@ -677,6 +702,17 @@ impl BytesView {
             // Will never overflow because we already handled the count < span_len case.
             count = count.wrapping_sub(span_len);
         }
+    }
+
+    /// Reduces the cached length after the caller has removed `amount` bytes from the front spans.
+    ///
+    /// This keeps the cached length consistent with `spans_reversed` for the fused consumption
+    /// fast paths, which pop or advance the front span directly and then record the removal here.
+    /// The caller must have already removed exactly `amount` bytes from the front of the view.
+    #[inline]
+    pub(crate) fn shrink_len(&mut self, amount: usize) {
+        // Cannot underflow: the caller removed `amount` bytes that the view was already covering.
+        self.len = self.len.wrapping_sub(amount);
     }
 
     /// Appends another view to the end of this one.

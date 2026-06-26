@@ -113,6 +113,12 @@ struct GlobalPoolInner {
     // might), but that even if memory is requested from a thread-specific pool, it may later be
     // released on a different thread, so the pool must be able to handle that.
     //
+    // We intentionally use a plain mutex here to keep the code simple. We never expect the mutex
+    // to be contended because we target a thread-isolated architecture (any single pool is
+    // effectively owned by one thread/core at a time). We have measured that, at least on the x64
+    // platform, an uncontended mutex is sufficiently cheap to be almost an annotation, so there is
+    // no need to reach for a more complex lock-free or per-core fast-path design.
+    //
     // Each sub-pool is wrapped in an Arc because each pool item has a reference back to the sub-pool
     // that contains it. This means there is a reference cycle in there! The sub-pool can only be
     // dropped once all items in the sub-pool have been returned. This is both good and bad.
@@ -180,6 +186,22 @@ fn allocate_uniform<const SIZE: usize>(
     let block_count = min_bytes.div_ceil(SIZE);
 
     BLOCK_RENTED_SIZE.with(|e| e.batch(block_count).observe(SIZE));
+
+    // The overwhelmingly common reservation fits in a single block. Building the buffer directly
+    // from that block skips the iterator/collect/sum machinery the multi-block path requires.
+    if block_count == 1 {
+        // Scope the pool lock to block allocation only. The block carries its own handle back to
+        // the pool, so the buffer can be built without holding the lock, keeping the critical
+        // section minimal. This also avoids re-entrant locking should the block be released while
+        // we still held the lock.
+        let block = {
+            let mut pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
+            pool.reserve(block_count);
+            allocate_block(&mut pool, pool_arc, vtable)
+        };
+
+        return BytesBuf::from_block(block);
+    }
 
     let mut pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
     pool.reserve(block_count);

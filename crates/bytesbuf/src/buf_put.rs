@@ -31,8 +31,24 @@ impl BytesBuf {
     ///
     /// Panics if there is insufficient remaining capacity in the buffer.
     pub fn put_slice(&mut self, src: impl Borrow<[u8]>) {
-        let mut src = src.borrow();
+        let src = src.borrow();
+        if !self.put_small(src) {
+            self.put_slice_looped(src);
+        }
+    }
 
+    /// Writes a slice that may span multiple capacity slices, copying one slice at a time.
+    ///
+    /// This is the general path used by [`put_slice()`] when [`put_small()`] declines a write that
+    /// does not fit within the first unfilled slice.
+    ///
+    /// [`put_slice()`]: Self::put_slice
+    /// [`put_small()`]: Self::put_small
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is insufficient remaining capacity in the buffer.
+    pub(crate) fn put_slice_looped(&mut self, mut src: &[u8]) {
         assert!(self.remaining_capacity() >= src.len());
 
         while !src.is_empty() {
@@ -194,7 +210,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_le<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_le_bytes();
-        self.put_slice(bytes);
+        self.put_slice(bytes.borrow());
     }
 
     /// Appends a number of type `T` in big-endian representation to the buffer.
@@ -221,7 +237,7 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_be<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_be_bytes();
-        self.put_slice(bytes);
+        self.put_slice(bytes.borrow());
     }
 
     /// Appends a number of type `T` in native-endian representation to the buffer.
@@ -249,15 +265,17 @@ impl BytesBuf {
     #[expect(clippy::needless_pass_by_value, reason = "tiny numeric types, fine to always pass by value")]
     pub fn put_num_ne<T: ToBytes>(&mut self, value: T) {
         let bytes = value.to_ne_bytes();
-        self.put_slice(bytes);
+        self.put_slice(bytes.borrow());
     }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use super::*;
-    use crate::mem::testing::TransparentMemory;
+    use crate::mem::testing::{FixedBlockMemory, TransparentMemory};
 
     #[test]
     fn put_slice() {
@@ -274,6 +292,35 @@ mod tests {
 
         assert_eq!(bytes.len(), 5);
         assert_eq!(bytes, &data);
+    }
+
+    #[test]
+    fn put_small_takes_fast_path_when_value_fits() {
+        let memory = TransparentMemory::new();
+        let mut buf = memory.reserve(100);
+
+        // The value fits entirely within the first unfilled slice, so the fast path handles it.
+        let data = [1u8, 2, 3, 4, 5];
+        assert!(buf.put_small(&data));
+
+        assert_eq!(buf.len(), 5);
+        assert_eq!(buf.remaining_capacity(), 95);
+
+        assert_eq!(buf.consume_all(), &data);
+    }
+
+    #[test]
+    fn put_small_declines_when_value_straddles_capacity_boundary() {
+        // Four-byte blocks force a capacity boundary after every four bytes.
+        let memory = FixedBlockMemory::new(NonZero::new(4).unwrap());
+        let mut buf = memory.reserve(8);
+
+        // The value does not fit within the first four-byte unfilled slice, so the fast path
+        // declines and leaves the buffer untouched for the caller to fall back to the looped path.
+        assert!(!buf.put_small(&[1, 2, 3, 4, 5]));
+
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.remaining_capacity(), 8);
     }
 
     #[test]

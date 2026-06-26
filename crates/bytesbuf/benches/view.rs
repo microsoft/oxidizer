@@ -174,6 +174,34 @@ fn entrypoint(c: &mut Criterion) {
         });
     });
 
+    // Drains a single-span view one byte at a time, exercising the fused get_byte fast path
+    // (read the front byte and advance within the same span in a single span lookup).
+    group.bench_function("get_byte_drain", |b| {
+        b.iter_batched_ref(
+            || test_data_as_view.clone(),
+            |seq| {
+                while !seq.is_empty() {
+                    black_box(seq.get_byte());
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Drains a single-span view as u32 values, exercising the fused single-span get_num path
+    // (the value never straddles a span boundary, so the buffered fallback is never taken).
+    group.bench_function("get_num_le_drain", |b| {
+        b.iter_batched_ref(
+            || test_data_as_view.clone(),
+            |seq| {
+                while seq.len() >= size_of::<u32>() {
+                    black_box(seq.get_num_le::<u32>());
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
     group.finish();
 
     let mut group = c.benchmark_group("BytesView_slow");

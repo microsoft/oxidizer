@@ -340,6 +340,47 @@ fn entrypoint(c: &mut Criterion) {
         );
     });
 
+    // Repeatedly writes a small slice into pre-reserved single-block capacity, exercising the
+    // fused put_small fast path where the data always fits within the first unfilled slice.
+    group.bench_function("put_slice", |b| {
+        const WRITE: &[u8] = &[0xAB; 16];
+        const WRITES: usize = 32;
+
+        b.iter_batched_ref(
+            || {
+                let mut buf = BytesBuf::new();
+                buf.reserve(WRITE.len() * (WRITES + 1), &memory);
+                buf
+            },
+            |buf| {
+                for _ in 0..WRITES {
+                    buf.put_slice(WRITE);
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Repeatedly writes a u32 into pre-reserved single-block capacity, exercising the fused
+    // put_small fast path for numeric writes.
+    group.bench_function("put_num_le", |b| {
+        const WRITES: usize = 32;
+
+        b.iter_batched_ref(
+            || {
+                let mut buf = BytesBuf::new();
+                buf.reserve(size_of::<u32>() * (WRITES + 1), &memory);
+                buf
+            },
+            |buf| {
+                for _ in 0..WRITES {
+                    buf.put_num_le(black_box(0x1234_5678_u32));
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
     group.finish();
 
     allocs.print_to_stdout();
