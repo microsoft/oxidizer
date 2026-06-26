@@ -22,6 +22,12 @@ include = { workspace = true }
 # opentelemetry/tracing/etc.
 allowed_external_types = ["*"]
 
+# Test-helper crate: the whole crate is `#![cfg_attr(coverage_nightly,
+# coverage(off))]` (its utilities are exercised opportunistically by other
+# crates' tests), so it produces no coverage data. Opt out of the gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [dependencies]
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["metrics"] }

@@ -20,6 +20,13 @@ publish = false
 # ohno/serde/etc.
 allowed_external_types = ["*"]
 
+# Script-only crate: its entry points are `#![cfg_attr(coverage_nightly,
+# coverage(off))]`, so it produces no coverage data. Opt out of the gate
+# (min-lines-percent = 0 -> the gate treats NO DATA as OK rather than a config
+# error).
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [dependencies]
 ohno = { workspace = true, features = ["app-err"] }
 
