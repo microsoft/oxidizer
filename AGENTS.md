@@ -8,7 +8,7 @@ Crate README files are auto-generated via `just readme`. Do not manually update 
 
 ## Executing `just` commands
 
-If you only touch one crate, you may use `just package=crate_name command` to narrow command scope to one crate.
+If you only touch one package, you may use `just package=PACKAGE_NAME command` to narrow command scope to that package, where PACKAGE_NAME is the Cargo.toml `[package].name`, which may differ from the directory name.
 
 ## Pre-commit Checklist
 

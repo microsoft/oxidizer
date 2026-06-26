@@ -7,16 +7,16 @@
 # atomic operations the C++/Rust memory model allows. It catches memory-
 # ordering bugs that hardware-stressing won't reproduce reliably.
 #
-# Discovery is convention-based: any crate whose `Cargo.toml` declares a
+# Discovery is convention-based: any package whose `Cargo.toml` declares a
 # `[target.'cfg(loom)'.dependencies]` section is included automatically.
-# No workflow or recipe edits are required when a new crate opts in.
+# No workflow or recipe edits are required when a new package opts in.
 #
 # Tuning:
 #   LOOM_MAX_PREEMPTIONS=2   (default) bound on context switches Loom tries.
 #                            Smaller = faster, less coverage.
 #   LOOM_LOG=info            print per-iteration thread schedules.
 
-# Run Loom model-checked tests for every crate that opts in via cfg(loom).
+# Run Loom model-checked tests for every package that opts in via cfg(loom).
 [script]
 loom FILTER="":
     $ErrorActionPreference = "Stop"
@@ -31,7 +31,7 @@ loom FILTER="":
         $packagesByManifest[$norm] = $pkg.name
     }
 
-    $crates = @()
+    $packages = @()
     foreach ($dir in (Get-ChildItem crates -Directory -ErrorAction SilentlyContinue)) {
         $manifest = Join-Path $dir.FullName "Cargo.toml"
         if ((Test-Path $manifest) -and (Select-String -Path $manifest -Pattern "cfg\(loom\)" -Quiet)) {
@@ -40,16 +40,16 @@ loom FILTER="":
             if (-not $pkgName) {
                 throw "Could not determine cargo package name for $manifest"
             }
-            $crates += [pscustomobject]@{ Package = $pkgName; Dir = $dir.FullName }
+            $packages += [pscustomobject]@{ Name = $pkgName; Dir = $dir.FullName }
         }
     }
 
-    if ($crates.Count -eq 0) {
-        Write-Host "No crates declare loom tests (looking for [target.'cfg(loom)'.dependencies])."
+    if ($packages.Count -eq 0) {
+        Write-Host "No packages declare loom tests (looking for [target.'cfg(loom)'.dependencies])."
         return
     }
 
-    Write-Host "Loom-enabled crates: $($crates.Package -join ', ')" -ForegroundColor Cyan
+    Write-Host "Loom-enabled packages: $($packages.Name -join ', ')" -ForegroundColor Cyan
 
     # `--release` makes Loom's exploration substantially faster: the
     # instrumented atomic primitives are themselves expensive in debug mode.
@@ -59,20 +59,20 @@ loom FILTER="":
     $original_rustflags = $env:RUSTFLAGS
     $env:RUSTFLAGS = if ($original_rustflags) { "$original_rustflags --cfg loom" } else { "--cfg loom" }
     try {
-        foreach ($crate in $crates) {
-            $tests_dir = Join-Path $crate.Dir "tests"
+        foreach ($package in $packages) {
+            $tests_dir = Join-Path $package.Dir "tests"
             $loom_files = @()
             if (Test-Path $tests_dir) {
                 $loom_files = Get-ChildItem -Path $tests_dir -Filter "loom_*.rs" -File -ErrorAction SilentlyContinue
             }
             if ($loom_files.Count -eq 0) {
-                Write-Host "`n=== $($crate.Package) has cfg(loom) deps but no tests/loom_*.rs files; skipping ===" -ForegroundColor Yellow
+                Write-Host "`n=== $($package.Name) has cfg(loom) deps but no tests/loom_*.rs files; skipping ===" -ForegroundColor Yellow
                 continue
             }
             foreach ($f in $loom_files) {
                 $name = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
-                Write-Host "`n=== Loom: $($crate.Package)::$name ===" -ForegroundColor Cyan
-                cargo +$env:RUST_LATEST test --release -p $crate.Package --test $name --locked -- --test-threads=1 {{ FILTER }}
+                Write-Host "`n=== Loom: $($package.Name)::$name ===" -ForegroundColor Cyan
+                cargo +$env:RUST_LATEST test --release -p $package.Name --test $name --locked -- --test-threads=1 {{ FILTER }}
             }
         }
     } finally {
@@ -91,9 +91,9 @@ loom FILTER="":
 # `tests/bolero_*.rs` files. Each `#[test]` invoking `bolero::check!()`
 # is a target; targets are auto-discovered via `cargo bolero list`.
 #
-# Discovery is convention-based: any crate with `tests/bolero_*.rs`
+# Discovery is convention-based: any package with `tests/bolero_*.rs`
 # files contributes targets. No workflow or recipe edits are required
-# when a new crate opts in.
+# when a new package opts in.
 #
 # The `libfuzzer` engine is used (Linux only). On other platforms,
 # the targets still run as plain `#[test]`s under `cargo test`.
@@ -101,7 +101,7 @@ loom FILTER="":
 # TIME bounds the per-target fuzz duration (default 60s). Override
 # locally for longer runs, e.g. `just bolero 10m`.
 
-# Run Bolero fuzz tests for every crate with tests/bolero_*.rs files.
+# Run Bolero fuzz tests for every package with tests/bolero_*.rs files.
 [script]
 bolero TIME="60s":
     $ErrorActionPreference = "Stop"
@@ -116,7 +116,7 @@ bolero TIME="60s":
         $packagesByManifest[$norm] = $pkg.name
     }
 
-    # Discover crates with bolero integration tests.
+    # Discover packages with bolero integration tests.
     $entries = @()
     foreach ($dir in (Get-ChildItem crates -Directory -ErrorAction SilentlyContinue)) {
         $tests_dir = Join-Path $dir.FullName "tests"
@@ -139,7 +139,7 @@ bolero TIME="60s":
     }
 
     if ($entries.Count -eq 0) {
-        Write-Host "No crates declare bolero tests (looking for tests/bolero_*.rs)."
+        Write-Host "No packages declare bolero tests (looking for tests/bolero_*.rs)."
         return
     }
 

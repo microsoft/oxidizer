@@ -164,15 +164,15 @@ test-docs FILTER="":
     if ("{{ package }}" -eq "") {
         cargo +$env:RUST_MSRV test --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
     } else {
-        # Single package - check if it's a library crate, otherwise skip it.
+        # Single package - check if it has a library crate (lib.rs), otherwise skip it.
         $lib_rs_path = "crates/{{ package }}/src/lib.rs"
 
         if (Test-Path $lib_rs_path) {
             cargo +$env:RUST_MSRV test {{ target_package }} --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
         } else {
-            # Binary-only crate - skip doctests because Cargo expects library targets for doctests.
-            # Binary crates (with only main.rs) cannot contain doctests, so running `cargo test --doc`
-            # on them results in an error rather than gracefully running zero tests.
+            # Binary-only package (no lib.rs) - skip doctests because Cargo only runs
+            # doctests for a library target. With no library crate there are no doctests,
+            # and `cargo test --doc` would error out rather than gracefully run zero tests.
             Write-Host "Skipping doctests for binary-only package: {{ package }}"
         }
     }
