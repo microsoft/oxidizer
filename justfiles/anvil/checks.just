@@ -302,12 +302,14 @@ anvil-spellcheck: anvil-spellcheck-validate-prereqs
 # Unscoped (PR title is not source-related).
 #
 # Validates that $env:PR_TITLE matches Conventional Commits when set;
-# no-op when unset. Cloud workflows inject PR_TITLE explicitly (GH Actions:
-# ${{ github.event.pull_request.title }}; ADO: $(System.PullRequest.Title))
-# so the check has authoritative input there. Locally it skips silently --
-# there is no reliable way to recover the PR title for the ADO backend
-# (no equivalent of `gh pr view`), so the recipe stays simple and
-# defers the check to cloud workflows.
+# no-op when unset. Cloud workflows inject PR_TITLE explicitly: GH Actions
+# from ${{ github.event.pull_request.title }}; ADO resolves it via the REST
+# API in steps/group.yml (ADO has no PR-title predefined variable). Locally
+# it skips silently when PR_TITLE is unset -- there is no reliable way to
+# recover the PR title, so the recipe defers the check to cloud workflows.
+# It does NOT tolerate a non-empty-but-wrong value: a misconfigured cloud
+# variable (e.g. an unexpanded pipeline macro) is a real error and fails
+# the check loudly rather than silently passing.
 [script("pwsh")]
 anvil-pr-title: anvil-pr-title-validate-prereqs
     $title = $env:PR_TITLE
@@ -341,17 +343,29 @@ anvil-audit: anvil-audit-validate-prereqs
 # precisely what the required tier is for. Pinned to the general
 # nightly defined in versions.just.
 #
-# Deliberately omits `--all-targets`: with `--all-targets`, a dep
-# that's listed in BOTH `[dependencies]` and `[dev-dependencies]` and
-# used only by tests is reported as "all used" because the dev-deps
-# target satisfies the lookup, masking the unused entry in main
-# `[dependencies]`. Restricting to the default targets (lib + bins)
-# matches main repo cloud workflows' check and surfaces the real bug.
+# Run twice, because cargo-udeps only analyzes the targets it is told
+# to, and each invocation catches a variant the other masks:
+#   1. default targets (lib + bins): catches a dep in `[dependencies]`
+#      that is referenced only by tests/benches/examples -- it belongs
+#      in `[dev-dependencies]`. Under `--all-targets` such a dep looks
+#      "used" (the test/bench/example target satisfies the lookup), so
+#      this run is the only one that surfaces it.
+#   2. `--all-targets`: catches unused `[dev-dependencies]` -- which the
+#      default-targets run never compiles, so it is the only one that
+#      surfaces those.
+# A genuinely-unused dep is caught by both; the two together cover all
+# of {unused dep, unused dev-dep, dep that should be a dev-dep}.
 [script("pwsh")]
 anvil-udeps: anvil-udeps-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_REQUIRED -eq '--skip') { exit 0 }
-    & cargo '+{{ rust_nightly }}' udeps @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' }) --all-features
+    $pkg = @(if ($env:ANVIL_INCLUDE_REQUIRED) { -split $env:ANVIL_INCLUDE_REQUIRED } else { '--workspace' })
+    # Pass 1: default targets (lib + bins) -- surfaces [dependencies] that
+    # are only used by tests/benches/examples (should be dev-deps).
+    & cargo '+{{ rust_nightly }}' udeps @pkg --all-features
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Pass 2: --all-targets -- surfaces unused [dev-dependencies].
+    & cargo '+{{ rust_nightly }}' udeps @pkg --all-features --all-targets
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier (compares published API of changed crates against the
@@ -621,54 +635,72 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
         & cargo '+{{ rust_nightly }}' nextest run @pkg --all-features --locked
         exit $LASTEXITCODE
     }
-    # cargo llvm-cov writes the .profraw set into target/llvm-cov-target/
-    # but the *report* output directory (target/coverage/) is something
-    # we choose and must exist before --output-path runs.
+    # The *report* output directory (target/coverage/) is something we
+    # choose and must exist before --output-path runs.
     [System.IO.Directory]::CreateDirectory('target/coverage') | Out-Null
-    [System.IO.Directory]::CreateDirectory('target/coverage/html') | Out-Null
-    # Wipe stale .profraw data so the report reflects only this run.
-    # `--profraw-only` may not be combined with `--workspace` (cargo-llvm-cov
-    # warns and ignores the flag), so we scope to profraw without it.
-    cargo '+{{ rust_nightly }}' llvm-cov clean --profraw-only
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # Instrument and run tests twice -- once with --all-features and
-    # once with --no-default-features -- merging both .profraw sets via
-    # the shared target/llvm-cov-target/ before any report runs. Dual
-    # invocation catches lines that only execute under one feature
-    # configuration: feature-gated code that's dead with default
-    # features off, plus code paths that only the default features
-    # exercise. The single merged report still produces one lcov.info
-    # (so Codecov / cobertura / HTML each have a single source of
-    # truth).
+    # Instrument and run tests once per feature configuration, each as a
+    # SELF-CONTAINED llvm-cov run that exports only its own config's
+    # objects. Dual config (--all-features + --no-default-features) catches
+    # lines that only execute under one feature configuration (feature-gated
+    # code dead with default features off, plus default-only code paths).
     #
-    # Note: nextest's exit-4 ("no tests to run") IS treated as a
-    # failure here -- a llvm-cov run that finds no tests almost
-    # always means a config mistake (wrong package filter, missing
-    # test target, etc.), not a legitimate empty set. anvil-miri
-    # is the exception (see its comment): miri-skipped tests are an
-    # expected design point for FS-heavy crates.
-    & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg --all-features --locked --no-report
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg --no-default-features --locked --no-report
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # lcov.info feeds Codecov on GitHub; cobertura.xml feeds
-    # PublishCodeCoverageResults@2 on Azure DevOps.
-    cargo '+{{ rust_nightly }}' llvm-cov report --lcov      --output-path target/coverage/lcov.info
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    cargo '+{{ rust_nightly }}' llvm-cov report --cobertura --output-path target/coverage/cobertura.xml
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    # Local-only HTML viewer (no cloud-workflow consumer); cheap once the data exists.
-    cargo '+{{ rust_nightly }}' llvm-cov report --html      --output-dir target/coverage/html
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # Crucially this does NOT merge both configs' objects into one report.
+    # A single `llvm-cov report` over the union shells one `--object=` per
+    # test binary and, on a large workspace, overflows the Windows
+    # CreateProcess command-line limit (os error 206, "filename or extension
+    # is too long"). Each per-config report references only ~half the
+    # objects and stays under the limit. The two configs are reconciled
+    # *downstream* instead of via a merged report:
+    #   * cargo-coverage-gate merges the two lcov files at the line level
+    #     (per-line counts summed) -- this is the gate;
+    #   * Codecov ingests both lcov files (it coalesces uploads);
+    #   * ADO's PublishCodeCoverageResults coalesces both cobertura files.
+    # This also avoids needing a platform-specific lcov merger (`lcov -a`
+    # is Linux-only). HTML output is dropped -- it had no cloud-workflow
+    # consumer and would reintroduce the overflowing union report; run
+    # `cargo llvm-cov --html` ad hoc for a local viewer.
+    #
+    # A full `llvm-cov clean` between configs wipes the prior config's
+    # objects so each `report` is scoped to the current config only.
+    #
+    # Note: nextest's exit-4 ("no tests to run") IS treated as a failure
+    # here -- a llvm-cov run that finds no tests almost always means a
+    # config mistake (wrong package filter, missing test target, etc.), not
+    # a legitimate empty set. anvil-miri is the exception (see its comment).
+    $configs = @(
+        @{ name = 'all-features'; flag = '--all-features' },
+        @{ name = 'no-default';   flag = '--no-default-features' }
+    )
+    foreach ($cfg in $configs) {
+        cargo '+{{ rust_nightly }}' llvm-cov clean --workspace
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & cargo '+{{ rust_nightly }}' llvm-cov nextest @pkg $cfg.flag --locked --no-report
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # lcov feeds the gate + Codecov; cobertura feeds ADO's
+        # PublishCodeCoverageResults@2. Both reports are scoped to THIS
+        # config's objects, so neither overflows the Windows cmdline limit.
+        cargo '+{{ rust_nightly }}' llvm-cov report --lcov      --output-path "target/coverage/lcov-$($cfg.name).info"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cargo '+{{ rust_nightly }}' llvm-cov report --cobertura --output-path "target/coverage/cobertura-$($cfg.name).xml"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     # Local coverage gate: cargo-coverage-gate compares per-package line
-    # coverage from lcov.info against per-package thresholds carried in
-    # Cargo.toml ([package.metadata.coverage-gate] min-lines-percent,
-    # falling back to [workspace.metadata.coverage-gate], then the
-    # built-in 100.0 default). Exits non-zero when any gated package
-    # falls below its threshold, so coverage regressions fail the PR
-    # locally and in cloud workflows -- the upload to Codecov stays
-    # purely for display and historical trend, no longer the gate.
-    cargo coverage-gate --lcov target/coverage/lcov.info
+    # coverage against per-package thresholds carried in Cargo.toml
+    # ([package.metadata.coverage-gate] min-lines-percent, falling back to
+    # [workspace.metadata.coverage-gate], then the built-in 100.0 default).
+    # It merges the two per-config lcovs (line-level) so the gate sees the
+    # union coverage. Exits non-zero when any gated package falls below its
+    # threshold, so coverage regressions fail the PR locally and in cloud
+    # workflows -- the Codecov upload stays purely for display, not the gate.
+    #
+    # Scope the gate to the SAME package set we measured. When impact
+    # scoping is active, $pkg holds `--package X ...` (already opt-out
+    # filtered above); pass those through so the gate only gates packages
+    # that were actually instrumented -- otherwise unmeasured members would
+    # report NO DATA and fail the gate. When unscoped, $pkg is `--workspace`
+    # (no gate flag); drop it so the gate defaults to every member.
+    $gateArgs = @($pkg | Where-Object { $_ -ne '--workspace' })
+    cargo coverage-gate @gateArgs --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier. Two cargo-test invocations cover both feature
@@ -697,6 +729,46 @@ anvil-examples: anvil-examples-validate-prereqs
 
 # === pr-mutants member ====================================================
 
+# _anvil-base-ref: single source of truth for "which git ref does a PR
+# diff against". Shared by the impact step (github/impact-action.yml,
+# ado/steps/impact.yml) and anvil-mutants-diff so the resolution lives in
+# exactly one place. Precedence:
+#   1. BASE_REF -- explicit override. GitHub sets it to the PR base commit
+#      SHA; adopters can set a full ref like `origin/release`.
+#   2. SYSTEM_PULLREQUEST_TARGETBRANCH -- ADO PR builds. This is the
+#      *fully-qualified* target ref (e.g. `refs/heads/main`), so strip the
+#      `refs/heads/` prefix and resolve to `origin/<branch>`
+#      (`origin/refs/heads/main` is not a valid ref).
+#   3. GITHUB_BASE_REF -- GitHub PR builds. Unqualified target branch name.
+#   4. origin/main, then origin/master -- local / non-PR fallback.
+# Prints ONLY the resolved ref to stdout so callers can capture it:
+#   pwsh : $base = (& {{just_executable()}} _anvil-base-ref)
+#   bash : base="$(just _anvil-base-ref)"
+[script("pwsh")]
+_anvil-base-ref:
+    $ErrorActionPreference = 'Stop'
+    if ($env:BASE_REF) {
+        Write-Output $env:BASE_REF
+        exit 0
+    }
+    if ($env:SYSTEM_PULLREQUEST_TARGETBRANCH) {
+        Write-Output ("origin/" + ($env:SYSTEM_PULLREQUEST_TARGETBRANCH -replace '^refs/heads/', ''))
+        exit 0
+    }
+    if ($env:GITHUB_BASE_REF) {
+        Write-Output "origin/$($env:GITHUB_BASE_REF)"
+        exit 0
+    }
+    foreach ($candidate in @('origin/main', 'origin/master')) {
+        git rev-parse --verify $candidate 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output $candidate
+            exit 0
+        }
+    }
+    Write-Error 'anvil-base-ref: cannot resolve a base ref. Set BASE_REF, or ensure origin/main or origin/master exists.'
+    exit 1
+
 # Affected tier. cargo-mutants does its own diff-scoping via --in-diff;
 # the affected-tier guard is the wiring-layer's coarse filter (if no
 # affected packages exist, the entire mutants run is pointless).
@@ -717,23 +789,10 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
         Write-Host 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs no affected packages; skipping'
         exit 0
     }
-    # Resolve BASE_REF: env override > origin/main > origin/master.
-    $base = $null
-    if ($env:BASE_REF) {
-        $base = $env:BASE_REF
-    } else {
-        foreach ($candidate in @('origin/main', 'origin/master')) {
-            git rev-parse --verify $candidate 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                $base = $candidate
-                break
-            }
-        }
-    }
-    if (-not $base) {
-        Write-Error 'anvil-mutants-diff: anvil-mutants-diff-validate-prereqs no BASE_REF set and neither origin/main nor origin/master is available. Set BASE_REF to the branch to diff against.'
-        exit 1
-    }
+    # Resolve the diff base via the shared resolver (single source of truth
+    # across the impact steps and this recipe; see _anvil-base-ref).
+    $base = (& "{{just_executable()}}" _anvil-base-ref)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     # cargo-mutants --in-diff takes a FILE path containing a unified
     # diff, not a git revision range. Write the diff to a temp file
     # first. RUNNER_TEMP (GH) and AGENT_TEMPDIRECTORY (ADO) point at

@@ -54,7 +54,7 @@ jobs:
         if: matrix.os != 'windows-arm'
         uses: codecov/codecov-action@v5
         with:
-          files: target/coverage/lcov.info
+          files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
           flags: scheduled,${{ matrix.os }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false

@@ -53,17 +53,43 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # GITHUB_BASE_REF is the target-branch name on a PR event
-        # (e.g. "main"); we resolve it to origin/<name>. Adopters can
-        # override via the BASE_REF env var.
-        base="${BASE_REF:-origin/${GITHUB_BASE_REF:-main}}"
+        # Resolve the baseline ref via the shared anvil resolver (single
+        # source of truth; see the _anvil-base-ref recipe). On GitHub PRs it
+        # resolves GITHUB_BASE_REF to origin/<branch>; BASE_REF overrides.
+        base="$(just _anvil-base-ref)"
+        # The baseline worktree is checked out at the merge target, whose
+        # rust-toolchain.toml may pin a toolchain that is NOT installed on the
+        # runner (any PR that bumps rust-toolchain.toml hits this). The
+        # snapshot is metadata-only (file presence + content hashes), so run
+        # the baseline under the runner's *active* toolchain via
+        # RUSTUP_TOOLCHAIN, which overrides the worktree's rust-toolchain.toml.
+        # Capture it here, in the PR checkout, where it is resolved + installed.
+        active_toolchain="$(rustup show active-toolchain | head -n1 | cut -d' ' -f1)"
         # cargo delta has no --base flag; the flow is two snapshots
         # (baseline at the merge target + current at HEAD) compared by
         # `cargo delta impact`. We use a temporary worktree to snapshot
         # the baseline without disturbing the checked-out tree.
         cargo delta snapshot > "$RUNNER_TEMP/anvil-current.json"
         git worktree add --detach "$RUNNER_TEMP/anvil-baseline" "$base"
-        ( cd "$RUNNER_TEMP/anvil-baseline" && cargo delta snapshot ) \
+        # When anvil is first introduced (this PR adds the cargo workspace),
+        # the baseline branch has no root Cargo.toml, so there is no
+        # workspace for cargo-delta to snapshot. Detect that explicitly and
+        # fall back to full-workspace validation (empty include_* -> recipes
+        # default to --workspace) rather than running cargo-delta. This is a
+        # targeted check: any *other* cargo-delta failure below is a real
+        # error and is allowed to fail the impact job (and the gated pr-* jobs).
+        if [ ! -f "$RUNNER_TEMP/anvil-baseline/Cargo.toml" ] ; then
+            echo "anvil impact: baseline '$base' has no root Cargo.toml (not a cargo workspace yet -- first-time anvil adoption?). Falling back to full-workspace validation." >&2
+            git worktree remove --force "$RUNNER_TEMP/anvil-baseline"
+            {
+                echo "include_modified="
+                echo "include_affected="
+                echo "include_required="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+        fi
+        ( cd "$RUNNER_TEMP/anvil-baseline" \
+            && RUSTUP_TOOLCHAIN="$active_toolchain" cargo delta snapshot ) \
             > "$RUNNER_TEMP/anvil-baseline.json"
         git worktree remove --force "$RUNNER_TEMP/anvil-baseline"
         result="$(cargo delta impact \
