@@ -227,6 +227,12 @@ udeps:
     $ErrorActionPreference = "Stop"
     $PSNativeCommandUseErrorActionPreference = $true
 
-    # Try both with and without feature flags to cover both extremes.
+    # Run without and with --all-targets to catch both dependency-placement
+    # variants (mirrors the CI 'Udeps' step):
+    #  - without --all-targets: enforce [dependencies] are used by lib/bins
+    #    (catches normal deps used only by dev targets -- misplaced deps that
+    #    should be [dev-dependencies]).
+    #  - with --all-targets: enforce [dev-dependencies] are used by some target
+    #    (catches unused dev-dependencies).
+    cargo +$env:RUST_NIGHTLY udeps {{ target_package }} --locked --all-features
     cargo +$env:RUST_NIGHTLY udeps {{ target_package }} --locked --all-features --all-targets
-    cargo +$env:RUST_NIGHTLY udeps {{ target_package }} --locked --all-targets

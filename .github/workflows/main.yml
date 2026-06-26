@@ -282,7 +282,17 @@ jobs:
 
       # execute
       - name: Udeps
-        run: cargo +${{ env.RUST_NIGHTLY }} udeps --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          # Without --all-targets: enforce that every [dependencies] entry is used
+          # by the library/bins (catches normal deps used only by tests/benches/
+          # examples -- i.e. misplaced deps that should be [dev-dependencies]).
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          # With --all-targets: enforce that every [dev-dependencies] entry is used
+          # by some target (catches unused dev-dependencies).
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
