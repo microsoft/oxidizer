@@ -151,7 +151,6 @@ opentelemetry_sdk = { workspace = true, features = [
     "metrics",
     "testing",
 ], default-features = false }
-rstest = { workspace = true }
 rustls = { workspace = true, features = [
     "tls12",
     "std",

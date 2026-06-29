@@ -35,7 +35,6 @@ thread_aware = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 futures-util = { workspace = true, features = ["alloc", "std"] }
 mutants = { workspace = true }
-tick = { path = "../tick", features = ["tokio"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
