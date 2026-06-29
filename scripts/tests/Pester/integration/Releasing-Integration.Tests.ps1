@@ -986,7 +986,6 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         $dependentCascadeReasons = New-Object 'System.Collections.Generic.List[object]'
         [void]$dependentCascadeReasons.Add([pscustomobject]@{
             Target   = 'dependency'
-            Version  = '0.2.1'
             Breaking = $false
         })
 
@@ -1131,9 +1130,9 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         # into a's changelog. The executor must instead derive bullets from each
         # crate's DIRECT deps in the plan.
         $aReasons = New-Object 'System.Collections.Generic.List[object]'
-        [void]$aReasons.Add([pscustomobject]@{ Target = 'c'; Version = '0.3.1'; Breaking = $false })
+        [void]$aReasons.Add([pscustomobject]@{ Target = 'c'; Breaking = $false })
         $bReasons = New-Object 'System.Collections.Generic.List[object]'
-        [void]$bReasons.Add([pscustomobject]@{ Target = 'c'; Version = '0.3.1'; Breaking = $false })
+        [void]$bReasons.Add([pscustomobject]@{ Target = 'c'; Breaking = $false })
         $cReasons = New-Object 'System.Collections.Generic.List[object]'
 
         $resolved = [ordered]@{
@@ -1204,7 +1203,7 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         # non-breaking, so the recorded reason is Breaking=$false even though
         # the dependent's own EffectiveChangeType is breaking.
         $dependentReasons = New-Object 'System.Collections.Generic.List[object]'
-        [void]$dependentReasons.Add([pscustomobject]@{ Target = 'dependency'; Version = '0.2.1'; Breaking = $false })
+        [void]$dependentReasons.Add([pscustomobject]@{ Target = 'dependency'; Breaking = $false })
 
         $resolved = [ordered]@{
             dependency = [pscustomobject]@{

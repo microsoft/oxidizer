@@ -213,7 +213,7 @@ Describe 'Get-DirectDependencyChangelogReasons' {
             )
             $resolved = ConvertTo-ResolvedHash @(
                 (New-ResolvedEntry -Folder 'app' -CurrentVersion '1.2.0' -EffectiveTargetVersion '2.0.0' -EffectiveChangeType 'breaking' `
-                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Version = '3.0.0'; Breaking = $true }))
+                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Breaking = $true }))
                 (New-ResolvedEntry -Folder 'engine' -CurrentVersion '2.0.0' -EffectiveTargetVersion '3.0.0' -EffectiveChangeType 'breaking')
             )
 
@@ -230,7 +230,7 @@ Describe 'Get-DirectDependencyChangelogReasons' {
             )
             $resolved = ConvertTo-ResolvedHash @(
                 (New-ResolvedEntry -Folder 'app' -CurrentVersion '1.2.0' -EffectiveTargetVersion '1.3.0' -EffectiveChangeType 'non-breaking' `
-                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Version = '3.0.0'; Breaking = $false }))
+                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Breaking = $false }))
                 (New-ResolvedEntry -Folder 'engine' -CurrentVersion '2.0.0' -EffectiveTargetVersion '3.0.0' -EffectiveChangeType 'breaking')
             )
 
@@ -251,7 +251,7 @@ Describe 'Get-DirectDependencyChangelogReasons' {
             )
             $resolved = ConvertTo-ResolvedHash @(
                 (New-ResolvedEntry -Folder 'dependent' -CurrentVersion '1.0.0' -EffectiveTargetVersion '2.0.0' -EffectiveChangeType 'breaking' `
-                    -CascadeReasons @([pscustomobject]@{ Target = 'dependency'; Version = '0.2.1'; Breaking = $false }))
+                    -CascadeReasons @([pscustomobject]@{ Target = 'dependency'; Breaking = $false }))
                 (New-ResolvedEntry -Folder 'dependency' -CurrentVersion '0.2.0' -EffectiveTargetVersion '0.2.1' -EffectiveChangeType 'patch')
             )
 
