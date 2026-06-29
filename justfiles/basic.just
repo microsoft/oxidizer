@@ -164,15 +164,22 @@ test-docs FILTER="":
     if ("{{ package }}" -eq "") {
         cargo +$env:RUST_MSRV test --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
     } else {
-        # Single package - check if it's a library crate, otherwise skip it.
-        $lib_rs_path = "crates/{{ package }}/src/lib.rs"
+        # Single package - check if it has a library crate (src/lib.rs), otherwise skip it.
+        # Resolve the package directory via `cargo metadata` instead of assuming the
+        # package name matches its directory under `crates/` (the two can differ).
+        $metadata = cargo metadata --format-version=1 --no-deps --locked | ConvertFrom-Json
+        $pkg = $metadata.packages | Where-Object { $_.name -eq "{{ package }}" } | Select-Object -First 1
+        if (-not $pkg) {
+            throw "Could not find package '{{ package }}' in cargo metadata."
+        }
+        $lib_rs_path = Join-Path (Split-Path $pkg.manifest_path -Parent) "src/lib.rs"
 
         if (Test-Path $lib_rs_path) {
             cargo +$env:RUST_MSRV test {{ target_package }} --doc --no-fail-fast --all-features --locked -- {{ FILTER }}
         } else {
-            # Binary-only crate - skip doctests because Cargo expects library targets for doctests.
-            # Binary crates (with only main.rs) cannot contain doctests, so running `cargo test --doc`
-            # on them results in an error rather than gracefully running zero tests.
+            # Binary-only package (no lib.rs) - skip doctests because Cargo only runs
+            # doctests for a library target. With no library crate there are no doctests,
+            # and `cargo test --doc` would error out rather than gracefully run zero tests.
             Write-Host "Skipping doctests for binary-only package: {{ package }}"
         }
     }
@@ -188,7 +195,14 @@ test-docs-default FILTER="":
     if ("{{ package }}" -eq "") {
         cargo +$env:RUST_MSRV test --doc --no-fail-fast --locked -- {{ FILTER }}
     } else {
-        $lib_rs_path = "crates/{{ package }}/src/lib.rs"
+        # Resolve the package directory via `cargo metadata` instead of assuming the
+        # package name matches its directory under `crates/` (the two can differ).
+        $metadata = cargo metadata --format-version=1 --no-deps --locked | ConvertFrom-Json
+        $pkg = $metadata.packages | Where-Object { $_.name -eq "{{ package }}" } | Select-Object -First 1
+        if (-not $pkg) {
+            throw "Could not find package '{{ package }}' in cargo metadata."
+        }
+        $lib_rs_path = Join-Path (Split-Path $pkg.manifest_path -Parent) "src/lib.rs"
 
         if (Test-Path $lib_rs_path) {
             cargo +$env:RUST_MSRV test {{ target_package }} --doc --no-fail-fast --locked -- {{ FILTER }}
