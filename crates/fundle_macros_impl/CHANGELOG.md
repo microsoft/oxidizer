@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.4] - 2026-06-26
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.3.2] - 2026-06-02
 
 - ✨ Features

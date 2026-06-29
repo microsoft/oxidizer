@@ -4,7 +4,7 @@
 [package]
 name = "uniflight"
 description = "Coalesces duplicate async tasks into a single execution."
-version = "0.2.4"
+version = "0.2.5"
 readme = "README.md"
 keywords = ["oxidizer", "coalescing", "stempede", "singleflight", "deduplication"]
 categories = ["concurrency"]

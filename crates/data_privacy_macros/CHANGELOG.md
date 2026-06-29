@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.3] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.10.3` of `data_privacy_macros_impl`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.10.2] - 2026-06-11
 
 - 🔧 Maintenance

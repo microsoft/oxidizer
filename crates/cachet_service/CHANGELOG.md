@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.8] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.2.6` of `cachet_tier`
+  - Now requires `0.3.5` of `layered`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.2.7] - 2026-06-24
 
 - 🔧 Maintenance

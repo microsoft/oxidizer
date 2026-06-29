@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.5` of `anyspawn`
+  - Now requires `0.3.5` of `tick`
+
+- ✨ Features
+
+  - adapt fetch HttpClient to Azure's HttpClient ([#494](https://github.com/microsoft/oxidizer/pull/494))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
 ## [0.1.0]
 
 - ✨ Features

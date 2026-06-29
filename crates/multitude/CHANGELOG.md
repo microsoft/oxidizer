@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.1] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.6` of `bytesbuf`
+
+- ✨ Features
+
+  - add arena-backed hashbrown HashMap/HashSet support ([#517](https://github.com/microsoft/oxidizer/pull/517))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
 ## [0.3.1] - 2026-06-18
 
 - 🔧 Maintenance

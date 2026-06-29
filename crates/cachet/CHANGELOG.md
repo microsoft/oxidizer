@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.3] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.5` of `anyspawn`
+  - Now requires `0.5.6` of `bytesbuf`
+  - Now requires `0.3.7` of `cachet_memory`
+  - Now requires `0.2.8` of `cachet_service`
+  - Now requires `0.2.6` of `cachet_tier`
+  - Now requires `0.3.5` of `layered`
+  - Now requires `0.3.8` of `ohno`
+  - Now requires `0.3.5` of `tick`
+  - Now requires `0.2.5` of `uniflight`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
 ## [0.7.2] - 2026-06-24
 
 - 🔧 Maintenance
