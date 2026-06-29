@@ -1182,5 +1182,59 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         # The released root 'c' has no direct deps in the set → no cascade bullet.
         $cChangelog | Should -Not -Match 'Now requires'
     }
+
+    It 'puts the cascade bullet under Maintenance for a breaking user target that is a non-breaking cascade dependent (ADO 7536096 reviewer counterexample)' {
+        # Linear2: dependent -> dependency. Release dependency@patch together
+        # with dependent@breaking. 'dependent' is BOTH a user target (breaking,
+        # 1.0.0 -> 2.0.0) AND a cascade dependent of dependency (the edge is
+        # non-breaking). The "Now requires" bullet must land under 🔧 Maintenance
+        # (driven by the per-edge cascade flag), NOT ⚠️ Breaking.
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Spec @{
+            Packages = @(
+                @{ Name = 'dependent';  Version = '1.0.0'; Deps = @(@{ Name = 'dependency' }) }
+                @{ Name = 'dependency'; Version = '0.2.0' }
+            )
+        } -Path (Join-Path $TestDrive 'invoke-resolved-release-mixed')
+
+        $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+
+        # CascadeReasons carries the per-edge flag: dependency->dependent is
+        # non-breaking, so the recorded reason is Breaking=$false even though
+        # the dependent's own EffectiveChangeType is breaking.
+        $dependentReasons = New-Object 'System.Collections.Generic.List[object]'
+        [void]$dependentReasons.Add([pscustomobject]@{ Target = 'dependency'; Version = '0.2.1'; Breaking = $false })
+
+        $resolved = [ordered]@{
+            dependency = [pscustomobject]@{
+                Folder = 'dependency'; Name = 'dependency'; CurrentVersion = '0.2.0'; EffectiveTargetVersion = '0.2.1'
+                EffectiveChangeType = 'patch'; Source = 'user'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; CascadeReasons = (New-Object 'System.Collections.Generic.List[object]')
+            }
+            dependent = [pscustomobject]@{
+                Folder = 'dependent'; Name = 'dependent'; CurrentVersion = '1.0.0'; EffectiveTargetVersion = '2.0.0'
+                EffectiveChangeType = 'breaking'; Source = 'user'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; CascadeReasons = $dependentReasons
+            }
+        }
+
+        Mock -CommandName Update-Readme -MockWith { } -Verifiable:$false
+
+        Push-Location $ws.Path
+        try {
+            $null = @(Invoke-ResolvedRelease `
+                -RepoRoot $ws.Path -RootCargoToml $rootCargo `
+                -ResolvedReleaseSet $resolved -WorkspaceBaseline $workspaceBaseline)
+        } finally {
+            Pop-Location
+        }
+
+        $dependentChangelog = Get-Content (Join-Path $ws.Path 'crates\dependent\CHANGELOG.md') -Raw
+
+        $dependentChangelog | Should -Match 'Now requires `0\.2\.1` of `dependency`'
+        $dependentChangelog | Should -Match '🔧 Maintenance'
+        $dependentChangelog | Should -Not -Match '⚠️ Breaking'
+    }
 }
 

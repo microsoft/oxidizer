@@ -317,12 +317,18 @@ function Get-TransitivePublishedDependentsFromBaseline {
 # EffectiveTargetVersion. This is necessary because the version captured
 # during a target's outer-loop iteration may be superseded later if that
 # same target is also a dependent of yet another user-source target whose
-# iteration strengthens it. Without normalisation, consumers
-# (Write-Changelog "Now requires <v> of <pkg>" bullets) would print the
-# stale pre-bump version. The companion Breaking flag is intentionally
-# left untouched — recomputing it without also re-iterating the dependent
-# would conflate "the target became breaking" with "this edge contributes
-# breaking", which under one-level cascade semantics it does not.
+# iteration strengthens it. The pass keeps the CascadeReasons structure's
+# documented invariant intact — every reason's Version reflects the target's
+# final planned version. (Changelog "Now requires <v> of <pkg>" bullets no
+# longer read this field; they are derived directly from each dependent's
+# DIRECT resolved dependencies in Get-DirectDependencyChangelogReasons. The
+# remaining consumers — pin-conflict messages and Show-ReleasePlan — read
+# only CascadeReason.Target. The Version field is still asserted by the
+# resolver's unit tests and kept consistent for any future consumer.) The
+# companion Breaking flag is intentionally left untouched — recomputing it
+# without also re-iterating the dependent would conflate "the target became
+# breaking" with "this edge contributes breaking", which under one-level
+# cascade semantics it does not.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
@@ -504,10 +510,12 @@ function Resolve-ReleaseSet {
     # value live at that moment when emitting reasons onto its dependents.
     # If a later outer-loop iteration (some user-source Y whose BFS reaches
     # X) bumps X.EffectiveTargetVersion via the rank-comparison branch
-    # above, the reasons X already emitted are now stale. Re-point them
-    # here so changelog "Now requires <Version> of <Target>" bullets render
-    # the post-cascade plan rather than an intermediate snapshot. Breaking
-    # is intentionally NOT recomputed (see header comment).
+    # above, the reasons X already emitted are now stale. Re-point them here
+    # so the CascadeReasons structure keeps its invariant (each reason's
+    # Version is the target's final planned version). Changelog bullets no
+    # longer read this field (see header comment), but the resolver's unit
+    # tests assert it and it is kept correct for any future consumer.
+    # Breaking is intentionally NOT recomputed (see header comment).
     $finalVersionByName = @{}
     foreach ($e in $resolved.Values) { $finalVersionByName[$e.Name] = $e.EffectiveTargetVersion }
     foreach ($e in $resolved.Values) {
@@ -1750,11 +1758,21 @@ function Get-DirectDependencyChangelogReasons {
         $resolvedByNormName[$e.Name.Replace('-', '_')] = $e
     }
 
-    # The dependent's section lands under Breaking iff its own cascade bump is
-    # breaking. This preserves the prior section-selection semantics: the header
-    # was Breaking iff any contributing cascade edge was breaking, which is
-    # exactly when the dependent's (max-rank) EffectiveChangeType is breaking.
-    $dependentIsBreaking = Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $Entry.EffectiveChangeType
+    # Section selection (Maintenance vs Breaking) must reproduce the original
+    # behaviour exactly: it OR-ed the per-EDGE Breaking flags recorded on this
+    # entry's CascadeReasons during resolution (each computed for the specific
+    # cascade edge that reached this dependent). We deliberately do NOT recompute
+    # breaking from the dependent's own EffectiveChangeType — a crate that is both
+    # a breaking user target AND a non-breaking cascade dependent must keep its
+    # "Now requires" bullet under Maintenance, matching the per-edge truth.
+    # Write-Changelog only derives a single aggregate header from these flags, so
+    # we stamp that one aggregate onto every direct-dependency reason.
+    $sectionBreaking = $false
+    if ($null -ne $Entry.CascadeReasons) {
+        foreach ($cr in $Entry.CascadeReasons) {
+            if ([bool]$cr.Breaking) { $sectionBreaking = $true; break }
+        }
+    }
 
     $reasons = New-Object 'System.Collections.Generic.List[object]'
     foreach ($depNorm in $baselinePkg.Deps) {
@@ -1764,7 +1782,7 @@ function Get-DirectDependencyChangelogReasons {
         $reasons.Add([pscustomobject]@{
             Target   = $depEntry.Name
             Version  = $depEntry.EffectiveTargetVersion
-            Breaking = $dependentIsBreaking
+            Breaking = $sectionBreaking
         })
     }
 

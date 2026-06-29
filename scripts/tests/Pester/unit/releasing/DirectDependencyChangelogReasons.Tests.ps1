@@ -40,15 +40,19 @@ BeforeAll {
             [string] $Name = $null,
             [string] $CurrentVersion,
             [string] $EffectiveTargetVersion,
-            [string] $EffectiveChangeType = 'non-breaking'
+            [string] $EffectiveChangeType = 'non-breaking',
+            [object[]] $CascadeReasons = @()
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
+        $reasons = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($r in $CascadeReasons) { [void]$reasons.Add($r) }
         return [pscustomobject]@{
             Folder                 = $Folder
             Name                   = $Name
             CurrentVersion         = $CurrentVersion
             EffectiveTargetVersion = $EffectiveTargetVersion
             EffectiveChangeType    = $EffectiveChangeType
+            CascadeReasons         = $reasons
         }
     }
 
@@ -201,14 +205,15 @@ Describe 'Get-DirectDependencyChangelogReasons' {
         }
     }
 
-    Context 'breaking flag drives section selection' {
-        It 'marks reasons Breaking when the dependent''s own change is breaking (>=1.0)' {
+    Context 'breaking flag drives section selection (preserves old per-edge aggregate)' {
+        It 'marks reasons Breaking when an edge in the entry''s CascadeReasons is breaking' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'app' -Version '1.2.0' -Deps @('engine'))
                 (New-BaselinePackage -Folder 'engine' -Version '2.0.0')
             )
             $resolved = ConvertTo-ResolvedHash @(
-                (New-ResolvedEntry -Folder 'app'    -CurrentVersion '1.2.0' -EffectiveTargetVersion '2.0.0' -EffectiveChangeType 'breaking')
+                (New-ResolvedEntry -Folder 'app' -CurrentVersion '1.2.0' -EffectiveTargetVersion '2.0.0' -EffectiveChangeType 'breaking' `
+                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Version = '3.0.0'; Breaking = $true }))
                 (New-ResolvedEntry -Folder 'engine' -CurrentVersion '2.0.0' -EffectiveTargetVersion '3.0.0' -EffectiveChangeType 'breaking')
             )
 
@@ -218,13 +223,14 @@ Describe 'Get-DirectDependencyChangelogReasons' {
             $result[0].Breaking | Should -BeTrue
         }
 
-        It 'leaves reasons non-breaking when the dependent''s change is not breaking' {
+        It 'leaves reasons non-breaking when every edge in CascadeReasons is non-breaking' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'app' -Version '1.2.0' -Deps @('engine'))
                 (New-BaselinePackage -Folder 'engine' -Version '2.0.0')
             )
             $resolved = ConvertTo-ResolvedHash @(
-                (New-ResolvedEntry -Folder 'app'    -CurrentVersion '1.2.0' -EffectiveTargetVersion '1.3.0' -EffectiveChangeType 'non-breaking')
+                (New-ResolvedEntry -Folder 'app' -CurrentVersion '1.2.0' -EffectiveTargetVersion '1.3.0' -EffectiveChangeType 'non-breaking' `
+                    -CascadeReasons @([pscustomobject]@{ Target = 'engine'; Version = '3.0.0'; Breaking = $false }))
                 (New-ResolvedEntry -Folder 'engine' -CurrentVersion '2.0.0' -EffectiveTargetVersion '3.0.0' -EffectiveChangeType 'breaking')
             )
 
@@ -232,6 +238,29 @@ Describe 'Get-DirectDependencyChangelogReasons' {
 
             $result.Count       | Should -Be 1
             $result[0].Breaking | Should -BeFalse
+        }
+
+        It 'keeps the bullet non-breaking for a crate that is a BREAKING user target but a NON-BREAKING cascade dependent (ADO 7536096 reviewer counterexample)' {
+            # dependent is released breaking via its OWN request, but the cascade
+            # edge dependency->dependent is non-breaking. The "Now requires" bullet
+            # must land under Maintenance (Breaking=$false), driven by the per-edge
+            # CascadeReasons flag — NOT by the dependent's own breaking change type.
+            $baseline = @(
+                (New-BaselinePackage -Folder 'dependent'  -Version '1.0.0' -Deps @('dependency'))
+                (New-BaselinePackage -Folder 'dependency' -Version '0.2.0')
+            )
+            $resolved = ConvertTo-ResolvedHash @(
+                (New-ResolvedEntry -Folder 'dependent' -CurrentVersion '1.0.0' -EffectiveTargetVersion '2.0.0' -EffectiveChangeType 'breaking' `
+                    -CascadeReasons @([pscustomobject]@{ Target = 'dependency'; Version = '0.2.1'; Breaking = $false }))
+                (New-ResolvedEntry -Folder 'dependency' -CurrentVersion '0.2.0' -EffectiveTargetVersion '0.2.1' -EffectiveChangeType 'patch')
+            )
+
+            $result = @(Get-DirectDependencyChangelogReasons -Entry $resolved['dependent'] -ResolvedReleaseSet $resolved -WorkspaceBaseline $baseline)
+
+            $result.Count       | Should -Be 1
+            $result[0].Target   | Should -Be 'dependency'
+            $result[0].Version  | Should -Be '0.2.1'
+            $result[0].Breaking | Should -BeFalse -Because 'section selection follows the per-edge cascade flag, not the dependent''s own change type'
         }
     }
 }
