@@ -103,8 +103,8 @@ impl ThreadRegistry {
             }
         }
 
-        assert!(processors.len() < u16::MAX as usize, "Too many processors");
-        assert!(numa_nodes.len() < u16::MAX as usize, "Too many memory regions");
+        assert!(u16::try_from(processors.len()).is_ok(), "Too many processors");
+        assert!(u16::try_from(numa_nodes.len()).is_ok(), "Too many memory regions");
 
         Self {
             processors: Processor::unpack(&processors),
