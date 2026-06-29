@@ -79,8 +79,9 @@ impl ThreadRegistry {
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
-        let available = hardware.processors().len();
-        let builder = hardware.processors().to_builder();
+        let all_processors = hardware.processors();
+        let available = all_processors.len();
+        let builder = all_processors.to_builder();
 
         let requested = match count {
             ProcessorCount::Auto | ProcessorCount::All => available,
@@ -112,8 +113,18 @@ impl ThreadRegistry {
             }
         }
 
-        assert!(u16::try_from(processors.len()).is_ok(), "Too many processors");
-        assert!(u16::try_from(numa_nodes.len()).is_ok(), "Too many memory regions");
+        assert!(
+            u16::try_from(processors.len()).is_ok(),
+            "too many processors: {} exceeds the supported maximum of {}",
+            processors.len(),
+            u16::MAX
+        );
+        assert!(
+            u16::try_from(numa_nodes.len()).is_ok(),
+            "too many memory regions: {} exceeds the supported maximum of {}",
+            numa_nodes.len(),
+            u16::MAX
+        );
 
         Self {
             processors: Processor::unpack(&processors),
