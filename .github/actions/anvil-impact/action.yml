@@ -7,9 +7,12 @@ description: |
   include lists.
 
   Outputs:
-    include_modified - "--package X --package Y" string for crates whose
-                       source files changed in the diff, or "--skip" if
-                       the modified set is empty.
+    include_modified - "--package X@ver --package Y@ver" string for crates
+                       whose source files changed in the diff, or "--skip"
+                       if the modified set is empty. Each package is a
+                       version-qualified cargo spec (name@version) so it
+                       resolves unambiguously even when a like-named crate
+                       is also a different-versioned transitive dependency.
     include_affected - same shape, for crates in the affected set
                        (modified ∪ rev-deps).
     include_required - same shape, for crates in the required set
@@ -98,8 +101,17 @@ runs:
             --format json)"
         # cargo-delta emits TitleCase keys (Modified / Affected /
         # Required), not lowercase. Format each tier into the
-        # `--package X --package Y` shape recipes expect, or the
+        # `--package X@ver --package Y@ver` shape recipes expect, or the
         # literal "--skip" sentinel when the tier is empty.
+        #
+        # The `@ver` suffix is a fully-qualified cargo package spec
+        # (`name@version`). It disambiguates a workspace member from a
+        # like-named transitive dependency pulled in at a *different*
+        # version: a bare `--package foo` makes `cargo build -p foo` fail
+        # with "multiple packages named foo" in that situation, whereas
+        # `--package foo@1.2.0` resolves uniquely to the workspace member.
+        # The version comes from `cargo metadata --no-deps` (workspace
+        # members only), so it always matches exactly one member.
         #
         # cargo-delta's impact output uses *library names* (snake_case)
         # rather than cargo *package names* (which may use hyphens). For
@@ -108,24 +120,27 @@ runs:
         # specification. We build:
         #   * `pkg_map`: lib-name -> package-name (and identity for
         #     package-name -> package-name), for translation;
+        #   * `pkg_ver`: package-name -> version, for the `@ver` suffix;
         #   * `valid_pkgs`: set of all known package names, for
         #     validation. Names cargo-delta emits that aren't valid
         #     packages (e.g. directory-leaf ambiguities like `ffi` /
         #     `ffi_build` in deeply nested workspaces) are dropped with a
         #     warning rather than failing the whole build.
         declare -A pkg_map
+        declare -A pkg_ver
         declare -A valid_pkgs
         # `tr -d '\r'` strips carriage returns: on Windows runners the
         # `cargo metadata | jq` (and cargo-delta) output can be CRLF-
         # terminated, which would otherwise leave a trailing `\r` on the
         # last `read` field — corrupting the map keys so valid packages
         # get mis-classified as unknown and silently dropped.
-        while IFS=$'\t' read -r pkg_name lib_name; do
+        while IFS=$'\t' read -r pkg_name lib_name version; do
             valid_pkgs["$pkg_name"]=1
             pkg_map["$pkg_name"]="$pkg_name"
+            pkg_ver["$pkg_name"]="$version"
             [ -n "$lib_name" ] && pkg_map["$lib_name"]="$pkg_name"
         done < <(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] as $p | ($p.targets[] | select(.kind | index("lib")) | "\($p.name)\t\(.name)"), "\($p.name)\t"' \
+            | jq -r '.packages[] as $p | ($p.targets[] | select(.kind | index("lib")) | "\($p.name)\t\(.name)\t\($p.version)"), "\($p.name)\t\t\($p.version)"' \
             | tr -d '\r')
         format_set() {
             local field="$1"
@@ -142,7 +157,12 @@ runs:
                         echo "anvil impact: dropping unknown package '$pkg' (-> '$mapped') from $field set" >&2
                         continue
                     fi
-                    out="$out --package $mapped"
+                    local ver="${pkg_ver[$mapped]:-}"
+                    if [ -n "$ver" ] ; then
+                        out="$out --package ${mapped}@${ver}"
+                    else
+                        out="$out --package $mapped"
+                    fi
                 done <<EOF
         $pkgs
         EOF

@@ -253,31 +253,32 @@ _check-tool name version:
 # _install-toolchain: install a specific rustup toolchain (no components).
 # Probe-first: if the toolchain is already installed, skip -- this keeps
 # the recipe idempotent and avoids redundant `rustup` network/update work
-# on warm or cache-restored runners.
+# on warm or cache-restored runners. The probe uses `rustup toolchain list`
+# (a pure, no-network presence check). Substring match because rustup
+# suffixes the host triple to the toolchain name.
 [script("pwsh")]
 _install-toolchain toolchain:
     $ErrorActionPreference = 'Stop'
     $toolchain = '{{toolchain}}'
-    & rustup which --toolchain $toolchain rustc *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if ((rustup toolchain list) -match [regex]::Escape($toolchain)) {
         Write-Host "toolchain '$toolchain' already installed; skipping"
         exit 0
     }
-    Write-Host "rustup toolchain install $toolchain --profile minimal --no-self-update"
-    rustup toolchain install $toolchain --profile minimal --no-self-update
+    Write-Host "rustup toolchain install $toolchain"
+    rustup toolchain install $toolchain
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to install toolchain '$toolchain'"
         exit $LASTEXITCODE
     }
 
-# _check-toolchain: verify a rustup toolchain is installed.
+# _check-toolchain: verify a rustup toolchain is installed. Uses the same
+# `rustup toolchain list` substring probe as _install-toolchain.
 [script("pwsh")]
 _check-toolchain toolchain:
     $ErrorActionPreference = 'Stop'
     $toolchain = '{{toolchain}}'
-    rustup which --toolchain $toolchain rustc 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain --profile minimal"
+    if (-not ((rustup toolchain list) -match [regex]::Escape($toolchain))) {
+        Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain"
         exit 1
     }
 
@@ -288,14 +289,12 @@ _check-toolchain toolchain:
 # anvil-<toolchain>-install).
 #
 # Probe-first: if the component is already available, skip the
-# `rustup component add`. This is what makes the recipe idempotent and,
-# critically, MSRustup-safe: msrustup `ms-prod` toolchains ship
-# clippy/rustfmt bundled and REJECT `rustup component add` outright, so
-# an unconditional add fails on every ms-prod version (a toolchain bump
-# can't fix it). The probe mirrors `_check-component` exactly -- artifact
-# detection (cargo subcommand / sysroot file), never `rustup component
-# list`, which msrustup does not support -- so the install path now has
-# the same MSRustup-awareness the check path already had.
+# `rustup component add`. This keeps the recipe idempotent and robust
+# against toolchains that ship the component bundled and reject an
+# explicit add. The probe mirrors `_check-component` exactly -- artifact
+# detection (cargo subcommand / sysroot file) rather than `rustup
+# component list` -- so the install path uses the same detection the
+# check path already had.
 [script("pwsh")]
 _install-component toolchain component:
     $ErrorActionPreference = 'Stop'
@@ -357,9 +356,8 @@ _install-component toolchain component:
 
 # _check-component: verify a component is installed on a toolchain.
 #
-# Detection avoids `rustup component list`, which msrustup does not
-# support. Instead each component is probed by the artifact it provides,
-# which works identically under rustup and msrustup:
+# Detection avoids `rustup component list`. Instead each component is
+# probed by the artifact it provides:
 #   - clippy / rustfmt / miri expose a cargo subcommand, so we invoke
 #     `cargo [+toolchain] <subcommand> --version` (non-zero exit => absent).
 #   - rust-src / llvm-tools ship no command, so we probe the toolchain
@@ -394,7 +392,7 @@ _check-component toolchain component:
             & rustc "+$toolchain" --print sysroot 2>$null
         }
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sysroot)) {
-            Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain --profile minimal"
+            Write-Error "anvil: toolchain '$toolchain' not installed. Run: rustup toolchain install $toolchain"
             exit 1
         }
         $sysroot = $sysroot.Trim()

@@ -8,9 +8,11 @@ description: Run the scheduled-advisories check group.
 inputs:
   include_modified:
     description: |
-      Pre-formatted --package args (e.g. "--package alpha --package beta")
-      for the modified tier, or the sentinel "--skip" when nothing
-      modified. Local invocations leave it unset; recipes default to
+      Pre-formatted --package args (e.g. "--package alpha@1.0.0 --package
+      beta@0.2.0") for the modified tier, or the sentinel "--skip" when
+      nothing modified. Packages are version-qualified cargo specs so they
+      resolve uniquely even when a like-named crate is also a transitive
+      dependency. Local invocations leave it unset; recipes default to
       --workspace.
     default: ""
     required: false
