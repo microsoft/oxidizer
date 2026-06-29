@@ -184,6 +184,7 @@ impl Default for ThreadRegistry {
 /// Both bounds can only be exceeded on hardware with more than `u16::MAX` of either, which is not
 /// reproducible via fake hardware (a memory region count can never exceed the processor count),
 /// so this is excluded from coverage.
+#[cfg_attr(test, mutants::skip)] // Unreachable via tests, so a mutant here cannot be caught.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn check_capacity(processor_count: usize, memory_region_count: usize) {
     assert!(
