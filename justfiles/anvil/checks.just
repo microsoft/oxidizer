@@ -47,8 +47,11 @@
 #                                    rather than `?? "--workspace"`
 #                                    (which would only catch $null and
 #                                    splat an empty arg cargo rejects).
-#   * "--package A --package B"   - emitted by the cloud-workflow impact step when
-#                                    the tier has members
+#   * "--package A@v --package B@v"  - emitted by the cloud-workflow impact step
+#                                    when the tier has members. Packages are
+#                                    version-qualified cargo specs so they
+#                                    resolve uniquely even when a like-named
+#                                    crate is also a transitive dependency.
 #   * "--skip"                    - emitted by the cloud-workflow impact step when
 #                                    the tier is empty (recipe exits 0)
 #
@@ -209,7 +212,10 @@ anvil-readme-check: anvil-readme-check-validate-prereqs
         $names = @()
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                $names += $pkg[$i + 1]; $i++
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name
+                # this metadata lookup keys on.
+                $names += ($pkg[$i + 1] -split '@', 2)[0]; $i++
             }
         }
         $names
@@ -428,7 +434,10 @@ anvil-semver-check: anvil-semver-check-validate-prereqs
         $packages = @()
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                if ($libPkgs[$pkg[$i + 1]]) { $packages += $pkg[$i + 1] }
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name.
+                $name = ($pkg[$i + 1] -split '@', 2)[0]
+                if ($libPkgs[$name]) { $packages += $name }
                 $i++
             }
         }
@@ -522,7 +531,11 @@ anvil-external-types: anvil-external-types-validate-prereqs
     } else {
         for ($i = 0; $i -lt $pkg.Count; $i++) {
             if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
-                if ($libPkgs.ContainsKey($pkg[$i + 1])) { $packages += $pkg[$i + 1] }
+                # Impact emits version-qualified specs (name@version);
+                # strip the @version to recover the bare package name
+                # this manifest-path map keys on.
+                $name = ($pkg[$i + 1] -split '@', 2)[0]
+                if ($libPkgs.ContainsKey($name)) { $packages += $name }
                 $i++
             }
         }
@@ -611,7 +624,11 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
         if ($optedOut.Count -gt 0) {
             $filtered = [System.Collections.Generic.List[string]]::new()
             for ($i = 0; $i -lt $pkg.Count; $i++) {
-                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains $pkg[$i + 1]) {
+                # Impact emits version-qualified specs (name@version);
+                # compare the bare name against the opt-out set, but keep
+                # the full name@version token in $pkg so the llvm-cov
+                # measurement below resolves unambiguously.
+                if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count -and $optedOut -contains (($pkg[$i + 1] -split '@', 2)[0])) {
                     $i++
                     continue
                 }
@@ -694,12 +711,25 @@ anvil-llvm-cov: anvil-llvm-cov-validate-prereqs
     # workflows -- the Codecov upload stays purely for display, not the gate.
     #
     # Scope the gate to the SAME package set we measured. When impact
-    # scoping is active, $pkg holds `--package X ...` (already opt-out
+    # scoping is active, $pkg holds `--package X@ver ...` (already opt-out
     # filtered above); pass those through so the gate only gates packages
     # that were actually instrumented -- otherwise unmeasured members would
     # report NO DATA and fail the gate. When unscoped, $pkg is `--workspace`
     # (no gate flag); drop it so the gate defaults to every member.
-    $gateArgs = @($pkg | Where-Object { $_ -ne '--workspace' })
+    #
+    # cargo-coverage-gate keys on bare package names from cargo metadata, so
+    # strip the @version qualifier the measurement used for disambiguation.
+    $gateArgs = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $pkg.Count; $i++) {
+        if ($pkg[$i] -eq '--workspace') { continue }
+        if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
+            $gateArgs.Add('--package')
+            $gateArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
+            $i++
+            continue
+        }
+        $gateArgs.Add($pkg[$i])
+    }
     cargo coverage-gate @gateArgs --lcov target/coverage/lcov-all-features.info --lcov target/coverage/lcov-no-default.info
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -1014,9 +1044,22 @@ anvil-bolero: anvil-bolero-validate-prereqs
         exit 0
     }
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    # Impact emits version-qualified specs (name@version); strip the
+    # @version qualifier -- cargo-bolero resolves over workspace members
+    # only, so bare names suffice and avoid any spec-parsing surprises.
+    $bareArgs = [System.Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $pkg.Count; $i++) {
+        if ($pkg[$i] -eq '--package' -and ($i + 1) -lt $pkg.Count) {
+            $bareArgs.Add('--package')
+            $bareArgs.Add(($pkg[$i + 1] -split '@', 2)[0])
+            $i++
+            continue
+        }
+        $bareArgs.Add($pkg[$i])
+    }
     # `cargo bolero list` emits one JSON object per target on stdout;
     # we want the set of (package, test) pairs over the affected set.
-    $targetsJson = & cargo bolero list @pkg 2>$null
+    $targetsJson = & cargo bolero list @bareArgs 2>$null
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'anvil-bolero: bolero list failed; assuming no targets'
         exit 0
