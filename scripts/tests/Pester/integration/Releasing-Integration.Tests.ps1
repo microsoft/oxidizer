@@ -1114,5 +1114,73 @@ Describe 'Invoke-ResolvedRelease: atomic multi-package on-disk product' {
         (Test-Path (Join-Path $ws.Path 'crates\dependency\README.md'))   | Should -BeFalse
         (Test-Path (Join-Path $ws.Path 'crates\dependent\README.md')) | Should -BeFalse
     }
+
+    It 'names the DIRECT dependency (not the root cause) in an indirect dependent''s changelog (ADO bug 7536096)' {
+        # Linear3: a -> b -> c (a depends on b, b depends on c). Releasing 'c'
+        # cascades to BOTH b and a. 'a' depends DIRECTLY on b only — so its
+        # changelog must say "Now requires <b's new version> of b", never
+        # "of c" (the root cause it does not directly depend on).
+        Reset-ReleaseScriptCaches
+        $ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'invoke-resolved-release-indirect')
+
+        $workspaceBaseline = @(Get-WorkspacePackages -repoRoot $ws.Path)
+        $rootCargo = Join-Path $ws.Path 'Cargo.toml'
+
+        # Plan: release c@patch; cascade lifts b and a by patch. CascadeReasons
+        # carry the ROOT cause (c) for both b and a — the OLD bug let those leak
+        # into a's changelog. The executor must instead derive bullets from each
+        # crate's DIRECT deps in the plan.
+        $aReasons = New-Object 'System.Collections.Generic.List[object]'
+        [void]$aReasons.Add([pscustomobject]@{ Target = 'c'; Version = '0.3.1'; Breaking = $false })
+        $bReasons = New-Object 'System.Collections.Generic.List[object]'
+        [void]$bReasons.Add([pscustomobject]@{ Target = 'c'; Version = '0.3.1'; Breaking = $false })
+        $cReasons = New-Object 'System.Collections.Generic.List[object]'
+
+        $resolved = [ordered]@{
+            a = [pscustomobject]@{
+                Folder = 'a'; Name = 'a'; CurrentVersion = '0.1.0'; EffectiveTargetVersion = '0.1.1'
+                EffectiveChangeType = 'patch'; Source = 'cascade'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; CascadeReasons = $aReasons
+            }
+            b = [pscustomobject]@{
+                Folder = 'b'; Name = 'b'; CurrentVersion = '0.2.0'; EffectiveTargetVersion = '0.2.1'
+                EffectiveChangeType = 'patch'; Source = 'cascade'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; CascadeReasons = $bReasons
+            }
+            c = [pscustomobject]@{
+                Folder = 'c'; Name = 'c'; CurrentVersion = '0.3.0'; EffectiveTargetVersion = '0.3.1'
+                EffectiveChangeType = 'patch'; Source = 'user'; AutoUpgraded = $false
+                PinHonoredAgainstCascade = $false; CascadeReasons = $cReasons
+            }
+        }
+
+        Mock -CommandName Update-Readme -MockWith { } -Verifiable:$false
+
+        Push-Location $ws.Path
+        try {
+            $null = @(Invoke-ResolvedRelease `
+                -RepoRoot $ws.Path `
+                -RootCargoToml $rootCargo `
+                -ResolvedReleaseSet $resolved `
+                -WorkspaceBaseline $workspaceBaseline)
+        } finally {
+            Pop-Location
+        }
+
+        $aChangelog = Get-Content (Join-Path $ws.Path 'crates\a\CHANGELOG.md') -Raw
+        $bChangelog = Get-Content (Join-Path $ws.Path 'crates\b\CHANGELOG.md') -Raw
+        $cChangelog = Get-Content (Join-Path $ws.Path 'crates\c\CHANGELOG.md') -Raw
+
+        # The indirect dependent 'a' names its DIRECT dep 'b' at b's NEW version.
+        $aChangelog | Should -Match 'Now requires `0\.2\.1` of `b`'
+        # It must NOT name the root-cause crate 'c' (the bug being fixed).
+        $aChangelog | Should -Not -Match 'of `c`'
+
+        # The direct dependent 'b' names its direct dep 'c'.
+        $bChangelog | Should -Match 'Now requires `0\.3\.1` of `c`'
+
+        # The released root 'c' has no direct deps in the set → no cascade bullet.
+        $cChangelog | Should -Not -Match 'Now requires'
+    }
 }
 

@@ -1718,6 +1718,59 @@ function Get-TopoOrderedReleaseFolders {
     return $result.ToArray()
 }
 
+# Computes the changelog "Now requires <version> of <target>" bullet reasons for
+# a dependent being released. This is deliberately decoupled from the entry's
+# CascadeReasons: CascadeReasons attribute a cascade to its ROOT-CAUSE released
+# crate(s) (correct for pin-conflict and plan diagnostics), but a changelog
+# bullet must name only the DIRECT workspace dependencies declared in the
+# dependent's OWN Cargo.toml (normal/build, dev excluded) that are part of this
+# release with a changed version, each at its NEW version. An indirect dependent
+# must not claim to require a crate it does not directly depend on
+# (ADO bug 7536096).
+function Get-DirectDependencyChangelogReasons {
+    param(
+        [Parameter(Mandatory = $true)][object]$Entry,
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+    )
+
+    $baselinePkg = $null
+    foreach ($pkg in $WorkspaceBaseline) {
+        if ($pkg.Folder -eq $Entry.Folder) { $baselinePkg = $pkg; break }
+    }
+    if ($null -eq $baselinePkg -or $null -eq $baselinePkg.Deps) {
+        return @()
+    }
+
+    # Baseline .Deps are underscore-normalized cargo names; index the resolved
+    # plan by the same normalization so direct deps resolve to their plan entry
+    # regardless of folder naming (the resolved set is keyed by Folder).
+    $resolvedByNormName = @{}
+    foreach ($e in $ResolvedReleaseSet.Values) {
+        $resolvedByNormName[$e.Name.Replace('-', '_')] = $e
+    }
+
+    # The dependent's section lands under Breaking iff its own cascade bump is
+    # breaking. This preserves the prior section-selection semantics: the header
+    # was Breaking iff any contributing cascade edge was breaking, which is
+    # exactly when the dependent's (max-rank) EffectiveChangeType is breaking.
+    $dependentIsBreaking = Test-IsBreakingChange -oldVersion $Entry.CurrentVersion -ChangeType $Entry.EffectiveChangeType
+
+    $reasons = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($depNorm in $baselinePkg.Deps) {
+        $depEntry = $resolvedByNormName[$depNorm]
+        if ($null -eq $depEntry) { continue }
+        if ($depEntry.CurrentVersion -eq $depEntry.EffectiveTargetVersion) { continue }
+        $reasons.Add([pscustomobject]@{
+            Target   = $depEntry.Name
+            Version  = $depEntry.EffectiveTargetVersion
+            Breaking = $dependentIsBreaking
+        })
+    }
+
+    return $reasons.ToArray()
+}
+
 # Executes a finalised release plan. For each release-set entry, in topo order
 # (dependencies first), writes Cargo.toml + workspace Cargo.toml + CHANGELOG +
 # README. No cascade logic, no user prompts — every release decision was
@@ -1766,12 +1819,10 @@ function Invoke-ResolvedRelease {
             Write-Error "Failed to update version for package '$folder'." -ErrorAction Stop
         }
 
-        $cascadeReasons = if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
-            # .ToArray() instead of @(...) — PowerShell's array sub-expression
-            # operator can't iterate a List[object] held in a property accessor.
-            $entry.CascadeReasons.ToArray()
-        } else {
-            $null
+        $cascadeReasons = Get-DirectDependencyChangelogReasons -Entry $entry `
+            -ResolvedReleaseSet $ResolvedReleaseSet -WorkspaceBaseline $WorkspaceBaseline
+        if ($null -ne $cascadeReasons -and $cascadeReasons.Count -eq 0) {
+            $cascadeReasons = $null
         }
         Write-Changelog -packageName $entry.Name -newVersion $newVersion -packageFolder $packageFolder `
             -changelogFile $changelogFile -prBaseUrl $PrBaseUrl -cascadeReasons $cascadeReasons
