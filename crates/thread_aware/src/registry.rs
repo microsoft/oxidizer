@@ -79,13 +79,22 @@ impl ThreadRegistry {
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
+        let available = hardware.processors().len();
         let builder = hardware.processors().to_builder();
 
+        let requested = match count {
+            ProcessorCount::Auto | ProcessorCount::All => available,
+            ProcessorCount::Manual(count) => count.get(),
+        };
         let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
-        }
-        .expect("Not enough processors available");
+        };
+        assert!(
+            processors.is_some(),
+            "not enough processors available: requested {requested}, available {available}"
+        );
+        let processors = processors.expect("checked by assert above");
 
         let mut numa_nodes = Vec::new();
         let mut dense_index = 0;
@@ -367,7 +376,7 @@ mod test_fake_hardware {
     }
 
     #[test]
-    #[should_panic(expected = "Not enough processors available")]
+    #[should_panic(expected = "not enough processors available")]
     fn manual_exceeds_available_panics() {
         let _registry = registry_from_fake(&ProcessorCount::Manual(nz!(5)), 2, 1);
     }
