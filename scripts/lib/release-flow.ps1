@@ -321,10 +321,12 @@ function Get-TransitivePublishedDependentsFromBaseline {
 # documented invariant intact — every reason's Version reflects the target's
 # final planned version. (Changelog "Now requires <v> of <pkg>" bullets no
 # longer read this field; they are derived directly from each dependent's
-# DIRECT resolved dependencies in Get-DirectDependencyChangelogReasons. The
-# remaining consumers — pin-conflict messages and Show-ReleasePlan — read
-# only CascadeReason.Target. The Version field is still asserted by the
-# resolver's unit tests and kept consistent for any future consumer.) The
+# DIRECT resolved dependencies in Get-DirectDependencyChangelogReasons —
+# which reads only CascadeReason.Breaking, for section selection. The
+# remaining readers of CascadeReason.Version — pin-conflict messages and
+# Show-ReleasePlan — actually use only CascadeReason.Target, so no production
+# code reads Version; it is still asserted by the resolver's unit tests and
+# kept consistent for any future consumer.) The
 # companion Breaking flag is intentionally left untouched — recomputing it
 # without also re-iterating the dependent would conflate "the target became
 # breaking" with "this edge contributes breaking", which under one-level
