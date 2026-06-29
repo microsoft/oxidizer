@@ -20,6 +20,8 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/thread_awar
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "thread_aware_macros::ThreadAware",
+    # `threads` feature
+    "many_cpus_impl::system_hardware::SystemHardware",
     # `bytes` feature
     "bytes::bytes::Bytes",
     "bytes::bytes_mut::BytesMut",

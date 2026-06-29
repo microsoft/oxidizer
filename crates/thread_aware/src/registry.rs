@@ -55,6 +55,9 @@ pub struct ThreadRegistry {
 impl ThreadRegistry {
     /// Create a new `ThreadRegistry` using the current system hardware.
     ///
+    /// This resolves [`SystemHardware::current`] for you. Prefer [`ThreadRegistry::with_hardware`]
+    /// when your service already owns a [`SystemHardware`] instance, so the same instance is shared.
+    ///
     /// # Panics
     ///
     /// This will panic if there are not enough processors available when using `Manual` or if no processors are available when using `Auto` or `All`.
@@ -64,9 +67,18 @@ impl ThreadRegistry {
         Self::with_hardware(count, SystemHardware::current())
     }
 
-    /// Create a new `ThreadRegistry` with the specified hardware instance.
+    /// Create a new `ThreadRegistry` using a caller-provided system hardware instance.
+    ///
+    /// Use this when your service already owns a [`SystemHardware`] so that the same instance is
+    /// reused throughout your stack instead of resolving a fresh one. [`ThreadRegistry::new`] is a
+    /// convenience that resolves [`SystemHardware::current`] for you.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if there are not enough processors available when using `Manual` or if no processors are available when using `Auto` or `All`.
+    /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
-    pub(crate) fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
+    pub fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
         let builder = hardware.processors().to_builder();
 
         let processors = match count {
