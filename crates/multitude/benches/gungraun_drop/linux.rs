@@ -16,7 +16,7 @@
 use core::hint::black_box;
 
 use gungraun::{Callgrind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group, main};
-use multitude::{Arc, Arena, Box};
+use multitude::{Arc, Arena, Box, Rc};
 
 const N: usize = 1_000;
 const SLICE_LEN: usize = 8;
@@ -41,11 +41,11 @@ fn setup_box_u64() -> (Vec<Box<u64>>, Arena) {
     (h, arena)
 }
 
-fn setup_rc_u64() -> (Vec<Arc<u64>>, Arena) {
+fn setup_rc_u64() -> (Vec<Rc<u64>>, Arena) {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     let mut h = Vec::with_capacity(N);
     for i in 0..N {
-        h.push(arena.alloc_arc(i as u64));
+        h.push(arena.alloc_rc(i as u64));
     }
     (h, arena)
 }
@@ -68,11 +68,11 @@ fn setup_box_droppy() -> (Vec<Box<DroppyT>>, Arena) {
     (h, arena)
 }
 
-fn setup_rc_droppy() -> (Vec<Arc<DroppyT>>, Arena) {
+fn setup_rc_droppy() -> (Vec<Rc<DroppyT>>, Arena) {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     let mut h = Vec::with_capacity(N);
     for i in 0..N {
-        h.push(arena.alloc_arc(make_droppy(i)));
+        h.push(arena.alloc_rc(make_droppy(i)));
     }
     (h, arena)
 }
@@ -97,11 +97,11 @@ fn setup_str_box() -> (Vec<Box<str>>, Arena) {
     (h, arena)
 }
 
-fn setup_str_rc() -> (Vec<Arc<str>>, Arena) {
+fn setup_str_rc() -> (Vec<Rc<str>>, Arena) {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     let mut h = Vec::with_capacity(N);
     for i in 0..N {
-        h.push(arena.alloc_str_arc(format!("word{i}")));
+        h.push(arena.alloc_str_rc(format!("word{i}")));
     }
     (h, arena)
 }
@@ -126,11 +126,11 @@ fn setup_slice_box_u64() -> (Vec<Box<[u64]>>, Arena) {
     (h, arena)
 }
 
-fn setup_slice_rc_u64() -> (Vec<Arc<[u64]>>, Arena) {
+fn setup_slice_rc_u64() -> (Vec<Rc<[u64]>>, Arena) {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     let mut h = Vec::with_capacity(N);
     for _ in 0..N {
-        h.push(arena.alloc_slice_fill_with_arc::<u64, _>(SLICE_LEN, |j| j as u64));
+        h.push(arena.alloc_slice_fill_with_rc::<u64, _>(SLICE_LEN, |j| j as u64));
     }
     (h, arena)
 }
@@ -153,11 +153,11 @@ fn setup_slice_box_droppy() -> (Vec<Box<[DroppyT]>>, Arena) {
     (h, arena)
 }
 
-fn setup_slice_rc_droppy() -> (Vec<Arc<[DroppyT]>>, Arena) {
+fn setup_slice_rc_droppy() -> (Vec<Rc<[DroppyT]>>, Arena) {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     let mut h = Vec::with_capacity(N);
     for _ in 0..N {
-        h.push(arena.alloc_slice_fill_with_arc::<DroppyT, _>(SLICE_LEN, make_droppy));
+        h.push(arena.alloc_slice_fill_with_rc::<DroppyT, _>(SLICE_LEN, make_droppy));
     }
     (h, arena)
 }
@@ -176,7 +176,7 @@ fn setup_slice_arc_droppy() -> (Vec<Arc<[DroppyT]>>, Arena) {
 fn setup_alloc() -> Arena {
     let arena = Arena::builder().with_capacity(64 * 1024).build();
     for i in 0..N {
-        let _: &mut u64 = arena.alloc(i as u64);
+        let _ = arena.alloc(i as u64);
     }
     arena
 }
@@ -191,7 +191,7 @@ fn box_u64(state: (Vec<Box<u64>>, Arena)) {
 
 #[library_benchmark]
 #[bench::run(setup_rc_u64())]
-fn rc_u64(state: (Vec<Arc<u64>>, Arena)) {
+fn rc_u64(state: (Vec<Rc<u64>>, Arena)) {
     black_box(state);
 }
 
@@ -209,7 +209,7 @@ fn box_droppy(state: (Vec<Box<DroppyT>>, Arena)) {
 
 #[library_benchmark]
 #[bench::run(setup_rc_droppy())]
-fn rc_droppy(state: (Vec<Arc<DroppyT>>, Arena)) {
+fn rc_droppy(state: (Vec<Rc<DroppyT>>, Arena)) {
     black_box(state);
 }
 
@@ -227,7 +227,7 @@ fn str_box(state: (Vec<Box<str>>, Arena)) {
 
 #[library_benchmark]
 #[bench::run(setup_str_rc())]
-fn str_rc(state: (Vec<Arc<str>>, Arena)) {
+fn str_rc(state: (Vec<Rc<str>>, Arena)) {
     black_box(state);
 }
 
@@ -245,7 +245,7 @@ fn slice_box_u64(state: (Vec<Box<[u64]>>, Arena)) {
 
 #[library_benchmark]
 #[bench::run(setup_slice_rc_u64())]
-fn slice_rc_u64(state: (Vec<Arc<[u64]>>, Arena)) {
+fn slice_rc_u64(state: (Vec<Rc<[u64]>>, Arena)) {
     black_box(state);
 }
 
@@ -263,7 +263,7 @@ fn slice_box_droppy(state: (Vec<Box<[DroppyT]>>, Arena)) {
 
 #[library_benchmark]
 #[bench::run(setup_slice_rc_droppy())]
-fn slice_rc_droppy(state: (Vec<Arc<[DroppyT]>>, Arena)) {
+fn slice_rc_droppy(state: (Vec<Rc<[DroppyT]>>, Arena)) {
     black_box(state);
 }
 

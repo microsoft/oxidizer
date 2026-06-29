@@ -9,7 +9,7 @@
 //! (e.g. by introducing a `!Send` field) or widens it past the
 //! intended bounds.
 
-use multitude::{Arc, Arena, Box};
+use multitude::{Alloc, Arc, Arena, Box, Rc};
 
 fn assert_send<T: Send>() {}
 fn assert_sync<T: Sync>() {}
@@ -109,6 +109,41 @@ fn box_str_is_send_sync() {
 fn arc_str_is_send_sync() {
     assert_send::<Arc<str>>();
     assert_sync::<Arc<str>>();
+}
+
+#[test]
+fn alloc_send_sync_follow_t() {
+    use core::cell::Cell;
+    // `Alloc<'a, T>` wraps `&'a mut T`, so it inherits the auto traits of
+    // `&mut T`: `Send` when `T: Send` (`impl<T: Send + ?Sized> Send for &mut T`)
+    // and `Sync` when `T: Sync` (`impl<T: Sync + ?Sized> Sync for &mut T` — a
+    // shared `&&mut T` only permits *reading* through it, so sharing is sound
+    // when `T: Sync`). These assertions lock that contract in.
+    assert_send::<Alloc<'static, u64>>();
+    assert_sync::<Alloc<'static, u64>>();
+    assert_send::<Alloc<'static, [u8]>>();
+    assert_sync::<Alloc<'static, [u8]>>();
+    // `Cell<T>` is `Send` but `!Sync`, so `Alloc<Cell<_>>` must follow suit —
+    // proving `Sync` genuinely tracks `T: Sync` rather than being unconditional.
+    assert_send::<Alloc<'static, Cell<u64>>>();
+    assert_not_sync::<Alloc<'static, Cell<u64>>>();
+}
+
+#[test]
+fn rc_is_not_send_or_sync() {
+    // `Rc<T, A>` uses a *non-atomic*, unaligned per-handle strong count
+    // (read/written with `read_unaligned`/`write_unaligned`), so it must never
+    // cross threads. It carries no `unsafe impl Send`/`Sync`, and its
+    // `NonNull<u8>` + `PhantomData<(*const T, A)>` fields keep it `!Send` and
+    // `!Sync` automatically for every `T`/`A`. This test fails to compile if a
+    // future refactor accidentally makes `Rc` `Send` or `Sync` — which would
+    // be unsound, since two threads could then race the non-atomic count.
+    assert_not_send::<Rc<u64>>();
+    assert_not_sync::<Rc<u64>>();
+    assert_not_send::<Rc<[u8]>>();
+    assert_not_sync::<Rc<[u8]>>();
+    assert_not_send::<Rc<str>>();
+    assert_not_sync::<Rc<str>>();
 }
 
 #[test]

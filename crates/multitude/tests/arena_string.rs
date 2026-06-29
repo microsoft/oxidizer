@@ -1198,3 +1198,230 @@ mod string_zero_copy_freeze {
         assert_eq!(&*a, "");
     }
 }
+
+mod str_smart_ptr_traits {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    use multitude::{Arc, Arena, Box};
+
+    fn hash_of<T: Hash>(v: &T) -> u64 {
+        let mut h = DefaultHasher::new();
+        v.hash(&mut h);
+        h.finish()
+    }
+
+    // --- Arc<str> -----------------------------------------------------------
+
+    #[test]
+    fn arc_str_partial_eq_ref_str_true_and_false() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_arc("hello");
+        assert!(s == "hello");
+        assert!((s != "world"));
+    }
+
+    #[test]
+    fn arc_str_partial_eq_str_returns_actual_compare() {
+        let arena = Arena::new();
+        let s: Arc<str> = arena.alloc_str_arc("alpha");
+        let alpha: std::string::String = "alpha".to_owned();
+        let beta: std::string::String = "beta".to_owned();
+        assert!(s == *alpha.as_str());
+        assert!((s != *beta.as_str()));
+    }
+
+    #[test]
+    fn arc_str_as_ref_returns_actual_contents() {
+        let arena = Arena::new();
+        let s: Arc<str> = arena.alloc_str_arc("payload");
+        let r: &str = s.as_ref();
+        assert_eq!(r, "payload");
+        assert_ne!(r, "");
+        assert_ne!(r, "xyzzy");
+    }
+
+    #[test]
+    fn arc_str_partial_eq_self_distinguishes() {
+        let arena = Arena::new();
+        let a = arena.alloc_str_arc("same");
+        let b = arena.alloc_str_arc("same");
+        let c = arena.alloc_str_arc("diff");
+        assert!(a == b);
+        assert!((a != c));
+    }
+
+    #[test]
+    fn arc_str_hash_depends_on_contents() {
+        let arena = Arena::new();
+        let a = arena.alloc_str_arc("foo");
+        let b = arena.alloc_str_arc("foo");
+        let c = arena.alloc_str_arc("bar");
+        assert_eq!(hash_of(&a), hash_of(&b));
+        assert_ne!(hash_of(&a), hash_of(&c));
+    }
+
+    #[test]
+    fn arc_str_pointer_fmt_renders_some_address() {
+        let arena = Arena::new();
+        let s = arena.alloc_str_arc("ptr");
+        let rendered = format!("{s:p}");
+        // Pointer formatting can produce either `0x…` or the bare hex form;
+        // both have non-empty content with at least one hex digit.
+        assert!(!rendered.is_empty());
+        assert!(rendered.chars().any(|c| c.is_ascii_hexdigit()));
+    }
+
+    // --- Box<str> -----------------------------------------------------------
+
+    #[test]
+    fn box_str_as_ref_returns_actual_contents() {
+        let arena = Arena::new();
+        let s: Box<str> = arena.alloc_str_box("payload");
+        let r: &str = s.as_ref();
+        assert_eq!(r, "payload");
+        assert_ne!(r, "");
+        assert_ne!(r, "xyzzy");
+    }
+
+    #[test]
+    fn box_str_partial_eq_self_distinguishes() {
+        let arena = Arena::new();
+        let a = arena.alloc_str_box("alpha");
+        let b = arena.alloc_str_box("alpha");
+        let c = arena.alloc_str_box("beta");
+        assert!(a == b);
+        assert!((a != c));
+    }
+
+    #[test]
+    fn box_str_partial_eq_str_true_and_false() {
+        let arena = Arena::new();
+        let s: Box<str> = arena.alloc_str_box("hi");
+        let hi: std::string::String = "hi".to_owned();
+        let bye: std::string::String = "bye".to_owned();
+        assert!(s == *hi.as_str());
+        assert!((s != *bye.as_str()));
+    }
+
+    #[test]
+    fn box_str_partial_eq_ref_str_true_and_false() {
+        let arena = Arena::new();
+        let s: Box<str> = arena.alloc_str_box("ok");
+        assert!(s == "ok");
+        assert!((s != "no"));
+    }
+
+    // --- multitude::String --------------------------------------------------
+
+    #[test]
+    fn string_partial_eq_str_true_and_false() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        s.push_str("equal");
+        let equal: std::string::String = "equal".to_owned();
+        let other: std::string::String = "other".to_owned();
+        assert!(s == *equal.as_str());
+        assert!((s != *other.as_str()));
+    }
+
+    #[test]
+    fn string_partial_eq_ref_str_true_and_false() {
+        let arena = Arena::new();
+        let mut s = arena.alloc_string();
+        s.push_str("eq");
+        assert!(s == "eq");
+        assert!((s != "neq"));
+    }
+}
+
+mod arc_str_traits_coverage {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+    #[cfg(feature = "utf16")]
+    use widestring::utf16str;
+
+    #[test]
+    fn arc_str_partial_eq_str_and_ref_str() {
+        let a = Arena::new();
+        let s = a.alloc_str_arc("hello");
+        // PartialEq<str>
+        assert!(s == *"hello");
+        // PartialEq<&str>
+        assert!(s == "hello");
+        let bad = "world";
+        assert!(s != *bad);
+    }
+
+    #[test]
+    fn arc_str_pointer_fmt() {
+        let a = Arena::new();
+        let s = a.alloc_str_arc("p");
+        let _ = format!("{s:p}");
+    }
+
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn arc_utf16_str_is_empty_and_eq_and_display() {
+        let a = Arena::new();
+        let s = a.alloc_utf16_str_arc(utf16str!(""));
+        assert!(s.is_empty());
+        let one = a.alloc_utf16_str_arc(utf16str!("x"));
+        let two = a.alloc_utf16_str_arc(utf16str!("x"));
+        assert!(one == two);
+        let _ = format!("{one}");
+    }
+}
+
+mod box_str_into_box_u8_slice {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::{Arena, Box as ArenaBox};
+
+    #[test]
+    fn from_box_str_to_box_u8_slice() {
+        let a = Arena::new();
+        let s = a.alloc_str_box("hello");
+        let bytes: ArenaBox<[u8]> = ArenaBox::from(s);
+        assert_eq!(&*bytes, b"hello");
+    }
+}

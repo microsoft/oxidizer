@@ -129,8 +129,10 @@ impl<'a, T> ArenaBuf<'a, T> {
     /// Returns the initialized prefix as a mutable slice.
     #[inline]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: see `as_slice`; the `&mut self` borrow grants exclusive
-        // access to the slice.
+        // SAFETY: by the type's invariants, `ptr` addresses storage of at least
+        // `len` initialized `T`s (dangling for ZSTs / empty, which
+        // `from_raw_parts_mut` accepts when `len == 0` or `T` is a ZST). The
+        // `&mut self` borrow grants exclusive access to the slice.
         unsafe { slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
@@ -492,7 +494,9 @@ impl<T> DoubleEndedIterator for DrainAll<'_, T> {
             return None;
         }
         self.tail -= 1;
-        // SAFETY: see `next`.
+        // SAFETY: `head < tail` held, so `tail - 1` indexes the still-initialized
+        // sub-range `[head, tail)`; reading it after decrementing `tail` moves
+        // the element out and prevents a double-drop on iterator drop.
         Some(unsafe { ptr::read(self.ptr.as_ptr().add(self.tail)) })
     }
 }

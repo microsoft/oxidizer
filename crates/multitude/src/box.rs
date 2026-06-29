@@ -32,32 +32,24 @@ use crate::vec::Vec;
 /// - Provides `&mut T` through `DerefMut` (exclusive ownership).
 /// - **Not** [`Clone`] — single owner.
 ///
-/// Like [`Arc`](crate::Arc), `Box` keeps its containing chunk alive by
-/// holding a +1 refcount, so it can outlive the arena it came from and
+/// Like [`Arc`](crate::Arc), `Box` can outlive the arena it came from and
 /// survives [`Arena::reset`](crate::Arena::reset), and it runs `T`'s
-/// destructor eagerly — never deferred to chunk teardown. As the sole
-/// owner, `Box` drops `T` when the `Box` itself is dropped, whereas
-/// `Arc` drops `T` when its last clone is dropped.
+/// destructor eagerly. As the sole owner, `Box` drops `T` when the `Box`
+/// itself is dropped, whereas `Arc` drops `T` when its last clone is dropped.
 ///
 /// # `Send` and `Sync`
 ///
 /// `Box<T, A>` is [`Send`] when `T: Send` and `A: Send + Sync`, and
-/// [`Sync`] when `T: Sync` and `A: Sync`. The backing storage lives in a
-/// chunk whose refcount is atomic; a last-reference `Drop` on the
-/// receiving thread tears that chunk down through its
-/// `Weak<ChunkProvider<A>>` (which touches the provider/allocator),
-/// so `Send` requires `A: Sync` too — exactly as `Arc<T, A>` does, rather
-/// than `std::boxed::Box<T, A>`'s `A: Send` (whose `A` is uniquely owned).
+/// [`Sync`] when `T: Sync` and `A: Sync` — the same bounds as `Arc<T, A>`
+/// (rather than `std::boxed::Box<T, A>`'s `A: Send`), because the backing
+/// storage is shared with the arena's chunk machinery.
 ///
 /// # Pinning
 ///
 /// `Box` implements [`Unpin`] unconditionally (like `std::Box`).
-/// Pinning a `Box` is sound: because `Box` holds a +1 refcount on its
-/// chunk, the backing memory cannot be freed or reused while the
-/// `Box` exists. If a pinned `Box` is leaked via [`core::mem::forget`],
-/// the refcount is never decremented and the chunk's storage persists
-/// for the lifetime of the process — satisfying [`Pin`](core::pin::Pin)'s
-/// drop guarantee (the pinned value's memory is never reclaimed).
+/// Pinning a `Box` is sound: the value stays at a fixed address for as long as
+/// the `Box` (or a pinned, leaked `Box`) exists, satisfying
+/// [`Pin`](core::pin::Pin)'s drop guarantee.
 ///
 /// # Example
 ///
@@ -102,9 +94,11 @@ pub struct Box<T: ?Sized + Pointee, A: Allocator + Clone = Global> {
 // bound is `A: Send + Sync`, not `std`'s `A: Send`. The `Pointee` bound
 // is implicit (already on the `Box` struct).
 unsafe impl<T: ?Sized + Pointee + Send, A: Allocator + Clone + Send + Sync> Send for Box<T, A> {}
-// SAFETY: see the `Send` impl above for the cross-thread invariants.
-// Sharing `&Box<T, A>` across threads exposes only `&T` (`Deref` is
-// `&self -> &T`); `DerefMut` requires `&mut self` and is serialized
+// SAFETY: a `Box<T, A>` owns its pointee and the chunk `+1`, so sending it
+// across threads can move the pointee and trigger chunk teardown (which may run
+// `A::deallocate`) on the receiving thread; that requires `T: Send` and
+// `A: Send + Sync`. Sharing `&Box<T, A>` across threads exposes only `&T`
+// (`Deref` is `&self -> &T`); `DerefMut` requires `&mut self` and is serialized
 // by the borrow checker. So `Sync` follows `T: Sync`, with `A: Sync`
 // mirrored from `std::boxed::Box<T, A>`.
 unsafe impl<T: ?Sized + Pointee + Sync, A: Allocator + Clone + Sync> Sync for Box<T, A> {}
@@ -189,9 +183,11 @@ impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
     pub unsafe fn assume_init(self) -> Box<T, A> {
         let thin = self.ptr;
         mem::forget(self);
-        // SAFETY: see scalar `Arc::<MaybeUninit<T>>::assume_init` —
-        // sized `T` shares the same chunk layout (no prefix) as
-        // `MaybeUninit<T>`.
+        // SAFETY: the caller guarantees the `MaybeUninit<T>` holds an
+        // initialized, valid `T`. For sized `T`, `MaybeUninit<T>` and `T` share
+        // the same chunk layout (no prefix), so the thin pointer (whose chunk
+        // `+1` is transferred via `mem::forget(self)`) reconstructs a valid
+        // `Box<T>`.
         unsafe { Box::from_raw(thin) }
     }
 
@@ -210,9 +206,10 @@ impl<T, A: Allocator + Clone> Box<MaybeUninit<T>, A> {
     where
         A: 'static,
     {
-        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
-        // value's address is unchanged across this cast, and the
-        // caller asserts the contents are a valid `T`.
+        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
+        // re-pin the result, and the value's address is unchanged across the
+        // cast (nothing moves). The caller's `assume_init` contract (the
+        // `MaybeUninit<T>` holds a valid `T`) is forwarded unchanged.
         unsafe {
             let inner: Self = Pin::into_inner_unchecked(this);
             Box::into_pin(inner.assume_init())
@@ -234,10 +231,11 @@ impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
     pub unsafe fn assume_init(self) -> Box<[T], A> {
         let thin = self.ptr;
         mem::forget(self);
-        // SAFETY: see scalar `assume_init`; `Box<[MaybeUninit<T>]>` and
-        // `Box<[T]>` share the same chunk prefix layout (slice length
-        // as `usize`), so the length stored there already matches the
-        // new fat pointer's metadata.
+        // SAFETY: the caller guarantees every element is an initialized, valid
+        // `T`. `[MaybeUninit<T>]` and `[T]` share the same chunk prefix layout
+        // (slice length as `usize`), so the length stored there already matches
+        // the new fat pointer's metadata, and the thin pointer (whose chunk `+1`
+        // is transferred via `mem::forget(self)`) reconstructs a valid `Box<[T]>`.
         unsafe { Box::from_raw(thin) }
     }
 
@@ -253,9 +251,10 @@ impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
     where
         A: 'static,
     {
-        // SAFETY: see `Pin::map_unchecked` + `Self::assume_init`; the
-        // value's address is unchanged across this cast, and the
-        // caller asserts every element is a valid `T`.
+        // SAFETY: `Pin::into_inner_unchecked` is sound because we immediately
+        // re-pin the result, and the elements' addresses are unchanged across
+        // the cast (nothing moves). The caller's slice `assume_init` contract
+        // (every element is a valid `T`) is forwarded unchanged.
         unsafe {
             let inner: Self = Pin::into_inner_unchecked(this);
             Box::into_pin(inner.assume_init())
@@ -266,7 +265,9 @@ impl<T, A: Allocator + Clone> Box<[MaybeUninit<T>], A> {
 impl<T: ?Sized + Pointee, A: Allocator + Clone> DerefMut for Box<T, A> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
-        // SAFETY: see `Deref`; `&mut self` confirms exclusive access.
+        // SAFETY: `as_fat_ptr` reconstructs the fat pointer to the live pointee
+        // this `Box` owns; the `&mut self` receiver proves exclusive access, so
+        // handing out `&mut T` for that borrow's lifetime introduces no aliasing.
         unsafe { self.as_fat_ptr().as_mut() }
     }
 }

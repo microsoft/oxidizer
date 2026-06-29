@@ -102,10 +102,11 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // reservation would later overflow and panic on the `expect` below).
         let payload_bytes = mem::size_of::<T>().checked_mul(new_cap).ok_or(AllocError)?;
         let refill_hint = if const { buffer_freezable::<T>() } {
-            // Freezable buffers carry the `Arc<[T]>` freeze prefix; the
+            // Freezable buffers carry the `Arc<[T]>` freeze prefix (the
+            // superset of `Rc`'s, so a freeze into either reuses it); the
             // refill hint must budget for it so the chunk fits prefix +
             // payload + alignment slack.
-            crate::arena::alloc_prefixed::worst_case_arc_slice_payload::<T>(new_cap)
+            crate::arena::alloc_prefixed::worst_case_strong_slice_payload::<crate::internal::thin_dst::AtomicStrong, T>(new_cap)
         } else {
             payload_bytes.checked_add(mem::align_of::<T>()).ok_or(AllocError)?
         };

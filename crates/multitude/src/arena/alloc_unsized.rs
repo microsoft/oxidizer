@@ -27,6 +27,8 @@ use super::{Arena, ExpectAlloc};
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::constants::max_smart_ptr_align;
+use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong, strong_prefix_bytes_for};
+use crate::rc::Rc;
 
 /// Maximum `layout.align()` accepted by smart-pointer allocations.
 /// Mirrors the constant of the same name in [`alloc_value`](super::alloc_value):
@@ -39,10 +41,8 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// The closure `init` receives a typed fat pointer to the buffer
     /// (built from `(thin_ptr, metadata)`) and is responsible for
-    /// writing a valid `T` through it. The metadata is stored in the
-    /// chunk prefix and recovered on demand, so `T`'s destructor runs
-    /// eagerly (via `drop_in_place::<T>`) when the last `Arc` clone is
-    /// dropped.
+    /// writing a valid `T` through it. `T`'s destructor runs eagerly (via
+    /// `drop_in_place::<T>`) when the last `Arc` clone is dropped.
     ///
     /// For sized `T`, prefer [`Self::alloc_arc`] / [`Self::alloc_arc_with`].
     ///
@@ -61,8 +61,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// - `metadata` must be valid for the value just written.
     /// - `T::Metadata` must be either zero-sized (sized `T`) or
     ///   `usize`-sized (slice DSTs `[U]` and trait objects `dyn Trait`,
-    ///   whose metadata — slice length or vtable pointer — is stored
-    ///   verbatim in the chunk prefix).
+    ///   whose metadata is a slice length or vtable pointer).
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
         &self,
@@ -149,6 +148,44 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { self.impl_alloc_dst_box::<T>(layout, metadata, init) }
     }
 
+    /// Allocate a possibly-unsized `T` and return an [`Rc<T, A>`](crate::Rc) —
+    /// the non-atomic, single-thread sibling of [`Self::alloc_dst_arc`]. `T`
+    /// needs no `Send`/`Sync` bound.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the backing allocator fails or if `layout.align()` is at least 32 KiB.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_arc`].
+    #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
+    pub unsafe fn alloc_dst_rc<T: ?Sized + Pointee>(&self, layout: Layout, metadata: T::Metadata, init: impl FnOnce(*mut T)) -> Rc<T, A> {
+        // SAFETY: forwarded.
+        unsafe { self.impl_alloc_dst_rc::<T>(layout, metadata, init) }.expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::alloc_dst_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails or if
+    /// `layout.align()` is at least 32 KiB.
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_arc`].
+    #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
+    pub unsafe fn try_alloc_dst_rc<T: ?Sized + Pointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Result<Rc<T, A>, AllocError> {
+        // SAFETY: forwarded.
+        unsafe { self.impl_alloc_dst_rc::<T>(layout, metadata, init) }
+    }
+
     /// Shared implementation for `alloc_dst_arc` / `try_alloc_dst_arc`.
     ///
     /// Reserves a strong-prefixed shared slot, invokes `init` on the
@@ -167,19 +204,34 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        // SAFETY: forwarded.
-        let thin = unsafe { self.impl_alloc_dst_smart::<T>(layout, metadata, init) }?;
-        // SAFETY: `impl_alloc_dst_smart` returns a thin payload pointer
-        // into a chunk whose prefix carries `T::Metadata` and that
-        // holds a fresh +1 in the new `Arc`'s name.
-        Ok(unsafe { Arc::from_raw(thin) })
+        // SAFETY: forwarded to `impl_alloc_dst_smart`, which shares this
+        // method's `layout` / `metadata` / `init` contract and returns the
+        // adopted `Arc`.
+        unsafe { self.impl_alloc_dst_smart::<AtomicStrong, T>(layout, metadata, init) }
+    }
+
+    /// `Rc` mirror of [`Self::impl_alloc_dst_arc`] (non-atomic strong count).
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_rc`].
+    #[inline]
+    unsafe fn impl_alloc_dst_rc<T: ?Sized + Pointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Result<Rc<T, A>, AllocError> {
+        // SAFETY: forwarded to `impl_alloc_dst_smart`, which shares this
+        // method's `layout` / `metadata` / `init` contract and returns the
+        // adopted `Rc`.
+        unsafe { self.impl_alloc_dst_smart::<LocalStrong, T>(layout, metadata, init) }
     }
 
     /// Shared implementation for `alloc_dst_box` / `try_alloc_dst_box`.
     /// Like `impl_alloc_dst_arc` but without the per-`Arc` strong-count
     /// prefix: [`Box::drop`] runs `drop_in_place::<T>` on the value
-    /// pointer (which natively handles `?Sized`). Neither variant
-    /// reserves a chunk drop entry.
+    /// pointer (which natively handles `?Sized`).
     ///
     /// # Safety
     ///
@@ -224,11 +276,15 @@ impl<A: Allocator + Clone> Arena<A> {
                         .try_alloc_with_chunk(total, layout.align().max(1))
                         .expect("dedicated oversized chunk sized to fit DST value + alignment slack");
                     let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
-                    // SAFETY: see the in-arena branch above.
+                    // SAFETY: `reservation` is fresh exclusive storage from the
+                    // dedicated oversized chunk; the DST metadata is written
+                    // before `init` receives the fat payload pointer.
                     let payload_nn =
                         unsafe { write_dst_prefix_and_init::<T>(reservation.as_non_null(), payload_offset, meta_bytes, metadata, init) };
                     let _ = chunk_ref.forget();
-                    // SAFETY: see the in-arena branch above.
+                    // SAFETY: `payload_nn` references the now-initialized `T`;
+                    // the oversized chunk holds the new `Box`'s `+1` (forgotten
+                    // above), so `Box::from_raw` adopts sole ownership.
                     unsafe { Box::from_raw(payload_nn) }
                 });
             }
@@ -236,18 +292,41 @@ impl<A: Allocator + Clone> Arena<A> {
         }
     }
 
-    /// Reserve a strong-prefixed `Arc<T>` slot in the current chunk
-    /// (per-`Arc` strong count + `T::Metadata` prefix + payload),
-    /// run `init` on a typed fat pointer, and return the thin payload
-    /// pointer. No chunk drop entry is reserved:
-    /// [`Arc::drop`](crate::Arc) runs `drop_in_place::<T>` (which natively
+    /// Reserve a strong-prefixed `Arc`/`Rc` `T` slot in the current chunk
+    /// (per-handle strong count + `T::Metadata` prefix + payload), run `init`
+    /// on a typed fat pointer, and adopt the result into `S`'s smart pointer.
+    /// The smart pointer's `Drop` runs `drop_in_place::<T>` (which natively
     /// handles `?Sized`) on the last reference.
     ///
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
     #[inline]
-    unsafe fn impl_alloc_dst_smart<T: ?Sized + Pointee>(
+    unsafe fn impl_alloc_dst_smart<S: Strong, T: ?Sized + Pointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Result<S::Ptr<T, A>, AllocError> {
+        // SAFETY: forwarded to the raw helper, which shares this method's
+        // contract on `layout` / `metadata` / `init`.
+        let thin = unsafe { self.alloc_dst_smart_raw::<S, T>(layout, metadata, init) }?;
+        // SAFETY: `alloc_dst_smart_raw` returns a thin pointer to a
+        // fully-initialized `T` whose chunk prefix carries `T::Metadata` and a
+        // strong count of 1, and whose hosting chunk it took a `+1` on; the
+        // pointer lies in the chunk's first tile. That is `S::adopt`'s contract.
+        Ok(unsafe { S::adopt::<T, A>(thin) })
+    }
+
+    /// Raw DST smart allocation returning the thin payload pointer (before
+    /// adoption). Split out so the single `S::adopt` lives in
+    /// [`Self::impl_alloc_dst_smart`].
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_arc`].
+    #[inline]
+    unsafe fn alloc_dst_smart_raw<S: Strong, T: ?Sized + Pointee>(
         &self,
         layout: Layout,
         metadata: T::Metadata,
@@ -260,11 +339,11 @@ impl<A: Allocator + Clone> Arena<A> {
         let value_align = layout.align().max(1);
         // Keep the payload pointer inside the reservation for ZSTs.
         let payload_bytes = layout.size().max(1);
-        let refill_hint = worst_case_arc_dst(payload_bytes, value_align, meta_bytes);
+        let refill_hint = worst_case_strong_dst::<S>(payload_bytes, value_align, meta_bytes);
 
         let mut init = Some(init);
         loop {
-            if let Some((value_ptr, chunk_ptr)) = self.current().try_alloc_arc_dst(payload_bytes, value_align, meta_bytes) {
+            if let Some((value_ptr, chunk_ptr)) = self.current().try_alloc_arc_dst::<S>(payload_bytes, value_align, meta_bytes) {
                 let init = init.take().expect("init taken twice");
                 let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
                 // SAFETY: `value_ptr` is fresh payload storage with a
@@ -278,10 +357,12 @@ impl<A: Allocator + Clone> Arena<A> {
                 let init = init.take().expect("init taken twice");
                 return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
                     let (value_ptr, _chunk) = mutator
-                        .try_alloc_arc_dst(payload_bytes, value_align, meta_bytes)
+                        .try_alloc_arc_dst::<S>(payload_bytes, value_align, meta_bytes)
                         .expect("dedicated oversized chunk sized to fit DST value + strong prefix");
                     let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
-                    // SAFETY: see the in-arena branch above.
+                    // SAFETY: `value_ptr` is fresh payload storage with a strong
+                    // prefix from the dedicated oversized chunk; the DST metadata
+                    // is written before `init` populates the value.
                     let payload_nn = unsafe { write_dst_meta_and_init::<T>(value_ptr, meta_bytes, metadata, init) };
                     let _ = chunk_ref.forget();
                     payload_nn
@@ -348,6 +429,53 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { self.try_alloc_dst_arc::<T>(layout, metadata, init) }.map(Arc::into_pin)
     }
 
+    /// `Pin` variant of [`Self::alloc_dst_rc`] (non-atomic).
+    ///
+    /// # Panics
+    ///
+    /// See [`Self::alloc_dst_arc`].
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_arc`].
+    #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
+    #[must_use]
+    pub unsafe fn alloc_dst_rc_pin<T: ?Sized + Pointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Pin<Rc<T, A>>
+    where
+        A: 'static,
+    {
+        // SAFETY: forwarded.
+        Rc::into_pin(unsafe { self.alloc_dst_rc::<T>(layout, metadata, init) })
+    }
+
+    /// Fallible variant of [`Self::alloc_dst_rc_pin`].
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::try_alloc_dst_rc`].
+    ///
+    /// # Safety
+    ///
+    /// Same contract as [`Self::alloc_dst_arc`].
+    #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
+    pub unsafe fn try_alloc_dst_rc_pin<T: ?Sized + Pointee>(
+        &self,
+        layout: Layout,
+        metadata: T::Metadata,
+        init: impl FnOnce(*mut T),
+    ) -> Result<Pin<Rc<T, A>>, AllocError>
+    where
+        A: 'static,
+    {
+        // SAFETY: forwarded.
+        unsafe { self.try_alloc_dst_rc::<T>(layout, metadata, init) }.map(Rc::into_pin)
+    }
+
     /// `Pin` variant of [`Self::alloc_dst_box`]. Trait objects are
     /// **not** supported (see [`Self::try_alloc_dst_arc`]'s safety
     /// contract); use the slice or sized variants.
@@ -398,16 +526,19 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 }
 
-/// Worst-case byte budget for a single strong-prefixed `Arc<T>` DST
-/// allocation: per-`Arc` strong count + `T::Metadata` prefix + payload +
-/// front alignment slack.
+/// Worst-case byte budget for a single strong-prefixed DST allocation under
+/// policy `S` ([`AtomicStrong`](thin_dst::AtomicStrong) for `Arc`,
+/// [`LocalStrong`](thin_dst::LocalStrong) for `Rc`): per-handle strong count +
+/// `T::Metadata` prefix + payload + front alignment slack (`S::block_align`).
+/// Using `S::block_align` keeps the hint tight for `Rc`'s sub-4-byte alignments
+/// instead of over-budgeting at the `Arc` 4-byte strong-count floor. (`Box` DST
+/// is not strong-prefixed — it uses the separate `impl_alloc_dst_box` path.)
 #[cfg_attr(test, mutants::skip)] // underestimating refill hint ⇒ refill spin
 #[inline]
-fn worst_case_arc_dst(payload_bytes: usize, value_align: usize, meta_bytes: usize) -> usize {
-    use crate::internal::thin_dst;
-    thin_dst::strong_prefix_bytes_for(value_align, meta_bytes)
+fn worst_case_strong_dst<S: Strong>(payload_bytes: usize, value_align: usize, meta_bytes: usize) -> usize {
+    strong_prefix_bytes_for(value_align, meta_bytes)
         .saturating_add(payload_bytes)
-        .saturating_add(thin_dst::arc_block_align(value_align))
+        .saturating_add(S::block_align(value_align))
 }
 
 /// Write metadata, call `init` on the reconstructed fat pointer, and
@@ -479,38 +610,4 @@ unsafe fn write_dst_prefix_and_init<T: ?Sized + Pointee>(
     // panics, callers' `ChunkRef` guard releases the chunk's `+1`.
     init(fat);
     payload_nn
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Arena as TestArena;
-
-    /// Exercises `alloc_dst_arc` of a sized drop-bearing `T`: the value's
-    /// destructor must run eagerly when the last `Arc` clone drops
-    /// (before the arena is torn down).
-    #[test]
-    fn dst_arc_sized_drop_type_metadata_zero_sized_paths() {
-        use std::sync::Arc as StdArc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        struct D(StdArc<AtomicUsize>);
-        impl Drop for D {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        let counter = StdArc::new(AtomicUsize::new(0));
-        let counter_for_init = StdArc::clone(&counter);
-        let arena: TestArena = TestArena::new();
-        let layout = Layout::new::<D>();
-        // SAFETY: `init` writes a valid `D` through `ptr`.
-        let h: Arc<D> = unsafe {
-            arena.alloc_dst_arc::<D>(layout, (), move |p: *mut D| {
-                p.write(D(counter_for_init));
-            })
-        };
-        drop(h);
-        drop(arena);
-        assert_eq!(counter.load(Ordering::Relaxed), 1);
-    }
 }

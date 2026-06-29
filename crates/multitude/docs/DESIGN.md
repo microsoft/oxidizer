@@ -10,10 +10,14 @@ see the crate-level docs.
 - [`ChunkProvider`](#chunkprovider)
 - [`Chunk`](#chunk)
 - [Smart-pointer alignment and masking](#smart-pointer-alignment-and-masking)
-- [`DropEntry`](#dropentry)
+- [Per-`Arc` reference counting](#per-arc-reference-counting)
+  - [`Rc`: the non-atomic sibling](#rc-the-non-atomic-sibling)
+- [Zero-copy freeze of growable buffers](#zero-copy-freeze-of-growable-buffers)
+- [`Alloc`](#alloc)
+- [Closure-panic safety](#closure-panic-safety)
 
-The crate is built from four collaborating pieces — `Arena`,
-`ChunkProvider`, `Chunk`, and `DropEntry` — wired together by a single,
+The crate is built from three collaborating pieces — `Arena`,
+`ChunkProvider`, and `Chunk` — wired together by a single,
 deliberately constrained chunk layout:
 
 ```text
@@ -25,10 +29,13 @@ ChunkProvider  ── Arc ──>  (cached Chunks)
            ─retired_local──> RetiredLocalChunks<A> (intrusive list of Chunks)
 ```
 
-A `Chunk` backs every allocation style. Arena-lifetime references
-(`&mut T`) and escape-capable smart pointers (`Arc`/`Box`) coexist in the
-same chunk; the chunk distinguishes them only by *how* each is torn down
-(deferred drop entries vs. eager per-handle refcount).
+A `Chunk` backs every allocation style. Arena-lifetime allocations
+(`Alloc<T>` handles) and escape-capable smart pointers (`Arc`/`Rc`/`Box`)
+coexist in the same chunk. All of them run their value's destructor
+eagerly when the handle drops; the chunk distinguishes them only by
+whether the handle takes a per-handle refcount (`Arc`/`Rc`/`Box`, which can
+escape and reclaim early) or relies on the arena keeping the chunk pinned
+(`Alloc`, which is lifetime-bound to `&Arena`).
 
 ## `Arena`
 
@@ -40,7 +47,7 @@ pub struct Arena<A: Allocator + Clone = Global> {
     current:               CurrentChunk<A>,
     local_shared_count:    Cell<u32>,            // smart-pointer handouts from `current`
     retired_local:         RetiredLocalChunks<A>,
-    current_has_reference: Cell<bool>,           // did `current` hand out a `&mut T`?
+    current_has_reference: Cell<bool>,           // did `current` hand out an `Alloc` (arena-lifetime) handle?
     next_class:            Cell<SizeClass>,
     provider:              StdArc<ChunkProvider<A>>,
     #[cfg(feature = "stats")]
@@ -57,22 +64,21 @@ threads.
 the current chunk fills, `refill` reconciles its surplus (see below) and
 then *either* retires it onto `retired_local` *or* drops it immediately:
 
-- If the chunk handed out any arena-lifetime reference (`&mut T`,
-  `&mut [T]`, `&mut str`, growable-collection buffer — tracked by
-  `current_has_reference`) or still carries drop entries, it must stay
-  pinned: such references carry no refcount of their own and their
-  lifetime is bounded by `&self`, so dropping the chunk could replay
-  drops on — or reclaim — memory still aliased by an outstanding `&mut T`.
-  Retired chunks thread through an intrusive singly linked list (each
-  chunk's `next` header field, no separate `Vec`) and keep their `+1`
-  until `Arena::reset` / `Arena::drop`. This is the safety story that lets
-  `try_reserve_local*` rebind a ticket's lifetime to `&Arena`.
+- If the chunk handed out any arena-lifetime allocation (`Alloc<T>`,
+  including the `str`/`[T]`/`MaybeUninit` forms and growable-collection
+  buffers — tracked by `current_has_reference`), it must stay pinned: such
+  handles carry no refcount of their own and their lifetime is bounded by
+  `&self`, so dropping the chunk could reclaim memory still aliased by an
+  outstanding `Alloc`. Retired chunks thread through an intrusive singly
+  linked list (each chunk's `next` header field, no separate `Vec`) and keep
+  their `+1` until `Arena::reset` / `Arena::drop`. This is the safety story
+  that lets `try_reserve_local*` rebind a ticket's lifetime to `&Arena`.
 - Otherwise (a smart-pointer-only chunk) it is dropped right away. Each
-  `Arc`/`Box` keeps its hosting chunk alive via the atomic refcount, so
+  `Arc`/`Rc`/`Box` keeps its hosting chunk alive via the atomic refcount, so
   such a chunk can **reclaim early** once its last handle drops, without
   waiting for reset.
 
-A chunk that mixes references and smart pointers therefore stays pinned
+A chunk that mixes `Alloc` handles and smart pointers therefore stays pinned
 until reset even after its `Arc`s drop — the deliberate cost of letting
 a single current chunk serve both allocation styles.
 
@@ -81,25 +87,26 @@ Bumping the chunk's `AtomicUsize` refcount on every smart-pointer
 allocation would be a hot-path atomic. Instead, at install time the arena
 pre-credits the chunk's atomic `ref_count` with `LARGE_SHARED_REF_SURPLUS`
 (2^30) and tracks per-allocation handouts in the non-atomic
-`local_shared_count` (`Cell<u32>`); simple references never touch it. At
+`local_shared_count` (`Cell<u32>`); `Alloc` handouts never touch it. At
 retire (`refill`, `Arena::reset`, or `Arena::drop`) the surplus is
 reconciled with a single
 `fetch_sub(LARGE_SHARED_REF_SURPLUS - local_shared_count)`, leaving the
 chunk's atomic count equal to the number of escaped handles. The 2^30
 surplus is large enough that concurrent `Arc::drop` on other threads
-cannot underflow it. `Arc::clone` does not touch this count — each `Arc`
-family takes exactly one chunk refcount at allocation and releases it when
-its last clone drops (clones bump only the per-`Arc` strong count; see
-*Per-`Arc` reference counting*).
+cannot underflow it. Neither `Arc::clone` nor `Rc::clone` touches this
+count — each `Arc`/`Rc` family takes exactly one chunk refcount at
+allocation and releases it when its last clone drops (clones bump only the
+per-handle strong count; see *Per-`Arc` reference counting*).
 
-**Reset replays reference drops eagerly.** `Arena::reset` (`&mut self`,
-so no `&mut T` borrow can be live) reconciles the current chunk's surplus,
-then replays every pending drop entry on the current and retired chunks
-*before* releasing their `+1`s — so reference destructors run at reset
-time even when escaped `Arc`/`Box` handles keep a chunk's refcount above
-zero. Smart-pointer values allocated before the reset are **not** dropped
-by it; they remain owned by their handles. After reset the next allocation
-installs a fresh chunk.
+**Reset is a pure cursor rewind.** `Arena::reset` (`&mut self`, so no
+`Alloc` handle — which borrows `&self` — can be live) reconciles the
+current chunk's surplus and returns the current and retired chunks' bytes
+to the cache (or leaves chunks alive if escaped `Arc`/`Rc`/`Box` handles still
+hold them). It runs **no** destructors: every `Alloc` handle already ran
+its value's destructor eagerly when it was dropped (which must have
+happened before `reset` could be called). Smart-pointer values allocated
+before the reset are likewise not dropped by it; they remain owned by their
+handles. After reset the next allocation installs a fresh chunk.
 
 **Size-class ratchet.** Each successful refill bumps `next_class` toward
 the largest cacheable class (`NUM_CHUNK_CLASSES - 1 = 7`). This hint flows
@@ -161,14 +168,13 @@ pub(crate) struct Chunk<A: Allocator + Clone> {
     capacity:         usize,
     ref_count:        AtomicUsize,
     next:             AtomicPtr<u8>,     // intrusive link: retired list OR cache freelist
-    drop_entry_count: AtomicU16,         // reference drops pending replay (capped by capacity)
     #[cfg(feature = "stats")]
     wasted_at_retire: AtomicU32,
     data: [UnsafeCell<u8>],
 }
 ```
 
-The chunk holds a `Weak<ChunkProvider>` because an escaped `Arc`/`Box`
+The chunk holds a `Weak<ChunkProvider>` because an escaped `Arc`/`Rc`/`Box`
 can outlive the arena, and its own `allocator` clone so it can free its
 backing memory itself if the arena (and thus the provider) is gone.
 
@@ -182,13 +188,12 @@ The payload is `[UnsafeCell<u8>]` (not `[u8]`) for two reasons:
   the derived pointer's provenance spanning the whole payload. A
   sized-header thin pointer would have provenance for only the header.
 
-**Mixed-chunk pinning.** A chunk that serves *both* a reference and a
+**Mixed-chunk pinning.** A chunk that serves *both* an `Alloc` handle and a
 smart pointer is pinned until reset: it cannot reclaim early once its
-`Arc`s drop, because the `&mut T` borrow has no refcount and its
-destructor must run at reset. The `current_has_reference` flag preserves
-early reclamation for smart-pointer-only chunks, so only genuinely mixed
-chunks pay this cost. The chunk always reserves a drop-entry tail;
-smart-pointer allocations simply never write one.
+`Arc`s drop, because the `Alloc`'s borrow has no refcount and is bounded by
+the `&Arena` lifetime, so the chunk must stay alive until reset. The
+`current_has_reference` flag preserves early reclamation for
+smart-pointer-only chunks, so only genuinely mixed chunks pay this cost.
 
 **Provider back-reference.** When a chunk's refcount hits zero it returns
 itself to the cache (or frees its backing if the arena is gone). It
@@ -208,21 +213,21 @@ structural alignment small means `size_of_val(&*fat_ptr)` matches the
 actual allocation even for small classes.
 
 Given that invariant, every user-facing smart pointer (`Arc<T>`,
-`Box<T>` for any `T` including DSTs, and the bespoke UTF-16 variants)
-is a **single 8-byte raw pointer** into the chunk's `data` tail. DST
+`Rc<T>`, `Box<T>` for any `T` including DSTs, and the bespoke UTF-16
+variants) is a **single 8-byte raw pointer** into the chunk's `data` tail. DST
 metadata (slice length, vtable) lives unaligned in the chunk prefix
 immediately preceding the value payload, read with
 `core::ptr::read_unaligned`. For `T: Sized` the metadata is `()` so
-there's no prefix overhead. `Arc<T>` additionally stores its
-per-`Arc` strong count (an `AtomicU32`) in the prefix, before the
-metadata (see *Per-`Arc` reference counting*); `Box` has no such
-prefix.
+there's no prefix overhead. `Arc<T>` and `Rc<T>` additionally store a
+per-handle strong count in the prefix, before the metadata — an `AtomicU32`
+for `Arc`, a plain unaligned `u32` for `Rc` (see *Per-`Arc` reference
+counting*); `Box` has no such prefix.
 
 To recover the owning chunk's header from a smart-pointer value, each
 smart-pointer type **masks the low bits to the 64 KiB boundary**
 (`CHUNK_BASE_MASK = !(CHUNK_ALIGN - 1)`) and casts the result to
-`Chunk<A>`. There is no runtime type tag in the header — `Box::drop` and
-`Arc::drop` both recover a `*const Chunk` the same way.
+`Chunk<A>`. There is no runtime type tag in the header — `Box::drop`,
+`Arc::drop`, and `Rc::drop` all recover a `*const Chunk` the same way.
 
 Two consequences of the masking scheme:
 
@@ -284,6 +289,30 @@ their storage promptly instead of forming a self-pinning cycle.
 and `T` share size, alignment, and metadata, so the strong-prefix layout
 is identical and the strong count is untouched.
 
+### `Rc`: the non-atomic sibling
+
+`Rc<T>` reuses **everything** above — the thin pointer, header masking,
+metadata prefix, the family's single (atomic) chunk refcount, and the eager
+last-drop teardown — with exactly two differences, captured by a `Strong`
+policy (`thin_dst::{AtomicStrong, LocalStrong}`) that parameterizes the shared
+reservation code:
+
+1. **Non-atomic count.** `Rc`'s per-handle strong count is a plain `u32`
+   read/written with `read_unaligned` / `write_unaligned` (never as a `&u32`).
+   `clone` is `count += 1` and `drop` is `count -= 1` with no atomic op and no
+   fence — sound because `Rc` is `!Send`/`!Sync`, so the count never crosses
+   threads. The chunk refcount stays atomic (touched only at alloc and last
+   drop), so an `Rc` can still outlive the arena and free its chunk.
+2. **Unaligned, no alignment floor.** Because the count is non-atomic it needs
+   no natural alignment, so `LocalStrong::block_align` is just `align_of::<T>()`
+   (vs. `max(_, 4)` for `Arc`). For sub-4-aligned payloads (`str`, `[u8]`) this
+   drops the 4-byte reservation floor, packing a few bytes tighter.
+
+`Rc` places no `Send`/`Sync` bound on `T`, so it can own thread-affine values
+that `Arc` cannot. Freezing a `Vec`/`String` into an `Rc` reuses the same
+`Arc`-layout freeze prefix (the `AtomicU32` `1` reads back as the `u32` `1` the
+`Rc` expects), so only direct `alloc_rc*` calls get the tighter packing.
+
 ## Zero-copy freeze of growable buffers
 
 `Vec<T>` / `String` / `Utf16String` can **freeze** into an arena-owned
@@ -319,67 +348,55 @@ original O(*n*) draining freeze (move the elements into a fresh
 allocation). `ArenaBuf` carries a one-bit `freeze_prefix` flag recording
 which case applies.
 
-## `DropEntry`
+## `Alloc`
 
-`DropEntry` records the deferred destructor work for **arena-lifetime
-references only** — `Arena::alloc -> &mut T` and `&mut [T]`, which have
-no `Drop` of their own and whose backing chunk runs the destructor at
-reset / teardown. **Neither `Box` nor `Arc` registers a drop entry**:
-`Box::drop` runs `drop_in_place` eagerly on the (re-fattened) value
-pointer, and `Arc::drop` does the same on the last strong reference (see
-*Per-`Arc` reference counting* above). A chunk's `drop_entry_count` stays
-`0` for as long as it only hosts smart pointers.
-
-Each such reference allocation reserves **both** `size_of::<T>()` at the
-front of the free region *and* one `DropEntry` slot at the back. The
-effective remaining capacity is `drop_top - bump`; overflow is detected
-when those two meet. Allocations of `T: !Drop` skip the reservation
-entirely.
+`Alloc<'a, T>` is the handle returned by every arena-lifetime allocation
+(`Arena::alloc -> Alloc<'a, T>`, and the `str` / `[T]` / `MaybeUninit`
+forms). It is a thin wrapper around the exclusive `&'a mut T` borrow of the
+slot the bump allocator just carved out:
 
 ```rust
-#[repr(C)]
-struct DropEntry {
-    drop_fn:      AtomicPtr<()>,  // null = uncommitted placeholder
-    value_offset: u16,            // offset into the chunk payload
-    len:          u16,            // element count (1 for a single value;
-                                  // DST metadata, e.g. slice length, for slices)
-    _pad: [u8; PAD_BYTES],        // keep successive back-stack entries aligned
+pub struct Alloc<'a, T: ?Sized> {
+    inner: &'a mut T,
 }
 ```
 
-`len` is a `u16`; slice references whose `needs_drop` count exceeds
-`u16::MAX` are rejected up front by their `alloc_*` orchestrator so the
-placeholder never overflows. (The `Arc<[T]>` family has **no** such cap,
-since it drops via `drop_in_place::<[T]>` rather than a counted entry.)
+It derefs to `T` (so it is used exactly like the bare reference it
+replaced) and runs `T`'s destructor **eagerly** in its own `Drop` via
+`ptr::drop_in_place(self.inner)`. The `&'a` field binds it to the arena
+borrow, so:
 
-**Two-phase write.** Allocation paths reserve a *placeholder* (null
-`drop_fn`, real `value_offset`/`len`) up front. After the value is
-fully initialized, the caller commits the real shim with
-`drop_fn.store(real_shim, Release)`. The replay loop loads with
-`Acquire`; null entries are skipped — they belong to allocations whose
-initialization closure panicked or whose `Uninit` ticket was dropped
-without `init`. Storing as `AtomicPtr<()>` (not `AtomicUsize`)
-preserves function-pointer provenance under Miri's strict provenance.
+- the arena (and the chunk pinning machinery, `current_has_reference` /
+  `retired_local`) keeps the backing storage alive for `'a`, with **no**
+  per-allocation refcount; and
+- because `Arena::reset` / `Arena::drop` take `&mut self`, no `Alloc` can be
+  live across them — every handle has already run its destructor by then.
 
-**Replay.** At `Arena::reset` / `Arena::drop`, each chunk's pending drop
-entries are replayed **eagerly** on the owning thread — walking the
-drop-entry stack **newest-first** (LIFO, matching Rust drop order) and
-invoking `(drop_fn)(data + value_offset, len)` on each committed entry —
-*before* the chunk's own `+1` is released, so reference destructors run
-even when escaped `Arc`/`Box` handles keep the chunk's refcount above
-zero. The count is then cleared so a later refcount-zero teardown does
-not run them again. A chunk with no drop entries skips this step
-entirely. A panic in any shim is contained; replay continues so remaining
-destructors still run.
+This is why **there is no deferred-drop machinery**: a chunk never has to
+remember which slots still need a destructor run at reset. Each `Alloc`
+finalizes its own value when it drops, `reset` is a pure cursor rewind, and
+`Box`/`Arc`/`Rc` likewise drop eagerly through their refcount (see *Per-`Arc`
+reference counting*). `Alloc::leak(handle)` recovers the bare `&'a mut T`
+without running the destructor, for the rare caller that wants a leaked
+reference.
 
-**Closure-panic safety.** The smart-pointer construction paths take a
-protective `ChunkRef` (`+1` guard) before invoking the user closure.
-On unwinding, the `ChunkRef`'s `Drop` releases the +1; on success the
-caller calls `ChunkRef::forget` to transfer the +1 into the
-freshly-constructed smart pointer. Combined with the two-phase
-placeholder (for local references) and eager `drop_in_place` (for
-`Box`/`Arc`), a panicking closure leaves no `T::drop` queued on
-uninitialized memory and no refcount leaked.
+`Alloc` only runs the destructor; it does **not** return the slot to the
+bump cursor (a bump allocator can only rewind its cursor, not free interior
+slots), so the memory is reclaimed in bulk at `reset` / arena drop like any
+other arena allocation. `mem::forget`ing an `Alloc` simply skips the
+destructor — sound, but the value is never finalized.
+
+## Closure-panic safety
+
+The smart-pointer construction paths take a protective `ChunkRef`
+(`+1` guard) before invoking the user closure. On unwinding, the
+`ChunkRef`'s `Drop` releases the +1; on success the caller calls
+`ChunkRef::forget` to transfer the +1 into the freshly-constructed smart
+pointer. For arena-lifetime allocations, a closure that panics before the
+value is initialized simply leaves the reserved slot uninitialized and no
+`Alloc` is constructed (so no `drop_in_place` runs on it); slice init guards
+drop any already-initialized prefix on panic. So a panicking closure leaves
+no `T::drop` queued on uninitialized memory and no refcount leaked.
 
 **Refcount overflow.** Both the chunk `inc_ref` paths and `Arc::clone`'s
 per-`Arc` `strong` increment check against the wraparound boundary and

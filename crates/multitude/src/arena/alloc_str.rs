@@ -17,12 +17,13 @@ use core::ptr::NonNull;
 use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::{Arena, ExpectAlloc};
-use crate::{Arc, Box};
+use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong};
+use crate::{Alloc, Arc, Box, Rc};
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Bump-allocate a copy of `s` and return a mutable string slice.
+    /// Bump-allocate a copy of `s` and return an owning string handle.
     ///
-    /// The returned `&mut str`'s lifetime is tied to `&self`. Like
+    /// The returned [`Alloc<str>`](Alloc)'s lifetime is tied to `&self`. Like
     /// [`Self::alloc`] but for `&str`.
     ///
     /// # Panics
@@ -34,23 +35,21 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// ```
     /// let arena = multitude::Arena::new();
-    /// let s: &mut str = arena.alloc_str("hello");
+    /// let mut s = arena.alloc_str("hello");
     /// s.make_ascii_uppercase();
-    /// assert_eq!(s, "HELLO");
+    /// assert_eq!(&*s, "HELLO");
     /// ```
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[must_use]
     #[inline]
-    pub fn alloc_str(&self, s: impl AsRef<str>) -> &mut str {
-        (self.impl_alloc_str(s.as_ref())).expect_alloc()
+    pub fn alloc_str(&self, s: impl AsRef<str>) -> Alloc<'_, str> {
+        self.impl_alloc_str(s.as_ref()).expect_alloc()
     }
 
     /// Copy `s` into the arena and return an [`Arc<str, A>`](crate::Arc)
     /// pointing to it.
     ///
-    /// `Arc<str, A>` is a thin 8-byte refcounted smart pointer to a
-    /// length-prefixed UTF-8 payload in a chunk. Clone is
-    /// O(1) via a single atomic refcount bump on the hosting chunk.
+    /// `Arc<str, A>` is a thin 8-byte refcounted smart pointer to the UTF-8
+    /// data in the arena. Clone is **O(1)**.
     ///
     /// # Panics
     ///
@@ -104,9 +103,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
     #[inline]
-    pub fn try_alloc_str(&self, s: impl AsRef<str>) -> Result<&mut str, AllocError> {
+    pub fn try_alloc_str(&self, s: impl AsRef<str>) -> Result<Alloc<'_, str>, AllocError> {
         self.impl_alloc_str(s.as_ref())
     }
 
@@ -120,9 +118,49 @@ impl<A: Allocator + Clone> Arena<A> {
     where
         A: Send + Sync,
     {
-        self.impl_alloc_prefixed_shared_arc::<u8>(s.as_ref().as_bytes()).map(|ptr|
-            // SAFETY: see `Self::alloc_str_arc`.
-            unsafe { Arc::from_raw(ptr) })
+        self.impl_alloc_str_smart::<AtomicStrong>(s.as_ref())
+    }
+
+    /// Copy `s` into the arena and return an [`Rc<str, A>`](crate::Rc) — a
+    /// non-atomic, single-thread thin string smart pointer.
+    ///
+    /// Like [`Self::alloc_str_arc`] but `Rc<str>` is `!Send`/`!Sync`, with
+    /// cheaper (non-atomic) clone/drop and slightly tighter packing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying allocator fails.
+    /// Use [`Self::try_alloc_str_rc`] for a fallible variant.
+    #[must_use]
+    #[inline]
+    pub fn alloc_str_rc(&self, s: impl AsRef<str>) -> Rc<str, A> {
+        self.try_alloc_str_rc(s).expect_alloc()
+    }
+
+    /// Fallible variant of [`Self::alloc_str_rc`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AllocError`] if the backing allocator fails.
+    #[inline]
+    pub fn try_alloc_str_rc(&self, s: impl AsRef<str>) -> Result<Rc<str, A>, AllocError> {
+        self.impl_alloc_str_smart::<LocalStrong>(s.as_ref())
+    }
+
+    /// Copy `s` (UTF-8 bytes) into a strong-prefixed chunk allocation and adopt
+    /// the payload into `S`'s thin string smart pointer ([`Arc<str>`] or
+    /// [`Rc<str>`]). The payload is laid out exactly like an `[u8]` slice
+    /// (length prefix + bytes); the smart pointer reinterprets it as `str`.
+    #[inline]
+    fn impl_alloc_str_smart<S: Strong>(&self, s: &str) -> Result<S::Ptr<str, A>, AllocError> {
+        let thin = self.impl_alloc_prefixed_shared_arc::<S, u8>(s.as_bytes())?;
+        // SAFETY: `impl_alloc_prefixed_shared_arc` returns a thin pointer to a
+        // `len`-prefixed UTF-8 byte payload whose chunk prefix holds a strong
+        // count of 1 and whose chunk it took a `+1` on, all within the chunk's
+        // first tile. `str` and `[u8]` share that storage layout, so adopting it
+        // as `S::Ptr<str, A>` (which reads the byte length as the `str`
+        // metadata) is sound — exactly `S::adopt`'s contract.
+        Ok(unsafe { S::adopt::<str, A>(thin.cast::<u8>()) })
     }
 
     /// Fallible variant of [`Self::alloc_str_box`].
@@ -133,8 +171,23 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     pub fn try_alloc_str_box(&self, s: impl AsRef<str>) -> Result<Box<str, A>, AllocError> {
         self.impl_alloc_prefixed_shared::<u8>(s.as_ref().as_bytes()).map(|ptr|
-            // SAFETY: see `Self::alloc_str_arc`.
+            // SAFETY: `impl_alloc_prefixed_shared::<u8>` returns a thin payload
+            // pointer to UTF-8 bytes copied into the arena, with the byte length
+            // written into the metadata prefix and a fresh chunk `+1` adopted.
+            // `str` and `[u8]` share that length-prefixed layout, so
+            // `Box::from_raw` reconstructs an owning `Box<str>`.
             unsafe { Box::from_raw(ptr) })
+    }
+
+    /// Adopting wrapper over [`Self::alloc_str_raw`]: copies `s` into a fresh
+    /// arena slot and takes ownership of it in an [`Alloc`].
+    #[inline(always)]
+    fn impl_alloc_str(&self, s: &str) -> Result<Alloc<'_, str>, AllocError> {
+        let slot = self.alloc_str_raw(s)?;
+        // SAFETY: `alloc_str_raw` returns the unique `&mut str` for a
+        // freshly-written arena slot that the arena hands out exactly once and
+        // never drops itself, so `Alloc` may adopt it and own its destructor.
+        Ok(unsafe { Alloc::from_mut(slot) })
     }
 
     /// Closure-free fast path for `alloc_str` / `try_alloc_str`. Mirrors
@@ -142,9 +195,12 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the error arm to either `panic_alloc!()` or `?`. Because `u8` has
     /// no drop, there is no `needs_drop` branch — the body is the
     /// minimal bump + memcpy + UTF-8 retag.
-    #[allow(clippy::mut_from_ref, reason = "Simple references: see Self::try_alloc_with")]
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "internal helper hands out a fresh, disjoint arena slot per call; the returned &mut is wrapped in an owning Alloc by impl_alloc_str"
+    )]
     #[inline(always)]
-    fn impl_alloc_str(&self, s: &str) -> Result<&mut str, AllocError> {
+    fn alloc_str_raw(&self, s: &str) -> Result<&mut str, AllocError> {
         let len = s.len();
         loop {
             if let Some(u) = self.try_reserve_local_bytes(len) {

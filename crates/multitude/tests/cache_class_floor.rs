@@ -21,7 +21,7 @@ fn cache_floor_evicts_smaller_chunks_on_bump() {
     for class in 0..6_u32 {
         // Allocate enough bytes to force a refill at the next-larger class.
         let bytes = 256_usize << class;
-        let _slice: &mut [u8] = arena.alloc_slice_fill_with(bytes, |_| 0);
+        let _slice = arena.alloc_slice_fill_with(bytes, |_| 0);
     }
     let stats = arena.stats();
     // The provider should have allocated multiple normal chunks

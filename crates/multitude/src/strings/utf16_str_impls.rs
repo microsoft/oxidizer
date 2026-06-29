@@ -18,7 +18,7 @@ use allocator_api2::alloc::Allocator;
 use widestring::Utf16Str as WideUtf16Str;
 
 use super::Utf16Str;
-use crate::{Arc, Box};
+use crate::{Arc, Box, Rc};
 
 macro_rules! impl_utf16_str_smart_ptr_extras {
     ($Ty:ident) => {
@@ -65,6 +65,7 @@ macro_rules! impl_utf16_str_smart_ptr_extras {
 
 impl_utf16_str_smart_ptr_extras!(Arc);
 impl_utf16_str_smart_ptr_extras!(Box);
+impl_utf16_str_smart_ptr_extras!(Rc);
 
 impl<A: Allocator + Clone> AsMut<WideUtf16Str> for Box<Utf16Str, A> {
     #[inline]
@@ -82,11 +83,7 @@ impl<A: Allocator + Clone> BorrowMut<WideUtf16Str> for Box<Utf16Str, A> {
 
 impl<A: Allocator + Clone> From<Arc<Utf16Str, A>> for Arc<[u16], A> {
     /// Convert an `Arc<Utf16Str, A>` into an [`Arc<[u16], A>`](crate::Arc)
-    /// without copying.
-    ///
-    /// `Utf16Str` is `#[repr(transparent)]` over `[u16]` and shares the same
-    /// length-prefixed chunk layout, so this only retags the element type
-    /// and transfers the chunk `+1` (and strong count) into the new handle.
+    /// without copying — the same UTF-16 units, viewed as `[u16]`. **O(1)**.
     #[inline]
     fn from(s: Arc<Utf16Str, A>) -> Self {
         let me = ManuallyDrop::new(s);
@@ -104,7 +101,24 @@ impl<A: Allocator + Clone> From<Box<Utf16Str, A>> for Box<[u16], A> {
     #[inline]
     fn from(s: Box<Utf16Str, A>) -> Self {
         let me = ManuallyDrop::new(s);
-        // SAFETY: see the `Arc` retag above (no strong count for `Box`).
+        // SAFETY: `Utf16Str` and `[u16]` share layout and metadata (the `usize`
+        // element count); `Box` carries no strong count. `ManuallyDrop`
+        // transfers the chunk `+1` to the new `Box<[u16]>` and `thin_ptr` keeps
+        // chunk-wide provenance.
+        unsafe { Self::from_raw(me.thin_ptr()) }
+    }
+}
+
+impl<A: Allocator + Clone> From<Rc<Utf16Str, A>> for Rc<[u16], A> {
+    /// Convert an `Rc<Utf16Str, A>` into an [`Rc<[u16], A>`](crate::Rc)
+    /// without copying. See [`From<Arc<Utf16Str, A>> for Arc<[u16], A>`].
+    #[inline]
+    fn from(s: Rc<Utf16Str, A>) -> Self {
+        let me = ManuallyDrop::new(s);
+        // SAFETY: `Utf16Str` and `[u16]` share layout, metadata (the `usize`
+        // element count) and the non-atomic strong-count prefix; `ManuallyDrop`
+        // transfers the chunk `+1` to the new `Rc<[u16]>` and `thin_ptr` keeps
+        // chunk-wide provenance.
         unsafe { Self::from_raw(me.thin_ptr()) }
     }
 }

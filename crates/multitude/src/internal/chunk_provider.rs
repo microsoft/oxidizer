@@ -28,7 +28,6 @@ use allocator_api2::alloc::{AllocError, Allocator};
 
 use super::chunk::Chunk;
 use super::constants::{MAX_CHUNK_BYTES, MAX_NORMAL_ALLOC, MIN_CHUNK_BYTES, SizeClass};
-use super::drop_entry::DropEntry;
 
 /// Tunable knobs for a [`ChunkProvider`].
 #[derive(Clone, Copy)]
@@ -130,7 +129,9 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
 // allocators when sharing the provider across threads). Only the owning thread
 // pops the cache (single-popper Treiber-stack invariant).
 unsafe impl<A: Allocator + Clone + Send> Send for ChunkProvider<A> {}
-// SAFETY: see `Send` impl above.
+// SAFETY: `cache` is composed of `AtomicPtr`s (`Send + Sync`) and `allocator`
+// is `A: Sync`; sharing `&ChunkProvider` across threads only exposes those, and
+// the single-popper Treiber-stack invariant is unaffected by shared `&`-access.
 unsafe impl<A: Allocator + Clone + Sync> Sync for ChunkProvider<A> {}
 
 impl<A: Allocator + Clone> ChunkProvider<A> {
@@ -173,7 +174,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     }
 
     /// Currently "wasted" tail bytes (free region between bump cursor and
-    /// drop-entry top) across chunks that have been retired from a current
+    /// payload end) across chunks that have been retired from a current
     /// `ChunkMutator` slot but have not yet been returned to the cache or
     /// freed back to the underlying allocator.
     #[cfg(feature = "stats")]
@@ -307,8 +308,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     ///
     /// # Safety
     ///
-    /// `chunk` must have refcount zero, with drops already replayed, and the
-    /// caller must hold the unique remaining reference.
+    /// `chunk` must have refcount zero and the caller must hold the unique
+    /// remaining reference.
     pub(in crate::internal) unsafe fn release(&self, chunk: NonNull<Chunk<A>>) {
         // SAFETY: chunk is live and uniquely owned by caller.
         let capacity = (*chunk.as_ptr()).capacity();
@@ -373,7 +374,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     pub(crate) fn acquire_oversized(&self, min_payload: usize) -> Result<NonNull<Chunk<A>>, AllocError> {
         // Add worst-case payload-start alignment skew; round to the rounded
         // allocation size we then reserve.
-        let payload = round_up_to_drop_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
+        let payload = round_up_to_word_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
         let total = Chunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
         match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
@@ -484,16 +485,14 @@ fn is_cacheable_size(total: usize) -> bool {
     (MIN_CHUNK_BYTES..=MAX_CHUNK_BYTES).contains(&total) && total.is_power_of_two()
 }
 
-/// Rounds an oversized chunk's payload up to a multiple of
-/// `align_of::<DropEntry>()`. Returns `None` on overflow.
-///
-/// [`ChunkMutator::from_owned`](super::chunk_mutator::ChunkMutator::from_owned)
-/// aligns `drop_top` down, so rounding prevents usable capacity from falling
-/// below `min_payload`.
+/// Rounds an oversized chunk's payload up to a multiple of the machine word
+/// alignment (`align_of::<usize>()`). Returns `Err(AllocError)` on overflow.
+/// Keeps the usable capacity from falling below `min_payload` after the bump
+/// cursor pays any payload-start alignment skew.
 #[cfg_attr(test, mutants::skip)] // mask mutations underfit payload → OOM spin
 #[inline]
-fn round_up_to_drop_align(min_payload: usize) -> Result<usize, AllocError> {
-    let mask = mem::align_of::<DropEntry>() - 1;
+fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
+    let mask = mem::align_of::<usize>() - 1;
     min_payload.checked_add(mask).map(|v| v & !mask).ok_or(AllocError)
 }
 
@@ -507,7 +506,7 @@ fn round_up_to_drop_align(min_payload: usize) -> Result<usize, AllocError> {
 // invisible through any public API contract.
 #[cfg_attr(test, mutants::skip)]
 fn oversized_payload_align_slack() -> usize {
-    mem::align_of::<DropEntry>() - 1
+    mem::align_of::<usize>() - 1
 }
 
 /// Wraps the `needed_total > MAX_CHUNK_BYTES` check used by the
@@ -528,7 +527,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// # Safety
     ///
     /// `chunk` must be the result of a fresh `acquire`/`allocate_fresh` call
-    /// on the same `provider` (no drop entries committed).
+    /// on the same `provider`.
     unsafe fn destroy_or_cache_just_acquired(provider: &ChunkProvider<A>, chunk: NonNull<Self>) {
         // SAFETY: chunk is live and uniquely owned; dec_ref takes it to 0,
         // then `release` routes it to the cache (no drops were committed

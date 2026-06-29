@@ -281,6 +281,29 @@ fn shrink_to_fit_runs() {
 }
 
 #[test]
+fn shrink_to_fit_at_max_normal_alloc_boundary_reclaims() {
+    // `Vec::shrink_to_fit` early-returns when `total_bytes > max_normal_alloc`;
+    // at `total_bytes == max_normal_alloc` it must still reclaim the tail.
+    let mna = 4 * 1024;
+    let arena: Arena = Arena::builder().max_normal_alloc(mna).build();
+    // u8 keeps `total_bytes == cap`. Pick the largest cap whose refill hint
+    // still fits in a normal chunk (`refill_hint <= mna`), so the Vec lives in
+    // `current` and `try_reclaim_tail` has a chance to fire. The freezable
+    // buffer reserves the `Arc<[u8]>` freeze prefix, so the hint is
+    // `cap + 16` (≈12B strong+len prefix + 4B alignment slack).
+    let cap = mna - 16;
+    let mut v: Vec<'_, u8> = arena.alloc_vec_with_capacity(cap);
+    v.extend_from_slice([7_u8; 16]);
+    assert_eq!(v.capacity(), cap);
+    v.shrink_to_fit();
+    assert_eq!(
+        v.capacity(),
+        v.len(),
+        "shrink_to_fit on a Vec backed by the current normal chunk must reclaim the unused tail",
+    );
+}
+
+#[test]
 fn retain_filters() {
     let arena = Arena::new();
     let mut v = arena.alloc_vec();
@@ -771,7 +794,7 @@ fn leak_reclaims_unused_capacity_tail() {
     // The reclaimed tail is reused: the next u64 lands right after the
     // three retained elements, not after the original capacity of 16.
     let next = arena.alloc(9_u64);
-    assert_eq!(core::ptr::from_ref::<u64>(next) as usize, base + 3 * core::mem::size_of::<u64>());
+    assert_eq!(core::ptr::from_ref::<u64>(&*next) as usize, base + 3 * core::mem::size_of::<u64>());
 }
 
 #[test]
@@ -787,7 +810,7 @@ fn drop_at_cursor_reclaims_storage() {
         v.as_ptr() as usize
     }; // `v` dropped here -> reclaims `[0, cap)`.
     let next = arena.alloc(9_u64);
-    assert_eq!(core::ptr::from_ref::<u64>(next) as usize, base);
+    assert_eq!(core::ptr::from_ref::<u64>(&*next) as usize, base);
 }
 
 #[test]
@@ -800,9 +823,11 @@ fn drop_not_at_cursor_does_not_reclaim() {
     v.extend([1_u64, 2, 3]);
     let v_base = v.as_ptr() as usize;
     // Allocate after `v`, moving the cursor past its buffer.
-    let mid_addr = core::ptr::from_ref::<u64>(arena.alloc(7_u64)) as usize;
+    let mid = arena.alloc(7_u64);
+    let mid_addr = core::ptr::from_ref::<u64>(&*mid) as usize;
     drop(v); // not at the cursor -> no reclaim
-    let next_addr = core::ptr::from_ref::<u64>(arena.alloc(8_u64)) as usize;
+    let next = arena.alloc(8_u64);
+    let next_addr = core::ptr::from_ref::<u64>(&*next) as usize;
     // `next` follows `mid`; it must not reuse `v`'s abandoned storage.
     assert!(next_addr > mid_addr);
     assert_ne!(next_addr, v_base);
@@ -1287,6 +1312,165 @@ fn resize_grow_by_one() {
     v.push(2);
     v.resize(3, 99);
     assert_eq!(v.as_slice(), &[1, 2, 99]);
+}
+
+#[test]
+fn insert_at_idx_equal_len_appends() {
+    // `insert` at the tail (idx == len) must skip the element shift and still
+    // write the value.
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    v.insert(v.len(), 99); // exactly at end
+    assert_eq!(&*v, &[1, 2, 3, 99]);
+}
+
+#[test]
+fn insert_at_middle_shifts_correctly() {
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([1_u32, 2, 3, 4, 5]);
+    v.insert(2, 99);
+    assert_eq!(&*v, &[1, 2, 99, 3, 4, 5]);
+}
+
+#[test]
+fn remove_last_element_leaves_prefix() {
+    // Removing the last element (idx == len - 1) leaves `tail == 0`, so no tail
+    // shift occurs.
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([10_u32, 20, 30, 40]);
+    let removed = v.remove(3);
+    assert_eq!(removed, 40);
+    assert_eq!(&*v, &[10, 20, 30]);
+}
+
+#[test]
+fn remove_first_element_shifts_tail_down() {
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([10_u32, 20, 30, 40]);
+    let removed = v.remove(0);
+    assert_eq!(removed, 10);
+    assert_eq!(&*v, &[20, 30, 40]);
+}
+
+#[test]
+fn remove_middle_element_shifts_tail_down() {
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([10_u32, 20, 30, 40, 50]);
+    let removed = v.remove(2);
+    assert_eq!(removed, 30);
+    assert_eq!(&*v, &[10, 20, 40, 50]);
+}
+
+#[test]
+fn into_iter_size_hint_matches_remaining() {
+    // `DrainAll::size_hint` returns `tail - head`, shrinking as items are
+    // consumed from either end.
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([1_u32, 2, 3, 4]);
+    let mut it = v.into_iter();
+    assert_eq!(it.size_hint(), (4, Some(4)));
+    assert_eq!(it.next(), Some(1));
+    assert_eq!(it.size_hint(), (3, Some(3)));
+    assert_eq!(it.next_back(), Some(4));
+    assert_eq!(it.size_hint(), (2, Some(2)));
+    assert_eq!(it.next(), Some(2));
+    assert_eq!(it.size_hint(), (1, Some(1)));
+    assert_eq!(it.next(), Some(3));
+    assert_eq!(it.size_hint(), (0, Some(0)));
+    assert_eq!(it.next(), None);
+}
+
+#[test]
+fn into_iter_partial_drain_drops_remaining_exactly_once() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    struct Counted(Rc<Cell<usize>>);
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let arena = Arena::new();
+    let counter = Rc::new(Cell::new(0));
+    let mut v: Vec<'_, Counted> = arena.alloc_vec();
+    for _ in 0..4 {
+        v.push(Counted(Rc::clone(&counter)));
+    }
+    {
+        let mut it = v.into_iter();
+        // Consume two elements; the remaining two stay live inside the
+        // iterator and must be dropped exactly once by `DrainAll::drop`.
+        let _ = it.next();
+        let _ = it.next();
+    }
+    assert_eq!(counter.get(), 4);
+}
+
+#[test]
+fn shrink_to_fit_with_room_to_shrink_reduces_capacity() {
+    // `shrink_to_fit` only copies when `cap > len`.
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec_with_capacity(64);
+    v.extend([1_u32, 2, 3, 4]);
+    let cap_before = v.capacity();
+    assert!(cap_before >= 64);
+    v.shrink_to_fit();
+    assert_eq!(v.len(), 4);
+    assert!(v.capacity() <= cap_before);
+}
+
+#[test]
+fn dedup_by_single_and_double_element_lengths() {
+    // `dedup_by` is a no-op for `len < 2`; cover len 0, 1, 2 (a dup pair), and 3.
+    let arena = Arena::new();
+
+    let mut empty: Vec<'_, u32> = arena.alloc_vec();
+    empty.dedup_by(|a, b| a == b);
+    assert!(empty.is_empty());
+
+    let mut one: Vec<'_, u32> = arena.alloc_vec();
+    one.push(7);
+    one.dedup_by(|a, b| a == b);
+    assert_eq!(&*one, &[7]);
+
+    let mut two_dup: Vec<'_, u32> = arena.alloc_vec();
+    two_dup.extend([5_u32, 5]);
+    two_dup.dedup_by(|a, b| a == b);
+    assert_eq!(&*two_dup, &[5], "len==2 dedup must collapse the pair");
+
+    let mut three: Vec<'_, u32> = arena.alloc_vec();
+    three.extend([1_u32, 1, 2]);
+    three.dedup_by(|a, b| a == b);
+    assert_eq!(&*three, &[1, 2]);
+}
+
+#[test]
+fn split_off_with_full_split_returns_empty_tail_and_keeps_head() {
+    // `split_off(len)` yields an empty tail and leaves the head intact.
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([1_u32, 2, 3]);
+    let tail = v.split_off(v.len()); // tail_len == 0
+    assert!(tail.is_empty());
+    assert_eq!(&*v, &[1, 2, 3]);
+}
+
+#[test]
+fn split_off_at_zero_returns_full_tail_and_empties_head() {
+    let arena = Arena::new();
+    let mut v: Vec<'_, u32> = arena.alloc_vec();
+    v.extend([10_u32, 20, 30]);
+    let tail = v.split_off(0);
+    assert_eq!(&*tail, &[10, 20, 30]);
+    assert!(v.is_empty());
 }
 
 #[cfg(feature = "std")]
@@ -1788,7 +1972,7 @@ mod zero_copy_freeze_retired {
         let data_ptr = v.as_slice().as_ptr();
         // Force a refill so the Vec's chunk is retired (no longer current):
         // a large allocation that cannot fit beside the Vec's buffer.
-        let _filler: &mut [u64] = arena.alloc_slice_fill_with(60_000 / 8, |i| i as u64);
+        let _filler = arena.alloc_slice_fill_with(60_000 / 8, |i| i as u64);
         let a: Arc<[u64]> = Arc::from(v);
         assert_eq!(a.as_ptr().cast::<u64>(), data_ptr, "retired-chunk freeze stays in place");
         assert_eq!(a.len(), 8);
@@ -1815,10 +1999,409 @@ mod zero_copy_freeze_retired {
             let arena = Arena::new();
             let mut v = arena.alloc_vec::<u32>();
             v.extend(0..16);
-            let _filler: &mut [u8] = arena.alloc_slice_fill_with(60_000, |_| 0u8);
+            let _filler = arena.alloc_slice_fill_with(60_000, |_| 0u8);
             Arc::from(v)
         };
         assert_eq!(arc.len(), 16);
         assert_eq!(arc[15], 15);
+    }
+}
+
+mod vec_freeze_try_into_arc_slice {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    use crate::common::SyncFailingAllocator;
+
+    #[test]
+    fn try_into_arc_ok() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        v.push(1);
+        v.push(2);
+        v.push(3);
+        let arc = v.try_into_arc_slice().unwrap();
+        assert_eq!(&*arc, &[1, 2, 3][..]);
+    }
+
+    #[test]
+    fn try_into_arc_err_on_failing_allocator() {
+        let a = Arena::new_in(SyncFailingAllocator::new(1));
+        // Fill most of the first chunk, then split: the tail has no freeze
+        // prefix of its own, so freezing it into an `Arc` (a copy of equal
+        // size) must acquire a second chunk, which the failing allocator
+        // rejects.
+        let mut v = a.alloc_vec_with_capacity::<u32>(100);
+        v.extend(0..100);
+        let tail = v.split_off(50);
+        let r = tail.try_into_arc_slice();
+        assert!(r.is_err());
+    }
+}
+
+mod vec_into_iter_traits_coverage {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn double_ended_next_back() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        v.push(1);
+        v.push(2);
+        v.push(3);
+        let mut it = v.into_iter();
+        assert_eq!(it.next_back(), Some(3));
+        assert_eq!(it.next(), Some(1));
+        assert_eq!(it.next_back(), Some(2));
+        assert_eq!(it.next_back(), None);
+    }
+
+    #[test]
+    fn debug_formats_remaining() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        v.push(10);
+        v.push(20);
+        let it = v.into_iter();
+        let s = format!("{it:?}");
+        assert!(s.contains("IntoIter"));
+        assert!(s.contains("remaining"));
+    }
+}
+
+mod vec_try_grow_to_noop {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn reserve_within_capacity_is_noop() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec_with_capacity::<u32>(16);
+        let cap_before = v.capacity();
+        // reserve(0) → needed = current len = 0 ≤ cap → fast return.
+        v.reserve(0);
+        assert_eq!(v.capacity(), cap_before);
+    }
+}
+
+mod vec_mutate_extras {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use multitude::Arena;
+
+    use crate::common::FailingAllocator;
+
+    #[test]
+    fn insert_panics_on_failing_allocator() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = Arena::new_in(FailingAllocator::new(0));
+            let mut v = a.alloc_vec::<u32>();
+            v.insert(0, 7);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn dedup_by_empty_is_noop() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        v.dedup_by(|_, _| true);
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn dedup_by_singleton_is_noop() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        v.push(7);
+        v.dedup_by(|_, _| true);
+        assert_eq!(v.len(), 1);
+    }
+}
+
+mod vec_intoiterator_impl {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn into_iter_yields_in_order() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<u32>();
+        for i in 0..5_u32 {
+            v.push(i);
+        }
+        let collected: std::vec::Vec<u32> = v.into_iter().collect();
+        assert_eq!(collected, std::vec![0, 1, 2, 3, 4]);
+    }
+}
+
+mod vec_try_grow_to_within_cap {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn try_grow_to_no_op_when_within_cap() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec_with_capacity::<u32>(8);
+        let cap = v.capacity();
+        // Reserve less than cap → try_grow_to should early-return.
+        v.try_reserve(0).unwrap();
+        assert_eq!(v.capacity(), cap);
+    }
+
+    #[test]
+    fn try_grow_to_zst_early_return() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<()>();
+        for _ in 0..1024_u32 {
+            v.push(());
+        }
+        assert_eq!(v.len(), 1024);
+    }
+}
+
+mod arena_buf_zst_split {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn vec_drain_zst_does_not_panic() {
+        let a = Arena::new();
+        let mut v = a.alloc_vec::<()>();
+        for _ in 0..32_u32 {
+            v.push(());
+        }
+        let drained: usize = v.drain(..16).count();
+        assert_eq!(drained, 16);
+        assert_eq!(v.len(), 16);
+    }
+}
+
+mod freeze_and_slice_edges {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+
+    #[test]
+    fn vec_leak_shared_reborrow_returns_arena_lifetime_slice() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        for i in 0..6_u32 {
+            v.push(i * 10);
+        }
+        // `u32: !Drop`, so `leak` is the in-place reinterpret (no copy, no
+        // drop entry); reborrow as shared for `&[T]`.
+        let s: &[u32] = &*v.leak();
+        assert_eq!(s, &[0, 10, 20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn vec_leak_allows_in_place_mutation() {
+        let arena = Arena::new();
+        let mut v = arena.alloc_vec::<u32>();
+        v.push(1);
+        v.push(2);
+        v.push(3);
+        let s: &mut [u32] = v.leak();
+        for x in s.iter_mut() {
+            *x *= 2;
+        }
+        assert_eq!(s, &[2, 4, 6]);
+    }
+
+    #[test]
+    fn vec_leak_empty() {
+        let arena = Arena::new();
+        let v = arena.alloc_vec::<u32>();
+        let s: &[u32] = &*v.leak();
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_copy_empty_returns_empty_slice() {
+        let arena = Arena::new();
+        let s = arena.alloc_slice_copy::<u32>(&[]);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_clone_empty_returns_empty_slice() {
+        let arena = Arena::new();
+        let src: [String; 0] = [];
+        let s = arena.alloc_slice_clone(&src);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_oversized_non_drop() {
+        let arena = Arena::new();
+        // 5000 × u32 = 20 KiB > MAX_NORMAL_ALLOC (16 KiB) ⇒ oversized path;
+        // `u32: !Drop` ⇒ the non-drop oversized arm of
+        // `impl_alloc_slice_fill_iter`.
+        let s = arena.alloc_slice_fill_iter((0_u32..5000).map(|i| i.wrapping_mul(3)));
+        assert_eq!(s.len(), 5000);
+        assert_eq!(s[0], 0);
+        assert_eq!(s[4999], 4999_u32.wrapping_mul(3));
     }
 }

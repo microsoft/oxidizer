@@ -25,27 +25,29 @@
 //! `multitude` uses a different implementation strategy and has a richer API surface making it suitable for more
 //! use cases. The main features that set `multitude` apart are:
 //!
-//! 1. **Flexibility.** `multitude` provides multiple allocation styles, all of
-//!    which can coexist in the same arena:
-//!
-//!    - Mutable references with lifetimes tied to the arena (`&mut T`,
-//!      `&mut str`, `&mut [T]`).
-//!    - Atomic reference-counted smart pointers ([`Arc`], [`Arc<str>`](Arc), [`Arc<[T]>`](Arc))
-//!      for cross-thread sharing.
-//!    - Owned, mutable smart pointers ([`Box`], [`Box<str>`](Box), [`Box<[T]>`](Box)).
+//! 1. **Flexibility.** Four allocation styles coexist in the same arena: the
+//!    arena-lifetime owning handle [`Alloc<T>`](Alloc) plus three escape-capable
+//!    smart pointers — the atomic [`Arc`], the non-atomic single-thread [`Rc`],
+//!    and the unique-owner [`Box`] — each available for sized `T`, `str`, and
+//!    `[T]`. See the [comparison table](#flexibility) for how they differ.
 //!
 //! 2. **Early Reclamation.** In many situations, `multitude` can reclaim memory from individual chunks as soon as their reference counts drop to zero,
 //!    without waiting for the entire arena to be dropped. This allows for more efficient memory usage in long-running arenas with many short-lived allocations.
 //!
-//! 3. **Smart Pointers Can Outlive the Arena.** The smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
+//! 3. **Smart Pointers Can Outlive the Arena.** Some of the smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
 //!    allowing for more flexible memory management and longer-lived data structures.
 //!
 //! 4. **Drop Support.** `multitude` automatically runs `Drop` for allocated values at the appropriate time.
 //!
-//! 5. **Uniformly Thin Smart Pointers.** `multitude`'s [`Arc<T>`](Arc) and [`Box<T>`](Box) are **8 bytes** on 64-bit
-//!    for *every* `T`.
+//! 5. **Uniformly Thin Smart Pointers.** `multitude`'s escape-capable smart
+//!    pointers — [`Arc<T>`](Arc), [`Rc<T>`](Rc), and [`Box<T>`](Box) — are
+//!    **8 bytes** on 64-bit for *every* `T`, even DSTs like `str` and `[T]`
+//!    (the metadata lives in a chunk prefix). The arena-lifetime
+//!    [`Alloc<T>`](Alloc) handle is a single word for sized `T`; for `str` /
+//!    `[T]` it is a fat reference (pointer + length), which costs nothing extra
+//!    since it never escapes the arena and isn't stored at scale.
 //!
-//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String) and [`Vec`](vec::Vec) which are growable collections that live in the arena.
+//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String), [`Utf16String`](strings::Utf16String) and [`Vec`](vec::Vec) which are growable collections that live in the arena.
 //!
 //! 7. **Dynamically-Sized Types.** `multitude` supports dynamically-sized types (DSTs) like slices and strings, allowing you to allocate and manage them in the
 //!    arena with the same flexibility as sized types. The [`dst-factory`](https://crates.io/crates/dst-factory) crate is a great companion for building DSTs in the arena.
@@ -84,67 +86,83 @@
 //! ```
 //! # Flexibility
 //!
-//! `multitude` supports a variety of ways to allocate data and track it over time.
+//! `multitude` offers four ways to allocate a value and own it over time. All
+//! four can coexist in the same arena, dereference to the value, and run
+//! `T::drop` **eagerly**; they differ in whether the handle can outlive the
+//! arena, whether ownership is unique or shared, and what (if any) per-handle
+//! reference count they pay. Each is available for sized `T`, `str`, and `[T]`
+//! (and, behind the `dst` feature, arbitrary DSTs).
 //!
-//! ## Simple References
+//! | | [`Alloc<T>`](Alloc) | [`Box<T>`](Box) | [`Rc<T>`](Rc) | [`Arc<T>`](Arc) |
+//! |---|:---:|:---:|:---:|:---:|
+//! | **Constructor family** | [`alloc`](Arena::alloc) | [`alloc_box`](Arena::alloc_box) | [`alloc_rc`](Arena::alloc_rc) | [`alloc_arc`](Arena::alloc_arc) |
+//! | **Ownership** | unique | unique | shared (`Clone`) | shared (`Clone`) |
+//! | **`&mut T` access** | ✅ | ✅ | ❌ | ❌ |
+//! | **Can outlive the arena** | ❌ | ✅ | ✅ | ✅ |
+//! | **Per-handle reference count** | none | none | non-atomic | atomic |
+//! | **Cross-thread *sharing*** | ❌ | ❌ | ❌ (`!Send`) | ✅ (`T: Send + Sync`) |
+//! | **Width (64-bit)** | 1 word (sized); fat ref for DSTs | 8 bytes | 8 bytes | 8 bytes |
 //!
-//! The simplest use of the arena is to get plain mutable references. The lifetime of those references is then tied
-//! to the arena's own lifetime.
+//! The cheapest option is [`Alloc<T>`](Alloc): an owning handle whose lifetime
+//! is tied to the arena — a single word for sized `T` (a fat pointer+length
+//! reference for `str` / `[T]`). It pays no reference count and cannot
+//! outlive the arena, but gives mutable access and runs the destructor when it
+//! is dropped — the fastest way to allocate when the lifetime constraint is
+//! tolerable.
 //!
 //! ```
 //! let arena = multitude::Arena::new();
-//! let x: &mut u32 = arena.alloc(42);
-//! let y: &mut u32 = arena.alloc(100);
+//! let mut x = arena.alloc(42);
 //! *x += 1;
-//! *y += 1;
 //! assert_eq!(*x, 43);
-//! assert_eq!(*y, 101);
 //!
 //! // Strings and slices too:
-//! let s: &mut str = arena.alloc_str("hello");
-//! let v: &mut [i32] = arena.alloc_slice_copy(&[1, 2, 3]);
+//! let s = arena.alloc_str("hello");
+//! let v = arena.alloc_slice_copy(&[1, 2, 3]);
+//! assert_eq!(&*s, "hello");
+//! assert_eq!(&*v, &[1, 2, 3]);
 //! ```
 //!
-//! These references can't outlive the arena, which limits their use. But they are the fastest and
-//! most efficient way to allocate from the arena, so if the lifetime constraints are tolerable, simple
-//! references are the way to go.
+//! For values that must **outlive the arena**, use one of the three smart
+//! pointers. They behave like the like-named `std` types but are uniformly
+//! **8-byte thin pointers** (even for DSTs) addressing storage inside a chunk,
+//! and they keep that chunk alive until the last handle drops.
 //!
-//! ## Smart Pointers
-//!
-//! Smart pointers ([`Arc`], [`Box`]) work in a way similar to the like-named types
-//! in the standard library, except that they reference addresses within an arena.
+//! [`Arc`] is reference-counted and shareable across threads:
 //!
 //! ```
 //! use multitude::Arc;
 //!
-//! struct Point {
-//!     x: f64,
-//!     y: f64,
-//! }
-//!
-//! let p: Arc<Point> = {
+//! let p: Arc<u32> = {
 //!     let arena = multitude::Arena::new();
-//!     arena.alloc_arc(Point { x: 3.0, y: 4.0 })
-//!     // arena dropped here
+//!     arena.alloc_arc(42)
+//!     // arena dropped here; `p` keeps its chunk alive
 //! };
-//! assert_eq!(p.x, 3.0);
-//! ```
+//! assert_eq!(*p, 42);
 //!
-//! Although [`Arena`] itself is `!Sync`, it is [`Send`]: an arena —
-//! along with any in-flight references and smart pointers — can be
-//! moved between threads. For cross-thread *sharing*, allocate
-//! [`Arc`]-family smart pointers (e.g. [`Arc<u64>`](Arc), [`Arc<str>`](Arc))
-//! and `.clone()` them across threads.
-//!
-//! ```
 //! let arena = multitude::Arena::new();
-//! let shared = arena.alloc_arc(42_u64);
+//! let shared = arena.alloc_arc(7_u64);
 //! let h = std::thread::spawn(move || *shared);
-//! assert_eq!(42, h.join().unwrap());
+//! assert_eq!(7, h.join().unwrap());
 //! ```
 //!
-//! [`Box`] is a unique owner that provides `&mut T` access, similar to
-//! [`alloc::boxed::Box`] but backed by the arena.
+//! [`Rc`] is the cheaper single-thread sibling of [`Arc`]: its reference count
+//! is non-atomic, so `clone`/`drop` are cheaper and `str` / `[u8]` pack slightly
+//! tighter. Being [`!Send`](Send)/[`!Sync`](Sync), it places **no** `Send`/`Sync`
+//! bound on `T`, so it can share thread-affine values (e.g. `Rc<RefCell<T>>`)
+//! that [`Arc`] cannot.
+//!
+//! ```
+//! use multitude::Rc;
+//!
+//! let arena = multitude::Arena::new();
+//! let a: Rc<u64> = arena.alloc_rc(42);
+//! let b = a.clone();
+//! assert_eq!(*a, *b);
+//! ```
+//!
+//! [`Box`] is a unique owner that provides `&mut T` access, like
+//! [`alloc::boxed::Box`] but backed by the arena:
 //!
 //! ```
 //! let arena = multitude::Arena::new();
@@ -154,7 +172,12 @@
 //! drop(v); // The vec drop runs here, freeing its heap buffer.
 //! ```
 //!
-//! ## Collections
+//! Although [`Arena`] itself is `!Sync`, it is [`Send`]: an arena — along with
+//! any in-flight [`Alloc`] handles and smart pointers — can be moved between
+//! threads. For cross-thread *sharing* of an individual value, allocate an
+//! [`Arc`] and `.clone()` it across threads.
+//!
+//! # Collections
 //!
 //! [`Vec`](vec::Vec), [`String`](strings::String), and [`Utf16String`](strings::Utf16String) are growable collections that live in
 //! the arena.
@@ -179,47 +202,23 @@
 //! assert_eq!(squares.as_slice(), &[1, 4, 9, 16, 25]);
 //! ```
 //!
-//! With the `hashbrown` Cargo feature, [`Arena`] can directly back
-//! [`hashbrown`](https://crates.io/crates/hashbrown) collections via
-//! [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`],
-//! [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. The returned
-//! `HashMap` / `HashSet` store their entries in arena chunks.
-//!
-//! ```
-//! # #[cfg(feature = "hashbrown")] {
-//! use multitude::Arena;
-//!
-//! let arena = Arena::new();
-//!
-//! let mut map = arena.alloc_hash_map::<u32, &str>();
-//! map.insert(1, "one");
-//! assert_eq!(map.get(&1), Some(&"one"));
-//!
-//! let mut set = arena.alloc_set::<u32>();
-//! set.insert(7);
-//! assert!(set.contains(&7));
-//! # }
-//! ```
-//!
 //! ## Freezing
 //!
 //! [`String`](strings::String) and [`Vec`](vec::Vec) are designed as **transient
-//! builders**. They carry a data pointer + length + capacity + arena reference.
+//! builders** — mutable, growable handles meant to be used briefly and then frozen.
 //!
 //! Once you're done building, you can **freeze them** into immutable smart pointers:
 //!
 //! - [`String::into_boxed_str`](strings::String::into_boxed_str) →
 //!   [`Box<str>`](crate::Box) (**8 bytes**, thin), or `Box::from(string)`.
-//!   The freeze is **O(n)** — it copies the bytes into a compact,
-//!   length-prefixed allocation so the resulting single pointer can outlive
-//!   the arena. (Like any [`Box`], it is `Send`/`Sync` only when the
-//!   allocator `A` is.)
+//!   The freeze is **O(n)** — it copies the bytes into a compact allocation
+//!   that can outlive the arena. (Like any [`Box`], it is `Send`/`Sync` only
+//!   when the allocator `A` is.)
 //! - [`Vec::into_boxed_slice`](vec::Vec::into_boxed_slice) →
 //!   [`Box<[T]>`](crate::Box) (**8 bytes**, thin), or `Box::from(vec)`.
-//!   The freeze is **O(n)** — it moves the elements into a fresh compact,
-//!   length-prefixed allocation so the resulting single pointer can outlive
-//!   the arena. (Like any [`Box`], it is `Send`/`Sync` only when `T` and the
-//!   allocator `A` are.)
+//!   The freeze is **O(n)** — it moves the elements into a fresh compact
+//!   allocation that can outlive the arena. (Like any [`Box`], it is
+//!   `Send`/`Sync` only when `T` and the allocator `A` are.)
 //! - `Arc::from(vec)` / `Arc::from(string)` → [`Arc<[T]>`](crate::Arc) /
 //!   [`Arc<str>`](crate::Arc), the shared, reference-counted freeze
 //!   (mirroring `std`'s `From<Vec<T>> for Arc<[T]>`).
@@ -250,6 +249,30 @@
 //! Use this pattern whenever you'd be storing many strings or slices
 //! long-term — the per-pointer savings (8 bytes for both strings and
 //! slices) add up quickly across millions of items.
+//!
+//! ## Maps and Sets
+//!
+//! With the `hashbrown` Cargo feature, [`Arena`] can directly back
+//! [`hashbrown`](https://crates.io/crates/hashbrown) collections via
+//! [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`],
+//! [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. The returned
+//! `HashMap` / `HashSet` store their entries in arena chunks.
+//!
+//! ```
+//! # #[cfg(feature = "hashbrown")] {
+//! use multitude::Arena;
+//!
+//! let arena = Arena::new();
+//!
+//! let mut map = arena.alloc_hash_map::<u32, &str>();
+//! map.insert(1, "one");
+//! assert_eq!(map.get(&1), Some(&"one"));
+//!
+//! let mut set = arena.alloc_set::<u32>();
+//! set.insert(7);
+//! assert!(set.contains(&7));
+//! # }
+//! ```
 //!
 //! # Strings
 //!
@@ -288,11 +311,10 @@
 //!    | [`String`](strings::String) | [`into_boxed_str`](strings::String::into_boxed_str) | [`Box<str>`](crate::Box) |
 //!    | [`Utf16String`](strings::Utf16String) | [`into_boxed_utf16_str`](strings::Utf16String::into_boxed_utf16_str) | `Box<Utf16Str>` |
 //!
-//!    The UTF-16 freeze reuses the buffer in place (O(1)) and returns
-//!    any unused tail capacity to the chunk's bump cursor when it can.
-//!    The UTF-8 freeze copies the bytes (O(n)) into a compact,
-//!    length-prefixed allocation so [`Box<str>`](crate::Box) stays a
-//!    single, `Send`-safe pointer.
+//!    The UTF-16 freeze reuses the buffer in place (O(1)) and reclaims any
+//!    unused capacity when it can. The UTF-8 freeze copies the bytes (O(n))
+//!    into a compact allocation, so [`Box<str>`](crate::Box) stays a single,
+//!    `Send`-safe pointer.
 //!
 //! UTF-16 support requires the `utf16` Cargo feature. Strict (validated)
 //! UTF-16 only — lone surrogates are rejected. The UTF-16 types
@@ -419,6 +441,7 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+mod alloc_handle;
 mod allocator_impl;
 mod arc;
 mod arena;
@@ -431,6 +454,7 @@ mod r#box;
 pub mod dst;
 mod from_in;
 mod internal;
+mod rc;
 pub mod strings;
 mod thin_smart_ptr_common;
 pub mod vec;
@@ -459,6 +483,7 @@ mod bytesbuf;
 #[cfg_attr(docsrs, doc(cfg(feature = "zerocopy")))]
 pub mod zerocopy;
 
+pub use self::alloc_handle::Alloc;
 pub use self::arc::Arc;
 pub use self::arena::Arena;
 pub use self::arena_builder::ArenaBuilder;
@@ -467,3 +492,4 @@ pub use self::arena_builder::ArenaBuilder;
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
 pub use self::from_in::{FromIn, IntoIn};
+pub use self::rc::Rc;

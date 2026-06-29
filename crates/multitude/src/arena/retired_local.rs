@@ -1,15 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Intrusive singly-linked list of retired chunks pending drop replay.
+//! Intrusive singly-linked list of retired chunks held alive for `&Arena`.
 //!
 //! The arena keeps a LIFO list of [`Chunk`]s it has rotated out of
-//! `current` but cannot recycle yet, because they carry arena-reference
-//! drop entries (`&mut T` / [`crate::vec::Vec`] / [`crate::strings::String`]
-//! backing bytes) whose destructors must run at reset / arena drop. Each
-//! chunk on the list holds one strong reference — the same `+1` that the
-//! originally-retiring [`ChunkMutator`] held — plus, possibly, additional
-//! references owned by escaped `Arc`/`Box` handles living in the same chunk.
+//! `current` but cannot recycle yet, because they handed out arena-lifetime
+//! [`Alloc`](crate::Alloc) handles (or growable-collection buffers — see
+//! [`crate::vec::Vec`] / [`crate::strings::String`]) that borrow the chunk
+//! storage for the whole `&Arena` lifetime. Each chunk on the list holds one
+//! strong reference — the same `+1` that the originally-retiring
+//! [`ChunkMutator`] held — plus, possibly, additional references owned by
+//! escaped `Arc`/`Box`/`Rc` handles living in the same chunk.
 //!
 //! Linkage is **intrusive**: each `Chunk` carries a [`next`](Chunk::next)
 //! field used to thread chunks together without per-retirement heap
@@ -18,14 +19,15 @@
 //! [`Chunk::header_to_fat`] when the list is drained.
 //!
 //! Only two writers ever touch this structure:
-//! * [`Arena::refill`](crate::Arena) pushes a rotated-out chunk that still
-//!   carries drop entries.
+//! * [`Arena::refill`](crate::Arena) pushes a rotated-out chunk that handed
+//!   out an arena-lifetime reference.
 //! * [`Arena::reset`](crate::Arena), `Arena::drop`, and the
 //!   oversized-Vec-grow path drain (or splice from) the list.
 //!
 //! The drain is iterative *and* re-checks `head` on each pass so that
 //! reentrant pushes performed by user-supplied chunk-teardown destructors
-//! (drop shims invoked from `Chunk::teardown_and_release`) never leak.
+//! (eager `Arc`/`Box`/`Rc` drops invoked from `Chunk::teardown_and_release`)
+//! never leak.
 
 use core::cell::Cell;
 use core::marker::PhantomData;
@@ -69,9 +71,8 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
     /// Empty mutators are a no-op (nothing to retire).
     ///
     /// The mutator's `+1` becomes the list's; its `Drop` is bypassed (via
-    /// [`ChunkMutator::forget_into_chunk`], which publishes the drop count
-    /// but does *not* replay it) so the reference destructors are deferred
-    /// to reset / arena drop.
+    /// [`ChunkMutator::forget_into_chunk`]) so the chunk stays pinned for the
+    /// `&Arena` borrow (its `Alloc` handles already run their own destructors).
     #[inline]
     pub(in crate::arena) fn push(&self, mutator: ChunkMutator<A>) {
         let Some(chunk) = mutator.forget_into_chunk() else {
@@ -121,23 +122,15 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
 
     /// Release the list's `+1` on a chunk that has been unlinked.
     ///
-    /// The reference destructors are replayed *eagerly* here (before the
-    /// `+1` is released) so they run even when escaped `Arc`/`Box` handles
-    /// in the same chunk keep its refcount above zero. After replay the
-    /// count is `0`, so the subsequent `teardown_and_release` (taken only
-    /// when this `+1` was the last reference) does not run them again.
-    ///
     /// # Safety
     ///
     /// Caller must have just removed `chunk` from this list and must not
     /// retain any further references to it.
     #[inline]
     unsafe fn release_retired_chunk(chunk: NonNull<Chunk<A>>) {
-        // SAFETY: caller hands over the list's `+1`. Replay any pending
-        // arena-reference drops on the owning thread, then release the `+1`;
-        // if it was the last reference, route through teardown to recycle.
+        // SAFETY: caller hands over the list's `+1`. Release the `+1`; if it
+        // was the last reference, route through teardown to recycle.
         unsafe {
-            Chunk::replay_pending_drops(chunk);
             if chunk.as_ref().dec_ref() {
                 Chunk::teardown_and_release(chunk);
             }

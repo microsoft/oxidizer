@@ -23,7 +23,7 @@ use multitude::vec::Vec as MVec;
 #[test]
 fn alloc_uninit_write_read() {
     let arena = Arena::new();
-    let slot = arena.alloc_uninit::<u64>();
+    let mut slot = arena.alloc_uninit::<u64>();
     let r = slot.write(42);
     assert_eq!(*r, 42);
 }
@@ -38,13 +38,18 @@ fn alloc_zeroed_is_zero() {
 #[test]
 fn alloc_uninit_slice_write_read() {
     let arena = Arena::new();
-    let s = arena.alloc_uninit_slice::<u32>(4);
+    let mut s = arena.alloc_uninit_slice::<u32>(4);
     assert_eq!(s.len(), 4);
     for (i, e) in s.iter_mut().enumerate() {
         e.write(i as u32);
     }
-    let init: &[u32] = unsafe { &*(std::ptr::from_ref(s) as *const [u32]) };
-    assert_eq!(init, &[0, 1, 2, 3]);
+    // Read each element back through the stable per-element `assume_init_ref`
+    // (the slice-level `MaybeUninit::slice_assume_init_ref` is still unstable),
+    // avoiding a slice type-punning cast and keeping the safety scope per slot.
+    for (i, e) in s.iter().enumerate() {
+        // SAFETY: every slot was initialized by the loop above.
+        assert_eq!(unsafe { *e.assume_init_ref() }, i as u32);
+    }
 }
 
 #[test]
@@ -52,7 +57,7 @@ fn alloc_zeroed_slice_is_zero() {
     let arena = Arena::new();
     let s = arena.alloc_zeroed_slice::<u16>(5);
     assert_eq!(s.len(), 5);
-    for e in s {
+    for e in s.iter() {
         assert_eq!(unsafe { *e.assume_init_ref() }, 0);
     }
 }
@@ -378,5 +383,677 @@ mod utf16_tests {
         let arena0s = Arena::new_in(SendFailingAllocator::new(0));
         let s0c = Utf16String::from_utf16_str_in(utf16str!(""), &arena0s);
         assert!(s0c.try_into_arc_utf16_str().is_err());
+    }
+}
+
+mod alloc_panics_on_failing_allocator {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use multitude::Arena;
+    #[cfg(feature = "utf16")]
+    use widestring::utf16str;
+
+    use crate::common::{FailingAllocator, SyncFailingAllocator};
+
+    fn fa() -> Arena<FailingAllocator> {
+        Arena::new_in(FailingAllocator::new(0))
+    }
+    fn sfa() -> Arena<SyncFailingAllocator> {
+        Arena::new_in(SyncFailingAllocator::new(0))
+    }
+
+    #[test]
+    fn alloc_value_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc(0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_with_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_with(|| 0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_arc(0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_arc_with_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_arc_with(|| 0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_box(0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_box_with_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_box_with(|| 0_u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_copy_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_copy(&[1_u8, 2, 3][..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_clone_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+            let _ = a.alloc_slice_clone(&v[..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_with_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_with::<u32, _>(3, |i| i as u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_iter::<u32, _>([1_u32, 2, 3]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_clone_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+            let _ = a.alloc_slice_clone_arc(&v[..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_copy_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_copy_arc(&[1_u8, 2, 3][..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_with_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_with_arc::<u32, _>(3, |i| i as u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_iter_arc::<u32, _>([1_u32, 2, 3]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_clone_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+            let _ = a.alloc_slice_clone_box(&v[..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_copy_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_copy_box(&[1_u8, 2, 3][..]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_with_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_with_box::<u32, _>(3, |i| i as u32);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_slice_fill_iter_box::<u32, _>([1_u32, 2, 3]);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_str_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_str("abc");
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_str_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_str_arc("abc");
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_str_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_str_box("abc");
+        }));
+        assert!(r.is_err());
+    }
+
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn alloc_utf16_str_arc_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_utf16_str_arc(utf16str!("abc"));
+        }));
+        assert!(r.is_err());
+    }
+
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn alloc_utf16_str_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_utf16_str_box(utf16str!("abc"));
+        }));
+        assert!(r.is_err());
+    }
+
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn alloc_utf16_str_arc_from_str_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_utf16_str_arc_from_str("abc");
+        }));
+        assert!(r.is_err());
+    }
+
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn alloc_utf16_str_box_from_str_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_utf16_str_box_from_str("abc");
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_uninit_arc_drop_type_panics() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_uninit_arc::<D>();
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_zeroed_arc_drop_type_panics() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_zeroed_arc::<D>();
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_uninit_slice_arc_drop_type_panics() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_uninit_slice_arc::<D>(2);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_zeroed_slice_arc_drop_type_panics() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_zeroed_slice_arc::<D>(2);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_uninit_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_uninit_box::<u32>();
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_zeroed_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_zeroed_box::<u32>();
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_uninit_slice_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_uninit_slice_box::<u32>(2);
+        }));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn alloc_zeroed_slice_box_panics() {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let a = sfa();
+            let _ = a.alloc_zeroed_slice_box::<u32>(2);
+        }));
+        assert!(r.is_err());
+    }
+}
+
+mod try_alloc_returns_err_on_failing_allocator {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use multitude::Arena;
+    #[cfg(feature = "utf16")]
+    use widestring::utf16str;
+
+    use crate::common::SyncFailingAllocator;
+
+    fn fa() -> Arena<SyncFailingAllocator> {
+        Arena::new_in(SyncFailingAllocator::new(0))
+    }
+
+    #[test]
+    fn try_alloc_value_err() {
+        let a = fa();
+        assert!(a.try_alloc(0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_with_err() {
+        let a = fa();
+        assert!(a.try_alloc_with(|| 0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_arc(0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_arc_with_err() {
+        let a = fa();
+        assert!(a.try_alloc_arc_with(|| 0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_box(0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_box_with_err() {
+        let a = fa();
+        assert!(a.try_alloc_box_with(|| 0_u32).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_copy_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_copy(&[1_u8, 2, 3][..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_clone_err() {
+        let a = fa();
+        let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+        assert!(a.try_alloc_slice_clone(&v[..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_with_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_with::<u32, _>(3, |i| i as u32).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_iter_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_iter::<u32, _>([1_u32, 2, 3]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_clone_arc_err() {
+        let a = fa();
+        let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+        assert!(a.try_alloc_slice_clone_arc(&v[..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_copy_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_copy_arc(&[1_u8, 2, 3][..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_with_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_with_arc::<u32, _>(3, |i| i as u32).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_iter_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_iter_arc::<u32, _>([1_u32, 2, 3]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_clone_box_err() {
+        let a = fa();
+        let v: std::vec::Vec<u32> = std::vec![1, 2, 3];
+        assert!(a.try_alloc_slice_clone_box(&v[..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_copy_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_copy_box(&[1_u8, 2, 3][..]).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_with_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_with_box::<u32, _>(3, |i| i as u32).is_err());
+    }
+    #[test]
+    fn try_alloc_slice_fill_iter_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_slice_fill_iter_box::<u32, _>([1_u32, 2, 3]).is_err());
+    }
+    #[test]
+    fn try_alloc_str_err() {
+        let a = fa();
+        assert!(a.try_alloc_str("abc").is_err());
+    }
+    #[test]
+    fn try_alloc_str_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_str_arc("abc").is_err());
+    }
+    #[test]
+    fn try_alloc_str_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_str_box("abc").is_err());
+    }
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn try_alloc_utf16_str_arc_err() {
+        let a = fa();
+        assert!(a.try_alloc_utf16_str_arc(utf16str!("abc")).is_err());
+    }
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn try_alloc_utf16_str_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_utf16_str_box(utf16str!("abc")).is_err());
+    }
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn try_alloc_utf16_str_arc_from_str_err() {
+        let a = fa();
+        assert!(a.try_alloc_utf16_str_arc_from_str("abc").is_err());
+    }
+    #[cfg(feature = "utf16")]
+    #[test]
+    fn try_alloc_utf16_str_box_from_str_err() {
+        let a = fa();
+        assert!(a.try_alloc_utf16_str_box_from_str("abc").is_err());
+    }
+    #[test]
+    fn try_alloc_uninit_arc_drop_err() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let a = fa();
+        assert!(a.try_alloc_uninit_arc::<D>().is_err());
+    }
+    #[test]
+    fn try_alloc_zeroed_arc_drop_err() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let a = fa();
+        assert!(a.try_alloc_zeroed_arc::<D>().is_err());
+    }
+    #[test]
+    fn try_alloc_uninit_slice_arc_drop_err() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let a = fa();
+        assert!(a.try_alloc_uninit_slice_arc::<D>(2).is_err());
+    }
+    #[test]
+    fn try_alloc_zeroed_slice_arc_drop_err() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let a = fa();
+        assert!(a.try_alloc_zeroed_slice_arc::<D>(2).is_err());
+    }
+    #[test]
+    fn try_alloc_uninit_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_uninit_box::<u32>().is_err());
+    }
+    #[test]
+    fn try_alloc_zeroed_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_zeroed_box::<u32>().is_err());
+    }
+    #[test]
+    fn try_alloc_uninit_slice_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_uninit_slice_box::<u32>(2).is_err());
+    }
+    #[test]
+    fn try_alloc_zeroed_slice_box_err() {
+        let a = fa();
+        assert!(a.try_alloc_zeroed_slice_box::<u32>(2).is_err());
+    }
+}
+
+mod uninit_drop_init_from_iter {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use multitude::Arena;
+
+    #[derive(Clone)]
+    struct Counted(StdArc<AtomicUsize>);
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn alloc_slice_fill_iter_drop_type_runs_drop_when_handle_drops() {
+        let counter = StdArc::new(AtomicUsize::new(0));
+        {
+            let a = Arena::new();
+            let _handle = a.alloc_slice_fill_iter((0..4).map(|_| Counted(counter.clone())));
+            assert_eq!(counter.load(Ordering::Relaxed), 0);
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 4);
+    }
+}
+
+mod zeroed_slice_arc_zeroes_payload {
+    #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
+    #![allow(clippy::unwrap_used, reason = "test code")]
+    #![allow(clippy::missing_panics_doc, reason = "test code")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests prefer concise method-call form")]
+    #![allow(clippy::items_after_statements, reason = "test layout")]
+    #![allow(dead_code, reason = "test scaffolding may be conditionally used")]
+    #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
+    #![allow(clippy::collection_is_never_read, reason = "tests retain handles to keep chunks alive")]
+    #![allow(clippy::cast_possible_truncation, reason = "test code: bounded test indices")]
+    #![allow(clippy::cast_lossless, reason = "test code")]
+    #![allow(clippy::cast_sign_loss, reason = "test code")]
+    #![allow(clippy::range_plus_one, reason = "test code")]
+    #![allow(clippy::assertions_on_result_states, reason = "test code")]
+    #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    #![allow(clippy::as_pointer_underscore, reason = "test code")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
+    #![allow(clippy::empty_drop, reason = "test code: probe types use empty Drop on purpose")]
+    #![allow(clippy::deref_by_slicing, reason = "tests prefer explicit slicing")]
+    #![allow(clippy::needless_borrow, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::needless_borrows_for_generic_args, reason = "tests prefer explicit borrows")]
+    #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
+    use core::mem::MaybeUninit;
+
+    use multitude::Arena;
+
+    #[test]
+    fn zeroed_slice_arc_drop_type_zeroes_payload() {
+        struct D(u32);
+        impl Drop for D {
+            fn drop(&mut self) {}
+        }
+        let a = Arena::new();
+        let slice = a.alloc_zeroed_slice_arc::<D>(3);
+        // SAFETY: the slice is freshly zeroed; reading the raw bytes is
+        // well defined for any zero pattern.
+        unsafe {
+            let bytes = core::slice::from_raw_parts(slice.as_ptr() as *const MaybeUninit<u8>, core::mem::size_of::<D>() * 3);
+            for b in bytes {
+                assert_eq!(b.assume_init(), 0);
+            }
+        }
     }
 }

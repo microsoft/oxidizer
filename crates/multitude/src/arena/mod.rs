@@ -81,7 +81,7 @@ use retired_local::RetiredLocalChunks;
 /// use multitude::Arena;
 ///
 /// let arena = Arena::new();
-/// let x: &mut u32 = arena.alloc(42_u32);
+/// let x = arena.alloc(42_u32);
 /// assert_eq!(*x, 42);
 /// ```
 pub struct Arena<A: Allocator + Clone = Global> {
@@ -91,8 +91,8 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// the hot path is a plain `self.current.borrow()`.
     ///
     /// A single chunk backs every allocation style. Arena-lifetime
-    /// references (`&mut T`) register drop entries replayed at reset;
-    /// smart pointers (`Arc`/`Box`) take a per-handle chunk refcount and
+    /// allocations (the [`Alloc`](crate::Alloc) handles) drop their values
+    /// eagerly; smart pointers (`Arc`/`Rc`/`Box`) take a per-handle chunk refcount and
     /// drop eagerly. The two coexist in the same chunk.
     current: CurrentChunk<A>,
 
@@ -108,20 +108,20 @@ pub struct Arena<A: Allocator + Clone = Global> {
     /// empty mutator.
     local_shared_count: Cell<u32>,
 
-    /// Chunks rotated out of `current` that still carry arena-reference drop
-    /// entries (`&mut T` borrows have no independent refcount). Each retained
-    /// chunk holds a `+1`, keeping it alive — and its drop entries pending —
-    /// until the arena is reset or dropped. Chunks that hosted only smart
-    /// pointers are released immediately on rotation instead (early
-    /// reclamation), since their handles keep them alive independently.
+    /// Chunks rotated out of `current` that handed out an arena-lifetime
+    /// [`Alloc`](crate::Alloc) handle (whose `&mut T` borrow has no independent
+    /// refcount). Each retained chunk holds a `+1`, keeping it alive until the
+    /// arena is reset or dropped. Chunks that hosted only smart pointers are
+    /// released immediately on rotation instead (early reclamation), since
+    /// their handles keep them alive independently.
     retired_local: RetiredLocalChunks<A>,
 
     /// Whether the current chunk has handed out at least one arena-lifetime
-    /// reference (`&mut T` / `&mut [T]` / `&mut str` / growable-collection
-    /// buffer). Such references have no independent refcount, so a chunk that
-    /// served any of them must be pinned on `retired_local` when rotated out
-    /// (it cannot reclaim until reset). Reset to `false` whenever a fresh
-    /// chunk is installed.
+    /// [`Alloc`](crate::Alloc) handle (a value / `[T]` / `str` reference or a
+    /// growable-collection buffer). Such references have no independent
+    /// refcount, so a chunk that served any of them must be pinned on
+    /// `retired_local` when rotated out (it cannot reclaim until reset). Reset
+    /// to `false` whenever a fresh chunk is installed.
     current_has_reference: Cell<bool>,
 
     /// Geometric-growth chunk-class hint for the next refill: each successful
@@ -158,7 +158,7 @@ impl Arena<Global> {
     ///
     /// ```
     /// let arena = multitude::Arena::new();
-    /// let x: &mut u32 = arena.alloc(42_u32);
+    /// let x = arena.alloc(42_u32);
     /// assert_eq!(*x, 42);
     /// ```
     #[must_use]
@@ -309,25 +309,25 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Reset the arena for a new allocation phase: the current chunk and all
-    /// retired chunks have their arena-reference drop entries replayed and
-    /// their bytes returned to the chunk cache (or kept alive by outstanding
-    /// `Arc`/`Box` handles).
+    /// retired chunks have their bytes returned to the chunk cache (or kept
+    /// alive by outstanding `Arc`/`Box` handles).
     ///
     /// Given that this takes `&mut self`, the borrow checker ensures no
-    /// outstanding simple references can still be live. Outstanding
-    /// `Arc`/`Box` handles allocated before the reset keep their backing
-    /// chunks alive independently — their values are not dropped here; only
-    /// the arena-reference destructors run. After reset the next allocation
-    /// installs a fresh chunk.
+    /// outstanding [`Alloc`](crate::Alloc) handles can still be live — each one
+    /// borrows the arena, and each runs its value's destructor eagerly when
+    /// dropped, so all reference destructors have already run by the time
+    /// `reset` is callable. Outstanding `Arc`/`Rc`/`Box` handles allocated before
+    /// the reset keep their backing chunks alive independently. `reset` itself
+    /// runs no destructors; it is purely a bulk cursor rewind. After reset the
+    /// next allocation installs a fresh chunk.
     #[cold]
     pub fn reset(&mut self) {
         // Reconcile the current chunk's pre-credited surplus before its
-        // mutator's Drop releases the `+1`, then replay retired-chunk drops.
+        // mutator's Drop releases the `+1`.
         self.reconcile_shared_surplus();
         self.retired_local.clear();
-        // Dropping the current mutator publishes + eagerly replays its own
-        // drop entries (so reference destructors run even if escaped handles
-        // keep the chunk alive) before releasing the `+1`.
+        // Dropping the current mutator releases its `+1`; no reference
+        // destructors run here (the `Alloc` handles already ran them).
         *self.current.get_mut() = ChunkMutator::<A>::empty();
         self.current_has_reference.set(false);
     }
@@ -409,11 +409,11 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `min_payload` bytes.
     ///
     /// The displaced chunk's pre-credited surplus is reconciled first. If it
-    /// still carries arena-reference drop entries it is pinned on
-    /// `retired_local` (its drops replay at reset); otherwise it is released
-    /// immediately so a smart-pointer-only chunk can reclaim early once its
-    /// handles drop. The fresh chunk is pre-credited with a large ref surplus
-    /// so the per-allocation hot path needs no atomic.
+    /// handed out an arena-lifetime [`Alloc`](crate::Alloc) handle it is pinned
+    /// on `retired_local` (kept alive for the `&Arena` borrow); otherwise it is
+    /// released immediately so a smart-pointer-only chunk can reclaim early once
+    /// its handles drop. The fresh chunk is pre-credited with a large ref
+    /// surplus so the per-allocation hot path needs no atomic.
     ///
     /// The caller must have verified `!self.is_oversized(min_payload)`;
     /// oversized requests go through the oversized paths so they don't
@@ -429,15 +429,13 @@ impl<A: Allocator + Clone> Arena<A> {
         // dropped/retired so the chunk's atomic refcount equals the number of
         // escaped handles regardless of how many we pre-credited.
         self.reconcile_shared_surplus();
-        // Detach the displaced mutator. Retire it only if it carries drop
-        // entries (it must stay pinned so its reference destructors replay at
-        // reset); otherwise drop it now to release its bytes before the new
-        // reservation, letting a now-unreferenced chunk reclaim early. Neither
-        // path runs user code: forgetting into the retired list publishes the
-        // count without replaying, and the drop path only fires when there are
-        // no drop entries (so the eager replay is a no-op).
+        // Detach the displaced mutator. Retire it only if it handed out an
+        // arena-lifetime reference (it must stay pinned so the `Alloc`'s
+        // borrow remains valid for the whole `&Arena` lifetime); otherwise
+        // drop it now to release its bytes before the new reservation, letting
+        // a now-unreferenced chunk reclaim early. Neither path runs user code.
         let displaced = self.current.replace(ChunkMutator::<A>::empty());
-        if self.current_has_reference.get() || displaced.has_drop_entries() {
+        if self.current_has_reference.get() {
             self.retired_local.push(displaced);
         } else {
             drop(displaced);
@@ -469,10 +467,9 @@ impl<A: Allocator + Clone> Arena<A> {
     /// existing chunk.
     ///
     /// The temporary mutator is dropped before this function returns:
-    /// it publishes its drop-entry count and releases its own `+1`
-    /// strong reference. If `do_alloc` retained a `+1` on the chunk
-    /// (the smart-pointer case), the chunk stays alive via that ref;
-    /// otherwise (e.g. an init panic before the `+1` was taken) the
+    /// it releases its own `+1` strong reference. If `do_alloc` retained a `+1`
+    /// on the chunk (the smart-pointer case), the chunk stays alive via that
+    /// ref; otherwise (e.g. an init panic before the `+1` was taken) the
     /// chunk is torn down here.
     #[cold]
     #[inline(never)]

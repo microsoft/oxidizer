@@ -47,9 +47,10 @@ impl<A: Allocator + Clone> CurrentChunk<A> {
     /// Replace the contained mutator and return the previous one.
     #[inline]
     pub(crate) fn replace(&self, new: ChunkMutator<A>) -> ChunkMutator<A> {
-        // SAFETY: Single-threaded access (see module docs); the caller
-        // must not hold any reference handed out by `borrow` across this
-        // call.
+        // SAFETY: the holder is `!Sync`, so access is single-threaded; the
+        // caller must not hold any reference handed out by `borrow` across this
+        // call, so reading the old mutator and writing the new one through the
+        // `UnsafeCell` introduces no aliasing.
         unsafe {
             let slot = self.0.get();
             let prev = ptr::read(slot);

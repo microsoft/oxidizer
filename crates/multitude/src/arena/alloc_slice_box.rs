@@ -157,8 +157,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.impl_alloc_slice_box_iter::<T, _>(len, it)
     }
 
-    /// Box: no chunk drop entry (`Box::drop` runs `drop_in_place` on the
-    /// slice eagerly). Copy fast path.
+    /// Box: `Box::drop` runs `drop_in_place` on the slice eagerly. Copy fast path.
     #[inline]
     fn impl_alloc_slice_box_copy<T: Copy>(&self, src: &[T]) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(src.len())?;
@@ -198,7 +197,9 @@ impl<A: Allocator + Clone> Arena<A> {
                 mem::forget(guard);
             }
         })?;
-        // SAFETY: see `impl_alloc_slice_box_copy`.
+        // SAFETY: `reserve_slice_box` returned a payload pointer to `len`
+        // now-initialized `T`s in a shared chunk carrying a fresh `+1`;
+        // `Box::from_raw` adopts that `+1` and reconstructs an owning `Box<[T]>`.
         Ok(unsafe { Box::from_raw(ptr.cast::<u8>()) })
     }
 
