@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.4] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.6` of `bytesbuf`
+  - Now requires `0.3.5` of `layered`
+  - Now requires `0.3.8` of `ohno`
+  - Now requires `0.1.7` of `recoverable`
+  - Now requires `0.3.4` of `templated_uri`
+  - Now requires `0.7.5` of `thread_aware`
+  - Now requires `0.3.5` of `tick`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
 ## [0.6.3] - 2026-06-24
 
 - 🔧 Maintenance

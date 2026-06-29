@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.9] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.5` of `layered`
+  - Now requires `0.1.7` of `recoverable`
+  - Now requires `0.7.5` of `thread_aware`
+  - Now requires `0.3.5` of `tick`
+
+- ✨ Features
+
+  - add abandoned execution policy for circuit breaker ([#506](https://github.com/microsoft/oxidizer/pull/506))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+  - bump MSRV to 1.93 and adopt new stdlib helpers ([#474](https://github.com/microsoft/oxidizer/pull/474))
+
 ## [0.5.8] - 2026-06-24
 
 - ✨ Features

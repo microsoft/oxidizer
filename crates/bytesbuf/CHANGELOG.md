@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.6] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.7.5` of `thread_aware`
+
+- 🐛 Bug Fixes
+
+  - size numeric reads by T::Bytes and read unaligned for FromBytes soundness ([#528](https://github.com/microsoft/oxidizer/pull/528))
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ⚡ Performance
+
+  - fuse single-span read/write fast paths + bootstrap benchmarking agent docs ([#518](https://github.com/microsoft/oxidizer/pull/518))
+
+- ♻️ Code Refactoring
+
+  - rename doc/ directory to docs/ for convention consistency ([#522](https://github.com/microsoft/oxidizer/pull/522))
+
 ## [0.5.5] - 2026-06-18
 
 - ✨ Features

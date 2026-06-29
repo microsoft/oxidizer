@@ -48,10 +48,10 @@ fn install_runtime(spawner: Spawner, clock: Clock) {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/anyspawn_azure">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbG3R9HTN6WQcb7BPkFt-c1lwbFJyoKmJddDMbd44aiRZ9MR1hZISCaGFueXNwYXduZTAuNS40gm5hbnlzcGF3bl9henVyZWUwLjEuMIJqYXp1cmVfY29yZWUxLjAuMIJkdGlja2UwLjMuNA
- [__link0]: https://crates.io/crates/anyspawn/0.5.4
- [__link1]: https://crates.io/crates/tick/0.3.4
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbG3R9HTN6WQcb7BPkFt-c1lwbFJyoKmJddDMbd44aiRZ9MR1hZISCaGFueXNwYXduZTAuNS41gm5hbnlzcGF3bl9henVyZWUwLjEuMYJqYXp1cmVfY29yZWUxLjAuMIJkdGlja2UwLjMuNQ
+ [__link0]: https://crates.io/crates/anyspawn/0.5.5
+ [__link1]: https://crates.io/crates/tick/0.3.5
  [__link2]: https://docs.rs/azure_core/1.0.0/azure_core/?search=async_runtime::AsyncRuntime
- [__link3]: https://docs.rs/anyspawn_azure/0.1.0/anyspawn_azure/?search=Runtime
- [__link4]: https://docs.rs/anyspawn/0.5.4/anyspawn/?search=Spawner
- [__link5]: https://docs.rs/tick/0.3.4/tick/?search=Clock
+ [__link3]: https://docs.rs/anyspawn_azure/0.1.1/anyspawn_azure/?search=Runtime
+ [__link4]: https://docs.rs/anyspawn/0.5.5/anyspawn/?search=Spawner
+ [__link5]: https://docs.rs/tick/0.3.5/tick/?search=Clock

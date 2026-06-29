@@ -438,113 +438,113 @@ existing `_arc` slice methods).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/multitude">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbCkq-X8ld8PQb_GY5FjOQAIUba5WfRTMVT-YbGGZEipQNg6VhZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjUuNYJpbXVsdGl0dWRlZTAuNS4wgmh6ZXJvY29weWYwLjguNTI
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbCkq-X8ld8PQb_GY5FjOQAIUba5WfRTMVT-YbGGZEipQNg6VhZIWCaGJ5dGVtdWNrZjEuMjUuMIJlYnl0ZXNmMS4xMi4wgmhieXRlc2J1ZmUwLjUuNoJpbXVsdGl0dWRlZTAuNS4xgmh6ZXJvY29weWYwLjguNTI
  [__link0]: https://crates.io/crates/bumpalo
- [__link1]: https://docs.rs/multitude/0.5.0/multitude/?search=Alloc
- [__link10]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
- [__link100]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=mem::Memory
- [__link101]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
- [__link102]: https://docs.rs/bytesbuf/0.5.5/bytesbuf/?search=BytesBuf
- [__link103]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
+ [__link1]: https://docs.rs/multitude/0.5.1/multitude/?search=Alloc
+ [__link10]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
+ [__link100]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=mem::Memory
+ [__link101]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
+ [__link102]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesBuf
+ [__link103]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
  [__link104]: https://crates.io/crates/hashbrown
- [__link105]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_hash_map
- [__link106]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_hash_map_with_capacity
- [__link107]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_set
- [__link108]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_set_with_capacity
- [__link11]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec
+ [__link105]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_hash_map
+ [__link106]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_hash_map_with_capacity
+ [__link107]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_set
+ [__link108]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_set_with_capacity
+ [__link11]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec
  [__link12]: https://crates.io/crates/dst-factory
- [__link13]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::format
- [__link14]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
- [__link15]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::format_utf16
+ [__link13]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::format
+ [__link14]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
+ [__link15]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::format_utf16
  [__link16]: https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md
  [__link17]: https://crates.io/crates/bumpalo
- [__link18]: https://docs.rs/multitude/0.5.0/multitude/?search=Alloc
- [__link19]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link2]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link20]: https://docs.rs/multitude/0.5.0/multitude/?search=Rc
- [__link21]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link22]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc
- [__link23]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_box
- [__link24]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_rc
- [__link25]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_arc
- [__link26]: https://docs.rs/multitude/0.5.0/multitude/?search=Alloc
- [__link27]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link28]: https://docs.rs/multitude/0.5.0/multitude/?search=Rc
- [__link29]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link3]: https://docs.rs/multitude/0.5.0/multitude/?search=Rc
+ [__link18]: https://docs.rs/multitude/0.5.1/multitude/?search=Alloc
+ [__link19]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link2]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link20]: https://docs.rs/multitude/0.5.1/multitude/?search=Rc
+ [__link21]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link22]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc
+ [__link23]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_box
+ [__link24]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_rc
+ [__link25]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_arc
+ [__link26]: https://docs.rs/multitude/0.5.1/multitude/?search=Alloc
+ [__link27]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link28]: https://docs.rs/multitude/0.5.1/multitude/?search=Rc
+ [__link29]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link3]: https://docs.rs/multitude/0.5.1/multitude/?search=Rc
  [__link30]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
  [__link31]: https://doc.rust-lang.org/stable/std/marker/trait.Sync.html
- [__link32]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link33]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
+ [__link32]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link33]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
  [__link34]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
- [__link35]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
+ [__link35]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
  [__link36]: https://doc.rust-lang.org/stable/std/marker/trait.Send.html
- [__link37]: https://docs.rs/multitude/0.5.0/multitude/?search=Alloc
- [__link38]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link39]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec
- [__link4]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link40]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link41]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
+ [__link37]: https://docs.rs/multitude/0.5.1/multitude/?search=Alloc
+ [__link38]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link39]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec
+ [__link4]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link40]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link41]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
  [__link42]: https://crates.io/crates/allocator-api2
- [__link43]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link44]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec
- [__link45]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String::into_boxed_str
- [__link46]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link47]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link48]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec::into_boxed_slice
- [__link49]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link5]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link50]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link51]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link52]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link53]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec::leak
- [__link54]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
+ [__link43]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link44]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec
+ [__link45]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String::into_boxed_str
+ [__link46]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link47]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link48]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec::into_boxed_slice
+ [__link49]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link5]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link50]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link51]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link52]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link53]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec::leak
+ [__link54]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
  [__link55]: https://crates.io/crates/hashbrown
- [__link56]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_hash_map
- [__link57]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_hash_map_with_capacity
- [__link58]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_set
- [__link59]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_set_with_capacity
- [__link6]: https://docs.rs/multitude/0.5.0/multitude/?search=Rc
- [__link60]: https://docs.rs/multitude/0.5.0/multitude/strings/index.html
- [__link61]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link62]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link63]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
- [__link64]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link65]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
- [__link66]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::format
- [__link67]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::format_utf16
- [__link68]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link69]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String::into_boxed_str
- [__link7]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link70]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link71]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
- [__link72]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String::into_boxed_utf16_str
- [__link73]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link74]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena
- [__link75]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_dst_arc
- [__link76]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_dst_box
+ [__link56]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_hash_map
+ [__link57]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_hash_map_with_capacity
+ [__link58]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_set
+ [__link59]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_set_with_capacity
+ [__link6]: https://docs.rs/multitude/0.5.1/multitude/?search=Rc
+ [__link60]: https://docs.rs/multitude/0.5.1/multitude/strings/index.html
+ [__link61]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link62]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link63]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
+ [__link64]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link65]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
+ [__link66]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::format
+ [__link67]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::format_utf16
+ [__link68]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link69]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String::into_boxed_str
+ [__link7]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link70]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link71]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
+ [__link72]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String::into_boxed_utf16_str
+ [__link73]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link74]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena
+ [__link75]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_dst_arc
+ [__link76]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_dst_box
  [__link77]: https://doc.rust-lang.org/stable/core/?search=alloc::Layout
  [__link78]: https://crates.io/crates/dst-factory
  [__link79]: https://doc.rust-lang.org/stable/std/?search=io::Write
- [__link8]: https://docs.rs/multitude/0.5.0/multitude/?search=Alloc
- [__link80]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec
- [__link81]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link82]: https://docs.rs/multitude/0.5.0/multitude/?search=Box
- [__link83]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link84]: https://docs.rs/multitude/0.5.0/multitude/?search=vec::Vec
- [__link85]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_dst_arc
- [__link86]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::alloc_dst_box
- [__link87]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::Utf16String
- [__link88]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::format_utf16
+ [__link8]: https://docs.rs/multitude/0.5.1/multitude/?search=Alloc
+ [__link80]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec
+ [__link81]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link82]: https://docs.rs/multitude/0.5.1/multitude/?search=Box
+ [__link83]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link84]: https://docs.rs/multitude/0.5.1/multitude/?search=vec::Vec
+ [__link85]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_dst_arc
+ [__link86]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::alloc_dst_box
+ [__link87]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::Utf16String
+ [__link88]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::format_utf16
  [__link89]: https://crates.io/crates/widestring
- [__link9]: https://docs.rs/multitude/0.5.0/multitude/?search=strings::String
- [__link90]: https://docs.rs/multitude/0.5.0/multitude/?search=zerocopy::ZerocopyView
+ [__link9]: https://docs.rs/multitude/0.5.1/multitude/?search=strings::String
+ [__link90]: https://docs.rs/multitude/0.5.1/multitude/?search=zerocopy::ZerocopyView
  [__link91]: https://docs.rs/zerocopy/0.8.52/zerocopy/?search=FromZeros
- [__link92]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::zerocopy
- [__link93]: https://docs.rs/multitude/0.5.0/multitude/?search=bytemuck::BytemuckView
+ [__link92]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::zerocopy
+ [__link93]: https://docs.rs/multitude/0.5.1/multitude/?search=bytemuck::BytemuckView
  [__link94]: https://docs.rs/bytemuck/1.25.0/bytemuck/?search=Zeroable
- [__link95]: https://docs.rs/multitude/0.5.0/multitude/?search=Arena::bytemuck
+ [__link95]: https://docs.rs/multitude/0.5.1/multitude/?search=Arena::bytemuck
  [__link96]: https://doc.rust-lang.org/stable/std/convert/trait.From.html
- [__link97]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
- [__link98]: https://docs.rs/multitude/0.5.0/multitude/?search=Arc
+ [__link97]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
+ [__link98]: https://docs.rs/multitude/0.5.1/multitude/?search=Arc
  [__link99]: https://docs.rs/bytes/1.12.0/bytes/?search=Bytes

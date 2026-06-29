@@ -40,12 +40,12 @@ and always use `data_privacy`.**
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_core">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4x
- [__link0]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=DataClass
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJMSGY2z7YbEblsBSe-58K48b62Bomn7PG1Ebw8HBurz5KcZhZIGCcWRhdGFfcHJpdmFjeV9jb3JlZTAuMS4y
+ [__link0]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass
  [__link1]: https://docs.rs/data_privacy
- [__link2]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=DataClass
- [__link3]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=Classified
- [__link4]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=Redactor
- [__link5]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=RedactedDebug
- [__link6]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=RedactedDisplay
- [__link7]: https://docs.rs/data_privacy_core/0.1.1/data_privacy_core/?search=RedactedToString
+ [__link2]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=DataClass
+ [__link3]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Classified
+ [__link4]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=Redactor
+ [__link5]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=RedactedDebug
+ [__link6]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=RedactedDisplay
+ [__link7]: https://docs.rs/data_privacy_core/0.1.2/data_privacy_core/?search=RedactedToString

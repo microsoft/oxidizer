@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.4] - 2026-06-26
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.4` of `http_extensions`
+  - Now requires `0.5.9` of `seatbelt`
+  - Now requires `0.3.4` of `templated_uri`
+  - Now requires `0.3.5` of `tick`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
 ## [0.4.3] - 2026-06-24
 
 - 🔧 Maintenance
