@@ -113,18 +113,7 @@ impl ThreadRegistry {
             }
         }
 
-        assert!(
-            u16::try_from(processors.len()).is_ok(),
-            "too many processors: {} exceeds the supported maximum of {}",
-            processors.len(),
-            u16::MAX
-        );
-        assert!(
-            u16::try_from(numa_nodes.len()).is_ok(),
-            "too many memory regions: {} exceeds the supported maximum of {}",
-            numa_nodes.len(),
-            u16::MAX
-        );
+        check_capacity(processors.len(), numa_nodes.len());
 
         Self {
             processors: Processor::unpack(&processors),
@@ -188,6 +177,25 @@ impl Default for ThreadRegistry {
     fn default() -> Self {
         Self::new(&ProcessorCount::Auto)
     }
+}
+
+/// Asserts that processor and memory region counts fit within the `u16` indices used internally.
+///
+/// Both bounds can only be exceeded on hardware with more than `u16::MAX` of either, which is not
+/// reproducible via fake hardware (a memory region count can never exceed the processor count),
+/// so this is excluded from coverage.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn check_capacity(processor_count: usize, memory_region_count: usize) {
+    assert!(
+        u16::try_from(processor_count).is_ok(),
+        "too many processors: {processor_count} exceeds the supported maximum of {}",
+        u16::MAX
+    );
+    assert!(
+        u16::try_from(memory_region_count).is_ok(),
+        "too many memory regions: {memory_region_count} exceeds the supported maximum of {}",
+        u16::MAX
+    );
 }
 
 /// A wrapper around `many_cpus::ProcessorSet` that contains only a single processor
