@@ -799,6 +799,101 @@ _anvil-base-ref:
     Write-Error 'anvil-base-ref: cannot resolve a base ref. Set BASE_REF, or ensure origin/main or origin/master exists.'
     exit 1
 
+# _anvil-impact-format: single source of truth for turning a cargo-delta
+# impact report into the `--package <spec> ...` string the checks.just
+# recipes consume. Shared by both impact steps
+# (github/impact-action.yml, ado/steps/impact.yml) so the formatting
+# logic lives in exactly one place rather than being duplicated (and
+# subtly diverging) across two shell dialects.
+#
+# Arguments:
+#   tier       - one of "modified" / "affected" / "required". Selected
+#                from the cargo-delta JSON (which uses TitleCase keys).
+#   impactJson - path to the file the caller produced via
+#                `cargo delta impact --format json`.
+#
+# Output (stdout, exactly one line so callers can capture it):
+#   * "--package name@version --package name2@version2 ..." when the
+#     tier has members. Each package is a version-qualified cargo spec:
+#     the version (read from `cargo metadata --no-deps`, i.e. workspace
+#     members only) disambiguates a workspace member from a like-named
+#     transitive dependency pulled in at a different version, which a
+#     bare `-p name` cannot do ("multiple packages named name").
+#   * "--skip" when the tier is empty (recipes treat this as a no-op).
+# Diagnostics (dropped unknown names) go to STDERR so they never
+# pollute the captured value.
+#
+# Why pwsh + ConvertFrom-Json rather than jq + read: cargo-delta and
+# cargo-metadata both emit JSON, and parsing structured data through a
+# tab-delimited `IFS` read is fragile -- e.g. tab is an IFS-whitespace
+# character, so an empty interior field (a package with no lib target)
+# coalesces with its delimiters and silently shifts every later field.
+# Working with objects sidesteps that entire class of bug.
+#
+# Usage:
+#   bash : val="$(just _anvil-impact-format affected "$impact_json")"
+#   pwsh : $val = (& {{just_executable()}} _anvil-impact-format affected $impactJson)
+[script("pwsh")]
+_anvil-impact-format tier impactJson:
+    $ErrorActionPreference = 'Stop'
+    $tier = '{{tier}}'
+    $impactJson = '{{impactJson}}'
+    # cargo-delta keys its impact tiers in TitleCase.
+    $tierKey = switch ($tier) {
+        'modified' { 'Modified' }
+        'affected' { 'Affected' }
+        'required' { 'Required' }
+        default {
+            Write-Error "anvil impact: unknown tier '$tier' (expected modified/affected/required)"
+            exit 1
+        }
+    }
+    # Build two lookups from workspace members:
+    #   * $byName: exact cargo package name (may contain hyphens) -> pkg
+    #   * $byLib:  library target name (snake_case) -> pkg
+    # cargo-delta reports *library* names (snake_case), but for crates
+    # whose package name differs from the lib name (e.g. `cargo-anvil`
+    # vs `cargo_anvil`) we must translate back to the package name cargo
+    # accepts. Bin-only crates have no lib target; cargo-delta reports
+    # those by their package name, caught by $byName.
+    $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $byName = @{}
+    $byLib = @{}
+    foreach ($p in $meta.packages) {
+        $byName[$p.name] = $p
+        foreach ($t in $p.targets) {
+            if ($t.kind -contains 'lib') { $byLib[$t.name] = $p }
+        }
+    }
+    $impact = Get-Content -LiteralPath $impactJson -Raw | ConvertFrom-Json
+    $names = @($impact.$tierKey)
+    $specs = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in $names) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $p = if ($byName.ContainsKey($name)) {
+            $byName[$name]
+        } elseif ($byLib.ContainsKey($name)) {
+            $byLib[$name]
+        } else {
+            $null
+        }
+        if ($null -eq $p) {
+            # Names cargo-delta emits that aren't valid workspace
+            # packages (e.g. directory-leaf ambiguities like `ffi` /
+            # `ffi_build` in deeply nested workspaces) are dropped with a
+            # warning rather than failing the whole build.
+            [Console]::Error.WriteLine("anvil impact: dropping unknown package '$name' from $tier set")
+            continue
+        }
+        $specs.Add("--package $($p.name)@$($p.version)")
+    }
+    if ($specs.Count -eq 0) {
+        Write-Output '--skip'
+    } else {
+        Write-Output ($specs -join ' ')
+    }
+
 # Affected tier. cargo-mutants does its own diff-scoping via --in-diff;
 # the affected-tier guard is the wiring-layer's coarse filter (if no
 # affected packages exist, the entire mutants run is pointless).
