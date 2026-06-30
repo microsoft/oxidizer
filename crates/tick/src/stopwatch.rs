@@ -92,6 +92,20 @@ mod test {
     }
 
     #[test]
+    fn new_accepts_any_time_source() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+        let time_clock = control.to_time_clock();
+
+        // `Stopwatch::new` accepts a `Clock`, a `TimeClock`, and references to either,
+        // since all of them are `AsRef<TimeClock>`.
+        let _ = Stopwatch::new(&clock);
+        let _ = Stopwatch::new(clock);
+        let _ = Stopwatch::new(&time_clock);
+        let _ = Stopwatch::new(time_clock);
+    }
+
+    #[test]
     fn test_stopwatch() {
         let clock = Clock::new_system_frozen();
         let watch = clock.stopwatch();

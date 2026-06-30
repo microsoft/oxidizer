@@ -194,7 +194,7 @@ impl ClockControl {
     /// ```
     #[must_use]
     pub fn to_time_clock(&self) -> crate::TimeClock {
-        crate::TimeClock::from_state(&ClockState::ClockControl(self.clone()))
+        crate::TimeClock::from_control(self.clone())
     }
 
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
@@ -425,7 +425,7 @@ impl From<&ClockControl> for Clock {
 
 impl From<ClockControl> for crate::TimeClock {
     fn from(control: ClockControl) -> Self {
-        control.to_time_clock()
+        Self::from_control(control)
     }
 }
 

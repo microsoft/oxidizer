@@ -120,8 +120,17 @@ impl TimeClock {
         match state {
             ClockState::System(_) => Self(TimeKind::System),
             #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => Self(TimeKind::Controlled(control.clone())),
+            ClockState::ClockControl(control) => Self::from_control(control.clone()),
         }
+    }
+
+    /// Builds a controlled `TimeClock` from an owned [`ClockControl`][crate::ClockControl].
+    ///
+    /// Taking ownership avoids an extra `Arc` clone compared to going through
+    /// [`from_state`][Self::from_state].
+    #[cfg(any(feature = "test-util", test))]
+    pub(crate) fn from_control(control: crate::ClockControl) -> Self {
+        Self(TimeKind::Controlled(control))
     }
 
     /// Retrieves the current system time as [`SystemTime`].
