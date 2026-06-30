@@ -211,7 +211,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
-    fn system_time_advances() {
+    fn instant_advances() {
         let clock = TimeClock::new_system();
         let first = clock.instant();
         let second = clock.instant();
