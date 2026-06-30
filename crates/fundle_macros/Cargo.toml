@@ -20,6 +20,14 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fundle_macr
 [package.metadata.docs.rs]
 all-features = true
 
+# Thin proc-macro entry crate: the only coverage source for `#[proc_macro_attribute]`
+# entry points is compile-time expansion in consumers, which is non-deterministic under
+# impact-scoped `cargo llvm-cov nextest`. The shims carry `#[coverage(off)]` and the
+# delegated logic lives in `fundle_macros_impl` (gated normally), so this crate reports
+# no instrumented lines; opt it out of the per-package line gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [lib]
 proc-macro = true
 
