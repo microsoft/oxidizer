@@ -248,4 +248,33 @@ mod tests {
 
         assert_eq!(clock.system_time(), specific);
     }
+
+    #[test]
+    fn from_clock_control_is_controlled() {
+        let control = ClockControl::new();
+        let owned: TimeClock = TimeClock::from(control.clone());
+        let borrowed: TimeClock = TimeClock::from(&control);
+
+        let start = owned.system_time();
+        control.advance(Duration::from_secs(3));
+
+        let expected = start.checked_add(Duration::from_secs(3)).unwrap();
+        assert_eq!(owned.system_time(), expected);
+        assert_eq!(borrowed.system_time(), expected);
+    }
+
+    #[test]
+    fn from_clock_preserves_controlled_time() {
+        let control = ClockControl::new();
+        let clock = control.to_clock();
+
+        let from_ref: TimeClock = TimeClock::from(&clock);
+        let from_owned: TimeClock = TimeClock::from(clock);
+
+        control.advance(Duration::from_secs(2));
+        let expected = control.to_time_clock().system_time();
+
+        assert_eq!(from_ref.system_time(), expected);
+        assert_eq!(from_owned.system_time(), expected);
+    }
 }

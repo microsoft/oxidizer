@@ -420,6 +420,18 @@ impl From<&ClockControl> for Clock {
     }
 }
 
+impl From<ClockControl> for crate::TimeClock {
+    fn from(control: ClockControl) -> Self {
+        control.to_time_clock()
+    }
+}
+
+impl From<&ClockControl> for crate::TimeClock {
+    fn from(control: &ClockControl) -> Self {
+        control.to_time_clock()
+    }
+}
+
 #[derive(Debug)]
 struct State {
     instant: Instant,

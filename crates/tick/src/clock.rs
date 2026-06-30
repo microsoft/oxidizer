@@ -498,6 +498,18 @@ impl AsRef<TimeClock> for Clock {
     }
 }
 
+impl From<Clock> for TimeClock {
+    fn from(clock: Clock) -> Self {
+        clock.time
+    }
+}
+
+impl From<&Clock> for TimeClock {
+    fn from(clock: &Clock) -> Self {
+        clock.time.clone()
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
