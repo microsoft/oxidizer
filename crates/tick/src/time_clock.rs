@@ -156,7 +156,7 @@ impl TimeClock {
         match T::try_from(self.system_time()) {
             Ok(time) => time,
             Err(_err) => {
-                panic!("The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.",)
+                panic!("The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.")
             }
         }
     }
