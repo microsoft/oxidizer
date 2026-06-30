@@ -55,9 +55,6 @@ sharded-slab = { workspace = true }
 slab = { workspace = true, features = ["std"] }
 slotmap = { workspace = true, features = ["std"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "criterion_alloc"
 harness = false
@@ -73,3 +70,8 @@ harness = false
 [[bench]]
 name = "pool_comparison"
 harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

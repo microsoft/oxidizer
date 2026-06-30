@@ -96,8 +96,8 @@ anvil-system-deps-check:
         # hunspell-sys build script can LOAD libclang.dll at runtime (the
         # loader ignores LIBCLANG_PATH). Catch the present-but-undiscoverable
         # case here instead of letting the build fail with STATUS_DLL_NOT_FOUND.
-        $pathDirs = ($env:PATH -split ';') | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
-        if ($pathDirs -notcontains $libclangDir.TrimEnd('\')) {
+        $pathDirs = ($env:PATH -split ';') | ForEach-Object { $_.Trim().TrimEnd('\') } | Where-Object { $_ }
+        if ($pathDirs -notcontains $libclangDir.Trim().TrimEnd('\')) {
             $missing += [pscustomobject]@{
                 name = 'libclang (present but not on PATH)'
                 why = "libclang.dll exists at '$libclangDir' but that directory is not on PATH; the hunspell-sys build script cannot load it (STATUS_DLL_NOT_FOUND)"
@@ -332,7 +332,7 @@ _install-component toolchain component:
             $sysroot = $sysroot.Trim()
             $present = switch ($component) {
                 'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
-                'llvm-tools' { @(Get-ChildItem (Join-Path $sysroot 'lib/rustlib') -Recurse -Filter 'llvm-profdata*' -ErrorAction SilentlyContinue).Count -gt 0 }
+                'llvm-tools' { @(Get-ChildItem -Path (Join-Path $sysroot 'lib/rustlib/*/bin/llvm-profdata*') -ErrorAction SilentlyContinue).Count -gt 0 }
                 default      { $false }
             }
         }
@@ -400,8 +400,11 @@ _check-component toolchain component:
             # rust-src lands the standard-library sources under the sysroot.
             'rust-src'   { Test-Path (Join-Path $sysroot 'lib/rustlib/src/rust/library') }
             # llvm-tools ships llvm-profdata/llvm-cov under the per-target
-            # bin directory.
-            'llvm-tools' { @(Get-ChildItem (Join-Path $sysroot 'lib/rustlib') -Recurse -Filter 'llvm-profdata*' -ErrorAction SilentlyContinue).Count -gt 0 }
+            # bin directory. Probe with a shallow glob over
+            # lib/rustlib/<target>/bin rather than a recursive scan of the
+            # whole rustlib tree (which also holds rust-src's std sources),
+            # keeping validate-prereqs fast on large sysroots.
+            'llvm-tools' { @(Get-ChildItem -Path (Join-Path $sysroot 'lib/rustlib/*/bin/llvm-profdata*') -ErrorAction SilentlyContinue).Count -gt 0 }
             default      { $false }
         }
     }

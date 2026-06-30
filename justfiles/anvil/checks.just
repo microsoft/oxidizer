@@ -941,17 +941,32 @@ anvil-mutants-diff: anvil-mutants-diff-validate-prereqs
 anvil-miri: anvil-miri-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    # `--no-tests=pass`: miri-only exception. Tests that touch the
-    # filesystem, spawn subprocesses, or use other miri-incompatible
-    # APIs commonly carry `#[cfg_attr(miri, ignore)]` (this is the
-    # canonical opt-out for build-tooling / CLI crates). A crate
-    # whose test set ends up entirely-skipped under miri legitimately
-    # produces zero runnable tests; nextest's default exit-4 ("no
-    # tests to run") would fail the recipe in that case. We treat
-    # empty test runs as success for miri only. Other nextest-using
-    # recipes (llvm-cov) keep exit-4 as a failure because zero tests
-    # there almost always indicates a config mistake.
-    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    # Run miri via libtest (`cargo miri test`), NOT `cargo miri nextest
+    # run`. nextest uses a process-per-test model; under miri every
+    # process pays the full cost of re-interpreting std initialization,
+    # so process-per-test roughly DOUBLES miri wall-time on a large suite
+    # (the dominant cost on the PR critical path). libtest runs all tests
+    # of a binary in a single process, matching how upstream runs miri.
+    #
+    # `--tests` selects the same target set nextest ran -- lib unit tests,
+    # bin unit tests, and integration tests -- while excluding doctests
+    # (miri cannot run them) and benches/examples. We use `--tests` rather
+    # than `--lib --tests` because `--lib` errors with "no library targets
+    # found" on a bin-only affected package under impact scoping; `--tests`
+    # already covers lib unit tests and tolerates libless packages. We do
+    # NOT use `--all-targets`: it would add `--benches` (criterion benches
+    # have `harness = false` and run a full measurement loop -- ruinously
+    # slow under miri) and `--examples` (runs each example's `main`, often
+    # miri-incompatible I/O), without adding doctest coverage.
+    #
+    # `--all-features` exercises feature-gated code so UB hidden behind an
+    # optional feature is caught, matching how upstream runs miri.
+    #
+    # libtest exits 0 when a binary has zero runnable tests (e.g. a crate
+    # whose tests are all `#[cfg_attr(miri, ignore)]` -- the canonical
+    # opt-out for build-tooling / CLI crates), so the old nextest
+    # `--no-tests=pass` workaround is no longer needed.
+    & cargo '+{{ rust_nightly }}' miri test --all-features --tests @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Stricter miri profiles. Each runs miri over the full workspace
@@ -973,7 +988,7 @@ anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     $env:MIRIFLAGS = "-Zmiri-tree-borrows $($env:MIRIFLAGS)".Trim()
     $env:RUSTFLAGS = "--cfg miri_tree_borrows $($env:RUSTFLAGS)".Trim()
-    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @pkg
+    & cargo '+{{ rust_nightly }}' miri test --all-features --tests @pkg
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 [script("pwsh")]
@@ -983,7 +998,7 @@ anvil-miri-strict-provenance: anvil-miri-strict-provenance-validate-prereqs
     $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
     $env:MIRIFLAGS = "-Zmiri-strict-provenance $($env:MIRIFLAGS)".Trim()
     $env:RUSTFLAGS = "--cfg miri_strict_provenance $($env:RUSTFLAGS)".Trim()
-    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @pkg
+    & cargo '+{{ rust_nightly }}' miri test --all-features --tests @pkg
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Race coverage rotates the miri-many-seeds window daily by
@@ -1003,14 +1018,57 @@ anvil-miri-race-coverage: anvil-miri-race-coverage-validate-prereqs
     $env:MIRIFLAGS = "-Zmiri-many-seeds=$low..$high $($env:MIRIFLAGS)".Trim()
     $env:RUSTFLAGS = "--cfg miri_race_coverage $($env:RUSTFLAGS)".Trim()
     Write-Host "anvil-miri-race-coverage: seed window $low..$high (day $day)"
-    & cargo '+{{ rust_nightly }}' miri nextest run --no-tests=pass @pkg
+    & cargo '+{{ rust_nightly }}' miri test --all-features --tests @pkg
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 [script("pwsh")]
 anvil-careful: anvil-careful-validate-prereqs
     $ErrorActionPreference = 'Stop'
     if ($env:ANVIL_INCLUDE_AFFECTED -eq '--skip') { exit 0 }
-    & cargo '+{{ rust_nightly }}' careful test @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' }) --all-features --locked
+    $pkg = @(if ($env:ANVIL_INCLUDE_AFFECTED) { -split $env:ANVIL_INCLUDE_AFFECTED } else { '--workspace' })
+    # Guard against cargo-careful's stale-sysroot hazard. cargo-careful
+    # builds a custom std ("careful sysroot": debug-assertions + extra UB
+    # checks) into a STABLE cache path -- ProjectDirs(de.ralfj.cargo-careful),
+    # NOT keyed by rustc version -- and runs the workspace build with
+    # `--sysroot <that stable path>`. cargo's fingerprint hashes the
+    # RUSTFLAGS string (the stable sysroot *path*) but not the sysroot's
+    # *contents*. So when the pinned nightly (or the careful tool, which sets
+    # the std-build flags) changes, cargo-careful rebuilds that std in place
+    # while cargo still considers the workspace artifacts up to date -- they
+    # then link against a now-replaced std and fail with metadata /
+    # "found crate compiled by an incompatible version of rustc" errors.
+    #
+    # cargo can't see this, so we track the careful build identity ourselves
+    # (the nightly rustc -- commit hash et al. -- plus the careful tool
+    # version) and `cargo clean` when it changes, forcing the workspace to be
+    # rebuilt against the freshly-built std. The marker lives under target/,
+    # so it is wiped by the clean and travels with any target/ cache.
+    $rustcVV = (& rustc '+{{ rust_nightly }}' -vV | Out-String)
+    if ($LASTEXITCODE -ne 0) { Write-Error 'anvil-careful: could not query nightly rustc version'; exit 1 }
+    $idSource = $rustcVV.Trim() + "`ncargo-careful {{ cargo_careful_version }}"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $idHash = ([System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($idSource)))).Replace('-', '').ToLower()
+    # Human-readable identity for log output: the first `rustc -vV` line
+    # (e.g. "rustc 1.98.0-nightly (<hash> <date>)") plus the careful version.
+    $idLabel = "$(($rustcVV -split "`n")[0].Trim()) + cargo-careful {{ cargo_careful_version }}"
+    $marker = Join-Path 'target' 'anvil/careful-sysroot.id'
+    $prev = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim() } else { $null }
+    if ($null -ne $prev -and $prev -ne $idHash) {
+        Write-Host 'anvil-careful: careful sysroot identity changed since the last run -- running `cargo clean` so the'
+        Write-Host '  workspace is rebuilt against the freshly-built careful std (cargo cannot detect the in-place'
+        Write-Host '  sysroot rebuild on its own, so stale artifacts would otherwise fail with an'
+        Write-Host '  "incompatible version of rustc" / metadata mismatch).'
+        Write-Host "  reason : the pinned nightly toolchain and/or the cargo-careful version changed"
+        Write-Host "  now    : $idLabel"
+        Write-Host "  identity: $($prev.Substring(0, [Math]::Min(12, $prev.Length)))... -> $($idHash.Substring(0, 12))..."
+        cargo clean
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    # Persist the current identity (also seeds the marker on first run, when
+    # there is nothing to clean). Written after the clean so it survives it.
+    New-Item -ItemType Directory -Force -Path (Split-Path $marker) | Out-Null
+    Set-Content -LiteralPath $marker -Value $idHash
+    & cargo '+{{ rust_nightly }}' careful test @pkg --all-features --locked
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Affected tier. `loom` is a permutation-based concurrency model
@@ -1343,32 +1401,32 @@ anvil-examples-validate-prereqs: anvil-tool-rustc-validate-prereqs
 # --- pr-runtime-analysis members ---
 
 [group("anvil-setup")]
-anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install (anvil-tool-cargo-nextest-install installer)
+anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 [group("anvil-setup")]
-anvil-miri-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs
+anvil-miri-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
 
 # The three nightly-miri profiles share the same toolchain prereqs
 # as anvil-miri; they only differ in the MIRIFLAGS / RUSTFLAGS the
 # recipe sets. Separate setup recipes keep the per-check fan-out
 # regular (groups.just can iterate without special-casing).
 [group("anvil-setup")]
-anvil-miri-tree-borrows-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install (anvil-tool-cargo-nextest-install installer)
+anvil-miri-tree-borrows-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 [group("anvil-setup")]
-anvil-miri-tree-borrows-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs
+anvil-miri-tree-borrows-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
 
 [group("anvil-setup")]
-anvil-miri-strict-provenance-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install (anvil-tool-cargo-nextest-install installer)
+anvil-miri-strict-provenance-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 [group("anvil-setup")]
-anvil-miri-strict-provenance-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs
+anvil-miri-strict-provenance-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
 
 [group("anvil-setup")]
-anvil-miri-race-coverage-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install (anvil-tool-cargo-nextest-install installer)
+anvil-miri-race-coverage-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
 [group("anvil-setup")]
-anvil-miri-race-coverage-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs anvil-tool-cargo-nextest-validate-prereqs
+anvil-miri-race-coverage-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
 
 [group("anvil-setup")]
 anvil-careful-setup installer="install": anvil-component-nightly-rust-src-install (anvil-tool-cargo-careful-install installer)
