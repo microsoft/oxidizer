@@ -382,6 +382,4 @@ fn entrypoint(c: &mut Criterion) {
     });
 
     group.finish();
-
-    allocs.print_to_stdout();
 }
