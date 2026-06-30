@@ -143,9 +143,9 @@ impl TimeClock {
     ///
     /// # Panics
     ///
-    /// Panics if the current system time cannot be represented by the target type. In practice
-    /// this never happens in production; it can only occur in tests that move controlled time
-    /// excessively far into the future.
+    /// Panics if the current system time cannot be represented by the target type.
+    /// This can happen if the target type supports a narrower range than `SystemTime`, or in tests
+    /// when controlled time is moved outside the target type's supported range.
     #[expect(
         clippy::match_wild_err_arm,
         clippy::panic,
