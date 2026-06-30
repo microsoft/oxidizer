@@ -197,7 +197,6 @@ fn entry(c: &mut Criterion) {
     });
 
     group.finish();
-    session.print_to_stdout();
 }
 
 criterion_group!(benches, entry);

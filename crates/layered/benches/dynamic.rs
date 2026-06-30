@@ -52,8 +52,6 @@ fn entry(c: &mut Criterion) {
             _ = block_on(service.execute(10));
         });
     });
-
-    session.print_to_stdout();
 }
 
 criterion_group!(benches, entry);
