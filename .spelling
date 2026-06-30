@@ -314,6 +314,7 @@ durations
 dyn
 e.g.
 elidable
+emplace
 end_offset
 entry_offset
 enum
@@ -626,3 +627,7 @@ LFS
 Markdown
 tarball
 tarballs
+ASTs
+DAGs
+representable
+rc
