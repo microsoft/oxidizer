@@ -351,18 +351,20 @@ impl Clock {
     ///
     /// # Panics
     ///
-    /// While this method uses [`TryFrom`] (a fallible conversion), it may panic on conversion failure.
+    /// Panics if the current system time cannot be represented by the target type `T`.
     ///
-    /// In practice, this conversion always succeeds because:
+    /// Callers must choose a target type whose representable range covers the
+    /// [`SystemTime`] values they expect. The conversion can fail in two cases:
     ///
-    /// - The system time returned is always within a normalized range in real environments.
-    /// - Target types that implement [`TryFrom<SystemTime>`][TryFrom] typically support the full valid
-    ///   range of system time values.
+    /// - **In production**, if `T` has a narrower representable range than [`SystemTime`] and the
+    ///   current system time falls outside it.
+    /// - **In tests** using manual time control (via the `test-util` feature), if controlled time
+    ///   is moved outside the target type's supported range.
     ///
-    /// The only theoretical failure case is in tests using manual time control (via the
-    /// `test-util` feature), where time could be moved excessively far into the future,
-    /// potentially exceeding the target type's supported range of values. This is not a concern
-    /// in production.
+    /// For types that support the full valid range of system time values, this conversion always
+    /// succeeds in real environments.
+    ///
+    /// Kept consistent with [`TimeClock::system_time_as`][crate::TimeClock::system_time_as].
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         self.time_clock().system_time_as()
