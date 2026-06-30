@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "The SystemTime returned by the clock is always in normalized range")]
+    #[should_panic(expected = "target type cannot represent the current SystemTime")]
     fn system_time_as_panics_on_conversion_failure() {
         /// A newtype that always fails conversion from `SystemTime`.
         struct AlwaysFailsConversion;
