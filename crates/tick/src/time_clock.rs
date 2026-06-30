@@ -158,15 +158,16 @@ impl TimeClock {
     #[expect(
         clippy::match_wild_err_arm,
         clippy::panic,
-        reason = "the panic might only occur when system time is outside of valid range which won't ever happen in real environments"
+        reason = "conversion failure indicates the chosen target type cannot represent the current SystemTime (or, in tests, controlled time was moved out of range); panicking keeps this API infallible"
     )]
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
         match T::try_from(self.system_time()) {
             Ok(time) => time,
-            Err(_err) => {
-                panic!("The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.")
-            }
+            Err(_err) => panic!(
+                "system_time_as::<{}> failed: target type cannot represent the current SystemTime (or controlled time is out of range)",
+                std::any::type_name::<T>()
+            ),
         }
     }
 
