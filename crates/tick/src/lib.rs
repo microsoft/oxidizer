@@ -77,6 +77,9 @@
 //! - [`Clock`] - Provides an abstraction for time-related operations. Returns absolute time
 //!   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
 //!   time primitives.
+//! - [`TimeClock`] - A simplified, driver-free clock for time retrieval only (no timers).
+//!   Shared by all clock kinds via [`AsRef<TimeClock>`], so time-only APIs accept either a
+//!   [`Clock`] or a `TimeClock`.
 //! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
 //!   is enabled.
 //! - [`Stopwatch`] - Measures elapsed time.
@@ -92,6 +95,38 @@
 //!
 //! - [`FutureExt`] - Extensions for the `Future` trait, providing timeout functionality.
 //! - [`SystemTimeExt`] - Extensions for [`SystemTime`][`std::time::SystemTime`].
+//!
+//! # Time retrieval without timers
+//!
+//! Many call sites only need to *read* the current time and never schedule timers. For these,
+//! [`TimeClock`] is a simplified clock that exposes time retrieval only. Unlike [`Clock`], it
+//! carries no timers, so it needs **no async runtime and no driver** —
+//! [`TimeClock::new_system`] returns a ready-to-use clock backed by real OS time.
+//!
+//! [`TimeClock`] is the common abstraction shared by every clock kind:
+//!
+//! - [`Clock`] implements [`AsRef<TimeClock>`] and exposes
+//!   [`time_clock()`][Clock::time_clock], so a timer-capable clock can be used wherever a
+//!   `TimeClock` is expected.
+//! - With the `test-util` feature, [`ClockControl::to_time_clock`] creates a controlled
+//!   `TimeClock` driven by the same [`ClockControl`] as its [`Clock`] counterpart, so both
+//!   observe identical controlled time.
+//!
+//! As a result, time-only APIs accept either clock seamlessly. [`Stopwatch`], for example,
+//! takes any [`AsRef<TimeClock>`]:
+//!
+//! ```
+//! use tick::{Stopwatch, TimeClock};
+//!
+//! // A driver-free clock that only retrieves time.
+//! let clock = TimeClock::new_system();
+//!
+//! let _now = clock.system_time();
+//!
+//! // `Stopwatch` accepts a `TimeClock` or a `Clock` (both are `AsRef<TimeClock>`).
+//! let stopwatch = Stopwatch::new(&clock);
+//! let _elapsed = stopwatch.elapsed();
+//! ```
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -225,10 +260,6 @@
 //!
 //! - **`tokio`** - Integration with the [Tokio](https://tokio.rs/) runtime. Enables
 //!   [`Clock::new_tokio`] for creating clocks that use Tokio's time facilities.
-//! - **`thread-driven`** - Enables [`Clock::new_thread_driven`], which spawns a dedicated
-//!   background OS thread to advance the clock's timers without any runtime dependency.
-//!   **Discouraged**: prefer driving timers explicitly via a
-//!   [`ClockDriver`][crate::runtime::ClockDriver]. Use only when no runtime is available.
 //! - **`test-util`** - Enables the [`ClockControl`] type for controlling the passage of time
 //!   in tests. This allows you to pause time, advance it manually, or automatically advance
 //!   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
@@ -255,6 +286,7 @@ mod periodic_timer;
 mod state;
 mod stopwatch;
 mod system_time_ext;
+mod time_clock;
 mod timers;
 
 pub mod runtime;
@@ -268,6 +300,7 @@ pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
 pub use stopwatch::Stopwatch;
 pub use system_time_ext::SystemTimeExt;
+pub use time_clock::TimeClock;
 pub use timeout::Timeout;
 
 /// Implements [`ThreadAware`](thread_aware::ThreadAware) for types that don't require any special relocation handling.

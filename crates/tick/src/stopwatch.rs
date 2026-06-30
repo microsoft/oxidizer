@@ -3,12 +3,12 @@
 
 use std::time::{Duration, Instant};
 
-use super::Clock;
+use crate::TimeClock;
 
 /// A stopwatch that facilitates the measurement of elapsed time.
 ///
-/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch()`] or by passing
-/// a [`Clock`] to the [`Stopwatch::new()`] constructor.
+/// An instance of `Stopwatch` is created by calling [`Clock::stopwatch()`][crate::Clock::stopwatch],
+/// [`TimeClock::stopwatch()`], or by passing any clock to the [`Stopwatch::new()`] constructor.
 ///
 /// # Examples
 ///
@@ -24,20 +24,20 @@ use super::Clock;
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct Stopwatch(StopwatchRepr);
-
-#[derive(Debug)]
-enum StopwatchRepr {
-    #[cfg(not(any(feature = "test-util", test)))]
-    System(Instant),
-    #[cfg(any(feature = "test-util", test))]
-    Clock(Clock, Instant),
+pub struct Stopwatch {
+    clock: TimeClock,
+    start: Instant,
 }
 
 impl Stopwatch {
     /// Creates a high-accuracy stopwatch that measures elapsed time.
     ///
-    /// > **Note**: Consider using [`Clock::stopwatch()`] as a shortcut for creating stopwatches.
+    /// The stopwatch accepts any source that can be referenced as a [`TimeClock`], including a
+    /// [`Clock`][crate::Clock] and a [`TimeClock`]. It measures time using the source's clock, so
+    /// stopwatches created from a controlled clock respect the controlled passage of time.
+    ///
+    /// > **Note**: Consider using [`Clock::stopwatch()`][crate::Clock::stopwatch] or
+    /// > [`TimeClock::stopwatch()`] as a shortcut for creating stopwatches.
     ///
     /// # Examples
     ///
@@ -52,43 +52,23 @@ impl Stopwatch {
     /// stopwatch.elapsed()
     /// # }
     /// ```
-    #[cfg_attr(
-        not(any(feature = "test-util", test)),
-        expect(unused_variables, reason = "intentionally not using self-references if test-util is disabled")
-    )]
     #[must_use]
-    pub fn new(clock: &Clock) -> Self {
-        #[cfg(any(feature = "test-util", test))]
-        let repr = StopwatchRepr::Clock(clock.clone(), clock.instant());
-
-        #[cfg(not(any(feature = "test-util", test)))]
-        let repr = StopwatchRepr::System(Instant::now());
-
-        Self(repr)
+    pub fn new(source: impl AsRef<TimeClock>) -> Self {
+        let clock = source.as_ref().clone();
+        let start = clock.instant();
+        Self { clock, start }
     }
 
     /// Returns the elapsed time since the stopwatch was created.
     #[must_use]
     pub fn elapsed(&self) -> Duration {
-        match &self.0 {
-            #[cfg(not(any(feature = "test-util", test)))]
-            StopwatchRepr::System(start) => start.elapsed(),
-
-            #[cfg(any(feature = "test-util", test))]
-            StopwatchRepr::Clock(clock, start) => clock.instant().saturating_duration_since(*start),
-        }
+        self.clock.instant().saturating_duration_since(self.start)
     }
 }
 
 impl From<Stopwatch> for Instant {
     fn from(stopwatch: Stopwatch) -> Self {
-        match stopwatch.0 {
-            #[cfg(not(any(feature = "test-util", test)))]
-            StopwatchRepr::System(start) => start,
-
-            #[cfg(any(feature = "test-util", test))]
-            StopwatchRepr::Clock(_, start) => start,
-        }
+        stopwatch.start
     }
 }
 
@@ -103,6 +83,7 @@ mod test {
     use std::thread::sleep;
 
     use super::*;
+    use crate::Clock;
     use crate::clock_control::ClockControl;
 
     #[test]

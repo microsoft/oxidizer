@@ -8,6 +8,7 @@ use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 
 use crate::state::ClockState;
+use crate::time_clock::TimeClock;
 use crate::timers::TimerKey;
 
 /// Provides an abstraction for time-related operations.
@@ -174,6 +175,7 @@ use crate::timers::TimerKey;
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
+    time: TimeClock,
     affinity: Option<Affinity>,
 }
 
@@ -215,57 +217,11 @@ impl Clock {
     }
 
     pub(crate) fn new(state: ClockState) -> Self {
-        Self { state, affinity: None }
-    }
-
-    /// Creates a self-driving clock backed by a dedicated background OS thread.
-    ///
-    /// The returned clock spawns a single background thread that periodically advances its
-    /// timers, so neither an async runtime nor manual [`ClockDriver`][crate::runtime::ClockDriver]
-    /// polling is required. The thread runs until every clone of the returned [`Clock`] is
-    /// dropped, at which point it observes that the clock is gone and terminates.
-    ///
-    /// # Discouraged
-    ///
-    /// This constructor is **discouraged** and gated behind the `thread-driven` feature. Each
-    /// call spawns an unmanaged background thread with a fixed timer resolution, which is
-    /// wasteful and imprecise compared to driving timers explicitly. Prefer obtaining a
-    /// [`ClockDriver`][crate::runtime::ClockDriver] via the [`runtime`][crate::runtime] module
-    /// and advancing it from your runtime, or use [`Clock::new_tokio`] when running under Tokio.
-    /// Reach for this only when no runtime is available and you accept the trade-offs.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operating system refuses to spawn the background driver thread.
-    #[cfg(feature = "thread-driven")]
-    #[must_use]
-    pub fn new_thread_driven() -> Self {
-        /// How often the background thread advances timers.
-        ///
-        /// A 10ms resolution balances precision with the overhead of the background thread
-        /// that drives timer advancement, mirroring [`Clock::new_tokio`].
-        const TIMER_RESOLUTION: Duration = Duration::from_millis(10);
-
-        // Like the Tokio clock, the thread-driven clock is advanced by a single driver over a
-        // shared timer set. The `Shared` variant intentionally forbids cloning and relocation,
-        // both of which would create configurations the single background driver could not
-        // advance correctly.
-        let (clock, mut driver) = crate::runtime::InactiveClock::new_shared().activate();
-
-        std::thread::Builder::new()
-            .name("tick-clock-driver".to_owned())
-            .spawn(move || {
-                loop {
-                    std::thread::sleep(TIMER_RESOLUTION);
-
-                    if driver.advance_timers(Instant::now()).is_err() {
-                        break;
-                    }
-                }
-            })
-            .expect("spawning a clock driver thread should not fail under normal conditions");
-
-        clock
+        Self {
+            time: TimeClock::from_state(&state),
+            state,
+            affinity: None,
+        }
     }
 
     #[cfg(any(feature = "tokio", test))]
@@ -380,11 +336,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn system_time(&self) -> SystemTime {
-        match self.clock_state() {
-            #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => control.system_time(),
-            ClockState::System(_) => SystemTime::now(),
-        }
+        self.time_clock().system_time()
     }
 
     /// Retrieves the current system time converted to a target type.
@@ -411,22 +363,9 @@ impl Clock {
     /// `test-util` feature), where time could be moved excessively far into the future,
     /// potentially exceeding the target type's supported range of values. This is not a concern
     /// in production.
-    #[expect(
-        clippy::match_wild_err_arm,
-        clippy::panic,
-        reason = "the panic might only occur when system time is outside of valid range which won't ever happen in real environments"
-    )]
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
-        match T::try_from(self.system_time()) {
-            Ok(time) => time,
-            Err(_err) => panic!(
-                "The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.
-                If the target type overflows, it indicates a problem with the target type not supporting valid system time range or
-                we are in tests where the time was moved excessively into the future. Practically, in production, this conversion will
-                always succeed.",
-            ),
-        }
+        self.time_clock().system_time_as()
     }
 
     /// Retrieves the current [`Instant`] time.
@@ -457,11 +396,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn instant(&self) -> Instant {
-        match self.clock_state() {
-            #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => control.instant(),
-            ClockState::System(_) => Instant::now(),
-        }
+        self.time_clock().instant()
     }
 
     /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
@@ -536,11 +471,30 @@ impl Clock {
     pub(crate) fn clock_state(&self) -> &ClockState {
         &self.state
     }
+
+    /// Returns the [`TimeClock`] view of this clock.
+    ///
+    /// A [`TimeClock`] exposes only time retrieval (no timers), and is the common abstraction
+    /// shared by all clock kinds. Use it to pass this clock to APIs — such as
+    /// [`Stopwatch`][crate::Stopwatch] — that only need to read the current time.
+    ///
+    /// This clock also implements [`AsRef<TimeClock>`], so it can be passed directly to such
+    /// APIs without calling this method explicitly.
+    #[must_use]
+    pub fn time_clock(&self) -> &TimeClock {
+        &self.time
+    }
 }
 
 impl AsRef<Self> for Clock {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+impl AsRef<TimeClock> for Clock {
+    fn as_ref(&self) -> &TimeClock {
+        &self.time
     }
 }
 
@@ -654,14 +608,6 @@ mod tests {
         drop(clock);
 
         handle.await.unwrap();
-    }
-
-    #[cfg_attr(miri, ignore)] // The logic we call talks to the real OS, which Miri cannot do.
-    #[cfg(feature = "thread-driven")]
-    #[tokio::test]
-    async fn thread_driven_ensure_timers_advancing() {
-        let clock = Clock::new_thread_driven();
-        clock.delay(Duration::from_millis(15)).await;
     }
 
     #[test]

@@ -168,6 +168,32 @@ impl ClockControl {
         Clock::new(ClockState::ClockControl(self.clone()))
     }
 
+    /// Converts this `ClockControl` into a [`TimeClock`][crate::TimeClock] instance.
+    ///
+    /// The returned [`TimeClock`][crate::TimeClock] provides time retrieval only (no timers) and
+    /// is driven by this `ClockControl`, just like a [`Clock`] created via
+    /// [`to_clock`][Self::to_clock]. Both kinds observe the same controlled time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::ClockControl;
+    ///
+    /// let control = ClockControl::new();
+    /// let time_clock = control.to_time_clock();
+    ///
+    /// let start = time_clock.system_time();
+    /// control.advance(Duration::from_secs(1));
+    ///
+    /// assert_eq!(time_clock.system_time(), start.checked_add(Duration::from_secs(1)).unwrap());
+    /// ```
+    #[must_use]
+    pub fn to_time_clock(&self) -> crate::TimeClock {
+        crate::TimeClock::from_state(&ClockState::ClockControl(self.clone()))
+    }
+
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
     ///
     /// # Examples
