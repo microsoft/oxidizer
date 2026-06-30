@@ -18,10 +18,11 @@
 use core::mem;
 use core::ptr::{self, NonNull};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Arena;
 use super::alloc_value::acquire_chunk_ref;
+use crate::AllocError;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::thin_dst;
 
@@ -73,8 +74,8 @@ impl<A: Allocator + Clone> Arena<A> {
         // pointer is strictly inside the chunk (never one-past-end at
         // `chunk_base + CHUNK_ALIGN`), preserving the mask-based chunk
         // recovery invariant used by the smart pointers' `Drop`.
-        let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError)?.max(elem_align);
-        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
+        let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
+        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         // `total` is an exact reservation size, not a worst-case hint: unlike
         // the slice paths (which permit over-aligned `T` and so add `elem_align`
         // of front-padding slack to their routing hint), the const-assert above

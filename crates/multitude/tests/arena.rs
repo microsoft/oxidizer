@@ -262,10 +262,11 @@ fn local_chunk_allocate_rejects_high_address_from_pathological_allocator() {
 // the regression covers the symmetric bounds check in `Chunk::allocate`.
 #[test]
 fn chunk_allocate_rejects_high_address_from_pathological_allocator() {
-    use allocator_api2::alloc::AllocError;
+    use multitude::AllocError;
     let arena = Arena::builder_in(common::BadAddressAllocator).build();
     let result: Result<multitude::Arc<u64, _>, AllocError> = arena.try_alloc_arc_with(|| 0_u64);
     assert!(result.is_err(), "high-address allocator must produce AllocError");
+    assert!(result.unwrap_err().is_capacity_overflow());
 }
 
 #[test]

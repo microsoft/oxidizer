@@ -25,8 +25,10 @@
 //! # }
 //! ```
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 use zerocopy::FromZeros;
+
+use crate::AllocError;
 
 /// Zero-cost view over an [`Arena`](crate::Arena) for safe zero-initialized allocation.
 ///

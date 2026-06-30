@@ -24,11 +24,12 @@ use core::ptr::{self, NonNull};
 use core::sync::atomic::AtomicU32;
 use core::sync::atomic::{AtomicPtr, AtomicUsize, Ordering, fence};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::chunk_alloc::chunk_alloc_size;
 use super::chunk_provider::ChunkProvider;
 use super::constants::{CHUNK_ALIGN, refcount_overflow_abort};
+use crate::AllocError;
 
 /// A bump-allocation chunk whose allocations can outlive the arena.
 ///

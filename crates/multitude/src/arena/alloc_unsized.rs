@@ -19,11 +19,12 @@ use core::mem;
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 use ptr_meta::Pointee;
 
 use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
+use crate::AllocError;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::constants::max_smart_ptr_align;
@@ -244,7 +245,7 @@ impl<A: Allocator + Clone> Arena<A> {
         init: impl FnOnce(*mut T),
     ) -> Result<Box<T, A>, AllocError> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
-            return Err(AllocError);
+            return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let meta_bytes = mem::size_of::<T::Metadata>();
         // Payload starts at the lowest layout-aligned offset >=
@@ -252,7 +253,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let payload_offset = if meta_bytes == 0 { 0 } else { meta_bytes.max(layout.align()) };
         // Keep the payload pointer inside the reservation for ZSTs.
         let value_bytes = layout.size().max(1);
-        let total = payload_offset.checked_add(value_bytes).ok_or(AllocError)?;
+        let total = payload_offset.checked_add(value_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         // Include alignment slack so the retry fits the chosen chunk.
         let refill_hint = total.saturating_add(layout.align());
         let mut init = Some(init);
@@ -333,7 +334,7 @@ impl<A: Allocator + Clone> Arena<A> {
         init: impl FnOnce(*mut T),
     ) -> Result<NonNull<u8>, AllocError> {
         if layout.align() >= MAX_SMART_PTR_ALIGN {
-            return Err(AllocError);
+            return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let meta_bytes = mem::size_of::<T::Metadata>();
         let value_align = layout.align().max(1);

@@ -42,9 +42,11 @@ macro_rules! impl_arena_string_common {
             ///
             /// # Errors
             ///
-            /// Returns [`allocator_api2::alloc::AllocError`] if the backing
-            /// allocator fails.
-            pub(crate) fn try_with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Result<Self, allocator_api2::alloc::AllocError> {
+            /// Returns [`$crate::AllocError`] if the backing allocator fails,
+            /// or if computing the required capacity overflows `usize`. Use
+            /// [`$crate::AllocError::is_allocator_failure`] and
+            /// [`$crate::AllocError::is_capacity_overflow`] to tell the two apart.
+            pub(crate) fn try_with_capacity_in(cap: usize, arena: &'a $crate::Arena<A>) -> Result<Self, $crate::AllocError> {
                 Ok(Self {
                     inner: $crate::vec::Vec::try_with_capacity_in(cap, arena)?,
                 })
@@ -85,10 +87,12 @@ macro_rules! impl_arena_string_common {
             ///
             /// # Errors
             ///
-            /// Returns [`allocator_api2::alloc::AllocError`] if the backing
-            /// allocator fails.
+            /// Returns [`$crate::AllocError`] if the backing allocator fails,
+            /// or if `len + additional` overflows `usize`. Use
+            /// [`$crate::AllocError::is_allocator_failure`] and
+            /// [`$crate::AllocError::is_capacity_overflow`] to tell the two apart.
             #[inline]
-            pub fn try_reserve(&mut self, additional: usize) -> Result<(), allocator_api2::alloc::AllocError> {
+            pub fn try_reserve(&mut self, additional: usize) -> Result<(), $crate::AllocError> {
                 self.inner.try_reserve(additional)
             }
 
@@ -103,10 +107,12 @@ macro_rules! impl_arena_string_common {
             ///
             /// # Errors
             ///
-            /// Returns [`allocator_api2::alloc::AllocError`] if the backing
-            /// allocator fails.
+            /// Returns [`$crate::AllocError`] if the backing allocator fails,
+            /// or if `len + additional` overflows `usize`. Use
+            /// [`$crate::AllocError::is_allocator_failure`] and
+            /// [`$crate::AllocError::is_capacity_overflow`] to tell the two apart.
             #[inline]
-            pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), allocator_api2::alloc::AllocError> {
+            pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), $crate::AllocError> {
                 self.inner.try_reserve_exact(additional)
             }
 
