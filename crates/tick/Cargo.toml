@@ -37,6 +37,10 @@ test-util = []
 serde = ["dep:serde_core"]
 # Integration with tokio runtime
 tokio = ["dep:tokio", "rt-shared"]
+# Spawns a dedicated background OS thread to drive the clock's timers via
+# `Clock::new_thread_driven`. Discouraged: prefer driving timers explicitly through a
+# `ClockDriver` owned by your runtime. Useful only when no runtime is available.
+thread-driven = ["rt-shared"]
 # Enables primitives for runtimes that drive the clock from a single shared driver task,
 # such as multi-threaded async runtimes (e.g. Tokio). Enables `InactiveClock::new_shared`.
 rt-shared = []

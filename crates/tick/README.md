@@ -209,16 +209,20 @@ This crate provides several optional features that can be enabled in your `Cargo
 
 * **`tokio`** - Integration with the [Tokio][__link26] runtime. Enables
   [`Clock::new_tokio`][__link27] for creating clocks that use Tokio’s time facilities.
-* **`test-util`** - Enables the [`ClockControl`][__link28] type for controlling the passage of time
+* **`thread-driven`** - Enables [`Clock::new_thread_driven`][__link28], which spawns a dedicated
+  background OS thread to advance the clock’s timers without any runtime dependency.
+  **Discouraged**: prefer driving timers explicitly via a
+  [`ClockDriver`][__link29]. Use only when no runtime is available.
+* **`test-util`** - Enables the [`ClockControl`][__link30] type for controlling the passage of time
   in tests. This allows you to pause time, advance it manually, or automatically advance
   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
-* **`serde`** - Adds serialization and deserialization support via [serde][__link29].
-* **`fmt`** - Enables the [`fmt`][__link30] module with utilities for formatting `SystemTime` into
+* **`serde`** - Adds serialization and deserialization support via [serde][__link31].
+* **`fmt`** - Enables the [`fmt`][__link32] module with utilities for formatting `SystemTime` into
   various formats (e.g., ISO 8601, RFC 2822).
 
 ## Additional Examples
 
-The [time examples][__link31]
+The [time examples][__link33]
 contain additional examples of how to use the time primitives.
 
 
@@ -227,7 +231,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbL9BDcNdcFMwb7BisAbHhDTMbCjff6Srdm8MbyVtuTcwxtz5hZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJ8hc2s3gZx4b8idQ9PYa1Nwb4s85eCLCzx8b2-hcmlUV9E1hZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
  [__link0]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.3.5/tick/?search=FutureExt
@@ -249,11 +253,13 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link25]: https://docs.rs/tick/0.3.5/tick/?search=Stopwatch
  [__link26]: https://tokio.rs/
  [__link27]: https://docs.rs/tick/0.3.5/tick/?search=Clock::new_tokio
- [__link28]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
- [__link29]: https://serde.rs/
+ [__link28]: https://docs.rs/tick/0.3.5/tick/?search=Clock::new_thread_driven
+ [__link29]: https://docs.rs/tick/0.3.5/tick/?search=runtime::ClockDriver
  [__link3]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
- [__link30]: https://docs.rs/tick/0.3.5/tick/fmt/index.html
- [__link31]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
+ [__link30]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
+ [__link31]: https://serde.rs/
+ [__link32]: https://docs.rs/tick/0.3.5/tick/fmt/index.html
+ [__link33]: https://github.com/microsoft/oxidizer/tree/main/crates/tick/examples
  [__link4]: https://docs.rs/tick/0.3.5/tick/?search=Stopwatch
  [__link5]: https://docs.rs/tick/0.3.5/tick/?search=Delay
  [__link6]: https://docs.rs/tick/0.3.5/tick/?search=PeriodicTimer

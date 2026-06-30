@@ -225,6 +225,10 @@
 //!
 //! - **`tokio`** - Integration with the [Tokio](https://tokio.rs/) runtime. Enables
 //!   [`Clock::new_tokio`] for creating clocks that use Tokio's time facilities.
+//! - **`thread-driven`** - Enables [`Clock::new_thread_driven`], which spawns a dedicated
+//!   background OS thread to advance the clock's timers without any runtime dependency.
+//!   **Discouraged**: prefer driving timers explicitly via a
+//!   [`ClockDriver`][crate::runtime::ClockDriver]. Use only when no runtime is available.
 //! - **`test-util`** - Enables the [`ClockControl`] type for controlling the passage of time
 //!   in tests. This allows you to pause time, advance it manually, or automatically advance
 //!   timers for fast, deterministic testing. **Only enable this in `dev-dependencies`.**
