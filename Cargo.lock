@@ -25,12 +25,6 @@ dependencies = [
 
 [[package]]
 name = "alloc_tracker"
-version = "0.5.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70bc5b36f4124124cdeae56ea9527e8db3e90f7ac7382c0b7a07d780163629a4"
-
-[[package]]
-name = "alloc_tracker"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0160148c6badd4fb18605f8373adda8d89a43abcacf9a1b7868aa33643eacdb7"
@@ -599,7 +593,7 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 name = "bytesbuf"
 version = "0.5.6"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "bytes",
  "criterion",
  "gungraun",
@@ -634,7 +628,7 @@ dependencies = [
 name = "cachet"
 version = "0.7.3"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "anyspawn",
  "bytesbuf",
  "cachet_memory",
@@ -1297,7 +1291,7 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 name = "fetch"
 version = "0.12.1"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "anyspawn",
  "argh",
  "bytes",
@@ -1839,7 +1833,7 @@ dependencies = [
 name = "http_extensions"
 version = "0.6.4"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "bytes",
  "bytesbuf",
  "criterion",
@@ -2257,7 +2251,7 @@ dependencies = [
 name = "layered"
 version = "0.3.5"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "criterion",
  "futures",
  "infinity_pool",
@@ -2419,7 +2413,7 @@ dependencies = [
 name = "multitude"
 version = "0.6.0"
 dependencies = [
- "alloc_tracker 0.6.0",
+ "alloc_tracker",
  "allocator-api2 0.2.21",
  "allocator-api2 0.4.0",
  "bolero",
@@ -3363,7 +3357,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 name = "seatbelt"
 version = "0.5.9"
 dependencies = [
- "alloc_tracker 0.5.25",
+ "alloc_tracker",
  "criterion",
  "fastrand",
  "futures",
