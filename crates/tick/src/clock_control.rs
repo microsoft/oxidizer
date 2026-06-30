@@ -187,7 +187,10 @@ impl ClockControl {
     /// let start = time_clock.system_time();
     /// control.advance(Duration::from_secs(1));
     ///
-    /// assert_eq!(time_clock.system_time(), start.checked_add(Duration::from_secs(1)).unwrap());
+    /// assert_eq!(
+    ///     time_clock.system_time(),
+    ///     start.checked_add(Duration::from_secs(1)).unwrap()
+    /// );
     /// ```
     #[must_use]
     pub fn to_time_clock(&self) -> crate::TimeClock {
