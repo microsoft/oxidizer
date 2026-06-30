@@ -86,4 +86,32 @@ mod tests {
         let error = MyTestError::caused_by("actual message");
         assert_error_message!(error, "expected message");
     }
+
+    // The three following tests each make exactly one branch of the
+    // accepted-continuation chain in `assert_error_message_impl` the
+    // deciding one (the others false), so the assertion only passes while
+    // those `||`s remain `||`. They exercise the impl directly (rather than
+    // synthesizing real backtrace/caused-by/trace output) because the
+    // strings are what the impl actually inspects.
+    #[test]
+    fn impl_accepts_backtrace_continuation() {
+        super::assert_error_message_impl("base\n\nBacktrace:\n at ...", "base");
+    }
+
+    #[test]
+    fn impl_accepts_caused_by_continuation() {
+        super::assert_error_message_impl("base\ncaused by: inner", "base");
+    }
+
+    #[test]
+    fn impl_accepts_error_trace_continuation() {
+        super::assert_error_message_impl("base\n> trace entry", "base");
+    }
+
+    #[test]
+    #[should_panic(expected = "left : base\nright: base mismatch")]
+    fn impl_rejects_unrelated_continuation() {
+        // A remainder that matches none of the accepted prefixes must fail.
+        super::assert_error_message_impl("base mismatch", "base");
+    }
 }
