@@ -10,13 +10,13 @@ use core::mem::ManuallyDrop;
 use core::ops::{Bound, Deref, DerefMut, Index, IndexMut, RangeBounds};
 use core::slice::SliceIndex;
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 use widestring::Utf16Str;
 
 use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
-use crate::{Arc, Arena, Box, FromIn, Rc};
+use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 
 /// A growable, mutable UTF-16 string that lives in an [`Arena`].
 ///

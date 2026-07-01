@@ -6,9 +6,10 @@
 //! All public methods are documented on [`Arena`] itself; this file
 //! groups the family together to keep the central `mod.rs` smaller.
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Arena;
+use crate::AllocError;
 use crate::arena::ExpectAlloc;
 use crate::strings::{FromUtf16Error, String};
 use crate::vec::Vec;

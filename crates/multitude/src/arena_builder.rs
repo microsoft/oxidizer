@@ -4,10 +4,10 @@
 use core::fmt;
 use core::marker::PhantomData;
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 
-use crate::Arena;
 use crate::internal::constants::{MAX_NORMAL_ALLOC, MIN_CHUNK_BYTES, SizeClass};
+use crate::{AllocError, Arena};
 
 /// Minimum value accepted for the `max_normal_alloc` knob.
 const MIN_MAX_NORMAL_ALLOC: usize = 4096;

@@ -7,7 +7,9 @@
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
+
+use crate::AllocError;
 
 /// Computes the canonical `Layout` for a chunk allocation.
 ///
@@ -37,7 +39,7 @@ pub(in crate::internal) fn chunk_layout(
     debug_assert!(base_align >= value_align, "base_align must be >= value_align");
     // Round the *size* up to the value alignment (not the base alignment).
     let rounded = chunk_alloc_size(header_size, payload_size, value_align)?;
-    Layout::from_size_align(rounded, base_align).map_err(|_| AllocError)
+    Layout::from_size_align(rounded, base_align).map_err(|_| AllocError::CAPACITY_OVERFLOW)
 }
 
 /// Exact byte footprint of a chunk allocation: the rounded `Layout::size()`
@@ -46,9 +48,9 @@ pub(in crate::internal) fn chunk_layout(
 #[inline]
 pub(in crate::internal) fn chunk_alloc_size(header_size: usize, payload_size: usize, value_align: usize) -> Result<usize, AllocError> {
     debug_assert!(value_align.is_power_of_two(), "value_align must be a power of two");
-    let total = header_size.checked_add(payload_size).ok_or(AllocError)?;
+    let total = header_size.checked_add(payload_size).ok_or(AllocError::CAPACITY_OVERFLOW)?;
     let mask = value_align - 1;
-    Ok(total.checked_add(mask).ok_or(AllocError)? & !mask)
+    Ok(total.checked_add(mask).ok_or(AllocError::CAPACITY_OVERFLOW)? & !mask)
 }
 
 /// Allocates a chunk backing allocation using [`chunk_layout`].
@@ -71,14 +73,14 @@ pub(in crate::internal) fn alloc_chunk_raw<A: Allocator>(
     let raw = allocator.allocate(layout)?;
     let raw_u8_ptr: *mut u8 = raw.cast::<u8>().as_ptr();
     let start_addr = raw_u8_ptr as usize;
-    let end_addr = start_addr.checked_add(layout.size()).ok_or(AllocError)?;
+    let end_addr = start_addr.checked_add(layout.size()).ok_or(AllocError::CAPACITY_OVERFLOW)?;
     if end_addr > isize::MAX as usize {
         // SAFETY: matches the `allocator.allocate` pair; nothing has
         // been stored in the allocation yet.
         unsafe {
             allocator.deallocate(NonNull::new_unchecked(raw_u8_ptr), layout);
         }
-        return Err(AllocError);
+        return Err(AllocError::CAPACITY_OVERFLOW);
     }
     Ok((raw_u8_ptr, layout))
 }

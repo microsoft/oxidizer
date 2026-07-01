@@ -10,13 +10,13 @@
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Arena;
-use crate::Alloc;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::rc::Rc;
+use crate::{Alloc, AllocError};
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Allocate uninitialized space for a `T`, returning `Alloc<MaybeUninit<T>>`.

@@ -4,9 +4,10 @@
 
 use core::mem;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Vec;
+use crate::AllocError;
 use crate::arena::{ExpectAlloc, panic_alloc};
 use crate::internal::arena_buf::ArenaBuf;
 
@@ -388,7 +389,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     /// alignment is at least 32 KiB.
     #[inline]
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), AllocError> {
-        let needed = self.buf.len().checked_add(additional).ok_or(AllocError)?;
+        let needed = self.buf.len().checked_add(additional).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         if needed <= self.buf.cap() {
             return Ok(());
         }
