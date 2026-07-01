@@ -56,13 +56,11 @@ function Get-LatestStableRustVersion {
             throw "No stable release found"
         }
 
-        # Extract major.minor version (e.g., "1.92.0" -> "1.92")
-        if ($stableRelease.tag_name -match '^(\d+\.\d+)\.\d+$') {
-            $version = $Matches[1]
+        # Keep the full x.y.z version (e.g., "1.92.0") so the pinned Cargo bugfix patch is preserved
+        if ($stableRelease.tag_name -match '^\d+\.\d+\.\d+$') {
             return @{
                 Success = $true
-                Version = $version
-                FullVersion = $stableRelease.tag_name
+                Version = $stableRelease.tag_name
             }
         }
         else {
@@ -184,7 +182,7 @@ Write-Host "  RUST_NIGHTLY_EXTERNAL_TYPES: $currentRustNightlyExternal"
 Write-Host ""
 
 Write-Host "New versions:"
-Write-Host "  RUST_LATEST                : $newStableVersion (full: $($stableResult.FullVersion))"
+Write-Host "  RUST_LATEST                : $newStableVersion"
 Write-Host "  RUST_NIGHTLY               : $yesterdayNightly"
 
 if ($externalTypesResult.Success) {
