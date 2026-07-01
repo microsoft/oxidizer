@@ -16,9 +16,9 @@ const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hol
 
 /// The number of processors to use for the registry.
 ///
-/// This can be set to `Auto` to use the default number of processors,
-/// or `Manual` to specify a specific number of processors.
-/// The `All` variant is used to specify that all processors should be used.
+/// Use `Auto` for the default number of processors, `Manual` to require an exact
+/// number of processors, `AtMost` to request an upper bound that is satisfied by
+/// fewer processors when the hardware offers fewer, or `All` to use every processor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ProcessorCount {
     /// Use the default number of processors. Right now this is equivalent to using
@@ -26,7 +26,16 @@ pub enum ProcessorCount {
     #[default]
     Auto,
     /// Use a specific number of processors.
+    ///
+    /// Construction fails if the hardware offers fewer processors than requested.
     Manual(NonZero<usize>),
+    /// Use up to this many processors, or every available processor when the
+    /// hardware offers fewer than requested.
+    ///
+    /// This suits callers that want to cap resource usage while still running on
+    /// smaller machines. For example, `AtMost(32)` uses 32 processors on a machine
+    /// with at least 32, and all of them on a machine with fewer.
+    AtMost(NonZero<usize>),
     /// Use all processors.
     All,
 }
@@ -72,6 +81,15 @@ impl ThreadRegistry {
         let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
+            ProcessorCount::AtMost(max) => {
+                // Clamp the ceiling to what the hardware actually offers so a larger
+                // request than the machine provides is satisfied by taking every
+                // available processor instead of failing.
+                let available = hardware.processors().len();
+                let count =
+                    NonZero::new(max.get().min(available)).expect("a processor set is never empty, so the clamped count is at least one");
+                builder.take(count)
+            }
         }
         .expect("Not enough processors available");
 
@@ -358,6 +376,31 @@ mod test_fake_hardware {
     #[should_panic(expected = "Not enough processors available")]
     fn manual_exceeds_available_panics() {
         let _registry = registry_from_fake(&ProcessorCount::Manual(nz!(5)), 2, 1);
+    }
+
+    #[test]
+    fn at_most_below_available_uses_requested_count() {
+        let registry = registry_from_fake(&ProcessorCount::AtMost(nz!(3)), 8, 2);
+
+        assert_eq!(registry.num_affinities(), 3);
+        assert_eq!(registry.affinities().count(), 3);
+    }
+
+    #[test]
+    fn at_most_equal_to_available_uses_all() {
+        let registry = registry_from_fake(&ProcessorCount::AtMost(nz!(8)), 8, 2);
+
+        assert_eq!(registry.num_affinities(), 8);
+    }
+
+    #[test]
+    fn at_most_exceeds_available_clamps_to_all() {
+        // A ceiling larger than the machine provides yields every processor
+        // rather than panicking, unlike `Manual`.
+        let registry = registry_from_fake(&ProcessorCount::AtMost(nz!(32)), 4, 2);
+
+        assert_eq!(registry.num_affinities(), 4);
+        assert_eq!(registry.affinities().count(), 4);
     }
 
     #[test]
