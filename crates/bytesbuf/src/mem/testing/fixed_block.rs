@@ -53,8 +53,10 @@ use crate::mem::{BlockSize, Memory};
 /// data.advance(16);
 /// assert_eq!(data.first_slice().len(), 13); // Remaining 13 bytes in second block.
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thread_aware::ThreadAware)]
 pub struct FixedBlockMemory {
+    // Immutable, read-only configuration shared without contention, so there is nothing to relocate.
+    #[thread_aware(skip)]
     inner: Arc<FixedBlockMemoryInner>,
 }
 
@@ -94,14 +96,6 @@ impl Memory for FixedBlockMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
-    }
-}
-
-impl thread_aware::ThreadAware for FixedBlockMemory {
-    #[cfg_attr(test, mutants::skip)] // No thread-affine state to relocate.
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
-        // The wrapped state is immutable, read-only configuration shared without contention, so
-        // there is nothing to relocate.
     }
 }
 

@@ -118,11 +118,11 @@ const CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfi
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
         // The wrapped provider carries the thread-affine I/O resources and is relocated
-        // automatically when this provider moves between threads. The closure captures only the
-        // inert optimal-memory configuration.
+        // automatically when this provider moves between threads. The closure is inert, referencing
+        // only a constant.
         let io_memory = self.io_context.io_memory();
 
-        WrappingMemory::new(io_memory, move |io_memory, min_len| {
+        WrappingMemory::new(io_memory, |io_memory, min_len| {
             io_memory.reserve_with_config(min_len, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
@@ -150,7 +150,7 @@ impl IoContext {
 
 /// The thread-affine I/O memory provider. In a real application this would carry per-thread I/O
 /// resources; here it holds no state and just performs the allocation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thread_aware::ThreadAware)]
 struct IoMemory;
 
 impl IoMemory {
@@ -173,12 +173,6 @@ impl IoMemory {
 impl bytesbuf::mem::Memory for IoMemory {
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve_with_config(min_bytes, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
-    }
-}
-
-impl thread_aware::ThreadAware for IoMemory {
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
-        // A real provider would relocate its per-thread I/O resources here.
     }
 }
 

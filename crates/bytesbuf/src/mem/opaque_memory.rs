@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
 
 use crate::mem::{Memory, MemoryShared};
 
@@ -14,7 +13,7 @@ use crate::mem::{Memory, MemoryShared};
 /// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards [`ThreadAware`]
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
 /// provider. Cloning the adapter clones the wrapped provider, so each clone is independent.
-#[derive(Debug)]
+#[derive(Debug, ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,
 }
@@ -63,13 +62,6 @@ impl Memory for OpaqueMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
         self.reserve(min_bytes)
-    }
-}
-
-impl ThreadAware for OpaqueMemory {
-    #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        self.inner.relocate(source, destination);
     }
 }
 

@@ -38,17 +38,10 @@ use crate::mem::{BlockSize, Memory};
 /// ```
 ///
 /// [1]: crate::mem::GlobalPool
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, thread_aware::ThreadAware)]
 pub struct TransparentMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.
     _placeholder: (),
-}
-
-impl thread_aware::ThreadAware for TransparentMemory {
-    #[cfg_attr(test, mutants::skip)] // No thread-affine state to relocate.
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
-        // This provider holds no thread-affine state, so there is nothing to relocate.
-    }
 }
 
 impl TransparentMemory {

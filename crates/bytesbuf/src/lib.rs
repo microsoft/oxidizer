@@ -340,12 +340,11 @@
 //! impl HasMemory for UdpConnection {
 //!     fn memory(&self) -> impl MemoryShared {
 //!         // The wrapped provider carries any thread-affine state and is relocated automatically
-//!         // when moved between threads. The closure captures only inert configuration.
+//!         // when moved between threads. The closure is inert, referencing only a constant.
 //!         let io_memory = self.io_context.io_memory();
-//!         let configuration = UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION;
 //!
-//!         WrappingMemory::new(io_memory, move |io_memory, min_len| {
-//!             io_memory.reserve_with_config(min_len, &configuration)
+//!         WrappingMemory::new(io_memory, |io_memory, min_len| {
+//!             io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
 //!         })
 //!     }
 //! }
@@ -357,7 +356,7 @@
 //! # impl IoContext {
 //! #     pub fn io_memory(&self) -> IoMemory { IoMemory }
 //! # }
-//! # #[derive(Clone, Debug)]
+//! # #[derive(Clone, Debug, thread_aware::ThreadAware)]
 //! # struct IoMemory;
 //! # impl IoMemory {
 //! #     fn reserve_with_config(&self, min_len: usize, _configuration: &MemoryConfiguration) -> BytesBuf {
@@ -366,9 +365,6 @@
 //! # }
 //! # impl Memory for IoMemory {
 //! #     fn reserve(&self, min_bytes: usize) -> BytesBuf { self.reserve_with_config(min_bytes, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION) }
-//! # }
-//! # impl thread_aware::ThreadAware for IoMemory {
-//! #     fn relocate(&mut self, _s: Option<thread_aware::affinity::Affinity>, _d: thread_aware::affinity::Affinity) {}
 //! # }
 //! # #[derive(Clone, Copy)]
 //! # struct MemoryConfiguration { requires_page_alignment: bool, zero_memory_on_release: bool, requires_registered_memory: bool }

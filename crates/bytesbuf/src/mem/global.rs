@@ -35,16 +35,9 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thread_aware::ThreadAware)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
-}
-
-impl thread_aware::ThreadAware for GlobalPool {
-    #[cfg_attr(test, mutants::skip)]
-    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
-        self.inner.relocate(source, destination);
-    }
 }
 
 impl GlobalPool {
