@@ -58,10 +58,21 @@ use crate::mem::Memory;
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CallbackMemory<D> {
     data: D,
     reserve_fn: fn(&D, usize) -> BytesBuf,
+}
+
+impl<D> Debug for CallbackMemory<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `data` is deliberately not formatted so that `CallbackMemory` is `Debug` regardless of
+        // whether `D` is, which keeps it usable with thread-aware data that is intentionally not
+        // `Debug` (e.g. a tuple containing a non-`Debug` field).
+        f.debug_struct("CallbackMemory")
+            .field("reserve_fn", &self.reserve_fn)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<D> CallbackMemory<D> {
@@ -100,7 +111,7 @@ impl<D> CallbackMemory<D> {
 
 impl<D> Memory for CallbackMemory<D>
 where
-    D: Debug + Send + Sync + 'static,
+    D: Send + Sync + 'static,
 {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
@@ -237,5 +248,27 @@ mod tests {
 
         // The provider remains usable after relocation.
         assert!(provider.reserve(32).capacity() >= 32);
+    }
+
+    #[test]
+    fn works_with_non_debug_data() {
+        // Data that is intentionally not `Debug`, to confirm `CallbackMemory` does not require it.
+        #[derive(Clone)]
+        struct NotDebug {
+            inner: TransparentMemory,
+        }
+
+        let provider = CallbackMemory::new(
+            NotDebug {
+                inner: TransparentMemory::new(),
+            },
+            |data: &NotDebug, min_bytes| data.inner.reserve(min_bytes),
+        );
+
+        assert!(Memory::reserve(&provider, 64).capacity() >= 64);
+
+        // `CallbackMemory` is still `Debug` even though its data is not.
+        let rendered = format!("{provider:?}");
+        assert!(rendered.contains("CallbackMemory"));
     }
 }
