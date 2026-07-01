@@ -77,6 +77,9 @@
 //! - [`Clock`] - Provides an abstraction for time-related operations. Returns absolute time
 //!   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
 //!   time primitives.
+//! - [`SimpleClock`] - A simplified, driver-free clock for time retrieval only (no timers).
+//!   Shared by all clock kinds via [`AsRef<SimpleClock>`], so time-only APIs accept either a
+//!   [`Clock`] or a `SimpleClock`.
 //! - [`ClockControl`] - Controls the passage of time. Available when the `test-util` feature
 //!   is enabled.
 //! - [`Stopwatch`] - Measures elapsed time.
@@ -92,6 +95,38 @@
 //!
 //! - [`FutureExt`] - Extensions for the `Future` trait, providing timeout functionality.
 //! - [`SystemTimeExt`] - Extensions for [`SystemTime`][`std::time::SystemTime`].
+//!
+//! # Time retrieval without timers
+//!
+//! Many call sites only need to *read* the current time and never schedule timers. For these,
+//! [`SimpleClock`] is a simplified clock that exposes time retrieval only. Unlike [`Clock`], it
+//! carries no timers, so it needs **no async runtime and no driver** —
+//! [`SimpleClock::new_system`] returns a ready-to-use clock backed by real OS time.
+//!
+//! [`SimpleClock`] is the common abstraction shared by every clock kind:
+//!
+//! - [`Clock`] implements [`AsRef<SimpleClock>`] and exposes
+//!   [`simple_clock()`][Clock::simple_clock], so a timer-capable clock can be used wherever a
+//!   `SimpleClock` is expected.
+//! - With the `test-util` feature, [`ClockControl::to_simple_clock`] creates a controlled
+//!   `SimpleClock` driven by the same [`ClockControl`] as its [`Clock`] counterpart, so both
+//!   observe identical controlled time.
+//!
+//! As a result, time-only APIs accept either clock seamlessly. [`Stopwatch`], for example,
+//! takes any [`AsRef<SimpleClock>`]:
+//!
+//! ```
+//! use tick::{SimpleClock, Stopwatch};
+//!
+//! // A driver-free clock that only retrieves time.
+//! let clock = SimpleClock::new_system();
+//!
+//! let _now = clock.system_time();
+//!
+//! // `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
+//! let stopwatch = Stopwatch::new(&clock);
+//! let _elapsed = stopwatch.elapsed();
+//! ```
 //!
 //! # Machine-Centric vs. Human-Centric Time
 //!
@@ -248,6 +283,7 @@ pub mod fmt;
 
 mod future_ext;
 mod periodic_timer;
+mod simple_clock;
 mod state;
 mod stopwatch;
 mod system_time_ext;
@@ -262,6 +298,7 @@ pub use delay::Delay;
 pub use error::{Error, Result};
 pub use future_ext::FutureExt;
 pub use periodic_timer::PeriodicTimer;
+pub use simple_clock::SimpleClock;
 pub use stopwatch::Stopwatch;
 pub use system_time_ext::SystemTimeExt;
 pub use timeout::Timeout;

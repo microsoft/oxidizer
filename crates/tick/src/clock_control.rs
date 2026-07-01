@@ -168,6 +168,35 @@ impl ClockControl {
         Clock::new(ClockState::ClockControl(self.clone()))
     }
 
+    /// Converts this `ClockControl` into a [`SimpleClock`][crate::SimpleClock] instance.
+    ///
+    /// The returned [`SimpleClock`][crate::SimpleClock] provides time retrieval only (no timers) and
+    /// is driven by this `ClockControl`, just like a [`Clock`] created via
+    /// [`to_clock`][Self::to_clock]. Both kinds observe the same controlled time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    ///
+    /// use tick::ClockControl;
+    ///
+    /// let control = ClockControl::new();
+    /// let simple_clock = control.to_simple_clock();
+    ///
+    /// let start = simple_clock.system_time();
+    /// control.advance(Duration::from_secs(1));
+    ///
+    /// assert_eq!(
+    ///     simple_clock.system_time(),
+    ///     start.checked_add(Duration::from_secs(1)).unwrap()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn to_simple_clock(&self) -> crate::SimpleClock {
+        crate::SimpleClock::from_control(self.clone())
+    }
+
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
     ///
     /// # Examples
@@ -391,6 +420,18 @@ impl From<ClockControl> for Clock {
 impl From<&ClockControl> for Clock {
     fn from(control: &ClockControl) -> Self {
         control.to_clock()
+    }
+}
+
+impl From<ClockControl> for crate::SimpleClock {
+    fn from(control: ClockControl) -> Self {
+        Self::from_control(control)
+    }
+}
+
+impl From<&ClockControl> for crate::SimpleClock {
+    fn from(control: &ClockControl) -> Self {
+        control.to_simple_clock()
     }
 }
 
