@@ -89,8 +89,8 @@ impl HttpBodyBuilder {
     /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
     ///
     /// The provided memory provider is type-erased and used in place of the global per-thread
-    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: its thread-affine state is
-    /// relocated when the builder moves between threads.
+    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: if this builder is relocated
+    /// (via [`ThreadAware`]), the provider's thread-affine state is relocated as well.
     #[must_use]
     pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
