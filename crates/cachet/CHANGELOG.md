@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.4] - 2026-07-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `tick`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - upgrade alloc_tracker from 0.5.25 to 0.6.0 ([#513](https://github.com/microsoft/oxidizer/pull/513))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
+- 🔄 Continuous Integration
+
+  - run cargo udeps with and without --all-targets; remove unused dev-dependencies ([#527](https://github.com/microsoft/oxidizer/pull/527))
+
 ## [0.7.3] - 2026-06-26
 
 - 🔧 Maintenance
