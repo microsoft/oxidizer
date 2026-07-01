@@ -328,7 +328,7 @@
 //! # struct UdpConnection {
 //! #     io_context: IoContext,
 //! # }
-//! use bytesbuf::mem::{HasMemory, MemoryShared, WrappingMemory};
+//! use bytesbuf::mem::{CallbackMemory, HasMemory, MemoryShared};
 //!
 //! /// Represents the optimal memory configuration for a UDP connection when reserving I/O memory.
 //! const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfiguration {
@@ -339,11 +339,11 @@
 //!
 //! impl HasMemory for UdpConnection {
 //!     fn memory(&self) -> impl MemoryShared {
-//!         // The wrapped provider carries any thread-affine state and is relocated automatically
-//!         // when moved between threads. The closure is inert, referencing only a constant.
+//!         // The I/O memory provider carries the thread-affine state and is relocated automatically
+//!         // when the returned provider moves between threads.
 //!         let io_memory = self.io_context.io_memory();
 //!
-//!         WrappingMemory::new(io_memory, |io_memory, min_len| {
+//!         CallbackMemory::new(io_memory, |io_memory, min_len| {
 //!             io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
 //!         })
 //!     }
@@ -351,12 +351,13 @@
 //!
 //! # use bytesbuf::BytesBuf;
 //! # use bytesbuf::mem::Memory;
+//! # use thread_aware::ThreadAware;
 //! # #[derive(Clone, Debug)]
 //! # struct IoContext;
 //! # impl IoContext {
 //! #     pub fn io_memory(&self) -> IoMemory { IoMemory }
 //! # }
-//! # #[derive(Clone, Debug, thread_aware::ThreadAware)]
+//! # #[derive(Clone, Debug, ThreadAware)]
 //! # struct IoMemory;
 //! # impl IoMemory {
 //! #     fn reserve_with_config(&self, min_len: usize, _configuration: &MemoryConfiguration) -> BytesBuf {

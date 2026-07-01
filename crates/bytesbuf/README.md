@@ -300,7 +300,7 @@ Example of returning a memory provider that performs configuration for optimal m
 `examples/bb_has_memory_optimizing.rs` for full code):
 
 ```rust
-use bytesbuf::mem::{HasMemory, MemoryShared, WrappingMemory};
+use bytesbuf::mem::{CallbackMemory, HasMemory, MemoryShared};
 
 /// Represents the optimal memory configuration for a UDP connection when reserving I/O memory.
 const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfiguration {
@@ -311,11 +311,11 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
-        // The wrapped provider carries any thread-affine state and is relocated automatically
-        // when moved between threads. The closure is inert, referencing only a constant.
+        // The I/O memory provider carries the thread-affine state and is relocated automatically
+        // when the returned provider moves between threads.
         let io_memory = self.io_context.io_memory();
 
-        WrappingMemory::new(io_memory, |io_memory, min_len| {
+        CallbackMemory::new(io_memory, |io_memory, min_len| {
             io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
@@ -470,7 +470,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbXO2xJ3o5Fmkb7pZwaFUwcowbKmlyvCmQz_gb-9IJisJlCothZIGCaGJ5dGVzYnVmZTAuNS42
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbs5zBudsiH2Ebfi6hdmXMj7AbPOaPxYSjDjwbgPW131WqjAphZIGCaGJ5dGVzYnVmZTAuNS42
  [__link0]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView

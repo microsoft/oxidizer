@@ -393,20 +393,15 @@ mod tests {
 
     #[test]
     fn memory_returns_configured_provider() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicBool, Ordering};
-
         use bytesbuf::mem::testing::TransparentMemory;
-        use bytesbuf::mem::{OpaqueMemory, WrappingMemory};
+        use bytesbuf::mem::{CallbackMemory, OpaqueMemory};
 
-        let callback_called = Arc::new(AtomicBool::new(false));
+        // The configured provider adds a distinctive marker offset to every reservation, so we can
+        // confirm the stream returns this provider rather than a default one.
+        const MARKER_OFFSET: usize = 7;
 
-        let custom_memory = OpaqueMemory::new(WrappingMemory::new(TransparentMemory::new(), {
-            let callback_called = Arc::clone(&callback_called);
-            move |inner: &TransparentMemory, min_bytes| {
-                callback_called.store(true, Ordering::SeqCst);
-                inner.reserve(min_bytes)
-            }
+        let custom_memory = OpaqueMemory::new(CallbackMemory::new(TransparentMemory::new(), |inner, min_bytes| {
+            inner.reserve(min_bytes + MARKER_OFFSET)
         }));
 
         let memory = GlobalPool::new();
@@ -415,11 +410,12 @@ mod tests {
 
         // Get memory from stream and use it
         let stream_memory = read_stream.memory();
-        let _buf = stream_memory.reserve(10);
+        let buf = stream_memory.reserve(10);
 
-        assert!(
-            callback_called.load(Ordering::SeqCst),
-            "Custom memory callback should have been called"
+        assert_eq!(
+            buf.capacity(),
+            10 + MARKER_OFFSET,
+            "stream should return the configured provider, which applies a marker offset"
         );
     }
 }
