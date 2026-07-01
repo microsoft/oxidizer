@@ -97,6 +97,14 @@ impl Memory for FixedBlockMemory {
     }
 }
 
+impl thread_aware::ThreadAware for FixedBlockMemory {
+    #[cfg_attr(test, mutants::skip)] // No thread-affine state to relocate.
+    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
+        // The wrapped state is immutable, read-only configuration shared without contention, so
+        // there is nothing to relocate.
+    }
+}
+
 #[derive(Debug)]
 struct FixedBlockMemoryInner {
     block_size: NonZero<BlockSize>,

@@ -6,7 +6,7 @@ use bytesbuf::{BytesBuf, BytesView};
 use futures::{Stream, TryStreamExt};
 use http_body::{Body, Frame};
 use http_body_util::BodyExt;
-use thread_aware::{ThreadAware, Unaware};
+use thread_aware::ThreadAware;
 use tick::Clock;
 
 use super::HttpBody;
@@ -88,12 +88,13 @@ impl HttpBodyBuilder {
 
     /// Creates a new instance of [`HttpBodyBuilder`] with custom memory.
     ///
-    /// When using this method, the memory is shared across all threads as opposed
-    /// to the global per-thread memory used by [`HttpBodyBuilder::new`].
+    /// The provided memory provider is type-erased and used in place of the global per-thread
+    /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: its thread-affine state is
+    /// relocated when the builder moves between threads.
     #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
+    pub fn with_custom_memory(memory: impl MemoryShared + Clone, clock: &Clock) -> Self {
         Self {
-            memory: MemoryWrapper::Opaque(Unaware(OpaqueMemory::new(memory))),
+            memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
             clock: clock.clone(),
             options: HttpBodyOptions::default(),
         }
@@ -358,7 +359,7 @@ impl HasMemory for HttpBodyBuilder {
 #[derive(Debug, Clone, ThreadAware)]
 enum MemoryWrapper {
     Global(GlobalPool),
-    Opaque(Unaware<OpaqueMemory>),
+    Opaque(OpaqueMemory),
 }
 
 impl Memory for MemoryWrapper {

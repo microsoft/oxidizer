@@ -397,15 +397,15 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         use bytesbuf::mem::testing::TransparentMemory;
-        use bytesbuf::mem::{CallbackMemory, OpaqueMemory};
+        use bytesbuf::mem::{OpaqueMemory, WrappingMemory};
 
         let callback_called = Arc::new(AtomicBool::new(false));
 
-        let custom_memory = OpaqueMemory::new(CallbackMemory::new({
+        let custom_memory = OpaqueMemory::new(WrappingMemory::new(TransparentMemory::new(), {
             let callback_called = Arc::clone(&callback_called);
-            move |min_bytes| {
+            move |inner: &TransparentMemory, min_bytes| {
                 callback_called.store(true, Ordering::SeqCst);
-                TransparentMemory::new().reserve(min_bytes)
+                inner.reserve(min_bytes)
             }
         }));
 

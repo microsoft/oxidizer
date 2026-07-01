@@ -44,6 +44,13 @@ pub struct TransparentMemory {
     _placeholder: (),
 }
 
+impl thread_aware::ThreadAware for TransparentMemory {
+    #[cfg_attr(test, mutants::skip)] // No thread-affine state to relocate.
+    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
+        // This provider holds no thread-affine state, so there is nothing to relocate.
+    }
+}
+
 impl TransparentMemory {
     /// Creates a new instance of the memory provider.
     #[must_use]
