@@ -27,7 +27,7 @@ pub enum ProcessorCount {
     Auto,
     /// Use a specific number of processors.
     ///
-    /// Construction fails if the hardware offers fewer processors than requested.
+    /// Registry construction panics if the hardware offers fewer processors than requested.
     Manual(NonZero<usize>),
     /// Use up to this many processors, or every available processor when the
     /// hardware offers fewer than requested.
@@ -82,13 +82,14 @@ impl ThreadRegistry {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
             ProcessorCount::AtMost(max) => {
-                // Clamp the ceiling to what the hardware actually offers so a larger
-                // request than the machine provides is satisfied by taking every
-                // available processor instead of failing.
-                let available = hardware.processors().len();
-                let count =
-                    NonZero::new(max.get().min(available)).expect("a processor set is never empty, so the clamped count is at least one");
-                builder.take(count)
+                // A processor set is never empty, so taking every available processor
+                // always satisfies a ceiling that meets or exceeds what the machine
+                // offers, without failing the way `Manual` would.
+                if max.get() >= hardware.processors().len() {
+                    builder.take_all()
+                } else {
+                    builder.take(*max)
+                }
             }
         }
         .expect("Not enough processors available");
