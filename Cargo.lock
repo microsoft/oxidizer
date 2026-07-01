@@ -2845,7 +2845,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 name = "plurality"
 version = "0.1.0"
 dependencies = [
- "alloc_tracker 0.6.0",
+ "alloc_tracker",
  "allocator-api2 0.4.0",
  "bolero",
  "criterion",

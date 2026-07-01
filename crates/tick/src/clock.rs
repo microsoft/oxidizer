@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 
+use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
 use crate::timers::TimerKey;
 
@@ -174,6 +175,7 @@ use crate::timers::TimerKey;
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
+    time: SimpleClock,
     affinity: Option<Affinity>,
 }
 
@@ -215,7 +217,11 @@ impl Clock {
     }
 
     pub(crate) fn new(state: ClockState) -> Self {
-        Self { state, affinity: None }
+        Self {
+            time: SimpleClock::from_state(&state),
+            state,
+            affinity: None,
+        }
     }
 
     #[cfg(any(feature = "tokio", test))]
@@ -330,11 +336,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn system_time(&self) -> SystemTime {
-        match self.clock_state() {
-            #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => control.system_time(),
-            ClockState::System(_) => SystemTime::now(),
-        }
+        self.simple_clock().system_time()
     }
 
     /// Retrieves the current system time converted to a target type.
@@ -349,34 +351,24 @@ impl Clock {
     ///
     /// # Panics
     ///
-    /// While this method uses [`TryFrom`] (a fallible conversion), it may panic on conversion failure.
+    /// Panics if the current system time cannot be represented by the target type `T`.
     ///
-    /// In practice, this conversion always succeeds because:
+    /// Callers must choose a target type whose representable range covers the
+    /// [`SystemTime`] values they expect. The conversion can fail in two cases:
     ///
-    /// - The system time returned is always within a normalized range in real environments.
-    /// - Target types that implement [`TryFrom<SystemTime>`][TryFrom] typically support the full valid
-    ///   range of system time values.
+    /// - **In production**, if `T` has a narrower representable range than [`SystemTime`] and the
+    ///   current system time falls outside it.
+    /// - **In tests** using manual time control (via the `test-util` feature), if controlled time
+    ///   is moved outside the target type's supported range.
     ///
-    /// The only theoretical failure case is in tests using manual time control (via the
-    /// `test-util` feature), where time could be moved excessively far into the future,
-    /// potentially exceeding the target type's supported range of values. This is not a concern
-    /// in production.
-    #[expect(
-        clippy::match_wild_err_arm,
-        clippy::panic,
-        reason = "the panic might only occur when system time is outside of valid range which won't ever happen in real environments"
-    )]
+    /// If `T` can represent every [`SystemTime`] value, this conversion never fails and this method
+    /// never panics — the panic above only occurs for target types whose representable range does
+    /// not cover the current time.
+    ///
+    /// Kept consistent with [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as].
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
-        match T::try_from(self.system_time()) {
-            Ok(time) => time,
-            Err(_err) => panic!(
-                "The SystemTime returned by the clock is always in normalized range and must be convertible to the target type.
-                If the target type overflows, it indicates a problem with the target type not supporting valid system time range or
-                we are in tests where the time was moved excessively into the future. Practically, in production, this conversion will
-                always succeed.",
-            ),
-        }
+        self.simple_clock().system_time_as()
     }
 
     /// Retrieves the current [`Instant`] time.
@@ -407,11 +399,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn instant(&self) -> Instant {
-        match self.clock_state() {
-            #[cfg(any(feature = "test-util", test))]
-            ClockState::ClockControl(control) => control.instant(),
-            ClockState::System(_) => Instant::now(),
-        }
+        self.simple_clock().instant()
     }
 
     /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
@@ -486,11 +474,42 @@ impl Clock {
     pub(crate) fn clock_state(&self) -> &ClockState {
         &self.state
     }
+
+    /// Returns the [`SimpleClock`] view of this clock.
+    ///
+    /// A [`SimpleClock`] exposes only time retrieval (no timers), and is the common abstraction
+    /// shared by all clock kinds. Use it to pass this clock to APIs — such as
+    /// [`Stopwatch`][crate::Stopwatch] — that only need to read the current time.
+    ///
+    /// This clock also implements [`AsRef<SimpleClock>`], so it can be passed directly to such
+    /// APIs without calling this method explicitly.
+    #[must_use]
+    pub fn simple_clock(&self) -> &SimpleClock {
+        &self.time
+    }
 }
 
 impl AsRef<Self> for Clock {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+impl AsRef<SimpleClock> for Clock {
+    fn as_ref(&self) -> &SimpleClock {
+        &self.time
+    }
+}
+
+impl From<Clock> for SimpleClock {
+    fn from(clock: Clock) -> Self {
+        clock.time
+    }
+}
+
+impl From<&Clock> for SimpleClock {
+    fn from(clock: &Clock) -> Self {
+        clock.time.clone()
     }
 }
 
@@ -637,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "The SystemTime returned by the clock is always in normalized range")]
+    #[should_panic(expected = "target type cannot represent the current SystemTime")]
     fn system_time_as_panics_on_conversion_failure() {
         /// A newtype that always fails conversion from `SystemTime`.
         struct AlwaysFailsConversion;
