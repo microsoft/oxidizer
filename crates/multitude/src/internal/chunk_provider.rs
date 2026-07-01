@@ -24,10 +24,11 @@ use core::ptr::{self, NonNull};
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::chunk::Chunk;
 use super::constants::{MAX_CHUNK_BYTES, MAX_NORMAL_ALLOC, MIN_CHUNK_BYTES, SizeClass};
+use crate::AllocError;
 
 /// Tunable knobs for a [`ChunkProvider`].
 #[derive(Clone, Copy)]
@@ -212,7 +213,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Caller must route oversized requests to [`Self::acquire_oversized`].
     pub(crate) fn acquire(&self, min_payload: usize, ratchet_class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         let header = Chunk::<A>::header_size();
-        let needed_total = header.checked_add(min_payload).ok_or(AllocError)?;
+        let needed_total = header.checked_add(min_payload).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         debug_assert!(
             min_payload <= self.config.max_normal_alloc && !exceeds_max_chunk_bytes(needed_total),
             "acquire invoked with oversized request — caller must route to acquire_oversized",
@@ -360,7 +361,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         {
             Ok(())
         } else {
-            Err(AllocError)
+            Err(AllocError::ALLOCATOR_FAILED)
         }
     }
 
@@ -374,7 +375,8 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     pub(crate) fn acquire_oversized(&self, min_payload: usize) -> Result<NonNull<Chunk<A>>, AllocError> {
         // Add worst-case payload-start alignment skew; round to the rounded
         // allocation size we then reserve.
-        let payload = round_up_to_word_align(min_payload.checked_add(oversized_payload_align_slack()).ok_or(AllocError)?)?;
+        let slack = oversized_payload_align_slack();
+        let payload = round_up_to_word_align(min_payload.checked_add(slack).ok_or(AllocError::CAPACITY_OVERFLOW)?)?;
         let total = Chunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
         match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
@@ -493,7 +495,10 @@ fn is_cacheable_size(total: usize) -> bool {
 #[inline]
 fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
     let mask = mem::align_of::<usize>() - 1;
-    min_payload.checked_add(mask).map(|v| v & !mask).ok_or(AllocError)
+    min_payload
+        .checked_add(mask)
+        .map(|v| v & !mask)
+        .ok_or(AllocError::CAPACITY_OVERFLOW)
 }
 
 /// Worst-case alignment skew the bump cursor pays at the start of an

@@ -8,8 +8,9 @@ use core::cell::Cell;
 use core::fmt;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 
+use crate::AllocError;
 use crate::arena_builder::ArenaBuilder;
 #[cfg(feature = "stats")]
 use crate::arena_stats::ArenaStats;
@@ -706,8 +707,8 @@ impl<T> ExpectAlloc<T> for Result<T, AllocError> {
 /// `#[cfg_attr(coverage_nightly, coverage(off))]`.
 macro_rules! panic_alloc {
     () => {{
-        $crate::arena::ExpectAlloc::expect_alloc(::core::result::Result::<(), allocator_api2::alloc::AllocError>::Err(
-            allocator_api2::alloc::AllocError,
+        $crate::arena::ExpectAlloc::expect_alloc(::core::result::Result::<(), $crate::AllocError>::Err(
+            $crate::AllocError::ALLOCATOR_FAILED,
         ))
     }};
 }

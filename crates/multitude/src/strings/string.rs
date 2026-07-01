@@ -8,12 +8,12 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Bound, Deref, DerefMut, RangeBounds};
 use core::str;
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 
 use crate::arena::ExpectAlloc;
 use crate::strings::string_common::impl_arena_string_common;
 use crate::vec::{FromIteratorIn, Vec};
-use crate::{Arc, Arena, Box, FromIn, Rc};
+use crate::{AllocError, Arc, Arena, Box, FromIn, Rc};
 
 /// A growable, mutable UTF-8 string that lives in an [`Arena`].
 ///
@@ -77,7 +77,7 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     }
 
     /// Fallible variant of [`Self::from_str_in`].
-    pub(crate) fn try_from_str_in(s: &str, arena: &'a Arena<A>) -> Result<Self, allocator_api2::alloc::AllocError> {
+    pub(crate) fn try_from_str_in(s: &str, arena: &'a Arena<A>) -> Result<Self, AllocError> {
         let mut out = Self::try_with_capacity_in(s.len(), arena)?;
         out.try_push_str(s)?;
         Ok(out)
@@ -318,8 +318,10 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// # Errors
     ///
-    /// Returns [`AllocError`](allocator_api2::alloc::AllocError) if the backing
-    /// allocator fails.
+    /// Returns [`AllocError`] if the backing allocator fails, or if computing
+    /// the required capacity overflows `usize`. Use
+    /// [`AllocError::is_allocator_failure`] and
+    /// [`AllocError::is_capacity_overflow`] to tell the two apart.
     #[inline]
     pub fn try_push(&mut self, ch: char) -> Result<(), AllocError> {
         let mut buf = [0u8; 4];
@@ -342,8 +344,10 @@ impl<'a, A: Allocator + Clone> String<'a, A> {
     ///
     /// # Errors
     ///
-    /// Returns [`AllocError`](allocator_api2::alloc::AllocError) if the backing
-    /// allocator fails.
+    /// Returns [`AllocError`] if the backing allocator fails, or if computing
+    /// the required capacity overflows `usize`. Use
+    /// [`AllocError::is_allocator_failure`] and
+    /// [`AllocError::is_capacity_overflow`] to tell the two apart.
     #[inline(always)]
     #[allow(
         clippy::inline_always,

@@ -9,11 +9,12 @@ use core::mem;
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::alloc_prefixed::worst_case_thin_slice_payload;
 use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
 use super::{Arena, ExpectAlloc};
+use crate::AllocError;
 use crate::r#box::Box;
 
 impl<A: Allocator + Clone> Arena<A> {
@@ -181,7 +182,7 @@ impl<A: Allocator + Clone> Arena<A> {
     fn impl_alloc_slice_box_with<T, F: FnMut(usize) -> T>(&self, len: usize, mut f: F) -> Result<Box<[T], A>, AllocError> {
         check_slice_box_layout::<T>(len)?;
         // Check overflow before the refill loop.
-        let payload_bytes = mem::size_of::<T>().checked_mul(len).ok_or(AllocError)?;
+        let payload_bytes = mem::size_of::<T>().checked_mul(len).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let ptr = self.reserve_slice_box::<T>(len, payload_bytes, |slot_ptr| {
             // SAFETY: `slot_ptr` is the reservation start; we init `len` slots
             // with panic-safe rollback via `InitGuard`.
@@ -293,7 +294,7 @@ impl<A: Allocator + Clone> Arena<A> {
 #[inline]
 fn check_slice_box_layout<T>(_len: usize) -> Result<(), AllocError> {
     if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
-        return Err(AllocError);
+        return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())
 }

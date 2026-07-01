@@ -2411,7 +2411,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",

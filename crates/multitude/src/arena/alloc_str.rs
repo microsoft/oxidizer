@@ -14,11 +14,11 @@
 
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::{Arena, ExpectAlloc};
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong};
-use crate::{Alloc, Arc, Box, Rc};
+use crate::{Alloc, AllocError, Arc, Box, Rc};
 
 impl<A: Allocator + Clone> Arena<A> {
     /// Bump-allocate a copy of `s` and return an owning string handle.

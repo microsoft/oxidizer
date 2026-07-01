@@ -9,10 +9,9 @@ use core::mem;
 use core::pin::Pin;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::{Arena, ExpectAlloc};
-use crate::Alloc;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::chunk_ref::ChunkRef;
@@ -21,6 +20,7 @@ use crate::internal::thin_dst::{AtomicStrong, LocalStrong};
 use crate::internal::uninit::Uninit;
 use crate::internal::{Chunk, thin_dst};
 use crate::rc::Rc;
+use crate::{Alloc, AllocError};
 
 /// Worst-case bytes consumed by a single value allocation of type `T` in
 /// a chunk: value bytes + alignment padding.
@@ -549,7 +549,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     fn alloc_value_with_raw<T, F: FnOnce() -> T>(&self, f: F) -> Result<&mut T, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
-            return Err(AllocError);
+            return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         // Straight-line fast path: a single in-chunk reservation attempt with
         // no loop, so the caller's own loop induction variable keeps its tight
@@ -657,7 +657,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn alloc_smart_prefixed_with_raw<S: thin_dst::Strong, T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<u8>, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
-            return Err(AllocError);
+            return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         let mut f = Some(f);
         loop {
@@ -691,7 +691,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // routing-predicate mutations ⇒ refill spin (OOM)
     fn impl_alloc_smart_with<T, F: FnOnce() -> T>(&self, f: F) -> Result<NonNull<T>, AllocError> {
         if const { mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN } {
-            return Err(AllocError);
+            return Err(AllocError::ALIGNMENT_TOO_LARGE);
         }
         loop {
             // A non-drop ZST allocation does not advance the bump cursor
