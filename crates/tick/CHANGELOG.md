@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.6] - 2026-07-01
+
+- ✨ Features
+
+  - add SimpleClock for driver-free time retrieval ([#537](https://github.com/microsoft/oxidizer/pull/537))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.3.5] - 2026-06-26
 
 - 🔧 Maintenance

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.10] - 2026-07-01
+
+- 🔧 Maintenance
+
+  - Now requires `0.3.6` of `tick`
+
+- ✨ Features
+
+  - add abandoned execution policy for circuit breaker ([#506](https://github.com/microsoft/oxidizer/pull/506))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - upgrade alloc_tracker from 0.5.25 to 0.6.0 ([#513](https://github.com/microsoft/oxidizer/pull/513))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+  - bump MSRV to 1.93 and adopt new stdlib helpers ([#474](https://github.com/microsoft/oxidizer/pull/474))
+
 ## [0.5.9] - 2026-06-26
 
 - 🔧 Maintenance

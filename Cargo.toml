@@ -52,10 +52,10 @@ include = [
 
 # local dependencies
 anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.5.5" }
-anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.1" }
+anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.2" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.5.6" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.5.8" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.7.3" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.7.4" }
 cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.3.7" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.8" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.6" }
@@ -63,23 +63,23 @@ data_privacy = { path = "crates/data_privacy", default-features = false, version
 data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
 data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.3" }
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.3" }
-fetch = { path = "crates/fetch", default-features = false, version = "0.12.1" }
-fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.2.1" }
-fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.4" }
+fetch = { path = "crates/fetch", default-features = false, version = "0.12.2" }
+fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.2.2" }
+fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.5" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.5" }
 fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.6.4" }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.6.5" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.6.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
 plurality = { path = "crates/plurality", default-features = false, version = "0.1.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.9" }
-seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.4.4" }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.10" }
+seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.4.5" }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.4" }
 templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.6" }
 templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.6" }
@@ -87,7 +87,7 @@ testing_aids = { path = "crates/testing_aids", default-features = false }
 thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.7.5" }
 thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.5" }
 thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.7.4" }
-tick = { path = "crates/tick", default-features = false, version = "0.3.5" }
+tick = { path = "crates/tick", default-features = false, version = "0.3.6" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.2.5" }
 
 # external dependencies
