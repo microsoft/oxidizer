@@ -312,12 +312,11 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
         // The wrapped provider carries any thread-affine state and is relocated automatically
-        // when moved between threads. The closure captures only inert configuration.
+        // when moved between threads. The closure is inert, referencing only a constant.
         let io_memory = self.io_context.io_memory();
-        let configuration = UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION;
 
-        WrappingMemory::new(io_memory, move |io_memory, min_len| {
-            io_memory.reserve_with_config(min_len, &configuration)
+        WrappingMemory::new(io_memory, |io_memory, min_len| {
+            io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
 }
@@ -471,7 +470,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbtAbmccK3BHQb8b1R5KJ5HKEbBITSfUzQS_AbLmjHxq8zJdthZIGCaGJ5dGVzYnVmZTAuNS42
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbXO2xJ3o5Fmkb7pZwaFUwcowbKmlyvCmQz_gb-9IJisJlCothZIGCaGJ5dGVzYnVmZTAuNS42
  [__link0]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView

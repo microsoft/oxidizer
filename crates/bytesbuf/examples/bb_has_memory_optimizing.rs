@@ -67,14 +67,13 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
         // The wrapped provider carries any thread-affine state and is relocated automatically when
-        // this provider moves between threads. The closure captures only inert configuration.
+        // this provider moves between threads. The closure is inert, referencing only a constant.
         let io_memory = self.io_context.io_memory();
-        let configuration = UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION;
 
-        WrappingMemory::new(io_memory, move |io_memory, min_len| {
+        WrappingMemory::new(io_memory, |io_memory, min_len| {
             // Apply the connection-specific configuration when reserving from the (relocated)
             // I/O memory provider.
-            io_memory.reserve_with_config(min_len, &configuration)
+            io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
 }
@@ -101,7 +100,7 @@ impl IoContext {
 
 /// The thread-affine I/O memory provider. In a real application this would carry per-thread I/O
 /// resources; here it is a thin wrapper for illustration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thread_aware::ThreadAware)]
 struct IoMemory;
 
 impl IoMemory {
@@ -123,12 +122,6 @@ impl Memory for IoMemory {
                 requires_registered_memory: false,
             },
         )
-    }
-}
-
-impl thread_aware::ThreadAware for IoMemory {
-    fn relocate(&mut self, _source: Option<thread_aware::affinity::Affinity>, _destination: thread_aware::affinity::Affinity) {
-        // A real provider would relocate its per-thread I/O resources here.
     }
 }
 

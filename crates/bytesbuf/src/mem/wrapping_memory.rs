@@ -35,7 +35,7 @@ use crate::mem::{Memory, MemoryShared};
 /// # use bytesbuf::BytesBuf;
 ///
 /// // Wrap a pool, applying custom configuration on each reservation.
-/// let memory = WrappingMemory::new(GlobalPool::new(), move |pool, min_len| {
+/// let memory = WrappingMemory::new(GlobalPool::new(), |pool, min_len| {
 ///     // Apply inert configuration when reserving memory from the (relocated) inner provider.
 ///     let page_aligned = true;
 ///     let adjusted = if page_aligned {

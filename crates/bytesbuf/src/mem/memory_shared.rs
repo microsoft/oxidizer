@@ -15,15 +15,10 @@ use crate::mem::Memory;
 ///
 /// A memory provider shared across threads is expected to be [thread-aware][ThreadAware], so it can
 /// relocate any thread-affine state when moved between threads and avoid contention on
-/// synchronization primitives. Our own providers (e.g. [`GlobalPool`][crate::mem::GlobalPool]) do
-/// this internally. When implementing a memory provider, derive or implement [`ThreadAware`]; a
-/// no-op implementation is correct for providers that hold no thread-affine state.
-///
-/// # Cloning
-///
-/// A memory provider must be [`Clone`], so that a distinct instance can be handed to each thread
-/// that shares the provider. Each clone owns its own thread-affine state and decides for itself how
-/// to be thread-aware, keeping that decision with the provider rather than any wrapper around it.
+/// synchronization primitives. Memory providers in this crate (e.g.
+/// [`GlobalPool`][crate::mem::GlobalPool]) do this internally. When implementing a memory provider,
+/// derive or implement [`ThreadAware`]; a no-op implementation is correct for providers that hold no
+/// thread-affine state.
 pub trait MemoryShared: Memory + ThreadAware + Send + Sync + 'static {
     /// Clones this provider into a boxed trait object.
     ///
