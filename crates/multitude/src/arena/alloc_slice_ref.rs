@@ -16,11 +16,11 @@ use core::hint::assert_unchecked;
 use core::mem;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::{Arena, ExpectAlloc};
-use crate::Alloc;
 use crate::internal::constants::CHUNK_ALIGN;
+use crate::{Alloc, AllocError};
 
 /// Reject over-aligned slice element types early. Simple-reference
 /// slices return a plain `&mut [T]` (no header-recovery mask), so they
@@ -30,7 +30,7 @@ use crate::internal::constants::CHUNK_ALIGN;
 #[inline(always)]
 fn reject_over_aligned<T>() -> Result<(), AllocError> {
     if const { mem::align_of::<T>() >= CHUNK_ALIGN } {
-        return Err(AllocError);
+        return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())
 }

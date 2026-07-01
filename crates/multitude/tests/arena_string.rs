@@ -199,13 +199,13 @@ fn try_with_capacity_in_zero_does_not_allocate() {
 
 #[test]
 fn try_push_str_returns_err_on_alloc_failure() {
-    use allocator_api2::alloc::AllocError;
+    use multitude::AllocError;
     // FailingAllocator with 0 budget: every allocate() fails.
     let alloc = common::FailingAllocator::new(0);
     let arena = Arena::new_in(alloc);
     let mut s = arena.alloc_string();
     let err: AllocError = s.try_push_str("x").unwrap_err();
-    let _ = err;
+    assert!(err.is_allocator_failure());
 }
 
 #[test]

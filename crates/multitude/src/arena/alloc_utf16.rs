@@ -11,14 +11,14 @@
 use core::mem;
 use core::ptr::{self, NonNull};
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::alloc_prefixed::PREFIX_BYTES;
 use super::alloc_value::acquire_chunk_ref;
 use super::{Arena, ExpectAlloc};
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong};
 use crate::strings::{Utf16Str, Utf16String};
-use crate::{Arc, Box, Rc};
+use crate::{AllocError, Arc, Box, Rc};
 
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 impl<A: Allocator + Clone> Arena<A> {
@@ -225,14 +225,14 @@ impl<A: Allocator + Clone> Arena<A> {
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))
-            .ok_or(AllocError)?;
+            .ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let elem_size = mem::size_of::<u16>();
         let elem_align = mem::align_of::<u16>();
         // At least `elem_align` payload bytes so the returned pointer
         // is strictly inside the chunk (smart-pointer recovery
         // invariant).
-        let payload_bytes = exact.checked_mul(elem_size).ok_or(AllocError)?.max(elem_align);
-        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError)?;
+        let payload_bytes = exact.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
+        let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         loop {
             if let Some((uninit, chunk_ptr)) = self.current().try_alloc_with_chunk(total, elem_align) {
                 let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
@@ -287,7 +287,7 @@ impl<A: Allocator + Clone> Arena<A> {
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))
-            .ok_or(AllocError)?;
+            .ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let bytes_needed = super::alloc_prefixed::worst_case_strong_slice_payload::<S, u16>(exact);
         loop {
             if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<S, u16>(exact) {
