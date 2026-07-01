@@ -116,7 +116,7 @@
 //! takes any [`AsRef<SimpleClock>`]:
 //!
 //! ```
-//! use tick::{Stopwatch, SimpleClock};
+//! use tick::{SimpleClock, Stopwatch};
 //!
 //! // A driver-free clock that only retrieves time.
 //! let clock = SimpleClock::new_system();
