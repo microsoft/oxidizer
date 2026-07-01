@@ -15,8 +15,9 @@
 
 use std::num::NonZero;
 
-use bytesbuf::mem::{BlockSize, GlobalPool, HasMemory, MemoryShared, WrappingMemory};
+use bytesbuf::mem::{BlockSize, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
 use bytesbuf::{BytesBuf, BytesView};
+use thread_aware::ThreadAware;
 
 fn main() {
     // In real-world code, both of these would be provided by the application framework.
@@ -117,12 +118,11 @@ const CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfi
 
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
-        // The wrapped provider carries the thread-affine I/O resources and is relocated
-        // automatically when this provider moves between threads. The closure is inert, referencing
-        // only a constant.
+        // The I/O memory provider carries the thread-affine I/O resources and is relocated
+        // automatically when the returned provider moves between threads.
         let io_memory = self.io_context.io_memory();
 
-        WrappingMemory::new(io_memory, |io_memory, min_len| {
+        CallbackMemory::new(io_memory, |io_memory, min_len| {
             io_memory.reserve_with_config(min_len, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
@@ -150,7 +150,7 @@ impl IoContext {
 
 /// The thread-affine I/O memory provider. In a real application this would carry per-thread I/O
 /// resources; here it holds no state and just performs the allocation.
-#[derive(Clone, Debug, thread_aware::ThreadAware)]
+#[derive(Clone, Debug, ThreadAware)]
 struct IoMemory;
 
 impl IoMemory {

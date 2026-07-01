@@ -3,6 +3,8 @@
 
 use std::num::NonZero;
 
+use thread_aware::ThreadAware;
+
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
 use crate::mem::{BlockSize, Memory};
@@ -38,7 +40,7 @@ use crate::mem::{BlockSize, Memory};
 /// ```
 ///
 /// [1]: crate::mem::GlobalPool
-#[derive(Clone, Debug, Default, thread_aware::ThreadAware)]
+#[derive(Clone, Debug, Default, ThreadAware)]
 pub struct TransparentMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.
     _placeholder: (),
@@ -138,7 +140,6 @@ mod tests {
 
     #[test]
     fn relocate_is_noop_and_keeps_provider_usable() {
-        use thread_aware::ThreadAware;
         use thread_aware::affinity::pinned_affinities;
 
         let mut memory = TransparentMemory::new();
