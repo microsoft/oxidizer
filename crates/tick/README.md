@@ -72,9 +72,9 @@ in production and tests, with zero runtime overhead when `test-util` is disabled
 * [`Clock`][__link2] - Provides an abstraction for time-related operations. Returns absolute time
   as `SystemTime` and relative time measurements via stopwatch. Used when creating other
   time primitives.
-* [`TimeClock`][__link3] - A simplified, driver-free clock for time retrieval only (no timers).
-  Shared by all clock kinds via [`AsRef<TimeClock>`][__link4], so time-only APIs accept either a
-  [`Clock`][__link5] or a `TimeClock`.
+* [`SimpleClock`][__link3] - A simplified, driver-free clock for time retrieval only (no timers).
+  Shared by all clock kinds via [`AsRef<SimpleClock>`][__link4], so time-only APIs accept either a
+  [`Clock`][__link5] or a `SimpleClock`.
 * [`ClockControl`][__link6] - Controls the passage of time. Available when the `test-util` feature
   is enabled.
 * [`Stopwatch`][__link7] - Measures elapsed time.
@@ -94,31 +94,31 @@ in production and tests, with zero runtime overhead when `test-util` is disabled
 ## Time retrieval without timers
 
 Many call sites only need to *read* the current time and never schedule timers. For these,
-[`TimeClock`][__link16] is a simplified clock that exposes time retrieval only. Unlike [`Clock`][__link17], it
+[`SimpleClock`][__link16] is a simplified clock that exposes time retrieval only. Unlike [`Clock`][__link17], it
 carries no timers, so it needs **no async runtime and no driver** —
-[`TimeClock::new_system`][__link18] returns a ready-to-use clock backed by real OS time.
+[`SimpleClock::new_system`][__link18] returns a ready-to-use clock backed by real OS time.
 
-[`TimeClock`][__link19] is the common abstraction shared by every clock kind:
+[`SimpleClock`][__link19] is the common abstraction shared by every clock kind:
 
-* [`Clock`][__link20] implements [`AsRef<TimeClock>`][__link21] and exposes
-  [`time_clock()`][__link22], so a timer-capable clock can be used wherever a
-  `TimeClock` is expected.
-* With the `test-util` feature, [`ClockControl::to_time_clock`][__link23] creates a controlled
-  `TimeClock` driven by the same [`ClockControl`][__link24] as its [`Clock`][__link25] counterpart, so both
+* [`Clock`][__link20] implements [`AsRef<SimpleClock>`][__link21] and exposes
+  [`simple_clock()`][__link22], so a timer-capable clock can be used wherever a
+  `SimpleClock` is expected.
+* With the `test-util` feature, [`ClockControl::to_simple_clock`][__link23] creates a controlled
+  `SimpleClock` driven by the same [`ClockControl`][__link24] as its [`Clock`][__link25] counterpart, so both
   observe identical controlled time.
 
 As a result, time-only APIs accept either clock seamlessly. [`Stopwatch`][__link26], for example,
-takes any [`AsRef<TimeClock>`][__link27]:
+takes any [`AsRef<SimpleClock>`][__link27]:
 
 ```rust
-use tick::{Stopwatch, TimeClock};
+use tick::{Stopwatch, SimpleClock};
 
 // A driver-free clock that only retrieves time.
-let clock = TimeClock::new_system();
+let clock = SimpleClock::new_system();
 
 let _now = clock.system_time();
 
-// `Stopwatch` accepts a `TimeClock` or a `Clock` (both are `AsRef<TimeClock>`).
+// `Stopwatch` accepts a `SimpleClock` or a `Clock` (both are `AsRef<SimpleClock>`).
 let stopwatch = Stopwatch::new(&clock);
 let _elapsed = stopwatch.elapsed();
 ```
@@ -262,7 +262,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQboOCQcISLQ6sbtGD9rIjFbPMbPLyCHiRva-Eb1GYt24GEoYxhZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbSq2cFZ4rLWsbpaZLh51tK84b-cdpE6tP8YQb-ps7U0F3RDxhZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
  [__link0]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.3.5/tick/?search=Error
@@ -271,22 +271,22 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link13]: https://docs.rs/tick/0.3.5/tick/?search=FutureExt
  [__link14]: https://docs.rs/tick/0.3.5/tick/?search=SystemTimeExt
  [__link15]: https://doc.rust-lang.org/stable/std/?search=time::SystemTime
- [__link16]: https://docs.rs/tick/0.3.5/tick/?search=TimeClock
+ [__link16]: https://docs.rs/tick/0.3.5/tick/?search=SimpleClock
  [__link17]: https://docs.rs/tick/0.3.5/tick/?search=Clock
- [__link18]: https://docs.rs/tick/0.3.5/tick/?search=TimeClock::new_system
- [__link19]: https://docs.rs/tick/0.3.5/tick/?search=TimeClock
+ [__link18]: https://docs.rs/tick/0.3.5/tick/?search=SimpleClock::new_system
+ [__link19]: https://docs.rs/tick/0.3.5/tick/?search=SimpleClock
  [__link2]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link20]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link21]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
- [__link22]: https://docs.rs/tick/0.3.5/tick/?search=Clock::time_clock
- [__link23]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl::to_time_clock
+ [__link22]: https://docs.rs/tick/0.3.5/tick/?search=Clock::simple_clock
+ [__link23]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl::to_simple_clock
  [__link24]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
  [__link25]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link26]: https://docs.rs/tick/0.3.5/tick/?search=Stopwatch
  [__link27]: https://doc.rust-lang.org/stable/std/convert/trait.AsRef.html
  [__link28]: https://crates.io/crates/jiff
  [__link29]: https://crates.io/crates/chrono
- [__link3]: https://docs.rs/tick/0.3.5/tick/?search=TimeClock
+ [__link3]: https://docs.rs/tick/0.3.5/tick/?search=SimpleClock
  [__link30]: https://crates.io/crates/time
  [__link31]: https://docs.rs/thread_aware/0.7.5/thread_aware/?search=ThreadAware
  [__link32]: https://docs.rs/tick/0.3.5/tick/?search=runtime::InactiveClock

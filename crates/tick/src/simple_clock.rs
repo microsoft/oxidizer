@@ -8,18 +8,18 @@ use crate::thread_aware_move;
 
 /// A simplified clock used purely for **time retrieval**.
 ///
-/// Unlike [`Clock`][crate::Clock], a `TimeClock` does not register or drive timers: it only
+/// Unlike [`Clock`][crate::Clock], a `SimpleClock` does not register or drive timers: it only
 /// exposes the current [`SystemTime`] and [`Instant`]. Because it has no timers, it requires
-/// **no runtime and no driver** — [`TimeClock::new_system`] yields a ready-to-use clock backed
+/// **no runtime and no driver** — [`SimpleClock::new_system`] yields a ready-to-use clock backed
 /// by real OS time.
 ///
-/// `TimeClock` is the common denominator shared by both clock kinds:
+/// `SimpleClock` is the common denominator shared by both clock kinds:
 ///
-/// - [`Clock`][crate::Clock] implements [`AsRef<TimeClock>`] and exposes
-///   [`Clock::time_clock`][crate::Clock::time_clock], so a timer-capable clock can be used
-///   anywhere a `TimeClock` is expected.
-/// - With the `test-util` feature, [`ClockControl::to_time_clock`][crate::ClockControl::to_time_clock]
-///   creates a controlled `TimeClock` whose time is driven by the same
+/// - [`Clock`][crate::Clock] implements [`AsRef<SimpleClock>`] and exposes
+///   [`Clock::simple_clock`][crate::Clock::simple_clock], so a timer-capable clock can be used
+///   anywhere a `SimpleClock` is expected.
+/// - With the `test-util` feature, [`ClockControl::to_simple_clock`][crate::ClockControl::to_simple_clock]
+///   creates a controlled `SimpleClock` whose time is driven by the same
 ///   [`ClockControl`][crate::ClockControl].
 ///
 /// This makes APIs that only need to read time — such as [`Stopwatch`][crate::Stopwatch] —
@@ -28,9 +28,9 @@ use crate::thread_aware_move;
 /// # Examples
 ///
 /// ```
-/// use tick::TimeClock;
+/// use tick::SimpleClock;
 ///
-/// let clock = TimeClock::new_system();
+/// let clock = SimpleClock::new_system();
 ///
 /// let first = clock.instant();
 /// let second = clock.instant();
@@ -38,7 +38,7 @@ use crate::thread_aware_move;
 /// assert!(second >= first);
 /// ```
 #[derive(Debug, Clone)]
-pub struct TimeClock(TimeKind);
+pub struct SimpleClock(TimeKind);
 
 #[derive(Debug, Clone)]
 enum TimeKind {
@@ -49,10 +49,10 @@ enum TimeKind {
     Controlled(crate::ClockControl),
 }
 
-thread_aware_move!(TimeClock);
+thread_aware_move!(SimpleClock);
 
-impl TimeClock {
-    /// Creates a `TimeClock` backed by real operating-system time.
+impl SimpleClock {
+    /// Creates a `SimpleClock` backed by real operating-system time.
     ///
     /// The returned clock needs no runtime or driver; it reads time directly from the OS.
     #[must_use]
@@ -60,9 +60,9 @@ impl TimeClock {
         Self(TimeKind::System)
     }
 
-    /// Creates a new frozen `TimeClock`.
+    /// Creates a new frozen `SimpleClock`.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new().to_time_clock()`.
+    /// This is a convenience method equivalent to calling `ClockControl::new().to_simple_clock()`.
     ///
     /// > **Note**: The returned clock will not advance time; all time is frozen.
     ///
@@ -72,9 +72,9 @@ impl TimeClock {
     /// use std::thread::sleep;
     /// use std::time::Duration;
     ///
-    /// use tick::TimeClock;
+    /// use tick::SimpleClock;
     ///
-    /// let clock = TimeClock::new_frozen();
+    /// let clock = SimpleClock::new_frozen();
     ///
     /// // The clock will always return the same timestamp and instant.
     /// let system_time = clock.system_time();
@@ -88,12 +88,12 @@ impl TimeClock {
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_frozen() -> Self {
-        crate::ClockControl::new().to_time_clock()
+        crate::ClockControl::new().to_simple_clock()
     }
 
-    /// Creates a new frozen `TimeClock` at the specified timestamp.
+    /// Creates a new frozen `SimpleClock` at the specified timestamp.
     ///
-    /// This is a convenience method equivalent to calling `ClockControl::new_at(time).to_time_clock()`.
+    /// This is a convenience method equivalent to calling `ClockControl::new_at(time).to_simple_clock()`.
     ///
     /// > **Note**: The returned clock will not advance time; all time is frozen at the specified timestamp.
     ///
@@ -102,17 +102,17 @@ impl TimeClock {
     /// ```
     /// use std::time::{Duration, SystemTime};
     ///
-    /// use tick::TimeClock;
+    /// use tick::SimpleClock;
     ///
     /// let specific_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    /// let clock = TimeClock::new_frozen_at(specific_time);
+    /// let clock = SimpleClock::new_frozen_at(specific_time);
     ///
     /// assert_eq!(clock.system_time(), specific_time);
     /// ```
     #[cfg(any(feature = "test-util", test))]
     #[must_use]
     pub fn new_frozen_at(time: impl Into<SystemTime>) -> Self {
-        crate::ClockControl::new_at(time).to_time_clock()
+        crate::ClockControl::new_at(time).to_simple_clock()
     }
 
     /// Builds the read-only time view for a [`Clock`][crate::Clock]'s state.
@@ -124,7 +124,7 @@ impl TimeClock {
         }
     }
 
-    /// Builds a controlled `TimeClock` from an owned [`ClockControl`][crate::ClockControl].
+    /// Builds a controlled `SimpleClock` from an owned [`ClockControl`][crate::ClockControl].
     ///
     /// Taking ownership avoids an extra `Arc` clone compared to going through
     /// [`from_state`][Self::from_state].
@@ -190,7 +190,7 @@ impl TimeClock {
     }
 }
 
-impl AsRef<Self> for TimeClock {
+impl AsRef<Self> for SimpleClock {
     fn as_ref(&self) -> &Self {
         self
     }
@@ -206,13 +206,13 @@ mod tests {
 
     #[test]
     fn assert_types() {
-        static_assertions::assert_impl_all!(TimeClock: Send, Sync, Clone, AsRef<TimeClock>);
+        static_assertions::assert_impl_all!(SimpleClock: Send, Sync, Clone, AsRef<SimpleClock>);
     }
 
     #[cfg_attr(miri, ignore)] // Talks to the real OS clock, which Miri cannot do.
     #[test]
     fn instant_advances() {
-        let clock = TimeClock::new_system();
+        let clock = SimpleClock::new_system();
         let first = clock.instant();
         let second = clock.instant();
         assert!(second >= first);
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn controlled_time_is_governed_by_clock_control() {
         let control = ClockControl::new();
-        let clock = control.to_time_clock();
+        let clock = control.to_simple_clock();
 
         let start = clock.system_time();
         control.advance(Duration::from_secs(5));
@@ -230,9 +230,9 @@ mod tests {
     }
 
     #[test]
-    fn stopwatch_from_time_clock() {
+    fn stopwatch_from_simple_clock() {
         let control = ClockControl::new();
-        let clock = control.to_time_clock();
+        let clock = control.to_simple_clock();
 
         let watch = clock.stopwatch();
         control.advance(Duration::from_secs(1));
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn new_frozen_does_not_advance() {
-        let clock = TimeClock::new_frozen();
+        let clock = SimpleClock::new_frozen();
 
         let system_time = clock.system_time();
         let instant = clock.instant();
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn new_frozen_at_uses_given_time() {
         let specific = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let clock = TimeClock::new_frozen_at(specific);
+        let clock = SimpleClock::new_frozen_at(specific);
 
         assert_eq!(clock.system_time(), specific);
     }
@@ -262,8 +262,8 @@ mod tests {
     #[test]
     fn from_clock_control_is_controlled() {
         let control = ClockControl::new();
-        let owned: TimeClock = TimeClock::from(control.clone());
-        let borrowed: TimeClock = TimeClock::from(&control);
+        let owned: SimpleClock = SimpleClock::from(control.clone());
+        let borrowed: SimpleClock = SimpleClock::from(&control);
 
         let start = owned.system_time();
         control.advance(Duration::from_secs(3));
@@ -278,11 +278,11 @@ mod tests {
         let control = ClockControl::new();
         let clock = control.to_clock();
 
-        let from_ref: TimeClock = TimeClock::from(&clock);
-        let from_owned: TimeClock = TimeClock::from(clock);
+        let from_ref: SimpleClock = SimpleClock::from(&clock);
+        let from_owned: SimpleClock = SimpleClock::from(clock);
 
         control.advance(Duration::from_secs(2));
-        let expected = control.to_time_clock().system_time();
+        let expected = control.to_simple_clock().system_time();
 
         assert_eq!(from_ref.system_time(), expected);
         assert_eq!(from_owned.system_time(), expected);

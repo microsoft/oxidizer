@@ -168,9 +168,9 @@ impl ClockControl {
         Clock::new(ClockState::ClockControl(self.clone()))
     }
 
-    /// Converts this `ClockControl` into a [`TimeClock`][crate::TimeClock] instance.
+    /// Converts this `ClockControl` into a [`SimpleClock`][crate::SimpleClock] instance.
     ///
-    /// The returned [`TimeClock`][crate::TimeClock] provides time retrieval only (no timers) and
+    /// The returned [`SimpleClock`][crate::SimpleClock] provides time retrieval only (no timers) and
     /// is driven by this `ClockControl`, just like a [`Clock`] created via
     /// [`to_clock`][Self::to_clock]. Both kinds observe the same controlled time.
     ///
@@ -182,19 +182,19 @@ impl ClockControl {
     /// use tick::ClockControl;
     ///
     /// let control = ClockControl::new();
-    /// let time_clock = control.to_time_clock();
+    /// let simple_clock = control.to_simple_clock();
     ///
-    /// let start = time_clock.system_time();
+    /// let start = simple_clock.system_time();
     /// control.advance(Duration::from_secs(1));
     ///
     /// assert_eq!(
-    ///     time_clock.system_time(),
+    ///     simple_clock.system_time(),
     ///     start.checked_add(Duration::from_secs(1)).unwrap()
     /// );
     /// ```
     #[must_use]
-    pub fn to_time_clock(&self) -> crate::TimeClock {
-        crate::TimeClock::from_control(self.clone())
+    pub fn to_simple_clock(&self) -> crate::SimpleClock {
+        crate::SimpleClock::from_control(self.clone())
     }
 
     /// Sets the duration by which the clock will auto-advance when accessing the current time.
@@ -423,15 +423,15 @@ impl From<&ClockControl> for Clock {
     }
 }
 
-impl From<ClockControl> for crate::TimeClock {
+impl From<ClockControl> for crate::SimpleClock {
     fn from(control: ClockControl) -> Self {
         Self::from_control(control)
     }
 }
 
-impl From<&ClockControl> for crate::TimeClock {
+impl From<&ClockControl> for crate::SimpleClock {
     fn from(control: &ClockControl) -> Self {
-        control.to_time_clock()
+        control.to_simple_clock()
     }
 }
 

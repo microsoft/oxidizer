@@ -7,8 +7,8 @@ use std::time::{Duration, Instant, SystemTime};
 use thread_aware::ThreadAware;
 use thread_aware::affinity::Affinity;
 
+use crate::simple_clock::SimpleClock;
 use crate::state::ClockState;
-use crate::time_clock::TimeClock;
 use crate::timers::TimerKey;
 
 /// Provides an abstraction for time-related operations.
@@ -175,7 +175,7 @@ use crate::timers::TimerKey;
 #[derive(Clone)]
 pub struct Clock {
     state: ClockState,
-    time: TimeClock,
+    time: SimpleClock,
     affinity: Option<Affinity>,
 }
 
@@ -218,7 +218,7 @@ impl Clock {
 
     pub(crate) fn new(state: ClockState) -> Self {
         Self {
-            time: TimeClock::from_state(&state),
+            time: SimpleClock::from_state(&state),
             state,
             affinity: None,
         }
@@ -336,7 +336,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn system_time(&self) -> SystemTime {
-        self.time_clock().system_time()
+        self.simple_clock().system_time()
     }
 
     /// Retrieves the current system time converted to a target type.
@@ -361,13 +361,14 @@ impl Clock {
     /// - **In tests** using manual time control (via the `test-util` feature), if controlled time
     ///   is moved outside the target type's supported range.
     ///
-    /// For types that support the full valid range of system time values, this conversion always
-    /// succeeds in real environments.
+    /// If `T` can represent every [`SystemTime`] value, this conversion never fails and this method
+    /// never panics — the panic above only occurs for target types whose representable range does
+    /// not cover the current time.
     ///
-    /// Kept consistent with [`TimeClock::system_time_as`][crate::TimeClock::system_time_as].
+    /// Kept consistent with [`SimpleClock::system_time_as`][crate::SimpleClock::system_time_as].
     #[must_use]
     pub fn system_time_as<T: TryFrom<SystemTime>>(&self) -> T {
-        self.time_clock().system_time_as()
+        self.simple_clock().system_time_as()
     }
 
     /// Retrieves the current [`Instant`] time.
@@ -398,7 +399,7 @@ impl Clock {
     /// ```
     #[must_use]
     pub fn instant(&self) -> Instant {
-        self.time_clock().instant()
+        self.simple_clock().instant()
     }
 
     /// Creates a new [`Delay`][crate::Delay] that will complete after the specified duration.
@@ -474,16 +475,16 @@ impl Clock {
         &self.state
     }
 
-    /// Returns the [`TimeClock`] view of this clock.
+    /// Returns the [`SimpleClock`] view of this clock.
     ///
-    /// A [`TimeClock`] exposes only time retrieval (no timers), and is the common abstraction
+    /// A [`SimpleClock`] exposes only time retrieval (no timers), and is the common abstraction
     /// shared by all clock kinds. Use it to pass this clock to APIs — such as
     /// [`Stopwatch`][crate::Stopwatch] — that only need to read the current time.
     ///
-    /// This clock also implements [`AsRef<TimeClock>`], so it can be passed directly to such
+    /// This clock also implements [`AsRef<SimpleClock>`], so it can be passed directly to such
     /// APIs without calling this method explicitly.
     #[must_use]
-    pub fn time_clock(&self) -> &TimeClock {
+    pub fn simple_clock(&self) -> &SimpleClock {
         &self.time
     }
 }
@@ -494,19 +495,19 @@ impl AsRef<Self> for Clock {
     }
 }
 
-impl AsRef<TimeClock> for Clock {
-    fn as_ref(&self) -> &TimeClock {
+impl AsRef<SimpleClock> for Clock {
+    fn as_ref(&self) -> &SimpleClock {
         &self.time
     }
 }
 
-impl From<Clock> for TimeClock {
+impl From<Clock> for SimpleClock {
     fn from(clock: Clock) -> Self {
         clock.time
     }
 }
 
-impl From<&Clock> for TimeClock {
+impl From<&Clock> for SimpleClock {
     fn from(clock: &Clock) -> Self {
         clock.time.clone()
     }

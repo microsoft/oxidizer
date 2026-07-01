@@ -3,12 +3,12 @@
 
 use std::time::{Duration, Instant};
 
-use crate::TimeClock;
+use crate::SimpleClock;
 
 /// A stopwatch that facilitates the measurement of elapsed time.
 ///
 /// An instance of `Stopwatch` is created by calling [`Clock::stopwatch()`][crate::Clock::stopwatch],
-/// [`TimeClock::stopwatch()`], or by passing any clock to the [`Stopwatch::new()`] constructor.
+/// [`SimpleClock::stopwatch()`], or by passing any clock to the [`Stopwatch::new()`] constructor.
 ///
 /// # Examples
 ///
@@ -25,19 +25,19 @@ use crate::TimeClock;
 /// ```
 #[derive(Debug)]
 pub struct Stopwatch {
-    clock: TimeClock,
+    clock: SimpleClock,
     start: Instant,
 }
 
 impl Stopwatch {
     /// Creates a high-accuracy stopwatch that measures elapsed time.
     ///
-    /// The stopwatch accepts any source that can be referenced as a [`TimeClock`], including a
-    /// [`Clock`][crate::Clock] and a [`TimeClock`]. It measures time using the source's clock, so
+    /// The stopwatch accepts any source that can be referenced as a [`SimpleClock`], including a
+    /// [`Clock`][crate::Clock] and a [`SimpleClock`]. It measures time using the source's clock, so
     /// stopwatches created from a controlled clock respect the controlled passage of time.
     ///
     /// > **Note**: Consider using [`Clock::stopwatch()`][crate::Clock::stopwatch] or
-    /// > [`TimeClock::stopwatch()`] as a shortcut for creating stopwatches.
+    /// > [`SimpleClock::stopwatch()`] as a shortcut for creating stopwatches.
     ///
     /// # Examples
     ///
@@ -53,7 +53,7 @@ impl Stopwatch {
     /// # }
     /// ```
     #[must_use]
-    pub fn new(source: impl AsRef<TimeClock>) -> Self {
+    pub fn new(source: impl AsRef<SimpleClock>) -> Self {
         let clock = source.as_ref().clone();
         let start = clock.instant();
         Self { clock, start }
@@ -95,14 +95,14 @@ mod test {
     fn new_accepts_any_time_source() {
         let control = ClockControl::new();
         let clock = control.to_clock();
-        let time_clock = control.to_time_clock();
+        let simple_clock = control.to_simple_clock();
 
-        // `Stopwatch::new` accepts a `Clock`, a `TimeClock`, and references to either,
-        // since all of them are `AsRef<TimeClock>`.
+        // `Stopwatch::new` accepts a `Clock`, a `SimpleClock`, and references to either,
+        // since all of them are `AsRef<SimpleClock>`.
         let _ = Stopwatch::new(&clock);
         let _ = Stopwatch::new(clock);
-        let _ = Stopwatch::new(&time_clock);
-        let _ = Stopwatch::new(time_clock);
+        let _ = Stopwatch::new(&simple_clock);
+        let _ = Stopwatch::new(simple_clock);
     }
 
     #[test]
