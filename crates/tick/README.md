@@ -111,7 +111,7 @@ As a result, time-only APIs accept either clock seamlessly. [`Stopwatch`][__link
 takes any [`AsRef<SimpleClock>`][__link27]:
 
 ```rust
-use tick::{Stopwatch, SimpleClock};
+use tick::{SimpleClock, Stopwatch};
 
 // A driver-free clock that only retrieves time.
 let clock = SimpleClock::new_system();
@@ -262,7 +262,7 @@ contain additional examples of how to use the time primitives.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/tick">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbSq2cFZ4rLWsbpaZLh51tK84b-cdpE6tP8YQb-ps7U0F3RDxhZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbn-ALXM8UiC8bIRESNiZavEAb64zavGelG-YbgLo76yq99ClhZIKCbHRocmVhZF9hd2FyZWUwLjcuNYJkdGlja2UwLjMuNQ
  [__link0]: https://docs.rs/tick/0.3.5/tick/?search=ClockControl
  [__link1]: https://docs.rs/tick/0.3.5/tick/?search=Clock
  [__link10]: https://docs.rs/tick/0.3.5/tick/?search=Error
