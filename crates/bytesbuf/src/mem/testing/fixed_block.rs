@@ -132,6 +132,7 @@ impl FixedBlockMemoryInner {
 mod tests {
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::BytesView;
@@ -164,8 +165,6 @@ mod tests {
 
     #[test]
     fn relocate_is_noop_and_keeps_provider_usable() {
-        use thread_aware::affinity::pinned_affinities;
-
         let mut memory = FixedBlockMemory::new(nz!(16));
 
         // The wrapped configuration is immutable, so relocation is a no-op, but the provider must

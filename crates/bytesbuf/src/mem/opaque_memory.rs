@@ -68,7 +68,11 @@ impl Memory for OpaqueMemory {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{self, AtomicUsize};
+
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::{Affinity, pinned_affinities};
 
     use super::*;
     use crate::mem::GlobalPool;
@@ -96,8 +100,6 @@ mod tests {
 
     #[test]
     fn relocate_does_not_break_reservation() {
-        use thread_aware::affinity::pinned_affinities;
-
         let mut memory = OpaqueMemory::new(GlobalPool::new());
 
         let affinities = pinned_affinities(&[2]);
@@ -110,11 +112,6 @@ mod tests {
 
     #[test]
     fn relocate_forwards_to_wrapped_provider() {
-        use std::sync::Arc;
-        use std::sync::atomic::{self, AtomicUsize};
-
-        use thread_aware::affinity::{Affinity, pinned_affinities};
-
         // A provider whose relocate is observable, to verify forwarding.
         #[derive(Clone, Debug)]
         struct TrackingMemory {
@@ -148,8 +145,6 @@ mod tests {
 
     #[test]
     fn clone_is_usable_independently() {
-        use thread_aware::affinity::pinned_affinities;
-
         let memory = OpaqueMemory::new(GlobalPool::new());
         let mut clone = memory.clone();
 
