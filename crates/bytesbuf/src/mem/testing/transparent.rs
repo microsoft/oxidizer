@@ -112,6 +112,7 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
 #[cfg(test)]
 mod tests {
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::mem::MemoryShared;
@@ -140,8 +141,6 @@ mod tests {
 
     #[test]
     fn relocate_is_noop_and_keeps_provider_usable() {
-        use thread_aware::affinity::pinned_affinities;
-
         let mut memory = TransparentMemory::new();
 
         // Relocation is a no-op for this stateless provider, but must leave it fully usable.

@@ -444,6 +444,7 @@ mod tests {
     use std::thread;
 
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::mem::MemoryShared;
@@ -723,8 +724,6 @@ mod tests {
 
     #[test]
     fn relocated_pool_works() {
-        use thread_aware::affinity::pinned_affinities;
-
         let affinities = pinned_affinities(&[2]);
         let source = Some(affinities[0]);
         let destination = affinities[1];
