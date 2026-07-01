@@ -126,8 +126,9 @@ mod tests {
         }
 
         impl ThreadAware for TrackingMemory {
-            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
                 self.relocated.fetch_add(1, atomic::Ordering::SeqCst);
+                self.inner.relocate(source, destination);
             }
         }
 

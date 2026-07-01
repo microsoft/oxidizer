@@ -59,12 +59,12 @@ use crate::mem::Memory;
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
 #[derive(Clone)]
-pub struct CallbackMemory<D> {
+pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
     data: D,
     reserve_fn: fn(&D, usize) -> BytesBuf,
 }
 
-impl<D> Debug for CallbackMemory<D> {
+impl<D: ThreadAware + Clone + Send + Sync + 'static> Debug for CallbackMemory<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // `data` is deliberately not formatted so that `CallbackMemory` is `Debug` regardless of
         // whether `D` is, which keeps it usable with thread-aware data that is intentionally not
@@ -75,7 +75,7 @@ impl<D> Debug for CallbackMemory<D> {
     }
 }
 
-impl<D> CallbackMemory<D> {
+impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
     /// Creates a provider that reserves memory via `reserve_fn`, applied to thread-aware `data`.
     ///
     /// `data` holds any state the reservation needs (typically the wrapped memory provider). Because
@@ -109,20 +109,14 @@ impl<D> CallbackMemory<D> {
     }
 }
 
-impl<D> Memory for CallbackMemory<D>
-where
-    D: Send + Sync + 'static,
-{
+impl<D: ThreadAware + Clone + Send + Sync + 'static> Memory for CallbackMemory<D> {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
 }
 
-impl<D> ThreadAware for CallbackMemory<D>
-where
-    D: ThreadAware,
-{
+impl<D: ThreadAware + Clone + Send + Sync + 'static> ThreadAware for CallbackMemory<D> {
     fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         // The function pointer holds no state; only the captured data can be thread-affine.
         self.data.relocate(source, destination);
@@ -253,7 +247,7 @@ mod tests {
     #[test]
     fn works_with_non_debug_data() {
         // Data that is intentionally not `Debug`, to confirm `CallbackMemory` does not require it.
-        #[derive(Clone)]
+        #[derive(Clone, ThreadAware)]
         struct NotDebug {
             inner: TransparentMemory,
         }
