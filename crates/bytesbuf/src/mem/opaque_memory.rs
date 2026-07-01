@@ -1,7 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use thread_aware::{PerCore, ThreadAware};
+use thread_aware::ThreadAware;
+use thread_aware::affinity::Affinity;
 
 use crate::mem::{Memory, MemoryShared};
 
@@ -10,24 +11,19 @@ use crate::mem::{Memory, MemoryShared};
 /// This adapter adds some inefficiency due to additional indirection overhead for
 /// every memory reservation, so avoid this adapter if you can tolerate alternatives (generics).
 ///
-/// The adapter is itself [`MemoryShared`], forwarding [`ThreadAware`] relocation to the wrapped
-/// provider so that thread-affine state is relocated correctly when the adapter moves between
-/// threads.
-#[derive(Clone, Debug)]
+/// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards [`ThreadAware`]
+/// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
+/// provider. Cloning the adapter clones the wrapped provider, so each clone is independent.
+#[derive(Debug)]
 pub struct OpaqueMemory {
-    inner: thread_aware::Arc<dyn MemoryShared, PerCore>,
+    inner: Box<dyn MemoryShared>,
 }
 
 impl OpaqueMemory {
     /// Creates a new instance of the adapter.
-    ///
-    /// The wrapped provider must be [`Clone`] so that a thread-local instance can be materialized
-    /// per thread, preserving thread-awareness across relocations.
     #[must_use]
-    pub fn new(inner: impl MemoryShared + Clone) -> Self {
-        Self {
-            inner: thread_aware::Arc::<dyn MemoryShared, PerCore>::with_clone_fn(inner, |provider| Box::new(provider.clone())),
-        }
+    pub fn new(inner: impl MemoryShared) -> Self {
+        Self { inner: Box::new(inner) }
     }
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
@@ -55,6 +51,14 @@ impl OpaqueMemory {
     }
 }
 
+impl Clone for OpaqueMemory {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone_boxed(),
+        }
+    }
+}
+
 impl Memory for OpaqueMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
@@ -64,7 +68,7 @@ impl Memory for OpaqueMemory {
 
 impl ThreadAware for OpaqueMemory {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
-    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
+    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
         self.inner.relocate(source, destination);
     }
 }
@@ -110,5 +114,59 @@ mod tests {
         // The adapter must remain usable after relocation.
         let builder = memory.reserve(1024);
         assert!(builder.capacity() >= 1024);
+    }
+
+    #[test]
+    fn relocate_forwards_to_wrapped_provider() {
+        use std::sync::Arc;
+        use std::sync::atomic::{self, AtomicUsize};
+
+        use thread_aware::affinity::{Affinity, pinned_affinities};
+
+        // A provider whose relocate is observable, to verify forwarding.
+        #[derive(Clone, Debug)]
+        struct TrackingMemory {
+            relocated: Arc<AtomicUsize>,
+            inner: GlobalPool,
+        }
+
+        impl Memory for TrackingMemory {
+            fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
+                self.inner.reserve(min_bytes)
+            }
+        }
+
+        impl ThreadAware for TrackingMemory {
+            fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+                self.relocated.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+        }
+
+        let relocated = Arc::new(AtomicUsize::new(0));
+        let mut memory = OpaqueMemory::new(TrackingMemory {
+            relocated: Arc::clone(&relocated),
+            inner: GlobalPool::new(),
+        });
+
+        let affinities = pinned_affinities(&[2]);
+        memory.relocate(Some(affinities[0]), affinities[1]);
+
+        assert_eq!(relocated.load(atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn clone_is_usable_independently() {
+        use thread_aware::affinity::pinned_affinities;
+
+        let memory = OpaqueMemory::new(GlobalPool::new());
+        let mut clone = memory.clone();
+
+        // Relocating the clone must leave both the clone and the original usable, since each owns
+        // its own wrapped provider.
+        let affinities = pinned_affinities(&[2]);
+        clone.relocate(Some(affinities[0]), affinities[1]);
+
+        assert!(memory.reserve(64).capacity() >= 64);
+        assert!(clone.reserve(64).capacity() >= 64);
     }
 }

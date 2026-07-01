@@ -92,7 +92,7 @@ impl HttpBodyBuilder {
     /// memory used by [`HttpBodyBuilder::new`]. It remains thread-aware: its thread-affine state is
     /// relocated when the builder moves between threads.
     #[must_use]
-    pub fn with_custom_memory(memory: impl MemoryShared + Clone, clock: &Clock) -> Self {
+    pub fn with_custom_memory(memory: impl MemoryShared, clock: &Clock) -> Self {
         Self {
             memory: MemoryWrapper::Opaque(OpaqueMemory::new(memory)),
             clock: clock.clone(),

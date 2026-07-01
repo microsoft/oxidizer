@@ -18,6 +18,26 @@ use crate::mem::Memory;
 /// synchronization primitives. Our own providers (e.g. [`GlobalPool`][crate::mem::GlobalPool]) do
 /// this internally. When implementing a memory provider, derive or implement [`ThreadAware`]; a
 /// no-op implementation is correct for providers that hold no thread-affine state.
-pub trait MemoryShared: Memory + ThreadAware + Send + Sync + 'static {}
+///
+/// # Cloning
+///
+/// A memory provider must be [`Clone`], so that a distinct instance can be handed to each thread
+/// that shares the provider. Each clone owns its own thread-affine state and decides for itself how
+/// to be thread-aware, keeping that decision with the provider rather than any wrapper around it.
+pub trait MemoryShared: Memory + ThreadAware + Send + Sync + 'static {
+    /// Clones this provider into a boxed trait object.
+    ///
+    /// This lets [`OpaqueMemory`][crate::mem::OpaqueMemory] duplicate a type-erased provider without
+    /// knowing its concrete type. The returned provider is independent and owns its own
+    /// thread-affine state.
+    fn clone_boxed(&self) -> Box<dyn MemoryShared>;
+}
 
-impl<T> MemoryShared for T where T: Memory + ThreadAware + Send + Sync + 'static {}
+impl<T> MemoryShared for T
+where
+    T: Memory + ThreadAware + Clone + Send + Sync + 'static,
+{
+    fn clone_boxed(&self) -> Box<dyn MemoryShared> {
+        Box::new(self.clone())
+    }
+}
