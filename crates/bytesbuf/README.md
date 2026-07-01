@@ -300,7 +300,7 @@ Example of returning a memory provider that performs configuration for optimal m
 `examples/bb_has_memory_optimizing.rs` for full code):
 
 ```rust
-use bytesbuf::mem::{CallbackMemory, HasMemory, MemoryShared};
+use bytesbuf::mem::{HasMemory, MemoryShared, WrappingMemory};
 
 /// Represents the optimal memory configuration for a UDP connection when reserving I/O memory.
 const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfiguration {
@@ -311,13 +311,13 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
-        CallbackMemory::new({
-            // Cloning is cheap, as it is a service that shares resources between clones.
-            let io_context = self.io_context.clone();
+        // The wrapped provider carries any thread-affine state and is relocated automatically
+        // when moved between threads. The closure captures only inert configuration.
+        let io_memory = self.io_context.io_memory();
+        let configuration = UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION;
 
-            move |min_len| {
-                io_context.reserve_io_memory(min_len, UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
-            }
+        WrappingMemory::new(io_memory, move |io_memory, min_len| {
+            io_memory.reserve_with_config(min_len, &configuration)
         })
     }
 }
@@ -471,7 +471,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb4gvD4zw9iycbirtUutkkzqcbSlRn3SgH6bsbjAbxNhZA3wBhZIGCaGJ5dGVzYnVmZTAuNS42
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbtAbmccK3BHQb8b1R5KJ5HKEbBITSfUzQS_AbLmjHxq8zJdthZIGCaGJ5dGVzYnVmZTAuNS42
  [__link0]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView

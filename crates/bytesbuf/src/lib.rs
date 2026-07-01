@@ -328,7 +328,7 @@
 //! # struct UdpConnection {
 //! #     io_context: IoContext,
 //! # }
-//! use bytesbuf::mem::{CallbackMemory, HasMemory, MemoryShared};
+//! use bytesbuf::mem::{HasMemory, MemoryShared, WrappingMemory};
 //!
 //! /// Represents the optimal memory configuration for a UDP connection when reserving I/O memory.
 //! const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfiguration {
@@ -339,29 +339,38 @@
 //!
 //! impl HasMemory for UdpConnection {
 //!     fn memory(&self) -> impl MemoryShared {
-//!         CallbackMemory::new({
-//!             // Cloning is cheap, as it is a service that shares resources between clones.
-//!             let io_context = self.io_context.clone();
+//!         // The wrapped provider carries any thread-affine state and is relocated automatically
+//!         // when moved between threads. The closure captures only inert configuration.
+//!         let io_memory = self.io_context.io_memory();
+//!         let configuration = UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION;
 //!
-//!             move |min_len| {
-//!                 io_context.reserve_io_memory(min_len, UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
-//!             }
+//!         WrappingMemory::new(io_memory, move |io_memory, min_len| {
+//!             io_memory.reserve_with_config(min_len, &configuration)
 //!         })
 //!     }
 //! }
 //!
 //! # use bytesbuf::BytesBuf;
+//! # use bytesbuf::mem::Memory;
 //! # #[derive(Clone, Debug)]
 //! # struct IoContext;
 //! # impl IoContext {
-//! #     pub fn reserve_io_memory(
-//! #         &self,
-//! #         min_len: usize,
-//! #         _memory_configuration: MemoryConfiguration,
-//! #     ) -> BytesBuf {
-//! #         todo!()
+//! #     pub fn io_memory(&self) -> IoMemory { IoMemory }
+//! # }
+//! # #[derive(Clone, Debug)]
+//! # struct IoMemory;
+//! # impl IoMemory {
+//! #     fn reserve_with_config(&self, min_len: usize, _configuration: &MemoryConfiguration) -> BytesBuf {
+//! #         bytesbuf::mem::GlobalPool::new().reserve(min_len)
 //! #     }
 //! # }
+//! # impl Memory for IoMemory {
+//! #     fn reserve(&self, min_bytes: usize) -> BytesBuf { self.reserve_with_config(min_bytes, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION) }
+//! # }
+//! # impl thread_aware::ThreadAware for IoMemory {
+//! #     fn relocate(&mut self, _s: Option<thread_aware::affinity::Affinity>, _d: thread_aware::affinity::Affinity) {}
+//! # }
+//! # #[derive(Clone, Copy)]
 //! # struct MemoryConfiguration { requires_page_alignment: bool, zero_memory_on_release: bool, requires_registered_memory: bool }
 //! ```
 //!
