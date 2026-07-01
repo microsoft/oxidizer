@@ -72,12 +72,15 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.6.5" }
+http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.1.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.6.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
 plurality = { path = "crates/plurality", default-features = false, version = "0.1.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
+rest_over_grpc = { path = "crates/rest_over_grpc", default-features = false, version = "0.1.0" }
+rest_over_grpc_build = { path = "crates/rest_over_grpc_build", default-features = false, version = "0.1.0" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.10" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.4.5" }
 templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.4" }
@@ -137,6 +140,7 @@ jiff = { version = "0.2.21", default-features = false }
 libc = { version = "0.2.178", default-features = false }
 loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
+matchit = { version = "0.8.4", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
@@ -160,6 +164,14 @@ postcard = { version = "1.1.3", default-features = false, features = ["use-std"]
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
+prost = { version = "0.14.4", default-features = false }
+prost-build = { version = "0.14.4", default-features = false }
+prost-reflect = { version = "0.16.4", default-features = false }
+prost-types = { version = "0.14.4", default-features = false }
+pbjson = { version = "0.9.0", default-features = false }
+pbjson-build = { version = "0.9.0", default-features = false }
+pbjson-types = { version = "0.9.0", default-features = false }
+protox = { version = "0.9.1", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }

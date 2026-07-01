@@ -1,0 +1,45 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rest_over_grpc_sample"
+description = "End-to-end sample exercising rest_over_grpc + rest_over_grpc_build"
+version = "0.0.0"
+publish = false
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+
+[dependencies]
+rest_over_grpc = { workspace = true, features = ["tower"] }
+pbjson = { workspace = true }
+prost = { workspace = true, features = ["std", "derive"] }
+serde = { workspace = true, features = ["std"] }
+
+[build-dependencies]
+rest_over_grpc_build = { workspace = true, features = ["descriptor"] }
+pbjson-build = { workspace = true }
+prost-build = { workspace = true }
+protox = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+criterion = { workspace = true }
+fastrand = { workspace = true }
+http = { workspace = true, features = ["std"] }
+http-body-util = { workspace = true }
+matchit = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tower-service = { workspace = true }
+
+[[bench]]
+name = "grs_router_vs_matchit"
+harness = false
+
+[lints]
+workspace = true

@@ -1,0 +1,81 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rest_over_grpc"
+version = "0.1.0"
+description = "Framework-neutral runtime for transcoding gRPC services to REST/JSON endpoints"
+readme = "README.md"
+keywords = ["grpc", "rest", "json", "transcoding", "router"]
+categories = ["web-programming", "network-programming", "encoding"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "http::method::Method",
+    "http::request::Request",
+    "http::response::Response",
+    "http::status::StatusCode",
+    "http::uri::Uri",
+    "http_body::Body",
+    "tower_service::Service",
+    "layered::service::Service",
+    "futures_core::stream::Stream",
+    "serde::de::*",
+    "serde::ser::*",
+    "serde_core::de::*",
+    "serde_core::ser::*",
+]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = []
+# Enables the `adapter` module's `tower::Service` bridge between the
+# `http`/`http-body`/`tower` ecosystem (hyper, axum, …) and the neutral
+# dispatcher signature.
+tower = ["dep:http-body", "dep:http-body-util", "dep:tower-service", "dep:bytes"]
+# Enables the `adapter` module's `layered::Service` bridge — the repository's
+# `async fn`-based service trait — over the same neutral dispatcher.
+layered = ["dep:http-body", "dep:http-body-util", "dep:layered", "dep:bytes"]
+# Enables server-streaming support: `ResponseStream`, `collect_stream`, and the
+# streaming response encodings (JSON array / NDJSON / SSE).
+streaming = ["dep:futures-core", "dep:futures-util"]
+
+[dependencies]
+http = { workspace = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+futures-core = { workspace = true, optional = true }
+futures-util = { workspace = true, features = ["std"], optional = true }
+layered = { workspace = true, optional = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tower-service = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["std", "executor"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[[example]]
+name = "tower_service"
+required-features = ["tower"]
+
+[[example]]
+name = "layered_service"
+required-features = ["layered"]
+
+[lints]
+workspace = true
