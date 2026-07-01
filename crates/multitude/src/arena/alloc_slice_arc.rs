@@ -9,11 +9,12 @@ use core::mem;
 use core::pin::Pin;
 use core::ptr::NonNull;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::alloc_prefixed::worst_case_strong_slice_payload;
 use super::alloc_value::{MAX_SMART_PTR_ALIGN, acquire_chunk_ref};
 use super::{Arena, ExpectAlloc};
+use crate::AllocError;
 use crate::arc::Arc;
 use crate::internal::thin_dst::{AtomicStrong, LocalStrong, Strong};
 use crate::rc::Rc;
@@ -465,7 +466,7 @@ impl<A: Allocator + Clone> Arena<A> {
 #[inline]
 fn check_slice_arc_layout<T>() -> Result<(), AllocError> {
     if mem::align_of::<T>() >= MAX_SMART_PTR_ALIGN {
-        return Err(AllocError);
+        return Err(AllocError::ALIGNMENT_TOO_LARGE);
     }
     Ok(())
 }

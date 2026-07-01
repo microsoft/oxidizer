@@ -11,15 +11,15 @@ use core::mem::{self, ManuallyDrop};
 use core::ptr::{self, NonNull};
 use core::slice;
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Vec;
-use crate::Arena;
 use crate::arc::Arc;
 use crate::r#box::Box;
 use crate::internal::arena_buf::DrainAll;
 use crate::internal::constants::buffer_freezable;
 use crate::rc::Rc;
+use crate::{AllocError, Arena};
 
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Shared body of the `Box`/`Arc` freeze paths: drain every element

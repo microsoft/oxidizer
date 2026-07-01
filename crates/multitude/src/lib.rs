@@ -60,7 +60,7 @@
 //!
 //! 10. **`#![no_std]` Support.** `multitude` can be used in `#![no_std]` environments, making it suitable for embedded systems and other resource-constrained contexts.
 //!
-//! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/BUMPALO.md)
+//! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/BUMPALO.md)
 //! for a feature-by-feature comparison with [`bumpalo`](https://crates.io/crates/bumpalo).
 //!
 //! # Example
@@ -431,7 +431,7 @@
 //! | `bytemuck` | Provides [`BytemuckView`](bytemuck::BytemuckView) for safe zero-initialized allocation of types implementing [`bytemuck::Zeroable`](::bytemuck::Zeroable). Access via [`Arena::bytemuck()`]. |
 //! | `bytes` | Adds [`From`] conversions from [`Arc<[u8]>`](Arc) and [`Arc<str>`](Arc) into [`bytes::Bytes`](::bytes::Bytes), enabling zero-copy integration with the Tokio / Hyper async ecosystem. |
 //! | `bytesbuf` | Implements [`bytesbuf::mem::Memory`](::bytesbuf::mem::Memory) directly on [`Arena`], so that [`BytesBuf`](::bytesbuf::BytesBuf) buffers can be backed by arena chunks. Implies `std`. |
-//! | `hashbrown` | Lets [`Arena`] back [`hashbrown`](https://crates.io/crates/hashbrown) collections via [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`], [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. (`&Arena` always implements the `allocator-api2` 0.2 `Allocator` trait so it can back `hashbrown` directly; this feature adds the convenience constructors.) |
+//! | `hashbrown` | Lets [`Arena`] back [`hashbrown`](https://crates.io/crates/hashbrown) collections via [`Arena::alloc_hash_map`], [`Arena::alloc_hash_map_with_capacity`], [`Arena::alloc_set`], and [`Arena::alloc_set_with_capacity`]. |
 
 #![no_std]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/multitude/logo.png")]
@@ -452,6 +452,7 @@ mod r#box;
 #[cfg(feature = "dst")]
 #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
 pub mod dst;
+mod error;
 mod from_in;
 mod internal;
 mod rc;
@@ -491,5 +492,6 @@ pub use self::arena_builder::ArenaBuilder;
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 pub use self::arena_stats::ArenaStats;
 pub use self::r#box::Box;
+pub use self::error::AllocError;
 pub use self::from_in::{FromIn, IntoIn};
 pub use self::rc::Rc;

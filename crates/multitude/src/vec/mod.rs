@@ -6,11 +6,11 @@
 use core::marker::PhantomData;
 use core::mem;
 
-use allocator_api2::alloc::{AllocError, Allocator, Global};
+use allocator_api2::alloc::{Allocator, Global};
 
-use crate::Arena;
 use crate::internal::arena_buf::ArenaBuf;
 use crate::internal::constants::buffer_freezable;
+use crate::{AllocError, Arena};
 
 mod basic;
 mod collect_in;
@@ -100,7 +100,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // both buffer kinds surface a recoverable `AllocError`, rather than the
         // freezable hint saturating into the oversized path (where the in-chunk
         // reservation would later overflow and panic on the `expect` below).
-        let payload_bytes = mem::size_of::<T>().checked_mul(new_cap).ok_or(AllocError)?;
+        let payload_bytes = mem::size_of::<T>().checked_mul(new_cap).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         let refill_hint = if const { buffer_freezable::<T>() } {
             // Freezable buffers carry the `Arc<[T]>` freeze prefix (the
             // superset of `Rc`'s, so a freeze into either reuses it); the
@@ -108,7 +108,9 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
             // payload + alignment slack.
             crate::arena::alloc_prefixed::worst_case_strong_slice_payload::<crate::internal::thin_dst::AtomicStrong, T>(new_cap)
         } else {
-            payload_bytes.checked_add(mem::align_of::<T>()).ok_or(AllocError)?
+            payload_bytes
+                .checked_add(mem::align_of::<T>())
+                .ok_or(AllocError::CAPACITY_OVERFLOW)?
         };
         let old_cap = self.buf.cap();
         // Fast path: if our storage sits at the chunk's bump cursor and the

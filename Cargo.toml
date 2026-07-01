@@ -73,9 +73,10 @@ fundle_macros = { path = "crates/fundle_macros", default-features = false, versi
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.6.4" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
-multitude = { path = "crates/multitude", default-features = false, version = "0.5.1" }
+multitude = { path = "crates/multitude", default-features = false, version = "0.6.0" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
+plurality = { path = "crates/plurality", default-features = false, version = "0.1.0" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.5.9" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.4.4" }
@@ -91,7 +92,7 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
-alloc_tracker = { version = "0.5.9", default-features = false }
+alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 argh = { version = "0.1.13", default-features = false }
@@ -111,6 +112,7 @@ chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
 darling = { version = "0.23.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
+deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
@@ -143,11 +145,13 @@ native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
+object-pool = { version = "0.6.0", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
 opentelemetry-stdout = { version = "0.32.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.0", default-features = false }
+opool = { version = "0.2.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
 pin-project = { version = "1.1.8", default-features = false }
@@ -168,6 +172,9 @@ rustls-platform-verifier = { version = "0.7.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
+sharded-slab = { version = "0.1.7", default-features = false }
+slab = { version = "0.4.12", default-features = false }
+slotmap = { version = "1.1.1", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }

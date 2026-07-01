@@ -3,12 +3,12 @@
 
 //! Basic inherent methods.
 
-use allocator_api2::alloc::{AllocError, Allocator};
+use allocator_api2::alloc::Allocator;
 
 use super::Vec;
-use crate::Arena;
 use crate::arena::{ExpectAlloc, panic_alloc};
 use crate::internal::arena_buf::ArenaBuf;
+use crate::{AllocError, Arena};
 
 impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// Create an empty vector backed by `arena`. No allocation until the first push.
@@ -112,7 +112,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
     /// alignment is at least 32 KiB.
     #[inline]
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), AllocError> {
-        let needed = self.buf.len().checked_add(additional).ok_or(AllocError)?;
+        let needed = self.buf.len().checked_add(additional).ok_or(AllocError::CAPACITY_OVERFLOW)?;
         if needed <= self.buf.cap() {
             return Ok(());
         }
@@ -187,7 +187,7 @@ impl<'a, T, A: Allocator + Clone> Vec<'a, T, A> {
         // `len <= cap` is a Vec invariant, so this subtraction never underflows
         // and avoids the `checked_add` overflow guard on the hot fast path.
         if cap - len < src.len() {
-            let needed = len.checked_add(src.len()).ok_or(AllocError)?;
+            let needed = len.checked_add(src.len()).ok_or(AllocError::CAPACITY_OVERFLOW)?;
             self.try_grow_to(grow_target(cap, needed))?;
         }
         self.buf.extend_copy(src);
@@ -239,7 +239,7 @@ impl<T, A: Allocator + Clone> Vec<'_, T, A> {
     #[inline(never)]
     fn try_grow_one(&mut self) -> Result<(), AllocError> {
         let cur = self.buf.cap();
-        let target = grow_target(cur, cur.checked_add(1).ok_or(AllocError)?);
+        let target = grow_target(cur, cur.checked_add(1).ok_or(AllocError::CAPACITY_OVERFLOW)?);
         self.try_grow_to(target)
     }
 }

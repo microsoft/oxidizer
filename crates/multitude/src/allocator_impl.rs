@@ -57,15 +57,17 @@ unsafe impl<A: Allocator + Clone> Allocator for &Arena<A> {
                 return Ok(NonNull::slice_from_raw_parts(ptr, layout.size()));
             }
             if self.is_oversized(refill_hint) {
-                return self.alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
-                    let (slot, _chunk) = mutator
-                        .try_alloc_with_chunk(layout.size(), layout.align())
-                        .expect("dedicated oversized chunk sized to fit allocation + alignment slack");
-                    let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
-                    let ptr = slot.as_non_null();
-                    let _ = chunk_ref.forget();
-                    NonNull::slice_from_raw_parts(ptr, layout.size())
-                });
+                return self
+                    .alloc_oversized_shared_with(refill_hint, |mutator, chunk_ptr| {
+                        let (slot, _chunk) = mutator
+                            .try_alloc_with_chunk(layout.size(), layout.align())
+                            .expect("dedicated oversized chunk sized to fit allocation + alignment slack");
+                        let chunk_ref = acquire_chunk_ref::<A>(chunk_ptr);
+                        let ptr = slot.as_non_null();
+                        let _ = chunk_ref.forget();
+                        NonNull::slice_from_raw_parts(ptr, layout.size())
+                    })
+                    .map_err(Into::into);
             }
             self.refill(refill_hint)?;
         }
