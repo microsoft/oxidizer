@@ -48,6 +48,8 @@ packaged contents.
 
 Pull request titles must follow [Conventional Commits](https://www.conventionalcommits.org/) naming, e.g. `feat(bytesbuf): add new metric` or `fix(cachet): correct eviction logic`.
 
+Pull request descriptions must be high-level and describe only the content the PR delivers and the problem it fixes. Do not narrate the history of how the PR came to be, or how it was created, designed, reviewed, or tested.
+
 ## Feature-gated Doctests
 
 Doctests that reference items behind a Cargo feature must compile both with and without that feature; wrap their bodies in hidden `#[cfg(...)]` shims. See [AGENTS-feature-gated-doctests.md](AGENTS-feature-gated-doctests.md).
