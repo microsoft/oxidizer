@@ -20,6 +20,7 @@ const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hol
 /// number of processors, `AtMost` to request an upper bound that is satisfied by
 /// fewer processors when the hardware offers fewer, or `All` to use every processor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProcessorCount {
     /// Use the default number of processors. Right now this is equivalent to using
     /// all processors, but this default may change in the future.
