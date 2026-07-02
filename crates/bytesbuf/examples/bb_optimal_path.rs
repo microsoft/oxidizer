@@ -118,8 +118,8 @@ const CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfi
 
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
-        // The I/O memory provider carries the thread-affine I/O resources and is relocated
-        // automatically when the returned provider moves between threads.
+        // The I/O memory provider carries the thread-affine I/O resources, which are relocated when
+        // the returned provider is moved between threads via a thread-aware runtime mechanism.
         let io_memory = self.io_context.io_memory();
 
         CallbackMemory::new(io_memory, |io_memory, min_len| {

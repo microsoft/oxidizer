@@ -339,8 +339,8 @@
 //!
 //! impl HasMemory for UdpConnection {
 //!     fn memory(&self) -> impl MemoryShared {
-//!         // The I/O memory provider carries the thread-affine state and is relocated automatically
-//!         // when the returned provider moves between threads.
+//!         // The I/O memory provider carries the thread-affine state, which is relocated when the
+//!         // returned provider is moved between threads via a thread-aware runtime mechanism.
 //!         let io_memory = self.io_context.io_memory();
 //!
 //!         CallbackMemory::new(io_memory, |io_memory, min_len| {

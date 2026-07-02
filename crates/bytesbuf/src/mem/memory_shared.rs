@@ -14,13 +14,9 @@ use crate::mem::Memory;
 /// # Thread awareness
 ///
 /// Implementations must be [`ThreadAware`], which allows them to optimize their behavior when an
-/// instance is moved to a new thread.
+/// instance is moved between threads via a thread-aware runtime mechanism.
 pub trait MemoryShared: Memory + ThreadAware + Send + Sync + 'static {
     /// Clones this provider into a boxed trait object.
-    ///
-    /// This lets [`OpaqueMemory`][crate::mem::OpaqueMemory] duplicate a type-erased provider without
-    /// knowing its concrete type. The returned provider is independent and owns its own
-    /// thread-affine state.
     fn clone_boxed(&self) -> Box<dyn MemoryShared>;
 }
 

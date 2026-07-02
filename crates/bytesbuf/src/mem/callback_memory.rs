@@ -15,8 +15,8 @@ use crate::mem::Memory;
 ///
 /// Modeled on [`thread_aware::closure::Closure`]: because `reserve_fn` is a bare `fn` pointer it
 /// cannot capture anything, so all state the reservation logic needs must live in `data`. As `data`
-/// is [`ThreadAware`], it is relocated together with the provider when the provider moves between
-/// threads.
+/// is [`ThreadAware`], it is relocated together with the provider when the provider is moved between
+/// threads via a thread-aware runtime mechanism.
 ///
 /// # Examples
 ///
@@ -81,7 +81,8 @@ impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
     ///
     /// `data` holds any state the reservation needs (typically the wrapped memory provider). Because
     /// `reserve_fn` is a bare `fn` pointer it cannot capture anything, so all such state must live in
-    /// `data`, which is relocated with the provider when it moves between threads.
+    /// `data`, which is relocated with the provider when it is moved between threads via a
+    /// thread-aware runtime mechanism.
     #[must_use]
     pub fn new(data: D, reserve_fn: fn(&D, usize) -> BytesBuf) -> Self {
         Self { data, reserve_fn }
