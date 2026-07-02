@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Rescale configuration: the rules that map a source instrument, within a
-//! scope, to one or more rescaled sidecars.
+//! Rescale configuration: the rules that map a source instrument, within a scope, to one or more rescaled sidecars.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+
+use foldhash::fast::RandomState;
 
 /// A single rescaled sidecar of a source instrument.
 #[derive(Debug, Clone)]
@@ -21,7 +22,7 @@ pub(crate) struct RescaleRule {
 /// The rescale rules for one instrumentation scope, keyed by source instrument name.
 #[derive(Debug, Default)]
 pub(crate) struct ScopeRules {
-    map: HashMap<Cow<'static, str>, Vec<RescaleRule>>,
+    map: HashMap<Cow<'static, str>, Vec<RescaleRule>, RandomState>,
 }
 
 impl ScopeRules {
@@ -43,8 +44,8 @@ impl ScopeRules {
 /// call [`rescale`](Self::rescale) on it to register sidecars.
 #[derive(Debug, Default)]
 pub struct ScopeConfigurator {
-    rules: HashMap<Cow<'static, str>, Vec<RescaleRule>>,
-    targets: HashSet<Cow<'static, str>>,
+    rules: HashMap<Cow<'static, str>, Vec<RescaleRule>, RandomState>,
+    targets: HashSet<Cow<'static, str>, RandomState>,
 }
 
 impl ScopeConfigurator {

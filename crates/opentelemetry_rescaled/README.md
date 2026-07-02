@@ -13,8 +13,7 @@
 
 </div>
 
-Wraps an inner OpenTelemetry meter provider to transparently emit *rescaled*
-side-by-side copies of selected instruments.
+Wraps an inner OpenTelemetry meter provider to transparently emit *rescaled* side-by-side copies of selected instruments.
 
 For a chosen instrument in a chosen instrumentation scope, this layer creates
 a second instrument whose measurements are the original values multiplied by a

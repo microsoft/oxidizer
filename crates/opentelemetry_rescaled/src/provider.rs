@@ -3,18 +3,21 @@
 
 //! The [`RescaledMetrics`] meter provider and its builder.
 
+use std::any::type_name;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
+use foldhash::fast::RandomState;
 use opentelemetry::InstrumentationScope;
 use opentelemetry::metrics::{Meter, MeterProvider};
 
-use crate::config::{ScopeConfigurator, ScopeRules};
+use crate::ScopeConfigurator;
+use crate::config::ScopeRules;
 use crate::instruments::RescalingInstrumentProvider;
 
-/// A meter provider that wraps an inner provider and emits rescaled side-by-side
-/// copies of selected instruments.
+/// A meter provider that wraps an inner provider and emits rescaled side-by-side copies of selected instruments.
 ///
 /// Build one with [`RescaledMetrics::builder`]. The result is itself a
 /// [`MeterProvider`], so it can be handed wherever the inner provider went —
@@ -25,7 +28,7 @@ use crate::instruments::RescalingInstrumentProvider;
 #[derive(Clone)]
 pub struct RescaledMetrics {
     inner: Arc<dyn MeterProvider + Send + Sync>,
-    scopes: Arc<HashMap<Cow<'static, str>, Arc<ScopeRules>>>,
+    scopes: Arc<HashMap<Cow<'static, str>, Arc<ScopeRules>, RandomState>>,
 }
 
 impl RescaledMetrics {
@@ -36,14 +39,14 @@ impl RescaledMetrics {
     pub fn builder(inner: impl MeterProvider + Send + Sync + 'static) -> RescaledMetricsBuilder {
         RescaledMetricsBuilder {
             inner: Arc::new(inner),
-            scopes: HashMap::new(),
+            scopes: HashMap::default(),
         }
     }
 }
 
-impl std::fmt::Debug for RescaledMetrics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RescaledMetrics")
+impl fmt::Debug for RescaledMetrics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>())
             .field("scopes", &self.scopes.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
@@ -65,7 +68,7 @@ impl MeterProvider for RescaledMetrics {
 /// [`build`](Self::build).
 pub struct RescaledMetricsBuilder {
     inner: Arc<dyn MeterProvider + Send + Sync>,
-    scopes: HashMap<Cow<'static, str>, ScopeConfigurator>,
+    scopes: HashMap<Cow<'static, str>, ScopeConfigurator, RandomState>,
 }
 
 impl RescaledMetricsBuilder {
@@ -105,9 +108,9 @@ impl RescaledMetricsBuilder {
     }
 }
 
-impl std::fmt::Debug for RescaledMetricsBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RescaledMetricsBuilder")
+impl fmt::Debug for RescaledMetricsBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>())
             .field("scopes", &self.scopes.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }

@@ -2688,6 +2688,7 @@ dependencies = [
 name = "opentelemetry_rescaled"
 version = "0.1.0"
 dependencies = [
+ "foldhash 0.2.0",
  "opentelemetry",
  "opentelemetry_sdk",
 ]

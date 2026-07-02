@@ -1,11 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! The rescaling [`InstrumentProvider`]: it builds each configured source
-//! instrument together with its rescaled sidecars, fanning synchronous
-//! measurements out to both and dual-registering observable callbacks.
+//! The rescaling [`InstrumentProvider`]: builds each configured source instrument together with its rescaled sidecars.
 
+use std::any::type_name;
 use std::borrow::Cow;
+use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::KeyValue;
@@ -17,8 +18,7 @@ use opentelemetry::metrics::{
 use crate::config::ScopeRules;
 use crate::rescale::Rescale;
 
-/// An [`InstrumentProvider`] that mirrors configured instruments into rescaled
-/// sidecars, delegating all real work to the wrapped inner [`Meter`].
+/// An [`InstrumentProvider`] that mirrors configured instruments into rescaled sidecars, delegating all real work to the wrapped inner [`Meter`].
 pub(crate) struct RescalingInstrumentProvider {
     inner: Meter,
     rules: Arc<ScopeRules>,
@@ -30,9 +30,9 @@ impl RescalingInstrumentProvider {
     }
 }
 
-impl std::fmt::Debug for RescalingInstrumentProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RescalingInstrumentProvider").finish_non_exhaustive()
+impl fmt::Debug for RescalingInstrumentProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
 
@@ -68,12 +68,11 @@ impl<T> Record<T> for Histogram<T> {
     }
 }
 
-/// A synchronous instrument backing that fans each measurement out to the
-/// original instrument and every rescaled sidecar.
+/// A synchronous instrument backing that fans each measurement out to the original instrument and every rescaled sidecar.
 struct FanOut<T, R> {
     original: R,
     sidecars: Vec<(R, f64)>,
-    _value: std::marker::PhantomData<fn(T)>,
+    _value: PhantomData<fn(T)>,
 }
 
 impl<T, R> SyncInstrument<T> for FanOut<T, R>
@@ -89,8 +88,7 @@ where
     }
 }
 
-/// An observer that scales every observation before forwarding it to the
-/// sidecar's inner observer.
+/// An observer that scales every observation before forwarding it to the sidecar's inner observer.
 struct ScalingObserver<'a, M> {
     inner: &'a dyn AsyncInstrument<M>,
     factor: f64,
@@ -106,9 +104,7 @@ where
 }
 
 impl RescalingInstrumentProvider {
-    /// Builds a synchronous instrument, returning either the plain inner
-    /// instrument (no rules) or one whose backing is a [`FanOut`] over the
-    /// original plus every configured sidecar.
+    /// Builds a synchronous instrument, returning either the plain inner instrument (no rules) or one whose backing is a [`FanOut`] over the original plus every configured sidecar.
     fn make_sync<T, Inst>(
         &self,
         name: Cow<'static, str>,
@@ -135,14 +131,13 @@ impl RescalingInstrumentProvider {
         let fan_out: Arc<dyn SyncInstrument<T> + Send + Sync> = Arc::new(FanOut {
             original: build_one(name, unit),
             sidecars,
-            _value: std::marker::PhantomData,
+            _value: PhantomData,
         });
         wrap(fan_out)
     }
 }
 
-/// Reconstructs a synchronous instrument builder on the inner meter, applying
-/// the inherited description and the given unit, then builds it.
+/// Reconstructs a synchronous instrument builder on the inner meter, applying the inherited description and the given unit, then builds it.
 macro_rules! sync_method {
     ($method:ident, $inst:ident, $value:ty) => {
         fn $method(&self, builder: InstrumentBuilder<'_, $inst<$value>>) -> $inst<$value> {
@@ -166,9 +161,7 @@ macro_rules! sync_method {
     };
 }
 
-/// Reconstructs a histogram builder on the inner meter. Unlike other
-/// synchronous instruments, a histogram's explicit bucket boundaries are scaled
-/// by the sidecar's factor so the buckets stay meaningful.
+/// Reconstructs a histogram builder on the inner meter, scaling each sidecar's explicit bucket boundaries by its factor so the buckets stay meaningful.
 macro_rules! histogram_method {
     ($method:ident, $value:ty) => {
         fn $method(&self, builder: HistogramBuilder<'_, Histogram<$value>>) -> Histogram<$value> {
@@ -210,16 +203,16 @@ macro_rules! histogram_method {
             Histogram::new(Arc::new(FanOut {
                 original,
                 sidecars,
-                _value: std::marker::PhantomData,
+                _value: PhantomData,
             }))
         }
     };
 }
 
-/// Reconstructs an observable instrument on the inner meter. The user callbacks
-/// are shared and registered once for the original (identity) and once per
-/// sidecar (through a [`ScalingObserver`]), so each sidecar observes scaled
-/// values. Callbacks therefore run once per registered instrument per collection.
+/// Reconstructs an observable instrument on the inner meter, sharing the user callbacks between the original (identity) registration and one per sidecar (through a [`ScalingObserver`]).
+///
+/// Because each registration is independent, the callbacks run once per
+/// registered instrument per collection.
 macro_rules! observable_method {
     ($method:ident, $inst:ident, $value:ty) => {
         fn $method(&self, builder: AsyncInstrumentBuilder<'_, $inst<$value>, $value>) -> $inst<$value> {

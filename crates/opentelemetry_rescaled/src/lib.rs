@@ -2,18 +2,8 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::panic,
-        clippy::float_cmp,
-        reason = "unwrap, panic, and exact float comparisons keep tests concise and readable"
-    )
-)]
 
-//! Wraps an inner OpenTelemetry meter provider to transparently emit *rescaled*
-//! side-by-side copies of selected instruments.
+//! Wraps an inner OpenTelemetry meter provider to transparently emit *rescaled* side-by-side copies of selected instruments.
 //!
 //! For a chosen instrument in a chosen instrumentation scope, this layer creates
 //! a second instrument whose measurements are the original values multiplied by a
