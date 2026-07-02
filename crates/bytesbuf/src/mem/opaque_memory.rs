@@ -12,7 +12,8 @@ use crate::mem::{Memory, MemoryShared};
 ///
 /// The adapter is itself [`MemoryShared`]. It owns the wrapped provider and forwards [`ThreadAware`]
 /// relocation to it, leaving the decision of how to be thread-aware entirely with the wrapped
-/// provider. Cloning the adapter clones the wrapped provider, so each clone is independent.
+/// provider. Cloning the adapter clones the wrapped provider; whether the clones then share any
+/// state is up to that provider.
 #[derive(Debug, ThreadAware)]
 pub struct OpaqueMemory {
     inner: Box<dyn MemoryShared>,
@@ -149,8 +150,7 @@ mod tests {
         let memory = OpaqueMemory::new(GlobalPool::new());
         let mut clone = memory.clone();
 
-        // Relocating the clone must leave both the clone and the original usable, since each owns
-        // its own wrapped provider.
+        // Relocating the clone must leave both the clone and the original usable.
         let affinities = pinned_affinities(&[2]);
         clone.relocate(Some(affinities[0]), affinities[1]);
 
