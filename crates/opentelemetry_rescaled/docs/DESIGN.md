@@ -29,10 +29,13 @@ every value type the API supports).
   independently registered instruments. No SDK internals are touched; the layer
   composes purely through the public OpenTelemetry API surface.
 - **Configured once, at build time.** The set of scopes, source instruments,
-  targets, and factors is fixed when the provider is built and never changes for
-  the life of the provider.
+  targets, units, and factors is fixed when the provider is built and never
+  changes for the life of the provider.
 - **Zero cost where unused.** Scopes and instruments that are not configured for
   rescaling incur no wrapping and delegate directly to the inner provider.
+- **Fail fast on nonsense.** A configuration that cannot produce a meaningful
+  sidecar (see [Configuration model](#configuration-model)) panics at build time
+  rather than silently emitting garbage.
 
 ## Usage shape
 
@@ -41,8 +44,10 @@ let inner = build_inner_meter_provider();
 
 let outer = RescaledMetrics::builder(inner)
     .scope("my_scope_name", |scope| {
+        // source name, target name, target unit (mandatory), factor
         scope.rescale("http.client.request.duration",
                       "http.client.request.duration.millis",
+                      "ms",
                       1000.0);
     })
     .build();
@@ -104,19 +109,57 @@ callbacks **twice** on the inner meter:
   observer** that multiplies every observed value before forwarding it.
 
 The user's callbacks are shared (behind an `Arc`) between the two registrations.
-A consequence is that the callbacks run **twice per collection** — see open
-questions.
+A consequence is that the callbacks run **twice per collection**. This is an
+accepted cost: callbacks are expected to be cheap and idempotent, and a
+replay-once cache would introduce its own staleness and correctness hazards for
+no meaningful benefit.
+
+## Value rescaling
+
+A rescale factor is always a plain multiplicative `f64` — the only transform the
+crate needs. Applying it depends on the instrument's value type:
+
+- **`f64` instruments** multiply directly.
+- **`u64`/`i64` instruments** multiply in `f64`, **round** to the nearest
+  integer, and **saturate** at the type's bounds. Saturation rather than
+  wrap/overflow keeps a runaway sidecar bounded and obvious instead of silently
+  corrupt.
+
+Histograms need one extra step: the sidecar's **bucket boundaries** are scaled by
+the same factor as the values, so the buckets stay meaningful. When the source
+instrument supplies explicit boundaries the layer scales them; when it relies on
+the SDK's default boundaries there is nothing to scale (the defaults are not
+visible through the API), so the sidecar simply keeps the defaults. That yields
+an obviously wrong bucketing that prompts the operator to configure real
+boundaries — acceptable because default boundaries are not expected in real
+production use.
 
 ## Configuration model
 
-Configuration is a map from scope to a set of rescale rules; each rule maps a
-source instrument name to one or more targets, each with its own factor. A single
-source may therefore feed several sidecars. Matching a source instrument is by
-name within its scope; the same rule applies to whichever value type the caller
-happens to build under that name.
+Configuration is a map from scope to a set of rescale rules. Each rule maps a
+source instrument name to one or more targets; a target carries its **name**, its
+**unit** (mandatory), and its **factor**. A single source may therefore feed
+several sidecars. The sidecar inherits the source's description but **must** be
+given a new unit at configuration time — rescaling almost always changes the unit
+(`s` → `ms`), and inheriting the stale one would be misleading.
 
-Validation happens at build time so misconfiguration fails fast rather than
-silently dropping metrics.
+Matching a source instrument is by name within its scope, and the same rule
+applies to whichever value type the caller builds under that name.
+
+Scopes are matched **by name only** for now. If several instrumentation scopes
+share a name, the rules apply to all of them. The configuration type is shaped so
+that stricter matching (e.g. a future `scope_exact(...)` keyed on the full
+instrumentation scope — name, version, schema URL, attributes) can be added later
+without reworking the model.
+
+Duplicate target names across the process are **not** the crate's concern:
+duplicate instrument registration is always possible in OpenTelemetry, and it is
+the user's job to avoid collisions and the SDK's job to cope with them.
+
+Validation happens at build time, and a configuration that cannot yield a
+meaningful sidecar **panics** — for example a factor that is `0.0`, `NaN`,
+infinite, or negative, a rule whose source equals its target, or duplicate
+targets within a scope.
 
 ## Relationship to the wider system
 
@@ -125,41 +168,10 @@ The crate depends only on the `opentelemetry` API crate — not on
 SDK provider, the no-op provider, and other wrappers. It is itself a
 `MeterProvider`, so wrappers may be stacked.
 
-## Open questions
+The inner provider is taken **by value** but immediately **type-erased** behind a
+trait object, so `RescaledMetrics` carries no generic parameter for it and does
+not leak the inner provider's concrete type into callers' signatures.
 
-These need decisions before (or during) implementation:
-
-1. **Integer rescaling & rounding.** The factor is `f64`, but counters and gauges
-   may be `u64`/`i64`. What conversion applies — round, truncate, saturating?
-   How are overflow and negative-from-unsigned handled? A factor of `1000.0` on a
-   `u64` value near the type maximum overflows.
-2. **Histogram bucket boundaries.** If values are scaled by the factor, the
-   sidecar's bucket boundaries must be scaled by the same factor, otherwise every
-   measurement collapses into one bucket. Should the layer auto-scale explicit
-   boundaries, and what does it do when the source used the SDK's default
-   boundaries (which it cannot see)?
-3. **Sidecar metadata.** Should the sidecar inherit the source's description and
-   unit verbatim, or should the configuration allow overriding them (e.g. unit
-   `s` → `ms`)? Inheriting a stale unit is arguably misleading.
-4. **Observable double invocation.** Registering the user callbacks twice means
-   they execute twice per collection. Is that acceptable, or do we need a caching
-   strategy (observe once, replay scaled) with its own correctness caveats?
-5. **Scope identity.** Match scopes by name only, or by the full instrumentation
-   scope (name + version + schema URL + attributes)? Name-only is simpler but can
-   over-match when several libraries share a scope name.
-6. **Transform generality.** Is a single multiplicative factor sufficient, or do
-   we anticipate needing affine (offset) or arbitrary transforms? This shapes the
-   configuration type even if only multiplication ships first.
-7. **Target name collisions.** What happens if a sidecar's target name equals an
-   instrument the caller also creates directly, or another sidecar's target? The
-   SDK would see duplicate registrations. Do we detect and reject, or document?
-8. **Config validation rules.** Which configurations are rejected at build time —
-   factor of `0.0`, `NaN`/infinite factors, negative factors, `source == target`,
-   duplicate targets within a scope?
-9. **Inner provider ownership.** Is the inner provider taken by value (generic
-   over its type, zero-cost) or type-erased behind a trait object? This affects
-   ergonomics for callers who need to retain their own reference to the inner
-   provider.
-10. **Allowed external types.** The public API will expose `opentelemetry` types
-    (`MeterProvider`, `Meter`, `KeyValue`, …); these must be enumerated in the
-    crate's `allowed_external_types` allowlist, as sibling crates do.
+The public API surface exposes `opentelemetry` types (`MeterProvider`, `Meter`,
+`KeyValue`, …); these are enumerated in the crate's `allowed_external_types`
+allowlist, as sibling crates do.
