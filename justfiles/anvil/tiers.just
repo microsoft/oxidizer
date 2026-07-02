@@ -77,8 +77,17 @@ anvil-full-validate-prereqs: \
 # Global aliases. `anvil-setup` (no suffix) installs everything the
 # catalog knows about; `anvil-validate-prereqs` verifies every tool
 # and component is present at or above its pinned version.
+#
+# These also install / verify cargo-delta, the impact-analysis tool.
+# cargo-delta is only invoked by the cloud-workflow impact step (not by
+# any check), so it is deliberately NOT part of the per-group / per-tier
+# setup recipes -- a CI group job installs only what its checks need, and
+# the impact step installs cargo-delta itself. But the catch-all
+# `anvil-setup` is "install everything the catalog knows about", so it
+# includes cargo-delta too (a local `just anvil-setup` then provisions a
+# complete environment, impact tool included).
 [group("anvil-setup")]
-anvil-setup installer="install": (anvil-full-setup installer)
+anvil-setup installer="install": (anvil-full-setup installer) (anvil-tool-cargo-delta-install installer)
 
 [group("anvil-setup")]
-anvil-validate-prereqs: anvil-full-validate-prereqs
+anvil-validate-prereqs: anvil-full-validate-prereqs anvil-tool-cargo-delta-validate-prereqs

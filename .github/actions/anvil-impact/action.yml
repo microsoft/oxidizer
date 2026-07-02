@@ -105,9 +105,14 @@ runs:
         # tier is empty), via the shared _anvil-impact-format recipe --
         # single source of truth across the GitHub and ADO impact steps.
         # See that recipe in checks.just for the version-qualification and
-        # lib-name translation rationale.
+        # lib-name translation rationale. Capture each formatted value into
+        # a variable first, then write plain `name=value` lines, so the
+        # quoted JSON-path argument never sits inside the output `echo`.
+        modified="$(just _anvil-impact-format modified "$RUNNER_TEMP/anvil-impact.json")"
+        affected="$(just _anvil-impact-format affected "$RUNNER_TEMP/anvil-impact.json")"
+        required="$(just _anvil-impact-format required "$RUNNER_TEMP/anvil-impact.json")"
         {
-          echo "include_modified=$(just _anvil-impact-format modified "$RUNNER_TEMP/anvil-impact.json")"
-          echo "include_affected=$(just _anvil-impact-format affected "$RUNNER_TEMP/anvil-impact.json")"
-          echo "include_required=$(just _anvil-impact-format required "$RUNNER_TEMP/anvil-impact.json")"
+          echo "include_modified=$modified"
+          echo "include_affected=$affected"
+          echo "include_required=$required"
         } >> "$GITHUB_OUTPUT"

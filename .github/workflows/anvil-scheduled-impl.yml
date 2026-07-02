@@ -79,13 +79,13 @@ jobs:
     # Full-workspace counterpart of pr-runtime-analysis. OS matrix
     # mirrors pr-runtime-analysis so any OS already considered "worth
     # running miri on" gets the stricter profiles (tree-borrows,
-    # strict-provenance, race-coverage) too. Each profile runs in
-    # one job: keeping them as members of one composite action would
-    # serialize them (hours per profile, days per run). The matrix
-    # gives parallelism across OS legs; the per-profile fan-out
-    # inside the composite action runs them sequentially within a
-    # leg, which is the right trade -- the profiles share toolchain
-    # setup and target/ cache.
+    # strict-provenance, race-coverage) too. One job per OS leg runs
+    # `just anvil-scheduled-runtime-analysis`, which executes all four
+    # miri profiles (base miri + the three stricter ones) sequentially
+    # within the leg. Parallelism is across OS legs, not across profiles:
+    # running the profiles sequentially lets them share toolchain setup
+    # and the target/ cache, which is the right trade given each profile
+    # already costs hours.
     strategy:
       fail-fast: false
       matrix:
