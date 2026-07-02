@@ -1,4 +1,4 @@
-# Opentelemetry Rescaled — Architecture & Design
+# OpenTelemetry Rescaled — Architecture & Design
 
 This document describes the intended design of the crate so it can be reviewed
 before implementation. For the user-facing summary see the crate-level rustdoc

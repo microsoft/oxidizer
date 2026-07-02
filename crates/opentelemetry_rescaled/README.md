@@ -1,7 +1,7 @@
 <div align="center">
- <img src="./logo.png" alt="Opentelemetry Rescaled Logo" width="96">
+ <img src="./logo.png" alt="OpenTelemetry Rescaled Logo" width="96">
 
-# Opentelemetry Rescaled
+# OpenTelemetry Rescaled
 
 [![crate.io](https://img.shields.io/crates/v/opentelemetry_rescaled.svg)](https://crates.io/crates/opentelemetry_rescaled)
 [![docs.rs](https://docs.rs/opentelemetry_rescaled/badge.svg)](https://docs.rs/opentelemetry_rescaled)
