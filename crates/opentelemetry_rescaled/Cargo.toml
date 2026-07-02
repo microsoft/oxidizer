@@ -16,6 +16,12 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/opentelemetry_rescaled"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "opentelemetry::metrics::meter::Meter",
+    "opentelemetry::metrics::meter::MeterProvider",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -26,5 +32,7 @@ default = []
 workspace = true
 
 [dependencies]
+opentelemetry = { workspace = true, features = ["metrics"] }
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }

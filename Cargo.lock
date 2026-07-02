@@ -2687,6 +2687,10 @@ dependencies = [
 [[package]]
 name = "opentelemetry_rescaled"
 version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
+]
 
 [[package]]
 name = "opentelemetry_sdk"
