@@ -77,7 +77,8 @@ impl ThreadRegistry {
     /// Create a new `ThreadRegistry` with the specified hardware instance.
     #[must_use]
     pub(crate) fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
-        let builder = hardware.processors().to_builder();
+        let all_processors = hardware.processors();
+        let builder = all_processors.to_builder();
 
         let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
@@ -86,7 +87,7 @@ impl ThreadRegistry {
                 // A processor set is never empty, so taking every available processor
                 // always satisfies a ceiling that meets or exceeds what the machine
                 // offers, without failing the way `Exactly` would.
-                if max.get() >= hardware.processors().len() {
+                if max.get() >= all_processors.len() {
                     builder.take_all()
                 } else {
                     builder.take(*max)
