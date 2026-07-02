@@ -40,13 +40,13 @@ azure-identity = ["dep:azure_identity", "dep:async-trait"]
 [dependencies]
 # internal
 anyspawn = { workspace = true }
-tick = { workspace = true }
 
 # external
 async-trait = { workspace = true, optional = true }
 azure_core = { workspace = true }
 azure_identity = { workspace = true, optional = true }
 futures = { workspace = true, features = ["std"] }
+tick = { workspace = true }
 
 [dev-dependencies]
 # internal
@@ -56,5 +56,7 @@ tick = { path = "../tick", features = ["tokio"] }
 # external
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

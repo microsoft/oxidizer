@@ -55,33 +55,33 @@ anyspawn = { workspace = true }
 bytesbuf = { workspace = true }
 fetch_options = { workspace = true }
 fetch_tls = { workspace = true }
-http_extensions = { workspace = true }
-layered = { workspace = true, features = ["dynamic-service"] }
-ohno = { workspace = true }
-seatbelt = { workspace = true }
-templated_uri = { workspace = true }
-tick = { workspace = true }
 
 # external
 futures = { workspace = true, features = ["std"] }
 http = { workspace = true }
 http-body-util = { workspace = true }
+http_extensions = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "client"] }
+
+# TLS related crates
+hyper-rustls = { workspace = true, optional = true, features = ["http1", "http2"] }
+hyper-tls = { workspace = true, optional = true, features = ["alpn"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2"] }
+layered = { workspace = true, features = ["dynamic-service"] }
+native-tls = { workspace = true, optional = true, features = ["alpn"] }
+ohno = { workspace = true }
 opentelemetry = { workspace = true, features = ["metrics"] }
 opentelemetry-semantic-conventions = { workspace = true, features = [
     "semconv_experimental",
 ] }
 pin-project = { workspace = true }
+rustls = { workspace = true, features = ["tls12", "std"], default-features = false, optional = true }
+seatbelt = { workspace = true }
+templated_uri = { workspace = true }
+tick = { workspace = true }
+tokio-native-tls = { workspace = true, optional = true }
 tower = { workspace = true }
 tracing = { workspace = true }
-
-# TLS related crates
-hyper-rustls = { workspace = true, optional = true, features = ["http1", "http2"] }
-hyper-tls = { workspace = true, optional = true, features = ["alpn"] }
-native-tls = { workspace = true, optional = true, features = ["alpn"] }
-rustls = { workspace = true, features = ["tls12", "std"], default-features = false, optional = true }
-tokio-native-tls = { workspace = true, optional = true }
 
 [dev-dependencies]
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
@@ -110,5 +110,7 @@ wiremock = { workspace = true }
 name = "smoke"
 required-features = ["native-tls"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

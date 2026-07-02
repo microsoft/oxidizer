@@ -4,7 +4,7 @@
 //! An unpublished crate for shared code used for writing Rust scripts
 
 #![allow(clippy::missing_errors_doc, reason = "this is an internal crate for scripts")]
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 mod cargo;

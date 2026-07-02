@@ -41,13 +41,13 @@ rustls = ["dep:rustls"]
 native-tls = ["dep:native-tls"]
 
 [dependencies]
-# internal
-ohno = { workspace = true }
 
 # external
 base64 = { workspace = true }
 http = { workspace = true }
 native-tls = { workspace = true, optional = true, features = ["alpn"] }
+# internal
+ohno = { workspace = true }
 # No crypto provider feature is enabled here; callers supply one via
 # `TlsBackendBuilder::configure_rustls`. See the crate docs for details.
 rustls = { workspace = true, features = [
@@ -66,5 +66,7 @@ rstest = { workspace = true }
 rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"], default-features = false }
 static_assertions = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

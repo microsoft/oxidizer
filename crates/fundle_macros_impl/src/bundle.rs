@@ -802,3 +802,17 @@ fn generate_reader_getters(
 
     impls
 }
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::bundle;
+
+    #[test]
+    fn rejects_non_named_fields() {
+        let tokens = bundle(quote! {}, quote! { struct Tuple(u32); })
+            .expect("bundle returns Ok with a compile_error token stream for invalid input");
+        assert!(tokens.to_string().contains("named fields"));
+    }
+}

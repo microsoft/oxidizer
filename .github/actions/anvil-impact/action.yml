@@ -1,0 +1,113 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-impact
+description: |
+  Compute the cargo-delta impact set for this PR and emit per-tier
+  include lists.
+
+  Outputs:
+    include_modified - "--package X@ver --package Y@ver" string for crates
+                       whose source files changed in the diff, or "--skip"
+                       if the modified set is empty. Each package is a
+                       version-qualified cargo spec (name@version) so it
+                       resolves unambiguously even when a like-named crate
+                       is also a different-versioned transitive dependency.
+    include_affected - same shape, for crates in the affected set
+                       (modified ∪ rev-deps).
+    include_required - same shape, for crates in the required set
+                       (affected ∪ workspace-internal transitive deps).
+
+  Recipes in checks.just interpret each variable per their tier:
+  modified-tier recipes (fmt, license-headers, spellcheck, ...) short-
+  circuit on "--skip"; affected-tier recipes (clippy, tests, ...) and
+  required-tier recipes (doc, cargo-hack, udeps) splice their include
+  list into the cargo invocation, defaulting to --workspace when unset
+  (local runs without impact wiring).
+
+  Unscoped recipes (deny, audit, aprz, pr-title) ignore all three
+  variables and always run unconditionally.
+outputs:
+  include_modified:
+    description: Pre-formatted --package args for the modified tier.
+    value: ${{ steps.compute.outputs.include_modified }}
+  include_affected:
+    description: Pre-formatted --package args for the affected tier.
+    value: ${{ steps.compute.outputs.include_affected }}
+  include_required:
+    description: Pre-formatted --package args for the required tier.
+    value: ${{ steps.compute.outputs.include_required }}
+runs:
+  using: composite
+  steps:
+    # anvil-setup with group=none bootstraps the rust toolchain +
+    # just + binstall + cache, but skips the full catalog install.
+    # We follow it with just the cargo-delta install (the only tool
+    # this composite needs). This keeps the impact stage lean -- it's
+    # the critical-path gating dep for every PR-tier group job.
+    - uses: ./.github/actions/anvil-setup
+      with:
+        group: none
+    - name: Install cargo-delta
+      shell: bash
+      run: just anvil-tool-cargo-delta-install binstall
+    - id: compute
+      name: Compute impact
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Resolve the baseline ref via the shared anvil resolver (single
+        # source of truth; see the _anvil-base-ref recipe). On GitHub PRs it
+        # resolves GITHUB_BASE_REF to origin/<branch>; BASE_REF overrides.
+        base="$(just _anvil-base-ref)"
+        # The baseline worktree is checked out at the merge target, whose
+        # rust-toolchain.toml may pin a toolchain that is NOT installed on the
+        # runner (any PR that bumps rust-toolchain.toml hits this). The
+        # snapshot is metadata-only (file presence + content hashes), so run
+        # the baseline under the runner's *active* toolchain via
+        # RUSTUP_TOOLCHAIN, which overrides the worktree's rust-toolchain.toml.
+        # Capture it here, in the PR checkout, where it is resolved + installed.
+        active_toolchain="$(rustup show active-toolchain | head -n1 | cut -d' ' -f1)"
+        # cargo delta has no --base flag; the flow is two snapshots
+        # (baseline at the merge target + current at HEAD) compared by
+        # `cargo delta impact`. We use a temporary worktree to snapshot
+        # the baseline without disturbing the checked-out tree.
+        cargo delta snapshot > "$RUNNER_TEMP/anvil-current.json"
+        git worktree add --detach "$RUNNER_TEMP/anvil-baseline" "$base"
+        # When anvil is first introduced (this PR adds the cargo workspace),
+        # the baseline branch has no root Cargo.toml, so there is no
+        # workspace for cargo-delta to snapshot. Detect that explicitly and
+        # fall back to full-workspace validation (empty include_* -> recipes
+        # default to --workspace) rather than running cargo-delta. This is a
+        # targeted check: any *other* cargo-delta failure below is a real
+        # error and is allowed to fail the impact job (and the gated pr-* jobs).
+        if [ ! -f "$RUNNER_TEMP/anvil-baseline/Cargo.toml" ] ; then
+            echo "anvil impact: baseline '$base' has no root Cargo.toml (not a cargo workspace yet -- first-time anvil adoption?). Falling back to full-workspace validation." >&2
+            git worktree remove --force "$RUNNER_TEMP/anvil-baseline"
+            {
+                echo "include_modified="
+                echo "include_affected="
+                echo "include_required="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+        fi
+        ( cd "$RUNNER_TEMP/anvil-baseline" \
+            && RUSTUP_TOOLCHAIN="$active_toolchain" cargo delta snapshot ) \
+            > "$RUNNER_TEMP/anvil-baseline.json"
+        git worktree remove --force "$RUNNER_TEMP/anvil-baseline"
+        cargo delta impact \
+            --baseline "$RUNNER_TEMP/anvil-baseline.json" \
+            --current  "$RUNNER_TEMP/anvil-current.json" \
+            --format json \
+            > "$RUNNER_TEMP/anvil-impact.json"
+        # Format each tier into the `--package name@version ...` shape the
+        # checks.just recipes consume (or the "--skip" sentinel when a
+        # tier is empty), via the shared _anvil-impact-format recipe --
+        # single source of truth across the GitHub and ADO impact steps.
+        # See that recipe in checks.just for the version-qualification and
+        # lib-name translation rationale.
+        {
+          echo "include_modified=$(just _anvil-impact-format modified "$RUNNER_TEMP/anvil-impact.json")"
+          echo "include_affected=$(just _anvil-impact-format affected "$RUNNER_TEMP/anvil-impact.json")"
+          echo "include_required=$(just _anvil-impact-format required "$RUNNER_TEMP/anvil-impact.json")"
+        } >> "$GITHUB_OUTPUT"

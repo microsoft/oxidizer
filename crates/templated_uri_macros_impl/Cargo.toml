@@ -33,5 +33,7 @@ insta = { workspace = true }
 mutants = { workspace = true }
 prettyplease = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

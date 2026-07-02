@@ -67,3 +67,22 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
 
     Ok(expanded)
 }
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::newtype;
+
+    #[test]
+    fn rejects_named_struct() {
+        let err = newtype(quote! {}, quote! { struct Named { inner: u32 } }).expect_err("named struct is not a tuple struct");
+        assert!(err.to_string().contains("tuple structs"));
+    }
+
+    #[test]
+    fn rejects_multiple_fields() {
+        let err = newtype(quote! {}, quote! { struct Two(u32, u32); }).expect_err("multi-field tuple struct is rejected");
+        assert!(err.to_string().contains("tuple structs"));
+    }
+}

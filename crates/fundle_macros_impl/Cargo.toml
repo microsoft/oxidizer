@@ -34,5 +34,7 @@ mutants = { workspace = true }
 prettyplease = { workspace = true }
 syn = { workspace = true, features = ["derive", "parsing", "proc-macro", "full", "extra-traits", "printing", "clone-impls"] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

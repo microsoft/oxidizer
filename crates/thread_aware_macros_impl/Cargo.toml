@@ -38,5 +38,7 @@ syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "
 insta = { workspace = true }
 prettyplease = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

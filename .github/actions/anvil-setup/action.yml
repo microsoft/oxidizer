@@ -1,0 +1,164 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-setup
+description: Install `just` and the anvil tools/components needed by a specific group (or everything if omitted).
+inputs:
+  group:
+    description: |
+      Which anvil group to install setup for (e.g. "pr-fast",
+      "pr-test", "scheduled-advisories"). Special values:
+        - "" (default): install the full catalog via
+          `just anvil-setup` -- use for local "give me everything"
+          flows.
+        - "none": skip tool installation entirely; just bootstrap the
+          rust toolchain + just + binstall + cache. Used by
+          anvil-impact, which installs only cargo-delta afterwards.
+        - anything else: install only that group's prerequisites via
+          `just anvil-<group>-setup`.
+    default: ""
+    required: false
+runs:
+  using: composite
+  steps:
+    - id: rustc-version
+      shell: bash
+      run: echo "version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+    - name: Restore cargo cache
+      id: cargo-cache
+      uses: actions/cache/restore@v4
+      with:
+        # Key on OS + arch + rustc version + lockfile hashes + catalog
+        # hash so a Rust toolchain bump, a cross-arch matrix leg, or a
+        # tool-versions update all invalidate the cache cleanly.
+        # runner.arch resolves to X64 / ARM64 / X86, which keeps the
+        # x86_64 and aarch64 legs of the same OS from colliding on
+        # arch-incompatible target/ contents.
+        #
+        # ${{ github.job }} discriminates by workflow-job-id (`pr-fast`,
+        # `pr-test`, `pr-slow`, etc.) so concurrent matrix legs that
+        # share OS+arch (e.g. pr-fast linux + pr-test linux) don't race
+        # on the same cache key. Without this, the first-to-finish job
+        # reserves the key, the others get "Unable to reserve cache:
+        # another job may be creating this cache" and silently skip
+        # the save -- leaving the cache empty forever. The restore-keys
+        # fall back across jobs so the install work is still shared
+        # across sibling legs on subsequent runs.
+        key: anvil-v1-${{ runner.os }}-${{ runner.arch }}-rust${{ steps.rustc-version.outputs.version }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'rust-toolchain.toml', 'justfiles/anvil/versions.just') }}-${{ github.job }}
+        restore-keys: |
+          anvil-v1-${{ runner.os }}-${{ runner.arch }}-rust${{ steps.rustc-version.outputs.version }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml', 'rust-toolchain.toml', 'justfiles/anvil/versions.just') }}-
+          anvil-v1-${{ runner.os }}-${{ runner.arch }}-rust${{ steps.rustc-version.outputs.version }}-
+          anvil-v1-${{ runner.os }}-${{ runner.arch }}-
+        # `.crates.toml` and `.crates2.json` track which cargo-installed
+        # tools and versions live in ~/.cargo/bin/. Without them in the
+        # cache, `cargo install --list` and (downstream) the
+        # tool-install recipes' early-skip on "installed >= pin" don't
+        # see the cached binaries — every run then tries to reinstall
+        # on top of them and fails with "binary X already exists in
+        # destination".
+        path: |
+          ~/.cargo/registry/cache/
+          ~/.cargo/registry/index/
+          ~/.cargo/bin/
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          target/
+
+    # System dependencies for the catalog's source builds.
+    #
+    # cargo-spellcheck's build script (clang-sys) needs libclang. The
+    # Ubuntu runner images don't ship it on PATH by default, so the
+    # source compile fails with "couldn't execute llvm-config". On
+    # macOS, libclang is bundled with Xcode CLT (always present on
+    # GH-hosted macos-*). On Windows, the Visual Studio install on
+    # the windows-* images includes a usable LLVM, so no install is
+    # needed.
+    - name: Install libclang (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+    # rustup auto-installs the toolchain from rust-toolchain.toml on
+    # first cargo invocation, but it doesn't pull profile/component
+    # extras. The `anvil-setup` recipe in step "Install anvil
+    # toolchains + tools" below handles that exhaustively (the
+    # per-component install recipes in tools.just install
+    # default-toolchain components and pinned-nightly components for
+    # miri/careful/etc.) -- we don't add components inline here anymore.
+    # This step exists only to ensure rustup itself has the default
+    # toolchain set up so subsequent cargo / just calls work.
+    - name: Ensure default toolchain is installed
+      shell: bash
+      run: rustup show active-toolchain || rustup default stable
+
+    # The catalog recipe `anvil-setup` (or `anvil-<group>-setup`
+    # when a group is specified via the `group` input) needs `just` to
+    # run. We bootstrap just here (chicken-and-egg), then hand off
+    # everything else to it. The setup recipes are idempotent and
+    # short-circuit on tools already installed at or above the pinned
+    # version, so re-running on cache-hit runs is cheap.
+    # Install a prebuilt cargo-binstall binary in seconds. Without this,
+    # the first `_install-tool` recipe that needs binstall bootstraps it
+    # via `cargo install --locked cargo-binstall`, which takes ~4 min of
+    # source compilation on every cold-cache job. The official action
+    # downloads the release binary from cargo-bins/cargo-binstall, so
+    # the bootstrap branch in `tools.just` becomes a no-op on GH.
+    - name: Install cargo-binstall
+      uses: cargo-bins/cargo-binstall@main
+
+    - name: Install just
+      shell: bash
+      run: |
+        if ! command -v just >/dev/null 2>&1 ; then
+          cargo binstall --no-confirm --locked just || cargo install --locked just
+        fi
+
+    - name: Install anvil toolchains + tools
+      shell: bash
+      # When `group` is empty (the default), installs the full catalog
+      # via `just anvil-setup binstall`. When `group` is "none",
+      # skips tool installation entirely (used by anvil-impact, which
+      # only needs cargo-delta and installs it itself afterwards). When
+      # `group` is anything else, installs only what that group needs
+      # via `just anvil-<group>-setup binstall`.
+      #
+      # binstall path downloads prebuilt tool binaries from each tool's
+      # GitHub Releases when available (~1 min cold, vs ~30 min for
+      # source builds). cargo-binstall has unresolved compliance issues
+      # for ADO pipelines, so the ADO backend uses the default `install`
+      # path; GH uses `binstall`.
+      run: |
+        case "${{ inputs.group }}" in
+          none) echo "anvil-setup: group=none, skipping tool install" ;;
+          "")   just anvil-setup binstall ;;
+          *)    just "anvil-${{ inputs.group }}-setup" binstall ;;
+        esac
+
+    # Save the cache as the LAST step of setup, regardless of whether
+    # any earlier install step partially failed. `actions/cache@v4`
+    # used to support this via `save-always: true`, but that knob is
+    # deprecated as of 2025 with the explicit message "does not work
+    # as intended" — failing runs simply don't save. The supported
+    # replacement is to call `actions/cache/save@v4` directly as its
+    # own step with `if: always()`.
+    #
+    # Without this, a single catalog issue that fails the install
+    # step locks the cache empty forever (chicken-and-egg: failed
+    # run -> no save -> next run cold-starts -> still fails -> still
+    # no save). Tool binaries installed by anvil-tools-install are
+    # immutable once on disk, so partial state is strictly better
+    # than nothing — and subsequent runs accumulate into the cache
+    # until the catalog is complete.
+    - name: Save cargo cache
+      if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+        path: |
+          ~/.cargo/registry/cache/
+          ~/.cargo/registry/index/
+          ~/.cargo/bin/
+          ~/.cargo/.crates.toml
+          ~/.cargo/.crates2.json
+          target/
+          target/

@@ -65,9 +65,6 @@ libc = { workspace = true }
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 windows-sys = { workspace = true }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "buf"
 harness = false
@@ -112,3 +109,8 @@ required-features = ["test-util"]
 [[example]]
 name = "bb_static_data"
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

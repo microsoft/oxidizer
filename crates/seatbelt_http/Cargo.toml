@@ -52,5 +52,7 @@ mutants = { workspace = true }
 ohno = { path = "../ohno" }
 tick = { path = "../tick", features = ["test-util"] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
