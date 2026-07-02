@@ -1,0 +1,13 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# cargo-audit (anvil-audit) reads this file; it does NOT consult deny.toml, so
+# advisory ignores must be mirrored here as well as in deny.toml's ignore list.
+[advisories]
+ignore = [
+    # quick-xml 0.39.4 DoS advisories fixed only in >=0.41.0, pulled transitively
+    # via the Azure SDK (typespec <- azure_core 1.0.0) which pins 0.39.x. Cannot be
+    # upgraded until an upstream Azure SDK release. See deny.toml for the full rationale.
+    "RUSTSEC-2026-0194", # quadratic-time duplicate-attribute check
+    "RUSTSEC-2026-0195", # unbounded namespace-declaration allocation
+]
