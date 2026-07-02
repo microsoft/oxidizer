@@ -4,7 +4,6 @@
 use std::fmt::Debug;
 
 use thread_aware::ThreadAware;
-use thread_aware::affinity::Affinity;
 
 use crate::BytesBuf;
 use crate::mem::Memory;
@@ -58,9 +57,11 @@ use crate::mem::Memory;
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
-#[derive(Clone)]
+#[derive(Clone, ThreadAware)]
 pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
     data: D,
+    // The function pointer holds no state; only the captured data can be thread-affine.
+    #[thread_aware(skip)]
     reserve_fn: fn(&D, usize) -> BytesBuf,
 }
 
@@ -116,13 +117,6 @@ impl<D: ThreadAware + Clone + Send + Sync + 'static> Memory for CallbackMemory<D
     }
 }
 
-impl<D: ThreadAware + Clone + Send + Sync + 'static> ThreadAware for CallbackMemory<D> {
-    fn relocate(&mut self, source: Option<Affinity>, destination: Affinity) {
-        // The function pointer holds no state; only the captured data can be thread-affine.
-        self.data.relocate(source, destination);
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
@@ -130,7 +124,7 @@ mod tests {
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
-    use thread_aware::affinity::pinned_affinities;
+    use thread_aware::affinity::{Affinity, pinned_affinities};
 
     use super::*;
     use crate::mem::MemoryShared;
