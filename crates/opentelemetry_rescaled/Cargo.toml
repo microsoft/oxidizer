@@ -1,0 +1,39 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "opentelemetry_rescaled"
+description = "Wraps an OpenTelemetry meter provider to emit rescaled side-by-side copies of selected instruments."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["opentelemetry", "metrics", "telemetry", "rescale"]
+categories = ["development-tools::debugging"]
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/opentelemetry_rescaled"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "opentelemetry::metrics::meter::Meter",
+    "opentelemetry::metrics::meter::MeterProvider",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[lints]
+workspace = true
+
+[dependencies]
+foldhash = { workspace = true }
+opentelemetry = { workspace = true, features = ["metrics"] }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }

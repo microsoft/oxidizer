@@ -2685,6 +2685,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry_rescaled"
+version = "0.1.0"
+dependencies = [
+ "foldhash 0.2.0",
+ "opentelemetry",
+ "opentelemetry_sdk",
+]
+
+[[package]]
 name = "opentelemetry_sdk"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
