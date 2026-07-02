@@ -16,7 +16,7 @@ const POISONED_LOCK_MSG: &str = "poisoned lock means type invariants may not hol
 
 /// The number of processors to use for the registry.
 ///
-/// Use `Auto` for the default number of processors, `Manual` to require an exact
+/// Use `Auto` for the default number of processors, `Exactly` to require an exact
 /// number of processors, `AtMost` to request an upper bound that is satisfied by
 /// fewer processors when the hardware offers fewer, or `All` to use every processor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -28,7 +28,7 @@ pub enum ProcessorCount {
     /// Use a specific number of processors.
     ///
     /// Registry construction panics if the hardware offers fewer processors than requested.
-    Manual(NonZero<usize>),
+    Exactly(NonZero<usize>),
     /// Use up to this many processors, or every available processor when the
     /// hardware offers fewer than requested.
     ///
@@ -66,7 +66,7 @@ impl ThreadRegistry {
     ///
     /// # Panics
     ///
-    /// This will panic if there are not enough processors available when using `Manual` or if no processors are available when using `Auto` or `All`.
+    /// This will panic if there are not enough processors available when using `Exactly` or if no processors are available when using `Auto` or `All`.
     /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn new(count: &ProcessorCount) -> Self {
@@ -80,11 +80,11 @@ impl ThreadRegistry {
 
         let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
-            ProcessorCount::Manual(count) => builder.take(*count),
+            ProcessorCount::Exactly(count) => builder.take(*count),
             ProcessorCount::AtMost(max) => {
                 // A processor set is never empty, so taking every available processor
                 // always satisfies a ceiling that meets or exceeds what the machine
-                // offers, without failing the way `Manual` would.
+                // offers, without failing the way `Exactly` would.
                 if max.get() >= hardware.processors().len() {
                     builder.take_all()
                 } else {
@@ -238,8 +238,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn test_registry_manual() {
-        let registry = ThreadRegistry::new(&ProcessorCount::Manual(NonZero::new(1).unwrap()));
+    fn test_registry_exactly() {
+        let registry = ThreadRegistry::new(&ProcessorCount::Exactly(NonZero::new(1).unwrap()));
         assert_eq!(registry.num_affinities(), 1);
     }
 
@@ -251,12 +251,12 @@ mod tests {
         let iterator_count = registry.affinities().count();
         assert_eq!(registry.num_affinities(), iterator_count);
 
-        // Also test with manual processor count > 1 if available
+        // Also test with an exact processor count > 1 if available
         if iterator_count > 1 {
             let count = NonZero::new(2.min(iterator_count)).unwrap();
-            let registry_manual = ThreadRegistry::new(&ProcessorCount::Manual(count));
-            assert_eq!(registry_manual.num_affinities(), count.get());
-            assert_eq!(registry_manual.num_affinities(), registry_manual.affinities().count());
+            let registry_exactly = ThreadRegistry::new(&ProcessorCount::Exactly(count));
+            assert_eq!(registry_exactly.num_affinities(), count.get());
+            assert_eq!(registry_exactly.num_affinities(), registry_exactly.affinities().count());
         }
     }
 
@@ -360,23 +360,23 @@ mod test_fake_hardware {
     }
 
     #[test]
-    fn manual_subset_of_processors() {
-        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(3)), 8, 2);
+    fn exactly_subset_of_processors() {
+        let registry = registry_from_fake(&ProcessorCount::Exactly(nz!(3)), 8, 2);
 
         assert_eq!(registry.num_affinities(), 3);
         assert_eq!(registry.affinities().count(), 3);
 
-        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(1)), 8, 2);
+        let registry = registry_from_fake(&ProcessorCount::Exactly(nz!(1)), 8, 2);
         assert_eq!(registry.num_affinities(), 1);
 
-        let registry = registry_from_fake(&ProcessorCount::Manual(nz!(8)), 8, 2);
+        let registry = registry_from_fake(&ProcessorCount::Exactly(nz!(8)), 8, 2);
         assert_eq!(registry.num_affinities(), 8);
     }
 
     #[test]
     #[should_panic(expected = "Not enough processors available")]
-    fn manual_exceeds_available_panics() {
-        let _registry = registry_from_fake(&ProcessorCount::Manual(nz!(5)), 2, 1);
+    fn exactly_exceeds_available_panics() {
+        let _registry = registry_from_fake(&ProcessorCount::Exactly(nz!(5)), 2, 1);
     }
 
     #[test]
@@ -397,7 +397,7 @@ mod test_fake_hardware {
     #[test]
     fn at_most_exceeds_available_clamps_to_all() {
         // A ceiling larger than the machine provides yields every processor
-        // rather than panicking, unlike `Manual`.
+        // rather than panicking, unlike `Exactly`.
         let registry = registry_from_fake(&ProcessorCount::AtMost(nz!(32)), 4, 2);
 
         assert_eq!(registry.num_affinities(), 4);
