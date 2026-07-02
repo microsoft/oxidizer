@@ -172,6 +172,7 @@ The inner provider is taken **by value** but immediately **type-erased** behind 
 trait object, so `RescaledMetrics` carries no generic parameter for it and does
 not leak the inner provider's concrete type into callers' signatures.
 
-The public API surface exposes `opentelemetry` types (`MeterProvider`, `Meter`,
-`KeyValue`, …); these are enumerated in the crate's `allowed_external_types`
-allowlist, as sibling crates do.
+The public API surface exposes only the `opentelemetry` provider types
+(`MeterProvider` and `Meter`, the latter through the `MeterProvider` trait
+impl); these are enumerated in the crate's `allowed_external_types` allowlist, as
+sibling crates do.
