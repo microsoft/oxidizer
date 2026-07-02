@@ -33,4 +33,18 @@ ignore = [
     # upstream and no production code path depends on it. Tracked for removal once the
     # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
     "RUSTSEC-2026-0173",
+    # quick-xml 0.39.4 has two DoS advisories on untrusted XML: RUSTSEC-2026-0194 (quadratic
+    # run time when checking a start tag for duplicate attributes, CPU exhaustion) and
+    # RUSTSEC-2026-0195 (unbounded namespace-declaration allocation in `NsReader`, memory
+    # exhaustion). It is pulled in only transitively via the Azure SDK (`typespec` ->
+    # `azure_core` / `typespec_client_core`, used by `fetch_azure`, `anyspawn_azure`,
+    # `azure_storage_blob`, `azure_identity`). Both are fixed in quick-xml >=0.41.0, but
+    # `typespec 1.0.0` pins `quick-xml = "^0.39.0"`, so there is no safe upgrade path until
+    # the Azure SDK loosens that requirement. Azure SDK PR
+    # https://github.com/Azure/azure-sdk-for-rust/pull/4691 updates the pin; remove these
+    # ignores (and update the Azure SDK dependencies to quick-xml >=0.41.0) once it merges.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0194
+    # https://rustsec.org/advisories/RUSTSEC-2026-0195
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
