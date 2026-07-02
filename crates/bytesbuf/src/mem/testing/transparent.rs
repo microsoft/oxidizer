@@ -3,6 +3,8 @@
 
 use std::num::NonZero;
 
+use thread_aware::ThreadAware;
+
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
 use crate::mem::{BlockSize, Memory};
@@ -38,7 +40,7 @@ use crate::mem::{BlockSize, Memory};
 /// ```
 ///
 /// [1]: crate::mem::GlobalPool
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, ThreadAware)]
 pub struct TransparentMemory {
     // We may add more fields later, so this is a placeholder to ensure we do not empty-type this.
     _placeholder: (),
@@ -110,6 +112,7 @@ fn reserve(min_bytes: usize) -> crate::BytesBuf {
 #[cfg(test)]
 mod tests {
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::mem::MemoryShared;
@@ -134,6 +137,18 @@ mod tests {
 
         assert_eq!(data.len(), 1313);
         assert_eq!(data.first_slice().len(), 1313);
+    }
+
+    #[test]
+    fn relocate_is_noop_and_keeps_provider_usable() {
+        let mut memory = TransparentMemory::new();
+
+        // Relocation is a no-op for this stateless provider, but must leave it fully usable.
+        let affinities = pinned_affinities(&[2]);
+        memory.relocate(Some(affinities[0]), affinities[1]);
+
+        let buf = memory.reserve(100);
+        assert_eq!(buf.capacity(), 100);
     }
 
     #[test]

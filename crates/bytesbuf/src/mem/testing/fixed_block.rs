@@ -5,6 +5,8 @@ use std::iter;
 use std::num::NonZero;
 use std::sync::Arc;
 
+use thread_aware::ThreadAware;
+
 use crate::BytesBuf;
 use crate::mem::testing::std_alloc_block;
 use crate::mem::{BlockSize, Memory};
@@ -53,8 +55,10 @@ use crate::mem::{BlockSize, Memory};
 /// data.advance(16);
 /// assert_eq!(data.first_slice().len(), 13); // Remaining 13 bytes in second block.
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ThreadAware)]
 pub struct FixedBlockMemory {
+    // Immutable, read-only configuration shared without contention, so there is nothing to relocate.
+    #[thread_aware(skip)]
     inner: Arc<FixedBlockMemoryInner>,
 }
 
@@ -128,6 +132,7 @@ impl FixedBlockMemoryInner {
 mod tests {
     use new_zealand::nz;
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::BytesView;
@@ -156,5 +161,18 @@ mod tests {
         });
 
         assert_eq!(chunks_encountered, 12);
+    }
+
+    #[test]
+    fn relocate_is_noop_and_keeps_provider_usable() {
+        let mut memory = FixedBlockMemory::new(nz!(16));
+
+        // The wrapped configuration is immutable, so relocation is a no-op, but the provider must
+        // remain fully usable afterwards.
+        let affinities = pinned_affinities(&[2]);
+        memory.relocate(Some(affinities[0]), affinities[1]);
+
+        let buf = memory.reserve(10);
+        assert_eq!(buf.capacity(), 16);
     }
 }
