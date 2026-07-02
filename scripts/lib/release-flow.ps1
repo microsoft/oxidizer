@@ -280,7 +280,7 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #     Source                    = 'user'|'cascade'
 #     AutoUpgraded              = $true|$false   # user-source entry strengthened by cascade
 #     PinHonoredAgainstCascade  = $true|$false   # -Force kept an explicit pin below cascade-required version
-#     CascadeReasons            = [List<{Target,Version,Breaking}>]          # one per (target → dep) edge
+#     CascadeReasons            = [List<{Target,Breaking}>]                  # one per (target → dep) edge
 #     RawToken                  = '<original token>'|$null                   # null for cascade-source
 #   }
 #
@@ -311,18 +311,6 @@ function Get-TransitivePublishedDependentsFromBaseline {
 # change type for each dependent is derived from exposure of the USER TARGET
 # (not of any intermediate). Tightening the analysis is out of scope for the
 # redesign.
-#
-# After the iteration loop finishes, a final normalisation pass re-points
-# every recorded CascadeReason.Version to the target entry's FINAL
-# EffectiveTargetVersion. This is necessary because the version captured
-# during a target's outer-loop iteration may be superseded later if that
-# same target is also a dependent of yet another user-source target whose
-# iteration strengthens it. Without normalisation, consumers
-# (Write-Changelog "Now requires <v> of <pkg>" bullets) would print the
-# stale pre-bump version. The companion Breaking flag is intentionally
-# left untouched — recomputing it without also re-iterating the dependent
-# would conflate "the target became breaking" with "this edge contributes
-# breaking", which under one-level cascade semantics it does not.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
@@ -416,7 +404,6 @@ function Resolve-ReleaseSet {
             $depBreakingForReason = Test-IsBreakingChange -oldVersion $depPkg.Version -ChangeType $dependentChangeType
             $cascadeReason = [pscustomobject]@{
                 Target   = $targetPkg.Name
-                Version  = $targetEntry.EffectiveTargetVersion
                 Breaking = $depBreakingForReason
             }
 
@@ -495,30 +482,6 @@ function Resolve-ReleaseSet {
                 }
                 $newEntry.CascadeReasons.Add($cascadeReason)
                 $resolved[$depPkg.Folder] = $newEntry
-            }
-        }
-    }
-
-    # Normalise CascadeReason.Version to each target entry's FINAL
-    # EffectiveTargetVersion. A target X's iteration captures the version
-    # value live at that moment when emitting reasons onto its dependents.
-    # If a later outer-loop iteration (some user-source Y whose BFS reaches
-    # X) bumps X.EffectiveTargetVersion via the rank-comparison branch
-    # above, the reasons X already emitted are now stale. Re-point them
-    # here so changelog "Now requires <Version> of <Target>" bullets render
-    # the post-cascade plan rather than an intermediate snapshot. Breaking
-    # is intentionally NOT recomputed (see header comment).
-    $finalVersionByName = @{}
-    foreach ($e in $resolved.Values) { $finalVersionByName[$e.Name] = $e.EffectiveTargetVersion }
-    foreach ($e in $resolved.Values) {
-        for ($i = 0; $i -lt $e.CascadeReasons.Count; $i++) {
-            $r = $e.CascadeReasons[$i]
-            if ($finalVersionByName.ContainsKey($r.Target) -and $r.Version -ne $finalVersionByName[$r.Target]) {
-                $e.CascadeReasons[$i] = [pscustomobject]@{
-                    Target   = $r.Target
-                    Version  = $finalVersionByName[$r.Target]
-                    Breaking = $r.Breaking
-                }
             }
         }
     }
@@ -1718,6 +1681,58 @@ function Get-TopoOrderedReleaseFolders {
     return $result.ToArray()
 }
 
+# Returns the changelog "Now requires <version> of <target>" bullet reasons for
+# a dependent: only the DIRECT workspace deps (normal/build) in this release with
+# a changed version, each at its new version. Decoupled from CascadeReasons,
+# which attribute a cascade to its root cause — an indirect dependent must not
+# claim to require a crate it does not directly depend on (ADO bug 7536096).
+function Get-DirectDependencyChangelogReasons {
+    param(
+        [Parameter(Mandatory = $true)][object]$Entry,
+        [Parameter(Mandatory = $true)][hashtable]$ResolvedReleaseSet,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline
+    )
+
+    $baselinePkg = $null
+    foreach ($pkg in $WorkspaceBaseline) {
+        if ($pkg.Folder -eq $Entry.Folder) { $baselinePkg = $pkg; break }
+    }
+    if ($null -eq $baselinePkg -or $null -eq $baselinePkg.Deps) {
+        return @()
+    }
+
+    # Baseline .Deps use underscore-normalized cargo names; the resolved set is
+    # keyed by Folder, so index it by the same normalization to match.
+    $resolvedByNormName = @{}
+    foreach ($e in $ResolvedReleaseSet.Values) {
+        $resolvedByNormName[$e.Name.Replace('-', '_')] = $e
+    }
+
+    # Section selection follows the per-edge cascade Breaking flags (not the
+    # dependent's own change type): a crate that is both a breaking user target
+    # and a non-breaking cascade dependent must keep its bullet under Maintenance.
+    $sectionBreaking = $false
+    if ($null -ne $Entry.CascadeReasons) {
+        foreach ($cr in $Entry.CascadeReasons) {
+            if ([bool]$cr.Breaking) { $sectionBreaking = $true; break }
+        }
+    }
+
+    $reasons = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($depNorm in $baselinePkg.Deps) {
+        $depEntry = $resolvedByNormName[$depNorm]
+        if ($null -eq $depEntry) { continue }
+        if ($depEntry.CurrentVersion -eq $depEntry.EffectiveTargetVersion) { continue }
+        $reasons.Add([pscustomobject]@{
+            Target   = $depEntry.Name
+            Version  = $depEntry.EffectiveTargetVersion
+            Breaking = $sectionBreaking
+        })
+    }
+
+    return $reasons.ToArray()
+}
+
 # Executes a finalised release plan. For each release-set entry, in topo order
 # (dependencies first), writes Cargo.toml + workspace Cargo.toml + CHANGELOG +
 # README. No cascade logic, no user prompts — every release decision was
@@ -1766,12 +1781,10 @@ function Invoke-ResolvedRelease {
             Write-Error "Failed to update version for package '$folder'." -ErrorAction Stop
         }
 
-        $cascadeReasons = if ($null -ne $entry.CascadeReasons -and $entry.CascadeReasons.Count -gt 0) {
-            # .ToArray() instead of @(...) — PowerShell's array sub-expression
-            # operator can't iterate a List[object] held in a property accessor.
-            $entry.CascadeReasons.ToArray()
-        } else {
-            $null
+        $cascadeReasons = Get-DirectDependencyChangelogReasons -Entry $entry `
+            -ResolvedReleaseSet $ResolvedReleaseSet -WorkspaceBaseline $WorkspaceBaseline
+        if ($null -ne $cascadeReasons -and $cascadeReasons.Count -eq 0) {
+            $cascadeReasons = $null
         }
         Write-Changelog -packageName $entry.Name -newVersion $newVersion -packageFolder $packageFolder `
             -changelogFile $changelogFile -prBaseUrl $PrBaseUrl -cascadeReasons $cascadeReasons
