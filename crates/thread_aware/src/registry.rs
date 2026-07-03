@@ -55,6 +55,9 @@ pub struct ThreadRegistry {
 impl ThreadRegistry {
     /// Create a new `ThreadRegistry` using the current system hardware.
     ///
+    /// This resolves [`SystemHardware::current`] for you. Prefer [`ThreadRegistry::with_hardware`]
+    /// when your service already owns a [`SystemHardware`] instance, so the same instance is shared.
+    ///
     /// # Panics
     ///
     /// This will panic if there are not enough processors available when using `Manual` or if no processors are available when using `Auto` or `All`.
@@ -64,16 +67,35 @@ impl ThreadRegistry {
         Self::with_hardware(count, SystemHardware::current())
     }
 
-    /// Create a new `ThreadRegistry` with the specified hardware instance.
+    /// Create a new `ThreadRegistry` using a caller-provided system hardware instance.
+    ///
+    /// Use this when your service already owns a [`SystemHardware`] so that the same instance is
+    /// reused throughout your stack instead of resolving a fresh one. [`ThreadRegistry::new`] is a
+    /// convenience that resolves [`SystemHardware::current`] for you.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if there are not enough processors available when using `Manual` or if no processors are available when using `Auto` or `All`.
+    /// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
-    pub(crate) fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
-        let builder = hardware.processors().to_builder();
+    pub fn with_hardware(count: &ProcessorCount, hardware: &SystemHardware) -> Self {
+        let all_processors = hardware.processors();
+        let available = all_processors.len();
+        let builder = all_processors.to_builder();
 
+        let requested = match count {
+            ProcessorCount::Auto | ProcessorCount::All => available,
+            ProcessorCount::Manual(count) => count.get(),
+        };
         let processors = match count {
             ProcessorCount::Auto | ProcessorCount::All => builder.take_all(),
             ProcessorCount::Manual(count) => builder.take(*count),
-        }
-        .expect("Not enough processors available");
+        };
+        assert!(
+            processors.is_some(),
+            "not enough processors available: requested {requested}, available {available}"
+        );
+        let processors = processors.expect("checked by assert above");
 
         let mut numa_nodes = Vec::new();
         let mut dense_index = 0;
@@ -91,8 +113,7 @@ impl ThreadRegistry {
             }
         }
 
-        assert!(processors.len() < u16::MAX as usize, "Too many processors");
-        assert!(numa_nodes.len() < u16::MAX as usize, "Too many memory regions");
+        check_capacity(processors.len(), numa_nodes.len());
 
         Self {
             processors: Processor::unpack(&processors),
@@ -156,6 +177,26 @@ impl Default for ThreadRegistry {
     fn default() -> Self {
         Self::new(&ProcessorCount::Auto)
     }
+}
+
+/// Asserts that processor and memory region counts fit within the `u16` indices used internally.
+///
+/// Both bounds can only be exceeded on hardware with more than `u16::MAX` of either, which is not
+/// reproducible via fake hardware (a memory region count can never exceed the processor count),
+/// so this is excluded from coverage.
+#[cfg_attr(test, mutants::skip)] // Unreachable via tests, so a mutant here cannot be caught.
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn check_capacity(processor_count: usize, memory_region_count: usize) {
+    assert!(
+        u16::try_from(processor_count).is_ok(),
+        "too many processors: {processor_count} exceeds the supported maximum of {}",
+        u16::MAX
+    );
+    assert!(
+        u16::try_from(memory_region_count).is_ok(),
+        "too many memory regions: {memory_region_count} exceeds the supported maximum of {}",
+        u16::MAX
+    );
 }
 
 /// A wrapper around `many_cpus::ProcessorSet` that contains only a single processor
@@ -355,7 +396,7 @@ mod test_fake_hardware {
     }
 
     #[test]
-    #[should_panic(expected = "Not enough processors available")]
+    #[should_panic(expected = "not enough processors available")]
     fn manual_exceeds_available_panics() {
         let _registry = registry_from_fake(&ProcessorCount::Manual(nz!(5)), 2, 1);
     }
