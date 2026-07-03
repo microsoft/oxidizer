@@ -67,8 +67,8 @@ impl ThreadRegistry {
     ///
     /// # Panics
     ///
-    /// This will panic if there are not enough processors available when using `Exactly` or if no processors are available when using `Auto` or `All`.
-    /// If there are more than `u16::MAX` processors or memory regions.
+/// This will panic if there are not enough processors available when using `Exactly`.
+/// If there are more than `u16::MAX` processors or memory regions.
     #[must_use]
     pub fn new(count: &ProcessorCount) -> Self {
         Self::with_hardware(count, SystemHardware::current())
