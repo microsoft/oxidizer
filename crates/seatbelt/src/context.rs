@@ -71,12 +71,6 @@ impl<In, Out> ResilienceContext<In, Out> {
         self
     }
 
-    /// Returns the configured pipeline name used for telemetry correlation.
-    #[must_use]
-    pub fn get_name(&self) -> &str {
-        self.name.as_ref()
-    }
-
     /// Enable metrics reporting with the given OpenTelemetry meter provider.
     #[must_use]
     #[cfg(any(feature = "metrics", test))]
@@ -173,17 +167,6 @@ mod tests {
         let telemetry = ctx.create_telemetry("test".into());
         assert_eq!(telemetry.pipeline_name.as_ref(), "custom_pipeline");
         assert!(matches!(telemetry.pipeline_name, Cow::Owned(_)));
-    }
-
-    #[test]
-    fn get_name_returns_configured_name() {
-        let clock = tick::Clock::new_frozen();
-
-        let default_ctx = ResilienceContext::<(), ()>::new(&clock);
-        assert_eq!(default_ctx.get_name(), DEFAULT_CONTEXT_NAME);
-
-        let named_ctx = ResilienceContext::<(), ()>::new(&clock).name("custom_pipeline");
-        assert_eq!(named_ctx.get_name(), "custom_pipeline");
     }
 
     #[cfg_attr(miri, ignore)]

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
+
 use data_privacy::RedactionEngine;
 use http_extensions::HttpBodyBuilder;
 use http_extensions::routing::Router;
@@ -24,6 +26,7 @@ pub struct PipelineContext {
     clock: Clock,
     body_builder: HttpBodyBuilder,
     router: Router,
+    name: Cow<'static, str>,
 }
 
 impl PipelineContext {
@@ -34,6 +37,7 @@ impl PipelineContext {
         body_builder: HttpBodyBuilder,
         clock: Clock,
         router: Router,
+        name: Cow<'static, str>,
     ) -> Self {
         Self {
             resilience_context,
@@ -42,6 +46,7 @@ impl PipelineContext {
             body_builder,
             clock,
             router,
+            name,
         }
     }
 
@@ -80,6 +85,13 @@ impl PipelineContext {
     pub const fn router(&self) -> &Router {
         &self.router
     }
+
+    /// Returns the name of the HTTP client owning this pipeline, used to
+    /// identify the client in telemetry (defaults to `"http_client"`).
+    #[must_use]
+    pub fn name(&self) -> Cow<'static, str> {
+        self.name.clone()
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +114,7 @@ mod tests {
             body_builder,
             clock,
             Router::default(),
+            Cow::Borrowed("test_client"),
         )
     }
 
@@ -128,5 +141,12 @@ mod tests {
         let _ = context.resilience_context();
         let _ = context.redaction_engine();
         let _ = context.router();
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn name_returns_configured_client_name() {
+        let context = test_context(HttpBodyBuilder::new_fake());
+        assert_eq!(context.name(), "test_client");
     }
 }

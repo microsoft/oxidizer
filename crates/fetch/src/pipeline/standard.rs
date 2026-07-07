@@ -92,11 +92,7 @@ pub struct StandardRequestPipeline {
 impl StandardRequestPipeline {
     pub(crate) fn new(options: &HttpResilienceContext, redaction: &RedactionEngine, clock: &Clock, meter: &Meter, router: &Router) -> Self {
         Self {
-            total_metrics: Metrics::layer()
-                .clock(clock)
-                .meter(meter.clone())
-                .report_total_duration(true)
-                .client_name(options.get_name().to_owned()),
+            total_metrics: Metrics::layer().clock(clock).meter(meter.clone()).report_total_duration(true),
             total_timeout: HttpTimeout::layer(TOTAL_TIMEOUT_NAME, options)
                 .http_timeout_error()
                 .timeout(TOTAL_TIMEOUT_DURATION),
@@ -112,10 +108,7 @@ impl StandardRequestPipeline {
                 .timeout(ATTEMPT_TIMEOUT_DURATION),
             attempt_intercept: Intercept::layer(),
             attempt_logs: Logging::layer(redaction).clock(clock),
-            attempt_metrics: Metrics::layer()
-                .clock(clock)
-                .meter(meter.clone())
-                .client_name(options.get_name().to_owned()),
+            attempt_metrics: Metrics::layer().clock(clock).meter(meter.clone()),
             recovery_mode: RecoveryMode::default(),
         }
     }
@@ -296,13 +289,20 @@ impl ConfigureStandardPipeline {
     }
 
     pub(crate) fn create(self, context: PipelineContext, redaction: &RedactionEngine) -> StandardRequestPipeline {
-        let pipeline = StandardRequestPipeline::new(
+        let mut pipeline = StandardRequestPipeline::new(
             context.resilience_context(),
             redaction,
             context.clock(),
             context.meter(),
             context.router(),
         );
+
+        // Report the owning client's name on both metric layers so recorded
+        // metrics can be correlated with a specific named client.
+        let client_name = context.name();
+        pipeline.total_metrics = pipeline.total_metrics.client_name(client_name.clone());
+        pipeline.attempt_metrics = pipeline.attempt_metrics.client_name(client_name);
+
         (self.0)(pipeline, context)
     }
 }

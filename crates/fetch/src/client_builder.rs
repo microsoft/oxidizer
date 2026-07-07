@@ -47,6 +47,7 @@ pub struct HttpClientBuilder {
     metering: Metering,
     transport: Transport,
     resilience_context: HttpResilienceContext,
+    client_name: Cow<'static, str>,
 }
 
 impl HttpClientBuilder {
@@ -59,6 +60,7 @@ impl HttpClientBuilder {
             metering: Metering::global(client_scope(transport.runtime().clone(), transport.name().clone())),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
+            client_name: Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
         }
     }
 
@@ -67,6 +69,8 @@ impl HttpClientBuilder {
     /// The name is used in logging and metrics to identify the HTTP client instance. The name should
     /// follow the `snake_case` convention. By default, the client is named "`http_client`".
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        let name = name.into();
+        self.client_name.clone_from(&name);
         self.resilience_context = self.resilience_context.name(name);
         self
     }
@@ -432,6 +436,7 @@ impl HttpClientBuilder {
             options: self.options,
             resilience_context: self.resilience_context,
             metering: self.metering,
+            client_name: self.client_name,
         };
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
@@ -452,6 +457,8 @@ struct Aware {
     options: ClientOptions,
     transport: Transport,
     resilience_context: ResilienceContext<HttpRequest, crate::Result<HttpResponse>>,
+    #[thread_aware(skip)]
+    client_name: Cow<'static, str>,
 }
 
 impl Aware {
@@ -468,6 +475,7 @@ impl Aware {
             body_builder,
             self.transport.clock().clone(),
             self.options.router,
+            self.client_name,
         )
     }
 }
