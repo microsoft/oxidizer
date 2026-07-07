@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,11 +26,11 @@ use crate::telemetry::{
 };
 use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
-/// Instrument name used when [`MetricsLayer::report_overall_duration`] is
+/// Instrument name used when [`MetricsLayer::report_total_duration`] is
 /// enabled. This is an Oxidizer-specific extension to the OpenTelemetry HTTP
-/// semantic conventions, used to distinguish overall request duration
+/// semantic conventions, used to distinguish total request duration
 /// (including all retries and hedged attempts) from per-attempt duration.
-const HTTP_CLIENT_REQUEST_OVERALL_DURATION: &str = "http.client.request.overall_duration";
+const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
 
 /// Metric attribute key for the zero-based attempt index of an HTTP request.
 const RESILIENCE_ATTEMPT_INDEX: &str = "resilience.attempt.index";
@@ -37,6 +38,9 @@ const RESILIENCE_ATTEMPT_INDEX: &str = "resilience.attempt.index";
 /// Metric attribute key indicating whether the recorded attempt is the last one
 /// that will be performed.
 const RESILIENCE_ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
+
+/// Metric attribute key identifying the named HTTP client instance.
+const HTTP_CLIENT_NAME: &str = "http.client.name";
 
 type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
 type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
@@ -85,8 +89,8 @@ impl Debug for ResponseEnricher {
 /// * **Meter name**: `fetch`
 /// * **Duration**: [`http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration) - How long requests take in seconds
 ///
-/// When [`MetricsLayer::report_overall_duration`] is enabled, the histogram is
-/// recorded under the name `http.client.request.overall_duration` instead,
+/// When [`MetricsLayer::report_total_duration`] is enabled, the histogram is
+/// recorded under the name `http.client.request.total_duration` instead,
 /// distinguishing measurements that cover an entire logical request (including
 /// retries and hedged attempts) from per-attempt measurements.
 #[derive(Debug)]
@@ -98,6 +102,7 @@ pub struct Metrics<T> {
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
     include_attempt: bool,
+    client_name: Option<Cow<'static, str>>,
 }
 
 /// Layer that wraps a service with [`Metrics`].
@@ -110,11 +115,12 @@ pub struct Metrics<T> {
 pub struct MetricsLayer {
     clock: Option<SimpleClock>,
     meter: Option<Meter>,
-    report_overall_duration: bool,
+    report_total_duration: bool,
     on_record: Option<OnRecordCallback>,
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
     include_attempt: bool,
+    client_name: Option<Cow<'static, str>>,
 }
 
 impl MetricsLayer {
@@ -127,6 +133,19 @@ impl MetricsLayer {
     #[must_use]
     pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
         self.clock = Some(clock.into());
+        self
+    }
+
+    /// Sets the client name reported as the `http.client.name` metric attribute.
+    ///
+    /// This is typically the name assigned to the owning
+    /// [`HttpClient`](crate::HttpClient) via
+    /// [`HttpClientBuilder::name`](crate::HttpClientBuilder::name), and lets
+    /// callers correlate recorded metrics with a specific named client. When
+    /// unset, no `http.client.name` attribute is reported.
+    #[must_use]
+    pub fn client_name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        self.client_name = Some(name.into());
         self
     }
 
@@ -213,18 +232,18 @@ impl MetricsLayer {
     }
 
     /// Toggles whether the request duration histogram is recorded under the
-    /// alternative `http.client.request.overall_duration` instrument name.
+    /// alternative `http.client.request.total_duration` instrument name.
     ///
     /// When enabled, the layer publishes its measurements to a histogram named
-    /// `http.client.request.overall_duration` instead of the default
+    /// `http.client.request.total_duration` instead of the default
     /// [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]. This is
     /// intended for layers that measure the entire request/response cycle
     /// (including retries and hedged attempts), so that downstream consumers can
-    /// distinguish overall and per-attempt durations without attribute
+    /// distinguish total and per-attempt durations without attribute
     /// disambiguation.
     #[must_use]
-    pub fn report_overall_duration(mut self, enabled: bool) -> Self {
-        self.report_overall_duration = enabled;
+    pub fn report_total_duration(mut self, enabled: bool) -> Self {
+        self.report_total_duration = enabled;
         self
     }
 }
@@ -240,11 +259,12 @@ impl<S> Layer<S> for MetricsLayer {
         Metrics {
             inner,
             clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),
-            request_duration: build_request_duration(&meter, self.report_overall_duration),
+            request_duration: build_request_duration(&meter, self.report_total_duration),
             on_record: self.on_record.clone(),
             enrich_from_request: self.enrich_from_request.clone(),
             enrich_from_response: self.enrich_from_response.clone(),
             include_attempt: self.include_attempt,
+            client_name: self.client_name.clone(),
         }
     }
 }
@@ -263,26 +283,27 @@ impl Metrics<()> {
         MetricsLayer {
             clock: None,
             meter: None,
-            report_overall_duration: false,
+            report_total_duration: false,
             on_record: None,
             enrich_from_request: None,
             enrich_from_response: None,
             include_attempt: false,
+            client_name: None,
         }
     }
 }
 
 /// Builds the request-duration histogram recorded by [`Metrics`].
 ///
-/// When `report_overall_duration` is `true`, the histogram is registered under
-/// the `http.client.request.overall_duration` instrument name; otherwise it uses
+/// When `report_total_duration` is `true`, the histogram is registered under
+/// the `http.client.request.total_duration` instrument name; otherwise it uses
 /// the standard [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]
 /// name.
-fn build_request_duration(meter: &Meter, report_overall_duration: bool) -> Histogram<f64> {
-    let (name, description) = if report_overall_duration {
+fn build_request_duration(meter: &Meter, report_total_duration: bool) -> Histogram<f64> {
+    let (name, description) = if report_total_duration {
         (
-            HTTP_CLIENT_REQUEST_OVERALL_DURATION,
-            "Overall duration of HTTP client requests, including all retries and hedged attempts.",
+            HTTP_CLIENT_REQUEST_TOTAL_DURATION,
+            "Total duration of HTTP client requests, including all retries and hedged attempts.",
         )
     } else {
         (HTTP_CLIENT_REQUEST_DURATION, "Duration of HTTP client requests.")
@@ -309,6 +330,10 @@ impl<T: RequestHandler> Service<HttpRequest> for Metrics<T> {
 
         if self.include_attempt {
             fill_attempt_attributes(&mut attributes, input.extensions().get::<Attempt>());
+        }
+
+        if let Some(client_name) = &self.client_name {
+            attributes.push(KeyValue::new(HTTP_CLIENT_NAME, client_name.to_string()));
         }
 
         let mut guard = MetricsDropGuard {
@@ -801,7 +826,47 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
-    fn report_overall_duration_uses_alternative_instrument_name() {
+    fn client_name_attribute_is_reported_when_set() {
+        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let attrs_clone = Arc::clone(&recorded_attrs);
+
+        let handler = test_layer()
+            .client_name("crates_api_client")
+            .on_record(move |_duration, _result, attrs| {
+                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+            })
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        let attrs = recorded_attrs.lock().unwrap();
+        assert_eq!(
+            attr_value(&attrs, HTTP_CLIENT_NAME).map(opentelemetry::Value::as_str),
+            Some("crates_api_client".into())
+        );
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn client_name_attribute_absent_by_default() {
+        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
+        let attrs_clone = Arc::clone(&recorded_attrs);
+
+        let handler = test_layer()
+            .on_record(move |_duration, _result, attrs| {
+                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
+            })
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        let attrs = recorded_attrs.lock().unwrap();
+        assert!(attr_value(&attrs, HTTP_CLIENT_NAME).is_none());
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn report_total_duration_uses_alternative_instrument_name() {
         use opentelemetry_sdk::metrics::InMemoryMetricExporter;
         use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
 
@@ -811,7 +876,7 @@ mod tests {
         let handler = Metrics::layer()
             .meter_provider(&provider)
             .clock(SimpleClock::new_frozen())
-            .report_overall_duration(true)
+            .report_total_duration(true)
             .layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
@@ -827,8 +892,8 @@ mod tests {
             .collect();
 
         assert!(
-            names.contains(&"http.client.request.overall_duration"),
-            "expected overall_duration instrument, found: {names:?}"
+            names.contains(&"http.client.request.total_duration"),
+            "expected total_duration instrument, found: {names:?}"
         );
         assert!(
             !names.contains(&"http.client.request.duration"),
@@ -838,7 +903,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
-    fn report_overall_duration_defaults_to_standard_instrument_name() {
+    fn report_total_duration_defaults_to_standard_instrument_name() {
         use opentelemetry_sdk::metrics::InMemoryMetricExporter;
         use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
 
@@ -863,6 +928,6 @@ mod tests {
             .collect();
 
         assert!(names.contains(&"http.client.request.duration"), "found: {names:?}");
-        assert!(!names.contains(&"http.client.request.overall_duration"), "found: {names:?}");
+        assert!(!names.contains(&"http.client.request.total_duration"), "found: {names:?}");
     }
 }

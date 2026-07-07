@@ -104,7 +104,7 @@ impl PipelineBuilder {
                 match standard.recovery_mode {
                     RecoveryMode::Retry => {
                         let service = (
-                            standard.overall_metrics,
+                            standard.total_metrics,
                             standard.total_timeout,
                             standard.retry,
                             standard.breaker,
@@ -126,7 +126,7 @@ impl PipelineBuilder {
                     }
                     RecoveryMode::Hedging => {
                         let service = (
-                            standard.overall_metrics,
+                            standard.total_metrics,
                             standard.total_timeout,
                             standard.hedging,
                             standard.breaker,

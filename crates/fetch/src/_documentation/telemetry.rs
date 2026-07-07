@@ -31,7 +31,7 @@
 //! | Metric | Instrument | Unit | Emitted when |
 //! |--------|-----------|------|--------------|
 //! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | Every HTTP request attempt completes (success **or** failure) |
-//! | [`http.client.request.overall_duration`](#httpclientrequestoverall_duration) | `Histogram<f64>` | `s` | An entire logical request completes, including all retries and hedged attempts (opt-in; enabled in the standard pipeline) |
+//! | [`http.client.request.total_duration`](#httpclientrequesttotal_duration) | `Histogram<f64>` | `s` | An entire logical request completes, including all retries and hedged attempts (opt-in; enabled in the standard pipeline) |
 //! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | A TCP/TLS connection attempt finishes (success **or** failure) |
 //! | [`http.client.connection.duration`](#httpclientconnectionduration) | `Histogram<f64>` | `s` | A connection is closed (the underlying stream is dropped) |
 //!
@@ -48,7 +48,7 @@
 //! In the [standard pipeline](crate::pipeline::StandardRequestPipeline) this is
 //! recorded per attempt, so a request that is retried or hedged produces one
 //! measurement per attempt. See
-//! [`http.client.request.overall_duration`](#httpclientrequestoverall_duration)
+//! [`http.client.request.total_duration`](#httpclientrequesttotal_duration)
 //! for a single measurement covering the whole logical request.
 //!
 //! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`
@@ -58,6 +58,7 @@
 //! | Attribute | Required | Description | Sample value |
 //! |-----------|----------|-------------|--------------|
 //! | `http.request.method` | always | HTTP method of the request | `"GET"` |
+//! | `http.client.name` | when named | Name of the owning [`HttpClient`](crate::HttpClient), set via [`HttpClientBuilder::name`](crate::HttpClientBuilder::name) (defaults to `"http_client"` in the standard pipeline); lets callers correlate metrics with a specific client | `"crates_api_client"` |
 //! | `server.address` | always | Hostname (authority) of the target server | `"api.example.com"` |
 //! | `server.port` | when derivable | Port number, inferred from scheme when absent (`443` for HTTPS, `80` for HTTP) | `443` |
 //! | `url.scheme` | always | URI scheme | `"https"` |
@@ -83,7 +84,7 @@
 //!
 //! ---
 //!
-//! ## `http.client.request.overall_duration`
+//! ## `http.client.request.total_duration`
 //!
 //! An Oxidizer-specific extension to the OpenTelemetry HTTP semantic
 //! conventions. Measures the wall-clock time of an entire *logical* request —
@@ -92,9 +93,9 @@
 //! a single attempt.
 //!
 //! This instrument is recorded by a [`Metrics`](crate::handlers::Metrics)
-//! handler with [`report_overall_duration`](crate::handlers::MetricsLayer::report_overall_duration)
+//! handler with [`report_total_duration`](crate::handlers::MetricsLayer::report_total_duration)
 //! enabled. In the [standard pipeline](crate::pipeline::StandardRequestPipeline)
-//! it is emitted by the outermost `overall_metrics` layer, which wraps the total
+//! it is emitted by the outermost `total_metrics` layer, which wraps the total
 //! timeout, retry/hedging, circuit breaker, and per-attempt layers — so a single
 //! measurement covers the whole request regardless of how many attempts it took.
 //!

@@ -63,9 +63,9 @@ pub enum RecoveryMode {
 /// The standard pipeline creates the following handler chain (from outermost to innermost)
 /// with production-ready defaults:
 ///
-/// 1. **overall metrics** ([`overall_metrics`][Self::overall_metrics]): Records the overall
+/// 1. **total metrics** ([`total_metrics`][Self::total_metrics]): Records the total
 ///    request duration (including all retries and hedged attempts) under the
-///    `http.client.request.overall_duration` instrument.
+///    `http.client.request.total_duration` instrument.
 /// 2. **total timeout** ([`total_timeout`][Self::total_timeout]): Enforces a total timeout for the entire request/response cycle.
 /// 3. **retry** ([`retry`][Self::retry]) *or* **hedging** ([`hedging`][Self::hedging]): Recovers from transient failures. Controlled by [`recovery_mode`][Self::recovery_mode].
 /// 4. **breaker** ([`breaker`][Self::breaker]): Circuit breaker that prevents sending requests to a service that is likely to fail.
@@ -77,7 +77,7 @@ pub enum RecoveryMode {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct StandardRequestPipeline {
-    pub(crate) overall_metrics: MetricsLayer,
+    pub(crate) total_metrics: MetricsLayer,
     pub(crate) total_timeout: HttpTimeoutLayer,
     pub(crate) retry: HttpRetryLayer,
     pub(crate) hedging: HttpHedgingLayer,
@@ -92,7 +92,11 @@ pub struct StandardRequestPipeline {
 impl StandardRequestPipeline {
     pub(crate) fn new(options: &HttpResilienceContext, redaction: &RedactionEngine, clock: &Clock, meter: &Meter, router: &Router) -> Self {
         Self {
-            overall_metrics: Metrics::layer().clock(clock).meter(meter.clone()).report_overall_duration(true),
+            total_metrics: Metrics::layer()
+                .clock(clock)
+                .meter(meter.clone())
+                .report_total_duration(true)
+                .client_name(options.get_name().to_owned()),
             total_timeout: HttpTimeout::layer(TOTAL_TIMEOUT_NAME, options)
                 .http_timeout_error()
                 .timeout(TOTAL_TIMEOUT_DURATION),
@@ -108,7 +112,10 @@ impl StandardRequestPipeline {
                 .timeout(ATTEMPT_TIMEOUT_DURATION),
             attempt_intercept: Intercept::layer(),
             attempt_logs: Logging::layer(redaction).clock(clock),
-            attempt_metrics: Metrics::layer().clock(clock).meter(meter.clone()),
+            attempt_metrics: Metrics::layer()
+                .clock(clock)
+                .meter(meter.clone())
+                .client_name(options.get_name().to_owned()),
             recovery_mode: RecoveryMode::default(),
         }
     }
@@ -229,15 +236,15 @@ impl StandardRequestPipeline {
         self
     }
 
-    /// Configures the overall metrics layer.
+    /// Configures the total metrics layer.
     ///
     /// This is the outermost layer in the pipeline, so it measures the entire
     /// logical request (including all retries and hedged attempts) and records
-    /// its duration under the `http.client.request.overall_duration` instrument,
+    /// its duration under the `http.client.request.total_duration` instrument,
     /// distinguishing it from the per-attempt [`attempt_metrics`][Self::attempt_metrics].
     #[must_use]
-    pub fn overall_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
-        self.overall_metrics = configure(self.overall_metrics);
+    pub fn total_metrics(mut self, configure: impl FnOnce(MetricsLayer) -> MetricsLayer) -> Self {
+        self.total_metrics = configure(self.total_metrics);
         self
     }
 
@@ -361,7 +368,7 @@ mod tests {
 
         let debug_str = format!("{pipeline:?}");
         assert!(debug_str.contains("StandardRequestPipeline"));
-        assert!(debug_str.contains("overall_metrics"));
+        assert!(debug_str.contains("total_metrics"));
         assert!(debug_str.contains("total_timeout"));
         assert!(debug_str.contains("retry"));
         assert!(debug_str.contains("hedging"));
@@ -440,7 +447,7 @@ mod tests {
         let intercept_flag = Arc::clone(&invocations);
         let logs_flag = Arc::clone(&invocations);
         let metrics_flag = Arc::clone(&invocations);
-        let overall_metrics_flag = Arc::clone(&invocations);
+        let total_metrics_flag = Arc::clone(&invocations);
 
         let _pipeline = StandardRequestPipeline::new(
             &HttpResilienceContext::new(&clock),
@@ -461,8 +468,8 @@ mod tests {
             metrics_flag.fetch_add(1, Ordering::Relaxed);
             metrics
         })
-        .overall_metrics(move |metrics| {
-            overall_metrics_flag.fetch_add(1, Ordering::Relaxed);
+        .total_metrics(move |metrics| {
+            total_metrics_flag.fetch_add(1, Ordering::Relaxed);
             metrics
         });
 
