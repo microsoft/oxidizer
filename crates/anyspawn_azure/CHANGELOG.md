@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.3] - 2026-07-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.0` of `anyspawn`
+  - Now requires `0.4.0` of `tick`
+
+- ✨ Features
+
+  - adapt fetch HttpClient to Azure's HttpClient ([#494](https://github.com/microsoft/oxidizer/pull/494))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release a new version of tick crate (and dependents) ([#542](https://github.com/microsoft/oxidizer/pull/542))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+
 ## [0.1.2] - 2026-07-01
 
 - 🔧 Maintenance

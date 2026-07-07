@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.0] - 2026-07-07
+
+- ✨ Features
+
+  - add ProcessorCount::AtMost for capped processor count ([#541](https://github.com/microsoft/oxidizer/pull/541))
+  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
+  - add feature-gated ThreadAware impls for 3rd-party crate types ([#478](https://github.com/microsoft/oxidizer/pull/478))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
 ## [0.7.5] - 2026-06-26
 
 - 🔧 Maintenance

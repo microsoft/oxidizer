@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.3] - 2026-07-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.0` of `bytesbuf`
+  - Now requires `0.13.0` of `fetch`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release a new version of tick crate (and dependents) ([#542](https://github.com/microsoft/oxidizer/pull/542))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
 ## [0.2.2] - 2026-07-01
 
 - 🔧 Maintenance
