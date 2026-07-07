@@ -11,6 +11,7 @@ use std::{iter, ptr};
 
 use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use nm::{Event, Magnitude};
+use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
 use crate::constants::ERR_POISONED_LOCK;
@@ -35,16 +36,9 @@ use crate::mem::{Block, BlockRef, BlockRefDynamic, BlockRefVTable, BlockSize, Me
 /// via the `thread_local!` macro.
 ///
 /// [thread-aware]: https://docs.rs/thread_aware
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ThreadAware)]
 pub struct GlobalPool {
     inner: thread_aware::Arc<GlobalPoolInner, thread_aware::PerCore>,
-}
-
-impl thread_aware::ThreadAware for GlobalPool {
-    #[cfg_attr(test, mutants::skip)]
-    fn relocate(&mut self, source: Option<thread_aware::affinity::Affinity>, destination: thread_aware::affinity::Affinity) {
-        self.inner.relocate(source, destination);
-    }
 }
 
 impl GlobalPool {
@@ -450,12 +444,13 @@ mod tests {
     use std::thread;
 
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::pinned_affinities;
 
     use super::*;
     use crate::mem::MemoryShared;
 
     assert_impl_all!(GlobalPool: MemoryShared);
-    assert_impl_all!(GlobalPool: thread_aware::ThreadAware);
+    assert_impl_all!(GlobalPool: ThreadAware);
 
     /// Helper to assert all sub-pools are empty.
     fn assert_all_pools_empty(inner: &GlobalPoolInner) {
@@ -729,9 +724,6 @@ mod tests {
 
     #[test]
     fn relocated_pool_works() {
-        use thread_aware::ThreadAware;
-        use thread_aware::affinity::pinned_affinities;
-
         let affinities = pinned_affinities(&[2]);
         let source = Some(affinities[0]);
         let destination = affinities[1];

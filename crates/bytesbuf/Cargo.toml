@@ -46,7 +46,7 @@ new_zealand = { workspace = true }
 nm = { workspace = true }
 num-traits = { workspace = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
-thread_aware = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }

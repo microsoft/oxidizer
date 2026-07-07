@@ -339,29 +339,35 @@
 //!
 //! impl HasMemory for UdpConnection {
 //!     fn memory(&self) -> impl MemoryShared {
-//!         CallbackMemory::new({
-//!             // Cloning is cheap, as it is a service that shares resources between clones.
-//!             let io_context = self.io_context.clone();
+//!         // The I/O memory provider carries the thread-affine state, which is relocated when the
+//!         // returned provider is moved between threads via a thread-aware runtime mechanism.
+//!         let io_memory = self.io_context.io_memory();
 //!
-//!             move |min_len| {
-//!                 io_context.reserve_io_memory(min_len, UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
-//!             }
+//!         CallbackMemory::new(io_memory, |io_memory, min_len| {
+//!             io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
 //!         })
 //!     }
 //! }
 //!
 //! # use bytesbuf::BytesBuf;
+//! # use bytesbuf::mem::Memory;
+//! # use thread_aware::ThreadAware;
 //! # #[derive(Clone, Debug)]
 //! # struct IoContext;
 //! # impl IoContext {
-//! #     pub fn reserve_io_memory(
-//! #         &self,
-//! #         min_len: usize,
-//! #         _memory_configuration: MemoryConfiguration,
-//! #     ) -> BytesBuf {
-//! #         todo!()
+//! #     pub fn io_memory(&self) -> IoMemory { IoMemory }
+//! # }
+//! # #[derive(Clone, Debug, ThreadAware)]
+//! # struct IoMemory;
+//! # impl IoMemory {
+//! #     fn reserve_with_config(&self, min_len: usize, _configuration: &MemoryConfiguration) -> BytesBuf {
+//! #         bytesbuf::mem::GlobalPool::new().reserve(min_len)
 //! #     }
 //! # }
+//! # impl Memory for IoMemory {
+//! #     fn reserve(&self, min_bytes: usize) -> BytesBuf { self.reserve_with_config(min_bytes, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION) }
+//! # }
+//! # #[derive(Clone, Copy)]
 //! # struct MemoryConfiguration { requires_page_alignment: bool, zero_memory_on_release: bool, requires_registered_memory: bool }
 //! ```
 //!

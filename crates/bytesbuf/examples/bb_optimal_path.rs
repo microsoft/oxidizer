@@ -17,6 +17,7 @@ use std::num::NonZero;
 
 use bytesbuf::mem::{BlockSize, CallbackMemory, GlobalPool, HasMemory, MemoryShared};
 use bytesbuf::{BytesBuf, BytesView};
+use thread_aware::ThreadAware;
 
 fn main() {
     // In real-world code, both of these would be provided by the application framework.
@@ -117,11 +118,12 @@ const CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryConfi
 
 impl HasMemory for Connection {
     fn memory(&self) -> impl MemoryShared {
-        CallbackMemory::new({
-            // Cloning is cheap, as it is a service that shares resources between clones.
-            let io_context = self.io_context.clone();
+        // The I/O memory provider carries the thread-affine I/O resources, which are relocated when
+        // the returned provider is moved between threads via a thread-aware runtime mechanism.
+        let io_memory = self.io_context.io_memory();
 
-            move |min_len| io_context.reserve_io_memory(min_len, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
+        CallbackMemory::new(io_memory, |io_memory, min_len| {
+            io_memory.reserve_with_config(min_len, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
 }
@@ -139,8 +141,21 @@ impl IoContext {
         Self {}
     }
 
+    /// Returns the thread-affine I/O memory provider that reservations are drawn from.
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub(crate) fn reserve_io_memory(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> BytesBuf {
+    pub(crate) fn io_memory(&self) -> IoMemory {
+        IoMemory
+    }
+}
+
+/// The thread-affine I/O memory provider. In a real application this would carry per-thread I/O
+/// resources; here it holds no state and just performs the allocation.
+#[derive(Clone, Debug, ThreadAware)]
+struct IoMemory;
+
+impl IoMemory {
+    #[expect(clippy::unused_self, reason = "for example realism")]
+    fn reserve_with_config(&self, min_len: usize, memory_configuration: MemoryConfiguration) -> BytesBuf {
         let min_len: BlockSize = min_len
             .try_into()
             .expect("this example is limited to max allocation size of BlockSize, just to keep it simple");
@@ -155,7 +170,13 @@ impl IoContext {
     }
 }
 
-#[derive(Debug)]
+impl bytesbuf::mem::Memory for IoMemory {
+    fn reserve(&self, min_bytes: usize) -> BytesBuf {
+        self.reserve_with_config(min_bytes, CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 #[expect(dead_code, reason = "unused fields just for example realism")]
 struct MemoryConfiguration {
     requires_page_alignment: bool,

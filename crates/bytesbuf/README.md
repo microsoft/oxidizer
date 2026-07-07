@@ -311,13 +311,12 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
-        CallbackMemory::new({
-            // Cloning is cheap, as it is a service that shares resources between clones.
-            let io_context = self.io_context.clone();
+        // The I/O memory provider carries the thread-affine state, which is relocated when the
+        // returned provider is moved between threads via a thread-aware runtime mechanism.
+        let io_memory = self.io_context.io_memory();
 
-            move |min_len| {
-                io_context.reserve_io_memory(min_len, UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
-            }
+        CallbackMemory::new(io_memory, |io_memory, min_len| {
+            io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
 }
@@ -471,7 +470,7 @@ See the `mem::testing` module for details (requires `test-util` Cargo feature).
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/bytesbuf">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb4gvD4zw9iycbirtUutkkzqcbSlRn3SgH6bsbjAbxNhZA3wBhZIGCaGJ5dGVzYnVmZTAuNS42
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJ1n5emfG9rYb9IJBtfUIpXYbaB5j18j1RxEbDiXhMXybg_xhZIGCaGJ5dGVzYnVmZTAuNS42
  [__link0]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesBuf
  [__link1]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
  [__link10]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView

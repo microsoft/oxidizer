@@ -37,8 +37,8 @@
 
 mod block;
 mod block_ref;
-mod callback_memory;
 
+mod callback_memory;
 mod global;
 mod has_memory;
 mod memory;
