@@ -8,7 +8,7 @@ use http::uri::Authority;
 use http_extensions::UriTemplateLabel;
 use layered::{Layer, Service};
 use ohno::ErrorExt;
-use tick::Clock;
+use tick::SimpleClock;
 use tracing::{Level, event};
 
 use crate::error_labels::collect_error_labels;
@@ -27,16 +27,20 @@ use crate::{HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 #[derive(Debug)]
 pub struct Logging<T> {
     inner: T,
-    clock: Clock,
+    clock: SimpleClock,
     redaction_engine: RedactionEngine,
 }
 
 impl Logging<()> {
-    /// Creates a new logging handler layer with the provided clock.
+    /// Creates a new logging handler layer.
+    ///
+    /// By default, timing uses a system clock ([`SimpleClock::new_system`]). Use
+    /// [`LoggingLayer::clock`] to supply a custom clock, which is primarily useful
+    /// for deterministic timing in tests.
     #[must_use]
-    pub fn layer(clock: &Clock, redaction_engine: &RedactionEngine) -> LoggingLayer {
+    pub fn layer(redaction_engine: &RedactionEngine) -> LoggingLayer {
         LoggingLayer {
-            clock: clock.clone(),
+            clock: None,
             redaction_engine: redaction_engine.clone(),
         }
     }
@@ -45,8 +49,22 @@ impl Logging<()> {
 /// [`Layer`] that wraps a handler with request/response logging.
 #[derive(Debug)]
 pub struct LoggingLayer {
-    clock: Clock,
+    clock: Option<SimpleClock>,
     redaction_engine: RedactionEngine,
+}
+
+impl LoggingLayer {
+    /// Sets the clock used to measure request duration.
+    ///
+    /// When no clock is configured, a system clock ([`SimpleClock::new_system`])
+    /// is used. Supplying a controlled clock (for example
+    /// [`SimpleClock::new_frozen`]) is primarily useful for deterministic timing
+    /// in tests.
+    #[must_use]
+    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
+        self.clock = Some(clock.into());
+        self
+    }
 }
 
 impl<S> Layer<S> for LoggingLayer {
@@ -54,11 +72,12 @@ impl<S> Layer<S> for LoggingLayer {
 
     /// Creates a new layer that wraps the given service with logging.
     ///
-    /// This layer will log requests and responses using the provided clock for timing.
+    /// This layer will log requests and responses, using the configured clock
+    /// (or a system clock when none was set) for timing.
     fn layer(&self, inner: S) -> Self::Service {
         Logging {
             inner,
-            clock: self.clock.clone(),
+            clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),
             redaction_engine: self.redaction_engine.clone(),
         }
     }
@@ -144,8 +163,7 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let clock = Clock::new_frozen();
-        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let layer = Logging::layer(&RedactionEngine::default()).clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
 
         let request = HttpRequestBuilder::new_fake()
@@ -176,8 +194,7 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let clock = Clock::new_frozen();
-        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let layer = Logging::layer(&RedactionEngine::default()).clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::never_completes()));
 
         // Request without scheme/authority triggers a validation error in Dispatch.

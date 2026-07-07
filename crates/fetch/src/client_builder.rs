@@ -171,7 +171,7 @@ impl HttpClientBuilder {
     /// fn configure_builder(mut builder: HttpClientBuilder) -> HttpClientBuilder {
     ///     builder.custom_pipeline(move |dispatch, ctx| {
     ///         let stack = (
-    ///             Logging::layer(ctx.clock(), ctx.redaction_engine()),
+    ///             Logging::layer(ctx.redaction_engine()).clock(ctx.clock()),
     ///             HttpRetry::layer("my_retry", ctx.resilience_context())
     ///                 .http_configure_defaults()
     ///                 .max_retry_attempts(1),
