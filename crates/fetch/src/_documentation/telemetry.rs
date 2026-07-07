@@ -30,7 +30,8 @@
 //!
 //! | Metric | Instrument | Unit | Emitted when |
 //! |--------|-----------|------|--------------|
-//! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | Every HTTP request completes (success **or** failure) |
+//! | [`http.client.request.duration`](#httpclientrequestduration) | `Histogram<f64>` | `s` | Every HTTP request attempt completes (success **or** failure) |
+//! | [`http.client.request.overall_duration`](#httpclientrequestoverall_duration) | `Histogram<f64>` | `s` | An entire logical request completes, including all retries and hedged attempts (opt-in; enabled in the standard pipeline) |
 //! | [`http.client.connection.setup.duration`](#httpclientconnectionsetupduration) | `Histogram<f64>` | `s` | A TCP/TLS connection attempt finishes (success **or** failure) |
 //! | [`http.client.connection.duration`](#httpclientconnectionduration) | `Histogram<f64>` | `s` | A connection is closed (the underlying stream is dropped) |
 //!
@@ -38,11 +39,17 @@
 //!
 //! ## `http.client.request.duration`
 //!
-//! Measures the total wall-clock time of an HTTP request from the moment
-//! the request enters [`Metrics`](crate::handlers::Metrics)
+//! Measures the total wall-clock time of a single HTTP request attempt from the
+//! moment the request enters [`Metrics`](crate::handlers::Metrics)
 //! until a response (or error) is returned. Follows the
 //! [OpenTelemetry `http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration)
 //! semantic convention.
+//!
+//! In the [standard pipeline](crate::pipeline::StandardRequestPipeline) this is
+//! recorded per attempt, so a request that is retried or hedged produces one
+//! measurement per attempt. See
+//! [`http.client.request.overall_duration`](#httpclientrequestoverall_duration)
+//! for a single measurement covering the whole logical request.
 //!
 //! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`
 //!
@@ -59,10 +66,46 @@
 //! | `network.protocol.version` | on success | Negotiated HTTP version of the response | `"1.1"` |
 //! | `http.response.status_code` | on success | HTTP status code of the response | `200` |
 //! | `error.type` | on failure | A short, metrics-friendly label classifying the error | `"io"` |
+//! | `resilience.attempt.index` | when attempt tracking enabled | Zero-based index of the resilience attempt, enabled via [`MetricsLayer::include_attempt`](crate::handlers::MetricsLayer::include_attempt) | `0` |
+//! | `resilience.attempt.is_last` | when attempt tracking enabled | Whether this is the final attempt that will be performed | `true` |
 //!
 //! > **Custom attributes.** Any [`TelemetryAttributes`](crate::telemetry::TelemetryAttributes)
 //! > attached to the request or response extensions are merged into the
 //! > attribute set. This allows callers to inject domain-specific dimensions.
+//!
+//! > **Attempt attributes.** `resilience.attempt.index` and
+//! > `resilience.attempt.is_last` are only reported when
+//! > [`MetricsLayer::include_attempt`](crate::handlers::MetricsLayer::include_attempt)
+//! > is enabled (disabled by default to keep metric cardinality low). When no
+//! > [`Attempt`](seatbelt::Attempt) is present in the request extensions — for
+//! > example on the first attempt or outside a retry stack — the fallback is
+//! > index `0` with `is_last = true`.
+//!
+//! ---
+//!
+//! ## `http.client.request.overall_duration`
+//!
+//! An Oxidizer-specific extension to the OpenTelemetry HTTP semantic
+//! conventions. Measures the wall-clock time of an entire *logical* request —
+//! including every retry and hedged attempt — as opposed to
+//! [`http.client.request.duration`](#httpclientrequestduration), which measures
+//! a single attempt.
+//!
+//! This instrument is recorded by a [`Metrics`](crate::handlers::Metrics)
+//! handler with [`report_overall_duration`](crate::handlers::MetricsLayer::report_overall_duration)
+//! enabled. In the [standard pipeline](crate::pipeline::StandardRequestPipeline)
+//! it is emitted by the outermost `overall_metrics` layer, which wraps the total
+//! timeout, retry/hedging, circuit breaker, and per-attempt layers — so a single
+//! measurement covers the whole request regardless of how many attempts it took.
+//!
+//! **Histogram boundaries (seconds):** `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0`
+//!
+//! ### Attributes
+//!
+//! Identical to [`http.client.request.duration`](#httpclientrequestduration),
+//! including the optional `resilience.attempt.*` attributes when
+//! [`MetricsLayer::include_attempt`](crate::handlers::MetricsLayer::include_attempt)
+//! is enabled.
 //!
 //! ---
 //!
