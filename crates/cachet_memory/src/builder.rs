@@ -525,22 +525,25 @@ mod tests {
         let seen_first = Arc::clone(&seen);
         let seen_second = Arc::clone(&seen);
 
-        // Registering a second listener replaces the first; only the last runs.
-        let builder = InMemoryCacheBuilder::<String, i32>::new()
-            .on_eviction(move |key: Arc<String>, value, _cause| {
-                assert_eq!((&**key, value), ("k", 42));
-                seen_first.lock().unwrap().push("first");
-            })
-            .on_eviction(move |key: Arc<String>, value, _cause| {
-                assert_eq!((&**key, value), ("k", 42));
-                seen_second.lock().unwrap().push("second");
-            });
+        // Register a first listener and invoke it so its body is exercised.
+        let builder = InMemoryCacheBuilder::<String, i32>::new().on_eviction(move |key: Arc<String>, value, _cause| {
+            assert_eq!((&**key, value), ("k", 42));
+            seen_first.lock().unwrap().push("first");
+        });
+        let first = builder.eviction_listener.clone().expect("first listener should be installed");
+        first(Arc::new("k".to_string()), 42, RemovalCause::Size);
+        assert_eq!(*seen.lock().unwrap(), vec!["first"]);
 
+        // Registering a second listener replaces the first; only the last runs.
+        let builder = builder.on_eviction(move |key: Arc<String>, value, _cause| {
+            assert_eq!((&**key, value), ("k", 42));
+            seen_second.lock().unwrap().push("second");
+        });
         let listener = builder.eviction_listener.expect("listener should be installed");
         listener(Arc::new("k".to_string()), 42, RemovalCause::Size);
 
-        // Only the second listener ran; the first was replaced.
-        assert_eq!(*seen.lock().unwrap(), vec!["second"]);
+        // The replaced first listener did not run again — only "second" was added.
+        assert_eq!(*seen.lock().unwrap(), vec!["first", "second"]);
     }
 
     #[test]
