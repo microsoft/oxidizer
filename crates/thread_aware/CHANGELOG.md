@@ -2,20 +2,40 @@
 
 ## [0.8.0] - 2026-07-07
 
-- ✨ Features
+### ⚠ Breaking Changes
 
-  - add ProcessorCount::AtMost for capped processor count ([#541](https://github.com/microsoft/oxidizer/pull/541))
-  - enable and enforce unreachable_pub lint ([#493](https://github.com/microsoft/oxidizer/pull/493))
-  - add feature-gated ThreadAware impls for 3rd-party crate types ([#478](https://github.com/microsoft/oxidizer/pull/478))
+- **`ProcessorCount::Manual` renamed to `Exactly`** ([#541](https://github.com/microsoft/oxidizer/pull/541))
+  Callers matching or constructing `ProcessorCount::Manual(n)` must update to `ProcessorCount::Exactly(n)`.
 
-- 🐛 Bug Fixes
+- **`ProcessorCount` is now `#[non_exhaustive]`** ([#541](https://github.com/microsoft/oxidizer/pull/541))
+  Exhaustive `match` expressions over `ProcessorCount` outside this crate will no longer compile; add a wildcard arm.
 
-  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+- **`thread_aware::storage` module (`Storage`, `Strategy`) is no longer public** ([#493](https://github.com/microsoft/oxidizer/pull/493))
+  Both were publicly documented in 0.7.5. They are now crate-private following the `unreachable_pub` lint audit. Downstream code referencing `thread_aware::storage::Storage` or `thread_aware::storage::Strategy` directly will fail to compile.
 
-- ✔️ Tasks
+- Internal-only items further restricted to `pub(crate)` (previously `pub` but undocumented/not part of the supported public surface): `cell::DataFn<T>`, `closure::ErasedClosureOnce` ([#493](https://github.com/microsoft/oxidizer/pull/493))
 
-  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
-  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+### ✨ Features
+
+- Add `ProcessorCount::AtMost(NonZero<usize>)` — caps processor count, clamping to the available count on smaller machines instead of panicking (unlike `Exactly`) ([#541](https://github.com/microsoft/oxidizer/pull/541))
+- Add opt-in, feature-gated `ThreadAware` impls for third-party crate types: `bytes` (`Bytes`, `BytesMut`), `http` (`StatusCode`, `Method`, `Uri`, `HeaderMap`, etc.), `jiff02` (`Timestamp`, `civil::DateTime`, etc.), `uuid` (`Uuid`). None enabled by default; no extra deps unless opted in ([#478](https://github.com/microsoft/oxidizer/pull/478))
+
+### 🐛 Bug Fixes
+
+- Exclude non-source artifacts from published crate tarballs via an `include` allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+### ✔️ Tasks
+
+- Re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+- Bump MSRV to Rust 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
+### Migration Guide
+
+| Before (≤0.7.5) | After (0.8.0) |
+|---|---|
+| `ProcessorCount::Manual(n)` | `ProcessorCount::Exactly(n)` |
+| Exhaustive `match` on `ProcessorCount` | Add `_ =>` wildcard arm |
+| `thread_aware::storage::Storage` / `::Strategy` | No longer available — no public replacement; contact maintainers if you depend on this |
 
 ## [0.7.5] - 2026-06-26
 
