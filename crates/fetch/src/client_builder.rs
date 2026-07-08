@@ -248,11 +248,23 @@ impl HttpClientBuilder {
     /// the lock contention that a global meter provider can cause.
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
+    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(self, meter_provider: P) -> Self {
+        self.meter_provider_arc(Arc::new(meter_provider))
+    }
+
+    /// Sets the [`MeterProvider`] used to collect this client's metrics from an
+    /// already-shared `Arc<dyn MeterProvider + Send + Sync>`.
+    ///
+    /// This is the counterpart to [`meter_provider`][Self::meter_provider] for
+    /// callers that hold a type-erased provider they want to share across
+    /// multiple clients. Concrete providers can use either method.
+    ///
+    /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     #[cfg_attr(test, mutants::skip)] // FIXME: mutants remove resilience context and other fields, which we can't really assert on
-    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
+    pub fn meter_provider_arc(mut self, meter_provider: Arc<dyn MeterProvider + Send + Sync>) -> Self {
         // Update the metering at all relevant places.
-        self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        self.metering = self.metering.with_provider(Arc::new(meter_provider));
+        self.resilience_context = self.resilience_context.use_metrics(meter_provider.as_ref());
+        self.metering = self.metering.with_provider(meter_provider);
         self
     }
 
@@ -496,6 +508,8 @@ fn create_dispatch_handler(meter: &Meter, options: ClientOptions, transport: &Tr
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::sync::Arc;
+
     use http::StatusCode;
     use http_extensions::{HttpBodyBuilder, HttpBodyOptions};
 
@@ -739,6 +753,16 @@ mod tests {
         assert!(!builder.metering.has_custom_provider());
 
         let builder = builder.meter_provider(provider);
+        assert!(builder.metering.has_custom_provider());
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn meter_provider_arc_accepts_shared_provider() {
+        let provider: Arc<dyn opentelemetry::metrics::MeterProvider + Send + Sync> =
+            Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::default());
+
+        let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default()).meter_provider_arc(provider);
         assert!(builder.metering.has_custom_provider());
     }
 }
