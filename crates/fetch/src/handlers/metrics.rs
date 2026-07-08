@@ -20,8 +20,7 @@ use tick::SimpleClock;
 
 use crate::error_labels::{LABEL_ABANDONED, collect_error_labels};
 use crate::telemetry::{
-    Metering, TelemetryAttributes, base_scope, http_method_name, network_protocol_name, network_protocol_version, server_port,
-    url_scheme_or,
+    TelemetryAttributes, base_scope, http_method_name, network_protocol_name, network_protocol_version, server_port, url_scheme_or,
 };
 use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
@@ -236,7 +235,10 @@ impl<S> Layer<S> for MetricsLayer {
     ///
     /// The resulting handler records request metrics against the configured meter.
     fn layer(&self, inner: S) -> Self::Service {
-        let meter = self.meter.clone().unwrap_or_else(|| Metering::global(base_scope()).into());
+        let meter = self
+            .meter
+            .clone()
+            .unwrap_or_else(|| opentelemetry::global::meter_with_scope(base_scope()));
         Metrics {
             inner,
             clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),

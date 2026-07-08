@@ -20,7 +20,7 @@ use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::{Metering, client_scope};
+use crate::telemetry::{Metering, ScopeProperties};
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -48,7 +48,6 @@ pub struct HttpClientBuilder {
     metering: Metering,
     transport: Transport,
     resilience_context: HttpResilienceContext,
-    client_name: Cow<'static, str>,
 }
 
 impl HttpClientBuilder {
@@ -58,14 +57,13 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::global(client_scope(
+            metering: Metering::global(ScopeProperties::new(
                 transport.runtime().clone(),
                 transport.name().clone(),
-                DEFAULT_HTTP_CLIENT_NAME,
+                Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
             )),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
-            client_name: Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
         }
     }
 
@@ -75,10 +73,7 @@ impl HttpClientBuilder {
     /// follow the `snake_case` convention. By default, the client is named "`http_client`".
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         let name = name.into();
-        self.metering = self
-            .metering
-            .with_client_name(self.transport.runtime().clone(), self.transport.name().clone(), name.clone());
-        self.client_name.clone_from(&name);
+        self.metering = self.metering.with_client_name(name.clone());
         self.resilience_context = self.resilience_context.name(name);
         self
     }
@@ -257,12 +252,7 @@ impl HttpClientBuilder {
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
         // Update the metering at all relevant places.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        let scope = client_scope(
-            self.transport.runtime().clone(),
-            self.transport.name().clone(),
-            self.client_name.clone(),
-        );
-        self.metering = Metering::custom(Arc::new(meter_provider), scope);
+        self.metering = self.metering.into_custom(Arc::new(meter_provider));
         self
     }
 
