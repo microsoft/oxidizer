@@ -20,7 +20,7 @@ use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::{Metering, ScopeProperties};
+use crate::telemetry::Metering;
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -57,11 +57,11 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::global(ScopeProperties::new(
+            metering: Metering::new(
                 transport.runtime().clone(),
                 transport.name().clone(),
                 Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
-            )),
+            ),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -252,7 +252,7 @@ impl HttpClientBuilder {
     pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
         // Update the metering at all relevant places.
         self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
-        self.metering = self.metering.into_custom(Arc::new(meter_provider));
+        self.metering = self.metering.with_provider(Arc::new(meter_provider));
         self
     }
 
@@ -501,7 +501,6 @@ mod tests {
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
-    use crate::telemetry::Metering;
     use crate::{HttpClient, HttpClientBuilder};
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
@@ -737,9 +736,9 @@ mod tests {
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
 
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-        assert!(matches!(builder.metering, Metering::Global(_)));
+        assert!(!builder.metering.has_custom_provider());
 
         let builder = builder.meter_provider(provider);
-        assert!(matches!(builder.metering, Metering::Custom { .. }));
+        assert!(builder.metering.has_custom_provider());
     }
 }
