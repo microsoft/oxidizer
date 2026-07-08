@@ -10,6 +10,9 @@
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::_documentation::telemetry).
 
+use std::fmt;
+use std::sync::Arc;
+
 /// Diagnostic information about the connection that served an HTTP response.
 ///
 /// Re-exported from [`fetch_options`]. Attached as a response extension by real
@@ -70,10 +73,22 @@ impl Extend<KeyValue> for TelemetryAttributes {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) enum Metering {
     Global(InstrumentationScope),
-    Custom(Meter),
+    Custom {
+        provider: Arc<dyn MeterProvider + Send + Sync>,
+        scope: InstrumentationScope,
+    },
+}
+
+impl fmt::Debug for Metering {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Global(scope) => f.debug_tuple("Global").field(scope).finish(),
+            Self::Custom { scope, .. } => f.debug_struct("Custom").field("scope", scope).finish_non_exhaustive(),
+        }
+    }
 }
 
 impl Metering {
@@ -83,10 +98,24 @@ impl Metering {
         Self::Global(scope)
     }
 
-    /// Metering against a caller-supplied provider. The scoped meter is created
-    /// eagerly because the provider is only borrowed, not retained.
-    pub(crate) fn custom(meter_provider: &dyn MeterProvider, scope: InstrumentationScope) -> Self {
-        Self::Custom(meter_provider.meter_with_scope(scope))
+    /// Metering against a caller-supplied provider. The provider and scope are
+    /// retained and the scoped meter is only materialized at build time, so the
+    /// scope (including `http.client.name`) can still be updated afterwards.
+    pub(crate) fn custom(provider: Arc<dyn MeterProvider + Send + Sync>, scope: InstrumentationScope) -> Self {
+        Self::Custom { provider, scope }
+    }
+
+    /// Rebuilds the instrumentation scope with an updated client name.
+    ///
+    /// Both global and custom metering are rebuilt: because the custom provider
+    /// is retained (not yet materialized into a meter), its scope can still be
+    /// updated when the client name changes, regardless of call order.
+    pub(crate) fn with_client_name(self, runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> Self {
+        let scope = client_scope(runtime, transport, client_name);
+        match self {
+            Self::Global(_) => Self::Global(scope),
+            Self::Custom { provider, .. } => Self::Custom { provider, scope },
+        }
     }
 }
 
@@ -94,21 +123,7 @@ impl From<Metering> for Meter {
     fn from(metering: Metering) -> Self {
         match metering {
             Metering::Global(scope) => opentelemetry::global::meter_with_scope(scope),
-            Metering::Custom(meter) => meter,
-        }
-    }
-}
-
-impl Metering {
-    /// Rebuilds the instrumentation scope with an updated client name.
-    ///
-    /// Only global metering can be rebuilt; custom metering keeps its already
-    /// materialized meter (and therefore the scope it was created with), so a
-    /// custom meter provider must be supplied after the client name is set.
-    pub(crate) fn with_client_name(self, runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> Self {
-        match self {
-            Self::Global(_) => Self::Global(client_scope(runtime, transport, client_name)),
-            custom @ Self::Custom(_) => custom,
+            Metering::Custom { provider, scope } => provider.meter_with_scope(scope),
         }
     }
 }
@@ -200,8 +215,9 @@ mod tests {
 
     #[test]
     fn metering_custom() {
-        let metering = Metering::custom(opentelemetry::global::meter_provider().as_ref(), base_scope());
-        assert!(matches!(metering, Metering::Custom(_expected_meter)));
+        let provider = Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build());
+        let metering = Metering::custom(provider, base_scope());
+        assert!(matches!(metering, Metering::Custom { .. }));
     }
 
     #[test]
@@ -239,6 +255,22 @@ mod tests {
 
         let Metering::Global(scope) = metering else {
             panic!("global metering must stay global after renaming");
+        };
+        let client_name = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == HTTP_CLIENT_NAME_ATTRIBUTE)
+            .expect("rebuilt scope must carry the http.client.name attribute");
+        assert_eq!(client_name.value, Value::from("renamed_client"));
+    }
+
+    #[test]
+    fn with_client_name_rebuilds_custom_scope() {
+        let provider = Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build());
+        let metering =
+            Metering::custom(provider, client_scope("tokio", "hyper", "http_client")).with_client_name("tokio", "hyper", "renamed_client");
+
+        let Metering::Custom { scope, .. } = metering else {
+            panic!("custom metering must stay custom after renaming");
         };
         let client_name = scope
             .attributes()

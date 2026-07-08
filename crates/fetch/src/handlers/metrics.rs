@@ -147,7 +147,7 @@ impl MetricsLayer {
     /// When no meter is configured, the global meter provider is used.
     #[must_use]
     pub fn meter_provider(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.meter = Some(Metering::custom(meter_provider, base_scope()).into());
+        self.meter = Some(meter_provider.meter_with_scope(base_scope()));
         self
     }
 

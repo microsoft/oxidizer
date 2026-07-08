@@ -74,7 +74,7 @@ async fn fake_transport_scope_attribute() {
 
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
         .insecure_allow_http()
-        .meter_provider(&provider)
+        .meter_provider(provider.clone())
         .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -108,7 +108,7 @@ async fn custom_transport_scope_attribute() {
         deps,
     )
     .insecure_allow_http()
-    .meter_provider(&provider)
+    .meter_provider(provider.clone())
     .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -148,7 +148,7 @@ async fn custom_transport_instrument_inherits_scope() {
         deps,
     )
     .insecure_allow_http()
-    .meter_provider(&provider)
+    .meter_provider(provider.clone())
     .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -168,7 +168,7 @@ async fn tokio_transport_connection_metric_scope_attribute() {
 
     let client = HttpClient::builder_tokio(TokioDeps::default())
         .insecure_allow_http()
-        .meter_provider(&provider)
+        .meter_provider(provider.clone())
         .build();
 
     let server = serve(Bytes::from_static(b"hello")).await;

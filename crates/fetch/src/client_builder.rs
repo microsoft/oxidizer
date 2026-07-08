@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use data_privacy::RedactionEngine;
@@ -242,6 +243,10 @@ impl HttpClientBuilder {
     /// default, the client uses the global meter provider; use this method to
     /// override it for this client instance.
     ///
+    /// The provider is retained and its scoped meter is materialized when the
+    /// client is [built][Self::build], so a client [`name`][Self::name] set
+    /// either before or after this call is reflected in the recorded metrics.
+    ///
     /// # Performance
     ///
     /// For thread-isolated runtimes, prefer a per-thread meter provider to avoid
@@ -249,20 +254,16 @@ impl HttpClientBuilder {
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     #[cfg_attr(test, mutants::skip)] // FIXME: mutants remove resilience context and other fields, which we can't really assert on
-    pub fn meter_provider(self, meter_provider: &dyn MeterProvider) -> Self {
-        // Update the metering at all relevant places
-        Self {
-            metering: Metering::custom(
-                meter_provider,
-                client_scope(
-                    self.transport.runtime().clone(),
-                    self.transport.name().clone(),
-                    self.client_name.clone(),
-                ),
-            ),
-            resilience_context: self.resilience_context.use_metrics(meter_provider),
-            ..self
-        }
+    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
+        // Update the metering at all relevant places.
+        self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
+        let scope = client_scope(
+            self.transport.runtime().clone(),
+            self.transport.name().clone(),
+            self.client_name.clone(),
+        );
+        self.metering = Metering::custom(Arc::new(meter_provider), scope);
+        self
     }
 
     /// Configures the standard pipeline with custom settings.
@@ -748,7 +749,7 @@ mod tests {
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
         assert!(matches!(builder.metering, Metering::Global(_)));
 
-        let builder = builder.meter_provider(&provider);
-        assert!(matches!(builder.metering, Metering::Custom(_)));
+        let builder = builder.meter_provider(provider);
+        assert!(matches!(builder.metering, Metering::Custom { .. }));
     }
 }
