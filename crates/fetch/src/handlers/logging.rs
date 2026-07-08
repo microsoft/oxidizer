@@ -34,14 +34,16 @@ pub struct Logging<T> {
 impl Logging<()> {
     /// Creates a new logging handler layer.
     ///
-    /// By default, timing uses a system clock ([`SimpleClock::new_system`]). Use
-    /// [`LoggingLayer::clock`] to supply a custom clock, which is primarily useful
-    /// for deterministic timing in tests.
+    /// By default, timing uses a system clock ([`SimpleClock::new_system`]) and
+    /// path/query redaction uses a default [`RedactionEngine`]. Use
+    /// [`LoggingLayer::clock`] to supply a custom clock (primarily useful for
+    /// deterministic timing in tests) and [`LoggingLayer::redaction_engine`] to
+    /// supply a custom redaction engine.
     #[must_use]
-    pub fn layer(redaction_engine: &RedactionEngine) -> LoggingLayer {
+    pub fn layer() -> LoggingLayer {
         LoggingLayer {
             clock: None,
-            redaction_engine: redaction_engine.clone(),
+            redaction_engine: None,
         }
     }
 }
@@ -50,7 +52,7 @@ impl Logging<()> {
 #[derive(Debug)]
 pub struct LoggingLayer {
     clock: Option<SimpleClock>,
-    redaction_engine: RedactionEngine,
+    redaction_engine: Option<RedactionEngine>,
 }
 
 impl LoggingLayer {
@@ -65,6 +67,16 @@ impl LoggingLayer {
         self.clock = Some(clock.into());
         self
     }
+
+    /// Sets the [`RedactionEngine`] used to redact the request path and query
+    /// before it is logged.
+    ///
+    /// When no engine is configured, a default [`RedactionEngine`] is used.
+    #[must_use]
+    pub fn redaction_engine(mut self, redaction_engine: &RedactionEngine) -> Self {
+        self.redaction_engine = Some(redaction_engine.clone());
+        self
+    }
 }
 
 impl<S> Layer<S> for LoggingLayer {
@@ -73,12 +85,13 @@ impl<S> Layer<S> for LoggingLayer {
     /// Creates a new layer that wraps the given service with logging.
     ///
     /// This layer will log requests and responses, using the configured clock
-    /// (or a system clock when none was set) for timing.
+    /// (or a system clock when none was set) for timing and the configured
+    /// redaction engine (or a default engine when none was set).
     fn layer(&self, inner: S) -> Self::Service {
         Logging {
             inner,
             clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),
-            redaction_engine: self.redaction_engine.clone(),
+            redaction_engine: self.redaction_engine.clone().unwrap_or_default(),
         }
     }
 }
@@ -163,7 +176,7 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let layer = Logging::layer(&RedactionEngine::default()).clock(SimpleClock::new_frozen());
+        let layer = Logging::layer().clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
 
         let request = HttpRequestBuilder::new_fake()
@@ -194,7 +207,7 @@ mod tests {
         let capture = LogCapture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let layer = Logging::layer(&RedactionEngine::default()).clock(SimpleClock::new_frozen());
+        let layer = Logging::layer().clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::never_completes()));
 
         // Request without scheme/authority triggers a validation error in Dispatch.

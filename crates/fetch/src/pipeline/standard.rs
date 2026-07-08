@@ -107,7 +107,7 @@ impl StandardRequestPipeline {
                 .http_timeout_error()
                 .timeout(ATTEMPT_TIMEOUT_DURATION),
             attempt_intercept: Intercept::layer(),
-            attempt_logs: Logging::layer(redaction).clock(clock),
+            attempt_logs: Logging::layer().redaction_engine(redaction).clock(clock),
             attempt_metrics: Metrics::layer().clock(clock).meter(meter.clone()),
             recovery_mode: RecoveryMode::default(),
         }

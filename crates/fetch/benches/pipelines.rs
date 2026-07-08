@@ -78,7 +78,7 @@ fn entry(c: &mut Criterion) {
                 Timeout::layer("attempt_timeout", context.resilience_context())
                     .timeout(Duration::from_secs(10))
                     .http_timeout_error(),
-                Logging::layer(context.redaction_engine()).clock(context.clock()),
+                Logging::layer().clock(context.clock()),
                 Metrics::layer()
                     .clock(context.clock())
                     .meter_provider(opentelemetry::global::meter_provider().as_ref()),
