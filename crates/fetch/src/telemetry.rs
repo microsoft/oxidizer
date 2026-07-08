@@ -237,6 +237,7 @@ mod tests {
         assert!(metering.provider.is_none());
     }
 
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn with_provider_sets_custom_provider() {
         let metering = test_metering("http_client").with_provider(test_provider());
@@ -248,6 +249,7 @@ mod tests {
         let _meter: Meter = test_metering("http_client").into();
     }
 
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn with_provider_preserves_client_name() {
         let metering = test_metering("preserved_client").with_provider(test_provider());
@@ -285,6 +287,7 @@ mod tests {
         assert!(metering.provider.is_none());
     }
 
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn with_client_name_updates_custom_client_name() {
         let metering = test_metering("http_client")
