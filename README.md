@@ -47,6 +47,7 @@ These are the primary crates built out of this repo:
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
+- [`rest_over_grpc`](./crates/rest_over_grpc/README.md) - Automatically transcode gRPC services to REST/JSON endpoints.
 - [`routerama`](./crates/routerama/README.md) - Blazingly fast HTTP route resolution and query string processing.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
 - [`seatbelt_http`](./crates/seatbelt_http/README.md) - HTTP-specific extensions for the seatbelt crate.

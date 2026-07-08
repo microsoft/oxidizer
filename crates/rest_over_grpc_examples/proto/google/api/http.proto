@@ -1,0 +1,84 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// Vendored from https://github.com/googleapis/googleapis (google/api/http.proto).
+// The schema (field numbers, oneof layout) is reproduced faithfully; the
+// extensive documentation comments have been condensed for brevity.
+
+syntax = "proto3";
+
+package google.api;
+
+option cc_enable_arenas = true;
+option go_package = "google.golang.org/genproto/googleapis/api/annotations;annotations";
+option java_multiple_files = true;
+option java_outer_classname = "HttpProto";
+option java_package = "com.google.api";
+option objc_class_prefix = "GAPI";
+
+// Defines the HTTP configuration for an API service.
+message Http {
+  // A list of HTTP configuration rules that apply to individual API methods.
+  repeated HttpRule rules = 1;
+
+  // When true, URL path parameters are fully URI-decoded except for single
+  // segment matches in reserved expansion.
+  bool fully_decode_reserved_expansion = 2;
+}
+
+// Defines the schema of the gRPC/REST mapping for one method.
+message HttpRule {
+  // Selects the method this rule applies to.
+  string selector = 1;
+
+  // The URL pattern matched by this rule.
+  oneof pattern {
+    // Maps to HTTP GET.
+    string get = 2;
+
+    // Maps to HTTP PUT.
+    string put = 3;
+
+    // Maps to HTTP POST.
+    string post = 4;
+
+    // Maps to HTTP DELETE.
+    string delete = 5;
+
+    // Maps to HTTP PATCH.
+    string patch = 6;
+
+    // A custom HTTP method.
+    CustomHttpPattern custom = 8;
+  }
+
+  // The request field mapped to the HTTP body, or `*` for all unbound fields.
+  string body = 7;
+
+  // The response field mapped to the HTTP response body, or empty for the whole
+  // message.
+  string response_body = 12;
+
+  // Additional HTTP bindings (may not themselves nest additional_bindings).
+  repeated HttpRule additional_bindings = 11;
+}
+
+// A custom HTTP verb.
+message CustomHttpPattern {
+  // The name of this custom HTTP verb.
+  string kind = 1;
+
+  // The path matched by this custom verb.
+  string path = 2;
+}

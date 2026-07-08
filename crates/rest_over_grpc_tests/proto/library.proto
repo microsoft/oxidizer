@@ -1,0 +1,184 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+syntax = "proto3";
+
+package library;
+
+import "google/api/annotations.proto";
+
+// A library service exposing REST endpoints via google.api.http annotations.
+service Library {
+  // Retrieves a single shelf.
+  rpc GetShelf(GetShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelves/{shelf}"
+    };
+  }
+
+  // Creates a shelf from the request body.
+  rpc CreateShelf(CreateShelfRequest) returns (Shelf) {
+    option (google.api.http) = {
+      post: "/v1/shelves"
+      body: "shelf"
+    };
+  }
+
+  // Lists shelves, optionally filtered via a query parameter.
+  rpc ListShelves(ListShelvesRequest) returns (ListShelvesResponse) {
+    option (google.api.http) = {
+      get: "/v1/shelves"
+    };
+  }
+
+  // Lists shelves of a given genre, bound from an `enum` path variable — the
+  // value may be given by name (`SCIENCE`) or number (`2`).
+  rpc ListShelvesByGenre(ListShelvesByGenreRequest) returns (ListShelvesResponse) {
+    option (google.api.http) = {
+      get: "/v1/shelves/genre/{genre}"
+    };
+  }
+
+  // Server-streams shelves one at a time, rendered as a streamed JSON body.
+  rpc StreamShelves(ListShelvesRequest) returns (stream Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelves:stream"
+    };
+  }
+
+  // Echoes typed query fields to exercise protobuf-aware query decoding.
+  rpc SearchShelves(SearchShelvesRequest) returns (SearchShelvesRequest) {
+    option (google.api.http) = {
+      get: "/v1/shelves:search"
+    };
+  }
+
+  // Updates through bindings with deliberately different body mappings.
+  rpc UpdateShelf(UpdateShelfRequest) returns (UpdateShelfResponse) {
+    option (google.api.http) = {
+      patch: "/v1/shelves/{id}"
+      body: "shelf"
+      response_body: "shelf"
+      additional_bindings {
+        post: "/v1/shelves/{id}:replace"
+        body: "*"
+        response_body: "result_code"
+      }
+    };
+  }
+
+  // Streams one selected response field from each response message.
+  rpc StreamShelfThemes(ListShelvesRequest) returns (stream Shelf) {
+    option (google.api.http) = {
+      get: "/v1/shelfThemes:stream"
+      response_body: "theme"
+    };
+  }
+
+  // Echoes a multi-segment reserved expansion.
+  rpc GetTree(GetTreeRequest) returns (GetTreeResponse) {
+    option (google.api.http) = {
+      get: "/v1/tree/{path=**}"
+    };
+  }
+}
+
+// A shelf in the library.
+message Shelf {
+  // The resource name of the shelf, e.g. "shelves/history".
+  string name = 1;
+  // The theme of the shelf.
+  string theme = 2;
+}
+
+// Request for retrieving a single shelf.
+message GetShelfRequest {
+  // The id of the shelf to retrieve (bound from the path).
+  string shelf = 1;
+}
+
+// Request for creating a shelf.
+message CreateShelfRequest {
+  // The shelf to create (bound from the request body).
+  Shelf shelf = 1;
+}
+
+// Request for listing shelves.
+message ListShelvesRequest {
+  // Optional theme filter (bound from the query string).
+  string filter = 1;
+}
+
+// A shelf genre, exposed as an `enum` path variable.
+enum Genre {
+  // Default, unset genre.
+  GENRE_UNSPECIFIED = 0;
+  // Historical works.
+  HISTORY = 1;
+  // Scientific works.
+  SCIENCE = 2;
+}
+
+// Request for listing shelves of a given genre.
+message ListShelvesByGenreRequest {
+  // The genre to list (bound from the path, by name or number).
+  Genre genre = 1;
+}
+
+// Response for listing shelves.
+message ListShelvesResponse {
+  // The shelves matching the request.
+  repeated Shelf shelves = 1;
+}
+
+// Nested query options.
+message SearchOptions {
+  // Whether the nested option is enabled.
+  bool enabled = 1;
+}
+
+// Query fields covering every protobuf scalar shape involved in the audit.
+message SearchShelvesRequest {
+  // A boolean query field.
+  bool include_archived = 1;
+  // A repeated primitive query field.
+  repeated string tags = 2;
+  // An enum query field.
+  Genre genre = 3;
+  // A floating-point query field.
+  double threshold = 4;
+  // A nested query message.
+  SearchOptions options = 5;
+  // A numeric-looking value that must remain a string.
+  string numeric_text = 6;
+}
+
+// Request shared by the primary update binding and its additional binding.
+message UpdateShelfRequest {
+  // Path-bound shelf id.
+  string id = 1;
+  // Shelf body.
+  Shelf shelf = 2;
+  // Only the whole-body additional binding supplies this field.
+  bool force = 3;
+}
+
+// Response whose snake_case field is selected by an additional binding.
+message UpdateShelfResponse {
+  // Updated shelf.
+  Shelf shelf = 1;
+  // Result selected by the additional binding.
+  int32 result_code = 2;
+}
+
+// Multi-segment path request.
+message GetTreeRequest {
+  // Captured tree path.
+  string path = 1;
+}
+
+// Multi-segment path response.
+message GetTreeResponse {
+  // Decoded tree path.
+  string path = 1;
+}

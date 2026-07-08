@@ -1,0 +1,93 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rest_over_grpc_examples"
+description = "Worked examples for rest_over_grpc, organized by architecture layer (serving/transcoding/handling), over a service wired both via the tonic bridge and a hand-written handler"
+version = "0.0.0"
+publish = false
+autoexamples = false
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+
+[dependencies]
+futures-util = { workspace = true, features = ["std"] }
+http = { workspace = true, features = ["std"] }
+prost = { workspace = true, features = ["std", "derive"] }
+rest_over_grpc = { workspace = true, features = ["tower", "axum"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tonic = { workspace = true, features = ["codegen"] }
+tonic-prost = { workspace = true }
+
+[build-dependencies]
+pbjson-build = { workspace = true }
+prost-build = { workspace = true }
+protox = { workspace = true }
+rest_over_grpc = { workspace = true, features = ["build-openapi"] }
+tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true, features = ["std", "executor"] }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tower = { workspace = true, features = ["util"] }
+tower-service = { workspace = true }
+
+[lints]
+workspace = true
+
+# --- serving-layer examples ---
+
+[[example]]
+name = "tower_service"
+path = "examples/serving/tower_service.rs"
+
+[[example]]
+name = "axum_app"
+path = "examples/serving/axum_app.rs"
+
+[[example]]
+name = "streaming_response"
+path = "examples/serving/streaming_response.rs"
+
+[[example]]
+name = "custom_body_handling"
+path = "examples/serving/custom_body_handling.rs"
+
+# --- transcoding-layer examples ---
+
+[[example]]
+name = "basic_transcode"
+path = "examples/transcoding/basic_transcode.rs"
+
+[[example]]
+name = "custom_fallback"
+path = "examples/transcoding/custom_fallback.rs"
+
+# --- handling-layer examples ---
+
+[[example]]
+name = "direct_service"
+path = "examples/handling/direct_service.rs"
+
+[[example]]
+name = "volo_bridge"
+path = "examples/handling/volo_bridge.rs"
+
+[[example]]
+name = "client_streaming_upload"
+path = "examples/handling/client_streaming_upload.rs"
+
+# --- build-output examples ---
+
+[[example]]
+name = "openapi_document"
+path = "examples/build/openapi_document.rs"
