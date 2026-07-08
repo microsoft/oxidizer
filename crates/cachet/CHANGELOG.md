@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.7.5] - 2026-07-07
+## [0.8.0] - 2026-07-07
 
-- 🔧 Maintenance
+- ⚠️ Breaking
 
   - Now requires `0.6.0` of `anyspawn`
   - Now requires `0.6.0` of `bytesbuf`

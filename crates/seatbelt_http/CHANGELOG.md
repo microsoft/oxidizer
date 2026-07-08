@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.4.6] - 2026-07-07
+## [0.5.0] - 2026-07-07
 
-- 🔧 Maintenance
+- ⚠️ Breaking
 
   - Now requires `0.7.0` of `http_extensions`
   - Now requires `0.6.0` of `seatbelt`

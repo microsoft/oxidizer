@@ -1,13 +1,10 @@
 # Changelog
 
-## [0.5.9] - 2026-07-07
-
-- 🔧 Maintenance
-
-  - Now requires `0.6.0` of `bytesbuf`
+## [0.6.0] - 2026-07-07
 
 - ⚠️ Breaking
 
+  - Now requires `0.6.0` of `bytesbuf`
   - make MemoryShared thread-aware ([#539](https://github.com/microsoft/oxidizer/pull/539))
 
 - 🐛 Bug Fixes

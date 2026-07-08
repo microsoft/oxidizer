@@ -612,7 +612,7 @@ dependencies = [
 
 [[package]]
 name = "bytesbuf_io"
-version = "0.5.9"
+version = "0.6.0"
 dependencies = [
  "bytesbuf",
  "futures",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "fetch_azure"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyspawn",
  "anyspawn_azure",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "seatbelt_http"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "futures",
  "http",

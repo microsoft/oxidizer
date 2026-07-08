@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.2.3] - 2026-07-07
+## [0.3.0] - 2026-07-07
 
-- 🔧 Maintenance
+- ⚠️ Breaking
 
   - Now requires `0.6.0` of `bytesbuf`
   - Now requires `0.13.0` of `fetch`
