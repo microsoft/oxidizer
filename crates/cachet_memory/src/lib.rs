@@ -53,7 +53,7 @@
 //! Two complementary hooks are available for observing entry removals:
 //!
 //! - [`InMemoryCacheBuilder::on_eviction`] takes a closure invoked with the
-//!   evicted key, its value, and a [`RemovalCause`] for every removal
+//!   removed key, its value, and a [`RemovalCause`] for every removal
 //!   (capacity, expiry, explicit, or replace). Use this for custom side effects.
 //! - [`InMemoryCacheBuilder::with_eviction_telemetry`] is a marker that the host
 //!   crate (`cachet`) recognizes via `CacheBuilder::memory_with` and uses to

@@ -267,7 +267,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
 
     /// Registers a listener that is called when an entry is removed from the cache.
     ///
-    /// The listener receives the evicted entry's key (as a shared
+    /// The listener receives the removed entry's key (as a shared
     /// [`Arc`](std::sync::Arc)), its owned value, and a [`RemovalCause`]
     /// indicating why the entry was removed:
     /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expiration,
@@ -316,7 +316,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
 
     /// Registers an internal, cause-only removal observer.
     ///
-    /// Observers receive only the [`RemovalCause`] — never the evicted key or
+    /// Observers receive only the [`RemovalCause`] — never the removed key or
     /// value — so registering one never forces a clone of the entry. Multiple
     /// observers may be registered; all run on every removal, in registration
     /// order, before the [`on_eviction`](Self::on_eviction) value listener (if any).
