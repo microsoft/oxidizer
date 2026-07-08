@@ -1,11 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# Required by [script]
-set unstable
-
 set windows-shell := ["pwsh.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
-set script-interpreter := ["pwsh"]
+set shell := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
+set script-interpreter := ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive"]
 
 # Constants shared by Just commands and GitHub workflows.
 set dotenv-path := "./constants.env"
