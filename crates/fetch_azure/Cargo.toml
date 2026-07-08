@@ -4,7 +4,7 @@
 [package]
 name = "fetch_azure"
 description = "Azure SDK HTTP transport backed by the fetch HTTP client."
-version = "0.2.2"
+version = "0.3.0"
 readme = "README.md"
 keywords = ["oxidizer", "azure", "fetch", "http", "transport"]
 categories = ["network-programming"]
