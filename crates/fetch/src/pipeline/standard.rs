@@ -289,20 +289,13 @@ impl ConfigureStandardPipeline {
     }
 
     pub(crate) fn create(self, context: PipelineContext, redaction: &RedactionEngine) -> StandardRequestPipeline {
-        let mut pipeline = StandardRequestPipeline::new(
+        let pipeline = StandardRequestPipeline::new(
             context.resilience_context(),
             redaction,
             context.clock(),
             context.meter(),
             context.router(),
         );
-
-        // Report the owning client's name on both metric layers so recorded
-        // metrics can be correlated with a specific named client.
-        let client_name = context.name();
-        pipeline.total_metrics = pipeline.total_metrics.client_name(client_name.clone());
-        pipeline.attempt_metrics = pipeline.attempt_metrics.client_name(client_name);
-
         (self.0)(pipeline, context)
     }
 }

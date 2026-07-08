@@ -57,7 +57,11 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::global(client_scope(transport.runtime().clone(), transport.name().clone())),
+            metering: Metering::global(client_scope(
+                transport.runtime().clone(),
+                transport.name().clone(),
+                DEFAULT_HTTP_CLIENT_NAME,
+            )),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
             client_name: Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
@@ -70,6 +74,9 @@ impl HttpClientBuilder {
     /// follow the `snake_case` convention. By default, the client is named "`http_client`".
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
         let name = name.into();
+        self.metering = self
+            .metering
+            .with_client_name(self.transport.runtime().clone(), self.transport.name().clone(), name.clone());
         self.client_name.clone_from(&name);
         self.resilience_context = self.resilience_context.name(name);
         self
@@ -247,7 +254,11 @@ impl HttpClientBuilder {
         Self {
             metering: Metering::custom(
                 meter_provider,
-                client_scope(self.transport.runtime().clone(), self.transport.name().clone()),
+                client_scope(
+                    self.transport.runtime().clone(),
+                    self.transport.name().clone(),
+                    self.client_name.clone(),
+                ),
             ),
             resilience_context: self.resilience_context.use_metrics(meter_provider),
             ..self
@@ -436,7 +447,6 @@ impl HttpClientBuilder {
             options: self.options,
             resilience_context: self.resilience_context,
             metering: self.metering,
-            client_name: self.client_name,
         };
         let body_builder = aware.transport.create_body_builder(&aware.options);
         let pipeline = match aware.transport.isolation() {
@@ -457,8 +467,6 @@ struct Aware {
     options: ClientOptions,
     transport: Transport,
     resilience_context: ResilienceContext<HttpRequest, crate::Result<HttpResponse>>,
-    #[thread_aware(skip)]
-    client_name: Cow<'static, str>,
 }
 
 impl Aware {
@@ -475,7 +483,6 @@ impl Aware {
             body_builder,
             self.transport.clock().clone(),
             self.options.router,
-            self.client_name,
         )
     }
 }

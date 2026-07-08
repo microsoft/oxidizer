@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,9 +37,6 @@ const RESILIENCE_ATTEMPT_INDEX: &str = "resilience.attempt.index";
 /// Metric attribute key indicating whether the recorded attempt is the last one
 /// that will be performed.
 const RESILIENCE_ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
-
-/// Metric attribute key identifying the named HTTP client instance.
-const HTTP_CLIENT_NAME: &str = "http.client.name";
 
 type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
 type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
@@ -102,7 +98,6 @@ pub struct Metrics<T> {
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
     include_attempt: bool,
-    client_name: Option<Cow<'static, str>>,
 }
 
 /// Layer that wraps a service with [`Metrics`].
@@ -120,7 +115,6 @@ pub struct MetricsLayer {
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
     include_attempt: bool,
-    client_name: Option<Cow<'static, str>>,
 }
 
 impl MetricsLayer {
@@ -133,19 +127,6 @@ impl MetricsLayer {
     #[must_use]
     pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
         self.clock = Some(clock.into());
-        self
-    }
-
-    /// Sets the client name reported as the `http.client.name` metric attribute.
-    ///
-    /// This is typically the name assigned to the owning
-    /// [`HttpClient`](crate::HttpClient) via
-    /// [`HttpClientBuilder::name`](crate::HttpClientBuilder::name), and lets
-    /// callers correlate recorded metrics with a specific named client. When
-    /// unset, no `http.client.name` attribute is reported.
-    #[must_use]
-    pub fn client_name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
-        self.client_name = Some(name.into());
         self
     }
 
@@ -264,7 +245,6 @@ impl<S> Layer<S> for MetricsLayer {
             enrich_from_request: self.enrich_from_request.clone(),
             enrich_from_response: self.enrich_from_response.clone(),
             include_attempt: self.include_attempt,
-            client_name: self.client_name.clone(),
         }
     }
 }
@@ -288,7 +268,6 @@ impl Metrics<()> {
             enrich_from_request: None,
             enrich_from_response: None,
             include_attempt: false,
-            client_name: None,
         }
     }
 }
@@ -330,10 +309,6 @@ impl<T: RequestHandler> Service<HttpRequest> for Metrics<T> {
 
         if self.include_attempt {
             fill_attempt_attributes(&mut attributes, input.extensions().get::<Attempt>());
-        }
-
-        if let Some(client_name) = &self.client_name {
-            attributes.push(KeyValue::new(HTTP_CLIENT_NAME, client_name.to_string()));
         }
 
         let mut guard = MetricsDropGuard {
@@ -822,46 +797,6 @@ mod tests {
         let attrs = recorded_attrs.lock().unwrap();
         assert!(attr_value(&attrs, RESILIENCE_ATTEMPT_INDEX).is_none());
         assert!(attr_value(&attrs, RESILIENCE_ATTEMPT_IS_LAST).is_none());
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn client_name_attribute_is_reported_when_set() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
-        let attrs_clone = Arc::clone(&recorded_attrs);
-
-        let handler = test_layer()
-            .client_name("crates_api_client")
-            .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
-            })
-            .layer(FakeHandler::from(StatusCode::OK));
-
-        block_on(Service::execute(&handler, test_request())).unwrap();
-
-        let attrs = recorded_attrs.lock().unwrap();
-        assert_eq!(
-            attr_value(&attrs, HTTP_CLIENT_NAME).map(opentelemetry::Value::as_str),
-            Some("crates_api_client".into())
-        );
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn client_name_attribute_absent_by_default() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
-        let attrs_clone = Arc::clone(&recorded_attrs);
-
-        let handler = test_layer()
-            .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
-            })
-            .layer(FakeHandler::from(StatusCode::OK));
-
-        block_on(Service::execute(&handler, test_request())).unwrap();
-
-        let attrs = recorded_attrs.lock().unwrap();
-        assert!(attr_value(&attrs, HTTP_CLIENT_NAME).is_none());
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.

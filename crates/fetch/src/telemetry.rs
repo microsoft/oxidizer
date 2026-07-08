@@ -29,6 +29,9 @@ pub(crate) const FETCH_RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 /// Instrumentation-scope attribute identifying the transport handler a client uses.
 pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
 
+/// Instrumentation-scope attribute identifying the name of a client instance.
+pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
+
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
 /// Attach these to a request (via its extensions) to merge custom dimensions
@@ -96,13 +99,29 @@ impl From<Metering> for Meter {
     }
 }
 
-/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime` and
-/// `fetch.transport` attributes, attached to every metric a client records.
-pub(crate) fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>) -> InstrumentationScope {
+impl Metering {
+    /// Rebuilds the instrumentation scope with an updated client name.
+    ///
+    /// Only global metering can be rebuilt; custom metering keeps its already
+    /// materialized meter (and therefore the scope it was created with), so a
+    /// custom meter provider must be supplied after the client name is set.
+    pub(crate) fn with_client_name(self, runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> Self {
+        match self {
+            Self::Global(_) => Self::Global(client_scope(runtime, transport, client_name)),
+            custom @ Self::Custom(_) => custom,
+        }
+    }
+}
+
+/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime`,
+/// `fetch.transport`, and `http.client.name` attributes, attached to every
+/// metric a client records.
+pub(crate) fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
         .with_attributes([
             KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime),
             KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport),
+            KeyValue::new(HTTP_CLIENT_NAME_ATTRIBUTE, client_name),
         ])
         .build()
 }
@@ -187,13 +206,13 @@ mod tests {
 
     #[test]
     fn from_metering_global() {
-        let metering = Metering::global(client_scope("tokio", "hyper"));
+        let metering = Metering::global(client_scope("tokio", "hyper", "http_client"));
         let _meter: Meter = metering.into();
     }
 
     #[test]
-    fn client_scope_carries_runtime_and_transport_attributes() {
-        let scope = client_scope("tokio", "hyper");
+    fn client_scope_carries_runtime_transport_and_client_name_attributes() {
+        let scope = client_scope("tokio", "hyper", "my_client");
 
         let runtime = scope
             .attributes()
@@ -206,6 +225,26 @@ mod tests {
             .find(|kv| kv.key.as_str() == FETCH_TRANSPORT_ATTRIBUTE)
             .expect("client scope must carry the fetch.transport attribute");
         assert_eq!(transport.value, Value::from("hyper"));
+
+        let client_name = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == HTTP_CLIENT_NAME_ATTRIBUTE)
+            .expect("client scope must carry the http.client.name attribute");
+        assert_eq!(client_name.value, Value::from("my_client"));
+    }
+
+    #[test]
+    fn with_client_name_rebuilds_global_scope() {
+        let metering = Metering::global(client_scope("tokio", "hyper", "http_client")).with_client_name("tokio", "hyper", "renamed_client");
+
+        let Metering::Global(scope) = metering else {
+            panic!("global metering must stay global after renaming");
+        };
+        let client_name = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == HTTP_CLIENT_NAME_ATTRIBUTE)
+            .expect("rebuilt scope must carry the http.client.name attribute");
+        assert_eq!(client_name.value, Value::from("renamed_client"));
     }
 
     #[test]

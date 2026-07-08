@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::borrow::Cow;
-
 use data_privacy::RedactionEngine;
 use futures::future::Either;
 use http_extensions::HttpBodyBuilder;
@@ -97,19 +95,10 @@ impl PipelineBuilder {
         body_builder: HttpBodyBuilder,
         clock: Clock,
         router: Router,
-        client_name: Cow<'static, str>,
     ) -> Pipeline {
         match self {
             Self::StandardPipeline(configure) => {
-                let context = PipelineContext::new(
-                    resilience_context,
-                    meter,
-                    redaction_engine.clone(),
-                    body_builder,
-                    clock,
-                    router,
-                    client_name,
-                );
+                let context = PipelineContext::new(resilience_context, meter, redaction_engine.clone(), body_builder, clock, router);
                 let standard = configure.create(context, &redaction_engine);
 
                 match standard.recovery_mode {
@@ -163,15 +152,7 @@ impl PipelineBuilder {
             Self::Custom(factory) => {
                 let pipeline = factory.create(
                     dispatch_handler,
-                    PipelineContext::new(
-                        resilience_context,
-                        meter,
-                        redaction_engine,
-                        body_builder,
-                        clock,
-                        router,
-                        client_name,
-                    ),
+                    PipelineContext::new(resilience_context, meter, redaction_engine, body_builder, clock, router),
                 );
 
                 Pipeline::Custom {
@@ -210,7 +191,6 @@ mod tests {
             HttpBodyBuilder::new_fake(),
             clock,
             Router::default(),
-            Cow::Borrowed("test_client"),
         );
 
         assert!(matches!(pipeline, Pipeline::Minimal(_)));
@@ -231,7 +211,6 @@ mod tests {
             HttpBodyBuilder::new_fake(),
             clock,
             Router::default(),
-            Cow::Borrowed("test_client"),
         );
 
         // The debug accessor is only valid for custom pipelines; a minimal pipeline must panic.
@@ -252,7 +231,6 @@ mod tests {
             HttpBodyBuilder::new_fake(),
             clock,
             Router::default(),
-            Cow::Borrowed("test_client"),
         );
 
         assert!(!pipeline.is_standard());
@@ -271,7 +249,6 @@ mod tests {
             HttpBodyBuilder::new_fake(),
             clock,
             Router::default(),
-            Cow::Borrowed("test_client"),
         );
 
         let _dbg = pipeline.dbg_string_for_custom_pipeline();
@@ -290,7 +267,6 @@ mod tests {
             HttpBodyBuilder::new_fake(),
             clock,
             Router::default(),
-            Cow::Borrowed("test_client"),
         );
 
         assert!(pipeline.is_standard());
@@ -311,7 +287,6 @@ mod tests {
                 HttpBodyBuilder::new_fake(),
                 clock,
                 Router::default(),
-                Cow::Borrowed("test_client"),
             );
 
         assert!(format!("{pipeline:?}").contains("max_attempts: 11"));
@@ -333,7 +308,6 @@ mod tests {
                 HttpBodyBuilder::new_fake(),
                 clock,
                 Router::default(),
-                Cow::Borrowed("test_client"),
             );
 
         let debug = format!("{pipeline:?}");

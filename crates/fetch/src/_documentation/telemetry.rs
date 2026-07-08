@@ -19,6 +19,7 @@
 //! |-----------------|-------------|--------------|
 //! | `fetch.runtime` | Identifies the async runtime the client is built for | `"tokio"` |
 //! | `fetch.transport` | Identifies the transport handler the client dispatches through | `"hyper"` |
+//! | `http.client.name` | Name of the client, set via [`HttpClientBuilder::name`](crate::HttpClientBuilder::name) (defaults to `"http_client"`); lets callers correlate all of a client's metrics with a specific named client | `"crates_api_client"` |
 //!
 //! The bundled transports report fixed values — `"tokio"` runtime and
 //! `"hyper"` transport for the default Tokio + hyper transport, and `"fake"`
@@ -58,7 +59,6 @@
 //! | Attribute | Required | Description | Sample value |
 //! |-----------|----------|-------------|--------------|
 //! | `http.request.method` | always | HTTP method of the request | `"GET"` |
-//! | `http.client.name` | when named | Name of the owning [`HttpClient`](crate::HttpClient), set via [`HttpClientBuilder::name`](crate::HttpClientBuilder::name) (defaults to `"http_client"` in the standard pipeline); lets callers correlate metrics with a specific client | `"crates_api_client"` |
 //! | `server.address` | always | Hostname (authority) of the target server | `"api.example.com"` |
 //! | `server.port` | when derivable | Port number, inferred from scheme when absent (`443` for HTTPS, `80` for HTTP) | `443` |
 //! | `url.scheme` | always | URI scheme | `"https"` |
