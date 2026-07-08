@@ -367,6 +367,14 @@ mod tests {
         assert!(debug_str.contains("hedging"));
         assert!(debug_str.contains("breaker"));
         assert!(debug_str.contains("attempt_timeout"));
+
+        // The total_metrics layer must actually be configured to record the
+        // total-duration instrument, not merely be present.
+        let total_metrics_debug = format!("{:?}", pipeline.total_metrics);
+        assert!(
+            total_metrics_debug.contains("report_total_duration: true"),
+            "total_metrics must record the total-duration instrument, got: {total_metrics_debug}"
+        );
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
