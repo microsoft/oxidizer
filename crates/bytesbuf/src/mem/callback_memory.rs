@@ -1,41 +1,55 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::any::type_name;
-use std::fmt;
-use std::sync::Arc;
+use std::fmt::Debug;
+
+use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
 use crate::mem::Memory;
 
-/// Implements [`MemoryShared`][crate::mem::MemoryShared] by delegating to a closure.
+/// A [`MemoryShared`][crate::mem::MemoryShared] provider that customizes reservations via a function.
 ///
-/// This can be used to construct wrapping memory providers that add logic or configuration
-/// on top of an existing memory provider.
+/// This can be used to construct memory providers that add logic or configuration on top of an
+/// existing memory provider, without implementing a dedicated provider type.
+///
+/// Modeled on [`thread_aware::closure::Closure`]: because `reserve_fn` is a bare `fn` pointer it
+/// cannot capture anything, so all state the reservation logic needs must live in `data`. As `data`
+/// is [`ThreadAware`], it is relocated together with the provider when the provider is moved between
+/// threads via a thread-aware runtime mechanism.
 ///
 /// # Examples
 ///
-/// Configure an inner memory provider with additional parameters:
+/// Wrap an existing memory provider, page-aligning every reservation. The wrapped provider is the
+/// callback's thread-aware data; the reservation logic is a bare function that cannot capture
+/// anything.
 ///
 /// ```
-/// use bytesbuf::mem::{CallbackMemory, GlobalPool, Memory};
+/// use bytesbuf::mem::{CallbackMemory, Memory};
 /// # use bytesbuf::BytesBuf;
-/// # #[derive(Clone)]
-/// # struct IoContext {
-/// #     pool: GlobalPool,
-/// # }
-/// # impl IoContext {
-/// #     fn reserve_with_config(&self, min_len: usize, _align: bool) -> BytesBuf {
-/// #         self.pool.reserve(min_len)
-/// #     }
-/// # }
+/// # use bytesbuf::mem::GlobalPool;
+/// # let inner = GlobalPool::new();
 ///
-/// // Create a callback memory that configures the inner provider.
-/// # let io_context = IoContext { pool: GlobalPool::new() };
-/// let memory = CallbackMemory::new(move |min_len| {
-///     // Apply custom configuration when reserving memory.
-///     let page_aligned = true;
-///     io_context.reserve_with_config(min_len, page_aligned)
+/// let memory = CallbackMemory::new(inner, |inner, min_len| {
+///     inner.reserve(min_len.next_multiple_of(4096))
+/// });
+///
+/// let buf = memory.reserve(64);
+/// assert!(buf.capacity() >= 64);
+/// ```
+///
+/// The reservation logic often needs more than the wrapped provider alone. Pass a tuple (or any
+/// [`ThreadAware`] value) as the data and destructure it in the callback:
+///
+/// ```
+/// use bytesbuf::mem::{CallbackMemory, Memory};
+/// # use bytesbuf::BytesBuf;
+/// # use bytesbuf::mem::GlobalPool;
+/// # let inner = GlobalPool::new();
+///
+/// let alignment = 4096_usize;
+/// let memory = CallbackMemory::new((inner, alignment), |(inner, alignment), min_len| {
+///     inner.reserve(min_len.next_multiple_of(*alignment))
 /// });
 ///
 /// let buf = memory.reserve(64);
@@ -43,22 +57,35 @@ use crate::mem::Memory;
 /// ```
 ///
 /// For a complete implementation pattern, see `examples/bb_has_memory_optimizing.rs`.
-pub struct CallbackMemory<FReserve>
-where
-    FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
-{
-    reserve_fn: Arc<FReserve>,
+#[derive(Clone, ThreadAware)]
+pub struct CallbackMemory<D: ThreadAware + Clone + Send + Sync + 'static> {
+    data: D,
+    // The function pointer holds no state; only the captured data can be thread-affine.
+    #[thread_aware(skip)]
+    reserve_fn: fn(&D, usize) -> BytesBuf,
 }
 
-impl<FReserve> CallbackMemory<FReserve>
-where
-    FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
-{
-    /// Creates a new instance implemented via the provided callback.
-    pub fn new(reserve_fn: FReserve) -> Self {
-        Self {
-            reserve_fn: Arc::new(reserve_fn),
-        }
+impl<D: ThreadAware + Clone + Send + Sync + 'static> Debug for CallbackMemory<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `data` is deliberately not formatted so that `CallbackMemory` is `Debug` regardless of
+        // whether `D` is, which keeps it usable with thread-aware data that is intentionally not
+        // `Debug` (e.g. a tuple containing a non-`Debug` field).
+        f.debug_struct("CallbackMemory")
+            .field("reserve_fn", &self.reserve_fn)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<D: ThreadAware + Clone + Send + Sync + 'static> CallbackMemory<D> {
+    /// Creates a provider that reserves memory via `reserve_fn`, applied to thread-aware `data`.
+    ///
+    /// `data` holds any state the reservation needs (typically the wrapped memory provider). Because
+    /// `reserve_fn` is a bare `fn` pointer it cannot capture anything, so all such state must live in
+    /// `data`, which is relocated with the provider when it is moved between threads via a
+    /// thread-aware runtime mechanism.
+    #[must_use]
+    pub fn new(data: D, reserve_fn: fn(&D, usize) -> BytesBuf) -> Self {
+        Self { data, reserve_fn }
     }
 
     /// Reserves at least `min_bytes` bytes of memory capacity.
@@ -79,114 +106,158 @@ where
     ///
     /// May panic if the operating system runs out of memory.
     #[must_use]
-    pub fn reserve(&self, min_bytes: usize) -> crate::BytesBuf {
-        (self.reserve_fn)(min_bytes)
+    pub fn reserve(&self, min_bytes: usize) -> BytesBuf {
+        (self.reserve_fn)(&self.data, min_bytes)
     }
 }
 
-impl<FReserve> Memory for CallbackMemory<FReserve>
-where
-    FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
-{
+impl<D: ThreadAware + Clone + Send + Sync + 'static> Memory for CallbackMemory<D> {
     #[cfg_attr(test, mutants::skip)] // Trivial forwarder.
     fn reserve(&self, min_bytes: usize) -> BytesBuf {
         self.reserve(min_bytes)
     }
 }
 
-impl<FReserve> Clone for CallbackMemory<FReserve>
-where
-    FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
-{
-    fn clone(&self) -> Self {
-        Self {
-            reserve_fn: Arc::clone(&self.reserve_fn),
-        }
-    }
-}
-
-impl<FReserve> fmt::Debug for CallbackMemory<FReserve>
-where
-    FReserve: Fn(usize) -> BytesBuf + Send + Sync + 'static,
-{
-    #[cfg_attr(test, mutants::skip)] // We have no API contract for this.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(type_name::<Self>())
-            .field("reserve_fn", &"Fn(usize) -> BytesBuf")
-            .finish()
-    }
-}
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{self, AtomicUsize};
 
     use static_assertions::assert_impl_all;
+    use thread_aware::affinity::{Affinity, pinned_affinities};
 
     use super::*;
     use crate::mem::MemoryShared;
     use crate::mem::testing::TransparentMemory;
 
-    assert_impl_all!(CallbackMemory<fn(usize) -> BytesBuf>: MemoryShared);
+    assert_impl_all!(CallbackMemory<TransparentMemory>: MemoryShared);
+
+    /// Thread-aware callback data carrying an observable call counter alongside the wrapped provider.
+    #[derive(Clone, Debug, ThreadAware)]
+    struct CountingData {
+        inner: TransparentMemory,
+        // The counter is inert shared state, so relocation does not affect it.
+        #[thread_aware(skip)]
+        reserve_calls: Arc<AtomicUsize>,
+    }
+
+    impl CountingData {
+        fn new() -> Self {
+            Self {
+                inner: TransparentMemory::new(),
+                reserve_calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    // A relocation observer bundled into the data, so we can assert forwarding without a bare skip.
+    #[derive(Clone, Debug)]
+    struct RelocationObserver {
+        inner: TransparentMemory,
+        relocations: Arc<AtomicUsize>,
+    }
+
+    impl ThreadAware for RelocationObserver {
+        fn relocate(&mut self, _source: Option<Affinity>, _destination: Affinity) {
+            self.relocations.fetch_add(1, atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn count_reserve(data: &CountingData, min_bytes: usize) -> BytesBuf {
+        data.reserve_calls.fetch_add(1, atomic::Ordering::SeqCst);
+        data.inner.reserve(min_bytes)
+    }
 
     #[test]
     fn calls_back_to_provided_fn() {
-        let callback_called_times = Arc::new(AtomicUsize::new(0));
+        let data = CountingData::new();
+        let reserve_calls = Arc::clone(&data.reserve_calls);
 
-        let provider = CallbackMemory::new({
-            let callback_called_times = Arc::clone(&callback_called_times);
-
-            move |min_bytes| {
-                callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentMemory::new().reserve(min_bytes)
-            }
-        });
+        let provider = CallbackMemory::new(data, count_reserve);
 
         _ = Memory::reserve(&provider, 100);
 
-        assert_eq!(callback_called_times.load(atomic::Ordering::SeqCst), 1);
+        assert_eq!(reserve_calls.load(atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn clone_shares_underlying_callback() {
-        let callback_called_times = Arc::new(AtomicUsize::new(0));
+    fn clone_shares_behavior() {
+        let data = CountingData::new();
+        let reserve_calls = Arc::clone(&data.reserve_calls);
 
-        let provider = CallbackMemory::new({
-            let callback_called_times = Arc::clone(&callback_called_times);
-
-            move |min_bytes| {
-                callback_called_times.fetch_add(1, atomic::Ordering::SeqCst);
-                TransparentMemory::new().reserve(min_bytes)
-            }
-        });
-
+        let provider = CallbackMemory::new(data, count_reserve);
         let cloned_provider = provider.clone();
 
-        // Call the original provider
         _ = Memory::reserve(&provider, 50);
-        assert_eq!(callback_called_times.load(atomic::Ordering::SeqCst), 1);
+        assert_eq!(reserve_calls.load(atomic::Ordering::SeqCst), 1);
 
-        // Call the cloned provider - should share the same callback
         _ = Memory::reserve(&cloned_provider, 75);
-        assert_eq!(callback_called_times.load(atomic::Ordering::SeqCst), 2);
+        assert_eq!(reserve_calls.load(atomic::Ordering::SeqCst), 2);
     }
 
     #[test]
-    fn debug_output_contains_type_and_field_info() {
-        let provider = CallbackMemory::new(|min_bytes| TransparentMemory::new().reserve(min_bytes));
+    fn reserve_produces_capacity() {
+        let provider = CallbackMemory::new(TransparentMemory::new(), TransparentMemory::reserve);
 
-        // Call the original provider to help code coverage.
-        _ = Memory::reserve(&provider, 50);
+        let buf = provider.reserve(64);
+        assert!(buf.capacity() >= 64);
+    }
 
-        let debug_output = format!("{provider:?}");
-
-        // Verify the debug output contains the struct name and field description
-        assert!(debug_output.contains("CallbackMemory"), "Debug output should contain type name");
-        assert!(debug_output.contains("reserve_fn"), "Debug output should contain field name");
-        assert!(
-            debug_output.contains("Fn(usize) -> BytesBuf"),
-            "Debug output should contain function signature description"
+    #[test]
+    fn multi_field_tuple_data() {
+        // The data can carry more than the wrapped provider: here a tuple pairs it with an offset
+        // that the callback adds to every reservation.
+        const EXTRA: usize = 16;
+        let provider = CallbackMemory::new(
+            (TransparentMemory::new(), EXTRA),
+            |(inner, extra): &(TransparentMemory, usize), min_bytes| inner.reserve(min_bytes + *extra),
         );
+
+        // TransparentMemory reserves exactly the requested capacity, so the offset is observable.
+        let buf = provider.reserve(64);
+        assert_eq!(buf.capacity(), 64 + EXTRA);
+    }
+
+    #[test]
+    fn relocate_forwards_to_data() {
+        let relocations = Arc::new(AtomicUsize::new(0));
+        let mut provider = CallbackMemory::new(
+            RelocationObserver {
+                inner: TransparentMemory::new(),
+                relocations: Arc::clone(&relocations),
+            },
+            |observer: &RelocationObserver, min_bytes| observer.inner.reserve(min_bytes),
+        );
+
+        let affinities = pinned_affinities(&[2]);
+        provider.relocate(Some(affinities[0]), affinities[1]);
+
+        assert_eq!(relocations.load(atomic::Ordering::SeqCst), 1);
+
+        // The provider remains usable after relocation.
+        assert!(provider.reserve(32).capacity() >= 32);
+    }
+
+    #[test]
+    fn works_with_non_debug_data() {
+        // Data that is intentionally not `Debug`, to confirm `CallbackMemory` does not require it.
+        #[derive(Clone, ThreadAware)]
+        struct NotDebug {
+            inner: TransparentMemory,
+        }
+
+        let provider = CallbackMemory::new(
+            NotDebug {
+                inner: TransparentMemory::new(),
+            },
+            |data: &NotDebug, min_bytes| data.inner.reserve(min_bytes),
+        );
+
+        assert!(Memory::reserve(&provider, 64).capacity() >= 64);
+
+        // `CallbackMemory` is still `Debug` even though its data is not.
+        let rendered = format!("{provider:?}");
+        assert!(rendered.contains("CallbackMemory"));
     }
 }

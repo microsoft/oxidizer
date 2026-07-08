@@ -712,86 +712,86 @@ fetch = { version = "*", features = ["json", "tokio"] }
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/fetch">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMIJoYnl0ZXNidWZlMC41LjaCZWZldGNoZjAuMTIuMoJvaHR0cF9leHRlbnNpb25zZTAuNi41gmdsYXllcmVkZTAuMy41gmhzZWF0YmVsdGYwLjUuMTCCbXRlbXBsYXRlZF91cmllMC4zLjQ
- [__link0]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient
- [__link1]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=RequestHandler
- [__link10]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::post
- [__link11]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::put
- [__link12]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::delete
- [__link13]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::request
- [__link14]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpRequestBuilder
- [__link15]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClientBuilder::base_uri
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbRcdYrc3P77cbVjz14MYzPFkbTKiKwHYuBbcbSr09Rcd_lPZhZIeCZWJ5dGVzZjEuMTIuMIJoYnl0ZXNidWZlMC42LjCCZWZldGNoZjAuMTMuMIJvaHR0cF9leHRlbnNpb25zZTAuNy4wgmdsYXllcmVkZTAuMy41gmhzZWF0YmVsdGUwLjYuMIJtdGVtcGxhdGVkX3VyaWUwLjMuNA
+ [__link0]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient
+ [__link1]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=RequestHandler
+ [__link10]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::post
+ [__link11]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::put
+ [__link12]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::delete
+ [__link13]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::request
+ [__link14]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpRequestBuilder
+ [__link15]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClientBuilder::base_uri
  [__link16]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=BaseUri
- [__link17]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpRequestBuilder::fetch
- [__link18]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpResponse
- [__link19]: https://docs.rs/fetch/0.12.2/fetch/?search=http::Response
+ [__link17]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpRequestBuilder::fetch
+ [__link18]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpResponse
+ [__link19]: https://docs.rs/fetch/0.13.0/fetch/?search=http::Response
  [__link2]: https://docs.rs/reqwest/
- [__link20]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpResponse::ensure_success
- [__link21]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpResponse::status
- [__link22]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpResponse::headers
- [__link23]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpResponse::into_body
- [__link24]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpBody::into_text
- [__link25]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpBody::into_bytes
- [__link26]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpBody::into_json
- [__link27]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpRequestBuilder::fetch
- [__link28]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_text
- [__link29]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_bytes
- [__link3]: https://docs.rs/fetch/0.12.2/fetch/custom/index.html
- [__link30]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json
- [__link31]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json_ref
- [__link32]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=HttpBody
- [__link33]: https://docs.rs/fetch/0.12.2/fetch/?search=http::Response
- [__link34]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpResponse::ensure_success
- [__link35]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_text_body
- [__link36]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_bytes_body
- [__link37]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json_body
+ [__link20]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpResponse::ensure_success
+ [__link21]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpResponse::status
+ [__link22]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpResponse::headers
+ [__link23]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpResponse::into_body
+ [__link24]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpBody::into_text
+ [__link25]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpBody::into_bytes
+ [__link26]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpBody::into_json
+ [__link27]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpRequestBuilder::fetch
+ [__link28]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_text
+ [__link29]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_bytes
+ [__link3]: https://docs.rs/fetch/0.13.0/fetch/custom/index.html
+ [__link30]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json
+ [__link31]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json_ref
+ [__link32]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=HttpBody
+ [__link33]: https://docs.rs/fetch/0.13.0/fetch/?search=http::Response
+ [__link34]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpResponse::ensure_success
+ [__link35]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_text_body
+ [__link36]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_bytes_body
+ [__link37]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json_body
  [__link38]: https://crates.io/crates/templated_uri/0.3.4
  [__link39]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Uri
- [__link4]: https://docs.rs/fetch/0.12.2/fetch/?search=custom::create_builder
+ [__link4]: https://docs.rs/fetch/0.13.0/fetch/?search=custom::create_builder
  [__link40]: https://datatracker.ietf.org/doc/html/rfc6570
  [__link41]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Uri
- [__link42]: https://docs.rs/fetch/0.12.2/fetch/?search=handlers::Logging
+ [__link42]: https://docs.rs/fetch/0.13.0/fetch/?search=handlers::Logging
  [__link43]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Uri
  [__link44]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=PathAndQueryTemplate
- [__link45]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::json
- [__link46]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json
- [__link47]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json_ref
- [__link48]: https://docs.rs/fetch/0.12.2/fetch/?search=Json
- [__link49]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpBody::into_json
+ [__link45]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::json
+ [__link46]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json
+ [__link47]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json_ref
+ [__link48]: https://docs.rs/fetch/0.13.0/fetch/?search=Json
+ [__link49]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpBody::into_json
  [__link5]: https://docs.rs/reqwest/
- [__link50]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpRequestBuilder::fetch_json_body
- [__link51]: https://docs.rs/fetch/0.12.2/fetch/?search=Json
- [__link52]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=RequestHandler
- [__link53]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=RequestHandler
+ [__link50]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpRequestBuilder::fetch_json_body
+ [__link51]: https://docs.rs/fetch/0.13.0/fetch/?search=Json
+ [__link52]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=RequestHandler
+ [__link53]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=RequestHandler
  [__link54]: https://docs.rs/reqwest/
- [__link55]: https://docs.rs/fetch/0.12.2/fetch/custom/index.html
- [__link56]: https://docs.rs/fetch/0.12.2/fetch/?search=custom::create_builder
- [__link57]: https://docs.rs/fetch/0.12.2/fetch/?search=pipeline::StandardRequestPipeline
- [__link58]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClientBuilder::standard_pipeline
- [__link59]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClientBuilder::custom_pipeline
+ [__link55]: https://docs.rs/fetch/0.13.0/fetch/custom/index.html
+ [__link56]: https://docs.rs/fetch/0.13.0/fetch/?search=custom::create_builder
+ [__link57]: https://docs.rs/fetch/0.13.0/fetch/?search=pipeline::StandardRequestPipeline
+ [__link58]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClientBuilder::standard_pipeline
+ [__link59]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClientBuilder::custom_pipeline
  [__link6]: https://docs.rs/hyper/
- [__link60]: https://docs.rs/fetch/0.12.2/fetch/?search=handlers::Dispatch
- [__link61]: https://docs.rs/http_extensions/0.6.5/http_extensions/?search=RequestHandler
- [__link62]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
+ [__link60]: https://docs.rs/fetch/0.13.0/fetch/?search=handlers::Dispatch
+ [__link61]: https://docs.rs/http_extensions/0.7.0/http_extensions/?search=RequestHandler
+ [__link62]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
  [__link63]: https://docs.rs/bytes
- [__link64]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
+ [__link64]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
  [__link65]: https://docs.rs/bytes/1.12.0/bytes/?search=Buf
  [__link66]: https://docs.rs/bytes/1.12.0/bytes/?search=BufMut
  [__link67]: https://docs.rs/bytes
- [__link68]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient
+ [__link68]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient
  [__link69]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Uri
- [__link7]: https://docs.rs/fetch/0.12.2/fetch/custom/index.html
- [__link70]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
- [__link71]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
- [__link72]: https://docs.rs/bytesbuf/0.5.6/bytesbuf/?search=BytesView
- [__link73]: https://docs.rs/fetch/0.12.2/fetch/http/index.html
- [__link74]: https://crates.io/crates/http_extensions/0.6.5
- [__link75]: https://crates.io/crates/seatbelt/0.5.10
+ [__link7]: https://docs.rs/fetch/0.13.0/fetch/custom/index.html
+ [__link70]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
+ [__link71]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
+ [__link72]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
+ [__link73]: https://docs.rs/fetch/0.13.0/fetch/http/index.html
+ [__link74]: https://crates.io/crates/http_extensions/0.7.0
+ [__link75]: https://crates.io/crates/seatbelt/0.6.0
  [__link76]: https://docs.rs/layered/0.3.5/layered/?search=Service
- [__link77]: https://docs.rs/fetch/0.12.2/fetch/?search=pipeline::StandardRequestPipeline
+ [__link77]: https://docs.rs/fetch/0.13.0/fetch/?search=pipeline::StandardRequestPipeline
  [__link78]: https://docs.rs/rustls
  [__link79]: https://docs.rs/aws-lc-rs
- [__link8]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::builder_tokio
+ [__link8]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::builder_tokio
  [__link80]: https://docs.rs/rustls-platform-verifier
- [__link81]: https://docs.rs/fetch/0.12.2/fetch/?search=tls::TlsOptions::builder_rustls
- [__link9]: https://docs.rs/fetch/0.12.2/fetch/?search=HttpClient::get
+ [__link81]: https://docs.rs/fetch/0.13.0/fetch/?search=tls::TlsOptions::builder_rustls
+ [__link9]: https://docs.rs/fetch/0.13.0/fetch/?search=HttpClient::get

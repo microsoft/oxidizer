@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0] - 2026-07-07
+
+- ⚠️ Breaking
+
+  - Now requires `0.8.0` of `thread_aware`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release all packages for MSRV 1.93 ([#492](https://github.com/microsoft/oxidizer/pull/492))
+
+- 🔄 Continuous Integration
+
+  - run cargo udeps with and without --all-targets; remove unused dev-dependencies ([#527](https://github.com/microsoft/oxidizer/pull/527))
+
 ## [0.2.5] - 2026-06-26
 
 - 🔧 Maintenance

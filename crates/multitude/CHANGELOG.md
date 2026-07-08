@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.1] - 2026-07-07
+
+- 🔧 Maintenance
+
+  - Now requires `0.6.0` of `bytesbuf`
+
+- ✨ Features
+
+  - Adopt custom AllocError type for Ralf-compatibility ([#536](https://github.com/microsoft/oxidizer/pull/536))
+  - Introduce Alloc<T> and reintroduce Rc<T> ([#521](https://github.com/microsoft/oxidizer/pull/521))
+  - add arena-backed hashbrown HashMap/HashSet support ([#517](https://github.com/microsoft/oxidizer/pull/517))
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+
 ## [0.5.1] - 2026-06-26
 
 - 🔧 Maintenance

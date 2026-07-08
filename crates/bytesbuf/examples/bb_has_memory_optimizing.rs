@@ -7,6 +7,7 @@
 
 use bytesbuf::mem::{CallbackMemory, HasMemory, Memory, MemoryShared};
 use bytesbuf::{BytesBuf, BytesView};
+use thread_aware::ThreadAware;
 
 fn main() {
     // In a real application, the I/O context would be provided by the framework.
@@ -66,11 +67,14 @@ const UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION: MemoryConfiguration = MemoryC
 
 impl HasMemory for UdpConnection {
     fn memory(&self) -> impl MemoryShared {
-        CallbackMemory::new({
-            // Cloning is cheap, as it is a service that shares resources between clones.
-            let io_context = self.io_context.clone();
+        // The I/O memory provider carries the thread-affine state, which is relocated when the
+        // returned provider is moved between threads via a thread-aware runtime mechanism.
+        let io_memory = self.io_context.io_memory();
 
-            move |min_len| io_context.reserve_io_memory(min_len, UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
+        CallbackMemory::new(io_memory, |io_memory, min_len| {
+            // Apply the connection-specific configuration when reserving from the (relocated)
+            // I/O memory provider.
+            io_memory.reserve_with_config(min_len, &UDP_CONNECTION_OPTIMAL_MEMORY_CONFIGURATION)
         })
     }
 }
@@ -88,11 +92,37 @@ impl IoContext {
         Self {}
     }
 
+    /// Returns the thread-affine I/O memory provider that reservations are drawn from.
     #[expect(clippy::unused_self, reason = "for example realism")]
-    pub(crate) fn reserve_io_memory(&self, min_len: usize, _memory_configuration: MemoryConfiguration) -> BytesBuf {
+    pub(crate) fn io_memory(&self) -> IoMemory {
+        IoMemory
+    }
+}
+
+/// The thread-affine I/O memory provider. In a real application this would carry per-thread I/O
+/// resources; here it is a thin wrapper for illustration.
+#[derive(Clone, Debug, ThreadAware)]
+struct IoMemory;
+
+impl IoMemory {
+    #[expect(clippy::unused_self, reason = "for example realism")]
+    fn reserve_with_config(&self, min_len: usize, _memory_configuration: &MemoryConfiguration) -> BytesBuf {
         // This is a wrong way to implement this! Only to make the example compile.
         let memory = bytesbuf::mem::testing::TransparentMemory::new();
         memory.reserve(min_len)
+    }
+}
+
+impl Memory for IoMemory {
+    fn reserve(&self, min_bytes: usize) -> BytesBuf {
+        self.reserve_with_config(
+            min_bytes,
+            &MemoryConfiguration {
+                requires_page_alignment: false,
+                zero_memory_on_release: false,
+                requires_registered_memory: false,
+            },
+        )
     }
 }
 

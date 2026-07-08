@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0] - 2026-07-07
+
+- ⚠️ Breaking
+
+  - Now requires `0.7.0` of `http_extensions`
+  - Now requires `0.6.0` of `seatbelt`
+  - Now requires `0.4.0` of `tick`
+
+- 🐛 Bug Fixes
+
+  - exclude non-source artifacts from published crates via include allowlist ([#526](https://github.com/microsoft/oxidizer/pull/526))
+
+- ✔️ Tasks
+
+  - release a new version of tick crate (and dependents) ([#542](https://github.com/microsoft/oxidizer/pull/542))
+  - re-release all packages with LFS-free tarballs ([#531](https://github.com/microsoft/oxidizer/pull/531))
+  - release ohno 0.3.7 and cascade dependents ([#524](https://github.com/microsoft/oxidizer/pull/524))
+
 ## [0.4.5] - 2026-07-01
 
 - 🔧 Maintenance
