@@ -20,5 +20,12 @@ coverage:
         base: auto
 ignore:
 - "crates/testing_aids/**/*"
+# Worked examples and benchmarks are `publish = false` internal crates whose
+# demo `fn main()`/bench/fixture code is not unit-tested, so they are excluded
+# from the 100% coverage gate (as with `testing_aids`). The e2e tests in
+# `rest_over_grpc_tests` still execute and contribute coverage to the crates they
+# exercise; only these harness crates' own files are excluded.
+- "crates/rest_over_grpc_examples/**/*"
+- "crates/rest_over_grpc_tests/**/*"
 # Macro expansion causes coverage to be inaccurate in these files, so we ignore them for now. We can re-enable them once we have a better solution for macro coverage.
 - "crates/ohno/src/test_util.rs"

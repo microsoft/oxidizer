@@ -1,0 +1,27 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_path_template"
+description = "Parser for the google.api.http path-template grammar"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["grpc", "rest", "path", "template", "http"]
+categories = ["parser-implementations", "web-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_path_template"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[dependencies]
+
+[lints]
+workspace = true

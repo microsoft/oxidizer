@@ -41,11 +41,14 @@ These are the primary crates built out of this repo:
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
+- [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar (literals, `*`, `**`, `{field=sub}` variables, `:verb`).
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.
+- [`rest_over_grpc`](./crates/rest_over_grpc/README.md) - Automatically transcode gRPC services to REST/JSON endpoints.
+- [`routerama`](./crates/routerama/README.md) - Blazingly fast HTTP routing.
 - [`seatbelt`](./crates/seatbelt/README.md) - Resilience and recovery mechanisms for fallible operations.
 - [`seatbelt_http`](./crates/seatbelt_http/README.md) - HTTP-specific extensions for the seatbelt crate.
 - [`templated_uri`](./crates/templated_uri/README.md) - Standards-compliant URI handling with templating, safety validation, and data classification

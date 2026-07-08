@@ -1,0 +1,136 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "rest_over_grpc"
+version = "0.1.0"
+description = "Automatically transcode gRPC services to REST/JSON endpoints"
+readme = "README.md"
+keywords = ["grpc", "rest", "json", "transcoding", "router"]
+categories = ["web-programming", "network-programming", "encoding"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "bytes::bytes::Bytes",
+    "http::method::Method",
+    "http::header::map::HeaderMap",
+    "http::header::name::HeaderName",
+    "http::header::value::HeaderValue",
+    "http::request::Request",
+    "http::response::Response",
+    "http::status::StatusCode",
+    "http::uri::Uri",
+    "http_body::Body",
+    "tower_service::Service",
+    "layered::service::Service",
+    "futures_core::stream::Stream",
+    "serde::de::*",
+    "serde::ser::*",
+    "serde_core::de::*",
+    "serde_core::ser::*",
+    "serde_json::value::Value",
+    "axum_core::response::into_response::IntoResponse",
+    "axum_core::response::Response",
+    "axum_core::body::Body",
+    # Surfaced by the `build` module (under the `build` feature).
+    "http_path_template::path_template::PathTemplate",
+    "proc_macro2::TokenStream",
+    "routerama_build::http_method::HttpMethod",
+]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[features]
+default = ["serving"]
+# The `serving` module's `serve_http*` one-shot helpers, which bridge an
+# `http::Request` to a transcoder and return an `http::Response`. On by default,
+# and implied by `tower` / `layered`.
+serving = ["dep:http-body", "dep:http-body-util"]
+# Adds the `serving` module's `tower::Service` bridge (`RestService`) between the
+# `http`/`http-body`/`tower` ecosystem (hyper, axum, …) and the neutral transcoder.
+tower = ["serving", "dep:tower-service"]
+# Adds the `serving` module's `layered::Service` bridge — the repository's
+# `async fn`-based service trait — over the same neutral transcoder.
+layered = ["serving", "dep:layered"]
+# Enables the `axum` integration: `IntoResponse` for the neutral response value
+# types (`HttpResponse` / `StreamingResponse` / `TranscodeResponse`), so they can
+# be returned directly from an `axum` handler.
+axum = ["dep:axum-core"]
+# Provides the `build` module — the build-time code generator, for use from a
+# `build.rs`. Folding the generator into this crate keeps the generated code and
+# the runtime it targets on a single version. It reads `google.api.http`
+# annotations from compiled descriptors (`ServiceDefinition::from_fds` /
+# `compile_fds`), which is how services are almost always generated.
+build = [
+    "dep:heck",
+    "dep:http_path_template",
+    "dep:proc-macro2",
+    "dep:prost-reflect",
+    "dep:quote",
+    "dep:routerama_build",
+    "routerama_build/codegen",
+]
+# Adds OpenAPI 3.1 document emission to the `build` module.
+build-openapi = ["build"]
+
+[dependencies]
+axum-core = { workspace = true, optional = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true, features = ["std"] }
+heck = { workspace = true, optional = true }
+http = { workspace = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+http_path_template = { workspace = true, optional = true }
+layered = { workspace = true, optional = true }
+proc-macro2 = { workspace = true, optional = true }
+prost-reflect = { workspace = true, optional = true }
+quote = { workspace = true, optional = true }
+routerama = { workspace = true }
+routerama_build = { workspace = true, optional = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std", "raw_value"] }
+smallvec = { workspace = true }
+tower-service = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["std", "executor"] }
+mutants = { workspace = true }
+prettyplease = { workspace = true }
+prost-types = { workspace = true }
+protox = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+syn = { workspace = true, features = ["full", "parsing"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[[example]]
+name = "tower_service"
+required-features = ["tower"]
+
+[[example]]
+name = "layered_service"
+required-features = ["layered"]
+
+[[example]]
+name = "serve_http_fn"
+required-features = ["serving"]
+
+[[example]]
+name = "generate_service"
+required-features = ["build"]
+
+[lints]
+workspace = true
