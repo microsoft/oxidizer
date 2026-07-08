@@ -164,8 +164,8 @@ where
         }
 
         if let Some(listener) = builder.eviction_listener {
-            moka_builder = moka_builder.eviction_listener(move |_key, _value, cause| {
-                listener(crate::notification::from_moka(cause));
+            moka_builder = moka_builder.eviction_listener(move |key, entry: CacheEntry<V>, cause| {
+                listener(key, entry.into_value(), crate::notification::from_moka(cause));
             });
         }
 
@@ -498,5 +498,45 @@ mod tests {
 
         // The cache should only have max_capacity entries
         assert_eq!(cache.len().await.expect("len should return Ok"), capacity);
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[tokio::test]
+    async fn on_eviction_receives_key_and_value() {
+        use std::sync::{Arc as StdArc, Mutex};
+
+        let evicted: StdArc<Mutex<Vec<(String, u64, crate::RemovalCause)>>> = StdArc::new(Mutex::new(Vec::new()));
+        let recorder = StdArc::clone(&evicted);
+
+        let capacity = 2;
+        let cache = InMemoryCache::<String, u64>::builder()
+            .max_capacity(capacity)
+            .on_eviction(move |key: StdArc<String>, value, cause| {
+                recorder.lock().unwrap().push(((*key).clone(), value, cause));
+            })
+            .build()
+            .expect("Cache should build successfully");
+
+        // Insert enough entries to force at least one size-based eviction.
+        for i in 0..(capacity + 3) {
+            cache
+                .insert(format!("key{i}"), CacheEntry::new(i))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+        }
+
+        let evictions = evicted.lock().unwrap();
+        assert!(!evictions.is_empty(), "at least one size eviction should have fired");
+        // Every reported eviction must carry the original key/value pair we inserted.
+        for (key, value, cause) in evictions.iter() {
+            assert_eq!(*cause, crate::RemovalCause::Size, "capacity churn should evict by size");
+            let index: u64 = key
+                .strip_prefix("key")
+                .expect("key uses the 'keyN' format")
+                .parse()
+                .expect("N is numeric");
+            assert_eq!(*value, index, "value must match the key it was inserted with");
+        }
     }
 }

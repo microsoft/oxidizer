@@ -164,7 +164,7 @@ impl<K, V> CacheBuilder<K, V, ()> {
         if builder.eviction_telemetry_enabled() {
             let hook = Arc::new(EvictionHook::new());
             let hook_for_listener = Arc::clone(&hook);
-            builder = builder.on_eviction(move |cause| hook_for_listener.handle(cause));
+            builder = builder.on_eviction(move |_key, _value, cause| hook_for_listener.handle(cause));
             self.eviction_hook = Some(hook);
         }
         let storage = builder.build().expect("InMemoryCacheBuilder configuration must be valid");
