@@ -165,6 +165,7 @@ most commonly used types from all of them.
 |`logs`|❌|Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`][__link18] constants.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
 |`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
+|`encrypt`|❌|Enables `.encrypt(&key)` on serialized builders for authenticated (AES-256-GCM) value encryption.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -226,6 +227,33 @@ let cache = Cache::builder::<String, String>(clock)
 cache.insert("key".to_string(), "value".to_string()).await?;
 ```
 
+### Encryption Boundary
+
+With the `encrypt` feature, chain `.encrypt(&key)` after `.serialize()` to encrypt
+values with AES-256-GCM before they reach the fallback tier. Each value is
+encrypted with a fresh random nonce and cryptographically bound to its storage key;
+keys are left serialized-but-unencrypted so they remain deterministic and can be
+looked up. A stored value that fails to decrypt — corrupt, truncated, wrong key, or
+relocated to a different key — is treated as a cache miss.
+
+```rust
+use cachet::Cache;
+use tick::Clock;
+
+let clock = Clock::new_tokio();
+let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+let key = [0u8; 32]; // in production, load from a secret store
+
+let cache = Cache::builder::<String, String>(clock)
+    .memory()
+    .serialize()
+    .encrypt(&key)
+    .fallback(remote)
+    .build();
+
+cache.insert("key".to_string(), "value".to_string()).await?;
+```
+
 ## Telemetry
 
 Cachet provides two complementary telemetry channels:
@@ -280,7 +308,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb_xlIDv3a6WgboIYzdhk5tYwbm8NaNvZXwrcbhIXs0eaeycFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbpeHGvMvQaAUbsC2g92vE_lobpJAjv-3H748bHP2lxkL3o0xhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.8.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

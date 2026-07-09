@@ -42,15 +42,18 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
+encrypt = ["dep:aes-gcm", "dep:getrandom", "dep:bytesbuf"]
 telemetry = []
 
 [dependencies]
+aes-gcm = { workspace = true, optional = true }
 anyspawn = { workspace = true, features = ["tokio"] }
 bytesbuf = { workspace = true, optional = true }
 cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
+getrandom = { workspace = true, optional = true }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true }

@@ -91,6 +91,7 @@ tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
 
 # external dependencies
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
 ahash = { version = "0.8.4", default-features = false }
 alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
@@ -122,6 +123,7 @@ futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
 futures-util = { version = "0.3.31", default-features = false }
+getrandom = { version = "0.3.4", default-features = false, features = ["std"] }
 gungraun = { version = "0.19.2", default-features = false }
 hashbrown = { version = "0.17.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }

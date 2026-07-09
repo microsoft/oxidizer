@@ -154,6 +154,7 @@
 //! | `logs` | ❌ | Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`] constants. |
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
 //! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
+//! | `encrypt` | ❌ | Enables `.encrypt(&key)` on serialized builders for authenticated (AES-256-GCM) value encryption. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -223,6 +224,36 @@
 //! # };
 //! ```
 //!
+//! ## Encryption Boundary
+//!
+//! With the `encrypt` feature, chain `.encrypt(&key)` after `.serialize()` to encrypt
+//! values with AES-256-GCM before they reach the fallback tier. Each value is
+//! encrypted with a fresh random nonce and cryptographically bound to its storage key;
+//! keys are left serialized-but-unencrypted so they remain deterministic and can be
+//! looked up. A stored value that fails to decrypt — corrupt, truncated, wrong key, or
+//! relocated to a different key — is treated as a cache miss.
+//!
+//! ```ignore
+//! use cachet::Cache;
+//! use tick::Clock;
+//! # async {
+//!
+//! let clock = Clock::new_tokio();
+//! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+//! let key = [0u8; 32]; // in production, load from a secret store
+//!
+//! let cache = Cache::builder::<String, String>(clock)
+//!     .memory()
+//!     .serialize()
+//!     .encrypt(&key)
+//!     .fallback(remote)
+//!     .build();
+//!
+//! cache.insert("key".to_string(), "value".to_string()).await?;
+//! # Ok::<(), cachet::Error>(())
+//! # };
+//! ```
+//!
 //! # Telemetry
 //!
 //! Cachet provides two complementary telemetry channels:
@@ -284,6 +315,9 @@ pub mod telemetry;
 mod transform;
 mod wrapper;
 
+#[cfg(feature = "encrypt")]
+#[doc(inline)]
+pub use builder::EncryptedTransformBuilder;
 #[doc(inline)]
 pub use builder::{CacheBuilder, CacheTierBuilder, FallbackBuilder, TransformBuilder};
 #[doc(inline)]

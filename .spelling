@@ -11,6 +11,8 @@
 5xx
 =
 >=
+AAD
+AEAD
 ABA
 ABI
 ACLs
@@ -250,6 +252,7 @@ chainable
 chrono
 chunked
 chunkless
+ciphertext
 clippt
 clippy
 clonable
@@ -273,6 +276,7 @@ covariant
 coverage.json
 crates.io
 crypto
+cryptographically
 customizable
 cutover
 dSMS
@@ -285,6 +289,8 @@ dec
 decrement
 decrementer
 decrementers
+decrypt
+decrypts
 deduplicating
 deduplication
 deps
@@ -334,6 +340,7 @@ freelist
 freezable
 frontend
 fundle
+GCM
 gRPC
 getter
 getters
@@ -443,6 +450,8 @@ passthrough
 performant
 pessimizes
 pointee
+plaintext
+pluggable
 polyfill
 pre-approved
 pre-generate
