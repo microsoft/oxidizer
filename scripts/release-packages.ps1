@@ -200,4 +200,14 @@ $mode = switch ($PSCmdlet.ParameterSetName) {
     'All'        { 'all' }
 }
 
-Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null
+# Invoke-ReleasePackagesMain surfaces all validation / pre-flight / execution
+# failures as terminating errors (throw) so it stays testable in-process. This
+# thin CLI shell is the only layer that turns a failure into a process exit
+# code, preserving the historical `exit 1`-on-error contract for command-line
+# and CI callers.
+try {
+    Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}

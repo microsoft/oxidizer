@@ -11,6 +11,11 @@
 
     Run = @{
         Mode    = 'all'
+        # a and b re-export c's public types, so when c lands a breaking change
+        # their own APIs break too — cargo-semver-checks classifies both as
+        # breaking. This is what makes the cascade mirror c's breaking onto
+        # them (and, being at the breaking ceiling, suppresses their prompts).
+        SemverVerdicts = @{ a = 'breaking'; b = 'breaking' }
         Answers = @(
             # Initial queue (no tokens, all roots): b, c, a (see S22 comment
             # for the BFS-root expansion that produces this order).
