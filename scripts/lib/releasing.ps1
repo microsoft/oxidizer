@@ -443,7 +443,8 @@ function Get-CrateRequiredChangeType {
     param(
         [Parameter(Mandatory = $true)][string]$Folder,
         [Parameter(Mandatory = $true)][string]$CargoName,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$Registry = 'crates-io'
     )
 
     if ($null -eq $script:CrateSemverVerdictCache) { $script:CrateSemverVerdictCache = @{} }
@@ -451,8 +452,8 @@ function Get-CrateRequiredChangeType {
         return $script:CrateSemverVerdictCache[$CargoName]
     }
 
-    Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its last published version..." -ForegroundColor Cyan
-    $result = Invoke-CrateSemverCheck -PackageName $CargoName -RepoRoot $RepoRoot
+    Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its last published version on '$Registry'..." -ForegroundColor Cyan
+    $result = Invoke-CrateSemverCheck -PackageName $CargoName -RepoRoot $RepoRoot -Registry $Registry
     $script:CrateSemverVerdictCache[$CargoName] = $result
     return $result
 }
@@ -494,11 +495,67 @@ function Get-WorkspacePackages {
     return $packages
 }
 
-# Runs `cargo semver-checks` for a single crate against its last published version
-# (the crates.io / registry baseline — cargo-semver-checks' default when no
-# --baseline-* flag is passed) and returns the minimum change type the current
-# working-tree API requires: 'breaking', 'non-breaking', 'patch', or 'none' when
-# the crate has never been published (no baseline to compare against).
+# Extracts the published version from `cargo info` output. Pure (no I/O) so it can
+# be unit-tested against captured tool output. `cargo info` prints a line like
+# "version: 1.2.3" (optionally with a trailing " (yanked)" note we ignore); this
+# returns the version string, or $null when no such line is present (the crate has
+# never been published on the queried registry).
+#
+# NOTE (documented limitation): the returned version is the last *published* one.
+# If a prior version was committed but never published (e.g. an aborted release),
+# the API delta introduced by that unpublished version is folded into the diff
+# against the older published baseline and cannot be isolated. The workaround is a
+# manual explicit-version pin. This is intentional — see docs/releasing.md.
+function ConvertFrom-CargoInfoOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output
+    )
+
+    $m = [regex]::Match($Output, '(?im)^\s*version:\s*([^\s(]+)')
+    if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    return $null
+}
+
+# Looks up the latest version of a crate as published on the given registry, using
+# `cargo info <crate> --registry <registry>`. The command is run in a throwaway
+# temp directory OUTSIDE the workspace: run inside the workspace, cargo resolves
+# the name to the local path package and reports the working-tree version instead
+# of the published one. Returns the version string, or $null when the crate has
+# never been published (no registry entry). Registry defaults to 'crates-io' but
+# can be pointed at a private registry (e.g. an enterprise mirror) so the baseline
+# comes from the same source the crate is actually published to.
+function Get-PublishedCrateVersion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CargoName,
+        [string]$Registry = 'crates-io'
+    )
+
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("semver-baseline-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+    try {
+        Push-Location $scratch
+        try {
+            $PSNativeCommandUseErrorActionPreference = $false
+            $output = & cargo info $CargoName --registry $Registry 2>&1 | Out-String
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    return ConvertFrom-CargoInfoOutput -Output $output
+}
+
+# Runs `cargo semver-checks` for a single crate against its last published version.
+# The baseline version is discovered via `cargo info --registry <Registry>` (see
+# Get-PublishedCrateVersion) and pinned with `--baseline-version`, so the comparison
+# source is the registry the crate is actually published to rather than
+# cargo-semver-checks' hard-coded crates.io default. Returns the minimum change type
+# the current working-tree API requires: 'breaking', 'non-breaking', 'patch', or
+# 'none' when the crate has never been published (no baseline to compare against).
 #
 # The current API is analysed from the working tree, so a coordinated release's
 # in-progress source edits (including a dependency whose public types this crate
@@ -508,15 +565,23 @@ function Invoke-CrateSemverCheck {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$PackageName,
-        [Parameter(Mandatory = $true)][string]$RepoRoot
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$Registry = 'crates-io'
     )
+
+    # Discover the baseline from the registry. No published version => brand-new
+    # crate: nothing to compare against, so it imposes no change-type floor.
+    $baselineVersion = Get-PublishedCrateVersion -CargoName $PackageName -Registry $Registry
+    if ([string]::IsNullOrWhiteSpace($baselineVersion)) {
+        return 'none'
+    }
 
     Push-Location $RepoRoot
     try {
         # Manage the exit code manually; cargo-semver-checks exits non-zero when a
         # bump is required, which is expected and not an error for our purposes.
         $PSNativeCommandUseErrorActionPreference = $false
-        $output = & cargo semver-checks --package $PackageName --all-features --color never 2>&1 | Out-String
+        $output = & cargo semver-checks --package $PackageName --baseline-version $baselineVersion --all-features --color never 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     } finally {
         Pop-Location

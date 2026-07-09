@@ -224,11 +224,12 @@ jobs:
           cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
       # Compute the publishing set (version-bumped published crates), run
-      # cargo-semver-checks per crate against its crates.io baseline, and render
+      # cargo-semver-checks per crate against its last published version on the
+      # configured registry (SEMVER_REGISTRY, crates.io by default), and render
       # a Markdown report (scripts/ci/semver-report.ps1 — reuses the release
       # library's version-diff / next-version helpers). Sets outputs:
       #   publishing = true|false   (any crate version bumped)
-      #   status     = pass|fail    (any crate under-bumped for its API changes)
+      #   status     = pass|fail    (any crate under-incremented for its API changes)
       # Kept non-failing so registry/network hiccups never block the PR.
       - name: Semver Report
         id: report
@@ -237,10 +238,13 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Registry the baseline version is read from. Override in a fork that
+          # publishes to a private registry (name as in .cargo/config.toml).
+          SEMVER_REGISTRY: crates-io
         run: |
           $ErrorActionPreference = 'Stop'
           git fetch --no-tags origin "+refs/heads/$env:BASE_REF`:refs/remotes/origin/$env:BASE_REF"
-          ./scripts/ci/semver-report.ps1 -BaseRef "origin/$env:BASE_REF" -ReportPath semver-comment.md -RunUrl "$env:RUN_URL"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/$env:BASE_REF" -ReportPath semver-comment.md -RunUrl "$env:RUN_URL" -Registry "$env:SEMVER_REGISTRY"
 
       # Post a NEW comment on every push (not a sticky update) so each run's
       # result is visible in the PR timeline. Only fires when the PR actually

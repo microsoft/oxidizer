@@ -207,34 +207,55 @@ published dependent as a cascade-source release. The change type for
 every release in the plan — both the directly-requested (user-source)
 crates and the cascade-pulled dependents — is derived by running
 [`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
-against each crate's **last published version on crates.io** (the tool's
-default baseline). The current working-tree API is analysed, so a
-coordinated release's in-progress edits — including a dependency whose
-public types a dependent re-exports — are reflected in the dependent's
-own API diff. This replaces the former
-`[package.metadata.cargo_check_external_types]` allowlist heuristic,
-which could misfire when the allowlist drifted from the real public API
-(see the bug that motivated this change: a breaking change in an exposed
-dependency was cascaded as `patch` instead of `breaking`).
+against each crate's **last published version in the registry** (looked
+up with `cargo info`, so it works against crates.io or a private
+registry). The current working-tree API is analysed, so a coordinated
+release's in-progress edits — including a dependency whose public types
+a dependent re-exports — are reflected in the dependent's own API diff.
 
-Mapping from `cargo semver-checks` verdicts to change types:
+This replaces the former
+`[package.metadata.cargo_check_external_types]` allowlist heuristic. That
+allowlist is a hand-maintained list of the external types a crate is
+*permitted* to expose; it was repurposed as a proxy for the types a
+crate *actually* re-exports. When the two drift apart — an entry missing
+or stale — the heuristic misjudged whether a dependent re-exports a
+changed dependency, so a breaking change in an exposed dependency could
+be cascaded as `patch` instead of `breaking` (the motivating defect: a
+breaking change in `bytesbuf` was not propagated to `bytesbuf_io`, which
+re-exports `bytesbuf` types). Analysing the real API with
+`cargo semver-checks` removes the proxy entirely.
 
-- major API change required → `breaking`
-- minor API change required → `non-breaking`
-- compatible / no update required → `patch`
-- crate not yet on crates.io (never published) → no constraint
+**How the change type is determined.** `cargo semver-checks` is invoked
+as a CLI (not as a library) and its textual result is parsed into one of
+our change types. The mapping mirrors the tool's own
+[`required_bump`](https://docs.rs/cargo-semver-checks/latest/cargo_semver_checks/struct.CrateReport.html#method.required_bump)
+notion (major / minor / none); the exact parsing lives in
+`ConvertFrom-SemverChecksOutput` (`scripts/lib/releasing.ps1`):
+
+| `cargo semver-checks` result | change type |
+|---|---|
+| a major-level change is required | `breaking` |
+| only a minor-level change is required | `non-breaking` |
+| compatible / no update required | `patch` |
+| crate not yet in the registry (never published) | no constraint |
 
 Cascade dependents are floored at `patch` (they must re-release to pick
 up the new dependency version even when their own public API is
 unchanged), then raised to whatever their own `cargo semver-checks`
-verdict requires.
+result requires.
 
-> **cargo-semver-checks is a hard dependency of the release scripts.**
-> Install the version pinned in `constants.env`
-> (`CARGO_SEMVER_CHECKS_VERSION`) with
-> `cargo install cargo-semver-checks --version <pinned> --locked`. There
-> is no heuristic fallback — the script errors out if the tool is
-> missing or the crate cannot be analysed.
+**Baseline limitation.** The baseline is always the crate's *last
+published* version on the registry. If a version was committed but never
+published — for example an aborted release that bumped `bytesbuf` to
+`4.0.0` without it reaching the registry — the registry still reports the
+older `3.3.3`, so `cargo semver-checks` diffs the working tree against
+`3.3.3` and cannot isolate the API delta introduced by the unpublished
+`4.0.0`. This is intentional: the tool trusts the registry as the source
+of truth for "what consumers actually have". When you need to release on
+top of an unpublished version, pin the target explicitly with a
+`<name>@<major>.<minor>.<patch>` token (and `-Force` if the pin is below
+what the diff-against-`3.3.3` computes) instead of relying on the
+automatic classification.
 
 The planner enforces **topological consistency**: if a user-supplied
 change type for a package is *weaker* than `cargo semver-checks`
@@ -242,7 +263,7 @@ requires (for that package or via a cascade), the planner auto-upgrades
 it and notes the upgrade in the review output. The caller's `-Packages`
 token is therefore a *lower bound*, not a guarantee — the caller can
 always elevate further on the next iteration of the review, but cannot
-suppress a semver-imposed change type.
+suppress a change type the API analysis requires.
 
 ### Errors the planner rejects
 

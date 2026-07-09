@@ -6,32 +6,35 @@
 <#
 .SYNOPSIS
     Runs cargo-semver-checks for each crate a PR is publishing and renders a
-    rich, per-crate Markdown report comparing the on-disk bump against the
-    minimum bump the crate's API changes require versus its crates.io baseline.
+    rich, per-crate Markdown report comparing the on-disk version increment
+    against the minimum increment the crate's API changes require versus its
+    last published version.
 
 .DESCRIPTION
     For every crate whose `[package] version` differs from the PR base ref (the
     "publishing set"), this script:
 
       1. reads the on-disk (this-PR) version,
-      2. runs `cargo semver-checks --package <crate>` against the crate's last
-         published crates.io release (the tool's default baseline),
-      3. parses the baseline version and the required change type from the
-         output, and
-      4. computes the *minimum* version the bump should reach given the detected
-         API changes.
+      2. discovers the crate's last published version with
+         `cargo info <crate> --registry <Registry>` (crates.io by default),
+      3. runs `cargo semver-checks --package <crate> --baseline-version <that>`
+         so the comparison source is the registry the crate is actually
+         published to,
+      4. parses the required change type from the output, and
+      5. computes the *minimum* version the increment should reach given the
+         detected API changes.
 
     It writes a Markdown report to -ReportPath containing:
-      - a summary status line (🛑 when at least one crate is under-bumped,
-        ✅ when every publishing crate is sufficiently bumped),
-      - a table: Crate | crates.io | This PR | Minimum required | Status,
-      - collapsible per-crate `cargo semver-checks` detail for under-bumped
+      - a summary status line (🛑 when at least one crate is under-incremented,
+        ✅ when every publishing crate is sufficiently incremented),
+      - a table: Crate | Published | This PR | Minimum required | Status,
+      - collapsible per-crate `cargo semver-checks` detail for under-incremented
         crates, and
       - a link to the triggering Actions run.
 
     Two GitHub Actions step outputs are written to -GitHubOutput:
       publishing = 'true' | 'false'
-      status     = 'pass' | 'fail'   (fail = at least one crate under-bumped)
+      status     = 'pass' | 'fail'   (fail = at least one crate under-incremented)
 
     The report is informational: callers keep the job non-failing.
 
@@ -47,6 +50,11 @@
 .PARAMETER RepoRoot
     Repository root. Defaults to the current directory.
 
+.PARAMETER Registry
+    Registry whose last published version is used as the semver-checks baseline.
+    Defaults to 'crates-io'. Override with a private registry name (as configured
+    in `.cargo/config.toml`) when the crates are published elsewhere.
+
 .PARAMETER GitHubOutput
     Path to the GitHub Actions step-output file. Defaults to $env:GITHUB_OUTPUT.
 #>
@@ -56,6 +64,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ReportPath,
     [string]$RunUrl = '',
     [string]$RepoRoot = (Get-Location).Path,
+    [string]$Registry = 'crates-io',
     [string]$GitHubOutput = $env:GITHUB_OUTPUT
 )
 
@@ -83,9 +92,9 @@ if ($changedFolders.Count -eq 0) {
 }
 
 # --- 2. Run cargo-semver-checks per crate and gather results. -----------------
-# A row per crate: cargo name, on-disk (this-PR) version, crates.io baseline,
+# A row per crate: cargo name, on-disk (this-PR) version, published baseline,
 # the parsed required change type, the computed minimum version, and the raw
-# tool detail (for under-bumped crates).
+# tool detail (for under-incremented crates).
 $rows = New-Object System.Collections.Generic.List[object]
 
 Push-Location $RepoRoot
@@ -97,29 +106,43 @@ try {
         $cargoName    = $pkg.Name
         $onDisk       = Get-CurrentVersion -cargoTomlPath (Join-Path $RepoRoot "crates/$folder/Cargo.toml")
 
-        Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs crates.io..."
+        # Discover the baseline from the registry (crates.io by default, or a
+        # private registry via -Registry) using `cargo info`, run outside the
+        # workspace so it reports the published version, not the local one.
+        $baselineVersion = Get-PublishedCrateVersion -CargoName $cargoName -Registry $Registry
+
+        if ([string]::IsNullOrWhiteSpace($baselineVersion)) {
+            # Never published on this registry: no baseline to compare against,
+            # so nothing to enforce. Skip the (slow) semver-checks run.
+            Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — not published on '$Registry', skipping."
+            $rows.Add([pscustomobject]@{
+                Crate       = $cargoName
+                Baseline    = '—'
+                OnDisk      = $onDisk
+                Required    = $onDisk
+                Sufficient  = $true
+                ChangeType  = 'none'
+                Detail      = ''
+            })
+            continue
+        }
+
+        Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs $Registry v$baselineVersion..."
         $PSNativeCommandUseErrorActionPreference = $false
-        $out = & cargo semver-checks --package $cargoName --all-features --color never 2>&1 | Out-String
+        $out = & cargo semver-checks --package $cargoName --baseline-version $baselineVersion --all-features --color never 2>&1 | Out-String
 
         $changeType = ConvertFrom-SemverChecksOutput -Output $out -ExitCode $LASTEXITCODE -PackageName $cargoName
 
-        # Baseline version cargo-semver-checks pulled from the registry, parsed
-        # from a "Checking <name> v<baseline> -> v<current>" line. Absent for a
-        # never-published crate (changeType 'none').
-        $baseline = '—'
-        $m = [regex]::Match($out, "(?im)^\s*Checking\s+\S+\s+v(\d+\.\d+\.\d+\S*)\s*->")
-        if ($m.Success) { $baseline = $m.Groups[1].Value }
-
         # A 'breaking'/'non-breaking' verdict means the detected API changes need
-        # a stronger bump than the on-disk version gives over the baseline; the
-        # minimum acceptable version is baseline bumped by that change type.
-        # 'patch' means the on-disk bump already covers the changes; 'none' means
-        # the crate is new (no baseline to violate).
+        # a stronger increment than the on-disk version gives over the baseline;
+        # the minimum acceptable version is the baseline incremented by that
+        # change type. 'patch' means the on-disk version already covers the
+        # changes; 'none' means the crate is new (no baseline to violate).
         $sufficient = $changeType -in @('patch', 'none')
         if ($sufficient) {
             $required = $onDisk
         } else {
-            $required = Get-NextVersion -currentVersion $baseline -ChangeType $changeType
+            $required = Get-NextVersion -currentVersion $baselineVersion -ChangeType $changeType
         }
 
         # Extract just the failure blocks for the collapsible detail.
@@ -130,7 +153,7 @@ try {
 
         $rows.Add([pscustomobject]@{
             Crate       = $cargoName
-            Baseline    = $baseline
+            Baseline    = $baselineVersion
             OnDisk      = $onDisk
             Required    = $required
             Sufficient  = $sufficient
@@ -149,23 +172,23 @@ $overallFail = $underBumped.Count -gt 0
 $bt = [char]0x60   # backtick, kept in a variable to avoid PowerShell escaping.
 $sb = New-Object System.Text.StringBuilder
 if ($overallFail) {
-    [void]$sb.AppendLine('## 🛑 Semver: version bump required')
+    [void]$sb.AppendLine('## 🛑 Additional version increments required')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest **crates.io** release. **$($underBumped.Count) of $($rows.Count)** need a higher version bump than the one on disk:")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($underBumped.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
 } else {
-    [void]$sb.AppendLine('## ✅ Semver: version bumps look sufficient')
+    [void]$sb.AppendLine('## ✅ Version increments look sufficient')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the **$($rows.Count)** crate(s) this PR publishes against their latest **crates.io** release. Every bump is sufficient for the detected API changes.")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the **$($rows.Count)** crate(s) this PR publishes against their latest published release. Every version increment is sufficient for the detected API changes.")
 }
 [void]$sb.AppendLine()
-[void]$sb.AppendLine('| Crate | crates.io | This PR | Minimum required | Status |')
+[void]$sb.AppendLine('| Crate | Published | This PR | Minimum required | Status |')
 [void]$sb.AppendLine('|---|---|---|---|---|')
 foreach ($r in $rows) {
     if ($r.Sufficient) {
         $status = '✅ ok'
         $req    = $r.Required
     } else {
-        $status = "🛑 bump to at least ${bt}$($r.Required)${bt}"
+        $status = "🛑 increase to at least ${bt}$($r.Required)${bt}"
         $req    = "**$($r.Required)**"
     }
     [void]$sb.AppendLine("| ${bt}$($r.Crate)${bt} | $($r.Baseline) | $($r.OnDisk) | $req | $status |")
@@ -183,14 +206,14 @@ if ($overallFail) {
         [void]$sb.AppendLine('</details>')
         [void]$sb.AppendLine()
     }
-    [void]$sb.AppendLine('> If these breaking changes are intentional, bump each crate to at least its **Minimum required** version. This check is **informational and does not block the merge**.')
+    [void]$sb.AppendLine('> If these breaking changes are intentional, increase each crate to at least its **Minimum required** version. This check is **informational and does not block the merge**.')
 } else {
     [void]$sb.AppendLine('> This check is informational and does not block the merge.')
 }
 
 if (-not [string]::IsNullOrEmpty($RunUrl)) {
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("[View the semver check run]($RunUrl)")
+    [void]$sb.AppendLine("[View the check run]($RunUrl)")
 }
 
 Set-Content -Path $ReportPath -Value $sb.ToString() -Encoding utf8
