@@ -39,6 +39,12 @@ Describe 'End-to-end release scenarios' {
         # tests run under CI / pwsh non-tty.
         Mock -CommandName Test-InteractiveSession -MockWith { $true } -Verifiable:$false
 
+        # The entry point's pre-flight asserts git and cargo-semver-checks are on
+        # PATH. Scenarios mock the classifier (Get-CrateRequiredChangeType) so the
+        # real cargo-semver-checks binary is never invoked and need not be
+        # installed on the runner — satisfy the presence check via mock.
+        Mock -CommandName Test-CommandExists -MockWith { $true } -Verifiable:$false
+
         # Suppress real editor launches when scenarios exercise the View Diff path.
         Mock -CommandName Open-PathWithPreferredEditor -MockWith { } -Verifiable:$false
 
