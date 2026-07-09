@@ -192,9 +192,7 @@ mod tests {
     use bytes::Bytes;
     use fetch_options::{ConnectionLifetime, PoolIndex, RequestFilter};
     use http::Version;
-    use http_body_util::BodyExt as _;
     use http_extensions::{HttpBodyBuilder, HttpRequestBuilder};
-    use layered::Service as _;
 
     use super::*;
     use crate::HyperTransport;

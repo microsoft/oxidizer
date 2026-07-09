@@ -211,6 +211,15 @@ unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_lifetimes = "warn"
 
+# Coverage builds (`cargo llvm-cov nextest`) compile the non-test library of
+# leaf crates whose `coverage(off)` attributes are all gated behind cargo
+# features or `cfg(test)`. In feature/target combinations where none of those
+# attributes are compiled, the crate-level `#![feature(coverage_attribute)]`
+# gate (enabled by the `coverage_nightly` cfg) is technically unused. That is a
+# benign artifact of instrumentation, not a real problem, so allow it rather
+# than encoding brittle per-crate feature conditions on every coverage gate.
+unused_features = "allow"
+
 # Allow our special-purpose nonstandard cfg attributes.
 # - coverage / coverage_nightly: set by cargo-llvm-cov to enable nightly coverage attributes.
 # - loom: set via RUSTFLAGS to swap in the loom model-checker for atomics in select crates.
