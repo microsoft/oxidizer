@@ -406,6 +406,26 @@ mod tests {
         let pq = PathAndQuery::from_template(FixedTemplate);
         assert_eq!(pq.render_capacity_hint(), 42);
     }
+
+    #[test]
+    fn fixed_template_remaining_methods() {
+        // Exercise the `FixedTemplate` helper's other `PathAndQueryTemplate` / `RedactedDisplay`
+        // methods (not touched by the `render_into` / `render_capacity_hint` tests above) so the
+        // helper is fully covered and cannot silently rot.
+        use data_privacy::{RedactedToString, RedactionEngine};
+
+        let template = FixedTemplate;
+        assert_eq!(template.render(), "/fixed/template");
+        assert_eq!(template.template(), "/fixed/template");
+        assert_eq!(template.format_template(), "/fixed/template");
+        assert_eq!(template.label(), None);
+        assert_eq!(template.to_path_and_query().expect("valid path").as_str(), "/fixed/template");
+        assert_eq!(format!("{template:?}"), "FixedTemplate");
+
+        // Drives the `RedactedDisplay` impl.
+        let engine = RedactionEngine::builder().build();
+        assert_eq!(template.to_redacted_string(&engine), "/fixed/template");
+    }
 }
 
 #[cfg(all(test, feature = "serde"))]
