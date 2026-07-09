@@ -353,6 +353,41 @@ Describe 'ConvertFrom-CargoInfoOutput' {
     }
 }
 
+Describe 'Test-CargoInfoCrateMissing' {
+    It 'matches "could not find <crate> in registry"' {
+        Test-CargoInfoCrateMissing -Output 'error: could not find `foo` in registry `crates-io`' | Should -BeTrue
+    }
+    It 'matches "not found in registry"' {
+        Test-CargoInfoCrateMissing -Output 'error: crate foo not found in the registry' | Should -BeTrue
+    }
+    It 'matches "no matching versions"' {
+        Test-CargoInfoCrateMissing -Output 'error: no matching versions for `foo`' | Should -BeTrue
+    }
+    It 'does NOT match a transient/config failure (so it will throw, not skip)' {
+        # A network timeout or reserved-name rejection must not be mistaken for
+        # an unpublished crate — that would silently skip the semver floor.
+        Test-CargoInfoCrateMissing -Output 'error: failed to query registry: operation timed out' | Should -BeFalse
+        Test-CargoInfoCrateMissing -Output 'error: crates-io is replaced with remote registry Foo' | Should -BeFalse
+    }
+    It 'does NOT match empty output' {
+        Test-CargoInfoCrateMissing -Output '' | Should -BeFalse
+    }
+}
+
+Describe 'Get-CargoInfoReplacementRegistry' {
+    It 'extracts the replacement registry name from a source-replacement error' {
+        Get-CargoInfoReplacementRegistry -Output 'error: crates-io is replaced with remote registry OxidizerDependencies;' |
+            Should -Be 'OxidizerDependencies'
+    }
+    It 'handles the "remote registry" phrasing without a trailing punctuation' {
+        Get-CargoInfoReplacementRegistry -Output 'crates-io is replaced with remote registry MyMirror' |
+            Should -Be 'MyMirror'
+    }
+    It 'returns $null when there is no replacement message' {
+        Get-CargoInfoReplacementRegistry -Output 'version: 1.2.3' | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-StrongerChangeType' {
     It 'returns the higher-ranked change type' {
         Get-StrongerChangeType 'patch' 'breaking'     | Should -Be 'breaking'

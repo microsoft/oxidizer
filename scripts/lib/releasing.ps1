@@ -498,8 +498,7 @@ function Get-WorkspacePackages {
 # Extracts the published version from `cargo info` output. Pure (no I/O) so it can
 # be unit-tested against captured tool output. `cargo info` prints a line like
 # "version: 1.2.3" (optionally with a trailing " (yanked)" note we ignore); this
-# returns the version string, or $null when no such line is present (the crate has
-# never been published on the queried registry).
+# returns the version string, or $null when no such line is present.
 #
 # NOTE (documented limitation): the returned version is the last *published* one.
 # If a prior version was committed but never published (e.g. an aborted release),
@@ -517,14 +516,53 @@ function ConvertFrom-CargoInfoOutput {
     return $null
 }
 
-# Looks up the latest version of a crate as published on the given registry, using
-# `cargo info <crate> --registry <registry>`. The command is run in a throwaway
-# temp directory OUTSIDE the workspace: run inside the workspace, cargo resolves
-# the name to the local path package and reports the working-tree version instead
-# of the published one. Returns the version string, or $null when the crate has
-# never been published (no registry entry). Registry defaults to 'crates-io' but
-# can be pointed at a private registry (e.g. an enterprise mirror) so the baseline
-# comes from the same source the crate is actually published to.
+# Pure predicate: does `cargo info` output specifically indicate the crate is
+# absent from the registry (never published)? This is deliberately narrow — the
+# same "no version" outcome can arise from a transient/config failure, which must
+# NOT be treated as "unpublished" (that would silently skip the semver floor).
+function Test-CargoInfoCrateMissing {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output)
+
+    return [bool](
+        $Output -match '(?i)could not find\s+`?[\w-]+`?\s+in registry' -or
+        $Output -match '(?i)not found in\s+(the\s+)?registry' -or
+        $Output -match '(?i)no\s+(released|published|matching)\s+versions?'
+    )
+}
+
+# Pure helper: when crates.io is source-replaced in .cargo/config (common on
+# enterprise dev boxes), `cargo info` without an explicit --registry refuses and
+# names the replacement, e.g. "crates-io is replaced with remote registry Foo".
+# Returns that replacement registry name so the lookup can be retried against it,
+# or $null when no such message is present.
+function Get-CargoInfoReplacementRegistry {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output)
+
+    $m = [regex]::Match($Output, '(?i)replaced with (?:remote )?registry\s+([^\s;,]+)')
+    if ($m.Success) { return $m.Groups[1].Value.Trim() }
+    return $null
+}
+
+# Looks up the latest version of a crate as published on the given registry with
+# `cargo info`, run in a throwaway temp directory OUTSIDE the workspace (run inside
+# the workspace, cargo resolves the name to the local path package and reports the
+# working-tree version instead of the published one).
+#
+# Registry defaults to 'crates-io', which uses cargo's DEFAULT source with no
+# --registry flag: cargo reserves the name "crates-io" and rejects it as an
+# explicit --registry value, so passing it fails in a vanilla environment. A
+# non-default Registry value is passed through as --registry <name> to target a
+# private registry (e.g. an enterprise mirror). If crates.io is source-replaced
+# locally, the refusal is detected and the lookup retried against the named
+# replacement.
+#
+# Returns the version string; $null ONLY when cargo info specifically reports the
+# crate is not in the registry (a brand-new, never-published crate — no baseline).
+# Any other failure to determine the version throws rather than silently returning
+# $null, so a transient/config error cannot be mistaken for "unpublished" and
+# quietly skip the semver floor.
 function Get-PublishedCrateVersion {
     [CmdletBinding()]
     param(
@@ -532,21 +570,48 @@ function Get-PublishedCrateVersion {
         [string]$Registry = 'crates-io'
     )
 
-    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("semver-baseline-" + [System.Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $scratch -Force | Out-Null
-    try {
-        Push-Location $scratch
+    $runCargoInfo = {
+        param([string[]]$InfoArgs)
+        $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("semver-baseline-" + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
         try {
-            $PSNativeCommandUseErrorActionPreference = $false
-            $output = & cargo info $CargoName --registry $Registry 2>&1 | Out-String
+            Push-Location $scratch
+            try {
+                $PSNativeCommandUseErrorActionPreference = $false
+                $out  = & cargo @InfoArgs 2>&1 | Out-String
+                $code = $LASTEXITCODE
+            } finally {
+                Pop-Location
+            }
         } finally {
-            Pop-Location
+            Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue
         }
-    } finally {
-        Remove-Item $scratch -Recurse -Force -ErrorAction SilentlyContinue
+        return [pscustomobject]@{ Output = $out; ExitCode = $code }
     }
 
-    return ConvertFrom-CargoInfoOutput -Output $output
+    if ($Registry -and $Registry -ne 'crates-io') {
+        $result = & $runCargoInfo @('info', $CargoName, '--registry', $Registry)
+    } else {
+        # Default crates.io source — no --registry flag (see note above).
+        $result = & $runCargoInfo @('info', $CargoName)
+
+        # Source-replaced dev box: retry against the named replacement registry.
+        if ($result.ExitCode -ne 0) {
+            $replacement = Get-CargoInfoReplacementRegistry -Output $result.Output
+            if ($replacement) {
+                $result = & $runCargoInfo @('info', $CargoName, '--registry', $replacement)
+            }
+        }
+    }
+
+    $version = ConvertFrom-CargoInfoOutput -Output $result.Output
+    if ($version) { return $version }
+
+    if (Test-CargoInfoCrateMissing -Output $result.Output) {
+        return $null
+    }
+
+    throw "Could not determine the last published version of '$CargoName' on registry '$Registry' (cargo info exit $($result.ExitCode)). This usually means cargo info failed, the registry is unreachable, or the output format was unexpected — it is NOT treated as 'unpublished' to avoid silently skipping the semver check. Output:`n$($result.Output)"
 }
 
 # Runs `cargo semver-checks` for a single crate against its last published version.
