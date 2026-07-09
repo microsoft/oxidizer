@@ -167,3 +167,12 @@ pub use pool::Pool;
 pub use rc::Rc;
 #[doc(inline)]
 pub use sync::Arc;
+
+/// The semantic version of this crate at build time, as a string.
+///
+/// A small, dependency-free convenience for callers that want to log or report
+/// which `plurality` release they are linked against.
+#[must_use]
+pub const fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
