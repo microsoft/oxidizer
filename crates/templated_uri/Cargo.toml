@@ -88,6 +88,22 @@ harness = false
 name = "hot_path_cg"
 harness = false
 
+[[bench]]
+name = "routing_rerender"
+harness = false
+
+[[bench]]
+name = "routing_rerender_cg"
+harness = false
+
+[[bench]]
+name = "escaped_string"
+harness = false
+
+[[bench]]
+name = "escaped_string_cg"
+harness = false
+
 [[example]]
 name = "classified_templating"
 path = "examples/classified_templating.rs"
