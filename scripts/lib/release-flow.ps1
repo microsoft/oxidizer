@@ -2018,8 +2018,11 @@ function Show-FinalMessageForBundle {
 #     accepts every published package as eligible.
 #
 # Returns the array of release records (so Pester scenarios can assert on
-# them). Errors during input validation / pre-flight checks call Exit 1 to
-# match the existing script CLI contract.
+# them). Input-validation / pre-flight / execution errors are surfaced as
+# terminating errors (throw) so callers can catch them. The thin CLI shell
+# (release-packages.ps1) converts a throw into `exit 1`; test harnesses catch
+# the exception directly. This keeps the entry point testable in-process — a
+# bare `Exit` would tear down the whole test runspace.
 function Invoke-ReleasePackagesMain {
     [CmdletBinding()]
     param(
@@ -2038,27 +2041,23 @@ function Invoke-ReleasePackagesMain {
 
     # 1. PRE-FLIGHT
     if (-not (Test-CommandExists -command 'git')) {
-        Write-Error 'Git is not installed or not found in your PATH.'
-        Exit 1
+        throw 'Git is not installed or not found in your PATH.'
     }
 
     # cargo-semver-checks decides every change type in the plan (against each
     # crate's last published version). It is a hard dependency — there is no
     # heuristic fallback — so fail fast with an actionable message if missing.
     if (-not (Test-CommandExists -command 'cargo-semver-checks')) {
-        Write-Error "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their last published versions."
-        Exit 1
+        throw "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their last published versions."
     }
 
     $repoRoot = Get-Location
     if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
-        Write-Error 'This script must be run from the root of a Git repository.'
-        Exit 1
+        throw 'This script must be run from the root of a Git repository.'
     }
     $rootCargoToml = Join-Path $repoRoot 'Cargo.toml'
     if (-not (Test-Path $rootCargoToml)) {
-        Write-Error "Could not find root Cargo.toml at '$rootCargoToml'."
-        Exit 1
+        throw "Could not find root Cargo.toml at '$rootCargoToml'."
     }
 
     # Every mode is interactive: the elevation review can prompt even in
@@ -2066,31 +2065,22 @@ function Invoke-ReleasePackagesMain {
     # dependencies. Bail out early with a clear error if stdin is not a
     # terminal, rather than failing deep inside Read-Host.
     if (-not (Test-InteractiveSession)) {
-        Write-Error 'release-packages.ps1 must be run from an interactive terminal — every mode may prompt the user for elevation review of modified-but-unreleased dependencies.'
-        Exit 1
+        throw 'release-packages.ps1 must be run from an interactive terminal — every mode may prompt the user for elevation review of modified-but-unreleased dependencies.'
     }
 
     # 2. MODE / INPUT VALIDATION + TOKEN PARSE
     $hasTokens = ($null -ne $Packages) -and ($Packages.Count -gt 0)
     if ($Mode -ne 'targeted' -and $Force) {
-        Write-Error "release-packages.ps1 -Force is only valid with -Packages (targeted mode). The -Changed and -All modes only accept change-type answers (breaking / non-breaking / patch) and never explicit version pins, so the pin-vs-cascade rejection that -Force overrides cannot fire."
-        Exit 1
+        throw "release-packages.ps1 -Force is only valid with -Packages (targeted mode). The -Changed and -All modes only accept change-type answers (breaking / non-breaking / patch) and never explicit version pins, so the pin-vs-cascade rejection that -Force overrides cannot fire."
     }
     if ($Mode -eq 'targeted') {
         if (-not $hasTokens) {
-            Write-Error 'release-packages.ps1 -Packages requires at least one ''<name>@<change-spec>'' token. Use -Changed or -All for a guided walk instead.'
-            Exit 1
+            throw 'release-packages.ps1 -Packages requires at least one ''<name>@<change-spec>'' token. Use -Changed or -All for a guided walk instead.'
         }
-        try {
-            $parsedTokens = Parse-ReleaseTokens -Tokens $Packages
-        } catch {
-            Write-Error $_.Exception.Message
-            Exit 1
-        }
+        $parsedTokens = Parse-ReleaseTokens -Tokens $Packages
     } else {
         if ($hasTokens) {
-            Write-Error "release-packages.ps1 -$Mode does not accept -Packages tokens; the planner discovers targets for you."
-            Exit 1
+            throw "release-packages.ps1 -$Mode does not accept -Packages tokens; the planner discovers targets for you."
         }
         $parsedTokens = @()
     }
@@ -2150,15 +2140,15 @@ function Invoke-ReleasePackagesMain {
     # memoises per crate so the interactive review loop re-resolves cheaply.
     $script:ReleaseRepoRoot = $repoRoot.Path
 
-    try {
-        $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
-            -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
-            -GetRequiredChangeType $script:DefaultSemverClassifier `
-            -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode -Force:$Force
-    } catch {
-        Write-Error $_.Exception.Message
-        Exit 1
-    }
+    # The classifier and Invoke-PlanReview surface planning errors (e.g. a pin
+    # below the semver-required version) as terminating errors. Let them
+    # propagate to the caller (the CLI shell turns them into `exit 1`; tests
+    # catch them) rather than swallowing and re-emitting, which would tear down
+    # a test runspace via Exit.
+    $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
+        -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
+        -GetRequiredChangeType $script:DefaultSemverClassifier `
+        -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode -Force:$Force
 
     # 6. EARLY EXIT IF GUIDED USER IGNORED EVERYTHING — skip Show-ReleasePlan
     # / Invoke-ResolvedRelease / Invoke-WorkspaceCheck. They handle empty
@@ -2179,8 +2169,7 @@ function Invoke-ReleasePackagesMain {
         $releases = @(Invoke-ResolvedRelease -RepoRoot $repoRoot.Path -RootCargoToml $rootCargoToml `
             -PrBaseUrl $prBaseUrl -ResolvedReleaseSet $resolvedHash -WorkspaceBaseline $workspaceBaseline)
     } catch {
-        Write-Error "Release execution failed: $_"
-        Exit 1
+        throw "Release execution failed: $_"
     }
 
     Invoke-WorkspaceCheck -RepoRoot $repoRoot.Path
