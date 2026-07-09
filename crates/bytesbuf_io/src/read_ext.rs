@@ -172,6 +172,9 @@ where
                 ReadInspectDecision::Complete(bytes) => {
                     return Ok((into.consume(bytes), into));
                 }
+                ReadInspectDecision::Done => {
+                    return Ok((into.consume(0), into));
+                }
                 ReadInspectDecision::Failed(err) => {
                     return Err(crate::Error::caused_by(err));
                 }
@@ -214,6 +217,12 @@ pub enum ReadInspectDecision {
     ///
     /// The provided error will be wrapped in a [`bytesbuf_io::Error`][crate::Error].
     Failed(Box<dyn std::error::Error + Send + Sync>),
+
+    /// Completes reading without consuming any further bytes.
+    ///
+    /// Equivalent to `Complete(0)`, but reads more clearly at call sites that
+    /// simply want to stop once a delimiter has been observed.
+    Done,
 }
 
 #[cfg(test)]
