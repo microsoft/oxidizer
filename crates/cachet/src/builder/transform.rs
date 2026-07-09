@@ -26,14 +26,14 @@ use crate::{CacheTier, Codec, Encoder};
 /// At build time, both sides are built into tiers, the post-transform tier is wrapped
 /// in a `TransformAdapter`, and combined with the pre-transform tier via fallback.
 pub struct TransformBuilder<K, V, KT, VT, Pre, Post = ()> {
-    pub(crate) pre: Pre,
-    pub(crate) post: Post,
-    pub(crate) key_encoder: Box<dyn Encoder<K, KT>>,
-    pub(crate) value_codec: Box<dyn Codec<V, VT>>,
-    pub(crate) clock: Clock,
-    pub(crate) telemetry: CacheTelemetry,
-    pub(crate) stampede_protection: bool,
-    pub(crate) _phantom: PhantomData<(K, V, KT, VT)>,
+    pub(super) pre: Pre,
+    pub(super) post: Post,
+    pub(super) key_encoder: Box<dyn Encoder<K, KT>>,
+    pub(super) value_codec: Box<dyn Codec<V, VT>>,
+    pub(super) clock: Clock,
+    pub(super) telemetry: CacheTelemetry,
+    pub(super) stampede_protection: bool,
+    pub(super) _phantom: PhantomData<(K, V, KT, VT)>,
 }
 
 impl<K, V, KT, VT, Pre: Debug, Post: Debug> Debug for TransformBuilder<K, V, KT, VT, Pre, Post> {

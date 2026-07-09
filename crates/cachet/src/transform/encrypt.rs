@@ -214,7 +214,8 @@ where
         let value = entry.into_value();
         // The storage key is authenticated as AAD, so a value planted under the
         // wrong key fails decryption and is treated as a miss.
-        match self.cipher.decrypt(&key.to_vec(), &value)? {
+        let aad = to_contiguous(key);
+        match self.cipher.decrypt(aad.as_ref(), &value)? {
             DecodeOutcome::Value(value) => {
                 let mut decrypted = CacheEntry::new(value);
                 if let Some(ttl) = ttl {
@@ -233,8 +234,8 @@ where
     }
 
     async fn insert(&self, key: BytesView, entry: CacheEntry<BytesView>) -> Result<(), Error> {
-        let aad = key.to_vec();
-        let encrypted = entry.try_map_value(|value| self.cipher.encrypt(&aad, &value))?;
+        let aad = to_contiguous(&key);
+        let encrypted = entry.try_map_value(|value| self.cipher.encrypt(aad.as_ref(), &value))?;
         self.inner.insert(key, encrypted).await
     }
 
