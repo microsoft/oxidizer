@@ -200,36 +200,6 @@ wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 
-
-# A bit of debugging support for release builds.
-[profile.release]
-debug = "line-tables-only"
-
-# Best perf possible for benchmarks
-[profile.bench]
-lto = "fat"
-codegen-units = 1
-
-# Best debugging experience possible for test builds. Even though this is the default, we specify it explicitly,
-# otherwise it appears that cargo-llvm-cov assumes different defaults which leads to only minimal debug info in
-# coverage builds.
-[profile.test]
-debug = "full"
-
-# No debug info for mutation testing to speed up compilation
-[profile.mutants]
-inherits = "test"
-debug = "none"
-
-# Profile used by `cargo bolero` (it passes `--profile fuzz` by default).
-# Optimized build with single codegen unit, as recommended by cargo-bolero
-# to avoid known compilation bugs in the libfuzzer instrumentation.
-[profile.fuzz]
-inherits = "dev"
-opt-level = 3
-incremental = false
-codegen-units = 1
-
 # >>> anvil-managed: anvil-workspace-lints
 [workspace.lints]
 # Catalog of opinionated lints, in dotted-key form so users can extend the
@@ -263,6 +233,13 @@ rust.unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(miri_tree_borrows)',
     'cfg(utc_backend)',
 ] }
+# <<< anvil-managed: anvil-workspace-lints
+
+# --- oxidizer-github-specific lint deltas (outside anvil's managed region) ---
+# Preserved from the pre-anvil manual policy; these extend the same
+# `[workspace.lints]` table. Anvil does not manage them.
+rust.missing_docs = "warn"
+rust.unreachable_pub = "warn"
 
 # --- rustdoc ---------------------------------------------------------------
 rustdoc.broken_intra_doc_links = "warn"
@@ -317,13 +294,34 @@ clippy.should_panic_without_expect = "allow"
 clippy.significant_drop_tightening = "allow"
 # Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
 clippy.wildcard_imports = "allow"
-
-# <<< anvil-managed: anvil-workspace-lints
-
-# --- oxidizer-github-specific lint deltas (outside anvil's managed region) ---
-# Preserved from the pre-anvil manual policy; these extend the same
-# `[workspace.lints]` table. Anvil does not manage them.
-rust.missing_docs = "warn"
-rust.unreachable_pub = "warn"
 clippy.empty_structs_with_brackets = "warn"
 clippy.panic = "warn"
+
+# A bit of debugging support for release builds.
+[profile.release]
+debug = "line-tables-only"
+
+# Best perf possible for benchmarks
+[profile.bench]
+lto = "fat"
+codegen-units = 1
+
+# Best debugging experience possible for test builds. Even though this is the default, we specify it explicitly,
+# otherwise it appears that cargo-llvm-cov assumes different defaults which leads to only minimal debug info in
+# coverage builds.
+[profile.test]
+debug = "full"
+
+# No debug info for mutation testing to speed up compilation
+[profile.mutants]
+inherits = "test"
+debug = "none"
+
+# Profile used by `cargo bolero` (it passes `--profile fuzz` by default).
+# Optimized build with single codegen unit, as recommended by cargo-bolero
+# to avoid known compilation bugs in the libfuzzer instrumentation.
+[profile.fuzz]
+inherits = "dev"
+opt-level = 3
+incremental = false
+codegen-units = 1
