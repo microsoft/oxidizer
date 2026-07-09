@@ -234,7 +234,12 @@ values with AES-256-GCM before they reach the fallback tier. Each value is
 encrypted with a fresh random nonce and cryptographically bound to its storage key;
 keys are left serialized-but-unencrypted so they remain deterministic and can be
 looked up. A stored value that fails to decrypt — corrupt, truncated, wrong key, or
-relocated to a different key — is treated as a cache miss.
+relocated to a different key — is treated as a cache miss and emits a
+`cache.decrypt_failed` telemetry event.
+
+Only values are encrypted: keys are stored in plaintext in the backing tier, so do
+not place secrets or PII in cache keys. For extreme write volumes, rotate the key
+periodically to stay well within the random-nonce birthday bound.
 
 ```rust
 use cachet::Cache;
@@ -308,7 +313,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbpeHGvMvQaAUbsC2g92vE_lobpJAjv-3H748bHP2lxkL3o0xhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbyuiO0QVEuMQbJSVJ4gMa8ksbNYDmq69e5OMbGHKmAj90pudhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.8.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

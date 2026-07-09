@@ -66,6 +66,14 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     /// each value is cryptographically bound to its storage key, so a value cannot be
     /// relocated to a different key in the backing store.
     ///
+    /// # Security
+    ///
+    /// Only values are encrypted. Keys are serialized and stored **in plaintext** in
+    /// the backing tier (they must stay deterministic to remain usable as lookup keys),
+    /// so do not place secrets or PII in cache keys. A stored value that fails
+    /// authentication (corrupt, truncated, wrong key, tampered, or relocated) is treated
+    /// as a cache miss and emits a `cache.decrypt_failed` telemetry event.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -220,7 +228,12 @@ where
         // Build the post-transform tier chain and wrap it so values are encrypted
         // (and key-authenticated) before reaching it.
         let post_tier = self.post.build_tier(clock.clone(), telemetry.clone(), true);
-        let encrypted = EncryptedTier::new(post_tier, self.cipher);
+        let encrypted = EncryptedTier::new(
+            post_tier,
+            self.cipher,
+            telemetry.clone(),
+            type_name::<EncryptedTier<Post::TierOutput>>(None),
+        );
         let adapted = TransformAdapter::from_boxed(encrypted, self.key_encoder, self.value_codec);
 
         let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);

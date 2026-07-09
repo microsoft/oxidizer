@@ -231,7 +231,12 @@
 //! encrypted with a fresh random nonce and cryptographically bound to its storage key;
 //! keys are left serialized-but-unencrypted so they remain deterministic and can be
 //! looked up. A stored value that fails to decrypt — corrupt, truncated, wrong key, or
-//! relocated to a different key — is treated as a cache miss.
+//! relocated to a different key — is treated as a cache miss and emits a
+//! `cache.decrypt_failed` telemetry event.
+//!
+//! Only values are encrypted: keys are stored in plaintext in the backing tier, so do
+//! not place secrets or PII in cache keys. For extreme write volumes, rotate the key
+//! periodically to stay well within the random-nonce birthday bound.
 //!
 //! ```ignore
 //! use cachet::Cache;

@@ -365,6 +365,29 @@ impl CacheTelemetry {
         );
     }
 
+    /// Records that a stored value failed authenticated decryption and was
+    /// treated as a cache miss.
+    ///
+    /// Fires from an `EncryptedTier` on the `get` path, so the thread-local
+    /// request ID is set and correlates the failure with the operation that
+    /// observed it. Signals a corrupt, truncated, wrong-key, tampered, or
+    /// relocated ciphertext.
+    #[cfg(feature = "encrypt")]
+    pub(crate) fn record_decrypt_failure(&self, cache_name: CacheName) {
+        #[cfg(any(feature = "logs", test))]
+        if self.logging_enabled {
+            tracing::warn!(cache.name = cache_name, cache.event = attributes::EVENT_DECRYPT_FAILED);
+        }
+
+        self.emit_tier_event(
+            Self::current_request_id(),
+            cache_name,
+            attributes::EVENT_DECRYPT_FAILED,
+            Duration::ZERO,
+            false,
+        );
+    }
+
     pub(crate) fn complete_operation(
         &self,
         request_id: RequestId,

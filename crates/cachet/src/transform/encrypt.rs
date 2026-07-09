@@ -14,6 +14,8 @@ use aes_gcm::aead::{Aead, AeadInPlace, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use bytesbuf::BytesView;
 
+use crate::cache::CacheName;
+use crate::telemetry::CacheTelemetry;
 use crate::transform::DecodeOutcome;
 use crate::{CacheEntry, CacheTier, Error, SizeError};
 
@@ -87,6 +89,13 @@ pub(crate) trait AeadCipher: Send + Sync {
 ///
 /// Because each encryption uses a fresh random nonce, output is non-deterministic;
 /// this cipher is applied to cache *values* only, never to keys.
+///
+/// # Nonce reuse
+///
+/// A 96-bit random nonce is safe for a very large volume of writes under one key,
+/// but not unbounded: the reuse probability follows the birthday bound and becomes
+/// non-negligible only after an extremely large number of writes under the same key.
+/// For extreme write volumes, rotate the key periodically.
 #[derive(Clone)]
 pub(crate) struct Aes256GcmCipher {
     cipher: Aes256Gcm,
@@ -165,15 +174,24 @@ impl AeadCipher for Aes256GcmCipher {
 /// holding serialized bytes). On insert it encrypts the value, authenticating the
 /// storage key as AAD; on get it decrypts, and an authentication failure — corrupt
 /// bytes, a tampered entry, or a value relocated from a different key — surfaces as
-/// a cache miss (`Ok(None)`) rather than an error.
+/// a cache miss (`Ok(None)`) rather than an error. Each such failure emits a
+/// `cache.decrypt_failed` telemetry event so that tampering with the backing store
+/// is observable rather than silent.
 pub(crate) struct EncryptedTier<S> {
     inner: S,
     cipher: Box<dyn AeadCipher>,
+    telemetry: CacheTelemetry,
+    name: CacheName,
 }
 
 impl<S> EncryptedTier<S> {
-    pub(crate) fn new(inner: S, cipher: Box<dyn AeadCipher>) -> Self {
-        Self { inner, cipher }
+    pub(crate) fn new(inner: S, cipher: Box<dyn AeadCipher>, telemetry: CacheTelemetry, name: CacheName) -> Self {
+        Self {
+            inner,
+            cipher,
+            telemetry,
+            name,
+        }
     }
 }
 
@@ -207,7 +225,10 @@ where
                 }
                 Ok(Some(decrypted))
             }
-            DecodeOutcome::SoftFailure(_) => Ok(None),
+            DecodeOutcome::SoftFailure(_) => {
+                self.telemetry.record_decrypt_failure(self.name);
+                Ok(None)
+            }
         }
     }
 
@@ -239,6 +260,10 @@ mod tests {
 
     fn view(data: &[u8]) -> BytesView {
         BytesView::from(data.to_vec())
+    }
+
+    fn test_tier<S>(inner: S) -> EncryptedTier<S> {
+        EncryptedTier::new(inner, Box::new(Aes256GcmCipher::new(&KEY)), CacheTelemetry::new(), "encrypted-test")
     }
 
     #[test]
@@ -363,7 +388,7 @@ mod tests {
         use cachet_tier::MockCache;
 
         let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = EncryptedTier::new(inner.clone(), Box::new(Aes256GcmCipher::new(&KEY)));
+        let tier = test_tier(inner.clone());
 
         let key = view(b"user:1");
         tier.insert(key.clone(), CacheEntry::new(view(b"profile")))
@@ -384,7 +409,7 @@ mod tests {
         use cachet_tier::MockCache;
 
         let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = EncryptedTier::new(inner.clone(), Box::new(Aes256GcmCipher::new(&KEY)));
+        let tier = test_tier(inner.clone());
 
         // Legitimately store a value under key A.
         let key_a = view(b"key-A");
@@ -403,5 +428,34 @@ mod tests {
         // Reading B must NOT yield A's value: AAD (key) mismatch => decryption fails => miss.
         let fetched = tier.get(&key_b).await.expect("get ok");
         assert!(fetched.is_none(), "relocated ciphertext must fail AAD check and read as a miss");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn decrypt_failure_emits_telemetry() {
+        use cachet_tier::MockCache;
+        use testing_aids::LogCapture;
+
+        let capture = LogCapture::new();
+        let _guard = tracing::subscriber::set_default(capture.subscriber());
+
+        let inner = MockCache::<BytesView, BytesView>::new();
+        let tier = EncryptedTier::new(
+            inner.clone(),
+            Box::new(Aes256GcmCipher::new(&KEY)),
+            CacheTelemetry::with_logging(),
+            "encrypted-test",
+        );
+
+        // Plant a garbage "ciphertext" that cannot authenticate.
+        let key = view(b"key");
+        inner
+            .insert(key.clone(), CacheEntry::new(view(&[0u8; 64])))
+            .await
+            .expect("insert should succeed");
+
+        let fetched = tier.get(&key).await.expect("get ok");
+        assert!(fetched.is_none(), "undecryptable value must read as a miss");
+        capture.assert_contains(crate::telemetry::attributes::EVENT_DECRYPT_FAILED);
     }
 }
