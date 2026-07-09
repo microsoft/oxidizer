@@ -131,7 +131,7 @@ pub(crate) fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribut
         .map(|p| p.name.to_owned())
         .collect();
 
-    let render_body = construct_render(&template, &struct_fields, &unrestricted_params);
+    let (render_statements, render_capacity) = construct_render(&template, &struct_fields, &unrestricted_params);
     let redacted_display = construct_redacted_display(&template, &struct_fields, &fields, unredacted);
 
     let label_impl = label.as_ref().map_or_else(
@@ -154,7 +154,17 @@ pub(crate) fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribut
             }
 
             fn render(&self) -> ::std::string::String {
-                #render_body
+                let mut __out = ::std::string::String::with_capacity(#render_capacity);
+                ::templated_uri::PathAndQueryTemplate::render_into(self, &mut __out);
+                __out
+            }
+
+            fn render_into(&self, __out: &mut ::std::string::String) {
+                #(#render_statements)*
+            }
+
+            fn render_capacity_hint(&self) -> ::core::primitive::usize {
+                #render_capacity
             }
 
             fn to_path_and_query(&self) -> ::std::result::Result<::templated_uri::__private::http::uri::PathAndQuery, ::templated_uri::UriError> {
@@ -209,21 +219,23 @@ fn extract_option_inner(ty: &syn::Type) -> Option<&syn::Type> {
     Some(inner_ty)
 }
 
-/// Generates the body of the `render()` method.
+/// Generates the append statements and capacity hint for the render methods.
 ///
-/// Walks the parsed template parts and emits `Write::write_fmt` calls (via UFCS,
-/// to avoid bringing `fmt::Write` into the caller's scope), handling RFC 6570
-/// undefined-value semantics for `Option<T>` fields.
-fn construct_render(template: &UriTemplate, struct_fields: &[&Field], unrestricted_params: &HashSet<String>) -> TokenStream {
+/// Walks the parsed template parts and emits statements that append into a buffer named
+/// `__out` (via `push_str` for literals and `Escape::escape_into`/`Raw::raw_into` for
+/// field values), handling RFC 6570 undefined-value semantics for `Option<T>` fields.
+/// Returns the statements plus the compile-time capacity estimate so the caller can build
+/// both `render` (owns a sized buffer) and `render_into` (appends into a caller buffer).
+fn construct_render(template: &UriTemplate, struct_fields: &[&Field], unrestricted_params: &HashSet<String>) -> (Vec<TokenStream>, usize) {
     let field_map: FieldMap<'_> = struct_fields
         .iter()
         .filter_map(|f| f.ident.as_ref().map(|ident| (ident.to_string(), *f)))
         .collect();
 
-    // Pre-allocate the rendered-URI buffer using a static heuristic computed from the
-    // template parts. See `render_capacity_hint` for the precise semantics; it may
-    // slightly over-allocate when a group's parameters are all `None` at runtime, which
-    // is far cheaper than the realloc chain a fresh `String::new()` would incur.
+    // Compile-time heuristic used to pre-size the buffer. See `render_capacity_hint` for
+    // the precise semantics; it may slightly over-allocate when a group's parameters are
+    // all `None` at runtime, which is far cheaper than the realloc chain a fresh
+    // `String::new()` would incur.
     let initial_capacity = render_capacity_hint(template);
 
     let statements: Vec<TokenStream> = template
@@ -237,29 +249,33 @@ fn construct_render(template: &UriTemplate, struct_fields: &[&Field], unrestrict
         })
         .collect();
 
-    quote! {
-        let mut __out = ::std::string::String::with_capacity(#initial_capacity);
-        #(#statements)*
-        __out
-    }
+    (statements, initial_capacity)
 }
 
 /// Compile-time capacity heuristic for the `String` buffer that holds a rendered URI.
 ///
-/// The returned size counts every byte the macro can statically *name*:
+/// The returned size counts every byte the macro can statically *name*, plus a small
+/// per-parameter estimate for the runtime values themselves:
 ///
 /// - Static `Content` segments are always present.
 /// - Each parameter group's fixed literals (prefix, separators between values, and the
 ///   `key=` literal for key/value expansions like `{?a}` and `{;a}`).
+/// - [`ESTIMATED_VALUE_LEN`] bytes per parameter as a stand-in for the (statically
+///   unknowable) substituted value.
 ///
-/// Parameter values themselves are not counted because their runtime size is unknown.
-/// The heuristic does **not** discount per-parameter literals attached to `Option<T>`
-/// fields, so when a group's optional values are all `None` at runtime, the buffer
-/// over-allocates by a few bytes (typically one prefix byte plus the key length plus
-/// `=`). That small over-attribution is harmless: a strict lower bound would require
-/// threading field metadata into this function, and the worst-case waste is bounded
-/// by a few bytes per group, well below a single allocator slab.
+/// The per-parameter estimate exists purely to avoid a reallocation on the render hot
+/// path: without it the buffer is sized to the static skeleton only and almost always
+/// has to grow once as the first value is written. Over-estimating merely reserves a few
+/// unused bytes (a single small allocation is rounded up by the allocator anyway), which
+/// is far cheaper than the realloc-and-copy it prevents. The estimate is intentionally
+/// *not* discounted for `Option<T>` fields that may be `None`, matching the existing
+/// treatment of their literals.
 fn render_capacity_hint(template: &UriTemplate) -> usize {
+    /// Assumed byte length of a rendered parameter value. Chosen to cover typical URI
+    /// segments (ids, short slugs) so the common case renders without a reallocation,
+    /// while keeping worst-case over-allocation negligible.
+    const ESTIMATED_VALUE_LEN: usize = 16;
+
     template
         .template_parts()
         .iter()
@@ -279,7 +295,8 @@ fn render_capacity_hint(template: &UriTemplate) -> usize {
                 } else {
                     0
                 };
-                prefix_len + separators_len + kv_len
+                let values_len = param_names.len() * ESTIMATED_VALUE_LEN;
+                prefix_len + separators_len + kv_len + values_len
             }
         })
         .sum()
@@ -357,12 +374,19 @@ fn render_group_all_required(group: &ParamGroup, field_map: &FieldMap<'_>, unres
         let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
         let field_ident = field.ident.as_ref().expect("struct fields must be named");
         let ty_span = field.ty.span();
-        if unrestricted_params.contains(*param_name) {
-            stmts.push(quote_spanned! { ty_span => ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", ::templated_uri::Raw::raw(&self.#field_ident))).expect("Display impls for templated URI parameter values are expected to be infallible"); });
+        // `Escape`/`Raw` take `&self`, so the receiver must be `&FieldType`. For an owned
+        // field that is `&self.field`; for a reference field (`&T`) the field itself already
+        // is `&T`, so pass it directly - matching the `*__val` deref in the optional path so
+        // both positions require the same bound (`T: Escape`/`T: Raw`) for `&T` fields.
+        let receiver = if matches!(&field.ty, syn::Type::Reference(_)) {
+            quote_spanned! { ty_span => self.#field_ident }
         } else {
-            stmts.push(
-                quote_spanned! { ty_span => ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", ::templated_uri::Escape::escape(&self.#field_ident))).expect("Display impls for templated URI parameter values are expected to be infallible"); },
-            );
+            quote_spanned! { ty_span => &self.#field_ident }
+        };
+        if unrestricted_params.contains(*param_name) {
+            stmts.push(quote_spanned! { ty_span => ::templated_uri::Raw::raw_into(#receiver, __out); });
+        } else {
+            stmts.push(quote_spanned! { ty_span => ::templated_uri::Escape::escape_into(#receiver, __out); });
         }
     }
     stmts
@@ -398,10 +422,10 @@ fn render_group_with_optional(group: &ParamGroup, field_map: &FieldMap<'_>, unre
             quote! { __val }
         };
 
-        let escape_expr = if unrestricted_params.contains(*param_name) {
-            quote_spanned! { ty_span => ::templated_uri::Raw::raw(#val_arg) }
+        let append_stmt = if unrestricted_params.contains(*param_name) {
+            quote_spanned! { ty_span => ::templated_uri::Raw::raw_into(#val_arg, __out); }
         } else {
-            quote_spanned! { ty_span => ::templated_uri::Escape::escape(#val_arg) }
+            quote_spanned! { ty_span => ::templated_uri::Escape::escape_into(#val_arg, __out); }
         };
 
         let key_for_kv = is_kv.then_some(*param_name);
@@ -410,7 +434,7 @@ fn render_group_with_optional(group: &ParamGroup, field_map: &FieldMap<'_>, unre
         let body = quote! {
             #emit_delim
             #emit_kv
-            ::std::fmt::Write::write_fmt(&mut __out, ::core::format_args!("{}", #escape_expr)).expect("Display impls for templated URI parameter values are expected to be infallible");
+            #append_stmt
             __first = false;
         };
 

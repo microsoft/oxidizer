@@ -59,12 +59,12 @@ uuid = ["dep:uuid"]
 data_privacy = { workspace = true }
 http = { workspace = true }
 ohno = { workspace = true }
-pct-str = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std", "derive"], optional = true }
 templated_uri_macros = { workspace = true }
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 mutants = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
@@ -73,8 +73,20 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trybuild = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[[bench]]
+name = "hot_path_cg"
+harness = false
 
 [[example]]
 name = "classified_templating"
