@@ -395,13 +395,21 @@ jobs:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: llvm-tools-preview
-          cargo-tools: CARGO_LLVM_COV_VERSION
+          cargo-tools: CARGO_LLVM_COV_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
+      # Coverage is generated with `llvm-cov nextest` (one process per test) instead
+      # of the default `cargo test` harness (all tests in one process). Process
+      # isolation prevents cross-test contamination of tracing's process-global
+      # callsite-interest cache: with the single-process harness, a no-subscriber test
+      # can register a `tracing::event!` callsite as "never interested" before a
+      # subscriber-installing test runs, leaving the macro's enabled branch (its
+      # field-value expressions) recorded as uncovered nondeterministically across
+      # platforms. This matches the `just coverage-measure` recipe (justfiles/coverage.just).
       - name: Generate Coverage (all-features)
-        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --all-features --workspace --lcov --output-path lcov-all.info
+        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov nextest --all-features --workspace --lcov --output-path lcov-all.info
       - name: Generate Coverage (no-default-features)
-        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
+        run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov nextest --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v7.0.0
         with:
