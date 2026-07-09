@@ -14,8 +14,9 @@ use uuid::Uuid;
 /// A wrapper that proves the inner value is already escaped for use in URI templates.
 ///
 /// The invariant is enforced via constructors - only types whose [`Display`] output
-/// contains no RFC 6570 reserved characters can be wrapped. For inherently-safe
-/// types (integers, [`IpAddr`]) an infallible [`From`] impl is provided.
+/// is already safe to splice into a URI verbatim (no *unescaped* RFC 6570 reserved
+/// characters; well-formed `%XX` percent-escapes are allowed) can be wrapped. For
+/// inherently-safe types (integers, [`IpAddr`]) an infallible [`From`] impl is provided.
 /// With the `uuid` feature (enabled by default), `Uuid` is also supported.
 /// For strings, use the encoding/validating constructors on [`Escaped<Cow<'static, str>>`]
 /// (aliased as [`EscapedString`]).
@@ -272,8 +273,11 @@ fn first_reserved(bytes: &[u8]) -> Option<usize> {
 ///
 /// The clean prefix `s[..first]` and every subsequent run of unreserved bytes are copied
 /// in bulk via `push_str` (no per-character formatting), and each reserved byte is emitted
-/// as a `%XX` escape using a direct hex table. All slice boundaries fall on unreserved
-/// ASCII bytes, so the `&str` indexing is always valid.
+/// as a `%XX` escape using a direct hex table. Every index used for `&str` slicing is a
+/// UTF-8 character boundary: `first` (and each subsequent run boundary) is the position of
+/// a byte that is not an unreserved ASCII byte, and since all unreserved bytes are
+/// single-byte ASCII, such a position never falls in the middle of a multi-byte code point.
+/// So the `&str` indexing is always valid.
 // The manual index advance (`i += 1`) mutates to `i *= 1`, which never advances `i` and spins
 // the `while` loop forever, pushing to `out` until the process runs out of memory. That hangs the mutation
 // runner rather than producing a killable diff, so the function is skipped; its output is
