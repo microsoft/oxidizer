@@ -320,6 +320,39 @@ Describe 'ConvertFrom-SemverChecksOutput' {
     }
 }
 
+Describe 'ConvertFrom-CargoInfoOutput' {
+    It 'extracts the version from a cargo info block' {
+        $out = "bytesbuf_io`n    An I/O adapter`nversion: 0.6.0`nlicense: MIT"
+        ConvertFrom-CargoInfoOutput -Output $out | Should -Be '0.6.0'
+    }
+
+    It 'ignores a trailing yanked/annotation note after the version' {
+        $out = "version: 1.2.3 (yanked)"
+        ConvertFrom-CargoInfoOutput -Output $out | Should -Be '1.2.3'
+    }
+
+    It 'returns $null when the crate is not published (no version line)' {
+        $out = "error: crate oxidizer_nope not found in registry"
+        ConvertFrom-CargoInfoOutput -Output $out | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for empty output' {
+        ConvertFrom-CargoInfoOutput -Output '' | Should -BeNullOrEmpty
+    }
+
+    It 'reports the last PUBLISHED version, not an unpublished intermediate (documented limitation)' {
+        # Baseline discovery reads whatever `cargo info` returns from the
+        # registry: the last *published* version. If a breaking change was
+        # committed as 4.0.0 but never published (an aborted release), the
+        # registry still reports 3.3.3, so semver-checks diffs the working tree
+        # against 3.3.3 and the delta from the unpublished 4.0.0 cannot be
+        # isolated. This is intentional; the workaround is a manual explicit
+        # version pin. See docs/releasing.md.
+        $registryReportsLastPublished = "version: 3.3.3"
+        ConvertFrom-CargoInfoOutput -Output $registryReportsLastPublished | Should -Be '3.3.3'
+    }
+}
+
 Describe 'Get-StrongerChangeType' {
     It 'returns the higher-ranked change type' {
         Get-StrongerChangeType 'patch' 'breaking'     | Should -Be 'breaking'

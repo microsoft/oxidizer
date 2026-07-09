@@ -541,6 +541,7 @@ function Resolve-ReleaseSet {
 # planning. A module-scope variable (rather than a captured closure) so the
 # classifier scriptblock below resolves it in the module session state.
 $script:ReleaseRepoRoot = $null
+$script:ReleaseRegistry = 'crates-io'
 
 # The production classifier handed to Resolve-ReleaseSet / Invoke-PlanReview.
 # Defined at module scope so, when invoked via `& $GetRequiredChangeType` deep
@@ -549,7 +550,7 @@ $script:ReleaseRepoRoot = $null
 # Get-CrateRequiredChangeType for tests.
 $script:DefaultSemverClassifier = {
     param([string]$folder, [string]$cargoName)
-    Get-CrateRequiredChangeType -Folder $folder -CargoName $cargoName -RepoRoot $script:ReleaseRepoRoot
+    Get-CrateRequiredChangeType -Folder $folder -CargoName $cargoName -RepoRoot $script:ReleaseRepoRoot -Registry $script:ReleaseRegistry
 }
 
 function Format-ConventionalCommits {
@@ -2038,6 +2039,9 @@ function Invoke-ReleasePackagesMain {
         [string[]]$Packages = @(),
 
         [Parameter()]
+        [string]$Registry = 'crates-io',
+
+        [Parameter()]
         [switch]$Force
     )
 
@@ -2141,6 +2145,7 @@ function Invoke-ReleasePackagesMain {
     # test suites Mock Get-CrateRequiredChangeType. Get-CrateRequiredChangeType
     # memoises per crate so the interactive review loop re-resolves cheaply.
     $script:ReleaseRepoRoot = $repoRoot.Path
+    $script:ReleaseRegistry = $Registry
 
     # The classifier and Invoke-PlanReview surface planning errors (e.g. a pin
     # below the semver-required version) as terminating errors. Let them
