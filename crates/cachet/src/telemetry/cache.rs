@@ -142,6 +142,10 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        allow(unused_variables, reason = "consumed only by the logging path, which is compiled out here")
+    )]
     fn record_debug_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
@@ -151,15 +155,15 @@ impl CacheTelemetry {
                 cache.duration_ns = duration.as_nanos()
             );
         }
-        #[cfg(not(any(feature = "logs", test)))]
-        {
-            let _ = (cache_name, event, duration);
-        }
     }
 
     #[cfg_attr(
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        allow(unused_variables, reason = "consumed only by the logging path, which is compiled out here")
     )]
     fn record_info_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
@@ -170,15 +174,15 @@ impl CacheTelemetry {
                 cache.duration_ns = duration.as_nanos()
             );
         }
-        #[cfg(not(any(feature = "logs", test)))]
-        {
-            let _ = (cache_name, event, duration);
-        }
     }
 
     #[cfg_attr(
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
+    )]
+    #[cfg_attr(
+        not(any(feature = "logs", test)),
+        allow(unused_variables, reason = "consumed only by the logging path, which is compiled out here")
     )]
     fn record_error_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
@@ -188,10 +192,6 @@ impl CacheTelemetry {
                 cache.event = event,
                 cache.duration_ns = duration.as_nanos()
             );
-        }
-        #[cfg(not(any(feature = "logs", test)))]
-        {
-            let _ = (cache_name, event, duration);
         }
     }
 
