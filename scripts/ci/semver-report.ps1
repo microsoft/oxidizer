@@ -109,7 +109,23 @@ try {
         # Discover the baseline from the registry (crates.io by default, or a
         # private registry via -Registry) using `cargo info`, run outside the
         # workspace so it reports the published version, not the local one.
-        $baselineVersion = Get-PublishedCrateVersion -CargoName $cargoName -Registry $Registry
+        # A genuinely-unpublished crate returns $null; an indeterminate lookup
+        # throws — surface that as a ⚠️ row rather than a silent "sufficient".
+        try {
+            $baselineVersion = Get-PublishedCrateVersion -CargoName $cargoName -Registry $Registry
+        } catch {
+            Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — baseline lookup FAILED: $($_.Exception.Message)"
+            $rows.Add([pscustomobject]@{
+                Crate       = $cargoName
+                Baseline    = '⚠️ unknown'
+                OnDisk      = $onDisk
+                Required    = '?'
+                Sufficient  = $false
+                ChangeType  = 'unknown'
+                Detail      = "Baseline lookup failed — could not determine the last published version on '$Registry'. The semver comparison was skipped for this crate; verify the version increment manually.`n`n$($_.Exception.Message)"
+            })
+            continue
+        }
 
         if ([string]::IsNullOrWhiteSpace($baselineVersion)) {
             # Never published on this registry: no baseline to compare against,
@@ -117,7 +133,7 @@ try {
             Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — not published on '$Registry', skipping."
             $rows.Add([pscustomobject]@{
                 Crate       = $cargoName
-                Baseline    = '—'
+                Baseline    = 'unpublished'
                 OnDisk      = $onDisk
                 Required    = $onDisk
                 Sufficient  = $true
@@ -167,6 +183,8 @@ try {
 
 # --- 3. Render the Markdown report. -------------------------------------------
 $underBumped = @($rows | Where-Object { -not $_.Sufficient })
+$unknownRows = @($rows | Where-Object { $_.ChangeType -eq 'unknown' })
+$realUnder   = @($underBumped | Where-Object { $_.ChangeType -ne 'unknown' })
 $overallFail = $underBumped.Count -gt 0
 
 $bt = [char]0x60   # backtick, kept in a variable to avoid PowerShell escaping.
@@ -174,7 +192,12 @@ $sb = New-Object System.Text.StringBuilder
 if ($overallFail) {
     [void]$sb.AppendLine('## 🛑 Additional version increments required')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($underBumped.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
+    if ($realUnder.Count -gt 0) {
+        [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($realUnder.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
+    }
+    if ($unknownRows.Count -gt 0) {
+        [void]$sb.AppendLine("⚠️ The baseline (last published version) could not be determined for **$($unknownRows.Count)** crate(s); their version increment was **not** verified — check them manually.")
+    }
 } else {
     [void]$sb.AppendLine('## ✅ Version increments look sufficient')
     [void]$sb.AppendLine()
@@ -184,7 +207,10 @@ if ($overallFail) {
 [void]$sb.AppendLine('| Crate | Published | This PR | Minimum required | Status |')
 [void]$sb.AppendLine('|---|---|---|---|---|')
 foreach ($r in $rows) {
-    if ($r.Sufficient) {
+    if ($r.ChangeType -eq 'unknown') {
+        $status = '⚠️ baseline unknown — not verified'
+        $req    = '—'
+    } elseif ($r.Sufficient) {
         $status = '✅ ok'
         $req    = $r.Required
     } else {
@@ -198,7 +224,9 @@ foreach ($r in $rows) {
 $fence = "$bt$bt$bt"
 if ($overallFail) {
     foreach ($r in $underBumped) {
-        [void]$sb.AppendLine("<details><summary>🛑 <code>$($r.Crate)</code> — cargo semver-checks detail</summary>")
+        $icon    = if ($r.ChangeType -eq 'unknown') { '⚠️' } else { '🛑' }
+        $summary = if ($r.ChangeType -eq 'unknown') { 'baseline lookup detail' } else { 'cargo semver-checks detail' }
+        [void]$sb.AppendLine("<details><summary>$icon <code>$($r.Crate)</code> — $summary</summary>")
         [void]$sb.AppendLine()
         [void]$sb.AppendLine($fence)
         [void]$sb.AppendLine($r.Detail)
