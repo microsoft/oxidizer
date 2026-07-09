@@ -8,7 +8,6 @@ use std::fmt::{Debug, Display};
 use std::net::IpAddr;
 use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU128, NonZeroUsize};
 
-use pct_str::{PctString, UriReserved};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
@@ -23,6 +22,19 @@ use uuid::Uuid;
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Escaped<T>(T);
+
+impl<T> Escaped<T> {
+    /// Wraps an already-escaped value without re-checking the invariant.
+    ///
+    /// Crate-internal: the caller guarantees the value's [`Display`] output is already
+    /// escaped for URI use - i.e. safe to splice into a URI verbatim without further
+    /// encoding (it may contain `%XX` percent-escape sequences). Used to hand out cheap
+    /// borrowing views (e.g. `Escaped<&str>`) that avoid cloning an owned [`EscapedString`]
+    /// on the render hot path.
+    pub(crate) const fn from_escaped(inner: T) -> Self {
+        Self(inner)
+    }
+}
 
 impl<T: Display> Display for Escaped<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -114,16 +126,16 @@ impl EscapedString {
     /// ```
     pub fn escape<'a>(s: impl Into<Cow<'a, str>>) -> Self {
         let s = s.into();
-        let encoded = PctString::encode(s.chars(), UriReserved::Any);
-        if encoded.as_str().len() == s.len() {
-            // No characters required encoding; avoid allocating a new `String` when
-            // the caller already owns one.
-            match s {
+        // Scan for the first byte that must be percent-encoded. The unreserved set is
+        // pure ASCII, so a byte scan is exact (any non-ASCII byte is >= 0x80 and always
+        // encoded) and lets the compiler vectorize the common all-clean case.
+        match first_reserved(s.as_bytes()) {
+            // Nothing needs encoding: never touch the allocator except to own a borrow.
+            None => match s {
                 Cow::Owned(owned) => Self(Cow::Owned(owned)),
                 Cow::Borrowed(borrowed) => Self(Cow::Owned(borrowed.to_owned())),
-            }
-        } else {
-            Self(Cow::Owned(encoded.into_string()))
+            },
+            Some(first) => Self(Cow::Owned(percent_encode(&s, first))),
         }
     }
 
@@ -235,6 +247,67 @@ const fn validate_escaped(bytes: &[u8]) -> Option<&'static str> {
     None
 }
 
+/// Returns `true` if `b` is an RFC 6570 *unreserved* byte (`A-Z`, `a-z`, `0-9`, `-`, `.`,
+/// `_`, `~`) that may appear in a URI without percent-encoding.
+///
+/// This is the exact complement of the set [`EscapedString::escape`] encodes: the
+/// unreserved characters are all ASCII, so any byte outside this set - including every
+/// byte of a multi-byte UTF-8 sequence (all `>= 0x80`) and `%` itself - is encoded.
+const fn is_unreserved_byte(b: u8) -> bool {
+    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~')
+}
+
+/// Returns the index of the first byte in `bytes` that must be percent-encoded, or `None`
+/// when every byte is unreserved.
+///
+/// The predicate is a handful of range comparisons over independent bytes, which the
+/// compiler can auto-vectorize into a wide SIMD scan on the hot all-clean path - no
+/// per-byte allocation or UTF-8 decoding required.
+fn first_reserved(bytes: &[u8]) -> Option<usize> {
+    bytes.iter().position(|&b| !is_unreserved_byte(b))
+}
+
+/// Percent-encodes `s` into a freshly allocated `String`, given `first` = the index of the
+/// first byte that requires encoding (as found by [`first_reserved`]).
+///
+/// The clean prefix `s[..first]` and every subsequent run of unreserved bytes are copied
+/// in bulk via `push_str` (no per-character formatting), and each reserved byte is emitted
+/// as a `%XX` escape using a direct hex table. All slice boundaries fall on unreserved
+/// ASCII bytes, so the `&str` indexing is always valid.
+fn percent_encode(s: &str, first: usize) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let bytes = s.as_bytes();
+    // Reserve the clean length plus headroom for a handful of `%XX` expansions (each adds
+    // two bytes). This avoids a reallocation for the common "a few reserved chars" case
+    // without paying for a second counting pass; heavily-escaped inputs may grow once.
+    let mut out = String::with_capacity(bytes.len() + 16);
+    out.push_str(&s[..first]);
+
+    let mut run_start = first;
+    let mut i = first;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if is_unreserved_byte(b) {
+            i += 1;
+            continue;
+        }
+        // Flush the pending run of clean bytes, then emit the escape for this byte.
+        if run_start < i {
+            out.push_str(&s[run_start..i]);
+        }
+        out.push('%');
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+        i += 1;
+        run_start = i;
+    }
+    if run_start < bytes.len() {
+        out.push_str(&s[run_start..]);
+    }
+    out
+}
+
 impl From<String> for EscapedString {
     /// Converts a [`String`] to an `EscapedString`, percent-encoding any RFC 6570 reserved characters.
     ///
@@ -314,6 +387,127 @@ mod tests {
         for reserved in RESERVED_CHARACTERS.chars() {
             let encoded_str = EscapedString::escape(format!("hello_{reserved}_world"));
             assert_eq!(encoded_str.to_string(), format!("hello_%{:02X}_world", reserved as u8));
+        }
+    }
+
+    #[test]
+    fn escape_multibyte_utf8_percent_encodes_each_byte() {
+        // Every byte of a multi-byte UTF-8 sequence is >= 0x80 and must be percent-encoded
+        // individually using uppercase hex, matching the previous `pct_str`-based behavior.
+        assert_eq!(EscapedString::escape("café").as_str(), "caf%C3%A9");
+        assert_eq!(EscapedString::escape("naïve—dash").as_str(), "na%C3%AFve%E2%80%94dash");
+    }
+
+    #[test]
+    fn escape_percent_sign_is_encoded() {
+        // A literal `%` is itself reserved and must become `%25`.
+        assert_eq!(EscapedString::escape("100%").as_str(), "100%25");
+        assert_eq!(EscapedString::escape("%3D").as_str(), "%253D");
+    }
+
+    #[test]
+    fn escape_handles_leading_trailing_and_mixed_runs() {
+        // Reserved bytes at the very start and end, with clean runs in between, must all be
+        // flushed correctly with uppercase hex.
+        assert_eq!(EscapedString::escape("/a b/").as_str(), "%2Fa%20b%2F");
+        assert_eq!(EscapedString::escape(" ").as_str(), "%20");
+        assert_eq!(EscapedString::escape("~clean.only_-").as_str(), "~clean.only_-");
+    }
+
+    #[test]
+    fn escape_empty_string_is_empty() {
+        assert_eq!(EscapedString::escape("").as_str(), "");
+    }
+
+    /// Reference percent-encoder that mirrors the exact RFC 6570 `UriReserved::Any`
+    /// semantics the crate relied on before the hand-rolled byte encoder: keep an
+    /// unreserved character verbatim, otherwise percent-encode every one of its UTF-8
+    /// bytes as uppercase `%XX`. Used only to cross-check [`EscapedString::escape`].
+    fn reference_escape(s: &str) -> String {
+        use std::fmt::Write as _;
+        fn is_unreserved(c: char) -> bool {
+            c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~')
+        }
+        let mut out = String::new();
+        for c in s.chars() {
+            if is_unreserved(c) {
+                out.push(c);
+            } else {
+                let mut buf = [0u8; 4];
+                for &b in c.encode_utf8(&mut buf).as_bytes() {
+                    write!(out, "%{b:02X}").expect("writing to a String is infallible");
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn escape_matches_reference_for_all_ascii_and_selected_unicode() {
+        // Every ASCII scalar plus a spread of 2-, 3- and 4-byte UTF-8 characters, checked
+        // individually and as a concatenated string, must match the reference encoder.
+        let mut singles: Vec<String> = (0u8..=0x7F).map(|b| (b as char).to_string()).collect();
+        for c in ['é', 'ñ', 'ü', '€', '£', '日', '本', '😀', '~', '%', ' ', '/', '?', '#'] {
+            singles.push(c.to_string());
+        }
+
+        let mut combined = String::new();
+        for s in &singles {
+            assert_eq!(
+                EscapedString::escape(s.as_str()).as_str(),
+                reference_escape(s),
+                "mismatch escaping {s:?}"
+            );
+            combined.push_str(s);
+        }
+        // The full concatenation exercises run-flushing across every boundary at once.
+        assert_eq!(EscapedString::escape(combined.as_str()).as_str(), reference_escape(&combined));
+    }
+
+    #[test]
+    fn escape_matches_reference_under_pseudo_random_fuzz() {
+        // Deterministic LCG over a mixed alphabet (clean, ASCII-reserved and multi-byte
+        // characters) across many lengths - a broad differential check against the
+        // reference encoder without a proptest dependency.
+        const ALPHABET: &[char] = &[
+            'a', 'Z', '0', '9', '-', '.', '_', '~', // unreserved
+            '/', '?', '#', '%', ' ', '&', '=', '+', ':', '@', // reserved ASCII
+            'é', 'ß', '€', '日', '😀', // multi-byte
+        ];
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+        for _ in 0..2000 {
+            let len = next() % 24;
+            let s: String = (0..len).map(|_| ALPHABET[next() % ALPHABET.len()]).collect();
+            assert_eq!(
+                EscapedString::escape(s.as_str()).as_str(),
+                reference_escape(&s),
+                "mismatch for {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_output_always_revalidates() {
+        // Invariant: `escape` must always produce a string that `try_new`/`from_static`
+        // accept as already-escaped. This ties the encoder and the validator together so
+        // they can never disagree about what constitutes a valid escaped string.
+        for raw in [
+            "",
+            "clean-only_~.09AZ",
+            "needs escaping / ? # %",
+            "café/naïve?x=€",
+            "100%",
+            "😀 mixed 日本 text!",
+        ] {
+            let escaped = EscapedString::escape(raw);
+            EscapedString::try_new(escaped.as_str().to_owned())
+                .unwrap_or_else(|e| panic!("escape({raw:?}) = {:?} failed re-validation: {e}", escaped.as_str()));
         }
     }
 

@@ -44,6 +44,28 @@ impl PathAndQuery {
         Self::from(HttpPathAndQuery::from_static(path))
     }
 
+    /// Appends this path-and-query's rendered text to `buf`.
+    ///
+    /// For a static value this is a single `push_str`; for a templated value it renders
+    /// the fields directly into `buf`, avoiding the intermediate `String` that
+    /// [`to_string`](Self::to_string) would allocate. Used by base-URI joining on the
+    /// request hot path.
+    pub(crate) fn render_into(&self, buf: &mut String) {
+        match &self.0 {
+            PathAndQueryInner::Static(classified_pq) => buf.push_str(classified_pq.declassify_ref().as_str()),
+            PathAndQueryInner::Templated(templated) => templated.render_into(buf),
+        }
+    }
+
+    /// Returns a heuristic byte-capacity estimate for [`render_into`](Self::render_into),
+    /// so a caller can size its buffer to avoid reallocating mid-render.
+    pub(crate) fn render_capacity_hint(&self) -> usize {
+        match &self.0 {
+            PathAndQueryInner::Static(classified_pq) => classified_pq.declassify_ref().as_str().len(),
+            PathAndQueryInner::Templated(templated) => templated.render_capacity_hint(),
+        }
+    }
+
     /// Returns the template string for this path and query.
     #[must_use]
     pub fn template(&self) -> Cow<'static, str> {

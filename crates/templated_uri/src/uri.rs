@@ -306,14 +306,15 @@ impl TryFrom<Uri> for http::Uri {
     fn try_from(value: Uri) -> Result<Self, Self::Error> {
         let Uri { base_uri, path_and_query } = value;
 
-        let path_and_query = path_and_query.map(|pq| HttpPathAndQuery::try_from(&pq)).transpose()?;
-
         match (base_uri, path_and_query) {
+            // Hot path: render, join onto the base, and validate in a single pass instead of
+            // materializing the path into a standalone `http::PathAndQuery` first.
+            (Some(base_uri), Some(pq)) => base_uri.build_http_uri_from_paq(&pq),
             (Some(base_uri), None) => Ok(base_uri.into()),
-            (Some(base_uri), Some(path_and_query)) => base_uri.build_http_uri(path_and_query),
             (None, pq) => {
+                let path_and_query = pq.map(|pq| HttpPathAndQuery::try_from(&pq)).transpose()?;
                 let mut parts = Parts::default();
-                parts.path_and_query = pq;
+                parts.path_and_query = path_and_query;
                 Self::from_parts(parts).map_err(Into::into)
             }
         }

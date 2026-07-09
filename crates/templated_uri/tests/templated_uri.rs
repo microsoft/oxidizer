@@ -937,3 +937,78 @@ fn optional_label_both_none() {
     let path = LabelOptional { ext1: None, ext2: None };
     assert_eq!(path.render(), "/file");
 }
+
+#[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
+#[derive(Clone)]
+struct MaterializePath {
+    user_id: u32,
+    post_id: EscapedString,
+}
+
+#[templated(template = "/{+catch_all}", unredacted)]
+#[derive(Clone)]
+struct CatchAllPath {
+    // `{+catch_all}` is a reserved expansion, so a value beginning with `/` renders a
+    // second leading slash (`//...`) that base joining must normalize.
+    catch_all: String,
+}
+
+/// The per-request hot path (base plus templated path into an `http::Uri`) must produce
+/// exactly the same URI as materializing the rendered path into a static `PathAndQuery`
+/// and joining that. This guards the single-pass `join_rendered` optimization against the
+/// original materialize-then-join behavior.
+#[test]
+fn materialize_hot_path_matches_static_join() {
+    let bases = [
+        "https://api.example.com",
+        "https://api.example.com/",
+        "https://api.example.com/v1/",
+        "http://localhost:8080/deep/base/",
+    ];
+
+    for base_str in bases {
+        let base = BaseUri::from_static(base_str);
+
+        // A normal templated path.
+        let templated = MaterializePath {
+            user_id: 42,
+            post_id: EscapedString::from_static("hello-world"),
+        };
+        let rendered = templated.render();
+
+        let hot: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(templated.clone())
+            .try_into()
+            .expect("hot-path materialization should succeed");
+
+        let expected: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(http::uri::PathAndQuery::try_from(rendered.as_str()).unwrap())
+            .try_into()
+            .expect("static-join materialization should succeed");
+
+        assert_eq!(hot, expected, "mismatch for base {base_str:?} (normal path)");
+
+        // A reserved-expansion path whose value begins with `/`, producing `//` before join.
+        let catch_all = CatchAllPath {
+            catch_all: "/nested/resource?x=1".to_string(),
+        };
+        let rendered_ca = catch_all.render();
+        assert!(rendered_ca.starts_with("//"), "sanity: catch-all should render a double slash");
+
+        let hot_ca: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(catch_all.clone())
+            .try_into()
+            .expect("hot-path materialization should succeed");
+
+        let expected_ca: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(http::uri::PathAndQuery::try_from(rendered_ca.as_str()).unwrap())
+            .try_into()
+            .expect("static-join materialization should succeed");
+
+        assert_eq!(hot_ca, expected_ca, "mismatch for base {base_str:?} (catch-all path)");
+    }
+}

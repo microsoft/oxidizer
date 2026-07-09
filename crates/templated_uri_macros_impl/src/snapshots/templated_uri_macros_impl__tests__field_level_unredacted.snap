@@ -19,44 +19,22 @@ impl ::templated_uri::PathAndQueryTemplate for Test {
         ::core::option::Option::None
     }
     fn render(&self) -> ::std::string::String {
-        let mut __out = ::std::string::String::with_capacity(16usize);
-        __out.push_str("/example.com/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.param)),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
-        __out.push_str("/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!("{}", ::templated_uri::Raw::raw(& self.param2)),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
-        __out.push_str("/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!(
-                    "{}", ::templated_uri::Escape::escape(& self.param3)
-                ),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
-        __out.push_str("/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!(
-                    "{}", ::templated_uri::Escape::escape(& self.param4)
-                ),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
+        let mut __out = ::std::string::String::with_capacity(80usize);
+        ::templated_uri::PathAndQueryTemplate::render_into(self, &mut __out);
         __out
+    }
+    fn render_into(&self, __out: &mut ::std::string::String) {
+        __out.push_str("/example.com/");
+        ::templated_uri::Escape::escape_into(&self.param, __out);
+        __out.push_str("/");
+        ::templated_uri::Raw::raw_into(&self.param2, __out);
+        __out.push_str("/");
+        ::templated_uri::Escape::escape_into(&self.param3, __out);
+        __out.push_str("/");
+        ::templated_uri::Escape::escape_into(&self.param4, __out);
+    }
+    fn render_capacity_hint(&self) -> ::core::primitive::usize {
+        80usize
     }
     fn to_path_and_query(
         &self,

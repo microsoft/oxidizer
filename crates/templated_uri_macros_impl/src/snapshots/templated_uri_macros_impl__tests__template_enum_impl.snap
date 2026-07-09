@@ -44,6 +44,36 @@ impl ::templated_uri::PathAndQueryTemplate for Test {
             Test::SecondTemplate(template_variant) => template_variant.render(),
         }
     }
+    fn render_into(&self, __out: &mut ::std::string::String) {
+        match self {
+            Test::FirstTemplate(template_variant) => {
+                ::templated_uri::PathAndQueryTemplate::render_into(
+                    template_variant,
+                    __out,
+                )
+            }
+            Test::SecondTemplate(template_variant) => {
+                ::templated_uri::PathAndQueryTemplate::render_into(
+                    template_variant,
+                    __out,
+                )
+            }
+        }
+    }
+    fn render_capacity_hint(&self) -> ::core::primitive::usize {
+        match self {
+            Test::FirstTemplate(template_variant) => {
+                ::templated_uri::PathAndQueryTemplate::render_capacity_hint(
+                    template_variant,
+                )
+            }
+            Test::SecondTemplate(template_variant) => {
+                ::templated_uri::PathAndQueryTemplate::render_capacity_hint(
+                    template_variant,
+                )
+            }
+        }
+    }
 }
 impl ::std::fmt::Debug for Test {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
