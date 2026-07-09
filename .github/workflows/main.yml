@@ -225,42 +225,17 @@ jobs:
       # Determine which crates have a bumped `[package] version = "..."` between
       # the PR base and head. Only these are on a path to publish, so only these
       # are checked against their crates.io baseline. Emits `--package NAME ...`
-      # (or empty) plus `publishing=true|false`.
+      # (or empty) plus `publishing=true|false`. Reuses the release library's
+      # per-crate version-diff logic (scripts/lib/releasing.ps1).
       - name: Compute Publishing Set
         id: publish
-        shell: bash
+        shell: pwsh
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          set -euo pipefail
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-
-          pkg_args=""
-          # For every crates/<crate>/Cargo.toml changed in this PR, compare the
-          # [package] version line at base vs head. A crate is "publishing" when
-          # its version line changed (added, or value differs).
-          while IFS= read -r manifest; do
-            [[ -z "$manifest" ]] && continue
-            [[ "$manifest" == crates/*/Cargo.toml ]] || continue
-
-            base_ver=$(git show "origin/${BASE_REF}:${manifest}" 2>/dev/null \
-              | awk '/^\[package\]/{p=1} p&&/^version[[:space:]]*=/{print;exit}' || true)
-            head_ver=$(awk '/^\[package\]/{p=1} p&&/^version[[:space:]]*=/{print;exit}' "$manifest" 2>/dev/null || true)
-
-            if [[ -n "$head_ver" && "$base_ver" != "$head_ver" ]]; then
-              name=$(awk '/^\[package\]/{p=1} p&&/^name[[:space:]]*=/{gsub(/.*=[[:space:]]*"?|"?[[:space:]]*$/,"");print;exit}' "$manifest")
-              [[ -n "$name" ]] && pkg_args+=" --package $name"
-            fi
-          done < <(git diff --name-only "origin/${BASE_REF}...HEAD" -- 'crates/*/Cargo.toml')
-
-          pkg_args="$(echo "$pkg_args" | sed 's/^ *//')"
-          if [[ -n "$pkg_args" ]]; then
-            echo "publishing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "publishing=false" >> "$GITHUB_OUTPUT"
-          fi
-          echo "packages=$pkg_args" >> "$GITHUB_OUTPUT"
-          echo "Publishing set: ${pkg_args:-<none>}"
+          $ErrorActionPreference = 'Stop'
+          git fetch --no-tags origin "+refs/heads/$env:BASE_REF`:refs/remotes/origin/$env:BASE_REF"
+          ./scripts/ci/compute-publishing-set.ps1 -BaseRef "origin/$env:BASE_REF"
 
       # execute — only when the PR bumps at least one crate version. Baseline is
       # crates.io (default: no --baseline-rev), so this validates the on-disk
