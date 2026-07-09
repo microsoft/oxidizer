@@ -295,6 +295,24 @@ function Test-IsBreakingChange {
     return $true
 }
 
+# Ordinal rank of a change type, used to compute the stronger of two change
+# types. 'none' means "no constraint" (e.g. cargo-semver-checks found nothing to
+# compare against) and ranks below every real change type.
+$script:ChangeTypeRank = @{ 'none' = 0; 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
+
+# Returns whichever of two change types is the stronger (higher-ranked). Unknown
+# or empty inputs are treated as 'none' (rank 0). Ties return $A.
+function Get-StrongerChangeType {
+    param(
+        [AllowNull()][AllowEmptyString()][string]$A,
+        [AllowNull()][AllowEmptyString()][string]$B
+    )
+    $ra = $script:ChangeTypeRank[$A]; if ($null -eq $ra) { $ra = 0 }
+    $rb = $script:ChangeTypeRank[$B]; if ($null -eq $rb) { $rb = 0 }
+    if ($rb -gt $ra) { return $B }
+    return $A
+}
+
 # Reads the [package] table's `version = "..."` from a Cargo.toml on disk.
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
@@ -410,6 +428,33 @@ function Reset-ReleaseScriptCaches {
     $script:PackageLastReleaseBaselineCache = $null
     $script:PackageCommittedChangesCache    = $null
     $script:PackageVersionAtRefCache        = $null
+    $script:CrateSemverVerdictCache         = $null
+}
+
+# Memoised, mockable classifier: returns the minimum change type a crate's
+# current working-tree public API requires versus its last published version
+# ('breaking' / 'non-breaking' / 'patch' / 'none' when never published), by
+# running cargo-semver-checks once per crate. Resolve-ReleaseSet is invoked many
+# times during the interactive review loop, so results are cached per cargo name
+# for the run. Test suites Mock this function to supply deterministic verdicts
+# without invoking the real tool (see the scenario harness).
+function Get-CrateRequiredChangeType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)][string]$CargoName,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    if ($null -eq $script:CrateSemverVerdictCache) { $script:CrateSemverVerdictCache = @{} }
+    if ($script:CrateSemverVerdictCache.ContainsKey($CargoName)) {
+        return $script:CrateSemverVerdictCache[$CargoName]
+    }
+
+    Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its last published version..." -ForegroundColor Cyan
+    $result = Invoke-CrateSemverCheck -PackageName $CargoName -RepoRoot $RepoRoot
+    $script:CrateSemverVerdictCache[$CargoName] = $result
+    return $result
 }
 
 # Returns information about all workspace packages as an array of objects with:
@@ -417,8 +462,6 @@ function Reset-ReleaseScriptCaches {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
-#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
-#                           or $null if the package does not declare them.
 function Get-WorkspacePackages {
     param([string]$repoRoot)
 
@@ -439,53 +482,84 @@ function Get-WorkspacePackages {
             }
         }
 
-        $allowedTypes = $null
-        $pkgMeta = $package.PSObject.Properties['metadata']
-        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
-            $cet = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
-            if ($cet -and $null -ne $cet.Value) {
-                $aet = $cet.Value.PSObject.Properties['allowed_external_types']
-                if ($aet -and $null -ne $aet.Value) {
-                    $allowedTypes = @($aet.Value)
-                }
-            }
-        }
-
         $packages += [pscustomobject]@{
             Name                 = $package.name
             Folder               = Split-Path $manifestDir -Leaf
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
-            AllowedExternalTypes = $allowedTypes
         }
     }
 
     return $packages
 }
 
-# Returns $true if the dependent package exposes any type rooted at the target package
-# in its public API, as declared by [package.metadata.cargo_check_external_types].
-# Conservative when metadata is missing.
-function Test-PackageExposesTarget {
+# Runs `cargo semver-checks` for a single crate against its last published version
+# (the crates.io / registry baseline — cargo-semver-checks' default when no
+# --baseline-* flag is passed) and returns the minimum change type the current
+# working-tree API requires: 'breaking', 'non-breaking', 'patch', or 'none' when
+# the crate has never been published (no baseline to compare against).
+#
+# The current API is analysed from the working tree, so a coordinated release's
+# in-progress source edits (including a dependency whose public types this crate
+# re-exports) are reflected — this is what lets an exposed-dependency breaking
+# change cascade correctly, without the old allowed_external_types heuristic.
+function Invoke-CrateSemverCheck {
+    [CmdletBinding()]
     param(
-        [pscustomobject]$dependent,
-        [string]$targetPackageName
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
     )
 
-    if ($null -eq $dependent.AllowedExternalTypes) {
-        return $true
+    Push-Location $RepoRoot
+    try {
+        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
+        # bump is required, which is expected and not an error for our purposes.
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = & cargo semver-checks --package $PackageName --all-features --color never 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
     }
 
-    $normalizedTarget = $targetPackageName.Replace('-', '_')
-    foreach ($entry in $dependent.AllowedExternalTypes) {
-        $root = ($entry -split '::', 2)[0]
-        if ($root -eq $normalizedTarget) {
-            return $true
-        }
+    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
+}
+
+# Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
+# so it can be unit-tested against captured tool output. Mapping:
+#   * "N major and M minor checks failed" -> major>0 breaking; minor>0 non-breaking
+#   * "no semver update required"                              -> patch (compatible)
+#   * baseline not found on the registry (never published)    -> none
+#   * anything else (tool/network/build failure)              -> throw (no silent fallback)
+function ConvertFrom-SemverChecksOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output,
+        [int]$ExitCode = 0,
+        [string]$PackageName = ''
+    )
+
+    $m = [regex]::Match($Output, '(?i)(\d+)\s+major\s+and\s+(\d+)\s+minor\s+check')
+    if ($m.Success) {
+        if ([int]$m.Groups[1].Value -gt 0) { return 'breaking' }
+        if ([int]$m.Groups[2].Value -gt 0) { return 'non-breaking' }
+        return 'patch'
     }
 
-    return $false
+    if ($Output -match '(?i)no\s+semver\s+update\s+required') {
+        return 'patch'
+    }
+
+    # No baseline: the crate (or a specific version) is not on the registry. This
+    # is the expected state for a brand-new, never-published crate — there is
+    # nothing to compare against, so it imposes no change-type floor.
+    if ($Output -match '(?i)not\s+found\s+in\s+(the\s+)?registry' -or
+        $Output -match '(?i)failed\s+to\s+retrieve\s+crate\s+data\s+from\s+registry' -or
+        $Output -match '(?i)no\s+(released|published)\s+versions?') {
+        return 'none'
+    }
+
+    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing, the network/registry is unreachable, or the crate failed to build. Output:`n$Output"
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published

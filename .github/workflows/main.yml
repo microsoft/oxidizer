@@ -196,6 +196,13 @@ jobs:
       - name: Check Spelling
         run: just spellcheck
 
+  # Runs cargo-semver-checks against each crate's LAST PUBLISHED version on
+  # crates.io (the tool's default baseline — no --baseline-rev), scoped to the
+  # crates whose `version =` is bumped in this PR (the "publishing set"). The
+  # job is informational only: it never fails the build (continue-on-error) and
+  # posts / clears a sticky PR comment. It is skipped entirely on PRs that do
+  # not bump any crate version, since only version-bumping PRs trigger a
+  # publish and thus need a compatibility check against the published baseline.
   semver:
     needs: [delta]
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
@@ -215,37 +222,84 @@ jobs:
           rust-toolchain: RUST_LATEST
           cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
-      # execute
+      # Determine which crates have a bumped `[package] version = "..."` between
+      # the PR base and head. Only these are on a path to publish, so only these
+      # are checked against their crates.io baseline. Emits `--package NAME ...`
+      # (or empty) plus `publishing=true|false`.
+      - name: Compute Publishing Set
+        id: publish
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+          pkg_args=""
+          # For every crates/<crate>/Cargo.toml changed in this PR, compare the
+          # [package] version line at base vs head. A crate is "publishing" when
+          # its version line changed (added, or value differs).
+          while IFS= read -r manifest; do
+            [[ -z "$manifest" ]] && continue
+            [[ "$manifest" == crates/*/Cargo.toml ]] || continue
+
+            base_ver=$(git show "origin/${BASE_REF}:${manifest}" 2>/dev/null \
+              | awk '/^\[package\]/{p=1} p&&/^version[[:space:]]*=/{print;exit}' || true)
+            head_ver=$(awk '/^\[package\]/{p=1} p&&/^version[[:space:]]*=/{print;exit}' "$manifest" 2>/dev/null || true)
+
+            if [[ -n "$head_ver" && "$base_ver" != "$head_ver" ]]; then
+              name=$(awk '/^\[package\]/{p=1} p&&/^name[[:space:]]*=/{gsub(/.*=[[:space:]]*"?|"?[[:space:]]*$/,"");print;exit}' "$manifest")
+              [[ -n "$name" ]] && pkg_args+=" --package $name"
+            fi
+          done < <(git diff --name-only "origin/${BASE_REF}...HEAD" -- 'crates/*/Cargo.toml')
+
+          pkg_args="$(echo "$pkg_args" | sed 's/^ *//')"
+          if [[ -n "$pkg_args" ]]; then
+            echo "publishing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishing=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "packages=$pkg_args" >> "$GITHUB_OUTPUT"
+          echo "Publishing set: ${pkg_args:-<none>}"
+
+      # execute — only when the PR bumps at least one crate version. Baseline is
+      # crates.io (default: no --baseline-rev), so this validates the on-disk
+      # bump is sufficient for the API changes since the last published release.
       - name: Semver Compatibility
         id: semver
+        if: steps.publish.outputs.publishing == 'true'
         continue-on-error: true
         run: |
           set -o pipefail
-          cargo semver-checks --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+          cargo semver-checks --all-features ${{ steps.publish.outputs.packages }} --color never 2>&1 | tee semver-output.txt
 
       # report
       - name: Prepare Semver Comment
-        if: steps.semver.outcome == 'failure'
+        if: steps.publish.outputs.publishing == 'true' && steps.semver.outcome == 'failure'
         run: |
-          echo "## ⚠️ Breaking Changes Detected" > semver-comment.txt
+          echo "## ⚠️ Breaking Changes Detected (vs last published version)" > semver-comment.txt
+          echo "" >> semver-comment.txt
+          echo "\`cargo semver-checks\` compared the crate(s) this PR is publishing against their latest **crates.io** release and found API changes that require a stronger version bump than the one on disk." >> semver-comment.txt
           echo "" >> semver-comment.txt
           echo '```' >> semver-comment.txt
           grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
           echo '```' >> semver-comment.txt
           echo "" >> semver-comment.txt
-          echo "If the breaking changes are intentional then everything is fine - this message is merely informative." >> semver-comment.txt
+          echo "If the breaking changes are intentional then everything is fine - this message is merely informative and does not block the merge." >> semver-comment.txt
           echo "" >> semver-comment.txt
           echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
 
       - name: Post Semver Failure Comment
-        if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
+        if: steps.publish.outputs.publishing == 'true' && steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check
           path: semver-comment.txt
 
+      # Clear a stale comment when the check now passes OR when the PR no longer
+      # publishes anything (publishing=false skips the check entirely).
       - name: Remove Semver Comment on Success
-        if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
+        if: (steps.publish.outputs.publishing != 'true' || steps.semver.outcome == 'success') && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@v3.0.4
         with:
           header: semver-check

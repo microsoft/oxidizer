@@ -47,6 +47,17 @@ Describe 'End-to-end release scenarios' {
             param([string]$Prompt)
             return Resolve-ScenarioPromptReply -Prompt $Prompt
         } -Verifiable:$false
+
+        # Replace real cargo-semver-checks with the scenario's simulated verdict
+        # map (folder -> change type), so cascade/self-floor classification is
+        # deterministic and offline. Unmapped folders default to 'none'.
+        Mock -CommandName Get-CrateRequiredChangeType -MockWith {
+            param([string]$Folder, [string]$CargoName, [string]$RepoRoot)
+            if ($script:ScenarioSemverVerdicts -and $script:ScenarioSemverVerdicts.ContainsKey($Folder)) {
+                return $script:ScenarioSemverVerdicts[$Folder]
+            }
+            return 'none'
+        } -Verifiable:$false
     }
 
     It '<Name>' -ForEach $script:ScenarioFiles {

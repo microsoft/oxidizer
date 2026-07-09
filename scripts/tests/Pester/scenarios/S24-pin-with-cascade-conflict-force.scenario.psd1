@@ -18,6 +18,7 @@
 
     Run = @{
         Packages = @('target@breaking', 'dependent@1.0.1')
+        SemverVerdicts = @{ dependent = 'breaking' }
         Force    = $true
         Answers  = @()
     }

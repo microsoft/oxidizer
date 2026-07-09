@@ -33,7 +33,10 @@
 #     Test-IsBreakingChange) and package-version readers (Get-CurrentVersion,
 #     Get-PackageVersionFromRef).
 #   - Workspace metadata (Get-WorkspaceMetadata, Get-WorkspacePackages,
-#     Invalidate-WorkspaceMetadataCache, Test-PackageExposesTarget, Get-AllTransitiveDependents).
+#     Invalidate-WorkspaceMetadataCache, Get-AllTransitiveDependents) and
+#     cargo-semver-checks classification (Invoke-CrateSemverCheck,
+#     ConvertFrom-SemverChecksOutput, Get-CrateRequiredChangeType,
+#     Get-StrongerChangeType).
 #   - Modified-but-unreleased dependency analysis (Get-PackagesWithUnreleasedChanges,
 #     Get-PackagesWithVersionChanges, Get-UnreleasedModifiedDependencies).
 . "$PSScriptRoot/releasing.ps1"
@@ -246,6 +249,61 @@ function Get-TransitivePublishedDependentsFromBaseline {
     return @($dependents)
 }
 
+# Raises a resolved release-set entry's EffectiveChangeType to at least
+# $RequiredChangeType, honouring the same explicit-pin rules the cascade uses:
+#   * Change-type-only entry: bump EffectiveChangeType + EffectiveTargetVersion,
+#     flag AutoUpgraded for user-source entries.
+#   * Pinned entry whose pin still satisfies the requirement: bump the tag, keep
+#     the pin.
+#   * Pinned entry whose pin undershoots: throw, unless -Force (then honour the
+#     pin verbatim, bump the tag, set PinHonoredAgainstCascade, and warn).
+# No-op when the entry is already at or above the required change type.
+# $RequirementLabel / $RequirementDetail are woven into the throw/warn messages
+# so the user can see whether the requirement came from a cascade or from
+# cargo-semver-checks analysing the crate's own API.
+function Update-EntryForRequiredChangeType {
+    param(
+        [Parameter(Mandatory = $true)][pscustomobject]$Entry,
+        [Parameter(Mandatory = $true)][string]$RequiredChangeType,
+        [Parameter(Mandatory = $true)][string]$RequirementLabel,
+        [Parameter(Mandatory = $true)][string]$RequirementDetail,
+        [switch]$Force
+    )
+
+    $existingRank = $script:ChangeTypeRank[$Entry.EffectiveChangeType]
+    $newRank      = $script:ChangeTypeRank[$RequiredChangeType]
+    if ($null -eq $existingRank) { $existingRank = 0 }
+    if ($null -eq $newRank) { $newRank = 0 }
+    if ($newRank -le $existingRank) { return }
+
+    $requiredVersion = Get-NextVersion -currentVersion $Entry.CurrentVersion -ChangeType $RequiredChangeType
+
+    if (-not [string]::IsNullOrEmpty($Entry.RequestedTargetVersion)) {
+        # User pinned an explicit version. Verify it numerically satisfies the
+        # requirement; if not, reject unless -Force honours it verbatim.
+        $cmpPin = Compare-SemanticVersions -version1 $Entry.RequestedTargetVersion -version2 $requiredVersion
+        if ($cmpPin -lt 0) {
+            if ($Force) {
+                Write-Warning "-Force: honoring explicit pin v$($Entry.RequestedTargetVersion) on '$($Entry.Folder)' even though $RequirementLabel requires at least v$requiredVersion ($RequirementDetail). The package's EffectiveChangeType tag is upgraded to '$RequiredChangeType' but the version on disk will be v$($Entry.RequestedTargetVersion). Consumers may break."
+                $Entry.EffectiveChangeType      = $RequiredChangeType
+                $Entry.PinHonoredAgainstCascade = $true
+            } else {
+                throw "Cannot release '$($Entry.Folder)' as v$($Entry.RequestedTargetVersion): $RequirementLabel requires at least v$requiredVersion because of $RequirementDetail. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (consumers may break)."
+            }
+        } else {
+            # Pin still satisfies. Bump the tag so downstream cascade decisions
+            # are correct, but keep the pinned version.
+            $Entry.EffectiveChangeType = $RequiredChangeType
+        }
+    } else {
+        $Entry.EffectiveChangeType    = $RequiredChangeType
+        $Entry.EffectiveTargetVersion = $requiredVersion
+        if ($Entry.Source -eq 'user') {
+            $Entry.AutoUpgraded = $true
+        }
+    }
+}
+
 # Turns the parsed token entries from Parse-ReleaseTokens into a *resolved
 # release set* — every package that will receive a release in this invocation,
 # whether the user asked for it directly or it was pulled in by cascade.
@@ -307,14 +365,22 @@ function Get-TransitivePublishedDependentsFromBaseline {
 #      overwrites the prior reason in place).
 #
 # Note: cascade is one-level. The set of dependents reachable from a user
-# target is the transitive published dependents BFS, but the cascade-applied
-# change type for each dependent is derived from exposure of the USER TARGET
-# (not of any intermediate). Tightening the analysis is out of scope for the
-# redesign.
+# target is the transitive published dependents BFS; each dependent's
+# cascade-applied change type is derived from cargo-semver-checks analysing the
+# dependent's OWN current working-tree public API vs its last published version
+# (floored at 'patch' — it must re-release to pick up the new dependency
+# version even when its own API is unchanged). This replaces the former
+# allowed_external_types exposure heuristic.
 function Resolve-ReleaseSet {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        # Classifier scriptblock: (folder, cargoName) -> 'breaking'|'non-breaking'|
+        # 'patch'|'none'. Decides each crate's minimum change type from its real
+        # API diff (cargo-semver-checks) vs its last published version. Production
+        # passes New-SemverChangeTypeClassifier; the default is a no-op ('none')
+        # so callers that only exercise version/pin/BFS math need not supply one.
+        [Parameter(Mandatory = $false)][scriptblock]$GetRequiredChangeType = { param($folder, $cargoName) 'none' },
         [Parameter(Mandatory = $false)][switch]$Force
     )
 
@@ -328,8 +394,6 @@ function Resolve-ReleaseSet {
         $baselineByFolder[$pkg.Folder] = $pkg
         $baselineByCargo[$pkg.Name.Replace('-', '_')] = $pkg
     }
-
-    $rank = @{ 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
 
     $resolved = [ordered]@{}
 
@@ -390,16 +454,20 @@ function Resolve-ReleaseSet {
         $targetEntry = $resolved[$targetFolder]
         $targetPkg   = $baselineByFolder[$targetFolder]
 
-        $targetIsBreaking = Test-IsBreakingChange -oldVersion $targetEntry.CurrentVersion -ChangeType $targetEntry.EffectiveChangeType
-        $exposingCascadeChangeType = if ($targetIsBreaking) { 'breaking' } else { $targetEntry.EffectiveChangeType }
-
         $targetCargoNorm = $targetPkg.Name.Replace('-', '_')
         $reachable = Get-TransitivePublishedDependentsFromBaseline -Baseline $WorkspaceBaseline -TargetCargoName $targetCargoNorm
 
         foreach ($depFolder in $reachable) {
             $depPkg  = $baselineByFolder[$depFolder]
-            $exposes = Test-PackageExposesTarget -dependent $depPkg -targetPackageName $targetPkg.Name
-            $dependentChangeType = if ($exposes) { $exposingCascadeChangeType } else { 'patch' }
+
+            # The dependent's change type is decided by cargo-semver-checks
+            # analysing ITS OWN current working-tree API (which already reflects
+            # the target's in-progress changes, including re-exported types) vs
+            # its last published version — floored at 'patch' because it must be
+            # re-released to pick up the new dependency version even when its own
+            # public API is unchanged. This replaces the old
+            # allowed_external_types exposure heuristic.
+            $dependentChangeType = Get-StrongerChangeType 'patch' (& $GetRequiredChangeType $depPkg.Folder $depPkg.Name)
 
             $depBreakingForReason = Test-IsBreakingChange -oldVersion $depPkg.Version -ChangeType $dependentChangeType
             $cascadeReason = [pscustomobject]@{
@@ -426,45 +494,9 @@ function Resolve-ReleaseSet {
                     $existing.CascadeReasons.Add($cascadeReason)
                 }
 
-                $existingRank = $rank[$existing.EffectiveChangeType]
-                $newRank      = $rank[$dependentChangeType]
-                if ($newRank -gt $existingRank) {
-                    $cascadeRequiredVersion = Get-NextVersion -currentVersion $existing.CurrentVersion -ChangeType $dependentChangeType
-
-                    if (-not [string]::IsNullOrEmpty($existing.RequestedTargetVersion)) {
-                        # User pinned an explicit version. Verify it numerically
-                        # satisfies the cascade requirement; if not, the user
-                        # has to revise their request — unless -Force was set,
-                        # in which case we honor the pin verbatim, still bump
-                        # the EffectiveChangeType tag, and flag the entry so
-                        # the user sees a clear warning at plan-display time.
-                        $cmpPin = Compare-SemanticVersions -version1 $existing.RequestedTargetVersion -version2 $cascadeRequiredVersion
-                        if ($cmpPin -lt 0) {
-                            if ($Force) {
-                                $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                                Write-Warning "-Force: honoring explicit pin v$($existing.RequestedTargetVersion) on '$($existing.Folder)' even though cascade requires at least v$cascadeRequiredVersion (cascade sources: $reasonsNames). The package's EffectiveChangeType tag is upgraded to '$dependentChangeType' but the version on disk will be v$($existing.RequestedTargetVersion). Consumers may break."
-                                $existing.EffectiveChangeType       = $dependentChangeType
-                                $existing.PinHonoredAgainstCascade  = $true
-                            } else {
-                                $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
-                                throw "Cannot release '$($existing.Folder)' as v$($existing.RequestedTargetVersion): cascade requires at least v$cascadeRequiredVersion because of changes in: $reasonsNames. Specify a higher version pin, use a change-type keyword, or pass -Force to honor the pin verbatim (consumers may break)."
-                            }
-                        } else {
-                            # Pin still satisfies. Bump the EffectiveChangeType tag
-                            # (so cascade re-exposure decisions for this entry's
-                            # own dependents — if we iterated them, which we don't
-                            # at present — would be correct) but keep the pin as
-                            # the version.
-                            $existing.EffectiveChangeType = $dependentChangeType
-                        }
-                    } else {
-                        $existing.EffectiveChangeType    = $dependentChangeType
-                        $existing.EffectiveTargetVersion = $cascadeRequiredVersion
-                        if ($existing.Source -eq 'user') {
-                            $existing.AutoUpgraded = $true
-                        }
-                    }
-                }
+                $reasonsNames = ($existing.CascadeReasons | ForEach-Object { $_.Target } | Sort-Object -Unique) -join ', '
+                Update-EntryForRequiredChangeType -Entry $existing -RequiredChangeType $dependentChangeType `
+                    -RequirementLabel 'cascade' -RequirementDetail "changes in: $reasonsNames" -Force:$Force
             } else {
                 $newEntry = [pscustomobject]@{
                     Folder                   = $depPkg.Folder
@@ -486,7 +518,36 @@ function Resolve-ReleaseSet {
         }
     }
 
+    # Self-floor: raise each USER-source entry's change type to at least what
+    # cargo-semver-checks requires for its OWN public API vs its last published
+    # version. The cascade above already floored dependents; this catches
+    # user-source ROOTS that nothing cascades into (e.g. releasing a single leaf
+    # crate whose own API broke). Author intent is never downgraded — only raised
+    # when the real API diff demands a stronger change type.
+    foreach ($folder in $userFolders) {
+        $entry    = $resolved[$folder]
+        $required = & $GetRequiredChangeType $entry.Folder $entry.Name
+        if ([string]::IsNullOrEmpty($required) -or $required -eq 'none') { continue }
+        Update-EntryForRequiredChangeType -Entry $entry -RequiredChangeType $required `
+            -RequirementLabel 'cargo-semver-checks' -RequirementDetail "the crate's own public API changes" -Force:$Force
+    }
+
     return @($resolved.Values)
+}
+
+# Repo root for the default classifier, set by Invoke-ReleasePackagesMain before
+# planning. A module-scope variable (rather than a captured closure) so the
+# classifier scriptblock below resolves it in the module session state.
+$script:ReleaseRepoRoot = $null
+
+# The production classifier handed to Resolve-ReleaseSet / Invoke-PlanReview.
+# Defined at module scope so, when invoked via `& $GetRequiredChangeType` deep
+# inside the planner, it resolves Get-CrateRequiredChangeType and
+# $script:ReleaseRepoRoot in this module's session state — and Pester can Mock
+# Get-CrateRequiredChangeType for tests.
+$script:DefaultSemverClassifier = {
+    param([string]$folder, [string]$cargoName)
+    Get-CrateRequiredChangeType -Folder $folder -CargoName $cargoName -RepoRoot $script:ReleaseRepoRoot
 }
 
 function Format-ConventionalCommits {
@@ -1446,6 +1507,10 @@ function Invoke-PlanReview {
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ParsedTokens,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
+        # Classifier forwarded to Resolve-ReleaseSet. Defaults to the module-scope
+        # cargo-semver-checks classifier; tests that mock Resolve-ReleaseSet can
+        # omit it (the default is never invoked because the mock ignores it).
+        [Parameter(Mandatory = $false)][scriptblock]$GetRequiredChangeType = $script:DefaultSemverClassifier,
         [Parameter(Mandatory = $false)][hashtable]$ModifiedSnapshot,
         [Parameter(Mandatory = $false)][ValidateSet('targeted', 'all-changed')][string]$Mode = 'targeted',
         [Parameter(Mandatory = $false)][switch]$Force
@@ -1510,7 +1575,7 @@ function Invoke-PlanReview {
             if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
                 $resolvedHash = @{}
             } else {
-                $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -Force:$Force)
+                $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -GetRequiredChangeType $GetRequiredChangeType -Force:$Force)
                 $resolvedHash = @{}
                 foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
             }
@@ -1593,7 +1658,7 @@ function Invoke-PlanReview {
         if ($Mode -eq 'all-changed' -and $userTokens.Count -eq 0) {
             $resolvedHash = @{}
         } else {
-            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -Force:$Force)
+            $resolvedArr  = @(Resolve-ReleaseSet -ParsedTokens $userTokens.ToArray() -WorkspaceBaseline $WorkspaceBaseline -GetRequiredChangeType $GetRequiredChangeType -Force:$Force)
             $resolvedHash = @{}
             foreach ($e in $resolvedArr) { $resolvedHash[$e.Folder] = $e }
         }
@@ -1977,6 +2042,14 @@ function Invoke-ReleasePackagesMain {
         Exit 1
     }
 
+    # cargo-semver-checks decides every change type in the plan (against each
+    # crate's last published version). It is a hard dependency — there is no
+    # heuristic fallback — so fail fast with an actionable message if missing.
+    if (-not (Test-CommandExists -command 'cargo-semver-checks')) {
+        Write-Error "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their last published versions."
+        Exit 1
+    }
+
     $repoRoot = Get-Location
     if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
         Write-Error 'This script must be run from the root of a Git repository.'
@@ -2066,9 +2139,21 @@ function Invoke-ReleasePackagesMain {
     # the loop and feed Resolve-ReleaseSet on the next iteration just like
     # the targeted flow.
     $planReviewMode = if ($Mode -eq 'targeted') { 'targeted' } else { 'all-changed' }
+
+    # Classifier passed to the planner: decides every change type in the plan
+    # (user-source and cascade) from each crate's real API diff vs its last
+    # published version — no allowed_external_types heuristic, no fallback.
+    # $script:DefaultSemverClassifier is a module-scope scriptblock (defined
+    # below Resolve-ReleaseSet) so it resolves Get-CrateRequiredChangeType and
+    # $script:ReleaseRepoRoot in the module session state; that also lets the
+    # test suites Mock Get-CrateRequiredChangeType. Get-CrateRequiredChangeType
+    # memoises per crate so the interactive review loop re-resolves cheaply.
+    $script:ReleaseRepoRoot = $repoRoot.Path
+
     try {
         $resolvedHash = Invoke-PlanReview -RepoRoot $repoRoot.Path `
             -ParsedTokens $parsedTokens -WorkspaceBaseline $workspaceBaseline `
+            -GetRequiredChangeType $script:DefaultSemverClassifier `
             -ModifiedSnapshot $modifiedSnapshot -Mode $planReviewMode -Force:$Force
     } catch {
         Write-Error $_.Exception.Message

@@ -203,31 +203,59 @@ Examples:
 
 After parsing the tokens, the planner walks the workspace dependency
 graph forward from every user-source release and adds each transitive
-published dependent as a cascade-source release. The cascade's change
-type for each dependent is derived from whether the user-source release
-exposes (in its public API) the cascaded-from package — exposing
-cascades propagate the source's change type, non-exposing cascades drop
-to `patch`.
+published dependent as a cascade-source release. The change type for
+every release in the plan — both the directly-requested (user-source)
+crates and the cascade-pulled dependents — is derived by running
+[`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
+against each crate's **last published version on crates.io** (the tool's
+default baseline). The current working-tree API is analysed, so a
+coordinated release's in-progress edits — including a dependency whose
+public types a dependent re-exports — are reflected in the dependent's
+own API diff. This replaces the former
+`[package.metadata.cargo_check_external_types]` allowlist heuristic,
+which could misfire when the allowlist drifted from the real public API
+(see the bug that motivated this change: a breaking change in an exposed
+dependency was cascaded as `patch` instead of `breaking`).
+
+Mapping from `cargo semver-checks` verdicts to change types:
+
+- major API change required → `breaking`
+- minor API change required → `non-breaking`
+- compatible / no update required → `patch`
+- crate not yet on crates.io (never published) → no constraint
+
+Cascade dependents are floored at `patch` (they must re-release to pick
+up the new dependency version even when their own public API is
+unchanged), then raised to whatever their own `cargo semver-checks`
+verdict requires.
+
+> **cargo-semver-checks is a hard dependency of the release scripts.**
+> Install the version pinned in `constants.env`
+> (`CARGO_SEMVER_CHECKS_VERSION`) with
+> `cargo install cargo-semver-checks --version <pinned> --locked`. There
+> is no heuristic fallback — the script errors out if the tool is
+> missing or the crate cannot be analysed.
 
 The planner enforces **topological consistency**: if a user-supplied
-change type for a package is *weaker* than the cascade would compute,
-the planner auto-upgrades it and notes the upgrade in the review output.
-The caller's `-Packages` token is therefore a *lower bound*, not a
-guarantee — the caller can always elevate further on the next iteration
-of the review, but cannot suppress a cascade-imposed change type.
+change type for a package is *weaker* than `cargo semver-checks`
+requires (for that package or via a cascade), the planner auto-upgrades
+it and notes the upgrade in the review output. The caller's `-Packages`
+token is therefore a *lower bound*, not a guarantee — the caller can
+always elevate further on the next iteration of the review, but cannot
+suppress a semver-imposed change type.
 
 ### Errors the planner rejects
 
 - An explicit semver that is not strictly greater than the package's
   current on-disk version. (Always fatal — `-Force` does not relax this.)
-- A user-supplied change type that pins the package *below* what the
-  cascade computes for it. (The planner can auto-upgrade ordinary
-  change-type tokens, but treats an explicit semver token as a hard
-  pin — if the explicit version is below what the cascade requires the
-  planner errors instead of silently overriding the caller. Pass
-  `-Force` to override: the pin is honored verbatim, the package's
-  effective change-type tag is still upgraded so further cascade
-  decisions are correct, and a warning is printed flagging that
+- A user-supplied change type that pins the package *below* what
+  `cargo semver-checks` (or the cascade) computes for it. (The planner
+  can auto-upgrade ordinary change-type tokens, but treats an explicit
+  semver token as a hard pin — if the explicit version is below what the
+  analysis requires the planner errors instead of silently overriding
+  the caller. Pass `-Force` to override: the pin is honored verbatim, the
+  package's effective change-type tag is still upgraded so further
+  cascade decisions are correct, and a warning is printed flagging that
   consumers may break.)
 
 ---

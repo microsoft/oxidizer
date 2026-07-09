@@ -14,18 +14,30 @@ BeforeAll {
             [string]   $Name = $null,
             [string]   $Version = '0.1.0',
             [string[]] $Deps = @(),
-            [bool]     $Published = $true,
-            $AllowedExternalTypes = $null
+            [bool]     $Published = $true
         )
         if ([string]::IsNullOrEmpty($Name)) { $Name = $Folder }
         return [pscustomobject]@{
-            Folder               = $Folder
-            Name                 = $Name
-            Version              = $Version
-            Published            = $Published
-            Deps                 = $Deps
-            AllowedExternalTypes = $AllowedExternalTypes
+            Folder    = $Folder
+            Name      = $Name
+            Version   = $Version
+            Published = $Published
+            Deps      = $Deps
         }
+    }
+
+    # Builds a stub cargo-semver-checks classifier from a folder -> change-type
+    # map. Unmapped folders return 'none' (no constraint). Lets the cascade /
+    # self-floor logic be tested deterministically without invoking the real
+    # tool. The real classifier is New-SemverChangeTypeClassifier.
+    function New-StubClassifier {
+        param([hashtable]$Map = @{})
+        return {
+            param([string]$Folder, [string]$CargoName)
+            $t = $Map[$Folder]
+            if ($t) { return $t }
+            return 'none'
+        }.GetNewClosure()
     }
 
     # Linear baseline: a → b → c → d (each depends on the previous).
@@ -214,15 +226,19 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['d'].CascadeReasons[0].Target | Should -Be 'a'
         }
 
-        It 'cascades a breaking change as breaking to exposing dependents and as patch to non-exposing dependents' {
-            # a (breaking), b exposes a (so cascade -> breaking), c does NOT expose a (-> patch).
+        It 'classifies cascade dependents via cargo-semver-checks: API-broken dependent is breaking, unaffected dependent is patch' {
+            # a released breaking. b's own public API broke (semver-checks:
+            # breaking, e.g. it re-exports a changed type); c's did not
+            # (semver-checks: none) but c must still re-release to pick up new a
+            # => floored to patch.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
-                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') -AllowedExternalTypes @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a') -AllowedExternalTypes @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
 
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
@@ -239,37 +255,36 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['c'].CascadeReasons[0].Breaking | Should -BeFalse
         }
 
-        It 'cascade BFS does NOT pass through cascade-source entries (one-level only)' {
-            # a -> b -> c.  Releasing 'a' as patch makes b non-exposing→patch and
-            # c non-exposing→patch.  Even if b *would* have been "breaking" if
-            # released directly, the cascade from a only ever asks for patch
-            # change types on transitive dependents (because b does not expose a's
-            # types and c does not expose a's types).
+        It 'derives each cascade dependent''s change type from its own semver-checks verdict, not the target''s' {
+            # a -> b -> c, releasing a as patch. b's own API is non-breaking; c's
+            # is unaffected. The dependent severities come from semver-checks on
+            # each dependent, independent of a's (patch) change type.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
-                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') -AllowedExternalTypes @())
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') -AllowedExternalTypes @())
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
             )
+            $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@patch')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
-            $byFolder['b'].EffectiveChangeType | Should -Be 'patch'
+            $byFolder['b'].EffectiveChangeType | Should -Be 'non-breaking'
             $byFolder['c'].EffectiveChangeType | Should -Be 'patch'
         }
     }
 
     Context 'cascade auto-upgrade of user-source entries' {
-        It 'auto-upgrades a user-source patch to non-breaking when cascade requires it (and sets AutoUpgraded)' {
-            # a -> b. Release a as non-breaking, release b as patch. Cascade from
-            # a's non-breaking exposes b -> non-breaking, so b's patch request
-            # gets auto-upgraded.
+        It 'auto-upgrades a user-source patch to non-breaking when its own semver-checks verdict requires it (and sets AutoUpgraded)' {
+            # b requested as patch, but semver-checks says b's own API is
+            # non-breaking, so its change type is floored up and AutoUpgraded set.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking', 'b@patch')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].Source                   | Should -Be 'user'
@@ -279,25 +294,27 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].EffectiveTargetVersion   | Should -Be '1.1.0'
         }
 
-        It 'does NOT mark AutoUpgraded when the user requested the same change type the cascade asks for' {
+        It 'does NOT mark AutoUpgraded when the user requested the same change type semver-checks asks for' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking', 'b@nonbreaking')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].AutoUpgraded | Should -BeFalse
         }
 
-        It 'does NOT downgrade the user-supplied change type when cascade asks for a weaker change' {
+        It 'does NOT downgrade the user-supplied change type when semver-checks asks for a weaker change' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'patch' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@patch', 'b@breaking')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveChangeType    | Should -Be 'breaking'
@@ -307,30 +324,33 @@ Describe 'Resolve-ReleaseSet' {
     }
 
     Context 'cascade interaction with explicit version pins' {
-        It 'keeps the pin when it numerically satisfies the cascade requirement' {
-            # a -> b. a non-breaking. b pinned to 1.5.0 (well above cascade 1.1.0 req).
+        It 'keeps the pin when it numerically satisfies the required version' {
+            # a non-breaking; b's own API non-breaking (required 1.1.0). b pinned
+            # to 1.5.0 (well above), so the pin is kept.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking', 'b@1.5.0')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveTargetVersion | Should -Be '1.5.0'
             $byFolder['b'].RequestedTargetVersion | Should -Be '1.5.0'
         }
 
-        It 'throws when the pin is numerically below the cascade requirement' {
-            # a breaking would require b 2.0.0 (cascade-required), but user pinned
-            # b at 1.1.0. Resolution must throw.
+        It 'throws when the pin is numerically below the required version' {
+            # b's own API broke (semver-checks: breaking) => requires 2.0.0, but
+            # user pinned b at 1.1.0. Resolution must throw.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
-            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
-                Should -Throw -ExpectedMessage "*Cannot release 'b' as v1.1.0*cascade requires*v2.0.0*"
+            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier } |
+                Should -Throw -ExpectedMessage "*Cannot release 'b' as v1.1.0*requires*v2.0.0*"
         }
 
         It 'mentions -Force in the rejection error message so the user knows about the override' {
@@ -338,21 +358,23 @@ Describe 'Resolve-ReleaseSet' {
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
-            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline } |
+            { Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier } |
                 Should -Throw -ExpectedMessage '*-Force*'
         }
 
-        It '-Force honors the explicit pin verbatim when cascade requires a higher version' {
-            # a breaking would normally require b 2.0.0; user pinned b at 1.1.0.
-            # With -Force, b stays at 1.1.0 but the change-type tag is upgraded
-            # so any further cascade decisions for b would be correct.
+        It '-Force honors the explicit pin verbatim when a higher version is required' {
+            # b's own API broke => normally requires 2.0.0; user pinned b at
+            # 1.1.0. With -Force, b stays at 1.1.0 but the change-type tag is
+            # upgraded so any further cascade decisions for b would be correct.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningAction SilentlyContinue
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier -Force -WarningAction SilentlyContinue
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].EffectiveTargetVersion    | Should -Be '1.1.0'
@@ -361,14 +383,15 @@ Describe 'Resolve-ReleaseSet' {
             $byFolder['b'].PinHonoredAgainstCascade  | Should -BeTrue
         }
 
-        It '-Force emits a warning naming the package, the pin, the cascade-required minimum, and the cascade sources' {
+        It '-Force emits a warning naming the package, the pin, the required minimum, and the sources' {
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@breaking', 'b@1.1.0')
             $warnings = @()
-            $null = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force -WarningVariable +warnings -WarningAction SilentlyContinue
+            $null = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier -Force -WarningVariable +warnings -WarningAction SilentlyContinue
             ($warnings -join "`n") | Should -Match '-Force'
             ($warnings -join "`n") | Should -Match "'b'"
             ($warnings -join "`n") | Should -Match 'v1\.1\.0'
@@ -376,15 +399,16 @@ Describe 'Resolve-ReleaseSet' {
             ($warnings -join "`n") | Should -Match 'a'
         }
 
-        It '-Force does NOT set PinHonoredAgainstCascade when the pin already satisfies the cascade' {
-            # a non-breaking would require b 1.1.0 (cascade-required); user pinned
-            # b at 1.5.0 which already satisfies. -Force is a no-op here.
+        It '-Force does NOT set PinHonoredAgainstCascade when the pin already satisfies the requirement' {
+            # a non-breaking; b's own API non-breaking (required 1.1.0); user
+            # pinned b at 1.5.0 which already satisfies. -Force is a no-op here.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
             )
+            $classifier = New-StubClassifier @{ b = 'non-breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@nonbreaking', 'b@1.5.0')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -Force
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier -Force
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
             $byFolder['b'].PinHonoredAgainstCascade | Should -BeFalse
@@ -403,15 +427,16 @@ Describe 'Resolve-ReleaseSet' {
 
     Context 'diamond dependency with two user-source roots' {
         It 'accumulates one cascade reason per dependency into the diamond bottom and strengthens correctly' {
-            # diamond:  a, x are roots;  both depended on by mid;  c depends on mid.
-            # Actually:  c depends on a (patch) and c depends on b (breaking).
+            # a, x are roots; c depends on both. c's own API broke (semver-checks:
+            # breaking) because of x's breaking change.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'x' -Version '1.0.0' -Deps @())
                 (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('a', 'x'))
             )
+            $classifier = New-StubClassifier @{ c = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('a@patch', 'x@breaking')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
 
@@ -419,24 +444,26 @@ Describe 'Resolve-ReleaseSet' {
             $reasonTargets = @($byFolder['c'].CascadeReasons | ForEach-Object { $_.Target } | Sort-Object)
             $reasonTargets | Should -Be @('a', 'x')
 
-            # x's cascade is breaking → c becomes breaking via cascade.
+            # c's own API broke => c becomes breaking.
             $byFolder['c'].EffectiveChangeType    | Should -Be 'breaking'
             $byFolder['c'].EffectiveTargetVersion | Should -Be '2.0.0'
         }
     }
 
     Context 'transitive cascade reason aggregation' {
-        It 'records reasons for both the direct and indirect target when a later iteration auto-upgrades the middle crate' {
-            # Linear chain a -> b -> c (each exposes the previous). Tokens
-            # `b a` so b iterates first, then a's BFS reaches both b and c and
-            # bumps b to breaking. c stays patch under one-level cascade.
+        It 'records reasons for both the direct and indirect target when a middle crate is auto-upgraded' {
+            # Linear chain a -> b -> c. Tokens `b a` so b iterates first, then a's
+            # BFS reaches both b and c. b's own API broke (semver-checks:
+            # breaking) so b is bumped to breaking; c's is unaffected so c stays
+            # patch under the per-dependent classification.
             $baseline = @(
                 (New-BaselinePackage -Folder 'a' -Version '1.0.0' -Deps @())
-                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a') -AllowedExternalTypes @('a'))
-                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b') -AllowedExternalTypes @('b'))
+                (New-BaselinePackage -Folder 'b' -Version '1.0.0' -Deps @('a'))
+                (New-BaselinePackage -Folder 'c' -Version '1.0.0' -Deps @('b'))
             )
+            $classifier = New-StubClassifier @{ b = 'breaking' }
             $parsed = Parse-ReleaseTokens -Tokens @('b@patch', 'a@breaking')
-            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline
+            $resolved = Resolve-ReleaseSet -ParsedTokens $parsed -WorkspaceBaseline $baseline -GetRequiredChangeType $classifier
 
             $byFolder = @{}
             foreach ($e in $resolved) { $byFolder[$e.Folder] = $e }
@@ -450,8 +477,7 @@ Describe 'Resolve-ReleaseSet' {
 
             $cReasonForB = @($byFolder['c'].CascadeReasons | Where-Object { $_.Target -eq 'b' })
             $cReasonForB.Count   | Should -Be 1
-            # Breaking is intentionally NOT recomputed (one-level cascade
-            # semantics); this assertion locks that decision in.
+            # Breaking reflects c's own (patch) change, not b's.
             $cReasonForB[0].Breaking | Should -BeFalse
 
             $cReasonForA = @($byFolder['c'].CascadeReasons | Where-Object { $_.Target -eq 'a' })
