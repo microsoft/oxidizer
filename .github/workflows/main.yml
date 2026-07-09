@@ -199,9 +199,10 @@ jobs:
   # Runs cargo-semver-checks against each crate's LAST PUBLISHED version on
   # crates.io (the tool's default baseline — no --baseline-rev), scoped to the
   # crates whose `version =` is bumped in this PR (the "publishing set"). The
-  # job is informational only: it never fails the build (continue-on-error) and
-  # posts / clears a sticky PR comment. It is skipped entirely on PRs that do
-  # not bump any crate version, since only version-bumping PRs trigger a
+  # job is informational only: it never fails the build and posts a fresh PR
+  # comment on every push with a per-crate table (crates.io vs this-PR vs the
+  # minimum required version) plus a link to the run. It is a no-op on PRs that
+  # do not bump any crate version, since only version-bumping PRs trigger a
   # publish and thus need a compatibility check against the published baseline.
   semver:
     needs: [delta]
@@ -222,63 +223,33 @@ jobs:
           rust-toolchain: RUST_LATEST
           cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
-      # Determine which crates have a bumped `[package] version = "..."` between
-      # the PR base and head. Only these are on a path to publish, so only these
-      # are checked against their crates.io baseline. Emits `--package NAME ...`
-      # (or empty) plus `publishing=true|false`. Reuses the release library's
-      # per-crate version-diff logic (scripts/lib/releasing.ps1).
-      - name: Compute Publishing Set
-        id: publish
+      # Compute the publishing set (version-bumped published crates), run
+      # cargo-semver-checks per crate against its crates.io baseline, and render
+      # a Markdown report (scripts/ci/semver-report.ps1 — reuses the release
+      # library's version-diff / next-version helpers). Sets outputs:
+      #   publishing = true|false   (any crate version bumped)
+      #   status     = pass|fail    (any crate under-bumped for its API changes)
+      # Kept non-failing so registry/network hiccups never block the PR.
+      - name: Semver Report
+        id: report
+        continue-on-error: true
         shell: pwsh
         env:
           BASE_REF: ${{ github.base_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
           git fetch --no-tags origin "+refs/heads/$env:BASE_REF`:refs/remotes/origin/$env:BASE_REF"
-          ./scripts/ci/compute-publishing-set.ps1 -BaseRef "origin/$env:BASE_REF"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/$env:BASE_REF" -ReportPath semver-comment.md -RunUrl "$env:RUN_URL"
 
-      # execute — only when the PR bumps at least one crate version. Baseline is
-      # crates.io (default: no --baseline-rev), so this validates the on-disk
-      # bump is sufficient for the API changes since the last published release.
-      - name: Semver Compatibility
-        id: semver
-        if: steps.publish.outputs.publishing == 'true'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          cargo semver-checks --all-features ${{ steps.publish.outputs.packages }} --color never 2>&1 | tee semver-output.txt
-
-      # report
-      - name: Prepare Semver Comment
-        if: steps.publish.outputs.publishing == 'true' && steps.semver.outcome == 'failure'
-        run: |
-          echo "## ⚠️ Breaking Changes Detected (vs last published version)" > semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "\`cargo semver-checks\` compared the crate(s) this PR is publishing against their latest **crates.io** release and found API changes that require a stronger version bump than the one on disk." >> semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo '```' >> semver-comment.txt
-          grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
-          echo '```' >> semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "If the breaking changes are intentional then everything is fine - this message is merely informative and does not block the merge." >> semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
-
-      - name: Post Semver Failure Comment
-        if: steps.publish.outputs.publishing == 'true' && steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: semver-check
-          path: semver-comment.txt
-
-      # Clear a stale comment when the check now passes OR when the PR no longer
-      # publishes anything (publishing=false skips the check entirely).
-      - name: Remove Semver Comment on Success
-        if: (steps.publish.outputs.publishing != 'true' || steps.semver.outcome == 'success') && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: semver-check
-          delete: true
+      # Post a NEW comment on every push (not a sticky update) so each run's
+      # result is visible in the PR timeline. Only fires when the PR actually
+      # publishes something and is not from a fork (forks lack a write token).
+      - name: Post Semver Comment
+        if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file semver-comment.md
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
