@@ -1012,3 +1012,80 @@ fn materialize_hot_path_matches_static_join() {
         assert_eq!(hot_ca, expected_ca, "mismatch for base {base_str:?} (catch-all path)");
     }
 }
+
+#[templated(template = "/search{?query,limit,offset}", unredacted)]
+#[derive(Clone)]
+struct CapacityHintPath {
+    query: EscapedString,
+    limit: u32,
+    offset: u32,
+}
+
+#[test]
+fn macro_render_capacity_hint_exact_value() {
+    // The `#[templated]` macro emits a compile-time `render_capacity_hint()` that sums, for
+    // `/search{?query,limit,offset}`:
+    //   - content "/search"                                        = 7
+    //   - group `{?query,limit,offset}` prefix "?"                 = 1
+    //   - separators between 3 values (2 x "&", 1 byte each)       = 2
+    //   - `key=` literals: "query="(6) + "limit="(6) + "offset="(7) = 19
+    //   - 3 values x ESTIMATED_VALUE_LEN (16)                       = 48
+    // for a total of 77. Asserting the exact value pins the macro's capacity arithmetic so a
+    // mutation to any of the `+`/`*` operators (which does not change rendered output and so
+    // is invisible to behavioral tests) is caught here.
+    let p = CapacityHintPath {
+        query: EscapedString::from_static("x"),
+        limit: 1,
+        offset: 2,
+    };
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&p), 77);
+    // Sanity: the hint must be a genuine upper bound for this concrete (short) render.
+    assert!(PathAndQueryTemplate::render_capacity_hint(&p) >= p.render().len());
+}
+
+#[test]
+fn macro_render_capacity_hint_covers_simple_and_reserved_expansions() {
+    // `/{org_id}/user/{user_id}/{+action}/` mixes static content with simple (`{org_id}`,
+    // `{user_id}`) and reserved (`{+action}`) expansions, none of which carry a prefix or
+    // `key=` literal. Its hint is:
+    //   "/"(1) + org_id(16) + "/user/"(6) + user_id(16) + "/"(1) + action(16) + "/"(1) = 57.
+    // The enum's generated `render_capacity_hint` must delegate to the active variant, so the
+    // value matches the underlying struct's hint. This pins the content and per-value
+    // arithmetic for the non-key/value expansion forms.
+    let action = UserActionPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
+        action: Action::Edit,
+    };
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&action), 57);
+
+    let enum_variant = UserApi::UserEditPath(action);
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&enum_variant), 57);
+}
+
+#[test]
+fn macro_render_into_appends_without_reallocating_prefix() {
+    // The macro's `render_into` appends field values directly into a caller-provided buffer
+    // rather than allocating a fresh `String`. It must leave any existing prefix intact and
+    // append exactly what `render()` would have produced. Guards the macro-generated
+    // `render_into` body against a mutation that drops the append statements.
+    let p = CapacityHintPath {
+        query: EscapedString::from_static("term"),
+        limit: 10,
+        offset: 5,
+    };
+    let mut buf = String::from("/prefix");
+    PathAndQueryTemplate::render_into(&p, &mut buf);
+    assert_eq!(buf, format!("/prefix{}", p.render()));
+    assert_eq!(buf, "/prefix/search?query=term&limit=10&offset=5");
+
+    // The enum variant's `render_into` must delegate to the active variant identically.
+    let action = UserApi::UserEditPath(UserActionPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Wile")),
+        action: Action::Edit,
+    });
+    let mut enum_buf = String::from("base:");
+    PathAndQueryTemplate::render_into(&action, &mut enum_buf);
+    assert_eq!(enum_buf, format!("base:{}", action.render()));
+}

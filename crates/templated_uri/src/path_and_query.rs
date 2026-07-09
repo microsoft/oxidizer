@@ -326,6 +326,86 @@ mod tests {
         let err = PathAndQuery::try_from(String::from("api/v1/users")).unwrap_err();
         assert_eq!(err.label(), "uri_invalid");
     }
+
+    /// Minimal hand-written [`PathAndQueryTemplate`] used to exercise the `Templated` arm of
+    /// [`PathAndQuery::render_into`] / [`PathAndQuery::render_capacity_hint`] with values that
+    /// differ from both `0` and `1` (so whole-body mutants are caught) and from the `Static`
+    /// arm's string length (so an arm swap would change the observed result).
+    #[derive(Debug)]
+    struct FixedTemplate;
+
+    impl RedactedDisplay for FixedTemplate {
+        fn fmt(&self, _redactor: &dyn Redactor, f: &mut Formatter<'_>) -> fmt::Result {
+            f.write_str("/fixed/template")
+        }
+    }
+
+    impl PathAndQueryTemplate for FixedTemplate {
+        fn render(&self) -> String {
+            String::from("/fixed/template")
+        }
+
+        fn render_into(&self, buf: &mut String) {
+            buf.push_str("/fixed/template");
+        }
+
+        fn render_capacity_hint(&self) -> usize {
+            42
+        }
+
+        fn to_path_and_query(&self) -> Result<HttpPathAndQuery, UriError> {
+            Ok(HttpPathAndQuery::try_from(self.render())?)
+        }
+
+        fn template(&self) -> &'static str {
+            "/fixed/template"
+        }
+
+        fn format_template(&self) -> &'static str {
+            "/fixed/template"
+        }
+
+        fn label(&self) -> Option<&'static str> {
+            None
+        }
+    }
+
+    #[test]
+    fn render_into_static_appends_text() {
+        // The `Static` arm appends the underlying path text verbatim to the caller's buffer,
+        // preserving any existing prefix. Kills a mutant that replaces `render_into` with `()`.
+        let pq = PathAndQuery::from_static("/api/v1/users?active=true");
+        let mut buf = String::from("/base/");
+        pq.render_into(&mut buf);
+        assert_eq!(buf, "/base//api/v1/users?active=true");
+    }
+
+    #[test]
+    fn render_into_templated_delegates() {
+        // The `Templated` arm delegates to the template's `render_into`. Using a distinct
+        // string guards against an arm swap and against dropping the append.
+        let pq = PathAndQuery::from_template(FixedTemplate);
+        let mut buf = String::from("/base/");
+        pq.render_into(&mut buf);
+        assert_eq!(buf, "/base//fixed/template");
+    }
+
+    #[test]
+    fn render_capacity_hint_static_is_str_len() {
+        // The `Static` arm reports the exact byte length of the path text. Asserting a value
+        // that is neither `0` nor `1` kills the whole-body replacement mutants.
+        let pq = PathAndQuery::from_static("/api/v1/");
+        assert_eq!(pq.render_capacity_hint(), "/api/v1/".len());
+        assert_eq!(pq.render_capacity_hint(), 8);
+    }
+
+    #[test]
+    fn render_capacity_hint_templated_delegates() {
+        // The `Templated` arm forwards to the template's hint (here a fixed `42`), distinct
+        // from the `Static` arm's length computation so an arm swap is observable.
+        let pq = PathAndQuery::from_template(FixedTemplate);
+        assert_eq!(pq.render_capacity_hint(), 42);
+    }
 }
 
 #[cfg(all(test, feature = "serde"))]
