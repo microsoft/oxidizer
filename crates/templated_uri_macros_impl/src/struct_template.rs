@@ -374,10 +374,19 @@ fn render_group_all_required(group: &ParamGroup, field_map: &FieldMap<'_>, unres
         let field = field_map.get(*param_name).expect("field should exist (validated earlier)");
         let field_ident = field.ident.as_ref().expect("struct fields must be named");
         let ty_span = field.ty.span();
-        if unrestricted_params.contains(*param_name) {
-            stmts.push(quote_spanned! { ty_span => ::templated_uri::Raw::raw_into(&self.#field_ident, __out); });
+        // `Escape`/`Raw` take `&self`, so the receiver must be `&FieldType`. For an owned
+        // field that is `&self.field`; for a reference field (`&T`) the field itself already
+        // is `&T`, so pass it directly - matching the `*__val` deref in the optional path so
+        // both positions require the same bound (`T: Escape`/`T: Raw`) for `&T` fields.
+        let receiver = if matches!(&field.ty, syn::Type::Reference(_)) {
+            quote_spanned! { ty_span => self.#field_ident }
         } else {
-            stmts.push(quote_spanned! { ty_span => ::templated_uri::Escape::escape_into(&self.#field_ident, __out); });
+            quote_spanned! { ty_span => &self.#field_ident }
+        };
+        if unrestricted_params.contains(*param_name) {
+            stmts.push(quote_spanned! { ty_span => ::templated_uri::Raw::raw_into(#receiver, __out); });
+        } else {
+            stmts.push(quote_spanned! { ty_span => ::templated_uri::Escape::escape_into(#receiver, __out); });
         }
     }
     stmts

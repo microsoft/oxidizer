@@ -1089,3 +1089,34 @@ fn macro_render_into_appends_without_reallocating_prefix() {
     PathAndQueryTemplate::render_into(&action, &mut enum_buf);
     assert_eq!(enum_buf, format!("base:{}", action.render()));
 }
+
+static REF_ID_VALUE: u32 = 4242;
+
+#[templated(template = "/items/{id}{?maybe}", unredacted)]
+#[derive(Clone)]
+struct ReferenceFieldPath {
+    id: &'static u32,
+    maybe: Option<&'static u32>,
+}
+
+#[test]
+fn reference_fields_render_in_required_and_optional_positions() {
+    // A `&T` field (where the owned `T: Escape`) must render identically whether it appears
+    // in a required (`{id}`) or an optional (`{?maybe}`) position. The macro passes
+    // `self.field` (already `&T`) in the required path and `*__val` in the optional path, so
+    // both resolve `Escape` on the owned `T` (e.g. `u32`), not on `&T` — the latter has no
+    // impl. This pins the required/optional receiver consistency the reviewer flagged.
+    static OTHER: u32 = 7;
+
+    let with_opt = ReferenceFieldPath {
+        id: &REF_ID_VALUE,
+        maybe: Some(&OTHER),
+    };
+    assert_eq!(with_opt.render(), "/items/4242?maybe=7");
+
+    let without_opt = ReferenceFieldPath {
+        id: &REF_ID_VALUE,
+        maybe: None,
+    };
+    assert_eq!(without_opt.render(), "/items/4242");
+}
