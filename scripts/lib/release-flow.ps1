@@ -270,11 +270,12 @@ function Update-EntryForRequiredChangeType {
         [switch]$Force
     )
 
-    $existingRank = $script:ChangeTypeRank[$Entry.EffectiveChangeType]
-    $newRank      = $script:ChangeTypeRank[$RequiredChangeType]
-    if ($null -eq $existingRank) { $existingRank = 0 }
-    if ($null -eq $newRank) { $newRank = 0 }
-    if ($newRank -le $existingRank) { return }
+    # Only ever raise the change type — never lower it. Get-StrongerChangeType
+    # (defined alongside the rank table in releasing.ps1, so it encapsulates the
+    # ranking rather than reaching across files for $script:ChangeTypeRank) returns
+    # its first argument on a tie; when the requirement does not exceed the current
+    # effective type the stronger-of equals the current type and we no-op.
+    if ((Get-StrongerChangeType $Entry.EffectiveChangeType $RequiredChangeType) -eq $Entry.EffectiveChangeType) { return }
 
     $requiredVersion = Get-NextVersion -currentVersion $Entry.CurrentVersion -ChangeType $RequiredChangeType
 
@@ -378,8 +379,9 @@ function Resolve-ReleaseSet {
         # Classifier scriptblock: (folder, cargoName) -> 'breaking'|'non-breaking'|
         # 'patch'|'none'. Decides each crate's minimum change type from its real
         # API diff (cargo-semver-checks) vs its last published version. Production
-        # passes New-SemverChangeTypeClassifier; the default is a no-op ('none')
-        # so callers that only exercise version/pin/BFS math need not supply one.
+        # passes $script:DefaultSemverClassifier (which calls
+        # Get-CrateRequiredChangeType); the default here is a no-op ('none') so
+        # callers that only exercise version/pin/BFS math need not supply one.
         [Parameter(Mandatory = $false)][scriptblock]$GetRequiredChangeType = { param($folder, $cargoName) 'none' },
         [Parameter(Mandatory = $false)][switch]$Force
     )

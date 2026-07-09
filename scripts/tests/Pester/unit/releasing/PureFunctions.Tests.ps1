@@ -305,6 +305,15 @@ Describe 'ConvertFrom-SemverChecksOutput' {
         ConvertFrom-SemverChecksOutput -Output 'error: foo has no released versions on the registry' | Should -Be 'none'
     }
 
+    It 'throws (does NOT return none) on a transient registry-retrieval failure with no "not found" cause' {
+        # A network/registry outage emits the generic wrapper line but no
+        # crate-absent cause. Treating it as an unpublished crate ('none') would
+        # silently skip classification, violating the no-fallback contract.
+        $out = "error: failed to retrieve crate data from registry`n`nCaused by:`n    error sending request for url (https://index.crates.io/...): operation timed out"
+        { ConvertFrom-SemverChecksOutput -Output $out -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
+    }
+
     It 'throws on unrecognized output (no silent fallback)' {
         { ConvertFrom-SemverChecksOutput -Output 'some unexpected tooling error' -PackageName 'foo' } |
             Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"

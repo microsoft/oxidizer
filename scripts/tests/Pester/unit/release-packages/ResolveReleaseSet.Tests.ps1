@@ -29,7 +29,8 @@ BeforeAll {
     # Builds a stub cargo-semver-checks classifier from a folder -> change-type
     # map. Unmapped folders return 'none' (no constraint). Lets the cascade /
     # self-floor logic be tested deterministically without invoking the real
-    # tool. The real classifier is New-SemverChangeTypeClassifier.
+    # tool. In production the classifier is $script:DefaultSemverClassifier, which
+    # calls Get-CrateRequiredChangeType (a cached cargo-semver-checks wrapper).
     function New-StubClassifier {
         param([hashtable]$Map = @{})
         return {

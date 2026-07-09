@@ -553,9 +553,18 @@ function ConvertFrom-SemverChecksOutput {
     # No baseline: the crate (or a specific version) is not on the registry. This
     # is the expected state for a brand-new, never-published crate — there is
     # nothing to compare against, so it imposes no change-type floor.
+    #
+    # Match ONLY messages that specifically indicate the crate/version is absent
+    # from the registry. The generic wrapper line "failed to retrieve crate data
+    # from registry" is deliberately NOT matched here: it also fires on transient
+    # network/registry outages, and treating those as 'none' would silently skip
+    # classification (violating the no-fallback contract). When the crate is
+    # genuinely unpublished the specific cause line ("... not found in registry"
+    # / "no released versions") is present in the output and matches below; a
+    # transient failure has no such line and falls through to the throw.
     if ($Output -match '(?i)not\s+found\s+in\s+(the\s+)?registry' -or
-        $Output -match '(?i)failed\s+to\s+retrieve\s+crate\s+data\s+from\s+registry' -or
-        $Output -match '(?i)no\s+(released|published)\s+versions?') {
+        $Output -match '(?i)no\s+(released|published)\s+versions?' -or
+        $Output -match '(?i)could\s+not\s+find\s+.*\bin\s+registry') {
         return 'none'
     }
 
