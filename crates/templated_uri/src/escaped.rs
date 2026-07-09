@@ -274,6 +274,11 @@ fn first_reserved(bytes: &[u8]) -> Option<usize> {
 /// in bulk via `push_str` (no per-character formatting), and each reserved byte is emitted
 /// as a `%XX` escape using a direct hex table. All slice boundaries fall on unreserved
 /// ASCII bytes, so the `&str` indexing is always valid.
+// The manual index advance (`i += 1`) mutates to `i *= 1`, which never advances `i` and spins
+// the `while` loop forever, pushing to `out` until the process runs out of memory. That hangs the mutation
+// runner rather than producing a killable diff, so the function is skipped; its output is
+// pinned by the differential/fuzz/exact-hex and re-validation tests in this module instead.
+#[cfg_attr(test, mutants::skip)]
 fn percent_encode(s: &str, first: usize) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
