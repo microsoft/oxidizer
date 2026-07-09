@@ -331,6 +331,14 @@ Describe 'ConvertFrom-CargoInfoOutput' {
         ConvertFrom-CargoInfoOutput -Output $out | Should -Be '1.2.3'
     }
 
+    It 'parses ANSI-colorized output (cargo forces colour in CI)' {
+        # cargo wraps the label in SGR escapes even when piped in CI:
+        # ESC[1mESC[92mversion:ESC[0m 0.6.0
+        $esc = [char]0x1b
+        $out = "${esc}[1m${esc}[92mversion:${esc}[0m 0.6.0"
+        ConvertFrom-CargoInfoOutput -Output $out | Should -Be '0.6.0'
+    }
+
     It 'returns $null when the crate is not published (no version line)' {
         $out = "error: crate oxidizer_nope not found in registry"
         ConvertFrom-CargoInfoOutput -Output $out | Should -BeNullOrEmpty

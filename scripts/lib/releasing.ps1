@@ -511,7 +511,12 @@ function ConvertFrom-CargoInfoOutput {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output
     )
 
-    $m = [regex]::Match($Output, '(?im)^\s*version:\s*([^\s(]+)')
+    # Strip ANSI colour escapes first: cargo forces colour in CI even when its
+    # output is piped, which would otherwise wrap the "version:" label in escape
+    # sequences (ESC[1mESC[92mversion:ESC[0m) and defeat the anchored match.
+    $clean = [regex]::Replace($Output, "`e\[[0-9;]*m", '')
+
+    $m = [regex]::Match($clean, '(?im)^\s*version:\s*([^\s(]+)')
     if ($m.Success) { return $m.Groups[1].Value.Trim() }
     return $null
 }
@@ -590,16 +595,16 @@ function Get-PublishedCrateVersion {
     }
 
     if ($Registry -and $Registry -ne 'crates-io') {
-        $result = & $runCargoInfo @('info', $CargoName, '--registry', $Registry)
+        $result = & $runCargoInfo @('info', $CargoName, '--registry', $Registry, '--color', 'never')
     } else {
         # Default crates.io source — no --registry flag (see note above).
-        $result = & $runCargoInfo @('info', $CargoName)
+        $result = & $runCargoInfo @('info', $CargoName, '--color', 'never')
 
         # Source-replaced dev box: retry against the named replacement registry.
         if ($result.ExitCode -ne 0) {
             $replacement = Get-CargoInfoReplacementRegistry -Output $result.Output
             if ($replacement) {
-                $result = & $runCargoInfo @('info', $CargoName, '--registry', $replacement)
+                $result = & $runCargoInfo @('info', $CargoName, '--registry', $replacement, '--color', 'never')
             }
         }
     }
