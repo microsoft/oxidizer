@@ -94,13 +94,13 @@ runs:
 
     - name: Start Sccache
       if: inputs.enable-sccache == 'true' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
-      uses: mozilla-actions/sccache-action@v0.0.10
+      uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
       with:
         version: ${{ env.SCCACHE_VERSION }}
 
     - name: Install Rust
       if: inputs.rust-toolchain != ''
-      uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+      uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
       with:
         toolchain: ${{ steps.expand.outputs.toolchain }}
         components: ${{ inputs.rust-components }}
@@ -113,4 +113,4 @@ runs:
 
     - name: Install Wild Linker
       if: inputs.enable-wild-linker == 'true'
-      uses: wild-linker/action@0.9.0
+      uses: wild-linker/action@0bbbfa5df4380cab8e63cb8505a1ce65e1d10203 # 0.9.0
