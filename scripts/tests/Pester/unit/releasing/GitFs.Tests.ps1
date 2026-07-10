@@ -427,6 +427,25 @@ Describe 'Get-PackagesWithVersionChanges' {
         $changedSet = Get-PackagesWithVersionChanges -RepoRoot $w2.Path -BaseRef 'HEAD'
         $changedSet.Count | Should -Be 0
     }
+
+    It 'the semver-report call-site expression yields a zero-length array when nothing changed' {
+        # Regression: the function returns a HashSet via Write-Output -NoEnumerate.
+        # Wrapping the raw return in @(...) produces a 1-element array containing
+        # the (empty) HashSet, so a `.Count -eq 0` guard never fires and a spurious
+        # "0 crate(s)" comment is posted. semver-report.ps1 casts to [string[]] and
+        # sorts; this must collapse to a true empty array.
+        Reset-ReleaseScriptCaches
+        $w = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionchanges-callsite-empty')
+        $changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $w.Path -BaseRef 'HEAD') | Sort-Object)
+        $changedFolders.Count | Should -Be 0
+    }
+
+    It 'the semver-report call-site expression yields the changed folders (sorted) when versions differ' {
+        Reset-ReleaseScriptCaches
+        $changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $script:Ws.Path -BaseRef 'HEAD~1') | Sort-Object)
+        $changedFolders.Count | Should -Be 1
+        $changedFolders[0] | Should -Be 'a'
+    }
 }
 
 Describe 'Get-PendingReleases' {
