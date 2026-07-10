@@ -13,6 +13,7 @@ use crate::utils::TelemetryHelper;
 /// Manages circuit breaker engines for different breaker IDs.
 #[derive(Debug)]
 pub(crate) struct Engines {
+    default_engine: Arc<Engine>,
     map: RwLock<HashMap<BreakerId, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
@@ -21,7 +22,9 @@ pub(crate) struct Engines {
 
 impl Engines {
     pub(crate) fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
+        let default_engine = Arc::new(create_engine(&engine_options, &clock, &telemetry, &BreakerId::default()));
         Self {
+            default_engine,
             map: RwLock::new(HashMap::new()),
             engine_options,
             clock,
@@ -30,6 +33,13 @@ impl Engines {
     }
 
     pub(crate) fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
+        // Fast path: the default breaker (the common single-breaker configuration, used
+        // whenever no ID provider is configured) is served by a pre-created engine. This
+        // avoids a lock, a hash of the key, and a map probe on every call.
+        if key.is_default() {
+            return Arc::clone(&self.default_engine);
+        }
+
         // Fast path: read lock for existing engines (common case).
         {
             let map = self.map.read().expect(ERR_POISONED_LOCK);
@@ -40,7 +50,9 @@ impl Engines {
 
         // Slow path: acquire write lock to insert a new engine.
         let mut map = self.map.write().expect(ERR_POISONED_LOCK);
-        let engine = map.entry(key.clone()).or_insert_with(|| Arc::new(self.create_engine(key)));
+        let engine = map
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(create_engine(&self.engine_options, &self.clock, &self.telemetry, key)));
 
         Arc::clone(engine)
     }
@@ -50,15 +62,15 @@ impl Engines {
         let map = self.map.read().expect(ERR_POISONED_LOCK);
         map.len()
     }
+}
 
-    fn create_engine(&self, key: &BreakerId) -> Engine {
-        EngineTelemetry::new(
-            EngineCore::new(self.engine_options.clone(), self.clock.clone()),
-            self.telemetry.clone(),
-            key.clone().into(),
-            self.clock.clone(),
-        )
-    }
+fn create_engine(engine_options: &EngineOptions, clock: &Clock, telemetry: &TelemetryHelper, key: &BreakerId) -> Engine {
+    EngineTelemetry::new(
+        EngineCore::new(engine_options.clone(), clock.clone()),
+        telemetry.clone(),
+        key.clone().into(),
+        clock.clone(),
+    )
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
