@@ -57,6 +57,7 @@
 //! [`Uri`]: templated_uri::Uri
 
 mod router;
+pub(crate) use router::RenderedPath;
 pub use router::{BaseUriConflict, RequestUris, Router};
 
 mod router_context;

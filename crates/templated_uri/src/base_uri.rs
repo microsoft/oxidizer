@@ -508,7 +508,7 @@ impl BaseUri {
         self.build_http_uri_inner(&path)
     }
 
-    fn build_http_uri_inner(&self, path: &PathAndQuery) -> Result<http::Uri, UriError> {
+    pub(crate) fn build_http_uri_inner(&self, path: &PathAndQuery) -> Result<http::Uri, UriError> {
         let full_path = self.path.join_path_and_query(path)?;
         self.assemble(full_path)
     }
