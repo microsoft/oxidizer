@@ -62,6 +62,14 @@ impl BreakerId {
         Self(BreakerIdValue::String(Cow::Borrowed("default")))
     }
 
+    /// Returns `true` if this ID is the default breaker ID.
+    ///
+    /// Used to fast-path the common single-breaker configuration, avoiding a lock,
+    /// a hash, and a map probe when routing to the shared default engine.
+    pub(crate) fn is_default(&self) -> bool {
+        matches!(&self.0, BreakerIdValue::String(value) if value.as_ref() == "default")
+    }
+
     /// Create a breaker ID by hashing the given value.
     ///
     /// The value must implement the `Hash` trait. This is useful for creating breaker
@@ -145,6 +153,17 @@ mod tests {
         assert_eq!(a.to_string(), "hello");
         assert_eq!(b.to_string(), "hello");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn is_default_distinguishes_default_from_others() {
+        assert!(BreakerId::default().is_default());
+        // Any string equal to "default" is treated as the default, regardless of ownership.
+        assert!(BreakerId::from(String::from("default")).is_default());
+
+        assert!(!BreakerId::from("other").is_default());
+        assert!(!BreakerId::from(42u64).is_default());
+        assert!(!BreakerId::hashed(&"value", "default").is_default());
     }
 
     #[test]

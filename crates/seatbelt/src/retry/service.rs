@@ -247,7 +247,7 @@ impl<In, Out> RetryShared<In, Out> {
                 opentelemetry::KeyValue::new(EVENT_NAME, RETRY_EVENT),
                 opentelemetry::KeyValue::new(ATTEMPT_INDEX, i64::from(attempt.index())),
                 opentelemetry::KeyValue::new(ATTEMPT_IS_LAST, attempt.is_last()),
-                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.to_string()),
+                opentelemetry::KeyValue::new(ATTEMPT_RECOVERY_KIND, recovery_kind.as_str()),
             ]);
         }
     }
