@@ -71,7 +71,13 @@ param(
 . "$PSScriptRoot/../lib/releasing.ps1"
 
 # --- 1. Determine the publishing set (version-bumped published crates). -------
-$changedFolders = @(Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef)
+# Get-PackagesWithVersionChanges returns a HashSet via Write-Output -NoEnumerate
+# (so its internal callers can use .Contains()). Casting to [string[]] reliably
+# enumerates that set into a flat array — do NOT wrap the raw return in @(...),
+# which produces a 1-element array containing the (possibly empty) HashSet and
+# makes the "nothing to publish" guard below never fire (leading to a spurious
+# "0 crate(s)" comment on non-publishing PRs).
+$changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $RepoRoot -BaseRef $BaseRef) | Sort-Object)
 $packages = Get-WorkspacePackages -repoRoot $RepoRoot
 $byFolder = @{}
 foreach ($p in $packages) { $byFolder[$p.Folder] = $p }
@@ -99,7 +105,7 @@ $rows = New-Object System.Collections.Generic.List[object]
 
 Push-Location $RepoRoot
 try {
-    foreach ($folder in ($changedFolders | Sort-Object)) {
+    foreach ($folder in $changedFolders) {
         $pkg = $byFolder[$folder]
         if ($null -eq $pkg) { continue }
 
