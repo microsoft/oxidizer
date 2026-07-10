@@ -54,7 +54,7 @@ use std::hash::Hasher;
 /// for observability purposes. **Important**: Ensure that the values from which breaker IDs
 /// are created do not contain any sensitive data such as authentication tokens, personal
 /// identifiable information (PII), or other confidential data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BreakerId(BreakerIdValue);
 
 impl BreakerId {
@@ -120,7 +120,7 @@ impl From<BreakerId> for Cow<'static, str> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum BreakerIdValue {
     Number(u64),
     Hashed(u64, &'static str),
