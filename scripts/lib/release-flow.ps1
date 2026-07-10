@@ -368,7 +368,8 @@ function Update-EntryForRequiredChangeType {
 # Note: cascade is one-level. The set of dependents reachable from a user
 # target is the transitive published dependents BFS; each dependent's
 # cascade-applied change type is derived from cargo-semver-checks analysing the
-# dependent's OWN current working-tree public API vs its last published version
+# dependent's OWN current working-tree public API vs its previous version-bump
+# commit
 # (floored at 'patch' — it must re-release to pick up the new dependency
 # version even when its own API is unchanged). This replaces the former
 # allowed_external_types exposure heuristic.
@@ -378,7 +379,7 @@ function Resolve-ReleaseSet {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$WorkspaceBaseline,
         # Classifier scriptblock: (folder, cargoName) -> 'breaking'|'non-breaking'|
         # 'patch'|'none'. Decides each crate's minimum change type from its real
-        # API diff (cargo-semver-checks) vs its last published version. Production
+        # API diff (cargo-semver-checks) vs its previous version-bump commit. Production
         # passes $script:DefaultSemverClassifier (which calls
         # Get-CrateRequiredChangeType); the default here is a no-op ('none') so
         # callers that only exercise version/pin/BFS math need not supply one.
@@ -465,7 +466,7 @@ function Resolve-ReleaseSet {
             # The dependent's change type is decided by cargo-semver-checks
             # analysing ITS OWN current working-tree API (which already reflects
             # the target's in-progress changes, including re-exported types) vs
-            # its last published version — floored at 'patch' because it must be
+            # its previous version-bump commit — floored at 'patch' because it must be
             # re-released to pick up the new dependency version even when its own
             # public API is unchanged. This replaces the old
             # allowed_external_types exposure heuristic.
@@ -521,8 +522,8 @@ function Resolve-ReleaseSet {
     }
 
     # Self-floor: raise each USER-source entry's change type to at least what
-    # cargo-semver-checks requires for its OWN public API vs its last published
-    # version. The cascade above already floored dependents; this catches
+    # cargo-semver-checks requires for its OWN public API vs its previous
+    # version-bump commit. The cascade above already floored dependents; this catches
     # user-source ROOTS that nothing cascades into (e.g. releasing a single leaf
     # crate whose own API broke). Author intent is never downgraded — only raised
     # when the real API diff demands a stronger change type.
@@ -541,7 +542,6 @@ function Resolve-ReleaseSet {
 # planning. A module-scope variable (rather than a captured closure) so the
 # classifier scriptblock below resolves it in the module session state.
 $script:ReleaseRepoRoot = $null
-$script:ReleaseRegistry = 'crates-io'
 
 # The production classifier handed to Resolve-ReleaseSet / Invoke-PlanReview.
 # Defined at module scope so, when invoked via `& $GetRequiredChangeType` deep
@@ -550,7 +550,7 @@ $script:ReleaseRegistry = 'crates-io'
 # Get-CrateRequiredChangeType for tests.
 $script:DefaultSemverClassifier = {
     param([string]$folder, [string]$cargoName)
-    Get-CrateRequiredChangeType -Folder $folder -CargoName $cargoName -RepoRoot $script:ReleaseRepoRoot -Registry $script:ReleaseRegistry
+    Get-CrateRequiredChangeType -Folder $folder -CargoName $cargoName -RepoRoot $script:ReleaseRepoRoot
 }
 
 function Format-ConventionalCommits {
@@ -2039,9 +2039,6 @@ function Invoke-ReleasePackagesMain {
         [string[]]$Packages = @(),
 
         [Parameter()]
-        [string]$Registry = 'crates-io',
-
-        [Parameter()]
         [switch]$Force
     )
 
@@ -2051,10 +2048,10 @@ function Invoke-ReleasePackagesMain {
     }
 
     # cargo-semver-checks decides every change type in the plan (against each
-    # crate's last published version). It is a hard dependency — there is no
+    # crate's previous version-bump commit). It is a hard dependency — there is no
     # heuristic fallback — so fail fast with an actionable message if missing.
     if (-not (Test-CommandExists -command 'cargo-semver-checks')) {
-        throw "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their last published versions."
+        throw "cargo-semver-checks is not installed or not found in your PATH. Install the version pinned in constants.env (CARGO_SEMVER_CHECKS_VERSION) with 'cargo install cargo-semver-checks --version <pinned> --locked'. It is required to classify releases against their previous version-bump commit."
     }
 
     $repoRoot = Get-Location
@@ -2137,15 +2134,15 @@ function Invoke-ReleasePackagesMain {
     $planReviewMode = if ($Mode -eq 'targeted') { 'targeted' } else { 'all-changed' }
 
     # Classifier passed to the planner: decides every change type in the plan
-    # (user-source and cascade) from each crate's real API diff vs its last
-    # published version — no allowed_external_types heuristic, no fallback.
-    # $script:DefaultSemverClassifier is a module-scope scriptblock (defined
-    # below Resolve-ReleaseSet) so it resolves Get-CrateRequiredChangeType and
-    # $script:ReleaseRepoRoot in the module session state; that also lets the
-    # test suites Mock Get-CrateRequiredChangeType. Get-CrateRequiredChangeType
-    # memoises per crate so the interactive review loop re-resolves cheaply.
+    # (user-source and cascade) from each crate's real API diff vs its previous
+    # version-bump commit in git history — no allowed_external_types heuristic,
+    # no registry, no fallback. $script:DefaultSemverClassifier is a module-scope
+    # scriptblock (defined below Resolve-ReleaseSet) so it resolves
+    # Get-CrateRequiredChangeType and $script:ReleaseRepoRoot in the module
+    # session state; that also lets the test suites Mock Get-CrateRequiredChangeType.
+    # Get-CrateRequiredChangeType memoises per crate so the interactive review loop
+    # re-resolves cheaply.
     $script:ReleaseRepoRoot = $repoRoot.Path
-    $script:ReleaseRegistry = $Registry
 
     # The classifier and Invoke-PlanReview surface planning errors (e.g. a pin
     # below the semver-required version) as terminating errors. Let them

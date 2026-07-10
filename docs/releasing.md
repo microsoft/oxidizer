@@ -207,11 +207,23 @@ published dependent as a cascade-source release. The change type for
 every release in the plan — both the directly-requested (user-source)
 crates and the cascade-pulled dependents — is derived by running
 [`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
-against each crate's **last published version in the registry** (looked
-up with `cargo info`, so it works against crates.io or a private
-registry). The current working-tree API is analysed, so a coordinated
-release's in-progress edits — including a dependency whose public types
-a dependent re-exports — are reflected in the dependent's own API diff.
+against each crate's **previous version-bump commit in git history** —
+the most recent commit that changed the crate's `[package] version`,
+supplied to the tool as `--baseline-rev <sha>`. cargo-semver-checks
+rebuilds the baseline rustdoc from the crate's source at that commit, so
+**no registry access is required** and the check behaves identically for
+open-source (crates.io) and enterprise/offline consumers. The current
+working-tree API is analysed, so a coordinated release's in-progress
+edits — including a dependency whose public types a dependent re-exports
+— are reflected in the dependent's own API diff.
+
+Versioning is treated as a **source-level** concern: the baseline is the
+version the repository last *declared*, regardless of whether it was ever
+published anywhere. This is what lets one workflow serve both public and
+private/enterprise environments (which cannot reach crates.io and whose
+published content lags the source), and it means an aborted release that
+bumped a crate to `4.0.0` without publishing is still the baseline the
+next change is measured against.
 
 This replaces the former
 `[package.metadata.cargo_check_external_types]` allowlist heuristic. That
@@ -237,25 +249,24 @@ notion (major / minor / none); the exact parsing lives in
 | a major-level change is required | `breaking` |
 | only a minor-level change is required | `non-breaking` |
 | compatible / no update required | `patch` |
-| crate not yet in the registry (never published) | no constraint |
+| no prior version-bump commit (new crate) | no constraint |
 
 Cascade dependents are floored at `patch` (they must re-release to pick
 up the new dependency version even when their own public API is
 unchanged), then raised to whatever their own `cargo semver-checks`
 result requires.
 
-**Baseline limitation.** The baseline is always the crate's *last
-published* version on the registry. If a version was committed but never
-published — for example an aborted release that bumped `bytesbuf` to
-`4.0.0` without it reaching the registry — the registry still reports the
-older `3.3.3`, so `cargo semver-checks` diffs the working tree against
-`3.3.3` and cannot isolate the API delta introduced by the unpublished
-`4.0.0`. This is intentional: the tool trusts the registry as the source
-of truth for "what consumers actually have". When you need to release on
-top of an unpublished version, pin the target explicitly with a
-`<name>@<major>.<minor>.<patch>` token (and `-Force` if the pin is below
-what the diff-against-`3.3.3` computes) instead of relying on the
-automatic classification.
+**Baseline semantics.** The baseline is the crate's previous
+version-bump commit — the most recent commit (before the change under
+review) that altered the crate's `[package] version`. Because it comes
+from git history rather than a registry, a version that was committed but
+never published *is* the baseline: an aborted release that bumped
+`bytesbuf` to `4.0.0` without publishing means the next change is
+compared against `4.0.0`, not a stale published `3.3.3`. A brand-new
+crate with no prior version-bump commit has no baseline and imposes no
+constraint. This works offline and in enterprise environments with no
+crates.io access, since the baseline API is rebuilt from the crate's own
+source at the baseline commit.
 
 The planner enforces **topological consistency**: if a user-supplied
 change type for a package is *weaker* than `cargo semver-checks`

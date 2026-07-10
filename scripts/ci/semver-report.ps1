@@ -7,19 +7,20 @@
 .SYNOPSIS
     Runs cargo-semver-checks for each crate a PR is publishing and renders a
     rich, per-crate Markdown report comparing the on-disk version increment
-    against the minimum increment the crate's API changes require versus its
-    last published version.
+    against the minimum increment the crate's API changes require versus the
+    crate's previous version-bump commit in git history.
 
 .DESCRIPTION
     For every crate whose `[package] version` differs from the PR base ref (the
     "publishing set"), this script:
 
       1. reads the on-disk (this-PR) version,
-      2. discovers the crate's last published version with
-         `cargo info <crate> --registry <Registry>` (crates.io by default),
-      3. runs `cargo semver-checks --package <crate> --baseline-version <that>`
-         so the comparison source is the registry the crate is actually
-         published to,
+      2. locates the crate's PREVIOUS version-bump commit — the most recent commit
+         reachable from -BaseRef (so this PR's own bump, which lives only on the PR
+         head, is excluded) that changed the crate's `[package] version` line,
+      3. runs `cargo semver-checks --package <crate> --baseline-rev <sha>` so the
+         comparison source is the crate's own source at that commit (the baseline
+         rustdoc is rebuilt from git — no registry access, works OSS + enterprise),
       4. parses the required change type from the output, and
       5. computes the *minimum* version the increment should reach given the
          detected API changes.
@@ -28,9 +29,9 @@
       - a summary status line (🛑 when at least one crate is under-incremented,
         ⚠️ when the only problem is a baseline that could not be determined,
         ✅ when every publishing crate is sufficiently incremented),
-      - a table: Crate | Published | This PR | Minimum required | Status,
+      - a table: Crate | Baseline | This PR | Minimum required | Status,
       - collapsible per-crate detail for under-incremented crates and for
-        crates whose baseline lookup failed, and
+        crates whose baseline could not be determined, and
       - a link to the triggering Actions run.
 
     Two GitHub Actions step outputs are written to -GitHubOutput:
@@ -47,6 +48,8 @@
 
 .PARAMETER BaseRef
     Git ref to diff against, e.g. 'origin/main'. Must be fetched beforehand.
+    Also the ref the previous version-bump commit is searched from, so this PR's
+    own version bump is excluded from the baseline.
 
 .PARAMETER ReportPath
     Path to write the Markdown report to.
@@ -57,11 +60,6 @@
 .PARAMETER RepoRoot
     Repository root. Defaults to the current directory.
 
-.PARAMETER Registry
-    Registry whose last published version is used as the semver-checks baseline.
-    Defaults to 'crates-io'. Override with a private registry name (as configured
-    in `.cargo/config.toml`) when the crates are published elsewhere.
-
 .PARAMETER GitHubOutput
     Path to the GitHub Actions step-output file. Defaults to $env:GITHUB_OUTPUT.
 #>
@@ -71,7 +69,6 @@ param(
     [Parameter(Mandatory = $true)][string]$ReportPath,
     [string]$RunUrl = '',
     [string]$RepoRoot = (Get-Location).Path,
-    [string]$Registry = 'crates-io',
     [string]$GitHubOutput = $env:GITHUB_OUTPUT
 )
 
@@ -105,7 +102,7 @@ if ($changedFolders.Count -eq 0) {
 }
 
 # --- 2. Run cargo-semver-checks per crate and gather results. -----------------
-# A row per crate: cargo name, on-disk (this-PR) version, published baseline,
+# A row per crate: cargo name, on-disk (this-PR) version, git-history baseline,
 # the parsed required change type, the computed minimum version, and the raw
 # tool detail (for under-incremented crates).
 $rows = New-Object System.Collections.Generic.List[object]
@@ -119,13 +116,12 @@ try {
         $cargoName    = $pkg.Name
         $onDisk       = Get-CurrentVersion -cargoTomlPath (Join-Path $RepoRoot "crates/$folder/Cargo.toml")
 
-        # Discover the baseline from the registry (crates.io by default, or a
-        # private registry via -Registry) using `cargo info`, run outside the
-        # workspace so it reports the published version, not the local one.
-        # A genuinely-unpublished crate returns $null; an indeterminate lookup
-        # throws — surface that as a ⚠️ row rather than a silent "sufficient".
+        # Locate the crate's previous version-bump commit reachable from BaseRef
+        # (so this PR's own bump is excluded). Its declared [package] version is
+        # the baseline number; its SHA is the semver-checks --baseline-rev.
+        # Locating the commit inspects git history only — no registry access.
         try {
-            $baselineVersion = Get-PublishedCrateVersion -CargoName $cargoName -Registry $Registry
+            $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $folder
         } catch {
             Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — baseline lookup FAILED: $($_.Exception.Message)"
             $rows.Add([pscustomobject]@{
@@ -135,18 +131,19 @@ try {
                 Required    = '?'
                 Sufficient  = $false
                 ChangeType  = 'unknown'
-                Detail      = "Baseline lookup failed — could not determine the last published version on '$Registry'. The semver comparison was skipped for this crate; verify the version increment manually.`n`n$($_.Exception.Message)"
+                Detail      = "Baseline lookup failed — could not locate the crate's previous version-bump commit in git history. The semver comparison was skipped for this crate; verify the version increment manually.`n`n$($_.Exception.Message)"
             })
             continue
         }
 
-        if ([string]::IsNullOrWhiteSpace($baselineVersion)) {
-            # Never published on this registry: no baseline to compare against,
-            # so nothing to enforce. Skip the (slow) semver-checks run.
-            Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — not published on '$Registry', skipping."
+        if ($null -eq $bump) {
+            # No prior version-bump commit reachable from BaseRef: a brand-new
+            # crate (or one with no committed version history) — there is no
+            # baseline to compare against, so nothing to enforce.
+            Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) — no prior version-bump commit, skipping."
             $rows.Add([pscustomobject]@{
                 Crate       = $cargoName
-                Baseline    = 'unpublished'
+                Baseline    = 'new crate'
                 OnDisk      = $onDisk
                 Required    = $onDisk
                 Sufficient  = $true
@@ -156,11 +153,32 @@ try {
             continue
         }
 
-        Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs $Registry v$baselineVersion..."
-        $PSNativeCommandUseErrorActionPreference = $false
-        $out = & cargo semver-checks --package $cargoName --baseline-version $baselineVersion --all-features --color never 2>&1 | Out-String
+        $baselineVersion = $bump.Version
+        $baselineSha     = $bump.Sha
+        $shortSha        = if ($baselineSha.Length -ge 7) { $baselineSha.Substring(0, 7) } else { $baselineSha }
 
-        $changeType = ConvertFrom-SemverChecksOutput -Output $out -ExitCode $LASTEXITCODE -PackageName $cargoName
+        Write-Host "cargo semver-checks: $cargoName (on-disk v$onDisk) vs v$baselineVersion @ $shortSha..."
+        $PSNativeCommandUseErrorActionPreference = $false
+        $out = & cargo semver-checks --package $cargoName --baseline-rev $baselineSha --all-features --color never 2>&1 | Out-String
+
+        # A build/tool failure makes ConvertFrom-SemverChecksOutput throw (no
+        # silent fallback); surface that as a ⚠️ unknown row rather than failing
+        # the whole report or misreporting the crate as sufficient.
+        try {
+            $changeType = ConvertFrom-SemverChecksOutput -Output $out -ExitCode $LASTEXITCODE -PackageName $cargoName
+        } catch {
+            Write-Host "cargo semver-checks: $cargoName — analysis FAILED: $($_.Exception.Message)"
+            $rows.Add([pscustomobject]@{
+                Crate       = $cargoName
+                Baseline    = "⚠️ $baselineVersion ($shortSha)"
+                OnDisk      = $onDisk
+                Required    = '?'
+                Sufficient  = $false
+                ChangeType  = 'unknown'
+                Detail      = "cargo semver-checks could not be evaluated against ``$baselineSha`` (v$baselineVersion). The version increment was NOT verified — check it manually.`n`n$($_.Exception.Message)"
+            })
+            continue
+        }
 
         # A 'breaking'/'non-breaking' verdict means the detected API changes need
         # a stronger increment than the on-disk version gives over the baseline;
@@ -182,7 +200,7 @@ try {
 
         $rows.Add([pscustomobject]@{
             Crate       = $cargoName
-            Baseline    = $baselineVersion
+            Baseline    = "$baselineVersion ($shortSha)"
             OnDisk      = $onDisk
             Required    = $required
             Sufficient  = $sufficient
@@ -208,24 +226,24 @@ if ($hasReal) {
     # At least one crate is genuinely under-incremented — the real failure case.
     [void]$sb.AppendLine('## 🛑 Additional version increments required')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($realUnder.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their previous version-bump commit in git history. **$($realUnder.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
     if ($hasUnknown) {
         [void]$sb.AppendLine()
-        [void]$sb.AppendLine("⚠️ The baseline (last published version) could not be determined for **$($unknownRows.Count)** other crate(s); their version increment was **not** verified — check them manually.")
+        [void]$sb.AppendLine("⚠️ The baseline (previous version-bump commit) could not be determined for **$($unknownRows.Count)** other crate(s); their version increment was **not** verified — check them manually.")
     }
 } elseif ($hasUnknown) {
     # No crate is under-incremented; the only problem is an unresolved baseline.
     # This is a warning (the check is incomplete), NOT an under-increment failure.
     [void]$sb.AppendLine('## ⚠️ Semver baseline could not be determined')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} could not determine the last published version for **$($unknownRows.Count)** of $($rows.Count) crate(s), so their version increment was **not** verified. No crate was found to be under-incremented; check the crate(s) below manually.")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} could not determine the previous version-bump commit for **$($unknownRows.Count)** of $($rows.Count) crate(s), so their version increment was **not** verified. No crate was found to be under-incremented; check the crate(s) below manually.")
 } else {
     [void]$sb.AppendLine('## ✅ Version increments look sufficient')
     [void]$sb.AppendLine()
-    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the **$($rows.Count)** crate(s) this PR publishes against their latest published release. Every version increment is sufficient for the detected API changes.")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the **$($rows.Count)** crate(s) this PR publishes against their previous version-bump commit in git history. Every version increment is sufficient for the detected API changes.")
 }
 [void]$sb.AppendLine()
-[void]$sb.AppendLine('| Crate | Published | This PR | Minimum required | Status |')
+[void]$sb.AppendLine('| Crate | Baseline | This PR | Minimum required | Status |')
 [void]$sb.AppendLine('|---|---|---|---|---|')
 foreach ($r in $rows) {
     if ($r.ChangeType -eq 'unknown') {

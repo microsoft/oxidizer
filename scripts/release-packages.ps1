@@ -56,12 +56,14 @@
     Cargo's 0.x.y SemVer rules are honored throughout: for `0.x.y` packages a
     Breaking change becomes `0.(x+1).0`, NonBreaking and Patch both map to
     incrementing `y`. Every release in the plan is classified by running
-    `cargo semver-checks` against each crate's last published version on the
-    configured registry (crates.io by default; override with -Registry): a
-    dependent whose own public API is unaffected by the release
-    cascades as a `patch` (it still re-releases to pick up the new dependency
-    version), while a dependent whose API actually changes (e.g. because it
-    re-exports a changed type) cascades at the severity `cargo semver-checks`
+    `cargo semver-checks` against each crate's previous version-bump commit in
+    git history (the most recent commit that changed the crate's `[package]
+    version`, with the baseline rustdoc rebuilt from source via `--baseline-rev`,
+    so no registry access is required and it works in OSS and enterprise/offline
+    environments alike): a dependent whose own public API is unaffected by the
+    release cascades as a `patch` (it still re-releases to pick up the new
+    dependency version), while a dependent whose API actually changes (e.g. because
+    it re-exports a changed type) cascades at the severity `cargo semver-checks`
     reports. Dev-only dependents are skipped — they automatically pick up the
     new workspace version. cargo-semver-checks is a hard dependency (install
     the version pinned in constants.env); there is no heuristic fallback.
@@ -152,14 +154,6 @@
     never explicit version pins, so the pin-vs-cascade rejection
     cannot fire there.
 
-.PARAMETER Registry
-    The registry whose last published version is used as the semver-checks
-    baseline for every crate in the plan. Defaults to `crates-io`. Point it at
-    a private registry (by the name configured in `.cargo/config.toml`) when the
-    crates are published somewhere other than crates.io — the baseline version
-    is discovered with `cargo info <crate> --registry <Registry>`, so the
-    comparison uses the same source the crates are actually released to.
-
 .EXAMPLE
     # Pin a specific version, e.g. release 'my-package' as 1.0.0.
     ./scripts/release-packages.ps1 -Packages 'my-package@1.0.0'
@@ -194,10 +188,7 @@ param(
     [switch]$All,
 
     [Parameter(ParameterSetName = 'ByPackages')]
-    [switch]$Force,
-
-    [Parameter()]
-    [string]$Registry = 'crates-io'
+    [switch]$Force
 )
 
 # All helpers, configuration, and Invoke-ReleasePackagesMain live in the
@@ -218,7 +209,7 @@ $mode = switch ($PSCmdlet.ParameterSetName) {
 # code, preserving the historical `exit 1`-on-error contract for command-line
 # and CI callers.
 try {
-    Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force -Registry $Registry | Out-Null
+    Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null
 } catch {
     Write-Error $_.Exception.Message
     exit 1
