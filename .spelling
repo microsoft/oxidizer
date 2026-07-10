@@ -335,6 +335,7 @@ freezable
 frontend
 fundle
 gRPC
+grpc
 getter
 getters
 github

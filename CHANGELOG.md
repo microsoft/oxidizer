@@ -15,6 +15,7 @@ Please see each crate's change log below:
 - [`data_privacy_macros_impl`](./crates/data_privacy_macros_impl/CHANGELOG.md)
 - [`fetch`](./crates/fetch/CHANGELOG.md)
 - [`fetch_azure`](./crates/fetch_azure/CHANGELOG.md)
+- [`fetch_grpc`](./crates/fetch_grpc/CHANGELOG.md)
 - [`fetch_hyper`](./crates/fetch_hyper/CHANGELOG.md)
 - [`fetch_options`](./crates/fetch_options/CHANGELOG.md)
 - [`fetch_tls`](./crates/fetch_tls/CHANGELOG.md)
