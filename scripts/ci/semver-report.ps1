@@ -26,15 +26,22 @@
 
     It writes a Markdown report to -ReportPath containing:
       - a summary status line (🛑 when at least one crate is under-incremented,
+        ⚠️ when the only problem is a baseline that could not be determined,
         ✅ when every publishing crate is sufficiently incremented),
       - a table: Crate | Published | This PR | Minimum required | Status,
-      - collapsible per-crate `cargo semver-checks` detail for under-incremented
-        crates, and
+      - collapsible per-crate detail for under-incremented crates and for
+        crates whose baseline lookup failed, and
       - a link to the triggering Actions run.
 
     Two GitHub Actions step outputs are written to -GitHubOutput:
       publishing = 'true' | 'false'
-      status     = 'pass' | 'fail'   (fail = at least one crate under-incremented)
+      status     = 'pass' | 'warn' | 'fail'
+                     fail = at least one crate is under-incremented;
+                     warn = no crate is under-incremented but at least one
+                            baseline could not be determined (check incomplete);
+                     pass = every crate is sufficiently incremented.
+      A failed/unknown baseline is NEVER reported as 'fail' on its own — 'fail'
+      is reserved for genuine under-increments per this contract.
 
     The report is informational: callers keep the job non-failing.
 
@@ -191,19 +198,27 @@ try {
 $underBumped = @($rows | Where-Object { -not $_.Sufficient })
 $unknownRows = @($rows | Where-Object { $_.ChangeType -eq 'unknown' })
 $realUnder   = @($underBumped | Where-Object { $_.ChangeType -ne 'unknown' })
-$overallFail = $underBumped.Count -gt 0
+$hasReal      = $realUnder.Count -gt 0
+$hasUnknown   = $unknownRows.Count -gt 0
+$anyProblem   = $underBumped.Count -gt 0
 
 $bt = [char]0x60   # backtick, kept in a variable to avoid PowerShell escaping.
 $sb = New-Object System.Text.StringBuilder
-if ($overallFail) {
+if ($hasReal) {
+    # At least one crate is genuinely under-incremented — the real failure case.
     [void]$sb.AppendLine('## 🛑 Additional version increments required')
     [void]$sb.AppendLine()
-    if ($realUnder.Count -gt 0) {
-        [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($realUnder.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the crate(s) this PR publishes against their latest published release. **$($realUnder.Count) of $($rows.Count)** need a higher version than this PR sets — the increment already applied is not enough for the API changes:")
+    if ($hasUnknown) {
+        [void]$sb.AppendLine()
+        [void]$sb.AppendLine("⚠️ The baseline (last published version) could not be determined for **$($unknownRows.Count)** other crate(s); their version increment was **not** verified — check them manually.")
     }
-    if ($unknownRows.Count -gt 0) {
-        [void]$sb.AppendLine("⚠️ The baseline (last published version) could not be determined for **$($unknownRows.Count)** crate(s); their version increment was **not** verified — check them manually.")
-    }
+} elseif ($hasUnknown) {
+    # No crate is under-incremented; the only problem is an unresolved baseline.
+    # This is a warning (the check is incomplete), NOT an under-increment failure.
+    [void]$sb.AppendLine('## ⚠️ Semver baseline could not be determined')
+    [void]$sb.AppendLine()
+    [void]$sb.AppendLine("${bt}cargo semver-checks${bt} could not determine the last published version for **$($unknownRows.Count)** of $($rows.Count) crate(s), so their version increment was **not** verified. No crate was found to be under-incremented; check the crate(s) below manually.")
 } else {
     [void]$sb.AppendLine('## ✅ Version increments look sufficient')
     [void]$sb.AppendLine()
@@ -228,7 +243,7 @@ foreach ($r in $rows) {
 [void]$sb.AppendLine()
 
 $fence = "$bt$bt$bt"
-if ($overallFail) {
+if ($anyProblem) {
     foreach ($r in $underBumped) {
         $icon    = if ($r.ChangeType -eq 'unknown') { '⚠️' } else { '🛑' }
         $summary = if ($r.ChangeType -eq 'unknown') { 'baseline lookup detail' } else { 'cargo semver-checks detail' }
@@ -240,7 +255,11 @@ if ($overallFail) {
         [void]$sb.AppendLine('</details>')
         [void]$sb.AppendLine()
     }
-    [void]$sb.AppendLine('> If these breaking changes are intentional, increase each crate to at least its **Minimum required** version. This check is **informational and does not block the merge**.')
+    if ($hasReal) {
+        [void]$sb.AppendLine('> If these breaking changes are intentional, increase each crate to at least its **Minimum required** version. This check is **informational and does not block the merge**.')
+    } else {
+        [void]$sb.AppendLine('> The baseline could not be determined for the crate(s) above, so their version increments were not verified. This check is **informational and does not block the merge**.')
+    }
 } else {
     [void]$sb.AppendLine('> This check is informational and does not block the merge.')
 }
@@ -252,4 +271,5 @@ if (-not [string]::IsNullOrEmpty($RunUrl)) {
 
 Set-Content -Path $ReportPath -Value $sb.ToString() -Encoding utf8
 Write-Host "Report written to $ReportPath"
-Write-Outputs -publishing 'true' -status ($(if ($overallFail) { 'fail' } else { 'pass' }))
+$status = if ($hasReal) { 'fail' } elseif ($hasUnknown) { 'warn' } else { 'pass' }
+Write-Outputs -publishing 'true' -status $status
