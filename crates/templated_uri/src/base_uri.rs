@@ -510,7 +510,23 @@ impl BaseUri {
 
     fn build_http_uri_inner(&self, path: &PathAndQuery) -> Result<http::Uri, UriError> {
         let full_path = self.path.join_path_and_query(path)?;
+        self.assemble(full_path)
+    }
 
+    /// Builds an [`http::Uri`] from this base and a [`crate::PathAndQuery`], rendering,
+    /// joining, and validating the path in a single pass.
+    ///
+    /// This is the request hot-path entry point used by `TryFrom<Uri> for http::Uri`: it
+    /// avoids materializing the path into a standalone validated [`PathAndQuery`] (an extra
+    /// allocation and URI parse) before joining it onto the base.
+    pub(crate) fn build_http_uri_from_paq(&self, path: &crate::PathAndQuery) -> Result<http::Uri, UriError> {
+        let full_path = self.path.join_rendered(path)?;
+        self.assemble(full_path)
+    }
+
+    /// Assembles a validated [`http::Uri`] from this base's scheme/authority and a
+    /// fully-joined path-and-query.
+    fn assemble(&self, full_path: PathAndQuery) -> Result<http::Uri, UriError> {
         let mut parts = Parts::default();
         parts.scheme = Some(self.scheme().clone());
         parts.authority = Some(self.authority().clone());
