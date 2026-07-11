@@ -41,6 +41,7 @@ These are the primary crates built out of this repo:
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
 - [`http_extensions`](./crates/http_extensions/README.md) - Shared HTTP types and extension traits for clients and servers.
+- [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar (literals, `*`, `**`, `{field=sub}` variables, `:verb`).
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
