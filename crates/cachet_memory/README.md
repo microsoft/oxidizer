@@ -60,9 +60,9 @@ assert_eq!(*value.unwrap().value(), 42);
 
 Two complementary hooks are available for observing entry removals:
 
-* [`InMemoryCacheBuilder::on_eviction`][__link6] takes a closure invoked with a
-  [`RemovalCause`][__link7] for every removal (capacity, expiry, explicit, or replace).
-  Use this for custom side effects.
+* [`InMemoryCacheBuilder::on_eviction`][__link6] takes a closure invoked with the
+  removed key, its value, and a [`RemovalCause`][__link7] for every removal
+  (capacity, expiry, explicit, or replace). Use this for custom side effects.
 * [`InMemoryCacheBuilder::with_eviction_telemetry`][__link8] is a marker that the host
   crate (`cachet`) recognizes via `CacheBuilder::memory_with` and uses to
   install a built-in listener that emits `cache.eviction` for capacity
@@ -91,7 +91,7 @@ TTL/TTI unset or set them to a sufficiently high ceiling.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet_memory">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbN0kpRlU_G9QbWC713oa4KjsbRG6BIsW3BU8bzI21NivEBVphZIKCbWNhY2hldF9tZW1vcnllMC40LjCCa2NhY2hldF90aWVyZTAuMi42
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbejeJIJ3wjSIbQ4FD8_ZrIe0bdNSA5y85nYcbNmCiuslgqq1hZIKCbWNhY2hldF9tZW1vcnllMC40LjCCa2NhY2hldF90aWVyZTAuMi42
  [__link0]: https://docs.rs/cachet_memory/0.4.0/cachet_memory/?search=InMemoryCache
  [__link1]: https://docs.rs/cachet_memory/0.4.0/cachet_memory/?search=InMemoryCacheBuilder
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheEntry::expires_after
