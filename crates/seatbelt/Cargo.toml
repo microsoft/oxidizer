@@ -91,6 +91,9 @@ tower-service = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [[example]]
 name = "timeout"
 required-features = ["timeout", "metrics"]
@@ -169,6 +172,31 @@ required-features = ["breaker"]
 
 [[bench]]
 name = "hedging"
+harness = false
+required-features = ["hedging"]
+
+[[bench]]
+name = "observability_cg"
+harness = false
+required-features = ["retry", "logs", "metrics"]
+
+[[bench]]
+name = "timeout_cg"
+harness = false
+required-features = ["timeout"]
+
+[[bench]]
+name = "retry_cg"
+harness = false
+required-features = ["retry"]
+
+[[bench]]
+name = "breaker_cg"
+harness = false
+required-features = ["breaker"]
+
+[[bench]]
+name = "hedging_cg"
 harness = false
 required-features = ["hedging"]
 

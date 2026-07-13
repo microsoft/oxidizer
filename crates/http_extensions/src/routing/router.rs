@@ -86,6 +86,25 @@ pub struct RequestUris {
     routed: Option<Uri>,
 }
 
+/// Request extension caching the standalone rendering of the request's templated
+/// path-and-query, produced once by
+/// [`HttpRequestBuilder::build`][crate::HttpRequestBuilder::build].
+///
+/// Routing only ever swaps the [`BaseUri`], never the path, so
+/// [`Router::resolve_request_uri`] reuses this rendering to join the resolved base without
+/// re-rendering the template - on the first attempt and on every retry/hedge attempt.
+#[derive(Clone)]
+pub(crate) struct RenderedPath(pub(crate) http::uri::PathAndQuery);
+
+impl std::fmt::Debug for RenderedPath {
+    // Deliberately omits the wrapped path-and-query contents: a rendered URI can carry
+    // sensitive values (ids, tokens, query parameters), so `Debug` must not risk leaking them
+    // via logs - consistent with `templated_uri::PathAndQuery`'s redacted `Debug`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RenderedPath").finish_non_exhaustive()
+    }
+}
+
 impl RequestUris {
     /// Creates a [`RequestUris`] with the given templated [`Uri`] as the
     /// [`original`](Self::original) and no [`routed`](Self::routed) yet.
@@ -263,19 +282,41 @@ impl Router {
     /// - [`Router::resolve_uri`] fails (e.g., a [`BaseUriConflict::Fail`] conflict), or
     /// - the resolved [`Uri`] cannot be converted back to an [`http::Uri`].
     pub fn resolve_request_uri(&self, context: RouterContext, request: &mut HttpRequest) -> Result<(), HttpError> {
-        // Always route from the caller-supplied target so repeated calls
-        // are idempotent. Clone rather than take, so a failure below leaves
-        // the request unchanged.
-        let original: Uri = match request.extensions().get::<RequestUris>() {
-            Some(uris) => uris.original().clone(),
-            None => request.uri().clone().try_into()?,
+        // Route from the caller-supplied target so repeated calls are idempotent. A built
+        // request carries its original target in `RequestUris`; a hand-built one derives it
+        // from the request's current URI. Clone rather than take, so a failure below leaves
+        // the request unchanged. A single lookup yields both the original and whether this is
+        // a built request.
+        let (original, built_request): (Uri, bool) = match request.extensions().get::<RequestUris>() {
+            Some(uris) => (uris.original().clone(), true),
+            None => (request.uri().clone().try_into()?, false),
         };
         let resolved = self.resolve_uri(context.with_request(request), original.clone())?;
-        let http_uri = resolved.clone().try_into()?;
 
-        // Commit: update the request's URI and record the resolved URI.
-        // Only `routed` is mutated; `original` is preserved across attempts.
+        // Routing only swaps the base, never the path, so reuse the path rendered once at
+        // build time (cached as `RenderedPath`) and join just the resolved base onto it,
+        // avoiding a second template render (including across retry/hedge attempts).
+        //
+        // Only trust `RenderedPath` for a built request: then `resolved`'s path derives from
+        // the same original the cache was rendered from, so they provably correspond. A
+        // hand-built request routes from its own `http::Uri` and may carry an unrelated
+        // `RenderedPath`, so it always full-materializes from `resolved`.
+        let http_uri = match request.extensions().get::<RenderedPath>().filter(|_| built_request) {
+            Some(rendered) => resolved.to_http_uri(&rendered.0)?,
+            None => resolved.clone().try_into()?,
+        };
+
+        // Commit: update the request's URI and record the resolved URI. `original` is
+        // preserved across attempts; only `routed` is mutated (a fresh `RequestUris` is
+        // attached for a hand-built request so subsequent calls stay idempotent).
         *request.uri_mut() = http_uri;
+        if !built_request {
+            // This request had no `RequestUris` at entry, so any `RenderedPath` it carries is
+            // unrelated to the target we just routed (and was ignored above). Drop it before
+            // attaching `RequestUris`, so the next call - which will see `RequestUris` and
+            // treat this as a built request - does not trust that stale cache.
+            let _ = request.extensions_mut().remove::<RenderedPath>();
+        }
         request
             .extensions_mut()
             .get_or_insert_with(|| RequestUris::new(original))
@@ -627,6 +668,38 @@ mod tests {
     }
 
     #[test]
+    fn resolve_request_uri_ignores_stale_rendered_path_without_request_uris() {
+        // A hand-built request (no `RequestUris`) that happens to carry an unrelated
+        // `RenderedPath` must NOT trust that cache: routing derives the target from the
+        // request's own `http::Uri`, so it must full-materialize from there, never splicing in
+        // the stale rendering. Guards the correct-by-construction reuse condition.
+        let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
+        let body = crate::HttpBodyBuilder::new_fake().empty();
+        let mut request = http::Request::new(body);
+        *request.uri_mut() = http::Uri::from_static("/v1/items");
+        // Inject a stale rendering that does not correspond to the request's URI.
+        request
+            .extensions_mut()
+            .insert(RenderedPath(http::uri::PathAndQuery::from_static("/stale/wrong/path")));
+        assert!(request.extensions().get::<RequestUris>().is_none(), "precondition: no RequestUris");
+
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
+
+        // The routed URI reflects the request's own path, not the stale cache.
+        assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+
+        // Idempotency: the first call attaches a `RequestUris`, so a second call sees a
+        // "built" request - but the stale `RenderedPath` must have been dropped, so it still
+        // routes to the same correct URI rather than trusting the stale cache.
+        router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
+        assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+        assert!(
+            request.extensions().get::<RenderedPath>().is_none(),
+            "stale RenderedPath must be cleared"
+        );
+    }
+
+    #[test]
     fn resolve_request_uri_attaches_base_uri() {
         let router = Router::fixed(BaseUri::from_static("https://api.example.com"));
         let mut request = crate::HttpRequestBuilder::new_fake().get("/v1/items").build().unwrap();
@@ -634,6 +707,40 @@ mod tests {
         router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
 
         assert_eq!(request.uri().to_string(), "https://api.example.com/v1/items");
+    }
+
+    #[test]
+    fn resolve_request_uri_reuses_rendered_path_matching_full_render() {
+        // `resolve_request_uri` reuses the path rendered once at build time (the `RenderedPath`
+        // extension) and joins only the resolved base. Its result must be byte-identical to the
+        // pre-optimization behavior, which fully re-materialized the resolved `Uri`. This pins
+        // the reuse path against the full-render reference across base-path joins, leading-slash
+        // normalization, and query strings.
+        let bases = ["https://api.example.com", "https://api.example.com/v1/", "http://h:8080/deep/base/"];
+        let paths = ["/items", "/users/42?active=true", "/a/b/c?x=1&y=2", "/only?q=1"];
+
+        for base_str in bases {
+            for path_str in paths {
+                let router = Router::fixed(BaseUri::from_static(base_str));
+                let mut request = crate::HttpRequestBuilder::new_fake().get(path_str).build().unwrap();
+
+                // Sanity: build attached a cached rendering that the reuse path will consume.
+                assert!(
+                    request.extensions().get::<RenderedPath>().is_some(),
+                    "build should cache a RenderedPath for {path_str:?}"
+                );
+
+                router.resolve_request_uri(RouterContext::new(), &mut request).unwrap();
+                let reused = request.uri().clone();
+
+                // Reference: the old behavior - fully re-materialize the resolved `Uri`.
+                let original: Uri = request.extensions().get::<RequestUris>().unwrap().original().clone();
+                let resolved = router.resolve_uri(RouterContext::new(), original).unwrap();
+                let full_render: http::Uri = resolved.try_into().unwrap();
+
+                assert_eq!(reused, full_render, "mismatch for base {base_str:?} + path {path_str:?}");
+            }
+        }
     }
 
     #[test]
@@ -750,5 +857,16 @@ mod tests {
         let custom_debug = format!("{custom:?}");
         assert!(custom_debug.starts_with("Custom"));
         assert!(custom_debug.contains("has_alternatives: true"));
+    }
+
+    #[test]
+    fn rendered_path_debug_is_redacted() {
+        // The wrapped path can carry sensitive ids/tokens, so `Debug` must not leak its
+        // contents (see the redacted `Debug` impl above).
+        let rendered = RenderedPath(http::uri::PathAndQuery::from_static("/users/42?token=secret"));
+        let debug = format!("{rendered:?}");
+        assert!(debug.starts_with("RenderedPath"), "unexpected debug output: {debug}");
+        assert!(!debug.contains("secret"), "debug output leaked path contents: {debug}");
+        assert!(!debug.contains("42"), "debug output leaked path contents: {debug}");
     }
 }

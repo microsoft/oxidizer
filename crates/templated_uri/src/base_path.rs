@@ -64,11 +64,31 @@ impl BasePath {
     }
 
     pub(crate) fn join_path_and_query(&self, other: &PathAndQuery) -> Result<PathAndQuery, UriError> {
-        let path_str = other.as_str().trim_start_matches('/');
+        let base = self.as_str();
+        let other_str = other.as_str();
+        let path_str = other_str.trim_start_matches('/');
         if path_str.is_empty() {
             return Ok(self.inner.clone());
         }
-        let full_path = format!("{}{path_str}", self.as_str());
+        // Fast path: when the base path is just the root `/` (the common case, e.g. a base
+        // URL like `https://api.example.com` with no path prefix) and the rendered path has
+        // exactly one leading slash, the join is byte-identical to `other` - which is already
+        // a validated `http::PathAndQuery`. Return it directly, skipping both the string
+        // allocation and the redundant re-validation scan (`clone` is a cheap `Bytes`
+        // reference-count bump). A difference of exactly one byte between `other_str` and the
+        // slash-trimmed `path_str` means exactly one leading slash was trimmed, so
+        // `"/" + path_str == other_str` (`path_str` is always a suffix of `other_str`, so the
+        // subtraction never underflows).
+        if base == "/" && other_str.len().saturating_sub(path_str.len()) == 1 {
+            return Ok(other.clone());
+        }
+        // General path: capacity-hinted `push_str` join rather than `format!`: sizes the
+        // buffer once and skips the formatting machinery, and the resulting `String` is
+        // donated to `PathAndQuery::try_from` without a re-copy. This is the request hot-path
+        // join used when reusing an already-rendered path (see `Uri::to_http_uri`).
+        let mut full_path = String::with_capacity(base.len() + path_str.len());
+        full_path.push_str(base);
+        full_path.push_str(path_str);
         Ok(PathAndQuery::try_from(full_path)?)
     }
 
@@ -318,6 +338,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn join_root_base_returns_path_unchanged() {
+        // Fast path: joining an already-validated path onto a root (`/`) base path yields the
+        // path unchanged (the optimization then returns it directly, skipping the re-allocation
+        // and re-validation scan; that allocation/scan property is verified by the Callgrind
+        // benches rather than asserted here, to avoid coupling to `http`'s internal storage).
+        let base = BasePath::from_static("/");
+        let path = PathAndQuery::from_static("/users/42?active=true");
+
+        let joined = base.join_path_and_query(&path).expect("join should succeed");
+
+        assert_eq!(joined.as_str(), "/users/42?active=true");
+    }
+
+    #[test]
+    fn join_root_base_double_slash_takes_general_path() {
+        // A path with multiple leading slashes must NOT take the reuse fast path: the join
+        // collapses them to one, so the result differs from the input and is re-validated.
+        let base = BasePath::from_static("/");
+        let path = PathAndQuery::from_static("//double//slash");
+        let joined = base.join_path_and_query(&path).expect("join should succeed");
+        assert_eq!(joined.as_str(), "/double//slash", "leading slashes must collapse to one");
     }
 
     #[test]
