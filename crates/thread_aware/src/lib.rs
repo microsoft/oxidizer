@@ -114,6 +114,7 @@
 //!   `http::uri::PathAndQuery`, `http::uri::Port<T>`, `http::Error`,
 //!   `http::uri::InvalidUri`, `http::Request<T>`, `http::Response<T>`.
 //! * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
+//! * **`tokio`**: Impl for `tokio::sync::mpsc::UnboundedSender<T>`.
 //! * **`uuid`**: Impl for `uuid::Uuid`.
 //!
 //! # Examples

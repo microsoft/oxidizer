@@ -127,6 +127,8 @@ the wrapped crate can be supported additively:
 
 * **`jiff02`**: Impls for `jiff::Timestamp`, `jiff::civil::DateTime`, etc.
 
+* **`tokio`**: Impl for `tokio::sync::mpsc::UnboundedSender<T>`.
+
 * **`uuid`**: Impl for `uuid::Uuid`.
 
 ## Examples
@@ -176,7 +178,7 @@ impl Service {
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/thread_aware">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbN-qa6ScfeXYbpUaqiTirDJMb-9jGY2W0shYbe4CUzbbLbn5hZIKCbHRocmVhZF9hd2FyZWUwLjguMIJzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuNQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYGr2MB-HcFMbhXOmoFr06X4bqEfiaABNbkkbelhYtCG4ukZhZIKCbHRocmVhZF9hd2FyZWUwLjguMIJzdGhyZWFkX2F3YXJlX21hY3Jvc2UwLjcuNQ
  [__link0]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware
  [__link1]: https://doc.rust-lang.org/stable/std/clone/trait.Clone.html
  [__link10]: https://docs.rs/thread_aware_macros/0.7.5/thread_aware_macros/?search=ThreadAware

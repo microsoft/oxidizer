@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ impl_transfer!(String);
 impl_transfer!(PathBuf);
 impl_transfer!(Duration);
 impl_transfer!(&Path);
+impl_transfer!(SocketAddr);
 
 impl_transfer!(&'static str);
 
@@ -330,6 +332,27 @@ mod tests {
         let mut err_string: Result<Vec<i32>, String> = Err("error".to_string());
         err_string.relocate(source, destination);
         assert_eq!(err_string, Err("error".to_string()));
+    }
+
+    #[test]
+    fn test_socket_addr() {
+        use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+
+        use crate::ThreadAware;
+
+        let affinities = pinned_affinities(&[2]);
+        let source = Some(affinities[0]);
+        let destination = affinities[1];
+
+        let mut v4 = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080));
+        let expected_v4 = v4;
+        v4.relocate(source, destination);
+        assert_eq!(v4, expected_v4);
+
+        let mut v6 = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0));
+        let expected_v6 = v6;
+        v6.relocate(source, destination);
+        assert_eq!(v6, expected_v6);
     }
 
     // std::sync::Arc<T> a type that introduces sharing across threads and thus is very likely to introduce

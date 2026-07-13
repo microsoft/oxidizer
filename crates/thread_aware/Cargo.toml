@@ -47,6 +47,8 @@ allowed_external_types = [
     "jiff::signed_duration::SignedDuration",
     "jiff::span::Span",
     "jiff::timestamp::Timestamp",
+    # `tokio` feature
+    "tokio::sync::mpsc::unbounded::UnboundedSender",
     # `uuid` feature
     "uuid::Uuid",
 ]
@@ -80,6 +82,7 @@ threads = ["dep:many_cpus"]
 bytes = ["dep:bytes"]
 http = ["dep:http"]
 jiff02 = ["dep:jiff"]
+tokio = ["dep:tokio"]
 uuid = ["dep:uuid"]
 
 [dependencies]
@@ -90,6 +93,7 @@ thread_aware_macros = { workspace = true, optional = true }
 bytes = { version = "1.11.1", default-features = false, optional = true }
 http = { version = "1.4.1", default-features = false, features = ["std"], optional = true }
 jiff = { version = "0.2.21", default-features = false, optional = true }
+tokio = { version = "1.48.0", default-features = false, features = ["sync"], optional = true }
 uuid = { version = "1.21.0", default-features = false, optional = true }
 
 [dev-dependencies]
@@ -102,6 +106,7 @@ many_cpus = { workspace = true, features = ["test-util"] }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
 thread_aware_macros = { path = "../thread_aware_macros" }
+tokio = { version = "1.48.0", default-features = false, features = ["sync"] }
 uuid = { version = "1.21.0", default-features = false }
 
 # Workspace dep declares `default-features = false`; we re-enable `default` here
