@@ -937,3 +937,186 @@ fn optional_label_both_none() {
     let path = LabelOptional { ext1: None, ext2: None };
     assert_eq!(path.render(), "/file");
 }
+
+#[templated(template = "/users/{user_id}/posts/{post_id}", unredacted)]
+#[derive(Clone)]
+struct MaterializePath {
+    user_id: u32,
+    post_id: EscapedString,
+}
+
+#[templated(template = "/{+catch_all}", unredacted)]
+#[derive(Clone)]
+struct CatchAllPath {
+    // `{+catch_all}` is a reserved expansion, so a value beginning with `/` renders a
+    // second leading slash (`//...`) that base joining must normalize.
+    catch_all: String,
+}
+
+/// The per-request hot path (base plus templated path into an `http::Uri`) must produce
+/// exactly the same URI as materializing the rendered path into a static `PathAndQuery`
+/// and joining that. This guards the single-pass `join_rendered` optimization against the
+/// original materialize-then-join behavior.
+#[test]
+fn materialize_hot_path_matches_static_join() {
+    let bases = [
+        "https://api.example.com",
+        "https://api.example.com/",
+        "https://api.example.com/v1/",
+        "http://localhost:8080/deep/base/",
+    ];
+
+    for base_str in bases {
+        let base = BaseUri::from_static(base_str);
+
+        // A normal templated path.
+        let templated = MaterializePath {
+            user_id: 42,
+            post_id: EscapedString::from_static("hello-world"),
+        };
+        let rendered = templated.render();
+
+        let hot: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(templated.clone())
+            .try_into()
+            .expect("hot-path materialization should succeed");
+
+        let expected: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(http::uri::PathAndQuery::try_from(rendered.as_str()).unwrap())
+            .try_into()
+            .expect("static-join materialization should succeed");
+
+        assert_eq!(hot, expected, "mismatch for base {base_str:?} (normal path)");
+
+        // A reserved-expansion path whose value begins with `/`, producing `//` before join.
+        let catch_all = CatchAllPath {
+            catch_all: "/nested/resource?x=1".to_string(),
+        };
+        let rendered_ca = catch_all.render();
+        assert!(rendered_ca.starts_with("//"), "sanity: catch-all should render a double slash");
+
+        let hot_ca: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(catch_all.clone())
+            .try_into()
+            .expect("hot-path materialization should succeed");
+
+        let expected_ca: http::Uri = Uri::default()
+            .with_base(base.clone())
+            .with_path_and_query(http::uri::PathAndQuery::try_from(rendered_ca.as_str()).unwrap())
+            .try_into()
+            .expect("static-join materialization should succeed");
+
+        assert_eq!(hot_ca, expected_ca, "mismatch for base {base_str:?} (catch-all path)");
+    }
+}
+
+#[templated(template = "/search{?query,limit,offset}", unredacted)]
+#[derive(Clone)]
+struct CapacityHintPath {
+    query: EscapedString,
+    limit: u32,
+    offset: u32,
+}
+
+#[test]
+fn macro_render_capacity_hint_exact_value() {
+    // The `#[templated]` macro emits a compile-time `render_capacity_hint()` that sums, for
+    // `/search{?query,limit,offset}`:
+    //   - content "/search"                                        = 7
+    //   - group `{?query,limit,offset}` prefix "?"                 = 1
+    //   - separators between 3 values (2 x "&", 1 byte each)       = 2
+    //   - `key=` literals: "query="(6) + "limit="(6) + "offset="(7) = 19
+    //   - 3 values x ESTIMATED_VALUE_LEN (16)                       = 48
+    // for a total of 77. Asserting the exact value pins the macro's capacity arithmetic so a
+    // mutation to any of the `+`/`*` operators (which does not change rendered output and so
+    // is invisible to behavioral tests) is caught here.
+    let p = CapacityHintPath {
+        query: EscapedString::from_static("x"),
+        limit: 1,
+        offset: 2,
+    };
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&p), 77);
+    // Sanity: the hint must be a genuine upper bound for this concrete (short) render.
+    assert!(PathAndQueryTemplate::render_capacity_hint(&p) >= p.render().len());
+}
+
+#[test]
+fn macro_render_capacity_hint_covers_simple_and_reserved_expansions() {
+    // `/{org_id}/user/{user_id}/{+action}/` mixes static content with simple (`{org_id}`,
+    // `{user_id}`) and reserved (`{+action}`) expansions, none of which carry a prefix or
+    // `key=` literal. Its hint is:
+    //   "/"(1) + org_id(16) + "/user/"(6) + user_id(16) + "/"(1) + action(16) + "/"(1) = 57.
+    // The enum's generated `render_capacity_hint` must delegate to the active variant, so the
+    // value matches the underlying struct's hint. This pins the content and per-value
+    // arithmetic for the non-key/value expansion forms.
+    let action = UserActionPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Will_E_Coyote")),
+        action: Action::Edit,
+    };
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&action), 57);
+
+    let enum_variant = UserApi::UserEditPath(action);
+    assert_eq!(PathAndQueryTemplate::render_capacity_hint(&enum_variant), 57);
+}
+
+#[test]
+fn macro_render_into_appends_without_reallocating_prefix() {
+    // The macro's `render_into` appends field values directly into a caller-provided buffer
+    // rather than allocating a fresh `String`. It must leave any existing prefix intact and
+    // append exactly what `render()` would have produced. Guards the macro-generated
+    // `render_into` body against a mutation that drops the append statements.
+    let p = CapacityHintPath {
+        query: EscapedString::from_static("term"),
+        limit: 10,
+        offset: 5,
+    };
+    let mut buf = String::from("/prefix");
+    PathAndQueryTemplate::render_into(&p, &mut buf);
+    assert_eq!(buf, format!("/prefix{}", p.render()));
+    assert_eq!(buf, "/prefix/search?query=term&limit=10&offset=5");
+
+    // The enum variant's `render_into` must delegate to the active variant identically.
+    let action = UserApi::UserEditPath(UserActionPath {
+        org_id: OrgId(EscapedString::from_static("Acme")),
+        user_id: UserId(EscapedString::from_static("Wile")),
+        action: Action::Edit,
+    });
+    let mut enum_buf = String::from("base:");
+    PathAndQueryTemplate::render_into(&action, &mut enum_buf);
+    assert_eq!(enum_buf, format!("base:{}", action.render()));
+}
+
+static REF_ID_VALUE: u32 = 4242;
+
+#[templated(template = "/items/{id}{?maybe}", unredacted)]
+#[derive(Clone)]
+struct ReferenceFieldPath {
+    id: &'static u32,
+    maybe: Option<&'static u32>,
+}
+
+#[test]
+fn reference_fields_render_in_required_and_optional_positions() {
+    // A `&T` field (where the owned `T: Escape`) must render identically whether it appears
+    // in a required (`{id}`) or an optional (`{?maybe}`) position. The macro passes
+    // `self.field` (already `&T`) in the required path and `*__val` in the optional path, so
+    // both resolve `Escape` on the owned `T` (e.g. `u32`), not on `&T` — the latter has no
+    // impl. This pins the required/optional receiver consistency the reviewer flagged.
+    static OTHER: u32 = 7;
+
+    let with_opt = ReferenceFieldPath {
+        id: &REF_ID_VALUE,
+        maybe: Some(&OTHER),
+    };
+    assert_eq!(with_opt.render(), "/items/4242?maybe=7");
+
+    let without_opt = ReferenceFieldPath {
+        id: &REF_ID_VALUE,
+        maybe: None,
+    };
+    assert_eq!(without_opt.render(), "/items/4242");
+}

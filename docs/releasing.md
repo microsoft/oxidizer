@@ -203,31 +203,91 @@ Examples:
 
 After parsing the tokens, the planner walks the workspace dependency
 graph forward from every user-source release and adds each transitive
-published dependent as a cascade-source release. The cascade's change
-type for each dependent is derived from whether the user-source release
-exposes (in its public API) the cascaded-from package — exposing
-cascades propagate the source's change type, non-exposing cascades drop
-to `patch`.
+published dependent as a cascade-source release. The change type for
+every release in the plan — both the directly-requested (user-source)
+crates and the cascade-pulled dependents — is derived by running
+[`cargo semver-checks`](https://crates.io/crates/cargo-semver-checks)
+against each crate's **previous version-bump commit in git history** —
+the most recent commit that changed the crate's `[package] version`,
+supplied to the tool as `--baseline-rev <sha>`. cargo-semver-checks
+rebuilds the baseline rustdoc from the crate's source at that commit, so
+**no registry access is required** and the check behaves identically for
+open-source (crates.io) and enterprise/offline consumers. The current
+working-tree API is analysed, so a coordinated release's in-progress
+edits — including a dependency whose public types a dependent re-exports
+— are reflected in the dependent's own API diff.
+
+Versioning is treated as a **source-level** concern: the baseline is the
+version the repository last *declared*, regardless of whether it was ever
+published anywhere. This is what lets one workflow serve both public and
+private/enterprise environments (which cannot reach crates.io and whose
+published content lags the source), and it means an aborted release that
+bumped a crate to `4.0.0` without publishing is still the baseline the
+next change is measured against.
+
+This replaces the former
+`[package.metadata.cargo_check_external_types]` allowlist heuristic. That
+allowlist is a hand-maintained list of the external types a crate is
+*permitted* to expose; it was repurposed as a proxy for the types a
+crate *actually* re-exports. When the two drift apart — an entry missing
+or stale — the heuristic misjudged whether a dependent re-exports a
+changed dependency, so a breaking change in an exposed dependency could
+be cascaded as `patch` instead of `breaking` (the motivating defect: a
+breaking change in `bytesbuf` was not propagated to `bytesbuf_io`, which
+re-exports `bytesbuf` types). Analysing the real API with
+`cargo semver-checks` removes the proxy entirely.
+
+**How the change type is determined.** `cargo semver-checks` is invoked
+as a CLI (not as a library) and its textual result is parsed into one of
+our change types. The mapping mirrors the tool's own
+[`required_bump`](https://docs.rs/cargo-semver-checks/latest/cargo_semver_checks/struct.CrateReport.html#method.required_bump)
+notion (major / minor / none); the exact parsing lives in
+`ConvertFrom-SemverChecksOutput` (`scripts/lib/releasing.ps1`):
+
+| `cargo semver-checks` result | change type |
+|---|---|
+| a major-level change is required | `breaking` |
+| only a minor-level change is required | `non-breaking` |
+| compatible / no update required | `patch` |
+| no prior version-bump commit (new crate) | no constraint |
+
+Cascade dependents are floored at `patch` (they must re-release to pick
+up the new dependency version even when their own public API is
+unchanged), then raised to whatever their own `cargo semver-checks`
+result requires.
+
+**Baseline semantics.** The baseline is the crate's previous
+version-bump commit — the most recent commit (before the change under
+review) that altered the crate's `[package] version`. Because it comes
+from git history rather than a registry, a version that was committed but
+never published *is* the baseline: an aborted release that bumped
+`bytesbuf` to `4.0.0` without publishing means the next change is
+compared against `4.0.0`, not a stale published `3.3.3`. A brand-new
+crate with no prior version-bump commit has no baseline and imposes no
+constraint. This works offline and in enterprise environments with no
+crates.io access, since the baseline API is rebuilt from the crate's own
+source at the baseline commit.
 
 The planner enforces **topological consistency**: if a user-supplied
-change type for a package is *weaker* than the cascade would compute,
-the planner auto-upgrades it and notes the upgrade in the review output.
-The caller's `-Packages` token is therefore a *lower bound*, not a
-guarantee — the caller can always elevate further on the next iteration
-of the review, but cannot suppress a cascade-imposed change type.
+change type for a package is *weaker* than `cargo semver-checks`
+requires (for that package or via a cascade), the planner auto-upgrades
+it and notes the upgrade in the review output. The caller's `-Packages`
+token is therefore a *lower bound*, not a guarantee — the caller can
+always elevate further on the next iteration of the review, but cannot
+suppress a change type the API analysis requires.
 
 ### Errors the planner rejects
 
 - An explicit semver that is not strictly greater than the package's
   current on-disk version. (Always fatal — `-Force` does not relax this.)
-- A user-supplied change type that pins the package *below* what the
-  cascade computes for it. (The planner can auto-upgrade ordinary
-  change-type tokens, but treats an explicit semver token as a hard
-  pin — if the explicit version is below what the cascade requires the
-  planner errors instead of silently overriding the caller. Pass
-  `-Force` to override: the pin is honored verbatim, the package's
-  effective change-type tag is still upgraded so further cascade
-  decisions are correct, and a warning is printed flagging that
+- A user-supplied change type that pins the package *below* what
+  `cargo semver-checks` (or the cascade) computes for it. (The planner
+  can auto-upgrade ordinary change-type tokens, but treats an explicit
+  semver token as a hard pin — if the explicit version is below what the
+  analysis requires the planner errors instead of silently overriding
+  the caller. Pass `-Force` to override: the pin is honored verbatim, the
+  package's effective change-type tag is still upgraded so further
+  cascade decisions are correct, and a warning is printed flagging that
   consumers may break.)
 
 ---

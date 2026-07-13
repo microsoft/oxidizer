@@ -21,6 +21,7 @@
         # User pinned dependent at 1.0.1 which is below the cascade requirement →
         # Resolve-ReleaseSet must throw.
         Packages = @('target@breaking', 'dependent@1.0.1')
+        SemverVerdicts = @{ dependent = 'breaking' }
         Answers  = @()
     }
 

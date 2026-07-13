@@ -69,6 +69,18 @@ pub(crate) fn enum_template(ident: &Ident, data: &DataEnum) -> TokenStream {
                     #(#variant_matches => template_variant.render()),*
                 }
             }
+
+            fn render_into(&self, __out: &mut ::std::string::String) {
+                match self {
+                    #(#variant_matches => ::templated_uri::PathAndQueryTemplate::render_into(template_variant, __out)),*
+                }
+            }
+
+            fn render_capacity_hint(&self) -> ::core::primitive::usize {
+                match self {
+                    #(#variant_matches => ::templated_uri::PathAndQueryTemplate::render_capacity_hint(template_variant)),*
+                }
+            }
         }
 
         impl ::std::fmt::Debug for #ident {

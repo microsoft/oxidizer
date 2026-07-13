@@ -23,6 +23,7 @@
         # dependent's EffectiveChangeType to breaking and EffectiveTargetVersion
         # to 2.0.0.
         Packages = @('target@breaking', 'dependent@patch')
+        SemverVerdicts = @{ dependent = 'breaking' }
         Answers  = @()
     }
 

@@ -22,6 +22,10 @@
 
     Run = @{
         Packages = @('dependent@patch')
+        # dependent re-exports dependency's public types; when dependency lands a
+        # non-breaking change, dependent's own API gains those additions, so
+        # cargo-semver-checks classifies dependent as non-breaking (→ 1.1.0).
+        SemverVerdicts = @{ dependent = 'non-breaking' }
         Answers   = @(
             # On a stable >=1.x.y package the menu offers [1-5]; '4' selects the
             # minor (non-breaking) path, distinct from the patch path of option 5.
