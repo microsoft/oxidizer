@@ -145,6 +145,73 @@ Describe 'Get-PackageLastReleaseBaseline' {
     }
 }
 
+Describe 'Get-PreviousVersionBumpCommit' {
+    BeforeAll {
+        Reset-ReleaseScriptCaches
+        $script:Ws = New-SyntheticWorkspace -Preset Linear3 -Path (Join-Path $TestDrive 'prevbump')
+        # C0 = baseline commit: 'b' created at 0.2.0, 'c' created at 0.3.0.
+        $script:Sha_C0 = $script:Ws.GitSha('HEAD')
+
+        # C1 = source-only edit to 'b' (no version change).
+        $script:Ws.ModifySource('b')
+        $script:Ws.AddCommit('source edit to b')
+        $script:Sha_C1 = $script:Ws.GitSha('HEAD')
+
+        # C2 = the version bump under test: 'b' 0.2.0 -> 0.2.1.
+        $script:Ws.SetVersion('b', '0.2.1')
+        $script:Ws.AddCommit('bump b to 0.2.1')
+        $script:Sha_C2 = $script:Ws.GitSha('HEAD')
+
+        # C3 = publish toggle only (touches Cargo.toml but NOT the version line).
+        $script:Ws.SetPublishFalse('b')
+        $script:Ws.AddCommit('set b publish=false')
+        $script:Sha_C3 = $script:Ws.GitSha('HEAD')
+    }
+
+    It 'returns the most recent [package] version-bump commit and its version' {
+        $r = Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'HEAD' -PackageFolder 'b'
+        $r.Sha     | Should -Be $script:Sha_C2
+        $r.Version | Should -Be '0.2.1'
+    }
+
+    It 'ignores a commit that changed only publish, not the package version' {
+        # HEAD is the publish-toggle commit C3; the helper must skip it and
+        # return the earlier version-bump C2 rather than treating a publish edit
+        # as a version bump (this is where it differs from the -G line match in
+        # Get-PackageLastReleaseBaseline).
+        (Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'HEAD' -PackageFolder 'b').Sha |
+            Should -Be $script:Sha_C2
+    }
+
+    It 'excludes bumps newer than BaseRef (a PR''s own bump is not its own baseline)' {
+        # Searching from C1 (before the 0.2.1 bump) yields the crate's creation
+        # commit at 0.2.0 — exactly the previously-declared version. This mirrors
+        # CI passing origin/main so THIS PR's bump is not the baseline.
+        $r = Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef $script:Sha_C1 -PackageFolder 'b'
+        $r.Sha     | Should -Be $script:Sha_C0
+        $r.Version | Should -Be '0.2.0'
+    }
+
+    It 'treats a crate''s creation commit as its version bump when never re-bumped' {
+        # 'c' is created at 0.3.0 in the baseline commit and never changed.
+        $r = Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'HEAD' -PackageFolder 'c'
+        $r.Sha     | Should -Be $script:Sha_C0
+        $r.Version | Should -Be '0.3.0'
+    }
+
+    It 'returns null for a package folder that has never existed' {
+        Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'HEAD' -PackageFolder 'nonexistent' |
+            Should -BeNullOrEmpty
+    }
+
+    It 'throws when the base ref cannot be resolved (not fetched / typo)' {
+        # A genuine lookup failure must NOT be silently treated as "no baseline"
+        # (which would drop the change-type floor and let CI wrongly pass).
+        { Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'origin/does-not-exist' -PackageFolder 'b' } |
+            Should -Throw -ExpectedMessage "*could not be resolved*"
+    }
+}
+
 Describe 'Get-PackageLastReleaseBaseline (TOML publish-syntax variants)' {
 
     # The baseline detector inspects committed history for diff hunks whose
@@ -426,6 +493,25 @@ Describe 'Get-PackagesWithVersionChanges' {
         $w2 = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionchanges-empty')
         $changedSet = Get-PackagesWithVersionChanges -RepoRoot $w2.Path -BaseRef 'HEAD'
         $changedSet.Count | Should -Be 0
+    }
+
+    It 'the semver-report call-site expression yields a zero-length array when nothing changed' {
+        # Regression: the function returns a HashSet via Write-Output -NoEnumerate.
+        # Wrapping the raw return in @(...) produces a 1-element array containing
+        # the (empty) HashSet, so a `.Count -eq 0` guard never fires and a spurious
+        # "0 crate(s)" comment is posted. semver-report.ps1 casts to [string[]] and
+        # sorts; this must collapse to a true empty array.
+        Reset-ReleaseScriptCaches
+        $w = New-SyntheticWorkspace -Preset Linear2 -Path (Join-Path $TestDrive 'versionchanges-callsite-empty')
+        $changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $w.Path -BaseRef 'HEAD') | Sort-Object)
+        $changedFolders.Count | Should -Be 0
+    }
+
+    It 'the semver-report call-site expression yields the changed folders (sorted) when versions differ' {
+        Reset-ReleaseScriptCaches
+        $changedFolders = @([string[]](Get-PackagesWithVersionChanges -RepoRoot $script:Ws.Path -BaseRef 'HEAD~1') | Sort-Object)
+        $changedFolders.Count | Should -Be 1
+        $changedFolders[0] | Should -Be 'a'
     }
 }
 
