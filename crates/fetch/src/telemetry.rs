@@ -79,8 +79,9 @@ impl Extend<KeyValue> for TelemetryAttributes {
 /// Holds the scope-defining properties (runtime, transport, client name) and an
 /// optional custom meter [provider][MeterProvider]; when no provider is set, the
 /// global meter provider is used. The [`InstrumentationScope`] is only
-/// materialized when the [`Meter`] is created (see [`From<Metering>`][Metering]),
-/// so the client name can still be updated after the provider has been chosen.
+/// materialized when the [`Meter`] is created (see the `From<Metering>` impl
+/// for [`Meter`]), so the client name can still be updated after the provider
+/// has been chosen.
 #[derive(Clone)]
 pub(crate) struct Metering {
     provider: Option<Arc<dyn MeterProvider + Send + Sync>>,
