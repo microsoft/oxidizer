@@ -15,7 +15,7 @@ use opentelemetry_semantic_conventions::trace::{
     ERROR_TYPE, HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME, NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS,
     URL_SCHEME, URL_TEMPLATE,
 };
-use seatbelt::{Attempt, RecoveryInfo};
+use seatbelt::RecoveryInfo;
 use tick::SimpleClock;
 
 use crate::error_labels::{LABEL_ABANDONED, collect_error_labels};
@@ -25,17 +25,14 @@ use crate::telemetry::{
 use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 
 /// Instrument name used when [`MetricsLayer::report_total_duration`] is
-/// enabled. This is an Oxidizer-specific extension to the OpenTelemetry HTTP
-/// semantic conventions, used to distinguish total request duration
-/// (including all retries and hedged attempts) from per-attempt duration.
+/// enabled.
+///
+/// This is a **proprietary Oxidizer metric**, not part of the official
+/// OpenTelemetry HTTP semantic conventions. Oxidizer defines it inside the
+/// OpenTelemetry-owned `http.client.*` namespace to distinguish the total
+/// request duration (including all retries and hedged attempts) from the
+/// per-attempt duration.
 const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
-
-/// Metric attribute key for the zero-based attempt index of an HTTP request.
-const RESILIENCE_ATTEMPT_INDEX: &str = "resilience.attempt.index";
-
-/// Metric attribute key indicating whether the recorded attempt is the last one
-/// that will be performed.
-const RESILIENCE_ATTEMPT_IS_LAST: &str = "resilience.attempt.is_last";
 
 type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
 type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
@@ -96,7 +93,6 @@ pub struct Metrics<T> {
     on_record: Option<OnRecordCallback>,
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
-    include_attempt: bool,
 }
 
 /// Layer that wraps a service with [`Metrics`].
@@ -113,7 +109,6 @@ pub struct MetricsLayer {
     on_record: Option<OnRecordCallback>,
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
-    include_attempt: bool,
 }
 
 impl MetricsLayer {
@@ -188,29 +183,6 @@ impl MetricsLayer {
         self
     }
 
-    /// Controls whether resilience attempt attributes are added to the recorded
-    /// metrics.
-    ///
-    /// When enabled, two attributes derived from the [`Attempt`] stored in the
-    /// request extensions are attached to every metric record:
-    ///
-    /// * `resilience.attempt.index` — the zero-based attempt index.
-    /// * `resilience.attempt.is_last` — whether this is the final attempt that
-    ///   will be performed.
-    ///
-    /// When no [`Attempt`] is present in the request extensions (for example,
-    /// when this layer is used outside of a retry stack, or on the first
-    /// attempt), the fallback reported is index `0` with `is_last = true`,
-    /// matching the semantics of a single, terminal attempt.
-    ///
-    /// This is disabled by default to avoid increasing metric cardinality when
-    /// attempt-level granularity is not required.
-    #[must_use]
-    pub fn include_attempt(mut self, enabled: bool) -> Self {
-        self.include_attempt = enabled;
-        self
-    }
-
     /// Toggles whether the request duration histogram is recorded under the
     /// alternative `http.client.request.total_duration` instrument name.
     ///
@@ -246,7 +218,6 @@ impl<S> Layer<S> for MetricsLayer {
             on_record: self.on_record.clone(),
             enrich_from_request: self.enrich_from_request.clone(),
             enrich_from_response: self.enrich_from_response.clone(),
-            include_attempt: self.include_attempt,
         }
     }
 }
@@ -269,7 +240,6 @@ impl Metrics<()> {
             on_record: None,
             enrich_from_request: None,
             enrich_from_response: None,
-            include_attempt: false,
         }
     }
 }
@@ -308,10 +278,6 @@ impl<T: RequestHandler> Service<HttpRequest> for Metrics<T> {
         let mut attributes = TelemetryAttributes::default();
 
         fill_request_attributes(&mut attributes, &input, self.enrich_from_request.as_ref());
-
-        if self.include_attempt {
-            fill_attempt_attributes(&mut attributes, input.extensions().get::<Attempt>());
-        }
 
         let mut guard = MetricsDropGuard {
             watch,
@@ -367,20 +333,6 @@ fn fill_request_attributes(attributes: &mut TelemetryAttributes, request: &HttpR
 
 fn fill_error_attributes(attributes: &mut TelemetryAttributes, error: &HttpError) {
     attributes.push(KeyValue::new(ERROR_TYPE, collect_error_labels(error).into_cow()));
-}
-
-/// Populates the resilience attempt attributes on the metric attribute set.
-///
-/// When `attempt` is `None`, the fallback values are an index of `0` and
-/// `is_last = true`, representing a single terminal attempt.
-fn fill_attempt_attributes(attributes: &mut TelemetryAttributes, attempt: Option<&Attempt>) {
-    let (index, is_last) = match attempt {
-        Some(attempt) => (attempt.index(), attempt.is_last()),
-        None => (0, true),
-    };
-
-    attributes.push(KeyValue::new(RESILIENCE_ATTEMPT_INDEX, i64::from(index)));
-    attributes.push(KeyValue::new(RESILIENCE_ATTEMPT_IS_LAST, is_last));
 }
 
 /// Drop guard that ensures metrics are recorded even when the request future
@@ -707,12 +659,6 @@ mod tests {
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
     }
 
-    /// Extracts the value recorded for a given attribute key from the collected
-    /// attributes, if present.
-    fn attr_value<'a>(attrs: &'a [KeyValue], key: &str) -> Option<&'a opentelemetry::Value> {
-        attrs.iter().find(|kv| kv.key.as_str() == key).map(|kv| &kv.value)
-    }
-
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
     #[test]
     fn default_clock_is_used_when_unset() {
@@ -722,83 +668,6 @@ mod tests {
         let handler = Metrics::layer().meter_provider(&provider).layer(FakeHandler::from(StatusCode::OK));
 
         block_on(Service::execute(&handler, test_request())).unwrap();
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn include_attempt_uses_extension_values() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
-        let attrs_clone = Arc::clone(&recorded_attrs);
-
-        let handler = test_layer()
-            .include_attempt(true)
-            .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
-            })
-            .layer(FakeHandler::from(StatusCode::OK));
-
-        let mut request = test_request();
-        request.extensions_mut().insert(Attempt::new(3, false));
-
-        block_on(Service::execute(&handler, request)).unwrap();
-
-        let attrs = recorded_attrs.lock().unwrap();
-        assert_eq!(
-            attr_value(&attrs, RESILIENCE_ATTEMPT_INDEX).map(opentelemetry::Value::as_str),
-            Some("3".into())
-        );
-        assert_eq!(
-            attr_value(&attrs, RESILIENCE_ATTEMPT_IS_LAST).map(opentelemetry::Value::as_str),
-            Some("false".into())
-        );
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn include_attempt_falls_back_when_extension_missing() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
-        let attrs_clone = Arc::clone(&recorded_attrs);
-
-        let handler = test_layer()
-            .include_attempt(true)
-            .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
-            })
-            .layer(FakeHandler::from(StatusCode::OK));
-
-        block_on(Service::execute(&handler, test_request())).unwrap();
-
-        let attrs = recorded_attrs.lock().unwrap();
-        assert_eq!(
-            attr_value(&attrs, RESILIENCE_ATTEMPT_INDEX).map(opentelemetry::Value::as_str),
-            Some("0".into())
-        );
-        assert_eq!(
-            attr_value(&attrs, RESILIENCE_ATTEMPT_IS_LAST).map(opentelemetry::Value::as_str),
-            Some("true".into())
-        );
-    }
-
-    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
-    #[test]
-    fn attempt_attributes_absent_by_default() {
-        let recorded_attrs = Arc::new(std::sync::Mutex::new(Vec::<KeyValue>::new()));
-        let attrs_clone = Arc::clone(&recorded_attrs);
-
-        let handler = test_layer()
-            .on_record(move |_duration, _result, attrs| {
-                attrs_clone.lock().unwrap().extend(attrs.iter().cloned());
-            })
-            .layer(FakeHandler::from(StatusCode::OK));
-
-        let mut request = test_request();
-        request.extensions_mut().insert(Attempt::new(3, false));
-
-        block_on(Service::execute(&handler, request)).unwrap();
-
-        let attrs = recorded_attrs.lock().unwrap();
-        assert!(attr_value(&attrs, RESILIENCE_ATTEMPT_INDEX).is_none());
-        assert!(attr_value(&attrs, RESILIENCE_ATTEMPT_IS_LAST).is_none());
     }
 
     #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
