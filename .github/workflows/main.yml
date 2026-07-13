@@ -246,8 +246,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          git fetch --no-tags origin "+refs/heads/$env:BASE_REF`:refs/remotes/origin/$env:BASE_REF"
-          ./scripts/ci/semver-report.ps1 -BaseRef "origin/$env:BASE_REF" -ReportPath semver-comment.md -RunUrl "$env:RUN_URL"
+          git fetch --no-tags origin "+refs/heads/${env:BASE_REF}:refs/remotes/origin/${env:BASE_REF}"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${env:BASE_REF}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
 
       # Post a NEW comment on every push (not a sticky update) so each run's
       # result is visible in the PR timeline. Only fires when the PR actually
