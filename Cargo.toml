@@ -92,7 +92,7 @@ uniflight = { path = "crates/uniflight", default-features = false, version = "0.
 
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
-alloc_tracker = { version = "0.6.0", default-features = false }
+alloc_tracker = { version = "0.7.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
 argh = { version = "0.1.13", default-features = false }

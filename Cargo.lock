@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "alloc_tracker"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0160148c6badd4fb18605f8373adda8d89a43abcacf9a1b7868aa33643eacdb7"
+checksum = "66dc7d41d01f66319dcf8ff2c80463dfc096ff26d6a25cb142debd2ea11b93f9"
 dependencies = [
  "folo_utils",
  "serde",
@@ -1454,9 +1454,9 @@ checksum = "c9da2799288b7822cb94d4b15fb5f0eef6de0bcb9d26ce99c8512597bb0dda81"
 
 [[package]]
 name = "folo_utils"
-version = "0.1.8"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc135ea093a19d41324dcf04daaf9da2e9c625147e3eb19073e9869580a89db"
+checksum = "9333d94e08221df95e40c29e8a239396501e635f037a840dec43f33efc4bb054"
 dependencies = [
  "serde",
  "serde_json",
