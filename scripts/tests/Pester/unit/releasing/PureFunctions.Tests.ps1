@@ -275,31 +275,64 @@ Describe 'Test-ValidPackageName' {
     }
 }
 
-Describe 'Test-PackageExposesTarget' {
-    It 'returns true when no allowed_external_types declared (conservative default)' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = $null }
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
+Describe 'ConvertFrom-SemverChecksOutput' {
+    It 'maps a major-check failure to breaking' {
+        $out = "     Summary semver requires new major version: 3 major and 0 minor checks failed"
+        ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'breaking'
     }
 
-    It 'returns true when target appears as a root in allowed_external_types' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = @('foo::*', 'bar::Baz') }
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeTrue
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'bar' | Should -BeTrue
+    It 'maps a minor-only failure to non-breaking' {
+        $out = "     Summary semver requires new minor version: 0 major and 2 minor checks failed"
+        ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'non-breaking'
     }
 
-    It 'returns false when target is not in allowed_external_types' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = @('std::*') }
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
+    It 'maps a zero-major zero-minor summary to patch' {
+        $out = "     Summary 0 major and 0 minor checks failed"
+        ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'patch'
     }
 
-    It 'normalizes hyphens to underscores when matching' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = @('my_package::*') }
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'my-package' | Should -BeTrue
+    It 'maps "no semver update required" to patch' {
+        $out = "    Checking foo v1.2.3 -> v1.2.3 (no change; assume minor)`n     Summary no semver update required"
+        ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'patch'
     }
 
-    It 'matches whole-root only, not prefix' {
-        $dep = [pscustomobject]@{ AllowedExternalTypes = @('foobar::*') }
-        Test-PackageExposesTarget -dependent $dep -targetPackageName 'foo' | Should -BeFalse
+    It 'throws on a tool/build failure (no silent fallback)' {
+        # Under --baseline-rev the baseline is built from source, so a failure to
+        # produce a verdict (e.g. the baseline crate failed to build) must surface
+        # as an error rather than being silently classified. The caller (CI report)
+        # turns this into an explicit "baseline unknown" row.
+        $out = "     Building foo v1.2.3 (baseline)`nerror: could not compile ``foo`` (lib)"
+        { ConvertFrom-SemverChecksOutput -Output $out -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
+    }
+
+    It 'throws on unrecognized output (no silent fallback)' {
+        { ConvertFrom-SemverChecksOutput -Output 'some unexpected tooling error' -PackageName 'foo' } |
+            Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
+    }
+}
+
+Describe 'Get-StrongerChangeType' {
+    It 'returns the higher-ranked change type' {
+        Get-StrongerChangeType 'patch' 'breaking'     | Should -Be 'breaking'
+        Get-StrongerChangeType 'breaking' 'patch'     | Should -Be 'breaking'
+        Get-StrongerChangeType 'patch' 'non-breaking' | Should -Be 'non-breaking'
+        Get-StrongerChangeType 'non-breaking' 'patch' | Should -Be 'non-breaking'
+    }
+
+    It 'treats none as below patch' {
+        Get-StrongerChangeType 'patch' 'none' | Should -Be 'patch'
+        Get-StrongerChangeType 'none' 'patch' | Should -Be 'patch'
+        Get-StrongerChangeType 'none' 'none' | Should -Be 'none'
+    }
+
+    It 'treats unknown/empty inputs as none (rank 0)' {
+        Get-StrongerChangeType 'breaking' '' | Should -Be 'breaking'
+        Get-StrongerChangeType $null 'patch' | Should -Be 'patch'
+    }
+
+    It 'returns the first argument on a tie' {
+        Get-StrongerChangeType 'non-breaking' 'non-breaking' | Should -Be 'non-breaking'
     }
 }
 

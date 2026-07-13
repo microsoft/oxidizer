@@ -18,15 +18,13 @@ impl ::templated_uri::PathAndQueryTemplate for OptionalTest {
         ::core::option::Option::None
     }
     fn render(&self) -> ::std::string::String {
-        let mut __out = ::std::string::String::with_capacity(22usize);
+        let mut __out = ::std::string::String::with_capacity(70usize);
+        ::templated_uri::PathAndQueryTemplate::render_into(self, &mut __out);
+        __out
+    }
+    fn render_into(&self, __out: &mut ::std::string::String) {
         __out.push_str("/items/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.id)),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
+        ::templated_uri::Escape::escape_into(&self.id, __out);
         {
             let mut __first = true;
             {
@@ -38,15 +36,7 @@ impl ::templated_uri::PathAndQueryTemplate for OptionalTest {
                 }
                 __out.push_str("filter");
                 __out.push_str("=");
-                ::std::fmt::Write::write_fmt(
-                        &mut __out,
-                        ::core::format_args!(
-                            "{}", ::templated_uri::Escape::escape(__val)
-                        ),
-                    )
-                    .expect(
-                        "Display impls for templated URI parameter values are expected to be infallible",
-                    );
+                ::templated_uri::Escape::escape_into(__val, __out);
                 __first = false;
             }
             if let ::core::option::Option::Some(ref __val) = self.limit {
@@ -57,19 +47,13 @@ impl ::templated_uri::PathAndQueryTemplate for OptionalTest {
                 }
                 __out.push_str("limit");
                 __out.push_str("=");
-                ::std::fmt::Write::write_fmt(
-                        &mut __out,
-                        ::core::format_args!(
-                            "{}", ::templated_uri::Escape::escape(__val)
-                        ),
-                    )
-                    .expect(
-                        "Display impls for templated URI parameter values are expected to be infallible",
-                    );
+                ::templated_uri::Escape::escape_into(__val, __out);
                 __first = false;
             }
         }
-        __out
+    }
+    fn render_capacity_hint(&self) -> ::core::primitive::usize {
+        70usize
     }
     fn to_path_and_query(
         &self,

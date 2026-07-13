@@ -94,6 +94,10 @@ tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
 
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
 [lints]
 workspace = true
 
@@ -110,3 +114,13 @@ required-features = ["test-util", "json"]
 harness = false
 name = "http_response_builder"
 required-features = ["test-util", "json"]
+
+[[bench]]
+harness = false
+name = "router_resolve"
+required-features = ["test-util"]
+
+[[bench]]
+harness = false
+name = "router_resolve_cg"
+required-features = ["test-util"]

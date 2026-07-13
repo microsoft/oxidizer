@@ -10,6 +10,10 @@
 //! For the full list of emitted metrics and their attributes, see the
 //! [telemetry reference](crate::_documentation::telemetry).
 
+use std::borrow::Cow;
+use std::fmt;
+use std::sync::Arc;
+
 /// Diagnostic information about the connection that served an HTTP response.
 ///
 /// Re-exported from [`fetch_options`]. Attached as a response extension by real
@@ -28,6 +32,9 @@ pub(crate) const FETCH_RUNTIME_ATTRIBUTE: &str = "fetch.runtime";
 
 /// Instrumentation-scope attribute identifying the transport handler a client uses.
 pub(crate) const FETCH_TRANSPORT_ATTRIBUTE: &str = "fetch.transport";
+
+/// Instrumentation-scope attribute identifying the name of a client instance.
+pub(crate) const HTTP_CLIENT_NAME_ATTRIBUTE: &str = "http.client.name";
 
 /// A set of key-value attributes that enrich `fetch` telemetry.
 ///
@@ -67,42 +74,86 @@ impl Extend<KeyValue> for TelemetryAttributes {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum Metering {
-    Global(InstrumentationScope),
-    Custom(Meter),
+/// How a client's `fetch` metrics are metered.
+///
+/// Holds the scope-defining properties (runtime, transport, client name) and an
+/// optional custom meter [provider][MeterProvider]; when no provider is set, the
+/// global meter provider is used. The [`InstrumentationScope`] is only
+/// materialized when the [`Meter`] is created (see the `From<Metering>` impl
+/// for [`Meter`]), so the client name can still be updated after the provider
+/// has been chosen.
+#[derive(Clone)]
+pub(crate) struct Metering {
+    provider: Option<Arc<dyn MeterProvider + Send + Sync>>,
+    runtime: Cow<'static, str>,
+    transport: Cow<'static, str>,
+    client_name: Cow<'static, str>,
+}
+
+impl fmt::Debug for Metering {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Metering")
+            .field("runtime", &self.runtime)
+            .field("transport", &self.transport)
+            .field("client_name", &self.client_name)
+            .field("custom_provider", &self.provider.is_some())
+            .finish()
+    }
 }
 
 impl Metering {
-    /// Metering against the global meter provider, materialized lazily at build
-    /// time. The `scope` is retained so the eventual meter carries it.
-    pub(crate) fn global(scope: InstrumentationScope) -> Self {
-        Self::Global(scope)
+    /// Creates metering that records against the global meter provider.
+    pub(crate) fn new(runtime: Cow<'static, str>, transport: Cow<'static, str>, client_name: Cow<'static, str>) -> Self {
+        Self {
+            provider: None,
+            runtime,
+            transport,
+            client_name,
+        }
     }
 
-    /// Metering against a caller-supplied provider. The scoped meter is created
-    /// eagerly because the provider is only borrowed, not retained.
-    pub(crate) fn custom(meter_provider: &dyn MeterProvider, scope: InstrumentationScope) -> Self {
-        Self::Custom(meter_provider.meter_with_scope(scope))
+    /// Records against the given custom meter provider instead of the global one.
+    ///
+    /// The scope is only materialized when the meter is created, so a client
+    /// name set either before or after this call is reflected in the eventual
+    /// meter.
+    pub(crate) fn with_provider(mut self, provider: Arc<dyn MeterProvider + Send + Sync>) -> Self {
+        self.provider = Some(provider);
+        self
+    }
+
+    /// Updates the client name recorded on the eventual meter's scope.
+    pub(crate) fn with_client_name(mut self, client_name: Cow<'static, str>) -> Self {
+        self.client_name = client_name;
+        self
+    }
+
+    /// Returns whether a custom meter provider has been configured.
+    #[cfg(test)]
+    pub(crate) fn has_custom_provider(&self) -> bool {
+        self.provider.is_some()
     }
 }
 
 impl From<Metering> for Meter {
     fn from(metering: Metering) -> Self {
-        match metering {
-            Metering::Global(scope) => opentelemetry::global::meter_with_scope(scope),
-            Metering::Custom(meter) => meter,
+        let scope = client_scope(metering.runtime, metering.transport, metering.client_name);
+        match metering.provider {
+            Some(provider) => provider.meter_with_scope(scope),
+            None => opentelemetry::global::meter_with_scope(scope),
         }
     }
 }
 
-/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime` and
-/// `fetch.transport` attributes, attached to every metric a client records.
-pub(crate) fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>) -> InstrumentationScope {
+/// Builds the `fetch` instrumentation scope carrying the `fetch.runtime`,
+/// `fetch.transport`, and `http.client.name` attributes, attached to every
+/// metric a client records.
+fn client_scope(runtime: impl Into<Value>, transport: impl Into<Value>, client_name: impl Into<Value>) -> InstrumentationScope {
     InstrumentationScope::builder(METER_NAME)
         .with_attributes([
             KeyValue::new(FETCH_RUNTIME_ATTRIBUTE, runtime),
             KeyValue::new(FETCH_TRANSPORT_ATTRIBUTE, transport),
+            KeyValue::new(HTTP_CLIENT_NAME_ATTRIBUTE, client_name),
         ])
         .build()
 }
@@ -173,27 +224,43 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn metering_global() {
-        let metering = Metering::global(base_scope());
-        assert!(matches!(metering, Metering::Global(_)));
+    fn test_metering(client_name: &'static str) -> Metering {
+        Metering::new(Cow::Borrowed("tokio"), Cow::Borrowed("hyper"), Cow::Borrowed(client_name))
+    }
+
+    fn test_provider() -> Arc<dyn MeterProvider + Send + Sync> {
+        Arc::new(opentelemetry_sdk::metrics::SdkMeterProvider::builder().build())
     }
 
     #[test]
-    fn metering_custom() {
-        let metering = Metering::custom(opentelemetry::global::meter_provider().as_ref(), base_scope());
-        assert!(matches!(metering, Metering::Custom(_expected_meter)));
+    fn new_metering_uses_global_provider() {
+        let metering = test_metering("http_client");
+        assert!(metering.provider.is_none());
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn with_provider_sets_custom_provider() {
+        let metering = test_metering("http_client").with_provider(test_provider());
+        assert!(metering.provider.is_some());
     }
 
     #[test]
-    fn from_metering_global() {
-        let metering = Metering::global(client_scope("tokio", "hyper"));
-        let _meter: Meter = metering.into();
+    fn from_global_metering_materializes_meter() {
+        let _meter: Meter = test_metering("http_client").into();
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn with_provider_preserves_client_name() {
+        let metering = test_metering("preserved_client").with_provider(test_provider());
+        assert_eq!(metering.client_name, "preserved_client");
+        assert!(metering.provider.is_some());
     }
 
     #[test]
-    fn client_scope_carries_runtime_and_transport_attributes() {
-        let scope = client_scope("tokio", "hyper");
+    fn client_scope_carries_runtime_transport_and_client_name_attributes() {
+        let scope = client_scope("tokio", "hyper", "my_client");
 
         let runtime = scope
             .attributes()
@@ -206,6 +273,29 @@ mod tests {
             .find(|kv| kv.key.as_str() == FETCH_TRANSPORT_ATTRIBUTE)
             .expect("client scope must carry the fetch.transport attribute");
         assert_eq!(transport.value, Value::from("hyper"));
+
+        let client_name = scope
+            .attributes()
+            .find(|kv| kv.key.as_str() == HTTP_CLIENT_NAME_ATTRIBUTE)
+            .expect("client scope must carry the http.client.name attribute");
+        assert_eq!(client_name.value, Value::from("my_client"));
+    }
+
+    #[test]
+    fn with_client_name_updates_global_client_name() {
+        let metering = test_metering("http_client").with_client_name(Cow::Borrowed("renamed_client"));
+        assert_eq!(metering.client_name, "renamed_client");
+        assert!(metering.provider.is_none());
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn with_client_name_updates_custom_client_name() {
+        let metering = test_metering("http_client")
+            .with_provider(test_provider())
+            .with_client_name(Cow::Borrowed("renamed_client"));
+        assert_eq!(metering.client_name, "renamed_client");
+        assert!(metering.provider.is_some());
     }
 
     #[test]

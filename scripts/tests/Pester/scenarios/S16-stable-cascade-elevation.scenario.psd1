@@ -24,6 +24,11 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
 
     Run = @{
         Packages = @('bottom@patch')
+        # Simulated cargo-semver-checks verdicts. 'top' re-exports 'middle' and
+        # its own public API gains 'middle's non-breaking additions, so the tool
+        # classifies top as non-breaking (→ 1.1.0). 'middle' itself is analysed
+        # as patch by the tool but the user elevates it via Invariant B review.
+        SemverVerdicts = @{ top = 'non-breaking' }
         Answers   = @(
             # Invariant B: middle was cascade-pulled with a patch change
             # AND has pre-existing modifications. User elevates to
@@ -36,9 +41,9 @@ This is the stable-version companion to S06 (the same flow on 0.x.y). Validates 
         # bottom: 1.0.0 -> 1.0.1 (user-requested patch).
         # middle: cascade-released to 1.0.1, then escalated to 1.1.0 by the
         #         post-release scan accepting it as non-breaking.
-        # top:    cascade-released to 1.0.1 originally, then re-cascade-pulled
-        #         to 1.1.0 because the exposing-cascade rule lifts dependents
-        #         in lock-step with middle's non-breaking change.
+        # top:    cascade-released to 1.1.0 because cargo-semver-checks
+        #         classifies top's own public API change (from re-exporting
+        #         middle's non-breaking additions) as non-breaking.
         Released = @(
             @{ Package = 'bottom'; To = '1.0.1' }
             @{ Package = 'middle'; To = '1.1.0' }
