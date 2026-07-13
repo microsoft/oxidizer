@@ -35,7 +35,7 @@ allocator-api2 = { workspace = true, features = ["alloc"] }
 loom = { workspace = true }
 
 [dev-dependencies]
-alloc_tracker = "0.7"
+alloc_tracker = { workspace = true }
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
