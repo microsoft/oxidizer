@@ -4,11 +4,12 @@
 #![expect(missing_docs, reason = "Benchmark code")]
 
 use std::alloc::System;
+use std::time::{Duration, Instant};
 
 use alloc_tracker::{Allocator, Session};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use testing_aids::repeating_incrementing_bytes;
 
 criterion_group!(benches, entrypoint);
@@ -19,6 +20,28 @@ static ALLOCATOR: Allocator<System> = Allocator::system();
 
 const ONE_MB: usize = 1024 * 1024;
 const TINY: usize = 128;
+
+fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let start = Instant::now();
+        for _ in 0..iters {
+            _ = std::hint::black_box(bench());
+        }
+        start.elapsed()
+    }
+}
+
+fn time_sample_with_inputs<T, R>(mut setup: impl FnMut() -> T, mut bench: impl FnMut(T) -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let inputs = (0..iters).map(|_| setup()).collect::<Vec<_>>();
+
+        let start = Instant::now();
+        for input in inputs {
+            _ = std::hint::black_box(bench(input));
+        }
+        start.elapsed()
+    }
+}
 
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();
@@ -33,84 +56,80 @@ fn entrypoint(c: &mut Criterion) {
 
     let allocs_op = allocs.operation("alloc_tiny");
     group.bench_function("alloc_tiny", |b| {
-        b.iter(|| {
-            let _span = allocs_op.measure_thread().iterations(1);
-            _ = warm_memory.reserve(TINY);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample(|| warm_memory.reserve(TINY))(iters)
         });
     });
 
     let allocs_op = allocs.operation("alloc_1mb");
     group.bench_function("alloc_1mb", |b| {
-        b.iter(|| {
-            let _span = allocs_op.measure_thread().iterations(1);
-            _ = warm_memory.reserve(ONE_MB);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample(|| warm_memory.reserve(ONE_MB))(iters)
         });
     });
 
     let allocs_op = allocs.operation("fill_tiny");
     group.bench_function("fill_tiny", |b| {
-        b.iter(|| {
-            let _span = allocs_op.measure_thread().iterations(1);
-            let mut buf = warm_memory.reserve(TINY);
-            buf.put_byte_repeated(66, TINY);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample(|| {
+                let mut buf = warm_memory.reserve(TINY);
+                buf.put_byte_repeated(66, TINY);
+            })(iters)
         });
     });
 
     let allocs_op = allocs.operation("fill_1mb");
     group.bench_function("fill_1mb", |b| {
-        b.iter(|| {
-            let _span = allocs_op.measure_thread().iterations(1);
-            let mut buf = warm_memory.reserve(ONE_MB);
-            buf.put_byte_repeated(66, ONE_MB);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample(|| {
+                let mut buf = warm_memory.reserve(ONE_MB);
+                buf.put_byte_repeated(66, ONE_MB);
+            })(iters)
         });
     });
 
     let allocs_op = allocs.operation("fill_tiny_cold");
     group.bench_function("fill_tiny_cold", |b| {
-        b.iter_batched(
-            GlobalPool::new,
-            |memory| {
-                let _span = allocs_op.measure_thread().iterations(1);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(GlobalPool::new, |memory| {
                 let mut buf = memory.reserve(TINY);
                 buf.put_byte_repeated(66, TINY);
-            },
-            BatchSize::LargeInput,
-        );
+            })(iters)
+        });
     });
 
     let allocs_op = allocs.operation("fill_1mb_cold");
     group.bench_function("fill_1mb_cold", |b| {
-        b.iter_batched(
-            GlobalPool::new,
-            |memory| {
-                let _span = allocs_op.measure_thread().iterations(1);
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(GlobalPool::new, |memory| {
                 let mut buf = memory.reserve(ONE_MB);
                 buf.put_byte_repeated(66, ONE_MB);
-            },
-            BatchSize::LargeInput,
-        );
+            })(iters)
+        });
     });
 
     let test_data = repeating_incrementing_bytes().take(ONE_MB).collect::<Vec<u8>>();
 
     let allocs_op = allocs.operation("copied_from_slice");
     group.bench_function("copied_from_slice", |b| {
-        b.iter(|| {
-            let _span = allocs_op.measure_thread().iterations(1);
-            BytesView::copied_from_slice(&test_data, &warm_memory)
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample(|| BytesView::copied_from_slice(&test_data, &warm_memory))(iters)
         });
     });
 
     let allocs_op = allocs.operation("copied_from_slice_cold");
     group.bench_function("copied_from_slice_cold", |b| {
-        b.iter_batched(
-            GlobalPool::new,
-            |memory| {
-                let _span = allocs_op.measure_thread().iterations(1);
-                BytesView::copied_from_slice(&test_data, &memory)
-            },
-            BatchSize::LargeInput,
-        );
+        b.iter_custom(|iters| {
+            let _span = allocs_op.measure_thread().iterations(iters);
+            time_sample_with_inputs(GlobalPool::new, |memory| BytesView::copied_from_slice(&test_data, &memory))(iters)
+        });
     });
 
     group.finish();
