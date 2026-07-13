@@ -24,7 +24,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("no-timeout");
     group.bench_function("no-timeout", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -43,7 +43,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("with-timeout");
     group.bench_function("with-timeout", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });

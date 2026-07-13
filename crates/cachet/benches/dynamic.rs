@@ -41,7 +41,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(static_get_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
+                let _span = op.measure_thread().iterations(iters);
                 let start = Instant::now();
                 for _ in 0..iters {
                     let _ = black_box(cache.get(black_box(&key)).await);
@@ -65,7 +65,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(dynamic_get_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
+                let _span = op.measure_thread().iterations(iters);
                 let start = Instant::now();
                 for _ in 0..iters {
                     let _ = black_box(cache.get(black_box(&key)).await);
@@ -86,7 +86,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(static_insert_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
+                let _span = op.measure_thread().iterations(iters);
                 let start = Instant::now();
                 for i in 0..iters {
                     let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;
@@ -109,7 +109,7 @@ fn bench_dynamic_cache(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let op = session.operation(dynamic_insert_name);
             rt.block_on(async {
-                let _span = op.measure_thread();
+                let _span = op.measure_thread().iterations(iters);
                 let start = Instant::now();
                 for i in 0..iters {
                     let _ = cache.insert(format!("key_{i}"), CacheEntry::new(format!("value_{i}"))).await;

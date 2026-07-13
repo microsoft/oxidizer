@@ -49,7 +49,7 @@ fn entrypoint(c: &mut Criterion) {
     let new_allocs = allocs.operation("new");
     group.bench_function("new", |b| {
         b.iter(|| {
-            let _span = new_allocs.measure_thread();
+            let _span = new_allocs.measure_thread().iterations(1);
             BytesBuf::new()
         });
     });
@@ -111,7 +111,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             BytesBuf::new,
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.put_bytes(test_data_as_view.clone());
             },
             BatchSize::SmallInput,
@@ -128,7 +128,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.put_bytes(test_data_as_view.clone());
             },
             BatchSize::SmallInput,
@@ -144,7 +144,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.consume(TEST_SPAN_SIZE.get() as usize)
             },
             BatchSize::SmallInput,
@@ -160,7 +160,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.consume(TEST_SPAN_SIZE.get() as usize);
             },
             BatchSize::SmallInput,
@@ -176,7 +176,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.consume_all()
             },
             BatchSize::SmallInput,
@@ -192,7 +192,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 buf.extend_lifetime()
             },
             BatchSize::SmallInput,
@@ -211,7 +211,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
@@ -236,7 +236,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
@@ -261,7 +261,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let write = buf.begin_vectored_write(None);
 
                 // SAFETY: Yes, I promise I wrote this many bytes.
@@ -306,7 +306,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let mut peeked = buf.peek();
 
                 // We just seek to the end, that is all.
@@ -328,7 +328,7 @@ fn entrypoint(c: &mut Criterion) {
                 buf
             },
             |buf| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let mut peeked = buf.peek();
 
                 // We just seek to the end, that is all.

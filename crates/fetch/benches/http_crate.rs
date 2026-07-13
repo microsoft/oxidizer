@@ -26,7 +26,7 @@ fn entry(c: &mut Criterion) {
     let uri_allocs = session.operation("uri");
     group.bench_function("uri", |b| {
         b.iter(|| {
-            let _measure = uri_allocs.measure_thread();
+            let _measure = uri_allocs.measure_thread().iterations(1);
             let _request = Request::builder().method(Method::GET).uri(get_uri()).body(()).unwrap();
         });
     });
@@ -34,7 +34,7 @@ fn entry(c: &mut Criterion) {
     let uri_raw_allocs = session.operation("uri_raw");
     group.bench_function("uri_raw", |b| {
         b.iter(|| {
-            let _measure = uri_raw_allocs.measure_thread();
+            let _measure = uri_raw_allocs.measure_thread().iterations(1);
             let _request = Request::builder().method(Method::GET).uri(URI_STRING).body(()).unwrap();
         });
     });
@@ -42,7 +42,7 @@ fn entry(c: &mut Criterion) {
     let single_header_allocs = session.operation("uri_single_header");
     group.bench_function("uri_single_header", |b| {
         b.iter(|| {
-            let _measure = single_header_allocs.measure_thread();
+            let _measure = single_header_allocs.measure_thread().iterations(1);
             let _request = Request::builder()
                 .method(Method::GET)
                 .uri(get_uri())
@@ -55,7 +55,7 @@ fn entry(c: &mut Criterion) {
     let two_headers_allocs = session.operation("uri_two_headers");
     group.bench_function("uri_two_headers", |b| {
         b.iter(|| {
-            let _measure = two_headers_allocs.measure_thread();
+            let _measure = two_headers_allocs.measure_thread().iterations(1);
             let _request = Request::builder()
                 .method(Method::GET)
                 .uri(get_uri())

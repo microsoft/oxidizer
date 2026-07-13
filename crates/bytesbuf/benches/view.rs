@@ -61,7 +61,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("new");
     group.bench_function("new", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             BytesView::new()
         });
     });
@@ -81,7 +81,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("extend_lifetime");
     group.bench_function("extend_lifetime", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             test_data_as_view.extend_lifetime()
         });
     });
@@ -89,7 +89,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("extend_lifetime_many");
     group.bench_function("extend_lifetime_many", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             many_as_view.extend_lifetime()
         });
     });
@@ -97,7 +97,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("slice_near");
     group.bench_function("slice_near", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             test_data_as_view.range(black_box(0..10))
         });
     });
@@ -105,7 +105,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("slice_far");
     group.bench_function("slice_far", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             test_data_as_view.range(black_box(12300..12310))
         });
     });
@@ -114,7 +114,7 @@ fn entrypoint(c: &mut Criterion) {
     group.bench_function("slice_very_far", |b| {
         // There are 10 spans in this sequence, with our slice being from the last one.
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             ten_as_view.range(black_box(123_000..123_010))
         });
     });
@@ -124,7 +124,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched_ref(
             || test_data_as_view.clone(),
             |seq| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 seq.consume_all_slices(|chunk| {
                     _ = black_box(chunk);
                 });
@@ -169,7 +169,7 @@ fn entrypoint(c: &mut Criterion) {
         let view = BytesView::from(test_data_as_view.to_bytes());
 
         b.iter(|| {
-            let _span = allocs_op.measure_process();
+            let _span = allocs_op.measure_process().iterations(1);
             let _bytes = view.to_bytes();
         });
     });
@@ -254,7 +254,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("to_bytes_many_spans");
     group.bench_function("to_bytes_many_spans", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_process();
+            let _span = allocs_op.measure_process().iterations(1);
             let _bytes = many_as_view.to_bytes();
         });
     });
@@ -264,7 +264,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched(
             || many.iter().cloned(),
             |many_clones| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 BytesView::from_views(black_box(many_clones))
             },
             BatchSize::SmallInput,
@@ -274,7 +274,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("clone_many");
     group.bench_function("clone_many", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_process();
+            let _span = allocs_op.measure_process().iterations(1);
             let _view = many_as_view.clone();
         });
     });
@@ -284,7 +284,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched(
             || max_inline.iter().cloned(),
             |max_inline_clones| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 BytesView::from_views(black_box(max_inline_clones))
             },
             BatchSize::SmallInput,

@@ -41,7 +41,7 @@ fn entry(c: &mut Criterion) {
     let standard_allocs = session.operation("standard_pipeline");
     group.bench_function("standard_pipeline", |b| {
         b.iter(|| {
-            let _measure = standard_allocs.measure_thread();
+            let _measure = standard_allocs.measure_thread().iterations(1);
             _ = block_on(client.get(get_uri()).fetch()).unwrap();
         });
     });
@@ -52,7 +52,7 @@ fn entry(c: &mut Criterion) {
     let minimal_allocs = session.operation("minimal_pipeline");
     group.bench_function("minimal_pipeline", |b| {
         b.iter(|| {
-            let _measure = minimal_allocs.measure_thread();
+            let _measure = minimal_allocs.measure_thread().iterations(1);
             _ = block_on(client.get(get_uri()).fetch()).unwrap();
         });
     });
@@ -63,7 +63,7 @@ fn entry(c: &mut Criterion) {
     let custom_minimal_allocs = session.operation("custom_minimal_pipeline");
     group.bench_function("custom_minimal_pipeline", |b| {
         b.iter(|| {
-            let _measure = custom_minimal_allocs.measure_thread();
+            let _measure = custom_minimal_allocs.measure_thread().iterations(1);
             _ = block_on(client.get(get_uri()).fetch()).unwrap();
         });
     });
@@ -89,7 +89,7 @@ fn entry(c: &mut Criterion) {
     let custom_standard_allocs = session.operation("custom_standard_pipeline");
     group.bench_function("custom_standard_pipeline", |b| {
         b.iter(|| {
-            let _measure = custom_standard_allocs.measure_thread();
+            let _measure = custom_standard_allocs.measure_thread().iterations(1);
             _ = block_on(client.get(get_uri()).fetch()).unwrap();
         });
     });

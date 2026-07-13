@@ -35,7 +35,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("retry-no-telemetry");
     group.bench_function("retry-no-telemetry", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -54,7 +54,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("retry-metrics");
     group.bench_function("retry-metrics", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -72,7 +72,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("retry-logs");
     group.bench_function("retry-logs", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });

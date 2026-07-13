@@ -19,7 +19,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("typed");
     group.bench_function("typed", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(10));
         });
     });
@@ -28,7 +28,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("dynamic");
     group.bench_function("dynamic", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(10));
         });
     });
@@ -37,7 +37,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("wrapped_typed");
     group.bench_function("wrapped_typed", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(10));
         });
     });
@@ -48,7 +48,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("wrapped_dynamic");
     group.bench_function("wrapped_dynamic", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(10));
         });
     });

@@ -21,7 +21,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("no-breaker");
     group.bench_function("no-breaker", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -41,7 +41,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("with-breaker");
     group.bench_function("with-breaker", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });

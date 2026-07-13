@@ -37,7 +37,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("uri_from_string");
     group.bench_function("uri_from_string", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(URI_STRING)
@@ -50,7 +50,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("uri_pre_parsed");
     group.bench_function("uri_pre_parsed", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
@@ -65,7 +65,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("empty_body");
     group.bench_function("empty_body", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
@@ -78,7 +78,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("text_body");
     group.bench_function("text_body", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::POST)
                 .uri(uri.clone())
@@ -97,7 +97,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("json_body_owned");
     group.bench_function("json_body_owned", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::POST)
                 .uri(uri.clone())
@@ -116,7 +116,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("json_body_borrowed");
     group.bench_function("json_body_borrowed", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::POST)
                 .uri(uri.clone())
@@ -144,7 +144,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("json_body_large_transparent");
     group.bench_function("json_body_large_transparent", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&transparent_body_builder)
                 .method(Method::POST)
                 .uri(uri.clone())
@@ -160,7 +160,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("no_header");
     group.bench_function("no_header", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
@@ -173,7 +173,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("single_header");
     group.bench_function("single_header", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())
@@ -186,7 +186,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("two_headers");
     group.bench_function("two_headers", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
                 .method(Method::GET)
                 .uri(uri.clone())

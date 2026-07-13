@@ -24,7 +24,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("no-retry");
     group.bench_function("no-retry", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -43,7 +43,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("with-retry");
     group.bench_function("with-retry", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });
@@ -64,7 +64,7 @@ fn entry(c: &mut Criterion) {
     let operation = session.operation("with-retry-and-recovery");
     group.bench_function("with-retry-and-recovery", |b| {
         b.iter(|| {
-            let _span = operation.measure_thread();
+            let _span = operation.measure_thread().iterations(1);
             _ = block_on(service.execute(Input));
         });
     });

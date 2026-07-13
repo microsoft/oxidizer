@@ -34,7 +34,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("alloc_tiny");
     group.bench_function("alloc_tiny", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             _ = warm_memory.reserve(TINY);
         });
     });
@@ -42,7 +42,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("alloc_1mb");
     group.bench_function("alloc_1mb", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             _ = warm_memory.reserve(ONE_MB);
         });
     });
@@ -50,7 +50,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_tiny");
     group.bench_function("fill_tiny", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             let mut buf = warm_memory.reserve(TINY);
             buf.put_byte_repeated(66, TINY);
         });
@@ -59,7 +59,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("fill_1mb");
     group.bench_function("fill_1mb", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             let mut buf = warm_memory.reserve(ONE_MB);
             buf.put_byte_repeated(66, ONE_MB);
         });
@@ -70,7 +70,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched(
             GlobalPool::new,
             |memory| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let mut buf = memory.reserve(TINY);
                 buf.put_byte_repeated(66, TINY);
             },
@@ -83,7 +83,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched(
             GlobalPool::new,
             |memory| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 let mut buf = memory.reserve(ONE_MB);
                 buf.put_byte_repeated(66, ONE_MB);
             },
@@ -96,7 +96,7 @@ fn entrypoint(c: &mut Criterion) {
     let allocs_op = allocs.operation("copied_from_slice");
     group.bench_function("copied_from_slice", |b| {
         b.iter(|| {
-            let _span = allocs_op.measure_thread();
+            let _span = allocs_op.measure_thread().iterations(1);
             BytesView::copied_from_slice(&test_data, &warm_memory)
         });
     });
@@ -106,7 +106,7 @@ fn entrypoint(c: &mut Criterion) {
         b.iter_batched(
             GlobalPool::new,
             |memory| {
-                let _span = allocs_op.measure_thread();
+                let _span = allocs_op.measure_thread().iterations(1);
                 BytesView::copied_from_slice(&test_data, &memory)
             },
             BatchSize::LargeInput,

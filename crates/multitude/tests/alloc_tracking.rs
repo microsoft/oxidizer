@@ -40,6 +40,14 @@ fn quiet_session() -> Session {
     Session::new().no_stdout().no_file()
 }
 
+fn total_bytes_allocated(session: &Session, operation_name: &str) -> u64 {
+    session
+        .to_report()
+        .operations()
+        .find_map(|(name, operation)| (name == operation_name).then(|| operation.total_bytes_allocated()))
+        .expect("measured operation must be present in the session report")
+}
+
 /// After [`Arena::reset`], re-allocating the same workload reuses the arena's
 /// chunks: the first fill allocates from the system, but once warmed, a reset
 /// + identical refill touches the system allocator zero times.
@@ -51,13 +59,13 @@ fn reset_reuses_chunks_without_reallocating() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("first_fill");
     {
-        let _span = first.measure_thread();
+        let _span = first.measure_thread().iterations(1);
         for i in 0..WORKLOAD {
             let _v = arena.alloc(i as u64);
         }
     }
     assert!(
-        first.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "first_fill") > 0,
         "first fill must allocate chunk(s) from the system"
     );
     arena.reset();
@@ -73,13 +81,13 @@ fn reset_reuses_chunks_without_reallocating() {
     // Steady state: an identical fill after reset reuses the existing chunks.
     let reused = session.operation("refill_after_reset");
     {
-        let _span = reused.measure_thread();
+        let _span = reused.measure_thread().iterations(1);
         for i in 0..WORKLOAD {
             let _v = arena.alloc(i as u64);
         }
     }
     assert_eq!(
-        reused.total_bytes_allocated(),
+        total_bytes_allocated(&session, "refill_after_reset"),
         0,
         "after warm-up, reset must reuse chunks rather than reallocate from the system"
     );
@@ -100,13 +108,13 @@ fn dropping_all_arcs_reclaims_chunks_for_reuse() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("arc_first_fill");
     {
-        let _span = first.measure_thread();
+        let _span = first.measure_thread().iterations(1);
         for i in 0..WORKLOAD {
             hold.push(arena.alloc_arc(i as u64));
         }
     }
     assert!(
-        first.total_bytes_allocated() > 0,
+        total_bytes_allocated(&session, "arc_first_fill") > 0,
         "allocating arcs must allocate chunk(s) from the system"
     );
     // Dropping every Arc drives each chunk's strong count to zero, reclaiming
@@ -124,13 +132,13 @@ fn dropping_all_arcs_reclaims_chunks_for_reuse() {
     // Steady state: an identical fill after dropping all arcs reuses chunks.
     let reused = session.operation("arc_refill");
     {
-        let _span = reused.measure_thread();
+        let _span = reused.measure_thread().iterations(1);
         for i in 0..WORKLOAD {
             hold.push(arena.alloc_arc(i as u64));
         }
     }
     assert_eq!(
-        reused.total_bytes_allocated(),
+        total_bytes_allocated(&session, "arc_refill"),
         0,
         "after warm-up, re-allocating dropped arcs must reuse reclaimed chunks"
     );
@@ -156,7 +164,7 @@ fn steady_state_fill_and_drop_does_not_over_allocate() {
     // Steady state: many more cycles must allocate nothing from the system.
     let steady = session.operation("steady_state");
     {
-        let _span = steady.measure_thread();
+        let _span = steady.measure_thread().iterations(1);
         for _round in 0..16 {
             for i in 0..WORKLOAD {
                 hold.push(arena.alloc_arc(i as u64));
@@ -165,7 +173,7 @@ fn steady_state_fill_and_drop_does_not_over_allocate() {
         }
     }
     assert_eq!(
-        steady.total_bytes_allocated(),
+        total_bytes_allocated(&session, "steady_state"),
         0,
         "steady-state fill/drop cycles must reuse chunks, not over-allocate from the system"
     );
