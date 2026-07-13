@@ -183,16 +183,20 @@ try {
             continue
         }
 
-        # A 'breaking'/'non-breaking' verdict means the detected API changes need
-        # a stronger increment than the on-disk version gives over the baseline;
-        # the minimum acceptable version is the baseline incremented by that
-        # change type. 'patch' means the on-disk version already covers the
-        # changes; 'none' means the crate is new (no baseline to violate).
-        $sufficient = $changeType -in @('patch', 'none')
-        if ($sufficient) {
-            $required = $onDisk
+        # Determine the minimum acceptable version and whether the on-disk version
+        # meets it. 'none' means there is no baseline (new crate) — no constraint.
+        # Otherwise the minimum is the baseline incremented by the required change
+        # type, and the crate is sufficient when its on-disk version is >= that
+        # minimum. Comparing on-disk against the minimum (rather than trusting the
+        # verdict alone) means a correctly-bumped crate — e.g. baseline 1.0.0 ->
+        # on-disk 1.1.0 with a 'non-breaking' verdict (min 1.1.0) — is reported as
+        # sufficient instead of being flagged for a bump it already has.
+        if ($changeType -eq 'none') {
+            $required   = $onDisk
+            $sufficient = $true
         } else {
-            $required = Get-NextVersion -currentVersion $baselineVersion -ChangeType $changeType
+            $required   = Get-NextVersion -currentVersion $baselineVersion -ChangeType $changeType
+            $sufficient = (Compare-SemanticVersions -version1 $onDisk -version2 $required) -ge 0
         }
 
         # Extract just the failure blocks for the collapsible detail.

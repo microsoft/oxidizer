@@ -231,8 +231,11 @@ jobs:
       # git history (--baseline-rev, no registry), and render a Markdown report
       # (scripts/ci/semver-report.ps1 — reuses the release library's version-diff
       # / next-version helpers). Sets outputs:
-      #   publishing = true|false   (any crate version bumped)
-      #   status     = pass|fail    (any crate under-incremented for its API changes)
+      #   publishing = true|false        (any crate version bumped)
+      #   status     = pass|warn|fail    (fail = a crate is under-incremented for
+      #                                   its API changes; warn = a baseline could
+      #                                   not be determined so a check is
+      #                                   incomplete; pass = all sufficient)
       # Kept non-failing so a git/tooling hiccup never blocks the PR.
       - name: Semver Report
         id: report
