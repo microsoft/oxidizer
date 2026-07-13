@@ -29,7 +29,7 @@
       - a summary status line (🛑 when at least one crate is under-incremented,
         ⚠️ when the only problem is a baseline that could not be determined,
         ✅ when every publishing crate is sufficiently incremented),
-      - a table: Crate | Baseline | This PR | Minimum required | Status,
+      - a table: Crate | Baseline | Baseline commit | This PR | Minimum required | Status,
       - collapsible per-crate detail for under-incremented crates and for
         crates whose baseline could not be determined, and
       - a link to the triggering Actions run.
@@ -127,6 +127,7 @@ try {
             $rows.Add([pscustomobject]@{
                 Crate       = $cargoName
                 Baseline    = '⚠️ unknown'
+                BaselineSha = ''
                 OnDisk      = $onDisk
                 Required    = '?'
                 Sufficient  = $false
@@ -144,6 +145,7 @@ try {
             $rows.Add([pscustomobject]@{
                 Crate       = $cargoName
                 Baseline    = 'new crate'
+                BaselineSha = ''
                 OnDisk      = $onDisk
                 Required    = $onDisk
                 Sufficient  = $true
@@ -170,7 +172,8 @@ try {
             Write-Host "cargo semver-checks: $cargoName — analysis FAILED: $($_.Exception.Message)"
             $rows.Add([pscustomobject]@{
                 Crate       = $cargoName
-                Baseline    = "⚠️ $baselineVersion ($shortSha)"
+                Baseline    = "⚠️ $baselineVersion"
+                BaselineSha = $baselineSha
                 OnDisk      = $onDisk
                 Required    = '?'
                 Sufficient  = $false
@@ -200,7 +203,8 @@ try {
 
         $rows.Add([pscustomobject]@{
             Crate       = $cargoName
-            Baseline    = "$baselineVersion ($shortSha)"
+            Baseline    = $baselineVersion
+            BaselineSha = $baselineSha
             OnDisk      = $onDisk
             Required    = $required
             Sufficient  = $sufficient
@@ -243,8 +247,16 @@ if ($hasReal) {
     [void]$sb.AppendLine("${bt}cargo semver-checks${bt} compared the **$($rows.Count)** crate(s) this PR publishes against their previous version-bump commit in git history. Every version increment is sufficient for the detected API changes.")
 }
 [void]$sb.AppendLine()
-[void]$sb.AppendLine('| Crate | Baseline | This PR | Minimum required | Status |')
-[void]$sb.AppendLine('|---|---|---|---|---|')
+# Derive a commit base URL from the Actions run URL (…/<owner>/<repo>/actions/runs/<id>)
+# so each baseline commit SHA links to the exact commit semver-checks ran against.
+# Falls back to a bare code-formatted short SHA when the URL can't be parsed.
+$commitBaseUrl = ''
+if (-not [string]::IsNullOrEmpty($RunUrl)) {
+    $m = [regex]::Match($RunUrl, '^(?<base>https?://[^\s]+?)/actions/runs/')
+    if ($m.Success) { $commitBaseUrl = "$($m.Groups['base'].Value)/commit" }
+}
+[void]$sb.AppendLine('| Crate | Baseline | Baseline commit | This PR | Minimum required | Status |')
+[void]$sb.AppendLine('|---|---|---|---|---|---|')
 foreach ($r in $rows) {
     if ($r.ChangeType -eq 'unknown') {
         $status = '⚠️ baseline unknown — not verified'
@@ -256,7 +268,21 @@ foreach ($r in $rows) {
         $status = "🛑 increase to at least ${bt}$($r.Required)${bt}"
         $req    = "**$($r.Required)**"
     }
-    [void]$sb.AppendLine("| ${bt}$($r.Crate)${bt} | $($r.Baseline) | $($r.OnDisk) | $req | $status |")
+
+    # The resolved commit semver-checks compared against (--baseline-rev), shown
+    # per crate. Empty for new crates and failed baseline lookups (no commit).
+    if ([string]::IsNullOrEmpty($r.BaselineSha)) {
+        $commitCell = '—'
+    } else {
+        $short = if ($r.BaselineSha.Length -ge 7) { $r.BaselineSha.Substring(0, 7) } else { $r.BaselineSha }
+        if ($commitBaseUrl) {
+            $commitCell = "[${bt}$short${bt}]($commitBaseUrl/$($r.BaselineSha))"
+        } else {
+            $commitCell = "${bt}$short${bt}"
+        }
+    }
+
+    [void]$sb.AppendLine("| ${bt}$($r.Crate)${bt} | $($r.Baseline) | $commitCell | $($r.OnDisk) | $req | $status |")
 }
 [void]$sb.AppendLine()
 
