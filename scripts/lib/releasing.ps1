@@ -295,6 +295,24 @@ function Test-IsBreakingChange {
     return $true
 }
 
+# Ordinal rank of a change type, used to compute the stronger of two change
+# types. 'none' means "no constraint" (e.g. cargo-semver-checks found nothing to
+# compare against) and ranks below every real change type.
+$script:ChangeTypeRank = @{ 'none' = 0; 'patch' = 1; 'non-breaking' = 2; 'breaking' = 3 }
+
+# Returns whichever of two change types is the stronger (higher-ranked). Unknown
+# or empty inputs are treated as 'none' (rank 0). Ties return $A.
+function Get-StrongerChangeType {
+    param(
+        [AllowNull()][AllowEmptyString()][string]$A,
+        [AllowNull()][AllowEmptyString()][string]$B
+    )
+    $ra = $script:ChangeTypeRank[$A]; if ($null -eq $ra) { $ra = 0 }
+    $rb = $script:ChangeTypeRank[$B]; if ($null -eq $rb) { $rb = 0 }
+    if ($rb -gt $ra) { return $B }
+    return $A
+}
+
 # Reads the [package] table's `version = "..."` from a Cargo.toml on disk.
 function Get-CurrentVersion {
     param([string]$cargoTomlPath)
@@ -347,6 +365,100 @@ function Get-PackageVersionFromRef {
     return $result
 }
 
+# Finds the crate's PREVIOUS version-bump commit: the most recent commit reachable
+# from $BaseRef whose diff changed the `[package] version = "..."` line in
+# crates/<PackageFolder>/Cargo.toml. Returns a [pscustomobject] with:
+#   Sha     - the commit SHA (suitable for `cargo semver-checks --baseline-rev`)
+#   Version - the [package] version declared at that commit
+# or $null when no such commit exists (a brand-new crate introduced in the range
+# above $BaseRef, or a crate with no committed history at $BaseRef).
+#
+# Genuine lookup FAILURES are NOT swallowed: if $BaseRef cannot be resolved (e.g.
+# it was never fetched, or is a typo) or git otherwise fails, this THROWS rather
+# than returning $null. A silent $null would become 'none' (no change-type floor)
+# downstream and make the CI report incorrectly pass when the baseline could not
+# actually be determined. The CI report catches the throw and records an
+# ⚠️ unknown/warn row; the release planner treats it as a hard error. Only a
+# SUCCESSFUL git log that finds no version-bump commit (a valid ref, but the
+# crate's [package] version never changed in reachable history) yields $null.
+#
+# This is the SOURCE-LEVEL semver baseline: the version the repository previously
+# *declared*, regardless of whether it was ever published to a registry. It works
+# identically in OSS and enterprise/offline environments because it never touches
+# crates.io — the baseline rustdoc is rebuilt from the crate's source at that
+# commit by cargo-semver-checks' `--baseline-rev`.
+#
+# $BaseRef controls which bump is "previous":
+#   - CI report: pass the PR base (e.g. origin/main) so THIS PR's own bump — which
+#     lives only on the PR head — is excluded, and the baseline is the last bump
+#     that already landed on the base branch.
+#   - Release planner: pass HEAD so the baseline is the last committed version bump
+#     (the previous release), compared against the working-tree API being released.
+#
+# Implementation: walk `git log <BaseRef> -- <Cargo.toml>` newest-first and, for
+# each touching commit, compare the [package] version at the commit against the
+# version at its parent (via Get-PackageVersionFromRef, which matches only the
+# [package]-scoped version — not dependency-table versions). The first commit
+# where they differ is the bump. Matching on the parsed [package] version (rather
+# than a raw `-G` line-diff) means a commit that only edited a dependency's
+# `version = "..."` or toggled `publish` is correctly skipped.
+#
+# Cached for the lifetime of the script run (the script never commits, so the
+# result per (RepoRoot, BaseRef, PackageFolder) is invariant). Cleared by
+# Reset-ReleaseScriptCaches between test scenarios.
+function Get-PreviousVersionBumpCommit {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$BaseRef,
+        [Parameter(Mandatory = $true)][string]$PackageFolder
+    )
+
+    if ($null -eq $script:PreviousVersionBumpCommitCache) {
+        $script:PreviousVersionBumpCommitCache = @{}
+    }
+    $cacheKey = "$RepoRoot`u{2402}$BaseRef`u{2402}$PackageFolder"
+    if ($script:PreviousVersionBumpCommitCache.ContainsKey($cacheKey)) {
+        return $script:PreviousVersionBumpCommitCache[$cacheKey]
+    }
+
+    $relPath = "crates/$PackageFolder/Cargo.toml"
+
+    # Surface a genuine failure rather than silently returning "no baseline".
+    # An unresolvable ref (not fetched / typo) must not be mistaken for a
+    # brand-new crate — that would drop the change-type floor and let an
+    # under-incremented release pass. Test-GitRef never throws; a false result
+    # means the ref is bad. The git log itself runs WITHOUT -AllowFailure so any
+    # other git error also propagates. A valid ref with no matching commit exits
+    # 0 with empty output and correctly yields $null (new crate).
+    if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
+        throw "Cannot locate the previous version-bump commit for '$PackageFolder': base ref '$BaseRef' could not be resolved in the repository. Ensure it is fetched (CI checks out with fetch-depth: 0) and spelled correctly."
+    }
+    $commits = Invoke-Git -Arguments @('log', '--format=%H', $BaseRef, '--', $relPath) -RepoRoot $RepoRoot
+
+    $result = $null
+    if ($null -ne $commits) {
+        foreach ($line in @($commits)) {
+            $sha = $line.ToString().Trim()
+            if ([string]::IsNullOrWhiteSpace($sha)) { continue }
+
+            $verAt = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef $sha -PackageFolder $PackageFolder
+            if ($null -eq $verAt) { continue }
+
+            # Version at the parent commit; $null when the crate did not exist there
+            # (this commit introduced it) or when $sha is the repository root.
+            $verParent = Get-PackageVersionFromRef -RepoRoot $RepoRoot -BaseRef "$sha^" -PackageFolder $PackageFolder
+
+            if ($verAt -ne $verParent) {
+                $result = [pscustomobject]@{ Sha = $sha; Version = $verAt }
+                break
+            }
+        }
+    }
+
+    $script:PreviousVersionBumpCommitCache[$cacheKey] = $result
+    return $result
+}
+
 # --- WORKSPACE METADATA ---
 
 # Cached `cargo metadata --no-deps` for the workspace. Graph topology is safe to cache
@@ -368,6 +480,7 @@ $script:CachedWorkspaceMetadata = $null
 $script:PackageLastReleaseBaselineCache = $null
 $script:PackageCommittedChangesCache    = $null
 $script:PackageVersionAtRefCache        = $null
+$script:PreviousVersionBumpCommitCache  = $null
 
 function Get-WorkspaceMetadata {
     param([string]$repoRoot)
@@ -410,6 +523,35 @@ function Reset-ReleaseScriptCaches {
     $script:PackageLastReleaseBaselineCache = $null
     $script:PackageCommittedChangesCache    = $null
     $script:PackageVersionAtRefCache        = $null
+    $script:PreviousVersionBumpCommitCache  = $null
+    $script:CrateSemverVerdictCache         = $null
+}
+
+# Memoised, mockable classifier: returns the minimum change type a crate's
+# current working-tree public API requires versus its previous version-bump
+# commit ('breaking' / 'non-breaking' / 'patch' / 'none' when there is no prior
+# bump to compare against), by running cargo-semver-checks once per crate.
+# Resolve-ReleaseSet is invoked many times during the interactive review loop, so
+# results are cached per cargo name for the run. Test suites Mock this function to
+# supply deterministic verdicts without invoking the real tool (see the scenario
+# harness).
+function Get-CrateRequiredChangeType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)][string]$CargoName,
+        [Parameter(Mandatory = $true)][string]$RepoRoot
+    )
+
+    if ($null -eq $script:CrateSemverVerdictCache) { $script:CrateSemverVerdictCache = @{} }
+    if ($script:CrateSemverVerdictCache.ContainsKey($CargoName)) {
+        return $script:CrateSemverVerdictCache[$CargoName]
+    }
+
+    Write-Host "🔎 cargo semver-checks: analysing '$CargoName' against its previous version-bump commit..." -ForegroundColor Cyan
+    $result = Invoke-CrateSemverCheck -PackageName $CargoName -PackageFolder $Folder -RepoRoot $RepoRoot
+    $script:CrateSemverVerdictCache[$CargoName] = $result
+    return $result
 }
 
 # Returns information about all workspace packages as an array of objects with:
@@ -417,8 +559,6 @@ function Reset-ReleaseScriptCaches {
 #   Folder                - folder name under crates/ (used as the script's PackageName argument)
 #   Published             - $true if the package is published to crates.io
 #   Deps                  - array of normalized dependency names (kind 'normal' or 'build', not 'dev')
-#   AllowedExternalTypes  - array of strings from [package.metadata.cargo_check_external_types],
-#                           or $null if the package does not declare them.
 function Get-WorkspacePackages {
     param([string]$repoRoot)
 
@@ -439,53 +579,98 @@ function Get-WorkspacePackages {
             }
         }
 
-        $allowedTypes = $null
-        $pkgMeta = $package.PSObject.Properties['metadata']
-        if ($pkgMeta -and $null -ne $pkgMeta.Value) {
-            $cet = $pkgMeta.Value.PSObject.Properties['cargo_check_external_types']
-            if ($cet -and $null -ne $cet.Value) {
-                $aet = $cet.Value.PSObject.Properties['allowed_external_types']
-                if ($aet -and $null -ne $aet.Value) {
-                    $allowedTypes = @($aet.Value)
-                }
-            }
-        }
-
         $packages += [pscustomobject]@{
             Name                 = $package.name
             Folder               = Split-Path $manifestDir -Leaf
             Version              = $package.version
             Published            = -not ($null -ne $package.publish -and $package.publish.Count -eq 0)
             Deps                 = $deps
-            AllowedExternalTypes = $allowedTypes
         }
     }
 
     return $packages
 }
 
-# Returns $true if the dependent package exposes any type rooted at the target package
-# in its public API, as declared by [package.metadata.cargo_check_external_types].
-# Conservative when metadata is missing.
-function Test-PackageExposesTarget {
+# Runs `cargo semver-checks` for a single crate against its previous version-bump
+# commit in git history. The baseline commit is located with
+# Get-PreviousVersionBumpCommit and passed to cargo-semver-checks as
+# `--baseline-rev <sha>`, which rebuilds the baseline rustdoc from the crate's
+# source at that commit — so the comparison source is what the repository last
+# *declared*, with no registry access. This works identically in OSS and
+# enterprise/offline environments and treats a declared-but-unpublished version as
+# the baseline (unlike the former registry lookup).
+#
+# $BaseRef selects which bump counts as "previous"; the planner uses HEAD (the
+# last committed version bump = the previous release). Returns the minimum change
+# type the current working-tree API requires: 'breaking', 'non-breaking', 'patch',
+# or 'none' when there is no prior version-bump commit to compare against (a
+# brand-new crate).
+#
+# The current API is analysed from the working tree, so a coordinated release's
+# in-progress source edits (including a dependency whose public types this crate
+# re-exports) are reflected — this is what lets an exposed-dependency breaking
+# change cascade correctly, without the old allowed_external_types heuristic.
+function Invoke-CrateSemverCheck {
+    [CmdletBinding()]
     param(
-        [pscustomobject]$dependent,
-        [string]$targetPackageName
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$PackageFolder,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$BaseRef = 'HEAD'
     )
 
-    if ($null -eq $dependent.AllowedExternalTypes) {
-        return $true
+    # Locate the previous version-bump commit. No such commit => brand-new crate:
+    # nothing to compare against, so it imposes no change-type floor.
+    $bump = Get-PreviousVersionBumpCommit -RepoRoot $RepoRoot -BaseRef $BaseRef -PackageFolder $PackageFolder
+    if ($null -eq $bump) {
+        return 'none'
     }
 
-    $normalizedTarget = $targetPackageName.Replace('-', '_')
-    foreach ($entry in $dependent.AllowedExternalTypes) {
-        $root = ($entry -split '::', 2)[0]
-        if ($root -eq $normalizedTarget) {
-            return $true
-        }
+    Push-Location $RepoRoot
+    try {
+        # Manage the exit code manually; cargo-semver-checks exits non-zero when a
+        # bump is required, which is expected and not an error for our purposes.
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = & cargo semver-checks --package $PackageName --baseline-rev $bump.Sha --all-features --color never 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
     }
 
-    return $false
+    return ConvertFrom-SemverChecksOutput -Output $output -ExitCode $exitCode -PackageName $PackageName
+}
+
+# Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
+# so it can be unit-tested against captured tool output. With the git-history
+# baseline (`--baseline-rev`) cargo-semver-checks always builds the baseline from
+# source, so the only outcomes are a semver verdict or a genuine tool/build
+# failure. Mapping:
+#   * "N major and M minor checks failed" -> major>0 breaking; minor>0 non-breaking
+#   * "no semver update required"                -> patch (compatible)
+#   * anything else (tool/build failure)         -> throw (no silent fallback)
+# The 'none' (no baseline) case is decided by the CALLER before this function is
+# invoked — when there is no previous version-bump commit to compare against —
+# not from tool output here.
+function ConvertFrom-SemverChecksOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output,
+        [int]$ExitCode = 0,
+        [string]$PackageName = ''
+    )
+
+    $m = [regex]::Match($Output, '(?i)(\d+)\s+major\s+and\s+(\d+)\s+minor\s+check')
+    if ($m.Success) {
+        if ([int]$m.Groups[1].Value -gt 0) { return 'breaking' }
+        if ([int]$m.Groups[2].Value -gt 0) { return 'non-breaking' }
+        return 'patch'
+    }
+
+    if ($Output -match '(?i)no\s+semver\s+update\s+required') {
+        return 'patch'
+    }
+
+    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build. Output:`n$Output"
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published

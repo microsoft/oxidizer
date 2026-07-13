@@ -82,6 +82,18 @@ function Invoke-Scenario {
     $script:ScenarioRepliesGiven  = New-Object System.Collections.Generic.List[string]
     $script:ScenarioSkippedPromptFolders = New-Object System.Collections.Generic.List[string]
 
+    # Simulated cargo-semver-checks verdicts (folder -> 'breaking'|'non-breaking'|
+    # 'patch'|'none'), consumed by the Get-CrateRequiredChangeType mock the test
+    # installs. Absent entries default to 'none' (no constraint) — the cascade
+    # then floors dependents at 'patch'. Scenarios that need a stronger cascade
+    # (e.g. a dependent whose own API broke) declare Run.SemverVerdicts.
+    $script:ScenarioSemverVerdicts = @{}
+    if ($scenario.Run.SemverVerdicts) {
+        foreach ($k in $scenario.Run.SemverVerdicts.Keys) {
+            $script:ScenarioSemverVerdicts[$k] = $scenario.Run.SemverVerdicts[$k]
+        }
+    }
+
     # --- 4. Invoke under mocks. The caller (test) has already mocked the
     # script-level cmdlets by the time this runs. We only invoke the entry
     # point and capture the release records + any thrown exception.
