@@ -5,9 +5,8 @@
 //!
 //! Each submodule is gated behind a Cargo feature named after the wrapped
 //! crate (and its major / 0.x minor where applicable): `bytes`, `http`,
-//! `jiff02`, `tokio`, `uuid`. Enabling a feature pulls in that crate as a
-//! dependency and exposes `ThreadAware` impls for inert, self-contained
-//! types from it.
+//! `jiff02`, `uuid`. Enabling a feature pulls in that crate as a dependency
+//! and exposes `ThreadAware` impls for inert, self-contained types from it.
 //! By default no such features are enabled, so this crate does not pull in
 //! any of these wrapped crates as additional dependencies.
 //!
@@ -53,9 +52,6 @@ mod http;
 
 #[cfg(any(test, feature = "jiff02"))]
 mod jiff02;
-
-#[cfg(any(test, feature = "tokio"))]
-mod tokio;
 
 #[cfg(any(test, feature = "uuid"))]
 mod uuid;

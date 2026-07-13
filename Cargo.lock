@@ -3764,7 +3764,6 @@ dependencies = [
  "mutants",
  "static_assertions",
  "thread_aware_macros",
- "tokio",
  "uuid",
 ]
 
