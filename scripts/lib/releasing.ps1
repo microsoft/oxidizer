@@ -373,6 +373,15 @@ function Get-PackageVersionFromRef {
 # or $null when no such commit exists (a brand-new crate introduced in the range
 # above $BaseRef, or a crate with no committed history at $BaseRef).
 #
+# Genuine lookup FAILURES are NOT swallowed: if $BaseRef cannot be resolved (e.g.
+# it was never fetched, or is a typo) or git otherwise fails, this THROWS rather
+# than returning $null. A silent $null would become 'none' (no change-type floor)
+# downstream and make the CI report incorrectly pass when the baseline could not
+# actually be determined. The CI report catches the throw and records an
+# ⚠️ unknown/warn row; the release planner treats it as a hard error. Only a
+# SUCCESSFUL git log that finds no version-bump commit (a valid ref, but the
+# crate's [package] version never changed in reachable history) yields $null.
+#
 # This is the SOURCE-LEVEL semver baseline: the version the repository previously
 # *declared*, regardless of whether it was ever published to a registry. It works
 # identically in OSS and enterprise/offline environments because it never touches
@@ -413,7 +422,18 @@ function Get-PreviousVersionBumpCommit {
     }
 
     $relPath = "crates/$PackageFolder/Cargo.toml"
-    $commits = Invoke-Git -Arguments @('log', '--format=%H', $BaseRef, '--', $relPath) -RepoRoot $RepoRoot -AllowFailure
+
+    # Surface a genuine failure rather than silently returning "no baseline".
+    # An unresolvable ref (not fetched / typo) must not be mistaken for a
+    # brand-new crate — that would drop the change-type floor and let an
+    # under-incremented release pass. Test-GitRef never throws; a false result
+    # means the ref is bad. The git log itself runs WITHOUT -AllowFailure so any
+    # other git error also propagates. A valid ref with no matching commit exits
+    # 0 with empty output and correctly yields $null (new crate).
+    if (-not (Test-GitRef -Ref $BaseRef -RepoRoot $RepoRoot)) {
+        throw "Cannot locate the previous version-bump commit for '$PackageFolder': base ref '$BaseRef' could not be resolved in the repository. Ensure it is fetched (CI checks out with fetch-depth: 0) and spelled correctly."
+    }
+    $commits = Invoke-Git -Arguments @('log', '--format=%H', $BaseRef, '--', $relPath) -RepoRoot $RepoRoot
 
     $result = $null
     if ($null -ne $commits) {

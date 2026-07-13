@@ -203,6 +203,13 @@ Describe 'Get-PreviousVersionBumpCommit' {
         Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'HEAD' -PackageFolder 'nonexistent' |
             Should -BeNullOrEmpty
     }
+
+    It 'throws when the base ref cannot be resolved (not fetched / typo)' {
+        # A genuine lookup failure must NOT be silently treated as "no baseline"
+        # (which would drop the change-type floor and let CI wrongly pass).
+        { Get-PreviousVersionBumpCommit -RepoRoot $script:Ws.Path -BaseRef 'origin/does-not-exist' -PackageFolder 'b' } |
+            Should -Throw -ExpectedMessage "*could not be resolved*"
+    }
 }
 
 Describe 'Get-PackageLastReleaseBaseline (TOML publish-syntax variants)' {
