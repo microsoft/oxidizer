@@ -50,7 +50,7 @@ async fn main() -> Result<(), ohno::AppError> {
     // Instead of making real HTTP requests, we use a fake handler that returns
     // simulated responses after a short delay.
     let client = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default())
-        .meter_provider(&meter_provider)
+        .meter_provider(meter_provider)
         .build();
 
     // Make 10 requests to generate metrics for a request made with simple URI input.
