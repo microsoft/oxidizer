@@ -55,20 +55,26 @@
 
     Cargo's 0.x.y SemVer rules are honored throughout: for `0.x.y` packages a
     Breaking change becomes `0.(x+1).0`, NonBreaking and Patch both map to
-    incrementing `y`. The dependent cascade also respects
-    `[package.metadata.cargo_check_external_types]`: a dependent that does
-    not expose any type rooted at the released package cascades as a `patch`
-    rather than mirroring the target's change type. Dev-only dependents are
-    skipped — they automatically pick up the new workspace version.
+    incrementing `y`. Every release in the plan is classified by running
+    `cargo semver-checks` against each crate's previous version-bump commit in
+    git history (the most recent commit that changed the crate's `[package]
+    version`, with the baseline rustdoc rebuilt from source via `--baseline-rev`,
+    so no registry access is required and it works in OSS and enterprise/offline
+    environments alike): a dependent whose own public API is unaffected by the
+    release cascades as a `patch` (it still re-releases to pick up the new
+    dependency version), while a dependent whose API actually changes (e.g. because
+    it re-exports a changed type) cascades at the severity `cargo semver-checks`
+    reports. Dev-only dependents are skipped — they automatically pick up the
+    new workspace version. cargo-semver-checks is a hard dependency (install
+    the version pinned in constants.env); there is no heuristic fallback.
 
-    User-provided change types may be automatically upgraded by cascade
-    analysis if dependency exposure rules require a stronger change type
-    (e.g. an exposing dependent of a breaking release is upgraded from
-    your requested `patch` to `breaking`). If an explicit version number
-    is specified for a package and cascade logic requires a higher
-    version number than the pin allows, the release plan is rejected
-    (or, with -Force, the pin is honored verbatim and a warning is
-    printed flagging that consumers may break).
+    User-provided change types may be automatically upgraded by this analysis
+    if the crate's real API diff requires a stronger change type (e.g. a
+    dependent that re-exports a breaking change is upgraded from your requested
+    `patch` to `breaking`). If an explicit version number is specified for a
+    package and the analysis requires a higher version number than the pin
+    allows, the release plan is rejected (or, with -Force, the pin is honored
+    verbatim and a warning is printed flagging that consumers may break).
 
 .PARAMETER Packages
     The list of workspace packages to release, in the form
@@ -197,4 +203,14 @@ $mode = switch ($PSCmdlet.ParameterSetName) {
     'All'        { 'all' }
 }
 
-Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null
+# Invoke-ReleasePackagesMain surfaces all validation / pre-flight / execution
+# failures as terminating errors (throw) so it stays testable in-process. This
+# thin CLI shell is the only layer that turns a failure into a process exit
+# code, preserving the historical `exit 1`-on-error contract for command-line
+# and CI callers.
+try {
+    Invoke-ReleasePackagesMain -Mode $mode -Packages $Packages -Force:$Force | Out-Null
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}

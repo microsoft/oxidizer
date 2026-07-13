@@ -21,6 +21,7 @@
         # because dependent exposes target. User pins dependent at 5.0.0 which
         # satisfies the cascade requirement, so the pin wins.
         Packages = @('target@breaking', 'dependent@5.0.0')
+        SemverVerdicts = @{ dependent = 'breaking' }
         Answers  = @()
     }
 

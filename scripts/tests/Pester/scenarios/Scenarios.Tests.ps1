@@ -39,6 +39,12 @@ Describe 'End-to-end release scenarios' {
         # tests run under CI / pwsh non-tty.
         Mock -CommandName Test-InteractiveSession -MockWith { $true } -Verifiable:$false
 
+        # The entry point's pre-flight asserts git and cargo-semver-checks are on
+        # PATH. Scenarios mock the classifier (Get-CrateRequiredChangeType) so the
+        # real cargo-semver-checks binary is never invoked and need not be
+        # installed on the runner — satisfy the presence check via mock.
+        Mock -CommandName Test-CommandExists -MockWith { $true } -Verifiable:$false
+
         # Suppress real editor launches when scenarios exercise the View Diff path.
         Mock -CommandName Open-PathWithPreferredEditor -MockWith { } -Verifiable:$false
 
@@ -46,6 +52,17 @@ Describe 'End-to-end release scenarios' {
         Mock -CommandName Read-Host -MockWith {
             param([string]$Prompt)
             return Resolve-ScenarioPromptReply -Prompt $Prompt
+        } -Verifiable:$false
+
+        # Replace real cargo-semver-checks with the scenario's simulated verdict
+        # map (folder -> change type), so cascade/self-floor classification is
+        # deterministic and offline. Unmapped folders default to 'none'.
+        Mock -CommandName Get-CrateRequiredChangeType -MockWith {
+            param([string]$Folder, [string]$CargoName, [string]$RepoRoot)
+            if ($script:ScenarioSemverVerdicts -and $script:ScenarioSemverVerdicts.ContainsKey($Folder)) {
+                return $script:ScenarioSemverVerdicts[$Folder]
+            }
+            return 'none'
         } -Verifiable:$false
     }
 
