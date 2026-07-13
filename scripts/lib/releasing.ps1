@@ -621,11 +621,16 @@ function Invoke-CrateSemverCheck {
 }
 
 # Parses `cargo semver-checks` combined output into a change type. Pure (no I/O)
-# so it can be unit-tested against captured tool output. Mapping:
+# so it can be unit-tested against captured tool output. With the git-history
+# baseline (`--baseline-rev`) cargo-semver-checks always builds the baseline from
+# source, so the only outcomes are a semver verdict or a genuine tool/build
+# failure. Mapping:
 #   * "N major and M minor checks failed" -> major>0 breaking; minor>0 non-breaking
-#   * "no semver update required"                              -> patch (compatible)
-#   * baseline not found on the registry (never published)    -> none
-#   * anything else (tool/network/build failure)              -> throw (no silent fallback)
+#   * "no semver update required"                -> patch (compatible)
+#   * anything else (tool/build failure)         -> throw (no silent fallback)
+# The 'none' (no baseline) case is decided by the CALLER before this function is
+# invoked — when there is no previous version-bump commit to compare against —
+# not from tool output here.
 function ConvertFrom-SemverChecksOutput {
     [CmdletBinding()]
     param(
@@ -645,25 +650,7 @@ function ConvertFrom-SemverChecksOutput {
         return 'patch'
     }
 
-    # No baseline: the crate (or a specific version) is not on the registry. This
-    # is the expected state for a brand-new, never-published crate — there is
-    # nothing to compare against, so it imposes no change-type floor.
-    #
-    # Match ONLY messages that specifically indicate the crate/version is absent
-    # from the registry. The generic wrapper line "failed to retrieve crate data
-    # from registry" is deliberately NOT matched here: it also fires on transient
-    # network/registry outages, and treating those as 'none' would silently skip
-    # classification (violating the no-fallback contract). When the crate is
-    # genuinely unpublished the specific cause line ("... not found in registry"
-    # / "no released versions") is present in the output and matches below; a
-    # transient failure has no such line and falls through to the throw.
-    if ($Output -match '(?i)not\s+found\s+in\s+(the\s+)?registry' -or
-        $Output -match '(?i)no\s+(released|published)\s+versions?' -or
-        $Output -match '(?i)could\s+not\s+find\s+.*\bin\s+registry') {
-        return 'none'
-    }
-
-    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing, the network/registry is unreachable, or the crate failed to build. Output:`n$Output"
+    throw "cargo semver-checks did not produce a parseable result for '$PackageName' (exit $ExitCode). This usually means the tool is missing or the crate/baseline failed to build. Output:`n$Output"
 }
 
 # BFS over the reverse dependency graph. Returns the folder names of all published

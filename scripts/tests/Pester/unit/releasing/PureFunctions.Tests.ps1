@@ -296,20 +296,12 @@ Describe 'ConvertFrom-SemverChecksOutput' {
         ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'patch'
     }
 
-    It 'maps a missing registry baseline to none (new/unpublished crate)' {
-        $out = "error: failed to retrieve crate data from registry`n`nCaused by:`n    crate foo version 999.999.999 not found in registry"
-        ConvertFrom-SemverChecksOutput -Output $out | Should -Be 'none'
-    }
-
-    It 'maps "no released versions" to none' {
-        ConvertFrom-SemverChecksOutput -Output 'error: foo has no released versions on the registry' | Should -Be 'none'
-    }
-
-    It 'throws (does NOT return none) on a transient registry-retrieval failure with no "not found" cause' {
-        # A network/registry outage emits the generic wrapper line but no
-        # crate-absent cause. Treating it as an unpublished crate ('none') would
-        # silently skip classification, violating the no-fallback contract.
-        $out = "error: failed to retrieve crate data from registry`n`nCaused by:`n    error sending request for url (https://index.crates.io/...): operation timed out"
+    It 'throws on a tool/build failure (no silent fallback)' {
+        # Under --baseline-rev the baseline is built from source, so a failure to
+        # produce a verdict (e.g. the baseline crate failed to build) must surface
+        # as an error rather than being silently classified. The caller (CI report)
+        # turns this into an explicit "baseline unknown" row.
+        $out = "     Building foo v1.2.3 (baseline)`nerror: could not compile ``foo`` (lib)"
         { ConvertFrom-SemverChecksOutput -Output $out -PackageName 'foo' } |
             Should -Throw -ExpectedMessage "*did not produce a parseable result for 'foo'*"
     }
