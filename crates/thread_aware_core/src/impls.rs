@@ -15,6 +15,8 @@ use core::time::Duration;
 #[cfg(any(test, feature = "std"))]
 use std::collections::HashMap;
 #[cfg(any(test, feature = "std"))]
+use std::net::SocketAddr;
+#[cfg(any(test, feature = "std"))]
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::thread;
@@ -70,6 +72,8 @@ impl_thread_aware!(PathBuf);
 impl_thread_aware!(Duration);
 #[cfg(any(test, feature = "std"))]
 impl_thread_aware!(Path);
+#[cfg(any(test, feature = "std"))]
+impl_thread_aware!(SocketAddr);
 
 impl_thread_aware!(str);
 // Immutable process-lifetime string labels have no referent state to relocate and cannot dangle.
