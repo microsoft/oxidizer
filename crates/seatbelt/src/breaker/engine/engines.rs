@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use tick::Clock;
@@ -14,7 +14,7 @@ use crate::utils::TelemetryHelper;
 #[derive(Debug)]
 pub(crate) struct Engines {
     default_engine: Arc<Engine>,
-    map: RwLock<HashMap<BreakerId, Arc<Engine>>>,
+    map: RwLock<BTreeMap<BreakerId, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
     telemetry: TelemetryHelper,
@@ -25,7 +25,7 @@ impl Engines {
         let default_engine = Arc::new(create_engine(&engine_options, &clock, &telemetry, &BreakerId::default()));
         Self {
             default_engine,
-            map: RwLock::new(HashMap::new()),
+            map: RwLock::new(BTreeMap::new()),
             engine_options,
             clock,
             telemetry,
@@ -35,12 +35,15 @@ impl Engines {
     pub(crate) fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
         // Fast path: the default breaker (the common single-breaker configuration, used
         // whenever no ID provider is configured) is served by a pre-created engine. This
-        // avoids a lock, a hash of the key, and a map probe on every call.
+        // avoids a lock and the map lookup entirely on every call.
         if key.is_default() {
             return Arc::clone(&self.default_engine);
         }
 
-        // Fast path: read lock for existing engines (common case).
+        // Read-lock path for existing engines (common case). The map is a `BTreeMap`, so a
+        // lookup is a handful of key comparisons rather than a hash of `key`; partitioned
+        // breakers are low-cardinality by design, so this stays cheap and, unlike a hash
+        // map, is not exposed to hash-flooding via request-derived IDs.
         {
             let map = self.map.read().expect(ERR_POISONED_LOCK);
             if let Some(engine) = map.get(key) {
