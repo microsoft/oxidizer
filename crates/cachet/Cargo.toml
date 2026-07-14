@@ -42,11 +42,11 @@ test-util = ["cachet_tier/test-util", "tick/test-util"]
 memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
-encrypt = ["dep:aes-gcm", "dep:getrandom", "dep:bytesbuf"]
+encrypt = ["dep:bytesbuf"]
+symcrypt = ["encrypt", "dep:symcrypt", "dep:getrandom"]
 telemetry = []
 
 [dependencies]
-aes-gcm = { workspace = true, optional = true }
 anyspawn = { workspace = true, features = ["tokio"] }
 bytesbuf = { workspace = true, optional = true }
 cachet_memory = { workspace = true, optional = true }
@@ -60,6 +60,7 @@ parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
+symcrypt = { workspace = true, optional = true }
 tick = { workspace = true, features = [] }
 tracing = { workspace = true, optional = true }
 uniflight = { workspace = true }

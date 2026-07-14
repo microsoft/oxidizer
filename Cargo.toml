@@ -91,7 +91,6 @@ tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
 uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
 
 # external dependencies
-aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
 ahash = { version = "0.8.4", default-features = false }
 alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
@@ -181,6 +180,7 @@ smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 syn = { version = "2.0.111", default-features = false }
+symcrypt = { version = "0.5.1", default-features = false }
 thiserror = { version = "2.0.17", default-features = false }
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.48.0", default-features = false }

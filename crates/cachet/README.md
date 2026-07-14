@@ -165,7 +165,8 @@ most commonly used types from all of them.
 |`logs`|❌|Enables structured `tracing` log events for every cache operation. Subscribe via [`telemetry::attributes`][__link18] constants.|
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
 |`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
-|`encrypt`|❌|Enables `.encrypt(&key)` on serialized builders for authenticated (AES-256-GCM) value encryption.|
+|`encrypt`|❌|Enables `.encrypt_with(cipher)` on serialized builders and the `AeadCipher` trait for authenticated value encryption with a caller-supplied cipher.|
+|`symcrypt`|❌|Enables the built-in `Aes256GcmCipher` (SymCrypt-backed AES-256-GCM) and the `.encrypt(&key)` convenience method. Implies `encrypt`.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -229,12 +230,20 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 ### Encryption Boundary
 
-With the `encrypt` feature, chain `.encrypt(&key)` after `.serialize()` to encrypt
-values with AES-256-GCM before they reach the fallback tier. Each value is
-encrypted with a fresh random nonce and cryptographically bound to its storage key;
-keys are left serialized-but-unencrypted so they remain deterministic and can be
-looked up. A stored value that fails to decrypt — corrupt, truncated, wrong key, or
-relocated to a different key — is treated as a cache miss and emits a
+With the `encrypt` feature, chain `.encrypt_with(cipher)` after `.serialize()` to
+encrypt values with a caller-supplied `AeadCipher` before they reach the fallback
+tier. The cachet crate ships only the encryption *mechanism* — it has no
+cryptographic dependency of its own, so you can plug in a cipher backed by whichever
+approved cryptographic library your project mandates. The cipher receives each
+value’s storage key as associated data and must authenticate it, which
+cryptographically binds every value to its key.
+
+For convenience, the `symcrypt` feature provides a built-in `Aes256GcmCipher`
+(SymCrypt-backed AES-256-GCM, FIPS-certifiable) and a `.encrypt(&key)` shortcut for
+`.encrypt_with(Aes256GcmCipher::new(&key))`. Each value is encrypted with a fresh
+random nonce; keys are left serialized-but-unencrypted so they remain deterministic
+and can be looked up. A stored value that fails to decrypt — corrupt, truncated,
+wrong key, or relocated to a different key — is treated as a cache miss and emits a
 `cache.decrypt_failed` telemetry event.
 
 Only values are encrypted: keys are stored in plaintext in the backing tier, so do
@@ -252,7 +261,7 @@ let key = [0u8; 32]; // in production, load from a secret store
 let cache = Cache::builder::<String, String>(clock)
     .memory()
     .serialize()
-    .encrypt(&key)
+    .encrypt(&key) // requires the `symcrypt` feature
     .fallback(remote)
     .build();
 
@@ -313,7 +322,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbyuiO0QVEuMQbJSVJ4gMa8ksbNYDmq69e5OMbGHKmAj90pudhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYTLaPDmxhiUbCENNbnE-_ecbUgmxqbnD8oYbvcUbjsva5KFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.8.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier

@@ -3,15 +3,19 @@
 
 //! Authenticated encryption of cache values stored in an untrusted tier.
 //!
-//! [`AeadCipher`] is the pluggable encryption contract; [`Aes256GcmCipher`] is
-//! the built-in AES-256-GCM implementation. [`EncryptedTier`] installs a cipher
-//! at the storage boundary, where both the key and value are available, and
-//! authenticates each value against its storage key.
+//! The base `encrypt` feature provides only the encryption *mechanism* — it carries
+//! no cryptographic dependency of its own. [`AeadCipher`] is the pluggable contract:
+//! you supply the actual cipher, backed by your approved cryptographic library, and
+//! register it with [`encrypt_with`](crate::TransformBuilder::encrypt_with).
+//! [`EncryptedTier`] installs that cipher at the storage boundary, where both the key
+//! and value are available, and authenticates each value against its storage key.
+//!
+//! If you don't need to supply your own cipher, enable the optional `symcrypt` feature
+//! to get a ready-made, FIPS-certifiable implementation (`Aes256GcmCipher`) plus the
+//! `encrypt(&key)` convenience method.
 
 use std::borrow::Cow;
 
-use aes_gcm::aead::{Aead, AeadInPlace, KeyInit, Payload};
-use aes_gcm::{Aes256Gcm, Nonce};
 use bytesbuf::BytesView;
 
 use crate::cache::CacheName;
@@ -19,15 +23,9 @@ use crate::telemetry::CacheTelemetry;
 use crate::transform::DecodeOutcome;
 use crate::{CacheEntry, CacheTier, Error, SizeError};
 
-/// Length of the AES-GCM nonce, in bytes. Stored in front of every ciphertext.
-const NONCE_SIZE: usize = 12;
-
-/// Length of the AES-GCM authentication tag, in bytes. Stored after the ciphertext.
-const TAG_SIZE: usize = 16;
-
 /// Returns a contiguous byte slice from a [`BytesView`]. Borrows for single-span
 /// views (the common case) and gathers into a `Vec` only for multi-span views.
-fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
+pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     let first = view.first_slice();
     if first.len() == view.len() {
         Cow::Borrowed(first)
@@ -43,25 +41,30 @@ fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
 /// Authenticated encryption with associated data (AEAD) for cache values.
 ///
 /// Implementations turn a value's plaintext bytes into stored bytes and back,
-/// authenticating a caller-supplied *associated data* (AAD) value. [`EncryptedTier`]
-/// passes the entry's storage key as AAD.
+/// authenticating a caller-supplied *associated data* (AAD) value. `EncryptedTier`
+/// passes the entry's storage key as AAD, so a value is cryptographically bound to
+/// the key it was stored under.
+///
+/// The base `encrypt` feature supplies no cipher of its own: implement this trait
+/// with your organization's approved cryptographic library and register it via
+/// [`encrypt_with`](crate::TransformBuilder::encrypt_with). Alternatively, enable the
+/// `symcrypt` feature for the built-in `Aes256GcmCipher`.
 ///
 /// # Security contract
 ///
-/// Implementors **must** authenticate `aad`: [`decrypt`](Self::decrypt) must
-/// return [`DecodeOutcome::SoftFailure`] when the `aad` does not match the value
-/// supplied to [`encrypt`](Self::encrypt). This is what binds each value to its
-/// storage key, preventing a value from being relocated to a different key in the
-/// backing store. Implementors are also responsible for nonce discipline — use a
-/// fresh nonce per [`encrypt`](Self::encrypt), or a nonce-misuse-resistant scheme.
+/// Implementors **must** authenticate `aad`: [`decrypt`](Self::decrypt) must return
+/// [`DecodeOutcome::SoftFailure`] when the `aad` does not match the value supplied to
+/// [`encrypt`](Self::encrypt). This is what binds each value to its storage key,
+/// preventing a value from being relocated to a different key in the backing store.
+/// Implementors using a nonce-based scheme are responsible for nonce discipline — use
+/// a fresh nonce per [`encrypt`](Self::encrypt), or a nonce-misuse-resistant scheme.
 ///
-/// `decrypt` distinguishes two failure modes:
-/// - `Ok(DecodeOutcome::SoftFailure(_))` — the ciphertext is undecodable
-///   (corrupt, truncated, tampered, wrong key, or AAD mismatch); the cache treats
-///   it as a miss.
+/// [`decrypt`](Self::decrypt) distinguishes two failure modes:
+/// - `Ok(DecodeOutcome::SoftFailure(_))` — the ciphertext is undecodable (corrupt,
+///   truncated, tampered, wrong key, or AAD mismatch); the cache treats it as a miss.
 /// - `Err(_)` — the operation could not be attempted (e.g. an unavailable backend);
 ///   the error propagates to the caller.
-pub(crate) trait AeadCipher: Send + Sync {
+pub trait AeadCipher: Send + Sync {
     /// Encrypts `plaintext`, authenticating `aad`, and returns the stored representation.
     ///
     /// # Errors
@@ -73,99 +76,9 @@ pub(crate) trait AeadCipher: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if decryption could not be attempted. An authentication
-    /// or format failure is reported as `Ok(DecodeOutcome::SoftFailure(_))`.
+    /// Returns `Err` only if decryption could not be attempted. An authentication or
+    /// format failure is reported as `Ok(DecodeOutcome::SoftFailure(_))`.
     fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error>;
-}
-
-/// An AES-256-GCM implementation of [`AeadCipher`].
-///
-/// Encryption writes a fresh random 12-byte nonce in front of the ciphertext
-/// (`nonce || ciphertext || tag`) and authenticates the AAD supplied by
-/// [`EncryptedTier`] (the storage key). Decryption failures — truncation,
-/// corruption, tag mismatch, AAD mismatch, or the wrong key — are reported as
-/// [`DecodeOutcome::SoftFailure`], so an undecodable entry is treated as a cache
-/// miss rather than a hard error.
-///
-/// Because each encryption uses a fresh random nonce, output is non-deterministic;
-/// this cipher is applied to cache *values* only, never to keys.
-///
-/// # Nonce reuse
-///
-/// A 96-bit random nonce is safe for a very large volume of writes under one key,
-/// but not unbounded: the reuse probability follows the birthday bound and becomes
-/// non-negligible only after an extremely large number of writes under the same key.
-/// For extreme write volumes, rotate the key periodically.
-#[derive(Clone)]
-pub(crate) struct Aes256GcmCipher {
-    cipher: Aes256Gcm,
-}
-
-impl Aes256GcmCipher {
-    /// Creates a new AES-256-GCM cipher from a 32-byte key.
-    #[must_use]
-    pub(crate) fn new(key: &[u8; 32]) -> Self {
-        Self {
-            cipher: Aes256Gcm::new(key.into()),
-        }
-    }
-}
-
-impl std::fmt::Debug for Aes256GcmCipher {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Never render the key material.
-        f.debug_struct("Aes256GcmCipher").finish_non_exhaustive()
-    }
-}
-
-impl AeadCipher for Aes256GcmCipher {
-    fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
-        let mut nonce_bytes = [0u8; NONCE_SIZE];
-        getrandom::fill(&mut nonce_bytes).map_err(|e| Error::from_message(format!("failed to generate nonce: {e}")))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Assemble `nonce || plaintext` in one buffer, encrypt the plaintext region
-        // in place, then append the detached tag. The plaintext spans are copied
-        // exactly once, straight into their final location.
-        //
-        // This copy cannot be eliminated: AES-GCM encrypts in place and so needs a
-        // single mutable, contiguous buffer, but `plaintext` is a shared, immutable
-        // `BytesView` (its memory may back other views) that can also be split across
-        // multiple spans. We therefore must gather it into our own writable buffer —
-        // which we do directly into `result` so it is the only copy.
-        let mut result = Vec::with_capacity(NONCE_SIZE + plaintext.len() + TAG_SIZE);
-        result.extend_from_slice(&nonce_bytes);
-        for (slice, _) in plaintext.slices() {
-            result.extend_from_slice(slice);
-        }
-
-        let tag = self
-            .cipher
-            .encrypt_in_place_detached(nonce, aad, &mut result[NONCE_SIZE..])
-            .map_err(|e| Error::from_message(format!("AES-GCM encryption failed: {e}")))?;
-        result.extend_from_slice(tag.as_slice());
-        Ok(result.into())
-    }
-
-    fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
-        // Borrow the ciphertext contiguously (zero-copy for the common single-span
-        // case; gather only when it is split across spans). The plaintext is then
-        // produced by the allocating `decrypt`, which is the single unavoidable copy:
-        // decryption must write plaintext into fresh memory since the input view is
-        // shared and immutable and cannot be decrypted in place.
-        let bytes = to_contiguous(ciphertext);
-        if bytes.len() < NONCE_SIZE {
-            return Ok(DecodeOutcome::SoftFailure("AES-GCM ciphertext too short: missing nonce"));
-        }
-
-        let (nonce_bytes, body) = bytes.split_at(NONCE_SIZE);
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        match self.cipher.decrypt(nonce, Payload { msg: body, aad }) {
-            Ok(plaintext) => Ok(DecodeOutcome::Value(plaintext.into())),
-            Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
-        }
-    }
 }
 
 /// A cache tier that transparently encrypts values with an [`AeadCipher`].
@@ -254,151 +167,81 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use cachet_tier::MockCache;
 
-    const KEY: [u8; 32] = [42u8; 32];
-    const AAD: &[u8] = b"cache-key";
+    use super::*;
 
     fn view(data: &[u8]) -> BytesView {
         BytesView::from(data.to_vec())
     }
 
-    fn test_tier<S>(inner: S) -> EncryptedTier<S> {
-        EncryptedTier::new(inner, Box::new(Aes256GcmCipher::new(&KEY)), CacheTelemetry::new(), "encrypted-test")
-    }
+    /// A crypto-free [`AeadCipher`] for exercising the tier mechanism. It "seals"
+    /// a value as `aad_len || aad || plaintext` and, on decrypt, treats an AAD
+    /// mismatch or malformed input as a soft failure — mirroring how a real AEAD
+    /// binds the value to its key without performing any real cryptography.
+    struct MockAeadCipher;
 
-    #[test]
-    fn encrypt_decrypt_round_trip() {
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let plaintext = view(b"the quick brown fox");
+    impl AeadCipher for MockAeadCipher {
+        fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+            let plaintext = plaintext.to_vec();
+            let mut out = Vec::with_capacity(4 + aad.len() + plaintext.len());
+            out.extend_from_slice(&(u32::try_from(aad.len()).expect("aad fits in u32")).to_le_bytes());
+            out.extend_from_slice(aad);
+            out.extend_from_slice(&plaintext);
+            Ok(out.into())
+        }
 
-        let encrypted = cipher.encrypt(AAD, &plaintext).expect("encrypt should succeed");
-        assert_ne!(encrypted.to_vec(), plaintext.to_vec(), "ciphertext must differ from plaintext");
-
-        match cipher.decrypt(AAD, &encrypted).expect("decrypt should not hard-error") {
-            DecodeOutcome::Value(v) => assert_eq!(v.to_vec(), plaintext.to_vec()),
-            DecodeOutcome::SoftFailure(reason) => panic!("expected a decoded value, got soft failure: {reason}"),
+        fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+            let bytes = ciphertext.to_vec();
+            let Some(len_bytes) = bytes.get(0..4) else {
+                return Ok(DecodeOutcome::SoftFailure("mock: missing length prefix"));
+            };
+            let aad_len = u32::from_le_bytes(len_bytes.try_into().expect("4 bytes")) as usize;
+            let Some(stored_aad) = bytes.get(4..4 + aad_len) else {
+                return Ok(DecodeOutcome::SoftFailure("mock: truncated aad"));
+            };
+            if stored_aad != aad {
+                return Ok(DecodeOutcome::SoftFailure("mock: aad mismatch"));
+            }
+            Ok(DecodeOutcome::Value(bytes[4 + aad_len..].to_vec().into()))
         }
     }
 
-    #[test]
-    fn decrypt_with_wrong_aad_is_soft_failure() {
-        // The core relocation defense: a ciphertext authenticated under one key's
-        // AAD must not decrypt under a different key's AAD.
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let encrypted = cipher.encrypt(b"key-A", &view(b"secret")).expect("encrypt should succeed");
+    /// A cipher whose operations always hard-error, for exercising error propagation.
+    struct FailingCipher;
 
-        let outcome = cipher.decrypt(b"key-B", &encrypted).expect("decrypt should not hard-error");
-        assert!(
-            matches!(outcome, DecodeOutcome::SoftFailure(_)),
-            "AAD mismatch must be a soft failure"
-        );
+    impl AeadCipher for FailingCipher {
+        fn encrypt(&self, _aad: &[u8], _plaintext: &BytesView) -> Result<BytesView, Error> {
+            Err(Error::from_message("encrypt failed"))
+        }
+
+        fn decrypt(&self, _aad: &[u8], _ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+            Err(Error::from_message("decrypt failed"))
+        }
     }
 
-    #[test]
-    fn each_encrypt_uses_a_fresh_nonce() {
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let plaintext = view(b"same input");
-
-        let a = cipher.encrypt(AAD, &plaintext).expect("encrypt should succeed").to_vec();
-        let b = cipher.encrypt(AAD, &plaintext).expect("encrypt should succeed").to_vec();
-        assert_ne!(a, b, "distinct nonces should yield distinct ciphertexts for identical input");
+    fn tier<S>(inner: S) -> EncryptedTier<S> {
+        EncryptedTier::new(inner, Box::new(MockAeadCipher), CacheTelemetry::new(), "encrypted-test")
     }
 
-    #[test]
-    fn decrypt_too_short_is_soft_failure() {
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let outcome = cipher
-            .decrypt(AAD, &view(&[0u8; NONCE_SIZE - 1]))
-            .expect("decrypt should not hard-error");
-        assert!(
-            matches!(outcome, DecodeOutcome::SoftFailure(_)),
-            "truncated input should be a soft failure"
-        );
-    }
-
-    #[test]
-    fn decrypt_tampered_ciphertext_is_soft_failure() {
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let mut encrypted = cipher.encrypt(AAD, &view(b"secret")).expect("encrypt should succeed").to_vec();
-        *encrypted.last_mut().expect("ciphertext is non-empty") ^= 0x01;
-
-        let outcome = cipher
-            .decrypt(AAD, &BytesView::from(encrypted))
-            .expect("decrypt should not hard-error");
-        assert!(
-            matches!(outcome, DecodeOutcome::SoftFailure(_)),
-            "tampered ciphertext should be a soft failure"
-        );
-    }
-
-    #[test]
-    fn decrypt_with_wrong_key_is_soft_failure() {
-        let encrypted = Aes256GcmCipher::new(&KEY)
-            .encrypt(AAD, &view(b"secret"))
-            .expect("encrypt should succeed");
-        let other = Aes256GcmCipher::new(&[7u8; 32]);
-
-        let outcome = other.decrypt(AAD, &encrypted).expect("decrypt should not hard-error");
-        assert!(
-            matches!(outcome, DecodeOutcome::SoftFailure(_)),
-            "wrong key should be a soft failure"
-        );
-    }
-
-    #[test]
-    fn round_trip_over_multi_span_view() {
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let encrypted = cipher.encrypt(AAD, &view(b"multi span payload")).expect("encrypt should succeed");
-
-        // Split the ciphertext into two spans so decrypt must handle a multi-span view.
-        let bytes = encrypted.to_vec();
-        let mid = bytes.len() / 2;
-        let mut multi = BytesView::from(bytes[..mid].to_vec());
-        multi.append(BytesView::from(bytes[mid..].to_vec()));
-        assert_ne!(multi.first_slice().len(), multi.len(), "test fixture should be multi-span");
-
-        let outcome = cipher.decrypt(AAD, &multi).expect("decrypt should succeed");
-        assert!(matches!(outcome, DecodeOutcome::Value(v) if v.to_vec() == b"multi span payload"));
-    }
-
-    #[test]
-    fn round_trip_over_multi_span_plaintext() {
-        // Exercise the multi-span gather path in `encrypt`: the plaintext view is
-        // split across two spans, so `encrypt` must collect them into one buffer.
-        let cipher = Aes256GcmCipher::new(&KEY);
-        let mut plaintext = BytesView::from(b"multi span ".to_vec());
-        plaintext.append(BytesView::from(b"plaintext value".to_vec()));
-        assert_ne!(plaintext.first_slice().len(), plaintext.len(), "test fixture should be multi-span");
-
-        let encrypted = cipher.encrypt(AAD, &plaintext).expect("encrypt should succeed");
-        let outcome = cipher.decrypt(AAD, &encrypted).expect("decrypt should succeed");
-        assert!(matches!(outcome, DecodeOutcome::Value(v) if v.to_vec() == b"multi span plaintext value"));
-    }
-
-    #[test]
-    fn debug_does_not_leak_key() {
-        let rendered = format!("{:?}", Aes256GcmCipher::new(&KEY));
-        assert!(rendered.contains("Aes256GcmCipher"));
-        assert!(!rendered.contains("42"), "Debug must not render key material");
+    fn failing_tier<S>(inner: S) -> EncryptedTier<S> {
+        EncryptedTier::new(inner, Box::new(FailingCipher), CacheTelemetry::new(), "failing-test")
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn encrypted_tier_round_trips_through_inner() {
-        use cachet_tier::MockCache;
-
+    async fn round_trips_through_inner() {
         let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = test_tier(inner.clone());
+        let tier = tier(inner.clone());
 
         let key = view(b"user:1");
         tier.insert(key.clone(), CacheEntry::new(view(b"profile")))
             .await
             .expect("insert should succeed");
 
-        // The inner tier stores ciphertext, not the plaintext value.
+        // The inner tier stores the sealed representation, not the plaintext value.
         let stored = inner.get(&key).await.expect("inner get ok").expect("entry present");
-        assert_ne!(stored.value().to_vec(), b"profile", "inner tier must hold ciphertext");
+        assert_ne!(stored.value().to_vec(), b"profile", "inner tier must not hold plaintext");
 
         let fetched = tier.get(&key).await.expect("get ok").expect("entry present");
         assert_eq!(fetched.value().to_vec(), b"profile", "decrypted value must match original");
@@ -406,35 +249,88 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    async fn encrypted_tier_relocated_value_is_a_miss() {
-        use cachet_tier::MockCache;
-
+    async fn relocated_value_is_a_miss() {
         let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = test_tier(inner.clone());
+        let tier = tier(inner.clone());
 
-        // Legitimately store a value under key A.
         let key_a = view(b"key-A");
         tier.insert(key_a.clone(), CacheEntry::new(view(b"value-A")))
             .await
             .expect("insert should succeed");
         let blob_a = inner.get(&key_a).await.expect("inner get ok").expect("entry present").into_value();
 
-        // Attacker relocates A's ciphertext blob under key B in the untrusted inner tier.
+        // Attacker relocates A's sealed blob under key B in the untrusted inner tier.
         let key_b = view(b"key-B");
         inner
             .insert(key_b.clone(), CacheEntry::new(blob_a))
             .await
             .expect("insert should succeed");
 
-        // Reading B must NOT yield A's value: AAD (key) mismatch => decryption fails => miss.
-        let fetched = tier.get(&key_b).await.expect("get ok");
-        assert!(fetched.is_none(), "relocated ciphertext must fail AAD check and read as a miss");
+        // Reading B must NOT yield A's value: AAD (key) mismatch => miss.
+        assert!(
+            tier.get(&key_b).await.expect("get ok").is_none(),
+            "relocated value must fail the AAD check and read as a miss"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn get_miss_returns_none() {
+        let tier = tier(MockCache::<BytesView, BytesView>::new());
+        assert!(
+            tier.get(&view(b"absent")).await.expect("get ok").is_none(),
+            "empty inner tier must miss"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn preserves_ttl_and_cached_at() {
+        use std::time::{Duration, SystemTime};
+
+        let tier = tier(MockCache::<BytesView, BytesView>::new());
+        let ttl = Duration::from_mins(5);
+        let cached_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let key = view(b"k");
+
+        tier.insert(key.clone(), CacheEntry::expires_at(view(b"v"), ttl, cached_at))
+            .await
+            .expect("insert should succeed");
+
+        let fetched = tier.get(&key).await.expect("get ok").expect("entry present");
+        assert_eq!(fetched.value().to_vec(), b"v", "decrypted value must match");
+        assert_eq!(fetched.ttl(), Some(ttl), "ttl must survive the round trip");
+        assert_eq!(fetched.cached_at(), Some(cached_at), "cached_at must survive the round trip");
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn invalidate_clear_len_delegate() {
+        let tier = tier(MockCache::<BytesView, BytesView>::new());
+        tier.insert(view(b"a"), CacheEntry::new(view(b"1")))
+            .await
+            .expect("insert should succeed");
+        tier.insert(view(b"b"), CacheEntry::new(view(b"2")))
+            .await
+            .expect("insert should succeed");
+        assert_eq!(tier.len().await.expect("len ok"), 2);
+
+        tier.invalidate(&view(b"a")).await.expect("invalidate should succeed");
+        assert_eq!(tier.len().await.expect("len ok"), 1);
+
+        tier.clear().await.expect("clear should succeed");
+        assert_eq!(tier.len().await.expect("len ok"), 0);
+    }
+
+    #[test]
+    fn debug_omits_inner_secrets() {
+        let tier = tier(MockCache::<BytesView, BytesView>::new());
+        assert!(format!("{tier:?}").contains("EncryptedTier"));
     }
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn decrypt_failure_emits_telemetry() {
-        use cachet_tier::MockCache;
         use testing_aids::LogCapture;
 
         let capture = LogCapture::new();
@@ -443,20 +339,66 @@ mod tests {
         let inner = MockCache::<BytesView, BytesView>::new();
         let tier = EncryptedTier::new(
             inner.clone(),
-            Box::new(Aes256GcmCipher::new(&KEY)),
+            Box::new(MockAeadCipher),
             CacheTelemetry::with_logging(),
             "encrypted-test",
         );
 
-        // Plant a garbage "ciphertext" that cannot authenticate.
-        let key = view(b"key");
+        // Plant a malformed blob that cannot be decoded.
         inner
-            .insert(key.clone(), CacheEntry::new(view(&[0u8; 64])))
+            .insert(view(b"k"), CacheEntry::new(view(&[0u8; 2])))
             .await
             .expect("insert should succeed");
 
-        let fetched = tier.get(&key).await.expect("get ok");
-        assert!(fetched.is_none(), "undecryptable value must read as a miss");
+        assert!(
+            tier.get(&view(b"k")).await.expect("get ok").is_none(),
+            "undecodable value must read as a miss"
+        );
         capture.assert_contains(crate::telemetry::attributes::EVENT_DECRYPT_FAILED);
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn encrypt_error_propagates_on_insert() {
+        let tier = failing_tier(MockCache::<BytesView, BytesView>::new());
+        assert!(
+            tier.insert(view(b"k"), CacheEntry::new(view(b"v"))).await.is_err(),
+            "a cipher encryption error must propagate from insert"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn decrypt_error_propagates_on_get() {
+        let inner = MockCache::<BytesView, BytesView>::new();
+        inner
+            .insert(view(b"k"), CacheEntry::new(view(b"stored")))
+            .await
+            .expect("insert should succeed");
+
+        let tier = failing_tier(inner);
+        assert!(
+            tier.get(&view(b"k")).await.is_err(),
+            "a cipher decryption hard error must propagate from get"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)]
+    #[tokio::test]
+    async fn inner_tier_errors_propagate() {
+        use cachet_tier::CacheOp;
+
+        let inner = MockCache::<BytesView, BytesView>::new();
+        let tier = tier(inner.clone());
+
+        inner.fail_when(|_op: &CacheOp<BytesView, BytesView>| true);
+
+        assert!(tier.get(&view(b"k")).await.is_err(), "inner get error must propagate");
+        assert!(
+            tier.insert(view(b"k"), CacheEntry::new(view(b"v"))).await.is_err(),
+            "inner insert error must propagate"
+        );
+        assert!(tier.invalidate(&view(b"k")).await.is_err(), "inner invalidate error must propagate");
+        assert!(tier.clear().await.is_err(), "inner clear error must propagate");
     }
 }

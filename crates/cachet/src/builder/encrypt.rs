@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Builder for applying an AES-256-GCM encryption boundary in the cache pipeline.
+//! Builder for applying an authenticated-encryption boundary in the cache pipeline.
 //!
-//! `.encrypt(&key)` becomes available once a [`TransformBuilder`] has reduced values
-//! to [`BytesView`](bytesbuf::BytesView) (typically via
+//! `.encrypt_with(cipher)` becomes available once a [`TransformBuilder`] has reduced
+//! values to [`BytesView`](bytesbuf::BytesView) (typically via
 //! [`serialize`](crate::CacheBuilder::serialize)). It produces an
 //! [`EncryptedTransformBuilder`], whose post-transform tier chain is wrapped in an
-//! internal `EncryptedTier` at build time.
+//! internal `EncryptedTier` at build time. With the `symcrypt` feature, `.encrypt(&key)`
+//! is available as a convenience over the built-in `SymCrypt` cipher.
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -22,10 +23,11 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use super::transform::TransformBuilder;
 use crate::telemetry::CacheTelemetry;
-use crate::transform::{AeadCipher, Aes256GcmCipher, EncryptedTier, TransformAdapter};
+use crate::transform::{AeadCipher, EncryptedTier, TransformAdapter};
 use crate::{Codec, Encoder};
 
-/// The builder produced by [`TransformBuilder::encrypt`].
+/// The builder produced by [`TransformBuilder::encrypt_with`] (and, with the
+/// `symcrypt` feature, the `encrypt` convenience method).
 ///
 /// It mirrors [`TransformBuilder`] but fixes the storage types to
 /// [`BytesView`] and carries an authenticated cipher. At build time the
@@ -55,16 +57,18 @@ impl<K, V, Pre: Debug, Post: Debug> Debug for EncryptedTransformBuilder<K, V, Pr
     }
 }
 
-// ── .encrypt() on TransformBuilder ──
+// ── .encrypt() / .encrypt_with() on TransformBuilder ──
 
 impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
-    /// Encrypts values with AES-256-GCM before they reach the post-transform tier.
+    /// Encrypts values with the built-in `SymCrypt` AES-256-GCM cipher before they
+    /// reach the post-transform tier.
     ///
-    /// Available only once values are [`BytesView`] (typically after
-    /// [`serialize`](crate::CacheBuilder::serialize)). Keys are left untouched — AES-GCM
-    /// output is non-deterministic, so an encrypted key could never be looked up — but
-    /// each value is cryptographically bound to its storage key, so a value cannot be
-    /// relocated to a different key in the backing store.
+    /// A convenience over [`encrypt_with`](Self::encrypt_with) using
+    /// [`Aes256GcmCipher`](crate::Aes256GcmCipher); available with the `symcrypt`
+    /// feature. Keys are left untouched — AES-GCM output is non-deterministic, so an
+    /// encrypted key could never be looked up — but each value is cryptographically
+    /// bound to its storage key, so a value cannot be relocated to a different key in
+    /// the backing store.
     ///
     /// # Security
     ///
@@ -91,16 +95,52 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     ///     .fallback(remote)
     ///     .build();
     /// ```
+    #[cfg(feature = "symcrypt")]
     #[must_use]
     pub fn encrypt(self, key: &[u8; 32]) -> EncryptedTransformBuilder<K, V, Pre, Post> {
-        self.encrypt_with(Aes256GcmCipher::new(key))
+        self.encrypt_with(crate::transform::Aes256GcmCipher::new(key))
     }
 
-    /// Encrypts values with the given authenticated cipher before they reach the
-    /// post-transform tier. Internal seam for [`encrypt`](Self::encrypt); the cipher
-    /// abstraction is not part of the public API yet.
+    /// Encrypts values with the given [`AeadCipher`](crate::AeadCipher) before they
+    /// reach the post-transform tier.
+    ///
+    /// Available once values are [`BytesView`] (typically after
+    /// [`serialize`](crate::CacheBuilder::serialize)). Supply a cipher backed by your
+    /// approved cryptographic library; the cipher receives the storage key as
+    /// associated data and must authenticate it (see the
+    /// [`AeadCipher`](crate::AeadCipher) contract). Keys themselves are never
+    /// encrypted, and a value that fails authentication is treated as a cache miss.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use cachet::{AeadCipher, Cache, DecodeOutcome, Error};
+    /// use tick::Clock;
+    ///
+    /// struct MyCipher;
+    /// impl AeadCipher for MyCipher {
+    ///     fn encrypt(&self, aad: &[u8], plaintext: &bytesbuf::BytesView) -> Result<bytesbuf::BytesView, Error> {
+    /// #       unimplemented!()
+    ///         // ... encrypt with your approved library, authenticating `aad` ...
+    ///     }
+    ///     fn decrypt(&self, aad: &[u8], ciphertext: &bytesbuf::BytesView) -> Result<DecodeOutcome<bytesbuf::BytesView>, Error> {
+    /// #       unimplemented!()
+    ///         // ... decrypt, returning SoftFailure on any authentication failure ...
+    ///     }
+    /// }
+    ///
+    /// let clock = Clock::new_tokio();
+    /// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+    ///
+    /// let cache = Cache::builder::<String, String>(clock)
+    ///     .memory()
+    ///     .serialize()
+    ///     .encrypt_with(MyCipher)
+    ///     .fallback(remote)
+    ///     .build();
+    /// ```
     #[must_use]
-    fn encrypt_with(self, cipher: impl AeadCipher + 'static) -> EncryptedTransformBuilder<K, V, Pre, Post> {
+    pub fn encrypt_with(self, cipher: impl AeadCipher + 'static) -> EncryptedTransformBuilder<K, V, Pre, Post> {
         EncryptedTransformBuilder {
             pre: self.pre,
             post: self.post,

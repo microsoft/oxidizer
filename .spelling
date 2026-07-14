@@ -136,6 +136,7 @@ RAII
 RDME
 RMW
 RMWs
+RNG
 RPC
 RSS
 Rc
@@ -276,7 +277,9 @@ covariant
 coverage.json
 crates.io
 crypto
+cryptographic
 cryptographically
+undecryptable
 customizable
 cutover
 dSMS
