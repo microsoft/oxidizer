@@ -107,6 +107,10 @@ runs:
 
     - name: Install Cargo Tools
       if: inputs.cargo-tools != ''
+      # taiki-e/install-action publishes immutable GitHub releases (verified via the GitHub API:
+      # "immutable": true on GET /repos/taiki-e/install-action/releases/tags/v2.81.8). The tag
+      # cannot be retargeted, so this reference is intentionally left unpinned to a commit SHA.
+      # See https://github.com/taiki-e/install-action/releases/tag/v2.81.8
       uses: taiki-e/install-action@v2.81.8
       with:
         tool: ${{ steps.expand.outputs.cargo_tools }}
