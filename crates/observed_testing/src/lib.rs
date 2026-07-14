@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+
 //! Test harness for the `observed` crate family.
 //!
 //! Provides a [`MockProcessor`] that captures emitted events for assertion,

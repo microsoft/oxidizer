@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+
 //! Structured telemetry events with enrichment, redaction, and per-field routing.
 //!
 //! The `observed` crate provides a unified telemetry API that:
