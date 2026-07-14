@@ -24,7 +24,7 @@ jobs:
       skip: ${{ steps.compute.outputs.skip }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -101,7 +101,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -141,7 +141,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -184,7 +184,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -216,7 +216,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -278,7 +278,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -315,7 +315,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -335,7 +335,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -354,7 +354,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -395,7 +395,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -410,6 +410,11 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
+        # codecov/codecov-action publishes immutable GitHub releases (verified via the GitHub API:
+        # "immutable": true on GET /repos/codecov/codecov-action/releases/tags/v7.0.0). An immutable
+        # release's tag can never be retargeted to a different commit, so pinning to a SHA adds no
+        # extra protection here; this reference is intentionally left as a tag.
+        # See https://github.com/codecov/codecov-action/releases/tag/v7.0.0
         uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -421,7 +426,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check PR Title
-        uses: amannn/action-semantic-pull-request@v6.1.1
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -445,7 +450,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -468,7 +473,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -495,7 +500,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         # The synthetic-workspace fixture builder shells out to `cargo metadata`,
         # so Rust must be available even though no Rust code is compiled.
