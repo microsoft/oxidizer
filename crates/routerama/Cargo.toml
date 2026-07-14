@@ -1,0 +1,89 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "routerama"
+version = "0.1.0"
+description = "Blazingly fast HTTP route resolution"
+readme = "README.md"
+keywords = ["http", "router", "routing", "path", "url"]
+categories = ["web-programming", "network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # Re-exported by the `build` module (under the `build` feature).
+    "routerama_build::route::Route",
+    "routerama_build::generator::Generator",
+    "routerama_build::generator_builder::GeneratorBuilder",
+    "routerama_build::http_method::HttpMethod",
+    "routerama_macros::resolver",
+]
+
+[features]
+default = ["build", "macros", "dynamic"]
+macros = ["dep:routerama_macros"]
+build = ["dep:routerama_build", "routerama_build/codegen"]
+# Runtime (dynamic) routing: a `DynResolver` value built from a route set at
+# runtime, resolving identically to the static codegen path by walking the same
+# shared trie. Pulls in `routerama_build` (the proc-macro-free `trie` IR only)
+# and `smallvec`.
+dynamic = ["dep:routerama_build", "dep:smallvec"]
+
+[dependencies]
+routerama_build = { workspace = true, optional = true }
+routerama_macros = { workspace = true, optional = true }
+smallvec = { workspace = true, optional = true }
+
+[dev-dependencies]
+actix-router = { workspace = true }
+bolero = { workspace = true, features = ["std"] }
+# `std` transitively enables `bolero-engine/any`, which is required
+# because bolero-libfuzzer references `bolero_engine::any::run` but does
+# not itself activate that feature on `bolero-engine`.
+criterion = { workspace = true }
+http_path_template = { workspace = true }
+matchit = { workspace = true }
+mutants = { workspace = true }
+path-tree = { workspace = true }
+regex = { workspace = true, features = ["std", "perf"] }
+route-recognizer = { workspace = true }
+routefinder = { workspace = true }
+
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "criterion_routers"
+harness = false
+
+[[bench]]
+name = "gungraun_routers"
+harness = false
+
+[[example]]
+name = "routing"
+required-features = ["macros"]
+
+[[example]]
+name = "dynamic_routing"
+required-features = ["dynamic"]
+
+[[example]]
+name = "hybrid_routing"
+required-features = ["dynamic", "macros"]

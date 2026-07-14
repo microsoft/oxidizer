@@ -18,7 +18,7 @@ argh = "0.1"
 //!   (stacked borrows, tree borrows, strict provenance, many-seeds race
 //!   coverage) using `cargo miri nextest run`.
 //! * **Loom** — model-checked concurrency tests (`tests/loom.rs`).
-//! * **Bolero** — property-based tests (`tests/bolero.rs`).
+//! * **Bolero** — property-based tests (`tests/bolero_plurality.rs`).
 //! * **cargo-careful** — extra UB checks via `cargo careful nextest run`.
 //! * **Doctests** — `cargo test --doc` (neither Miri nor nextest run doctests,
 //!   so they are otherwise unexercised by this suite).
@@ -210,7 +210,7 @@ fn run_bolero(root: &Path, tc: &Toolchains, failures: &mut Vec<String>) {
     // exercises every `bolero::check!()` target using the built-in random
     // generator.  For coverage-guided fuzzing with libfuzzer, use `just bolero`.
     let mut cmd = cargo(root, &tc.nightly);
-    cmd.args(["test", "-p", PACKAGE, "--test", "bolero", "--all-features", "--locked"]);
+    cmd.args(["test", "-p", PACKAGE, "--test", "bolero_plurality", "--all-features", "--locked"]);
 
     run_step("Bolero", cmd, failures);
 }

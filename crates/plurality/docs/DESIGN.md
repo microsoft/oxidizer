@@ -310,7 +310,7 @@ The crate is checked by several complementary tools (see `tests/` and
 - **Loom** (`tests/loom.rs`, `src/atomic.rs`) — exhaustive interleavings of the
   concurrent free path (two `Arc`s on one slot, cross-thread frees, teardown on
   a worker thread, drop-exactly-once).
-- **Bolero** (`tests/bolero.rs`) — property/fuzz coverage.
+- **Bolero** (`tests/bolero_plurality.rs`) — property/fuzz coverage.
 - **Coverage** — line coverage via `cargo +nightly llvm-cov`; genuinely
   unreachable paths (overflow abort, the `splice_chain` helper) are marked
   `#[cfg_attr(coverage_nightly, coverage(off))]`.
