@@ -1,7 +1,7 @@
 <div align="center">
  <img src="./logo.png" alt="Http Path Template Logo" width="96">
 
-# HTTP Path Template
+# Http Path Template
 
 [![crate.io](https://img.shields.io/crates/v/http_path_template.svg)](https://crates.io/crates/http_path_template)
 [![docs.rs](https://docs.rs/http_path_template/badge.svg)](https://docs.rs/http_path_template)

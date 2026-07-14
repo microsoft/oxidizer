@@ -1,0 +1,35 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_helpers"
+description = "Helper types and utilities shared by observed telemetry framework crates."
+version = "0.23.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "helpers", "logging"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_helpers"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+arrayvec = { workspace = true }
+const-hex = { workspace = true, features = ["alloc"] }
+data_privacy = { workspace = true }
+opentelemetry = { workspace = true, features = ["logs"] }
+
+[dev-dependencies]
+observed = { workspace = true }
+observed_testing = { workspace = true }
+tick = { workspace = true }
+
+[lints]
+workspace = true

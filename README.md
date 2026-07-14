@@ -44,6 +44,9 @@ These are the primary crates built out of this repo:
 - [`http_path_template`](./crates/http_path_template/README.md) - Parser for the google.api.http path-template grammar (literals, `*`, `**`, `{field=sub}` variables, `:verb`).
 - [`layered`](./crates/layered/README.md) - A foundational service abstraction for building composable, middleware-driven systems.
 - [`multitude`](./crates/multitude/README.md) - Fast and flexible arena allocator.
+- [`observed`](./crates/observed/README.md) - Structured telemetry events with enrichment, redaction, and per-field routing to OpenTelemetry.
+- [`observed_helpers`](./crates/observed_helpers/README.md) - Helper types and utilities shared by observed telemetry framework crates.
+- [`observed_rt`](./crates/observed_rt/README.md) - Context-propagating task spawner: wraps anyspawn with automatic observed enrichment forwarding.
 - [`ohno`](./crates/ohno/README.md) - High-quality Rust error handling.
 - [`plurality`](./crates/plurality/README.md) - A highly efficient pooling memory allocator.
 - [`recoverable`](./crates/recoverable/README.md) - Recovery information and classification for resilience patterns.

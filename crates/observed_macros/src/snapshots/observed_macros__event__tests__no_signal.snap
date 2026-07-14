@@ -1,0 +1,24 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for NoSignal {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "no.signal",
+            ::core::option::Option::Some(::core::any::TypeId::of::<NoSignal>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

@@ -1,0 +1,53 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_rt"
+description = "Context-propagating task spawner: wraps anyspawn with automatic observed enrichment forwarding."
+version = "0.23.0"
+readme = "README.md"
+keywords = ["observed", "async", "runtime", "context", "telemetry"]
+categories = ["asynchronous"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_rt"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "anyspawn::spawner::Spawner",
+    "observed::sink::core::Sink",
+]
+
+[features]
+tokio = ["anyspawn/tokio"]
+
+[dependencies]
+anyspawn = { workspace = true }
+observed = { workspace = true }
+
+[dev-dependencies]
+anyspawn = { workspace = true, features = ["tokio"] }
+data_privacy = { workspace = true }
+observed = { workspace = true, features = ["test-util"] }
+observed_testing = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-stdout = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
+testing_aids = { workspace = true }
+tick = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "spawner"
+required-features = ["tokio"]

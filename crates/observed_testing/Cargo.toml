@@ -1,0 +1,23 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_testing"
+description = "Test harness for the observed crate family"
+version = "0.0.0"
+publish = false
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+
+[dependencies]
+data_privacy = { workspace = true }
+observed = { workspace = true, features = ["test-util"] }
+tick = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

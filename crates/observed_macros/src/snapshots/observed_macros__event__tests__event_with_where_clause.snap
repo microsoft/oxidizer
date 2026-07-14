@@ -1,0 +1,41 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl<T: 'static> ::observed::Event for BoundedEvent<T>
+    where
+        T: Clone,
+    {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "bounded.event",
+            ::core::option::Option::Some(::core::any::TypeId::of::<BoundedEvent<T>>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "bounded.event",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "value",
+                    ::core::option::Option::Some(LogFieldEntry::new("value")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.value.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

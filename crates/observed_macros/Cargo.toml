@@ -1,0 +1,37 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed_macros"
+description = "Procedural macros for the observed crate. You should not add this as a direct dependency; use the re-exports from observed."
+version = "0.23.0"
+readme = "README.md"
+keywords = ["observed", "proc-macro", "macros", "telemetry", "events"]
+categories = ["development-tools::procedural-macro-helpers"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_macros"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true, features = ["full", "parsing", "derive", "extra-traits", "printing", "clone-impls", "proc-macro"] }
+
+[dev-dependencies]
+insta = { workspace = true }
+prettyplease = { workspace = true }
+
+[lints]
+workspace = true

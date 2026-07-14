@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::{env, process, thread};
 
+mod futures;
 mod io;
 mod log;
 mod log_capture;
@@ -17,6 +18,7 @@ mod macros;
 mod metrics;
 mod yielding;
 
+pub use futures::*;
 pub use io::*;
 pub use log::*;
 pub use log_capture::*;

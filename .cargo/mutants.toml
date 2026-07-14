@@ -2,7 +2,10 @@
 # Licensed under the MIT License.
 
 examine_globs = ["crates/**"]
-exclude_globs = ["crates/testing_aids/**"]
+# observed_testing is a publish=false test harness; its tests still run (it stays in
+# the mutants group) to validate mutations in its sibling observed crates, but its
+# own code is never mutated.
+exclude_globs = ["crates/testing_aids/**", "crates/observed_testing/**"]
 all_features = true
 cap_lints = true
 profile = "mutants"

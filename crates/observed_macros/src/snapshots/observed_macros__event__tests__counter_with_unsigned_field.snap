@@ -1,0 +1,42 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for BytesReceived {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "bytes.received",
+            ::core::option::Option::Some(::core::any::TypeId::of::<BytesReceived>()),
+            ::core::option::Option::None,
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "bytes",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "bytes",
+                            ::observed::metadata::MetricDescription::new(
+                                "bytes.received.total",
+                                ::observed::metadata::InstrumentKind::Counter,
+                                "",
+                                "By",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.bytes.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
