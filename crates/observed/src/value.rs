@@ -133,7 +133,7 @@ impl Value {
     }
 
     /// Returns the value as an `f64` if it is numeric. Returns `None` for
-    /// non-numeric types (strings, bools, arrays).
+    /// non-numeric types (strings, booleans, arrays).
     #[must_use]
     pub fn to_number(&self) -> Option<f64> {
         match &self.0 {

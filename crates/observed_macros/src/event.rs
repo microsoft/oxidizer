@@ -233,7 +233,7 @@ enum IntegerSignedness {
 /// Returns the signedness of a primitive integer type, matched syntactically on
 /// the last path segment (so `u64`, `std::primitive::u64` are recognized, but a
 /// type aliased to an integer is not). Returns `None` for non-integer types
-/// (e.g. `f64`) or unrecognized paths. `Option<T>`, group, and paren wrappers
+/// (e.g. `f64`) or unrecognized paths. `Option<T>`, group, and parenthesis wrappers
 /// are transparent.
 fn integer_signedness(ty: &syn::Type) -> Option<IntegerSignedness> {
     let ty = option_inner_type(ty).unwrap_or(ty);
@@ -271,7 +271,7 @@ fn ident_or_str<T>(expr: &Expr, parse: fn(&str) -> darling::Result<T>) -> darlin
 }
 
 /// Converts a `darling` parse error into a `syn` error spanned on the attribute,
-/// preserving `darling`'s message so it surfaces through the derive's `Result`.
+/// preserving `darling`'s message so it surfaces through the `Result` returned by the derive.
 fn to_syn(err: &darling::Error, attr: &syn::Attribute) -> Error {
     Error::new_spanned(attr, err.to_string())
 }

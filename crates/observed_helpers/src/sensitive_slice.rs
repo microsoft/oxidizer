@@ -66,10 +66,10 @@ pub struct SensitiveSlice<'a, const N: usize = 5, const D: char = ','> {
 
 impl<'a, const N: usize, const D: char> SensitiveSlice<'a, N, D> {
     /// Collects items from any iterator of references to [`RedactedDisplay`]
-    /// implementors.
+    /// implementers.
     ///
     /// At most `N` items are stored inline. Whether there were additional
-    /// items is recorded so overflow can be signalled during formatting.
+    /// items is recorded so overflow can be signaled during formatting.
     pub fn new<I, T>(iter: I) -> Self
     where
         I: IntoIterator<Item = &'a T>,

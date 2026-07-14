@@ -419,7 +419,7 @@ mod tests {
 
     /// Children with divergent chains (one populated via `.enrich(&child, …)`,
     /// the other left empty) round-trip without one clobbering the other -
-    /// the historical FIXME at `Sink::transfer_context` prior to the
+    /// the historical bug at `Sink::transfer_context` prior to the
     /// slot-identity refactor.
     #[test]
     fn composite_transfer_preserves_divergent_children() {
@@ -715,7 +715,7 @@ mod tests {
     }
 
     /// Stacking two `Transfer::apply` calls on the same slot unwinds
-    /// in LIFO order - inner guard restores to the outer's captured head,
+    /// in LIFO order - inner guard restores to the head captured by the outer guard,
     /// outer guard restores to the original (empty) state.
     #[test]
     fn nested_apply_context_transfer_unwinds_lifo() {
@@ -943,7 +943,7 @@ mod tests {
     }
 
     /// Two children, each enriched independently in nested scopes -
-    /// neither pushes leak into the other's chain.
+    /// neither pushes leak into the other chain.
     #[test]
     fn enrich_each_child_independently_no_crosstalk() {
         static A: SinkId = SinkId::new("ctx_test_indep_a");

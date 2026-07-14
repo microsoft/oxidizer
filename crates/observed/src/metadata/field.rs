@@ -44,7 +44,7 @@ impl MetricFieldEntry {
         Self { key, instrument: None }
     }
 
-    /// Creates an instrument entry - the field carries this metric's value.
+    /// Creates an instrument entry - the field carries this metric value.
     #[must_use]
     pub const fn instrument(key: &'static str, description: MetricDescription) -> Self {
         Self {

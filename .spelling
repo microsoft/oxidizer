@@ -174,6 +174,7 @@ Tunable
 TypeSpec
 UAF
 UB
+UCUM
 UDEPS
 UFCS
 URI
@@ -316,6 +317,7 @@ e.g.
 elidable
 emplace
 end_offset
+enrichments
 entry_offset
 enum
 enums
@@ -324,6 +326,7 @@ evaluator
 ffi
 fhl-scus4-app-win
 fhl-scus4-app-win2
+fieldless
 filesystem
 fn
 foldhash
@@ -443,6 +446,7 @@ parsers
 passthrough
 performant
 pessimizes
+pluggable
 pointee
 polyfill
 pre-approved
@@ -455,6 +459,8 @@ preallocation
 precompute
 precomputed
 prefetch
+prefilter
+prefiltering
 preloaded
 proc
 profiler
@@ -513,11 +519,15 @@ serializable
 setsockopt
 sharable
 shareable
+signedness
 skimmable
 smallvec
+snapshotted
+snapshotting
 spawner
 spawners
 sret
+stackable
 startup
 stderr
 stdlib
@@ -586,6 +596,7 @@ unregisters
 unresolvable
 unrounded
 unsized
+untargeted
 untrusted
 unyielded
 v4

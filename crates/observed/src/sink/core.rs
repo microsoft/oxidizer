@@ -84,7 +84,7 @@ impl Sink {
     /// For a sink that ignores untargeted entries (the library-isolation
     /// pattern), use [`Sink::new_isolated`].
     ///
-    /// This is the foundational primitive: supply the [`EventProcessor`]s that
+    /// This is the fundamental primitive: supply the [`EventProcessor`]s that
     /// the sink fans each event out to.
     #[must_use]
     pub fn new(id: impl Into<SinkId>, processors: Vec<Arc<dyn EventProcessor>>, clock: impl AsRef<SimpleClock>) -> Self {
@@ -135,7 +135,7 @@ impl Sink {
     ///
     /// # Flush
     ///
-    /// Calling [`Sink::flush`] on the composite recurses into every child.
+    /// Calling [`Sink::flush`] on the composite propagates to every child.
     ///
     /// # Enrichment
     ///
