@@ -1862,6 +1862,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "http_path_template"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "gungraun",
+ "mutants",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

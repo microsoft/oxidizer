@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Duration;
 
 use data_privacy::RedactionEngine;
@@ -19,7 +20,7 @@ use crate::handlers::{Dispatch, DispatchMode};
 use crate::options::{ClientOptions, ConnectionKeepAlive, ConnectionPoolOptions, Http2Options, PoolIndex, RequestFilter};
 use crate::pipeline::{CustomPipelineFactory, Pipeline, PipelineBuilder, PipelineContext, StandardRequestPipeline};
 use crate::resilience::HttpResilienceContext;
-use crate::telemetry::{Metering, client_scope};
+use crate::telemetry::Metering;
 use crate::tls::TlsOptions;
 use crate::{BaseUri, RequestHandler};
 
@@ -56,7 +57,11 @@ impl HttpClientBuilder {
         Self {
             options: ClientOptions::default(),
             pipeline_builder: PipelineBuilder::default(),
-            metering: Metering::global(client_scope(transport.runtime().clone(), transport.name().clone())),
+            metering: Metering::new(
+                transport.runtime().clone(),
+                transport.name().clone(),
+                Cow::Borrowed(DEFAULT_HTTP_CLIENT_NAME),
+            ),
             transport,
             resilience_context: HttpResilienceContext::new(&clock).name(DEFAULT_HTTP_CLIENT_NAME).use_logs(),
         }
@@ -67,6 +72,8 @@ impl HttpClientBuilder {
     /// The name is used in logging and metrics to identify the HTTP client instance. The name should
     /// follow the `snake_case` convention. By default, the client is named "`http_client`".
     pub fn name(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        let name = name.into();
+        self.metering = self.metering.with_client_name(name.clone());
         self.resilience_context = self.resilience_context.name(name);
         self
     }
@@ -171,7 +178,9 @@ impl HttpClientBuilder {
     /// fn configure_builder(mut builder: HttpClientBuilder) -> HttpClientBuilder {
     ///     builder.custom_pipeline(move |dispatch, ctx| {
     ///         let stack = (
-    ///             Logging::layer(ctx.clock(), ctx.redaction_engine()),
+    ///             Logging::layer()
+    ///                 .redaction_engine(ctx.redaction_engine())
+    ///                 .clock(ctx.clock()),
     ///             HttpRetry::layer("my_retry", ctx.resilience_context())
     ///                 .http_configure_defaults()
     ///                 .max_retry_attempts(1),
@@ -231,6 +240,10 @@ impl HttpClientBuilder {
     /// default, the client uses the global meter provider; use this method to
     /// override it for this client instance.
     ///
+    /// The provider is retained and its scoped meter is materialized when the
+    /// client is [built][Self::build], so a client [`name`][Self::name] set
+    /// either before or after this call is reflected in the recorded metrics.
+    ///
     /// # Performance
     ///
     /// For thread-isolated runtimes, prefer a per-thread meter provider to avoid
@@ -238,16 +251,11 @@ impl HttpClientBuilder {
     ///
     /// [`MeterProvider`]: https://docs.rs/opentelemetry/latest/opentelemetry/metrics/trait.MeterProvider.html
     #[cfg_attr(test, mutants::skip)] // FIXME: mutants remove resilience context and other fields, which we can't really assert on
-    pub fn meter_provider(self, meter_provider: &dyn MeterProvider) -> Self {
-        // Update the metering at all relevant places
-        Self {
-            metering: Metering::custom(
-                meter_provider,
-                client_scope(self.transport.runtime().clone(), self.transport.name().clone()),
-            ),
-            resilience_context: self.resilience_context.use_metrics(meter_provider),
-            ..self
-        }
+    pub fn meter_provider<P: MeterProvider + Send + Sync + 'static>(mut self, meter_provider: P) -> Self {
+        // Update the metering at all relevant places.
+        self.resilience_context = self.resilience_context.use_metrics(&meter_provider);
+        self.metering = self.metering.with_provider(Arc::new(meter_provider));
+        self
     }
 
     /// Configures the standard pipeline with custom settings.
@@ -495,7 +503,6 @@ mod tests {
 
     use crate::fake::FakeDeps;
     use crate::options::{ConnectionIdleTimeout, ConnectionPoolOptions, Http2Options};
-    use crate::telemetry::Metering;
     use crate::{HttpClient, HttpClientBuilder};
 
     static_assertions::assert_impl_all!(HttpClientBuilder: Send, Sync, Clone);
@@ -731,9 +738,9 @@ mod tests {
         let provider = opentelemetry_sdk::metrics::SdkMeterProvider::default();
 
         let builder = HttpClient::builder_fake(StatusCode::OK, FakeDeps::default());
-        assert!(matches!(builder.metering, Metering::Global(_)));
+        assert!(!builder.metering.has_custom_provider());
 
-        let builder = builder.meter_provider(&provider);
-        assert!(matches!(builder.metering, Metering::Custom(_)));
+        let builder = builder.meter_provider(provider);
+        assert!(builder.metering.has_custom_provider());
     }
 }

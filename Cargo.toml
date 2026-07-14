@@ -72,6 +72,7 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.7.0" }
+http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.1.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }

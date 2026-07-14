@@ -419,6 +419,7 @@ mutator
 mutator's
 mutators
 mutex
+namespace
 namespaced
 natively
 newtype
@@ -634,3 +635,5 @@ rc
 destructure
 SIMD
 Callgrind
+matcher
+AST

@@ -16,14 +16,23 @@ use opentelemetry_semantic_conventions::trace::{
     URL_SCHEME, URL_TEMPLATE,
 };
 use seatbelt::RecoveryInfo;
-use tick::Clock;
+use tick::SimpleClock;
 
 use crate::error_labels::{LABEL_ABANDONED, collect_error_labels};
 use crate::telemetry::{
-    Metering, TelemetryAttributes, base_scope, http_method_name, network_protocol_name, network_protocol_version, server_port,
-    url_scheme_or,
+    TelemetryAttributes, base_scope, http_method_name, network_protocol_name, network_protocol_version, server_port, url_scheme_or,
 };
 use crate::{HttpError, HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
+
+/// Instrument name used when [`MetricsLayer::report_total_duration`] is
+/// enabled.
+///
+/// This is a **proprietary Oxidizer metric**, not part of the official
+/// OpenTelemetry HTTP semantic conventions. Oxidizer defines it inside the
+/// OpenTelemetry-owned `http.client.*` namespace to distinguish the total
+/// request duration (including all retries and hedged attempts) from the
+/// per-attempt duration.
+const HTTP_CLIENT_REQUEST_TOTAL_DURATION: &str = "http.client.request.total_duration";
 
 type CallbackType = Arc<dyn Fn(Duration, &Result<HttpResponse>, &[KeyValue]) + Send + Sync>;
 type RequestEnricherFn = Arc<dyn Fn(&mut TelemetryAttributes, &HttpRequest) + Send + Sync>;
@@ -71,10 +80,15 @@ impl Debug for ResponseEnricher {
 ///
 /// * **Meter name**: `fetch`
 /// * **Duration**: [`http.client.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpclientrequestduration) - How long requests take in seconds
+///
+/// When [`MetricsLayer::report_total_duration`] is enabled, the histogram is
+/// recorded under the name `http.client.request.total_duration` instead,
+/// distinguishing measurements that cover an entire logical request (including
+/// retries and hedged attempts) from per-attempt measurements.
 #[derive(Debug)]
 pub struct Metrics<T> {
     inner: T,
-    clock: Clock,
+    clock: SimpleClock,
     request_duration: Histogram<f64>,
     on_record: Option<OnRecordCallback>,
     enrich_from_request: Option<RequestEnricher>,
@@ -89,14 +103,27 @@ pub struct Metrics<T> {
 /// instrument the histogram themselves.
 #[derive(Debug)]
 pub struct MetricsLayer {
-    clock: Clock,
+    clock: Option<SimpleClock>,
     meter: Option<Meter>,
+    report_total_duration: bool,
     on_record: Option<OnRecordCallback>,
     enrich_from_request: Option<RequestEnricher>,
     enrich_from_response: Option<ResponseEnricher>,
 }
 
 impl MetricsLayer {
+    /// Sets the clock used to measure request duration.
+    ///
+    /// When no clock is configured, a system clock ([`SimpleClock::new_system`])
+    /// is used. Supplying a controlled clock (for example
+    /// [`SimpleClock::new_frozen`]) is primarily useful for deterministic timing
+    /// in tests.
+    #[must_use]
+    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
+        self.clock = Some(clock.into());
+        self
+    }
+
     /// Sets the [`Meter`] used to create the request-duration histogram when the
     /// layer is built.
     ///
@@ -114,7 +141,7 @@ impl MetricsLayer {
     /// When no meter is configured, the global meter provider is used.
     #[must_use]
     pub fn meter_provider(mut self, meter_provider: &dyn MeterProvider) -> Self {
-        self.meter = Some(Metering::custom(meter_provider, base_scope()).into());
+        self.meter = Some(meter_provider.meter_with_scope(base_scope()));
         self
     }
 
@@ -155,6 +182,22 @@ impl MetricsLayer {
         self.enrich_from_response = Some(ResponseEnricher(Arc::new(enricher)));
         self
     }
+
+    /// Toggles whether the request duration histogram is recorded under the
+    /// alternative `http.client.request.total_duration` instrument name.
+    ///
+    /// When enabled, the layer publishes its measurements to a histogram named
+    /// `http.client.request.total_duration` instead of the default
+    /// [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]. This is
+    /// intended for layers that measure the entire request/response cycle
+    /// (including retries and hedged attempts), so that downstream consumers can
+    /// distinguish total and per-attempt durations without attribute
+    /// disambiguation.
+    #[must_use]
+    pub fn report_total_duration(mut self, enabled: bool) -> Self {
+        self.report_total_duration = enabled;
+        self
+    }
 }
 
 impl<S> Layer<S> for MetricsLayer {
@@ -164,11 +207,14 @@ impl<S> Layer<S> for MetricsLayer {
     ///
     /// The resulting handler records request metrics against the configured meter.
     fn layer(&self, inner: S) -> Self::Service {
-        let meter = self.meter.clone().unwrap_or_else(|| Metering::global(base_scope()).into());
+        let meter = self
+            .meter
+            .clone()
+            .unwrap_or_else(|| opentelemetry::global::meter_with_scope(base_scope()));
         Metrics {
             inner,
-            clock: self.clock.clone(),
-            request_duration: build_request_duration(&meter),
+            clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),
+            request_duration: build_request_duration(&meter, self.report_total_duration),
             on_record: self.on_record.clone(),
             enrich_from_request: self.enrich_from_request.clone(),
             enrich_from_response: self.enrich_from_response.clone(),
@@ -177,16 +223,20 @@ impl<S> Layer<S> for MetricsLayer {
 }
 
 impl Metrics<()> {
-    /// Creates a [`Layer`] that records request metrics using the given clock.
+    /// Creates a [`Layer`] that records request metrics.
     ///
     /// By default the global meter provider is used to create the request-duration
-    /// histogram when the layer is built. Use [`MetricsLayer::meter`] or
-    /// [`MetricsLayer::meter_provider`] to record metrics against a custom meter.
+    /// histogram when the layer is built, and timing uses a system clock
+    /// ([`SimpleClock::new_system`]). Use [`MetricsLayer::meter`] or
+    /// [`MetricsLayer::meter_provider`] to record metrics against a custom meter,
+    /// and [`MetricsLayer::clock`] to supply a custom clock (primarily useful for
+    /// deterministic timing in tests).
     #[must_use]
-    pub fn layer(clock: &Clock) -> MetricsLayer {
+    pub fn layer() -> MetricsLayer {
         MetricsLayer {
-            clock: clock.clone(),
+            clock: None,
             meter: None,
+            report_total_duration: false,
             on_record: None,
             enrich_from_request: None,
             enrich_from_response: None,
@@ -195,10 +245,24 @@ impl Metrics<()> {
 }
 
 /// Builds the request-duration histogram recorded by [`Metrics`].
-fn build_request_duration(meter: &Meter) -> Histogram<f64> {
+///
+/// When `report_total_duration` is `true`, the histogram is registered under
+/// the `http.client.request.total_duration` instrument name; otherwise it uses
+/// the standard [`http.client.request.duration`][HTTP_CLIENT_REQUEST_DURATION]
+/// name.
+fn build_request_duration(meter: &Meter, report_total_duration: bool) -> Histogram<f64> {
+    let (name, description) = if report_total_duration {
+        (
+            HTTP_CLIENT_REQUEST_TOTAL_DURATION,
+            "Total duration of HTTP client requests, including all retries and hedged attempts.",
+        )
+    } else {
+        (HTTP_CLIENT_REQUEST_DURATION, "Duration of HTTP client requests.")
+    };
+
     meter
-        .f64_histogram(HTTP_CLIENT_REQUEST_DURATION)
-        .with_description("Duration of HTTP client requests.")
+        .f64_histogram(name)
+        .with_description(description)
         .with_unit("s")
         .with_boundaries(vec![
             0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
@@ -337,7 +401,7 @@ mod tests {
 
     fn test_layer() -> MetricsLayer {
         let provider = SdkMeterProvider::builder().build();
-        Metrics::layer(&Clock::new_frozen()).meter_provider(&provider)
+        Metrics::layer().meter_provider(&provider).clock(SimpleClock::new_frozen())
     }
 
     fn test_request() -> HttpRequest {
@@ -593,5 +657,83 @@ mod tests {
 
         let attrs = recorded_attrs.lock().unwrap();
         insta::assert_debug_snapshot!(sorted_attrs(&attrs));
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn default_clock_is_used_when_unset() {
+        // Not calling `.clock(..)` must fall back to a system clock and still
+        // record without panicking.
+        let provider = SdkMeterProvider::builder().build();
+        let handler = Metrics::layer().meter_provider(&provider).layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn report_total_duration_uses_alternative_instrument_name() {
+        use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+        use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+
+        let handler = Metrics::layer()
+            .meter_provider(&provider)
+            .clock(SimpleClock::new_frozen())
+            .report_total_duration(true)
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        provider.force_flush().unwrap();
+        let metrics = exporter.get_finished_metrics().unwrap();
+
+        let names: Vec<&str> = metrics
+            .iter()
+            .flat_map(ResourceMetrics::scope_metrics)
+            .flat_map(ScopeMetrics::metrics)
+            .map(opentelemetry_sdk::metrics::data::Metric::name)
+            .collect();
+
+        assert!(
+            names.contains(&"http.client.request.total_duration"),
+            "expected total_duration instrument, found: {names:?}"
+        );
+        assert!(
+            !names.contains(&"http.client.request.duration"),
+            "default instrument should not be present when toggle is on, found: {names:?}"
+        );
+    }
+
+    #[cfg_attr(miri, ignore)] // SdkMeterProvider uses operations unsupported by Miri.
+    #[test]
+    fn report_total_duration_defaults_to_standard_instrument_name() {
+        use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+        use opentelemetry_sdk::metrics::data::{ResourceMetrics, ScopeMetrics};
+
+        let exporter = InMemoryMetricExporter::default();
+        let provider = SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build();
+
+        let handler = Metrics::layer()
+            .meter_provider(&provider)
+            .clock(SimpleClock::new_frozen())
+            .layer(FakeHandler::from(StatusCode::OK));
+
+        block_on(Service::execute(&handler, test_request())).unwrap();
+
+        provider.force_flush().unwrap();
+        let metrics = exporter.get_finished_metrics().unwrap();
+
+        let names: Vec<&str> = metrics
+            .iter()
+            .flat_map(ResourceMetrics::scope_metrics)
+            .flat_map(ScopeMetrics::metrics)
+            .map(opentelemetry_sdk::metrics::data::Metric::name)
+            .collect();
+
+        assert!(names.contains(&"http.client.request.duration"), "found: {names:?}");
+        assert!(!names.contains(&"http.client.request.total_duration"), "found: {names:?}");
     }
 }
