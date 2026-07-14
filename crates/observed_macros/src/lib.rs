@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+
 //! Procedural macros for the `observed` crate.
 //!
 //! This crate provides:

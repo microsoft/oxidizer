@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+
 //! Context-propagating task spawner for [`observed`].
 //!
 //! Wraps [`anyspawn::Spawner`] so that every spawned task (async or blocking)
@@ -81,6 +83,7 @@ pub fn tokio(sink: &observed::Sink) -> anyspawn::Spawner {
         .build()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, not(miri)))] // miri error: can't call foreign function `CreateIoCompletionPort` on OS `windows`
 mod tests {
     use anyspawn::CustomSpawnerBuilder;

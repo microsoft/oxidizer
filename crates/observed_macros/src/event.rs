@@ -828,6 +828,7 @@ fn generate_option_field_visit(field: &FieldDef, inner_ty: &syn::Type, field_des
 }
 
 // miri fails to use insta snapshots: `insta::_macro_support::get_cargo_workspace` leads to
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;

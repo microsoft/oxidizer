@@ -232,6 +232,7 @@ fn entry_ctor(key: &str, redaction: &FieldRedaction, value: &TokenStream, exclud
 
 // miri fails to use insta snapshots: `insta::_macro_support::get_cargo_workspace` leads to
 // `unsupported operation: `open` not available when isolation is enabled`
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
