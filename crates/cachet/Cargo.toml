@@ -175,5 +175,9 @@ required-features = ["memory", "logs"]
 name = "serialization"
 required-features = ["memory", "serialize"]
 
+[[example]]
+name = "encrypt_symcrypt"
+required-features = ["memory", "serialize", "symcrypt"]
+
 [lints]
 workspace = true

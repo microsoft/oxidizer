@@ -10,8 +10,8 @@ use bytesbuf::BytesView;
 use symcrypt::cipher::BlockCipherType;
 use symcrypt::gcm::GcmExpandedKey;
 
-use super::encrypt::{to_contiguous, AeadCipher};
 use super::DecodeOutcome;
+use super::encrypt::{AeadCipher, to_contiguous};
 use crate::Error;
 
 /// Length of the AES-GCM nonce, in bytes. Stored in front of the ciphertext.
