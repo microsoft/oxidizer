@@ -70,7 +70,7 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// use cachet::{AeadCipher, Cache, DecodeOutcome, Error};
     /// use tick::Clock;
     ///

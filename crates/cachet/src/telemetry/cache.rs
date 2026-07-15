@@ -371,7 +371,9 @@ impl CacheTelemetry {
     /// Fires from an `EncryptedTier` on the `get` path, so the thread-local
     /// request ID is set and correlates the failure with the operation that
     /// observed it. Signals a corrupt, truncated, wrong-key, tampered, or
-    /// relocated ciphertext.
+    /// relocated ciphertext. The encrypted tier always sits on the
+    /// post-transform (fallback) side of the hierarchy, so the event is tagged
+    /// `fallback = true` to match the tier's other events.
     #[cfg(feature = "encrypt")]
     pub(crate) fn record_decrypt_failure(&self, cache_name: CacheName) {
         #[cfg(any(feature = "logs", test))]
@@ -384,7 +386,7 @@ impl CacheTelemetry {
             cache_name,
             attributes::EVENT_DECRYPT_FAILED,
             Duration::ZERO,
-            false,
+            true,
         );
     }
 

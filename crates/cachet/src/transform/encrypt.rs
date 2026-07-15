@@ -400,4 +400,21 @@ mod tests {
         assert!(tier.invalidate(&view(b"k")).await.is_err(), "inner invalidate error must propagate");
         assert!(tier.clear().await.is_err(), "inner clear error must propagate");
     }
+
+    #[test]
+    fn to_contiguous_gathers_every_span() {
+        // Single-span: returns the full contents (borrowed).
+        let single = view(b"contiguous");
+        assert_eq!(to_contiguous(&single).as_ref(), b"contiguous");
+
+        // Multi-span: must concatenate ALL spans, not just the first one.
+        let mut multi = BytesView::from(b"first-".to_vec());
+        multi.append(BytesView::from(b"second".to_vec()));
+        assert_ne!(multi.first_slice().len(), multi.len(), "fixture must be multi-span");
+        assert_eq!(
+            to_contiguous(&multi).as_ref(),
+            b"first-second",
+            "to_contiguous must gather every span, not return only the first"
+        );
+    }
 }
