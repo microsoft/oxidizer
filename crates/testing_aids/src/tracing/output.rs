@@ -158,8 +158,8 @@ fn ensure_initialized() {
         // permanently interested in every callsite at every level. This is
         // deliberate and load-bearing on two counts. First, because this
         // always-interested layer is part of the process-global subscriber from the
-        // very first initialization, `tracing-core` can never cache a callsite as
-        // "disabled", which makes both buffer capture and per-test
+        // very first initialization, `tracing-core` can never cache a callsite's
+        // interest as "disabled", which makes both buffer capture and per-test
         // thread-local capture deterministic regardless of test execution order.
         // Second, keeping every callsite enabled forces `tracing` to evaluate event
         // field expressions (e.g. `duration.as_nanos()`) on every emission even when
@@ -179,7 +179,7 @@ fn ensure_initialized() {
 ///
 /// It performs no formatting and produces no output; its sole job is to keep every
 /// `tracing` callsite enabled from process start. This prevents `tracing-core` from
-/// caching any callsite as "disabled" and forces event field expressions to
+/// caching a callsite's interest as "disabled" and forces event field expressions to
 /// be evaluated on every emission, which keeps capture and coverage deterministic
 /// independent of which output sinks are active. See `docs/tracing-tests.md`.
 #[derive(Debug)]
