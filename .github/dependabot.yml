@@ -10,12 +10,20 @@ updates:
   commit-message:
     prefix: "chore: "
   ignore:
-    # ignore minor updates for tokio as they are semver compatible
-    - dependency-name: "tokio"
-      versions: ["1.x"]
-    # ignore patch updates for all dependencies
+    # Ignore all minor and patch updates — security updates are handled separately
+    # by Dependabot security alerts and are not affected by these ignore rules.
+    #
+    # Ideally we would use versioning-strategy: increase-if-necessary to allow
+    # minor bumps that only touch Cargo.lock (respecting Cargo's 0.x semver
+    # conventions). However, Cargo only supports "auto" and "lockfile-only" —
+    # see https://github.com/dependabot/dependabot-core/issues/4009
+    # If that issue is resolved, replace these ignore rules with:
+    #   versioning-strategy: increase-if-necessary
+    #   ignore patch updates only
     - dependency-name: "*"
-      update-types: ["version-update:semver-patch"]
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-patch"
 
 - package-ecosystem: "github-actions"
   directory: "/"
