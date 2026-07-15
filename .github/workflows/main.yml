@@ -217,6 +217,7 @@ jobs:
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       # prep
