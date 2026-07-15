@@ -1,5 +1,12 @@
 # Testing `tracing` Events
 
+> **Prefer `observed` for telemetry.** Emitting telemetry through the `observed`
+> package sidesteps everything described here: its events are not subject to the
+> `tracing-core` process-global callsite-interest cache, so capturing and asserting
+> on them just works with no fallback subscriber, no `#[serial]`, and no
+> per-binary constructor. Reach for raw `tracing` events only when you specifically
+> need them; otherwise use `observed` and skip this guide.
+
 This is the guide for how to test `tracing` output in this repository. It exists
 because `tracing` subscribers and the `tracing-core` callsite-interest cache are
 process-global state. Interacting with them naively causes cross-test pollution
