@@ -325,7 +325,7 @@ mod tests {
 #[cfg(test)]
 mod fetch_and_promote_tests {
     use cachet_tier::MockCache;
-    use testing_aids::LogCapture;
+    use testing_aids::tracing::Capture;
     use tick::Clock;
 
     use super::*;
@@ -347,7 +347,7 @@ mod fetch_and_promote_tests {
     #[test]
     fn fallback_miss_logs_refresh_miss_telemetry() {
         block_on(async {
-            let capture = LogCapture::new();
+            let capture = Capture::new();
             let _guard = tracing::subscriber::set_default(capture.subscriber());
 
             let clock = Clock::new_frozen();

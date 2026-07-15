@@ -274,10 +274,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn latency_emits_log() {
-        use testing_aids::LogCapture;
+        use testing_aids::tracing::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
         let clock = tick::ClockControl::default().auto_advance(Duration::from_millis(200)).to_clock();

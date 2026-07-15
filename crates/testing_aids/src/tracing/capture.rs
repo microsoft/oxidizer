@@ -13,13 +13,13 @@ use tracing_subscriber::layer::SubscriberExt;
 ///
 /// Uses `tracing_subscriber::fmt::MakeWriter` to capture formatted log output
 /// into a shared buffer that can be inspected in tests. Pair with
-/// [`tracing::subscriber::set_default`] to scope capture to the current thread.
+/// [`set_default`](::tracing::subscriber::set_default) to scope capture to the current thread.
 #[derive(Debug, Clone, Default)]
-pub struct LogCapture {
+pub struct Capture {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
 }
 
-impl LogCapture {
+impl Capture {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -52,28 +52,28 @@ impl LogCapture {
 
     /// Creates a `tracing_subscriber` that writes to this capture buffer.
     ///
-    /// Use with [`tracing::subscriber::set_default`] to scope capture to the
+    /// Use with [`set_default`](::tracing::subscriber::set_default) to scope capture to the
     /// current thread so parallel tests don't interfere with each other.
     ///
     /// # Panics
     ///
     /// Panics if the silent always-interested fallback subscriber has not been
     /// installed by a `#[ctor::ctor]` constructor calling
-    /// [`initialize_logging`](crate::initialize_logging). Thread-local capture only
+    /// [`initialize`](super::initialize). Thread-local capture only
     /// composes deterministically when that fallback is present from process start.
     /// See `docs/tracing-tests.md`.
     #[must_use]
-    pub fn subscriber(&self) -> impl tracing::Subscriber {
-        crate::log::assert_initialized();
+    pub fn subscriber(&self) -> impl ::tracing::Subscriber {
+        super::output::assert_initialized();
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
     }
 }
 
-impl<'a> MakeWriter<'a> for LogCapture {
-    type Writer = LogCaptureWriter;
+impl<'a> MakeWriter<'a> for Capture {
+    type Writer = CaptureWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
-        LogCaptureWriter {
+        CaptureWriter {
             buffer: std::sync::Arc::clone(&self.buffer),
         }
     }
@@ -81,11 +81,11 @@ impl<'a> MakeWriter<'a> for LogCapture {
 
 /// Writer that appends to a shared buffer.
 #[derive(Debug)]
-pub struct LogCaptureWriter {
+pub struct CaptureWriter {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
 }
 
-impl Write for LogCaptureWriter {
+impl Write for CaptureWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.buffer.lock().unwrap().extend_from_slice(buf);
         Ok(buf.len())

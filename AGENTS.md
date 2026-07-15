@@ -88,15 +88,15 @@ why we believe the operation can never cause an out of bounds access.
 How to test `tracing` output without cross-test pollution: the process-global
 callsite-interest hazard; the rule that every test binary emitting or inspecting
 `tracing` installs a silent always-interested fallback calling
-`testing_aids::initialize_logging()` - via a `#[cfg(test)] #[ctor::ctor]` at the
+`testing_aids::tracing::initialize()` - via a `#[cfg(test)] #[ctor::ctor]` at the
 crate root for the unit-test binary, and via an ungated file-level `#[ctor::ctor]`
 inside each integration binary, since `cfg(test)` is false there; that the
-`testing_aids` logging helpers (`LogCapture::subscriber()`, `log_to_stdout*`)
+`testing_aids` tracing helpers (`Capture::subscriber()`, `write_to_stdout*`)
 *assert* the fallback was installed and panic if the constructor is missing rather
 than installing lazily; that unit tests may inspect output only through a
-thread-local subscriber (`testing_aids::LogCapture` + `set_default`) and never
+thread-local subscriber (`testing_aids::tracing::Capture` + `set_default`) and never
 touch global state; and that cross-thread/global capture must live in a
-`#[serial]` integration binary using the `testing_aids::log_to_stdout_and_buffer()`
+`#[serial]` integration binary using the `testing_aids::tracing::write_to_stdout_and_buffer()`
 bridge.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;

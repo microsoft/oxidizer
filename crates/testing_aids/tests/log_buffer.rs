@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Regression tests for the `log_to_stdout_and_buffer` capture bridge.
+//! Regression tests for the `write_to_stdout_and_buffer` capture bridge.
 //!
 //! These live in their own integration-test binary and every test is `#[serial]`
 //! because capture is process-global. They verify the load-bearing property of the
@@ -10,20 +10,20 @@
 //! otherwise poison `tracing-core`'s process-global callsite-interest cache).
 
 use serial_test::serial;
-use testing_aids::log_to_stdout_and_buffer;
+use testing_aids::tracing::write_to_stdout_and_buffer;
 
 // The capture bridge asserts the fallback was installed at process start, so install it
 // here. Integration binaries do not run any crate-root `#[cfg(test)]` constructor. See
 // docs/tracing-tests.md.
 #[ctor::ctor(unsafe)]
 fn init_test_tracing() {
-    testing_aids::initialize_logging();
+    testing_aids::tracing::initialize();
 }
 
 #[test]
 #[serial]
 fn captures_emitted_lines() {
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
     tracing::info!(marker = "hello_capture", "an event");
     let lines = guard.into_inner();
 
@@ -37,7 +37,7 @@ fn captures_emitted_lines() {
 #[serial]
 fn capture_is_empty_after_guard_detaches() {
     // First capture scope: emit something.
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
     tracing::info!(marker = "first_scope", "an event");
     let _ = guard.into_inner();
 
@@ -45,7 +45,7 @@ fn capture_is_empty_after_guard_detaches() {
     tracing::info!(marker = "between_scopes", "an event");
 
     // Second capture scope must only see its own events.
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
     tracing::info!(marker = "second_scope", "an event");
     let lines = guard.into_inner();
 
@@ -66,7 +66,7 @@ fn capture_works_after_prior_debug_emission_without_subscriber() {
     // must prevent that.
     poison_attempt();
 
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
     poison_attempt();
     let lines = guard.into_inner();
 
@@ -80,7 +80,7 @@ fn capture_works_after_prior_debug_emission_without_subscriber() {
 #[test]
 #[serial]
 fn snapshot_reads_without_detaching() {
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
 
     tracing::info!(marker = "first_line", "an event");
     let first = guard.snapshot();

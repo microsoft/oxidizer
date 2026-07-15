@@ -288,5 +288,5 @@ pub(crate) type TelemetryString = std::borrow::Cow<'static, str>;
 #[cfg(test)]
 #[ctor::ctor(unsafe)]
 fn init_test_tracing() {
-    testing_aids::initialize_logging();
+    testing_aids::tracing::initialize();
 }

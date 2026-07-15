@@ -180,10 +180,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_log_with_hedging_delay() {
-        use testing_aids::LogCapture;
+        use testing_aids::tracing::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _default = log_capture.subscriber().set_default();
 
         let context = crate::ResilienceContext::<String, String>::new(Clock::new_frozen())

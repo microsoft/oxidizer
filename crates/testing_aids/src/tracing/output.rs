@@ -6,8 +6,8 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
-use tracing::Level;
-use tracing::level_filters::LevelFilter;
+use ::tracing::Level;
+use ::tracing::level_filters::LevelFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -21,14 +21,14 @@ use crate::is_mutation_testing;
 ///
 /// Logging is global state and will last until end of process - once you call this, all logging
 /// statements in the process will be captured and be emitted to the standard output. This
-/// is compatible with `log_to_stdout_and_file()`, as well - you can log to both standard
+/// is compatible with `write_to_stdout_and_file()`, as well - you can log to both standard
 /// output and file at the same time and upgrade from one to the other at will.
 ///
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
 /// Logging is disabled under mutation testing - this becomes a no-op.
-pub fn log_to_stdout() {
+pub fn write_to_stdout() {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.
         return;
@@ -46,17 +46,17 @@ pub fn log_to_stdout() {
 ///
 /// Logging is global state and will last until end of process - once you call this, all logging
 /// statements in the process will be captured and emitted to the standard output,
-/// as well as logged to file. After the returned `LogFileGuard` is dropped, future log entries
+/// as well as logged to file. After the returned `FileGuard` is dropped, future log entries
 /// will only go to the standard output.
 ///
 /// All log entries will be written synchronously to ensure no data gets lost in case of
 /// test failure or other anomaly.
 ///
 /// Logging is disabled under mutation testing - this becomes a no-op.
-pub fn log_to_stdout_and_file(file_name: &str) -> LogFileGuard {
+pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.
-        return LogFileGuard::fake();
+        return FileGuard::fake();
     }
 
     assert_initialized();
@@ -118,14 +118,14 @@ pub fn log_file(file_name: &str) -> String {
 /// the `DefaultGuard` restores the silent global fallback when dropped, and no
 /// callsite is ever poisoned into the "disabled" state. See
 /// `docs/tracing-tests.md`.
-pub fn initialize_logging() {
-    ensure_logging_initialized();
+pub fn initialize() {
+    ensure_initialized();
 }
 
-fn ensure_logging_initialized() {
-    LOGGING_INITIALIZER.call_once(|| {
+fn ensure_initialized() {
+    INITIALIZER.call_once(|| {
         // Stdout output is gated by `STDOUT_ENABLED` (off by default) so the
-        // fallback subscriber is silent until a `log_to_stdout*` helper opts in.
+        // fallback subscriber is silent until a `write_to_stdout*` helper opts in.
         let terminal_layer = tracing_subscriber::fmt::layer()
             .with_writer(StdoutWriterFactory)
             .with_filter(LevelFilter::from_level(Level::INFO));
@@ -153,12 +153,12 @@ fn ensure_logging_initialized() {
     });
 }
 
-static LOGGING_INITIALIZER: Once = Once::new();
+static INITIALIZER: Once = Once::new();
 
-/// Asserts that [`initialize_logging`] has already installed the silent always-interested
+/// Asserts that [`initialize`] has already installed the silent always-interested
 /// fallback subscriber.
 ///
-/// The logging helpers require that fallback to be present from process start - installed
+/// The tracing helpers require that fallback to be present from process start - installed
 /// in a `#[ctor::ctor]` constructor that runs before any test - so that no `tracing`
 /// callsite can be poisoned into the "disabled" state before capture begins. Relying on a
 /// helper to install it lazily would be too late: an earlier emission on a subscriber-less
@@ -167,18 +167,18 @@ static LOGGING_INITIALIZER: Once = Once::new();
 /// # Panics
 ///
 /// Panics if the fallback was never installed, which means the test binary is missing its
-/// `#[ctor::ctor]` constructor calling [`initialize_logging`].
+/// `#[ctor::ctor]` constructor calling [`initialize`].
 pub(crate) fn assert_initialized() {
     assert!(
-        LOGGING_INITIALIZER.is_completed(),
-        "testing_aids logging was used before initialize_logging() ran; every test binary that \
+        INITIALIZER.is_completed(),
+        "testing_aids tracing was used before initialize() ran; every test binary that \
          emits or inspects tracing must install the fallback from a `#[ctor::ctor]` constructor \
-         calling `testing_aids::initialize_logging()`. See docs/tracing-tests.md."
+         calling `testing_aids::tracing::initialize()`. See docs/tracing-tests.md."
     );
 }
 
 /// Whether the terminal (stdout) sink of the global subscriber is active. Off by
-/// default so [`initialize_logging`] is silent; turned on by the `log_to_stdout*`
+/// default so [`initialize`] is silent; turned on by the `write_to_stdout*`
 /// helpers.
 static STDOUT_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -234,17 +234,17 @@ impl Write for StdoutWriter {
 /// in an integration-test binary that captures `tracing` output MUST therefore be
 /// annotated `#[serial]` so the tests are mutually exclusive.
 ///
-/// Retrieve the captured lines with [`BufferLogGuard::into_inner`].
+/// Retrieve the captured lines with [`BufferGuard::into_inner`].
 ///
 /// # Panics
 ///
 /// Panics if a buffer is already active (i.e. two capturing tests ran
 /// concurrently because one of them was missing `#[serial]`), or if the fallback
 /// subscriber was never installed (the binary is missing its `#[ctor::ctor]`
-/// constructor calling [`initialize_logging`]).
+/// constructor calling [`initialize`]).
 ///
 /// [`docs/tracing-tests.md`]: https://github.com/microsoft/oxidizer/blob/main/docs/tracing-tests.md
-pub fn log_to_stdout_and_buffer() -> BufferLogGuard {
+pub fn write_to_stdout_and_buffer() -> BufferGuard {
     assert_initialized();
     STDOUT_ENABLED.store(true, Ordering::Relaxed);
 
@@ -260,14 +260,14 @@ pub fn log_to_stdout_and_buffer() -> BufferLogGuard {
         *slot = Some(Arc::clone(&buffer));
     }
 
-    BufferLogGuard { buffer: Some(buffer) }
+    BufferGuard { buffer: Some(buffer) }
 }
 
-/// The buffer that captured log lines are written to while a [`BufferLogGuard`] is
+/// The buffer that captured log lines are written to while a [`BufferGuard`] is
 /// active. `None` when no capture is in progress.
 static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<u8>>>>> = Mutex::new(None);
 
-/// Scopes an in-memory `tracing` capture started by [`log_to_stdout_and_buffer`].
+/// Scopes an in-memory `tracing` capture started by [`write_to_stdout_and_buffer`].
 ///
 /// While this guard is alive, every emitted log line is appended to an in-memory
 /// buffer. Consume the guard with [`into_inner`](Self::into_inner) to detach the
@@ -275,12 +275,12 @@ static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<u8>>>>> = Mutex::new(None);
 /// simply detaches the buffer and discards its contents.
 #[derive(Debug)]
 #[must_use]
-pub struct BufferLogGuard {
+pub struct BufferGuard {
     // `Some` until consumed by `into_inner`; `None` afterwards so `Drop` is a no-op.
     buffer: Option<Arc<Mutex<Vec<u8>>>>,
 }
 
-impl BufferLogGuard {
+impl BufferGuard {
     /// Returns a snapshot of everything logged so far during the guard's lifetime,
     /// one entry per emitted log line, without detaching the capture buffer.
     ///
@@ -321,7 +321,7 @@ impl BufferLogGuard {
     }
 }
 
-impl Drop for BufferLogGuard {
+impl Drop for BufferGuard {
     fn drop(&mut self) {
         if self.buffer.is_some() {
             // Guard dropped without `into_inner`: detach so capture does not leak
@@ -373,12 +373,12 @@ static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 /// Once this scope ends, new log entries will no longer go to a file.
 #[derive(Debug)]
 #[must_use]
-pub struct LogFileGuard {
+pub struct FileGuard {
     // Under mutation testing, we pretend to log but do not actually do so, to speed up the tests.
     fake: bool,
 }
 
-impl LogFileGuard {
+impl FileGuard {
     const fn new() -> Self {
         Self { fake: false }
     }
@@ -388,7 +388,7 @@ impl LogFileGuard {
     }
 }
 
-impl Drop for LogFileGuard {
+impl Drop for FileGuard {
     fn drop(&mut self) {
         if self.fake {
             return;
@@ -401,7 +401,7 @@ impl Drop for LogFileGuard {
     }
 }
 
-fn start_log_file_scope(file_name: &str) -> LogFileGuard {
+fn start_log_file_scope(file_name: &str) -> FileGuard {
     let file = File::create(log_file(file_name)).unwrap();
 
     {
@@ -415,7 +415,7 @@ fn start_log_file_scope(file_name: &str) -> LogFileGuard {
         *log_file = Some(file);
     }
 
-    LogFileGuard::new()
+    FileGuard::new()
 }
 
 #[derive(Debug)]

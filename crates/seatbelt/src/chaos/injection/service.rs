@@ -233,10 +233,10 @@ mod tests {
 
     #[tokio::test]
     async fn injection_emits_log() {
-        use testing_aids::LogCapture;
+        use testing_aids::tracing::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
         let clock = tick::Clock::new_frozen();

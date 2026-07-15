@@ -414,19 +414,19 @@ impl CacheTelemetry {
 mod tests {
     use std::sync::Mutex;
 
-    use testing_aids::LogCapture;
+    use testing_aids::tracing::Capture;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
 
-    fn subscriber(capture: &LogCapture) -> impl tracing::Subscriber {
+    fn subscriber(capture: &Capture) -> impl tracing::Subscriber {
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(capture.clone()).with_ansi(false))
     }
 
     #[cfg_attr(miri, ignore)]
     #[test]
     fn logs_emit_contains_all_fields_and_values() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let telemetry = CacheTelemetry::with_logging();
 
@@ -457,7 +457,7 @@ mod tests {
     fn logs_emit_at_correct_severity_levels() {
         let telemetry = CacheTelemetry::with_logging();
 
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
         futures::executor::block_on(async {
@@ -467,7 +467,7 @@ mod tests {
         });
         capture.assert_contains("ERROR");
 
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
         futures::executor::block_on(async {
@@ -477,7 +477,7 @@ mod tests {
         });
         capture.assert_contains("INFO");
 
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let request_id = next_request_id();
         futures::executor::block_on(async {
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn telemetry_disabled_emits_nothing() {
         let telemetry = CacheTelemetry::new();
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
 
         let request_id = next_request_id();
@@ -507,7 +507,7 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     fn assert_emits(expected: &str, f: impl FnOnce(&CacheTelemetry, RequestId)) {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(subscriber(&capture));
         let telemetry = CacheTelemetry::with_logging();
         let request_id = next_request_id();

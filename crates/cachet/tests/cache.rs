@@ -9,7 +9,7 @@
 // tracing fallback does not run here. Install it directly. See docs/tracing-tests.md.
 #[ctor::ctor(unsafe)]
 fn init_test_tracing() {
-    testing_aids::initialize_logging();
+    testing_aids::tracing::initialize();
 }
 
 use cachet::{Cache, CacheEntry, Error};
@@ -923,7 +923,7 @@ mod service_tests {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -938,7 +938,7 @@ async fn get_or_insert_with_logging_emits_operation_and_events() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn try_get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -953,7 +953,7 @@ async fn try_get_or_insert_with_logging_emits_operation_and_events() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn optionally_get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();

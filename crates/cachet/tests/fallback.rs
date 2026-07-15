@@ -12,7 +12,7 @@
 // tracing fallback does not run here. Install it directly. See docs/tracing-tests.md.
 #[ctor::ctor(unsafe)]
 fn init_test_tracing() {
-    testing_aids::initialize_logging();
+    testing_aids::tracing::initialize();
 }
 
 use std::time::Duration;
@@ -331,7 +331,7 @@ async fn fallback_builder_stampede_protection() {
 #[cfg(feature = "logs")]
 #[tokio::test]
 async fn fallback_builder_enable_logs_emits_logs() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -355,7 +355,7 @@ async fn fallback_builder_enable_logs_emits_logs() {
 #[cfg(feature = "logs")]
 #[tokio::test]
 async fn cache_builder_enable_logs_emits_logs() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();

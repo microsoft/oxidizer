@@ -49,7 +49,7 @@ Where it goes depends on the binary kind:
   #[cfg(test)]
   #[ctor::ctor(unsafe)]
   fn init_test_tracing() {
-      testing_aids::initialize_logging();
+      testing_aids::tracing::initialize();
   }
   ```
 
@@ -62,7 +62,7 @@ Where it goes depends on the binary kind:
   ```rust
   #[ctor::ctor(unsafe)]
   fn init_test_tracing() {
-      testing_aids::initialize_logging();
+      testing_aids::tracing::initialize();
   }
   ```
 
@@ -71,12 +71,12 @@ Where it goes depends on the binary kind:
   no-subscriber code paths) must NOT install the fallback and must own its own
   binary; see `crates/cachet/tests/no_subscriber.rs`.
 
-`initialize_logging()` is idempotent, so multiple callers are harmless.
+`testing_aids::tracing::initialize()` is idempotent, so multiple callers are harmless.
 
-The `testing_aids` logging helpers do not install the fallback lazily: doing so
+The `testing_aids` tracing helpers do not install the fallback lazily: doing so
 would be too late, because an earlier emission on a subscriber-less thread could
-already have poisoned a callsite. Instead they *assert* that `initialize_logging()`
-has already run. `LogCapture::subscriber()` and the `log_to_stdout*` helpers panic
+already have poisoned a callsite. Instead they *assert* that `testing_aids::tracing::initialize()`
+has already run. `Capture::subscriber()` and the `write_to_stdout*` helpers panic
 with a pointer to this guide if the constructor is missing, so a forgotten
 constructor fails loudly and deterministically rather than causing a flaky miss.
 
@@ -95,17 +95,17 @@ constructor fails loudly and deterministically rather than causing a flaky miss.
 
 ## Thread-local capture in unit tests
 
-Use `testing_aids::LogCapture` with `set_default` to scope capture to the current
+Use `testing_aids::tracing::Capture` with `set_default` to scope capture to the current
 thread. This composes safely with the fallback: the capture subscriber shadows the
 fallback on its own thread, and the returned guard restores the fallback on drop.
 
 ```rust
 use tracing_subscriber::util::SubscriberInitExt;
-use testing_aids::LogCapture;
+use testing_aids::tracing::Capture;
 
 #[test]
 fn emits_operation_event() {
-    let capture = LogCapture::new();
+    let capture = Capture::new();
     let _guard = capture.subscriber().set_default();
 
     run_the_logging_operation();
@@ -117,7 +117,7 @@ fn emits_operation_event() {
 ## Global capture in serial integration tests
 
 When capture must observe events from other threads, use the process-global
-`testing_aids::log_to_stdout_and_buffer()` bridge. It tees emitted lines to stdout
+`testing_aids::tracing::write_to_stdout_and_buffer()` bridge. It tees emitted lines to stdout
 and into a buffer, returning a guard; `into_inner()` detaches the buffer and
 returns the captured lines. Capture is process-global, so every test in the binary
 MUST be `#[serial]`.
@@ -130,12 +130,12 @@ For events emitted asynchronously (for example, on a background worker), poll
 
 ```rust
 use serial_test::serial;
-use testing_aids::log_to_stdout_and_buffer;
+use testing_aids::tracing::write_to_stdout_and_buffer;
 
 #[test]
 #[serial]
 fn emits_event_from_background_thread() {
-    let guard = log_to_stdout_and_buffer();
+    let guard = write_to_stdout_and_buffer();
 
     run_the_cross_thread_operation();
 

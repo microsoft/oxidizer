@@ -11,14 +11,15 @@
 // docs/tracing-tests.md.
 #[ctor::ctor(unsafe)]
 fn init_test_tracing() {
-    testing_aids::initialize_logging();
+    testing_aids::tracing::initialize();
 }
 
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
 use serial_test::serial;
-use testing_aids::{TEST_TIMEOUT, log_to_stdout_and_buffer};
+use testing_aids::TEST_TIMEOUT;
+use testing_aids::tracing::write_to_stdout_and_buffer;
 use tick::Clock;
 
 /// Inserting past the configured `max_capacity` of the underlying moka cache
@@ -31,7 +32,7 @@ async fn memory_size_eviction_emits_telemetry() {
     // so a thread-local subscriber (`set_default`) won't see those events. The
     // global capture bridge routes every thread's events into one buffer; this
     // test owns its own test binary, so process-global capture is safe here.
-    let capture = log_to_stdout_and_buffer();
+    let capture = write_to_stdout_and_buffer();
 
     let clock = Clock::new_tokio();
     let cache: Cache<String, i32> = Cache::builder::<String, i32>(clock)

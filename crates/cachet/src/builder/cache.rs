@@ -415,9 +415,9 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
-        use testing_aids::LogCapture;
+        use testing_aids::tracing::Capture;
 
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let clock = Clock::new_frozen();
