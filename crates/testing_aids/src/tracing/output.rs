@@ -142,7 +142,11 @@ fn ensure_initialized() {
         // layer formats an event, so when a sink is off its (relatively expensive)
         // event formatting is skipped entirely rather than being rendered and then
         // discarded by the writer.
+        // All layers omit the timestamp. Wall-clock timestamps would make captured
+        // output non-deterministic (breaking buffer assertions) and reading the clock
+        // via `SystemTime::now` is an unsupported operation under Miri's isolation.
         let terminal_layer = tracing_subscriber::fmt::layer()
+            .without_time()
             .with_writer(StdoutWriterFactory)
             .with_filter(SinkFilter {
                 active: stdout_active,
@@ -150,6 +154,7 @@ fn ensure_initialized() {
             });
 
         let file_layer = tracing_subscriber::fmt::layer()
+            .without_time()
             .with_writer(LogFileWriter)
             // No coloring codes or such fancy stuff in the file, please.
             .with_ansi(false)
@@ -159,6 +164,7 @@ fn ensure_initialized() {
             });
 
         let buffer_layer = tracing_subscriber::fmt::layer()
+            .without_time()
             .with_writer(BufferWriterFactory)
             .with_ansi(false)
             .with_filter(SinkFilter {
