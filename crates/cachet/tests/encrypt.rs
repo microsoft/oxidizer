@@ -29,7 +29,8 @@ struct MockCipher {
 }
 
 impl MockCipher {
-    /// Derives a 12-byte nonce from the monotonic counter (non-zero across bytes).
+    /// Derives a 12-byte nonce from the monotonic counter (counter in the first 4
+    /// bytes, little-endian; remaining bytes are a fixed filler).
     fn nonce_bytes(counter: u32) -> [u8; NONCE_SIZE] {
         let mut nonce = [0xA5u8; NONCE_SIZE];
         nonce[..4].copy_from_slice(&counter.to_le_bytes());
