@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0] - 2026-07-15
+
+- ⚠️ Breaking
+
+  - surface evicted key and value to on_eviction listeners ([#552](https://github.com/microsoft/oxidizer/pull/552))
+
 ## [0.4.0] - 2026-07-07
 
 - ⚠️ Breaking

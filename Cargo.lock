@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cachet_tier",
  "criterion",
