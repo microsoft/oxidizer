@@ -309,3 +309,13 @@ pub use refresh::TimeToRefresh;
 pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
+
+/// Installs a silent, always-interested global `tracing` subscriber before any
+/// unit test in this crate runs. This keeps `tracing` emission paths executing
+/// deterministically (never poisoned into the "disabled" state) and lets per-test
+/// thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn init_test_tracing() {
+    testing_aids::initialize_logging();
+}

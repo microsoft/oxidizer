@@ -152,7 +152,6 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    #[tracing_test::traced_test]
     fn drop_records_metric_with_inferred_port() {
         let tester = MetricTester::new();
         let histogram = tester

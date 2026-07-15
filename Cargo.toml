@@ -111,6 +111,7 @@ chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
+ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
 darling = { version = "0.23.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
 deadpool = { version = "0.13.0", default-features = false }
@@ -173,6 +174,7 @@ rustls-platform-verifier = { version = "0.7.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
+serial_test = { version = "3.2.0", default-features = false }
 sharded-slab = { version = "0.1.7", default-features = false }
 slab = { version = "0.4.12", default-features = false }
 slotmap = { version = "1.1.1", default-features = false }
@@ -190,7 +192,6 @@ tower-service = { version = "0.3.3", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-appender = { version = "0.2.5", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
-tracing-test = { version = "0.2.6", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }

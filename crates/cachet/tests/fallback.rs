@@ -8,6 +8,13 @@
 
 #![cfg(feature = "memory")]
 
+// Integration binaries link the library with `cfg(test)` false, so the crate-root
+// tracing fallback does not run here. Install it directly. See docs/tracing-tests.md.
+#[ctor::ctor(unsafe)]
+fn init_test_tracing() {
+    testing_aids::initialize_logging();
+}
+
 use std::time::Duration;
 
 use anyspawn::Spawner;

@@ -233,9 +233,8 @@ mod tests {
 
     #[tokio::test]
     async fn injection_emits_log() {
+        use testing_aids::LogCapture;
         use tracing_subscriber::util::SubscriberInitExt;
-
-        use crate::testing::LogCapture;
 
         let log_capture = LogCapture::new();
         let _guard = log_capture.subscriber().set_default();

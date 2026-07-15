@@ -67,6 +67,7 @@ bytesbuf = { path = "../bytesbuf" }
 cachet_memory = { path = "../cachet_memory" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 dashmap = { workspace = true }
 dynosaur = { workspace = true }
 opentelemetry = { workspace = true, features = [
@@ -78,6 +79,7 @@ postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }
 serde = { workspace = true, features = ["derive"] }
+serial_test = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -83,6 +83,27 @@ wrong and it does not explain why we believe this access can never be out of bou
 This is good code: `self_span.get(self_offset..).expect("guarded by min() above to never exceed span length")` - this explains
 why we believe the operation can never cause an out of bounds access.
 
+# [Testing tracing events](docs/tracing-tests.md)
+
+How to test `tracing` output without cross-test pollution: the process-global
+callsite-interest hazard; the rule that every test binary emitting or inspecting
+`tracing` installs a silent always-interested fallback calling
+`testing_aids::initialize_logging()` - via a `#[cfg(test)] #[ctor::ctor]` at the
+crate root for the unit-test binary, and via an ungated file-level `#[ctor::ctor]`
+inside each integration binary, since `cfg(test)` is false there; that the
+`testing_aids` logging helpers (`LogCapture::subscriber()`, `log_to_stdout*`)
+*assert* the fallback was installed and panic if the constructor is missing rather
+than installing lazily; that unit tests may inspect output only through a
+thread-local subscriber (`testing_aids::LogCapture` + `set_default`) and never
+touch global state; and that cross-thread/global capture must live in a
+`#[serial]` integration binary using the `testing_aids::log_to_stdout_and_buffer()`
+bridge.
+
+**Open this when**: writing or moving any test that inspects `tracing` output;
+adding a log/event emission that needs coverage; adding a crate whose tests emit
+`tracing` events (it needs the ctor fallback); tempted to install a global
+subscriber in a unit test.
+
 # [Benchmarks](docs/benchmarks.md)
 
 Criterion benchmark design (single-threaded by default, elementary operations,

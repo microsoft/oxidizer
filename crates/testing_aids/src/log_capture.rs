@@ -54,8 +54,17 @@ impl LogCapture {
     ///
     /// Use with [`tracing::subscriber::set_default`] to scope capture to the
     /// current thread so parallel tests don't interfere with each other.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the silent always-interested fallback subscriber has not been
+    /// installed by a `#[ctor::ctor]` constructor calling
+    /// [`initialize_logging`](crate::initialize_logging). Thread-local capture only
+    /// composes deterministically when that fallback is present from process start.
+    /// See `docs/tracing-tests.md`.
     #[must_use]
     pub fn subscriber(&self) -> impl tracing::Subscriber {
+        crate::log::assert_initialized();
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
     }
 }

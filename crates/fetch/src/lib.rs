@@ -857,3 +857,13 @@ pub mod pipeline;
 
 /// Longer-form documentation for [`fetch`](crate).
 pub mod _documentation;
+
+/// Installs a silent, always-interested global `tracing` subscriber before any
+/// unit test in this crate runs. This keeps `tracing` emission paths executing
+/// deterministically (never poisoned into the "disabled" state) and lets per-test
+/// thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn init_test_tracing() {
+    testing_aids::initialize_logging();
+}
