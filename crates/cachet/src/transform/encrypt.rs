@@ -417,4 +417,15 @@ mod tests {
             "to_contiguous must gather every span, not return only the first"
         );
     }
+
+    #[test]
+    fn mock_cipher_treats_truncated_aad_as_soft_failure() {
+        // A valid 4-byte length prefix declaring a 4-byte AAD, but with no bytes
+        // following it, must decode as a soft failure rather than panic.
+        let blob = 4u32.to_le_bytes().to_vec();
+        let outcome = MockAeadCipher
+            .decrypt(b"aad", &BytesView::from(blob))
+            .expect("malformed input is a soft failure, not a hard error");
+        assert!(matches!(outcome, DecodeOutcome::SoftFailure(_)));
+    }
 }
