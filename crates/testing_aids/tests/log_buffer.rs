@@ -59,11 +59,12 @@ fn capture_is_empty_after_guard_detaches() {
 #[test]
 #[serial]
 fn capture_works_after_prior_debug_emission_without_subscriber() {
-    // Deliberately emit at a fresh callsite BEFORE any subscriber is installed.
-    // Under `tracing-core`'s fast path this would cache the callsite's interest as
-    // "disabled" process-wide and permanently, suppressing all later capture at
-    // this callsite. The always-interested buffer layer in the global subscriber
-    // must prevent that.
+    // Deliberately emit at a fresh callsite BEFORE any capture buffer is enabled
+    // (the silent fallback subscriber is already installed by the file-level ctor).
+    // Without an always-interested subscriber, `tracing-core`'s fast path could cache
+    // this callsite's interest as "disabled" process-wide and permanently, suppressing
+    // all later capture at this callsite. The always-interested buffer layer in the
+    // global fallback subscriber must prevent that.
     poison_attempt();
 
     let guard = write_to_stdout_and_buffer();
