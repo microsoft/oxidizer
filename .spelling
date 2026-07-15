@@ -229,6 +229,7 @@ bitflag
 bitwise
 bool
 boolean
+booleans
 branch_name
 branchless
 btree_map

@@ -17,6 +17,12 @@ homepage.workspace = true
 include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed_helpers"
 
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "data_privacy_core::redacted::RedactedDisplay",
+    "opentelemetry::logs::record::AnyValue",
+]
+
 [package.metadata.docs.rs]
 all-features = true
 
