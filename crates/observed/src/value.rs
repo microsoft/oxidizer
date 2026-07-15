@@ -151,6 +151,10 @@ impl Value {
 // Required at the OTel log boundary: `LogRecord::add_attribute` takes `AnyValue`,
 // while the metric path uses `opentelemetry::Value`. Both conversions are needed.
 impl From<Value> for AnyValue {
+    // The trailing `_` arms below guard `opentelemetry`'s `#[non_exhaustive]`
+    // `Value`/`Array` enums; they are unreachable for the variants that exist
+    // today, so the whole conversion is excluded from coverage.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn from(v: Value) -> Self {
         match v.0 {
             opentelemetry::Value::Bool(b) => Self::Boolean(b),

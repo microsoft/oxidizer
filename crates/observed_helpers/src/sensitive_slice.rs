@@ -199,6 +199,22 @@ mod tests {
     }
 
     #[test]
+    fn debug_and_clone() {
+        let v = [s("a"), s("b"), s("c")];
+        let sc = SensitiveSlice::<2>::new(v.iter());
+
+        let dbg = format!("{sc:?}");
+        assert!(dbg.contains("SensitiveSlice"));
+        assert!(dbg.contains("overflowed"));
+
+        let cloned = sc.clone();
+        assert_eq!(
+            cloned.to_redacted_string(&passthrough_engine()),
+            sc.to_redacted_string(&passthrough_engine()),
+        );
+    }
+
+    #[test]
     fn custom_delimiter() {
         let v = [s("x"), s("y"), s("z")];
         let sc = SensitiveSlice::<5, ';'>::new(v.iter());

@@ -343,3 +343,25 @@ pub(crate) fn option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
         _ => None,
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn ty(s: &str) -> syn::Type {
+        syn::parse_str(s).expect("parse type")
+    }
+
+    #[test]
+    fn option_inner_type_rejects_non_option_shapes() {
+        // qualified self (`<T as Trait>::Assoc`).
+        assert!(option_inner_type(&ty("<i32 as Copy>::Output")).is_none());
+        // `Option` without angle-bracketed arguments.
+        assert!(option_inner_type(&ty("Option")).is_none());
+        // more than one generic argument.
+        assert!(option_inner_type(&ty("Option<u8, u16>")).is_none());
+        // a non-type (lifetime) generic argument.
+        assert!(option_inner_type(&ty("Option<'a>")).is_none());
+    }
+}

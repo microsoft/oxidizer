@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Helper types and utilities that expand `observed` functionality.
 //!

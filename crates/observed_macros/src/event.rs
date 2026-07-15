@@ -1895,3 +1895,119 @@ mod tests {
         assert!(err.contains("string key or the `exclude`"), "{err}");
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(all(test, not(miri)))]
+mod coverage_tests {
+    use super::*;
+
+    /// Parses `input` and asserts the derive fails, returning the error text.
+    fn expect_err(input: &str) -> String {
+        let input: DeriveInput = syn::parse_str(input).expect("failed to parse input");
+        derive_event(&input).expect_err("expected derive to fail").to_string()
+    }
+
+    /// Parses `input` and asserts the derive succeeds.
+    fn expect_ok(input: &str) {
+        let input: DeriveInput = syn::parse_str(input).expect("failed to parse input");
+        let tokens = derive_event(&input).expect("expected derive to succeed");
+        syn::parse2::<syn::File>(tokens).expect("generated code should parse");
+    }
+
+    #[test]
+    fn invalid_severity_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = bogus)] struct E { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn tuple_struct_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] struct E(i64);"#);
+    }
+
+    #[test]
+    fn union_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] union E { a: i64 }"#);
+    }
+
+    #[test]
+    fn duplicate_event_attribute_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "a")] #[event(name = "b")] struct E { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn duplicate_log_attribute_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = info)] #[log(severity = warn)] struct E { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn message_escaped_brace_and_valid_placeholder() {
+        // Escaped `{{` is skipped while a valid `{name}` placeholder resolves.
+        expect_ok(r#"#[event(name = "e")] #[log(severity = info, message = "a {{ b {name}")] struct E { #[unredacted] name: i64 }"#);
+    }
+
+    #[test]
+    fn const_generic_event_generates() {
+        expect_ok(r#"#[event(name = "e")] #[log(severity = info)] struct E<const N: usize> { #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn dimension_name_value_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = info)] struct E { #[dimension = 1] #[unredacted] v: i64 }"#);
+    }
+
+    #[test]
+    fn if_none_without_argument_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = info)] struct E { #[if_none] #[unredacted] v: Option<i64> }"#);
+    }
+
+    #[test]
+    fn if_none_bad_keyword_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = info)] struct E { #[if_none(bogus)] #[unredacted] v: Option<i64> }"#);
+    }
+
+    #[test]
+    fn duplicate_if_none_is_rejected() {
+        let _ = expect_err(
+            r#"#[event(name = "e")] #[log(severity = info)] struct E { #[if_none(drop)] #[if_none("x")] #[unredacted] v: Option<i64> }"#,
+        );
+    }
+
+    #[test]
+    fn data_class_after_unredacted_is_rejected() {
+        let _ = expect_err(r#"#[event(name = "e")] #[log(severity = info)] struct E { #[unredacted] #[data_class(Foo::Bar)] v: i64 }"#);
+    }
+
+    #[test]
+    fn option_field_with_reference_inner_generates() {
+        // A `Option<&T>` field drives the `inner_is_ref` branch of the option
+        // visit codegen.
+        expect_ok(r#"#[event(name = "e")] #[log(severity = info)] struct E { #[unredacted] v: Option<&'static str> }"#);
+    }
+
+    #[test]
+    fn message_with_unterminated_brace_is_ignored() {
+        // A `{` with no matching `}` is skipped rather than treated as a placeholder.
+        expect_ok(r#"#[event(name = "e")] #[log(severity = info, message = "x {y")] struct E { #[unredacted] y: i64 }"#);
+    }
+
+    #[test]
+    fn integer_signedness_of_non_path_type_is_none() {
+        let reference: syn::Type = syn::parse_str("&u64").expect("parse type");
+        assert!(integer_signedness(&reference).is_none());
+    }
+
+    #[test]
+    fn strip_type_wrappers_unwraps_paren_and_group() {
+        // `Paren` comes from source; `Group` is synthesized (it only appears from
+        // macro-expanded token streams, never hand-written source).
+        let paren: syn::Type = syn::parse_str("(u64)").expect("parse type");
+        assert!(matches!(strip_type_wrappers(&paren), syn::Type::Path(_)));
+
+        let inner: syn::Type = syn::parse_str("u64").expect("parse type");
+        let grouped = syn::Type::Group(syn::TypeGroup {
+            group_token: syn::token::Group::default(),
+            elem: Box::new(inner),
+        });
+        assert!(matches!(strip_type_wrappers(&grouped), syn::Type::Path(_)));
+    }
+}

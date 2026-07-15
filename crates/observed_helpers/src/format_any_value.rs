@@ -43,6 +43,10 @@ pub fn format_any_value(value: &AnyValue) -> impl fmt::Display + '_ {
 struct DisplayAnyValue<'a>(&'a AnyValue);
 
 impl fmt::Display for DisplayAnyValue<'_> {
+    // The final `other` arm guards `opentelemetry`'s `#[non_exhaustive]`
+    // `AnyValue`; it is unreachable for the variants that exist today, so the
+    // formatter is excluded from coverage.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             AnyValue::Int(v) => write!(f, "{v}"),

@@ -173,3 +173,27 @@ impl std::fmt::Debug for EnrichmentTransfer {
         f.debug_struct(type_name::<Self>()).finish_non_exhaustive()
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn debug_impls_and_relocate() {
+        let mut slot = Slot::new();
+
+        // `relocate` is a documented no-op for thread-local slots.
+        let affinity = thread_aware::affinity::pinned_affinities(&[1])[0];
+        <Slot as thread_aware::ThreadAware>::relocate(&mut slot, None, affinity);
+
+        assert!(format!("{slot:?}").contains("Slot"));
+
+        let mut transfer = EnrichmentTransfer::default();
+        transfer.add_slot(&slot);
+        assert!(format!("{transfer:?}").contains("EnrichmentTransfer"));
+
+        let guard = transfer.apply();
+        assert!(format!("{guard:?}").contains("Guard"));
+    }
+}

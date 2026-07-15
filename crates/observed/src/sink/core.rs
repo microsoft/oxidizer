@@ -438,3 +438,57 @@ mod tests {
         assert!(Sink::noop().is_noop());
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod coverage_tests {
+    use std::borrow::Cow;
+    use std::ops::ControlFlow;
+
+    use super::*;
+
+    struct DummyDyn;
+
+    impl crate::interop::DynEvent for DummyDyn {
+        fn name(&self) -> &'static str {
+            "dummy"
+        }
+        fn severity(&self) -> Option<crate::severity::Severity> {
+            None
+        }
+        fn body(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_file(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn source_line(&self) -> Option<u32> {
+            None
+        }
+        fn source_crate(&self) -> Option<Cow<'static, str>> {
+            None
+        }
+        fn visit_fields(&self, _visitor: &mut crate::processing::FieldVisitorFn<'_>) -> ControlFlow<()> {
+            ControlFlow::Continue(())
+        }
+    }
+
+    #[test]
+    fn current_enrichments_on_composite_is_empty() {
+        // A composite carries no enrichment of its own, so the accessor short-circuits.
+        let composite = Sink::composite([Sink::noop()]);
+        assert!(composite.current_enrichments().is_empty());
+    }
+
+    #[test]
+    fn noop_sink_interest_dispatch_and_flush() {
+        // `emit_impl` gates on `is_noop()`, so these no-op arms are only reachable
+        // by calling the pipeline hooks directly.
+        let noop = Sink::noop();
+        let description = EventDescription::new("dummy", None, None, None, false, false);
+
+        assert!(!noop.is_interested_in(&description));
+        noop.dispatch_to_processors(&DummyDyn, &description);
+        noop.flush().expect("noop flush should succeed");
+    }
+}

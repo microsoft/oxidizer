@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Procedural macros for the `observed` crate.
 //!
@@ -20,6 +20,7 @@ use proc_macro::TokenStream;
 /// Derives the `Event` trait for a struct. See the re-export in the `observed`
 /// crate for full documentation.
 #[proc_macro_derive(Event, attributes(event, log, metric, disabled, dimension, unredacted, data_class, if_none))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     match crate::event::derive_event(&input) {
@@ -31,6 +32,7 @@ pub fn derive_event(input: TokenStream) -> TokenStream {
 /// Derives the `Enrichment` trait for a struct. See the re-export in the `observed`
 /// crate for full documentation.
 #[proc_macro_derive(Enrichment, attributes(dimension, unredacted, data_class, if_none))]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn derive_enrichment(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
     match crate::enrichment::derive_enrichment(&input) {

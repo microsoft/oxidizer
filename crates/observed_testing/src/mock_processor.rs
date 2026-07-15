@@ -638,3 +638,41 @@ impl PartialEq<EventDescription> for ExpectedEventDescription {
         other == self
     }
 }
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg(test)]
+mod coverage_tests {
+    use observed::{Event, emit};
+
+    use super::*;
+    use crate::events::ProbeEvent;
+    use crate::test_emitter;
+
+    #[test]
+    fn mock_processor_default_debug_and_flush() {
+        let processor = MockProcessor::default();
+        assert!(format!("{processor:?}").contains("captured_events"));
+        EventProcessor::flush(&processor).expect("flush should succeed");
+    }
+
+    #[test]
+    fn expected_types_equal_actuals_in_reverse() {
+        let (sink, processor) = test_emitter(observed::SinkId::new("rev"));
+        emit!(sink, ProbeEvent::new(42));
+        let captured = processor.single_event();
+
+        // `ExpectedEvent == CapturedEvent` (reverse direction) agrees with the
+        // forward direction it delegates to.
+        let expected_event = ExpectedEvent::new("test.probe", Severity::Info).dimension("value", 42i64).log();
+        assert_eq!(expected_event == captured, captured == expected_event);
+
+        // `ExpectedEnrichmentEntry == EnrichmentEntry` (reverse direction).
+        let entry = EnrichmentEntry::unclassified("k", 1i64);
+        let expected_entry = ExpectedEnrichmentEntry::new("k", 1i64);
+        assert!(expected_entry == entry);
+
+        // `ExpectedEventDescription == EventDescription` (reverse direction).
+        let expected_desc = ExpectedEventDescription::new("test.probe", Severity::Info).log();
+        assert!(expected_desc == ProbeEvent::DESCRIPTION);
+    }
+}

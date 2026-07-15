@@ -523,4 +523,10 @@ mod tests {
         );
         assert!(err.contains("requires at least one"), "{err}");
     }
+
+    #[test]
+    fn union_is_rejected() {
+        let err = parse_and_expect_error("union U { a: i64 }");
+        assert!(err.contains("unions"), "{err}");
+    }
 }
