@@ -636,12 +636,8 @@ dependencies = [
  "cachet_tier",
  "criterion",
  "dashmap",
- "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.8",
- "opentelemetry",
- "opentelemetry_sdk",
  "parking_lot",
  "pin-project-lite",
  "postcard",
@@ -1027,7 +1023,6 @@ dependencies = [
  "rapidhash",
  "rustc-hash",
  "serde",
- "serde_core",
  "serde_json",
  "xxhash-rust",
 ]
@@ -1038,7 +1033,6 @@ version = "0.1.2"
 dependencies = [
  "insta",
  "mutants",
- "serde",
  "serde_core",
  "serde_json",
 ]
@@ -1306,7 +1300,6 @@ dependencies = [
  "futures",
  "http",
  "http_extensions",
- "hyper",
  "hyper-util",
  "insta",
  "layered",
@@ -1333,7 +1326,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "uuid",
  "wiremock",
 ]
 
@@ -1837,7 +1829,6 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
- "data_privacy",
  "futures",
  "gungraun",
  "http",
@@ -2581,7 +2572,6 @@ dependencies = [
  "ohno_macros 0.3.5",
  "regex",
  "testing_aids",
- "thiserror",
  "tokio",
  "typeid",
 ]
