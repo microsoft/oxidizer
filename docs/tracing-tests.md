@@ -57,8 +57,10 @@ panic with a pointer to this guide rather than failing silently.
 
 *Do this only if you want to see or assert on `tracing` output across all threads.*
 These helpers route events through the process-global subscriber, so they affect
-all threads. Capture is process-global: **every test in a binary that uses them
-MUST be `#[serial]`.**
+all threads and capture records events from *any* thread. Because of this, if a test
+binary uses these helpers at all, **every test in that binary MUST be `#[serial]`** -
+not just the ones that call the helpers - so that no other test runs concurrently
+and emits into the shared buffer.
 
 ```rust
 use testing_aids::tracing;

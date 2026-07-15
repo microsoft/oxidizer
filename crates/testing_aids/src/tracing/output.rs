@@ -313,23 +313,25 @@ impl Write for StdoutWriter {
 /// messages regardless of level.
 ///
 /// This is the sanctioned way to assert on `tracing` output in tests. It routes
-/// through the single process-global subscriber (installed by the test binary's
-/// `#[ctor::ctor]` constructor and left permanently interested), so a prior
+/// through the single process-global subscriber (initialized by the test binary's
+/// `#[ctor::ctor]` init function and left permanently interested), so a prior
 /// emission on a subscriber-less thread can never suppress later capture. See
 /// [`docs/tracing-tests.md`] for the full rationale and rules.
 ///
-/// Capture is process-global: only one buffer can be active at a time. Every test
-/// in an integration-test binary that captures `tracing` output MUST therefore be
-/// annotated `#[serial]` so the tests are mutually exclusive.
+/// Capture is process-global: only one buffer can be active at a time, and the
+/// buffer records events from *any* thread, including tests that never call this
+/// helper. Therefore, if a test binary uses this helper at all, EVERY test in that
+/// binary MUST be annotated `#[serial]` - not just the capturing ones - so that no
+/// other test runs concurrently and emits into the shared buffer.
 ///
 /// Retrieve the captured lines with [`BufferGuard::into_inner`].
 ///
 /// # Panics
 ///
-/// Panics if a buffer is already active (i.e. two capturing tests ran
-/// concurrently because one of them was missing `#[serial]`), or if the fallback
-/// subscriber was never installed (the binary is missing its `#[ctor::ctor]`
-/// constructor calling [`initialize`]).
+/// Panics if a buffer is already active (i.e. another test ran concurrently because
+/// some test in the binary was missing `#[serial]`), or if
+/// `testing_aids::tracing::initialize()` was never called (the binary is missing its
+/// `#[ctor::ctor]` init function).
 ///
 /// [`docs/tracing-tests.md`]: https://github.com/microsoft/oxidizer/blob/main/docs/tracing-tests.md
 pub fn write_to_stdout_and_buffer() -> BufferGuard {
@@ -342,8 +344,9 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
         let mut slot = LOG_BUFFER.lock().unwrap();
         assert!(
             slot.is_none(),
-            "a log buffer is already active; tracing capture is process-global, so every test in a \
-             binary that captures tracing output must be annotated `#[serial]`"
+            "a log buffer is already active; tracing capture is process-global and records events \
+             from any thread, so if a binary uses this helper then every test in that binary - not \
+             just the capturing ones - must be annotated `#[serial]`"
         );
         *slot = Some(Arc::clone(&buffer));
     }
