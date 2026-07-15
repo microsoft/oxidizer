@@ -28,6 +28,11 @@ use crate::is_mutation_testing;
 /// test failure or other anomaly.
 ///
 /// Logging is disabled under mutation testing - this becomes a no-op.
+///
+/// # Panics
+///
+/// Panics if `testing_aids::tracing::initialize()` was never called, which means the
+/// test binary is missing its `#[ctor::ctor]` init function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.
@@ -53,6 +58,13 @@ pub fn write_to_stdout() {
 /// test failure or other anomaly.
 ///
 /// Logging is disabled under mutation testing - this becomes a no-op.
+///
+/// # Panics
+///
+/// Panics if a log file is already active (another test is logging to file in the same
+/// process without `#[serial]`), or if `testing_aids::tracing::initialize()` was never
+/// called, which means the test binary is missing its `#[ctor::ctor]` init function. See
+/// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.

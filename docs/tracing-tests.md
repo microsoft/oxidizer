@@ -82,6 +82,8 @@ For events emitted asynchronously (for example, on a background worker), poll
 `moka` eviction listener emits its event on a background thread.
 
 ```rust
+use std::time::{Duration, Instant};
+
 use serial_test::serial;
 use testing_aids::tracing::write_to_stdout_and_buffer;
 
@@ -90,10 +92,19 @@ use testing_aids::tracing::write_to_stdout_and_buffer;
 fn emits_event_from_background_thread() {
     let guard = write_to_stdout_and_buffer();
 
-    run_the_cross_thread_operation();
+    trigger_the_cross_thread_operation();
 
-    let lines = guard.into_inner();
-    assert!(lines.iter().any(|line| line.contains("cache.evict")));
+    // The event is emitted on a background thread, so poll `snapshot()` until it
+    // appears rather than reading once - the operation may return before the
+    // background thread emits.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if guard.snapshot().iter().any(|line| line.contains("cache.evict")) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "eviction event was not emitted in time");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 ```
 
