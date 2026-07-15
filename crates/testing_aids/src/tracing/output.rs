@@ -248,7 +248,7 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
     assert_initialized();
     STDOUT_ENABLED.store(true, Ordering::Relaxed);
 
-    let buffer = Arc::new(Mutex::new(Vec::new()));
+    let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
     {
         let mut slot = LOG_BUFFER.lock().unwrap();
@@ -264,8 +264,8 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
 }
 
 /// The buffer that captured log lines are written to while a [`BufferGuard`] is
-/// active. `None` when no capture is in progress.
-static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<u8>>>>> = Mutex::new(None);
+/// active, one entry per line. `None` when no capture is in progress.
+static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<String>>>>> = Mutex::new(None);
 
 /// Scopes an in-memory `tracing` capture started by [`write_to_stdout_and_buffer`].
 ///
@@ -277,7 +277,7 @@ static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<u8>>>>> = Mutex::new(None);
 #[must_use]
 pub struct BufferGuard {
     // `Some` until consumed by `into_inner`; `None` afterwards so `Drop` is a no-op.
-    buffer: Option<Arc<Mutex<Vec<u8>>>>,
+    buffer: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl BufferGuard {
@@ -295,8 +295,7 @@ impl BufferGuard {
     #[must_use]
     pub fn snapshot(&self) -> Vec<String> {
         let buffer = self.buffer.as_ref().expect("buffer is present until into_inner consumes the guard");
-        let bytes = buffer.lock().unwrap();
-        String::from_utf8_lossy(&bytes).lines().map(str::to_string).collect()
+        buffer.lock().unwrap().clone()
     }
 
     /// Detaches the capture buffer and returns everything logged during the guard's
@@ -316,8 +315,7 @@ impl BufferGuard {
         // Detach global capture so the next test starts clean.
         *LOG_BUFFER.lock().unwrap() = None;
 
-        let bytes = buffer.lock().unwrap();
-        String::from_utf8_lossy(&bytes).lines().map(str::to_string).collect()
+        std::mem::take(&mut *buffer.lock().unwrap())
     }
 }
 
@@ -342,26 +340,61 @@ impl<'a> MakeWriter<'a> for BufferWriterFactory {
         let slot = LOG_BUFFER.lock().unwrap();
         BufferWriter {
             buffer: slot.as_ref().map(Arc::clone),
+            pending: Vec::new(),
         }
     }
 }
 
-/// Writes to the active capture buffer, or discards output when no buffer is active.
+/// Accumulates the bytes of a single formatted event and, on flush or drop, commits
+/// each complete newline-delimited line to the active capture buffer as its own entry.
+///
+/// `tracing_subscriber`'s `fmt` layer creates one writer per event but may call
+/// [`write`](Write::write) more than once, so a single `write` is not a line. Buffering
+/// per writer and splitting on newlines keeps each captured entry a whole line and keeps
+/// concurrently-emitted events from interleaving at byte granularity in the shared buffer.
 #[derive(Debug)]
 struct BufferWriter {
-    buffer: Option<Arc<Mutex<Vec<u8>>>>,
+    buffer: Option<Arc<Mutex<Vec<String>>>>,
+    pending: Vec<u8>,
+}
+
+impl BufferWriter {
+    /// Moves every complete line out of `pending` into the shared buffer, leaving any
+    /// trailing bytes that are not yet newline-terminated in `pending`.
+    fn commit(&mut self) {
+        let Some(buffer) = &self.buffer else {
+            self.pending.clear();
+            return;
+        };
+
+        let Some(last_newline) = self.pending.iter().rposition(|&b| b == b'\n') else {
+            return;
+        };
+
+        let complete = &self.pending[..=last_newline];
+        let lines: Vec<String> = String::from_utf8_lossy(complete).lines().map(str::to_string).collect();
+        buffer.lock().unwrap().extend(lines);
+        self.pending.drain(..=last_newline);
+    }
 }
 
 impl Write for BufferWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Some(buffer) = &self.buffer {
-            buffer.lock().unwrap().extend_from_slice(buf);
+        if self.buffer.is_some() {
+            self.pending.extend_from_slice(buf);
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        self.commit();
         Ok(())
+    }
+}
+
+impl Drop for BufferWriter {
+    fn drop(&mut self) {
+        self.commit();
     }
 }
 
