@@ -69,6 +69,11 @@ if (Test-Path $destinationDir) {
 Write-Host "Copying template from '$templateDir' to '$destinationDir'..."
 Copy-Item -Path $templateDir -Destination $destinationDir -Recurse
 
+# The manifest ships as `Cargo.toml.template` so that its `{{...}}` placeholders
+# (invalid TOML) are not picked up by tools that scan the workspace for
+# `Cargo.toml` files (e.g. cargo-machete). Restore the real name in the new crate.
+Rename-Item -Path (Join-Path $destinationDir "Cargo.toml.template") -NewName "Cargo.toml"
+
 # Prepare replacement values
 $crateNameUpper = ($crateName -replace '_', ' ').Split(' ') | ForEach-Object { $_.Substring(0, 1).ToUpper() + $_.Substring(1) } | Join-String -Separator ' '
 $formattedKeywords = ($crateKeywords.Split(',') | ForEach-Object { "`"$($_.Trim())`"" }) -join ", "
