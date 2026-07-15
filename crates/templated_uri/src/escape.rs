@@ -23,6 +23,19 @@ use crate::{Escaped, EscapedString};
 pub trait Escape {
     /// Returns this value wrapped in [`Escaped`], proving it is properly escaped for URI use.
     fn escape(&self) -> Escaped<impl Display>;
+
+    /// Appends the escaped rendering of this value to `out`.
+    ///
+    /// Equivalent to writing [`escape`](Escape::escape)'s result to `out`, but string-backed
+    /// types override it to `push_str` their already-escaped contents directly, skipping the
+    /// [`core::fmt`] formatting machinery on the URI-rendering hot path. Used by the
+    /// `#[templated]`-generated `render` implementation.
+    fn escape_into(&self, out: &mut String) {
+        use std::fmt::Write as _;
+        write!(out, "{}", self.escape()).expect(
+            "writing to a String is infallible, so any Err here means the value's Display impl returned fmt::Error, which it must not",
+        );
+    }
 }
 
 /// Marks types whose `Display` output is emitted verbatim into a URI, without
@@ -38,16 +51,19 @@ pub trait Escape {
 pub trait Raw {
     /// Returns this value's raw `Display` form, to be inserted into a URI without escaping.
     fn raw(&self) -> impl Display;
-}
 
-macro_rules! impl_raw {
-    ($t:ty) => {
-        impl Raw for $t {
-            fn raw(&self) -> impl Display {
-                self
-            }
-        }
-    };
+    /// Appends the raw rendering of this value to `out`.
+    ///
+    /// Equivalent to writing [`raw`](Raw::raw)'s result to `out`, but string-backed types
+    /// override it to `push_str` their contents directly, skipping the [`core::fmt`]
+    /// formatting machinery on the URI-rendering hot path. Used by the
+    /// `#[templated]`-generated `render` implementation for `{+var}` expansions.
+    fn raw_into(&self, out: &mut String) {
+        use std::fmt::Write as _;
+        write!(out, "{}", self.raw()).expect(
+            "writing to a String is infallible, so any Err here means the value's Display impl returned fmt::Error, which it must not",
+        );
+    }
 }
 
 macro_rules! impl_escape {
@@ -60,17 +76,36 @@ macro_rules! impl_escape {
     };
 }
 
-impl_raw!(String);
+impl Raw for String {
+    fn raw(&self) -> impl Display {
+        self
+    }
+
+    fn raw_into(&self, out: &mut String) {
+        out.push_str(self);
+    }
+}
 
 impl Escape for EscapedString {
     fn escape(&self) -> Escaped<impl Display> {
-        self.clone()
+        // Borrow the already-escaped contents instead of cloning the `Cow`, which would
+        // reallocate for an owned value on every render.
+        Escaped::from_escaped(self.as_str())
+    }
+
+    fn escape_into(&self, out: &mut String) {
+        // The contents are already escaped, so copy them in one shot with no formatting.
+        out.push_str(self.as_str());
     }
 }
 
 impl Raw for EscapedString {
     fn raw(&self) -> impl Display {
         self.as_str()
+    }
+
+    fn raw_into(&self, out: &mut String) {
+        out.push_str(self.as_str());
     }
 }
 
@@ -155,6 +190,26 @@ mod tests {
     fn raw_uri_escaped_string() {
         let s = EscapedString::escape("hello world");
         assert_eq!(format!("{}", s.raw()), "hello%20world");
+    }
+
+    #[test]
+    fn escaped_string_raw_into_appends_contents() {
+        // `Raw::raw_into` for `EscapedString` is used when an already-escaped value fills a
+        // reserved-expansion (`{+var}`) position; it must append the contents verbatim.
+        let s = EscapedString::escape("hello world");
+        let mut buf = String::from("/prefix/");
+        s.raw_into(&mut buf);
+        assert_eq!(buf, "/prefix/hello%20world");
+    }
+
+    #[test]
+    fn escaped_string_escape_into_appends_contents() {
+        // `Escape::escape_into` for `EscapedString` appends the already-escaped contents
+        // directly (the render fast path used by the `#[templated]` macro).
+        let s = EscapedString::escape("a b");
+        let mut buf = String::from("/prefix/");
+        s.escape_into(&mut buf);
+        assert_eq!(buf, "/prefix/a%20b");
     }
 
     #[test]

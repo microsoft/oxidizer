@@ -636,12 +636,8 @@ dependencies = [
  "cachet_tier",
  "criterion",
  "dashmap",
- "dynosaur",
  "futures",
  "layered",
- "ohno 0.3.8",
- "opentelemetry",
- "opentelemetry_sdk",
  "parking_lot",
  "pin-project-lite",
  "postcard",
@@ -1027,7 +1023,6 @@ dependencies = [
  "rapidhash",
  "rustc-hash",
  "serde",
- "serde_core",
  "serde_json",
  "xxhash-rust",
 ]
@@ -1038,7 +1033,6 @@ version = "0.1.2"
 dependencies = [
  "insta",
  "mutants",
- "serde",
  "serde_core",
  "serde_json",
 ]
@@ -1306,7 +1300,6 @@ dependencies = [
  "futures",
  "http",
  "http_extensions",
- "hyper",
  "hyper-util",
  "insta",
  "layered",
@@ -1333,7 +1326,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "uuid",
  "wiremock",
 ]
 
@@ -1837,8 +1829,8 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
- "data_privacy",
  "futures",
+ "gungraun",
  "http",
  "http-body",
  "http-body-util",
@@ -1858,6 +1850,15 @@ dependencies = [
  "tick",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "http_path_template"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "gungraun",
+ "mutants",
 ]
 
 [[package]]
@@ -2571,7 +2572,6 @@ dependencies = [
  "ohno_macros 0.3.5",
  "regex",
  "testing_aids",
- "thiserror",
  "tokio",
  "typeid",
 ]
@@ -2764,15 +2764,6 @@ name = "pastey"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
-
-[[package]]
-name = "pct-str"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "756dc82399e1ef9b37bd698266e4b7fed5f3d3cccb09fbc6b602086c9077e4ad"
-dependencies = [
- "utf8-decode",
-]
 
 [[package]]
 name = "percent-encoding"
@@ -3362,6 +3353,7 @@ dependencies = [
  "fastrand",
  "futures",
  "futures-util",
+ "gungraun",
  "http",
  "insta",
  "jiff",
@@ -3679,11 +3671,12 @@ dependencies = [
 name = "templated_uri"
 version = "0.3.4"
 dependencies = [
+ "criterion",
  "data_privacy",
+ "gungraun",
  "http",
  "mutants",
  "ohno 0.3.8",
- "pct-str",
  "serde",
  "serde_json",
  "static_assertions",
@@ -4259,12 +4252,6 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
-
-[[package]]
-name = "utf8-decode"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7932c10aa1600e9ddee027024aa9c0d397a103478253bf3fd6cea6dd03161b8a"
 
 [[package]]
 name = "utf8_iter"

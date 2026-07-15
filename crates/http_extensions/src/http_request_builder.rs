@@ -371,18 +371,20 @@ impl<R> HttpRequestBuilder<'_, R> {
             .uri
             .ok_or_else(|| HttpError::validation_with_label("URI is required when building the request", LABEL_URI_MISSING))??;
 
-        // Attach both a `RequestUris` carrying the caller's templated target
-        // and its `PathAndQuery`:
-        //   - `RequestUris::original` preserves the unrouted target so
-        //     `Router::resolve_request_uri` can re-route from it on every retry.
-        //   - `PathAndQuery` backs `RequestExt::path_and_query` and
-        //     `ExtensionsExt::uri_template_label`.
+        // Attach a `RequestUris` (its `original` lets `Router::resolve_request_uri` re-route
+        // on every retry) and the `PathAndQuery` (backing `RequestExt::path_and_query` and
+        // `ExtensionsExt::uri_template_label`). The templated path is rendered once here and
+        // cached as a `RenderedPath` so routing can reuse it without re-rendering the template.
         let path = uri.to_path_and_query();
-        let http_uri = http::Uri::try_from(uri.clone())?;
+        let rendered = path.as_ref().map(http::uri::PathAndQuery::try_from).transpose()?;
+        let http_uri = uri.to_http_uri(rendered.as_ref())?;
         let mut request = self.builder.uri(http_uri).body(body)?;
         request.extensions_mut().insert(crate::routing::RequestUris::new(uri));
         if let Some(path) = path {
             request.extensions_mut().insert(path);
+        }
+        if let Some(rendered) = rendered {
+            request.extensions_mut().insert(crate::routing::RenderedPath(rendered));
         }
 
         Ok(request)

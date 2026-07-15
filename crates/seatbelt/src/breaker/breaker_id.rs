@@ -54,12 +54,20 @@ use std::hash::Hasher;
 /// for observability purposes. **Important**: Ensure that the values from which breaker IDs
 /// are created do not contain any sensitive data such as authentication tokens, personal
 /// identifiable information (PII), or other confidential data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BreakerId(BreakerIdValue);
 
 impl BreakerId {
     pub(crate) const fn default() -> Self {
         Self(BreakerIdValue::String(Cow::Borrowed("default")))
+    }
+
+    /// Returns `true` if this ID is the default breaker ID.
+    ///
+    /// Used to fast-path the common single-breaker configuration, avoiding a lock,
+    /// a hash, and a map probe when routing to the shared default engine.
+    pub(crate) fn is_default(&self) -> bool {
+        matches!(&self.0, BreakerIdValue::String(value) if value.as_ref() == "default")
     }
 
     /// Create a breaker ID by hashing the given value.
@@ -112,7 +120,7 @@ impl From<BreakerId> for Cow<'static, str> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum BreakerIdValue {
     Number(u64),
     Hashed(u64, &'static str),
@@ -145,6 +153,17 @@ mod tests {
         assert_eq!(a.to_string(), "hello");
         assert_eq!(b.to_string(), "hello");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn is_default_distinguishes_default_from_others() {
+        assert!(BreakerId::default().is_default());
+        // Any string equal to "default" is treated as the default, regardless of ownership.
+        assert!(BreakerId::from(String::from("default")).is_default());
+
+        assert!(!BreakerId::from("other").is_default());
+        assert!(!BreakerId::from(42u64).is_default());
+        assert!(!BreakerId::hashed(&"value", "default").is_default());
     }
 
     #[test]

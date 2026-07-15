@@ -21,7 +21,18 @@ use crate::policy::EvictionPolicy;
 use crate::tier::InMemoryCache;
 
 /// Type-erased eviction listener.
-pub(crate) type EvictionListener = Arc<dyn Fn(RemovalCause) + Send + Sync + 'static>;
+///
+/// Receives the evicted entry's key (as a shared [`Arc`]) and owned value
+/// along with the [`RemovalCause`].
+pub(crate) type EvictionListener<K, V> = Arc<dyn Fn(Arc<K>, V, RemovalCause) + Send + Sync + 'static>;
+
+/// Type-erased, cause-only removal observer.
+///
+/// Unlike [`EvictionListener`], observers receive only the [`RemovalCause`] —
+/// never the key or value — so registering one never forces a clone of the
+/// evicted entry. Used internally by host crates (such as `cachet`) to bridge
+/// removals into their own telemetry.
+pub(crate) type RemovalObserver = Arc<dyn Fn(RemovalCause) + Send + Sync + 'static>;
 
 /// Builder for configuring an `InMemoryCache`.
 ///
@@ -50,7 +61,8 @@ pub struct InMemoryCacheBuilder<K, V, H = RandomState> {
     pub(crate) time_to_idle: Option<Duration>,
     pub(crate) name: Option<&'static str>,
     pub(crate) eviction_policy: EvictionPolicy,
-    pub(crate) eviction_listener: Option<EvictionListener>,
+    pub(crate) eviction_listener: Option<EvictionListener<K, V>>,
+    pub(crate) removal_observers: Vec<RemovalObserver>,
     pub(crate) eviction_telemetry: bool,
     pub(crate) hasher: H,
     _phantom: PhantomData<(K, V)>,
@@ -66,6 +78,7 @@ impl<K, V, H: fmt::Debug> fmt::Debug for InMemoryCacheBuilder<K, V, H> {
             .field("name", &self.name)
             .field("eviction_policy", &self.eviction_policy)
             .field("eviction_listener", &self.eviction_listener.as_ref().map(|_| "<set>"))
+            .field("removal_observers", &self.removal_observers.len())
             .field("eviction_telemetry", &self.eviction_telemetry)
             .field("hasher", &self.hasher)
             .finish()
@@ -100,6 +113,7 @@ impl<K, V> InMemoryCacheBuilder<K, V> {
             name: None,
             eviction_policy: EvictionPolicy::default(),
             eviction_listener: None,
+            removal_observers: Vec::new(),
             eviction_telemetry: false,
             hasher: RandomState::default(),
             _phantom: PhantomData,
@@ -253,7 +267,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
 
     /// Registers a listener that is called when an entry is removed from the cache.
     ///
-    /// The listener receives a [`RemovalCause`] indicating why the entry was removed:
+    /// The listener receives the removed entry's key (as a shared
+    /// [`Arc`](std::sync::Arc)), its owned value, and a [`RemovalCause`]
+    /// indicating why the entry was removed:
     /// `Size` for capacity-driven evictions, `Expired` for TTL/TTI expiration,
     /// `Explicit` for [`invalidate`](cachet_tier::CacheTier::invalidate) or
     /// [`clear`](cachet_tier::CacheTier::clear) calls, and `Replaced` for inserts
@@ -262,11 +278,9 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     /// The listener runs on the cache's background maintenance task. Keep the
     /// closure cheap; expensive work should be offloaded to a separate task.
     ///
-    /// If a listener was already registered (for example via an earlier
-    /// `on_eviction` call, or by the host crate when
-    /// [`with_eviction_telemetry`](Self::with_eviction_telemetry) is enabled),
-    /// the new listener is chained — both run on every removal, in registration
-    /// order.
+    /// At most one listener is held: calling this more than once replaces the
+    /// previously registered listener. To fan out to multiple consumers,
+    /// compose them into a single closure.
     ///
     /// # Examples
     ///
@@ -281,7 +295,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     ///
     /// let cache = InMemoryCache::<String, i32>::builder()
     ///     .max_capacity(100)
-    ///     .on_eviction(move |cause| {
+    ///     .on_eviction(move |_key, _value, cause| {
     ///         if matches!(cause, RemovalCause::Size | RemovalCause::Expired) {
     ///             counter.fetch_add(1, Ordering::Relaxed);
     ///         }
@@ -292,24 +306,43 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
     #[must_use]
     pub fn on_eviction<F>(mut self, listener: F) -> Self
     where
+        F: Fn(Arc<K>, V, RemovalCause) + Send + Sync + 'static,
+        K: 'static,
+        V: 'static,
+    {
+        self.eviction_listener = Some(Arc::new(listener));
+        self
+    }
+
+    /// Registers an internal, cause-only removal observer.
+    ///
+    /// Observers receive only the [`RemovalCause`] — never the removed key or
+    /// value — so registering one never forces a clone of the entry. Multiple
+    /// observers may be registered; all run on every removal, in registration
+    /// order, before the [`on_eviction`](Self::on_eviction) value listener (if any).
+    ///
+    /// This is not part of the stable public API. It exists so host crates
+    /// (such as `cachet`) can bridge removals into their own telemetry without
+    /// competing with the user-facing value listener. End users should use
+    /// [`on_eviction`](Self::on_eviction) instead.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_removal_observer<F>(mut self, observer: F) -> Self
+    where
         F: Fn(RemovalCause) + Send + Sync + 'static,
     {
-        self.eviction_listener = Some(match self.eviction_listener.take() {
-            Some(previous) => Arc::new(move |cause| {
-                previous(cause);
-                listener(cause);
-            }),
-            None => Arc::new(listener),
-        });
+        self.removal_observers.push(Arc::new(observer));
         self
     }
 
     /// Requests that the host crate install eviction telemetry for this cache.
     ///
     /// This is a marker for `cachet::CacheBuilder::memory_with` to recognize:
-    /// when set, the host installs a listener that emits `cache.eviction` on
-    /// capacity evictions ([`RemovalCause::Size`]) and `cache.expired` on
-    /// background TTL/TTI expiry ([`RemovalCause::Expired`]).
+    /// when set, the host registers an internal removal observer that emits
+    /// `cache.eviction` on capacity evictions ([`RemovalCause::Size`]) and
+    /// `cache.expired` on background TTL/TTI expiry ([`RemovalCause::Expired`]).
+    /// The observer is independent of any [`on_eviction`](Self::on_eviction)
+    /// value listener, so enabling telemetry never clones the evicted value.
     /// [`RemovalCause::Explicit`] and [`RemovalCause::Replaced`] are
     /// intentionally not surfaced, as they are already covered by the host's
     /// `cache.invalidated` and `cache.inserted` events.
@@ -355,6 +388,7 @@ impl<K, V, H> InMemoryCacheBuilder<K, V, H> {
             name: self.name,
             eviction_policy: self.eviction_policy,
             eviction_listener: self.eviction_listener,
+            removal_observers: self.removal_observers,
             eviction_telemetry: self.eviction_telemetry,
             hasher,
             _phantom: PhantomData,
@@ -484,34 +518,50 @@ mod tests {
     }
 
     #[test]
-    fn on_eviction_chains_existing_listener() {
+    fn on_eviction_replaces_previous_listener() {
         use std::sync::Mutex;
-        use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let first_count = Arc::new(AtomicUsize::new(0));
-        let second_count = Arc::new(AtomicUsize::new(0));
+        let seen: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_first = Arc::clone(&seen);
+        let seen_second = Arc::clone(&seen);
+
+        // Register a first listener and invoke it so its body is exercised.
+        let builder = InMemoryCacheBuilder::<String, i32>::new().on_eviction(move |key: Arc<String>, value, _cause| {
+            assert_eq!((&**key, value), ("k", 42));
+            seen_first.lock().unwrap().push("first");
+        });
+        let first = builder.eviction_listener.clone().expect("first listener should be installed");
+        first(Arc::new("k".to_string()), 42, RemovalCause::Size);
+        assert_eq!(*seen.lock().unwrap(), vec!["first"]);
+
+        // Registering a second listener replaces the first; only the last runs.
+        let builder = builder.on_eviction(move |key: Arc<String>, value, _cause| {
+            assert_eq!((&**key, value), ("k", 42));
+            seen_second.lock().unwrap().push("second");
+        });
+        let listener = builder.eviction_listener.expect("listener should be installed");
+        listener(Arc::new("k".to_string()), 42, RemovalCause::Size);
+
+        // The replaced first listener did not run again — only "second" was added.
+        assert_eq!(*seen.lock().unwrap(), vec!["first", "second"]);
+    }
+
+    #[test]
+    fn removal_observers_all_run_in_order() {
+        use std::sync::Mutex;
+
         let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
-
-        let first_count_cb = Arc::clone(&first_count);
-        let second_count_cb = Arc::clone(&second_count);
         let order_first = Arc::clone(&order);
         let order_second = Arc::clone(&order);
 
         let builder = InMemoryCacheBuilder::<String, i32>::new()
-            .on_eviction(move |_| {
-                first_count_cb.fetch_add(1, Ordering::Relaxed);
-                order_first.lock().unwrap().push("first");
-            })
-            .on_eviction(move |_| {
-                second_count_cb.fetch_add(1, Ordering::Relaxed);
-                order_second.lock().unwrap().push("second");
-            });
+            .with_removal_observer(move |_cause| order_first.lock().unwrap().push("first"))
+            .with_removal_observer(move |_cause| order_second.lock().unwrap().push("second"));
 
-        let listener = builder.eviction_listener.expect("listener should be installed");
-        listener(RemovalCause::Size);
-
-        assert_eq!(first_count.load(Ordering::Relaxed), 1);
-        assert_eq!(second_count.load(Ordering::Relaxed), 1);
+        assert_eq!(builder.removal_observers.len(), 2);
+        for observer in &builder.removal_observers {
+            observer(RemovalCause::Size);
+        }
         assert_eq!(*order.lock().unwrap(), vec!["first", "second"]);
     }
 
@@ -524,7 +574,8 @@ mod tests {
             .time_to_idle(Duration::from_secs(30))
             .name("my_cache")
             .with_eviction_telemetry()
-            .on_eviction(|_| {});
+            .with_removal_observer(|_| {})
+            .on_eviction(|_, _, _| {});
         let rendered = format!("{builder:?}");
         assert!(rendered.contains("InMemoryCacheBuilder"));
         assert!(rendered.contains("max_capacity: Some(100)"));
@@ -533,6 +584,7 @@ mod tests {
         assert!(rendered.contains("time_to_idle: Some(30s)"));
         assert!(rendered.contains("name: Some(\"my_cache\")"));
         assert!(rendered.contains("eviction_telemetry: true"));
+        assert!(rendered.contains("removal_observers: 1"));
         assert!(rendered.contains("eviction_listener: Some(\"<set>\")"));
     }
 

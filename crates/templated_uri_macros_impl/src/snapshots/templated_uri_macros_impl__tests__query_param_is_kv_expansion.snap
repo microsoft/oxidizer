@@ -18,38 +18,24 @@ impl ::templated_uri::PathAndQueryTemplate for QueryTest {
         ::core::option::Option::None
     }
     fn render(&self) -> ::std::string::String {
-        let mut __out = ::std::string::String::with_capacity(18usize);
+        let mut __out = ::std::string::String::with_capacity(66usize);
+        ::templated_uri::PathAndQueryTemplate::render_into(self, &mut __out);
+        __out
+    }
+    fn render_into(&self, __out: &mut ::std::string::String) {
         __out.push_str("/api/");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!(
-                    "{}", ::templated_uri::Escape::escape(& self.resource)
-                ),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
+        ::templated_uri::Escape::escape_into(&self.resource, __out);
         __out.push_str("?");
         __out.push_str("page");
         __out.push_str("=");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.page)),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
+        ::templated_uri::Escape::escape_into(&self.page, __out);
         __out.push_str("&");
         __out.push_str("limit");
         __out.push_str("=");
-        ::std::fmt::Write::write_fmt(
-                &mut __out,
-                ::core::format_args!("{}", ::templated_uri::Escape::escape(& self.limit)),
-            )
-            .expect(
-                "Display impls for templated URI parameter values are expected to be infallible",
-            );
-        __out
+        ::templated_uri::Escape::escape_into(&self.limit, __out);
+    }
+    fn render_capacity_hint(&self) -> ::core::primitive::usize {
+        66usize
     }
     fn to_path_and_query(
         &self,

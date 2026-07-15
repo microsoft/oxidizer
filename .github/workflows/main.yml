@@ -24,7 +24,7 @@ jobs:
       skip: ${{ steps.compute.outputs.skip }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -101,7 +101,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -141,7 +141,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -184,7 +184,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -196,6 +196,17 @@ jobs:
       - name: Check Spelling
         run: just spellcheck
 
+  # Runs cargo-semver-checks against each crate's PREVIOUS VERSION-BUMP COMMIT in
+  # git history (the most recent commit on the base branch that changed the
+  # crate's `[package] version`, passed as --baseline-rev), scoped to the crates
+  # whose `version =` is bumped in this PR (the "publishing set"). The baseline
+  # rustdoc is rebuilt from that commit's source, so no registry access is needed
+  # and the check behaves identically for OSS and enterprise/offline consumers.
+  # The job is informational only: it never fails the build and posts a fresh PR
+  # comment on every push with a per-crate table (baseline vs this-PR vs the
+  # minimum required version) plus a link to the run. It is a no-op on PRs that
+  # do not bump any crate version, since only version-bumping PRs trigger a
+  # publish and thus need a compatibility check against the previous version.
   semver:
     needs: [delta]
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
@@ -205,7 +216,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -215,41 +226,37 @@ jobs:
           rust-toolchain: RUST_LATEST
           cargo-tools: CARGO_SEMVER_CHECKS_VERSION
 
-      # execute
-      - name: Semver Compatibility
-        id: semver
+      # Compute the publishing set (version-bumped published crates), run
+      # cargo-semver-checks per crate against its previous version-bump commit in
+      # git history (--baseline-rev, no registry), and render a Markdown report
+      # (scripts/ci/semver-report.ps1 — reuses the release library's version-diff
+      # / next-version helpers). Sets outputs:
+      #   publishing = true|false        (any crate version bumped)
+      #   status     = pass|warn|fail    (fail = a crate is under-incremented for
+      #                                   its API changes; warn = a baseline could
+      #                                   not be determined so a check is
+      #                                   incomplete; pass = all sufficient)
+      # Kept non-failing so a git/tooling hiccup never blocks the PR.
+      - name: Semver Report
+        id: report
         continue-on-error: true
+        shell: pwsh
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          set -o pipefail
-          cargo semver-checks --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color never --baseline-rev origin/${{ github.base_ref }} 2>&1 | tee semver-output.txt
+          $ErrorActionPreference = 'Stop'
+          git fetch --no-tags origin "+refs/heads/${env:BASE_REF}:refs/remotes/origin/${env:BASE_REF}"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${env:BASE_REF}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
 
-      # report
-      - name: Prepare Semver Comment
-        if: steps.semver.outcome == 'failure'
-        run: |
-          echo "## ⚠️ Breaking Changes Detected" > semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo '```' >> semver-comment.txt
-          grep -v "^ *Cloning " semver-output.txt | grep -v "^ *Building " | grep -v "^ *Built \[" | grep -v "^ *Parsing " | grep -v "^ *Parsed \[" | grep -v "^ *Checking" | grep -v "^ *Checked \[" | grep -v "^ *Finished \[" | grep -v "^ *Summary " >> semver-comment.txt
-          echo '```' >> semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "If the breaking changes are intentional then everything is fine - this message is merely informative." >> semver-comment.txt
-          echo "" >> semver-comment.txt
-          echo "Remember to apply a version number bump with the correct severity when publishing a version with breaking changes (\`1.x.x -> 2.x.x\` or \`0.1.x -> 0.2.x\`)." >> semver-comment.txt
-
-      - name: Post Semver Failure Comment
-        if: steps.semver.outcome == 'failure' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: semver-check
-          path: semver-comment.txt
-
-      - name: Remove Semver Comment on Success
-        if: steps.semver.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@v3.0.4
-        with:
-          header: semver-check
-          delete: true
+      # Post a NEW comment on every push (not a sticky update) so each run's
+      # result is visible in the PR timeline. Only fires when the PR actually
+      # publishes something and is not from a fork (forks lack a write token).
+      - name: Post Semver Comment
+        if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file semver-comment.md
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
@@ -271,28 +278,34 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
-          cargo-tools: CARGO_UDEPS_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
+          cargo-tools: CARGO_UDEPS_VERSION, CARGO_MACHETE_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
-      - name: Udeps
+      - name: Unused dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          # cargo-machete scans source text and flags a direct dependency even
+          # when it is still pulled in transitively (which udeps ignores by
+          # design). It always runs workspace-wide -- it has no package
+          # selection -- so it is the backstop that catches stale unused deps in
+          # crates outside the current PR's impacted set.
+          cargo machete --with-metadata
           # Without --all-targets: enforce that every [dependencies] entry is used
           # by the library/bins (catches normal deps used only by tests/benches/
           # examples -- i.e. misplaced deps that should be [dev-dependencies]).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
           # With --all-targets: enforce that every [dev-dependencies] entry is used
           # by some target (catches unused dev-dependencies).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
@@ -308,7 +321,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -328,7 +341,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -347,7 +360,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -388,7 +401,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -403,6 +416,11 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
+        # codecov/codecov-action publishes immutable GitHub releases (verified via the GitHub API:
+        # "immutable": true on GET /repos/codecov/codecov-action/releases/tags/v7.0.0). An immutable
+        # release's tag can never be retargeted to a different commit, so pinning to a SHA adds no
+        # extra protection here; this reference is intentionally left as a tag.
+        # See https://github.com/codecov/codecov-action/releases/tag/v7.0.0
         uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -414,7 +432,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check PR Title
-        uses: amannn/action-semantic-pull-request@v6.1.1
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -438,7 +456,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -461,7 +479,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -488,7 +506,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         # The synthetic-workspace fixture builder shells out to `cargo metadata`,
         # so Rust must be available even though no Rust code is compiled.

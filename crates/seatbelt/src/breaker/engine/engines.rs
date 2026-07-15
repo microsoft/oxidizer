@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use tick::Clock;
@@ -13,7 +13,8 @@ use crate::utils::TelemetryHelper;
 /// Manages circuit breaker engines for different breaker IDs.
 #[derive(Debug)]
 pub(crate) struct Engines {
-    map: RwLock<HashMap<BreakerId, Arc<Engine>>>,
+    default_engine: Arc<Engine>,
+    map: RwLock<BTreeMap<BreakerId, Arc<Engine>>>,
     engine_options: EngineOptions,
     clock: Clock,
     telemetry: TelemetryHelper,
@@ -21,8 +22,10 @@ pub(crate) struct Engines {
 
 impl Engines {
     pub(crate) fn new(engine_options: EngineOptions, clock: Clock, telemetry: TelemetryHelper) -> Self {
+        let default_engine = Arc::new(create_engine(&engine_options, &clock, &telemetry, &BreakerId::default()));
         Self {
-            map: RwLock::new(HashMap::new()),
+            default_engine,
+            map: RwLock::new(BTreeMap::new()),
             engine_options,
             clock,
             telemetry,
@@ -30,7 +33,17 @@ impl Engines {
     }
 
     pub(crate) fn get_engine(&self, key: &BreakerId) -> Arc<Engine> {
-        // Fast path: read lock for existing engines (common case).
+        // Fast path: the default breaker (the common single-breaker configuration, used
+        // whenever no ID provider is configured) is served by a pre-created engine. This
+        // avoids a lock and the map lookup entirely on every call.
+        if key.is_default() {
+            return Arc::clone(&self.default_engine);
+        }
+
+        // Read-lock path for existing engines (common case). The map is a `BTreeMap`, so a
+        // lookup is a handful of key comparisons rather than a hash of `key`; partitioned
+        // breakers are low-cardinality by design, so this stays cheap and, unlike a hash
+        // map, is not exposed to hash-flooding via request-derived IDs.
         {
             let map = self.map.read().expect(ERR_POISONED_LOCK);
             if let Some(engine) = map.get(key) {
@@ -40,7 +53,9 @@ impl Engines {
 
         // Slow path: acquire write lock to insert a new engine.
         let mut map = self.map.write().expect(ERR_POISONED_LOCK);
-        let engine = map.entry(key.clone()).or_insert_with(|| Arc::new(self.create_engine(key)));
+        let engine = map
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(create_engine(&self.engine_options, &self.clock, &self.telemetry, key)));
 
         Arc::clone(engine)
     }
@@ -50,15 +65,15 @@ impl Engines {
         let map = self.map.read().expect(ERR_POISONED_LOCK);
         map.len()
     }
+}
 
-    fn create_engine(&self, key: &BreakerId) -> Engine {
-        EngineTelemetry::new(
-            EngineCore::new(self.engine_options.clone(), self.clock.clone()),
-            self.telemetry.clone(),
-            key.clone().into(),
-            self.clock.clone(),
-        )
-    }
+fn create_engine(engine_options: &EngineOptions, clock: &Clock, telemetry: &TelemetryHelper, key: &BreakerId) -> Engine {
+    EngineTelemetry::new(
+        EngineCore::new(engine_options.clone(), clock.clone()),
+        telemetry.clone(),
+        key.clone().into(),
+        clock.clone(),
+    )
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
