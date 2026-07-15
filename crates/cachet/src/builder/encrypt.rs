@@ -55,7 +55,7 @@ impl<K, V, Pre: Debug, Post: Debug> Debug for EncryptedTransformBuilder<K, V, Pr
     }
 }
 
-// ── .encrypt() / .encrypt_with() on TransformBuilder ──
+// ── .encrypt_with() on TransformBuilder ──
 
 impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     /// Encrypts values with the given [`AeadCipher`](crate::AeadCipher) before they
