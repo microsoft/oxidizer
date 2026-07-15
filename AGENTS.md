@@ -87,7 +87,7 @@ why we believe the operation can never cause an out of bounds access.
 
 How to test `tracing` output without cross-test pollution. Key rule: every test
 binary that emits or inspects `tracing` must call `testing_aids::tracing::initialize()`
-from a constructor, or trace-event lines may be reported as uncovered even though
+from a `#[ctor::ctor]` init function, or trace-event lines may be reported as uncovered even though
 they run.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;

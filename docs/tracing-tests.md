@@ -4,7 +4,7 @@
 > package sidesteps everything described here: its events are not subject to the
 > `tracing-core` process-global callsite-interest cache, so capturing and asserting
 > on them just works with no initialization, no `#[serial]`, and no
-> per-binary constructor. Reach for raw `tracing` events only when you specifically
+> per-binary init function. Reach for raw `tracing` events only when you specifically
 > need them; otherwise use `observed` and skip this guide.
 
 This repository has one **mandatory requirement** for any test binary that touches
@@ -20,8 +20,9 @@ emission lines (and the field expressions inside them, such as
 coverage even though they execute during tests** - the coverage miss is
 non-deterministic and depends on test scheduling.
 
-Initialize `testing_aids` tracing before any test runs, via a constructor. Where
-the constructor goes depends on the binary kind.
+Initialize `testing_aids` tracing before any test runs, via a `#[ctor::ctor]`
+process-init function that runs before `main`. Where it goes depends on the binary
+kind.
 
 **Unit-test binary** (`#[cfg(test)]` code under `src/`) — add this at the crate
 root, gated on `test`:
@@ -35,8 +36,8 @@ fn init_test_tracing() {
 ```
 
 **Integration-test binaries** (`tests/*.rs`) — `cfg(test)` is false here, so the
-crate-root constructor does not run. Add an ungated file-level constructor to each
-`tests/*.rs` file that emits or inspects `tracing`:
+crate-root init function does not run. Add an ungated file-level `#[ctor::ctor]`
+init function to each `tests/*.rs` file that emits or inspects `tracing`:
 
 ```rust
 #[ctor::ctor(unsafe)]
