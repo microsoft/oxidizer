@@ -208,7 +208,7 @@ impl EventProcessor for MetricProcessor {
             self.events
                 .lock()
                 .unwrap()
-                .push(format!("  [METRIC] {}({}) = 1", metric.kind(), metric.instrument_name(),));
+                .push(format!("  [METRIC] {}({}) = 1", metric.kind(), metric.instrument_name()));
         }
     }
 
