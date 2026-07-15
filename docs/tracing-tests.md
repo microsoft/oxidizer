@@ -113,9 +113,12 @@ fn emits_event_from_background_thread() {
 ## 3. Optional: capture events on a single thread (unit tests)
 
 *Do this only if you want to assert on `tracing` output emitted on the current
-thread.* Use `testing_aids::tracing::Capture` with `set_default`. This is
-thread-local, so it needs no `#[serial]` and does not touch `tracing` global state.
-Unit tests MUST use this form and MUST NOT install a global subscriber.
+thread.* Use `testing_aids::tracing::Capture` with `set_default`. Capture is
+thread-local: it installs a subscriber for the current thread only (`set_default`),
+so it needs no `#[serial]` and touches no process-global `tracing` state. Beyond the
+one-time process-init call from section 1, a unit test MUST NOT install its own
+global subscriber (for example via `set_global_default`); it must scope capture to
+its own thread with this form.
 
 ```rust
 use tracing_subscriber::util::SubscriberInitExt;
