@@ -336,7 +336,15 @@ impl Write for StdoutWriter {
 /// [`docs/tracing-tests.md`]: https://github.com/microsoft/oxidizer/blob/main/docs/tracing-tests.md
 pub fn write_to_stdout_and_buffer() -> BufferGuard {
     assert_initialized();
-    STDOUT_ENABLED.store(true, Ordering::Relaxed);
+
+    // Unlike `write_to_stdout`/`write_to_stdout_and_file`, buffer capture is not
+    // disabled under mutation testing: its contents are asserted upon by the calling
+    // test, so a disabled buffer would break those tests rather than merely omit
+    // diagnostic output. The stdout tee, however, is purely diagnostic, so we silence
+    // it under mutation testing to avoid the output overhead.
+    if !is_mutation_testing() {
+        STDOUT_ENABLED.store(true, Ordering::Relaxed);
+    }
 
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
@@ -467,6 +475,25 @@ impl BufferWriter {
         buffer.lock().unwrap().extend(lines);
         self.pending.drain(..=last_newline);
     }
+
+    /// Commits every complete line and then any remaining trailing bytes as a final
+    /// line, even if they are not newline-terminated. Used on drop so a formatter that
+    /// does not newline-terminate its last write cannot silently lose that line.
+    fn commit_final(&mut self) {
+        self.commit();
+
+        let Some(buffer) = &self.buffer else {
+            return;
+        };
+
+        if self.pending.is_empty() {
+            return;
+        }
+
+        let line = String::from_utf8_lossy(&self.pending).into_owned();
+        buffer.lock().unwrap().push(line);
+        self.pending.clear();
+    }
 }
 
 impl Write for BufferWriter {
@@ -485,7 +512,7 @@ impl Write for BufferWriter {
 
 impl Drop for BufferWriter {
     fn drop(&mut self) {
-        self.commit();
+        self.commit_final();
     }
 }
 
@@ -570,5 +597,63 @@ impl Write for LogWriter {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.file.as_mut().map_or(Ok(()), File::flush)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_writer() -> (BufferWriter, Arc<Mutex<Vec<String>>>) {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let writer = BufferWriter {
+            buffer: Some(Arc::clone(&buffer)),
+            pending: Vec::new(),
+        };
+        (writer, buffer)
+    }
+
+    #[test]
+    fn write_splits_on_newlines_into_separate_entries() {
+        let (mut writer, buffer) = new_writer();
+
+        writer.write_all(b"first line\nsecond line\n").unwrap();
+        writer.flush().unwrap();
+
+        assert_eq!(*buffer.lock().unwrap(), vec!["first line", "second line"]);
+    }
+
+    #[test]
+    fn write_does_not_split_a_line_across_multiple_writes() {
+        let (mut writer, buffer) = new_writer();
+
+        // A single logical line delivered in several `write` calls must become one entry.
+        writer.write_all(b"one ").unwrap();
+        writer.write_all(b"logical ").unwrap();
+        writer.write_all(b"line\n").unwrap();
+        writer.flush().unwrap();
+
+        assert_eq!(*buffer.lock().unwrap(), vec!["one logical line"]);
+    }
+
+    #[test]
+    fn flush_retains_a_trailing_partial_line_until_terminated() {
+        let (mut writer, buffer) = new_writer();
+
+        writer.write_all(b"complete\npartial").unwrap();
+        writer.flush().unwrap();
+
+        // Only the newline-terminated line is committed; the partial line waits.
+        assert_eq!(*buffer.lock().unwrap(), vec!["complete"]);
+    }
+
+    #[test]
+    fn drop_flushes_a_final_line_without_a_trailing_newline() {
+        let (mut writer, buffer) = new_writer();
+
+        writer.write_all(b"no trailing newline").unwrap();
+        drop(writer);
+
+        assert_eq!(*buffer.lock().unwrap(), vec!["no trailing newline"]);
     }
 }
