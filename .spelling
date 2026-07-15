@@ -279,6 +279,7 @@ crates.io
 crypto
 cryptographic
 cryptographically
+SymCrypt
 undecryptable
 customizable
 cutover

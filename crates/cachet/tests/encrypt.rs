@@ -6,8 +6,6 @@
 //! These exercise the encryption *pipeline* (builder wiring, key-as-AAD binding,
 //! relocation defense, fallback chaining) using a crypto-free mock [`AeadCipher`],
 //! so they run under the base `encrypt` feature with no cryptographic dependency.
-//! The SymCrypt-backed `.encrypt(&key)` convenience is exercised in a separate
-//! module gated on the `symcrypt` feature.
 
 #![cfg(all(feature = "encrypt", feature = "serialize", feature = "test-util"))]
 
@@ -20,33 +18,54 @@ use tick::Clock;
 const NONCE_SIZE: usize = 12;
 
 /// A crypto-free [`AeadCipher`] for exercising the pipeline. The stored form is
-/// `nonce(12) || aad_len(4, LE) || aad || plaintext`. A monotonic counter stands in
-/// for a fresh nonce per encryption, and `decrypt` authenticates the AAD by comparing
-/// it to the embedded copy — mirroring the security contract without real crypto.
+/// `nonce(12) || aad_len(4, LE) || aad || body`, where `body` is the plaintext
+/// combined with a nonce-derived keystream (via XOR) so the stored bytes never
+/// contain the plaintext verbatim. A monotonic counter stands in for a fresh nonce per encryption, and
+/// `decrypt` authenticates the AAD by comparing it to the embedded copy — mirroring
+/// the security contract without real crypto.
 #[derive(Default)]
 struct MockCipher {
     counter: AtomicU32,
 }
 
+impl MockCipher {
+    /// Derives a 12-byte nonce from the monotonic counter (non-zero across bytes).
+    fn nonce_bytes(counter: u32) -> [u8; NONCE_SIZE] {
+        let mut nonce = [0xA5u8; NONCE_SIZE];
+        nonce[..4].copy_from_slice(&counter.to_le_bytes());
+        nonce
+    }
+
+    /// Reversible keystream transform: `body[i] ^= 0x5A ^ nonce[i % 12]`.
+    fn xor_keystream(nonce: &[u8; NONCE_SIZE], body: &mut [u8]) {
+        for (i, byte) in body.iter_mut().enumerate() {
+            *byte ^= 0x5A ^ nonce[i % NONCE_SIZE];
+        }
+    }
+}
+
 impl AeadCipher for MockCipher {
     fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
-        let nonce = self.counter.fetch_add(1, Ordering::Relaxed);
+        let nonce = Self::nonce_bytes(self.counter.fetch_add(1, Ordering::Relaxed));
         let mut out = Vec::with_capacity(NONCE_SIZE + 4 + aad.len() + plaintext.len());
-        out.extend_from_slice(&[0u8; NONCE_SIZE - 4]);
-        out.extend_from_slice(&nonce.to_le_bytes());
+        out.extend_from_slice(&nonce);
         out.extend_from_slice(&u32::try_from(aad.len()).expect("aad fits in u32").to_le_bytes());
         out.extend_from_slice(aad);
+        let body_start = out.len();
         for (slice, _) in plaintext.slices() {
             out.extend_from_slice(slice);
         }
+        Self::xor_keystream(&nonce, &mut out[body_start..]);
         Ok(BytesView::from(out))
     }
 
     fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
         let bytes = ciphertext.to_vec();
-        let Some(rest) = bytes.get(NONCE_SIZE..) else {
+        let Some(nonce) = bytes.get(..NONCE_SIZE) else {
             return Ok(DecodeOutcome::SoftFailure("truncated"));
         };
+        let nonce: [u8; NONCE_SIZE] = nonce.try_into().expect("NONCE_SIZE bytes");
+        let rest = &bytes[NONCE_SIZE..];
         let Some(len_bytes) = rest.get(..4) else {
             return Ok(DecodeOutcome::SoftFailure("truncated"));
         };
@@ -57,8 +76,9 @@ impl AeadCipher for MockCipher {
         if stored_aad != aad {
             return Ok(DecodeOutcome::SoftFailure("aad mismatch"));
         }
-        let plaintext = &rest[4 + aad_len..];
-        Ok(DecodeOutcome::Value(BytesView::from(plaintext.to_vec())))
+        let mut body = rest[4 + aad_len..].to_vec();
+        Self::xor_keystream(&nonce, &mut body);
+        Ok(DecodeOutcome::Value(BytesView::from(body)))
     }
 }
 
@@ -102,9 +122,15 @@ async fn encrypt_pipeline_stores_ciphertext_and_round_trips() {
     // is exactly the serialized key and remains lookupable.
     assert_eq!(stored_key.to_vec(), serialized(&key), "key must be serialized but not encrypted");
 
-    // Values ARE encrypted: the stored bytes differ from the plaintext-serialized form.
+    // Values ARE encrypted: the stored bytes differ from the plaintext-serialized
+    // form, and the plaintext never appears verbatim anywhere in the ciphertext.
     let plaintext = serialized(&value);
-    assert_ne!(stored_value.to_vec(), plaintext, "stored value must be ciphertext, not plaintext");
+    let stored = stored_value.to_vec();
+    assert_ne!(stored, plaintext, "stored value must be ciphertext, not plaintext");
+    assert!(
+        !stored.windows(plaintext.len()).any(|w| w == plaintext.as_slice()),
+        "plaintext must not appear verbatim in the stored ciphertext"
+    );
 
     // Force the read to fall back to the encrypted tier and decrypt.
     l1.invalidate(&key).await.expect("invalidate should succeed");
@@ -274,61 +300,4 @@ async fn encrypt_chained_post_transform_fallbacks() {
         })
         .expect("first post tier should have received an insert");
     assert_ne!(stored, serialized("v"), "value must be encrypted in the chained fallback");
-}
-
-/// SymCrypt-backed `.encrypt(&key)` convenience, gated on the `symcrypt` feature.
-#[cfg(feature = "symcrypt")]
-mod symcrypt {
-    use super::{NONCE_SIZE, serialized};
-    use bytesbuf::BytesView;
-    use cachet::{Cache, CacheOp, CacheTier, MockCache};
-    use tick::Clock;
-
-    const KEY: [u8; 32] = [42u8; 32];
-    const GCM_TAG_SIZE: usize = 16;
-
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn symcrypt_encrypt_round_trips_with_gcm_overhead() {
-        let l1 = MockCache::<String, String>::new();
-        let l2 = MockCache::<BytesView, BytesView>::new();
-
-        let cache = Cache::builder::<String, String>(Clock::new_frozen())
-            .storage(l1.clone())
-            .serialize()
-            .encrypt(&KEY)
-            .fallback(Cache::builder::<BytesView, BytesView>(Clock::new_frozen()).storage(l2.clone()))
-            .build();
-
-        let value = "Hello, world!".to_string();
-        cache
-            .insert("greeting".to_string(), value.clone())
-            .await
-            .expect("insert should succeed");
-
-        let stored_value = l2
-            .operations()
-            .iter()
-            .find_map(|op| match op {
-                CacheOp::Insert { entry, .. } => Some(entry.value().to_vec()),
-                _ => None,
-            })
-            .expect("post-transform tier should have received an insert");
-
-        let plaintext = serialized(&value);
-        assert_ne!(stored_value, plaintext, "stored value must be ciphertext");
-        assert_eq!(
-            stored_value.len(),
-            NONCE_SIZE + plaintext.len() + GCM_TAG_SIZE,
-            "ciphertext must be nonce + plaintext + GCM tag"
-        );
-
-        l1.invalidate(&"greeting".to_string()).await.expect("invalidate should succeed");
-        let fetched = cache
-            .get(&"greeting".to_string())
-            .await
-            .expect("get should succeed")
-            .expect("value should be present");
-        assert_eq!(*fetched.value(), value, "decrypted value must match the original");
-    }
 }

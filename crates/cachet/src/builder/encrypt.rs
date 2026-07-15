@@ -7,8 +7,7 @@
 //! values to [`BytesView`](bytesbuf::BytesView) (typically via
 //! [`serialize`](crate::CacheBuilder::serialize)). It produces an
 //! [`EncryptedTransformBuilder`], whose post-transform tier chain is wrapped in an
-//! internal `EncryptedTier` at build time. With the `symcrypt` feature, `.encrypt(&key)`
-//! is available as a convenience over the built-in `SymCrypt` cipher.
+//! internal `EncryptedTier` at build time.
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -26,8 +25,7 @@ use crate::telemetry::CacheTelemetry;
 use crate::transform::{AeadCipher, EncryptedTier, TransformAdapter};
 use crate::{Codec, Encoder};
 
-/// The builder produced by [`TransformBuilder::encrypt_with`] (and, with the
-/// `symcrypt` feature, the `encrypt` convenience method).
+/// The builder produced by [`TransformBuilder::encrypt_with`].
 ///
 /// It mirrors [`TransformBuilder`] but fixes the storage types to
 /// [`BytesView`] and carries an authenticated cipher. At build time the
@@ -60,47 +58,6 @@ impl<K, V, Pre: Debug, Post: Debug> Debug for EncryptedTransformBuilder<K, V, Pr
 // ── .encrypt() / .encrypt_with() on TransformBuilder ──
 
 impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
-    /// Encrypts values with the built-in `SymCrypt` AES-256-GCM cipher before they
-    /// reach the post-transform tier.
-    ///
-    /// A convenience over [`encrypt_with`](Self::encrypt_with) using
-    /// [`Aes256GcmCipher`](crate::Aes256GcmCipher); available with the `symcrypt`
-    /// feature. Keys are left untouched — AES-GCM output is non-deterministic, so an
-    /// encrypted key could never be looked up — but each value is cryptographically
-    /// bound to its storage key, so a value cannot be relocated to a different key in
-    /// the backing store.
-    ///
-    /// # Security
-    ///
-    /// Only values are encrypted. Keys are serialized and stored **in plaintext** in
-    /// the backing tier (they must stay deterministic to remain usable as lookup keys),
-    /// so do not place secrets or PII in cache keys. A stored value that fails
-    /// authentication (corrupt, truncated, wrong key, tampered, or relocated) is treated
-    /// as a cache miss and emits a `cache.decrypt_failed` telemetry event.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use cachet::Cache;
-    /// use tick::Clock;
-    ///
-    /// let clock = Clock::new_tokio();
-    /// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
-    /// let key = [0u8; 32];
-    ///
-    /// let cache = Cache::builder::<String, String>(clock)
-    ///     .memory()
-    ///     .serialize()
-    ///     .encrypt(&key)
-    ///     .fallback(remote)
-    ///     .build();
-    /// ```
-    #[cfg(feature = "symcrypt")]
-    #[must_use]
-    pub fn encrypt(self, key: &[u8; 32]) -> EncryptedTransformBuilder<K, V, Pre, Post> {
-        self.encrypt_with(crate::transform::Aes256GcmCipher::new(key))
-    }
-
     /// Encrypts values with the given [`AeadCipher`](crate::AeadCipher) before they
     /// reach the post-transform tier.
     ///
@@ -119,11 +76,19 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     ///
     /// struct MyCipher;
     /// impl AeadCipher for MyCipher {
-    ///     fn encrypt(&self, aad: &[u8], plaintext: &bytesbuf::BytesView) -> Result<bytesbuf::BytesView, Error> {
+    ///     fn encrypt(
+    ///         &self,
+    ///         aad: &[u8],
+    ///         plaintext: &bytesbuf::BytesView,
+    ///     ) -> Result<bytesbuf::BytesView, Error> {
     /// #       unimplemented!()
     ///         // ... encrypt with your approved library, authenticating `aad` ...
     ///     }
-    ///     fn decrypt(&self, aad: &[u8], ciphertext: &bytesbuf::BytesView) -> Result<DecodeOutcome<bytesbuf::BytesView>, Error> {
+    ///     fn decrypt(
+    ///         &self,
+    ///         aad: &[u8],
+    ///         ciphertext: &bytesbuf::BytesView,
+    ///     ) -> Result<DecodeOutcome<bytesbuf::BytesView>, Error> {
     /// #       unimplemented!()
     ///         // ... decrypt, returning SoftFailure on any authentication failure ...
     ///     }

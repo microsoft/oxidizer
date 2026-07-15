@@ -166,7 +166,6 @@ most commonly used types from all of them.
 |`service`|❌|Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration.|
 |`serialize`|❌|Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`.|
 |`encrypt`|❌|Enables `.encrypt_with(cipher)` on serialized builders and the `AeadCipher` trait for authenticated value encryption with a caller-supplied cipher.|
-|`symcrypt`|❌|Enables the built-in `Aes256GcmCipher` (SymCrypt-backed AES-256-GCM) and the `.encrypt(&key)` convenience method. Implies `encrypt`.|
 |`test-util`|❌|Enables `MockCache`, frozen-clock utilities, and other test helpers.|
 
 ## Examples
@@ -232,23 +231,17 @@ cache.insert("key".to_string(), "value".to_string()).await?;
 
 With the `encrypt` feature, chain `.encrypt_with(cipher)` after `.serialize()` to
 encrypt values with a caller-supplied `AeadCipher` before they reach the fallback
-tier. The cachet crate ships only the encryption *mechanism* — it has no
-cryptographic dependency of its own, so you can plug in a cipher backed by whichever
+tier. The cachet crate ships only the encryption *mechanism* — it has **no
+cryptographic dependency of its own**, so you plug in a cipher backed by whichever
 approved cryptographic library your project mandates. The cipher receives each
 value’s storage key as associated data and must authenticate it, which
 cryptographically binds every value to its key.
 
-For convenience, the `symcrypt` feature provides a built-in `Aes256GcmCipher`
-(SymCrypt-backed AES-256-GCM, FIPS-certifiable) and a `.encrypt(&key)` shortcut for
-`.encrypt_with(Aes256GcmCipher::new(&key))`. Each value is encrypted with a fresh
-random nonce; keys are left serialized-but-unencrypted so they remain deterministic
-and can be looked up. A stored value that fails to decrypt — corrupt, truncated,
-wrong key, or relocated to a different key — is treated as a cache miss and emits a
+Only values are encrypted: keys are left serialized-but-unencrypted so they remain
+deterministic and can be looked up — so do not place secrets or PII in cache keys.
+A stored value that fails to decrypt (corrupt, truncated, wrong key, tampered, or
+relocated to a different key) is treated as a cache miss and emits a
 `cache.decrypt_failed` telemetry event.
-
-Only values are encrypted: keys are stored in plaintext in the backing tier, so do
-not place secrets or PII in cache keys. For extreme write volumes, rotate the key
-periodically to stay well within the random-nonce birthday bound.
 
 ```rust
 use cachet::Cache;
@@ -256,17 +249,90 @@ use tick::Clock;
 
 let clock = Clock::new_tokio();
 let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
-let key = [0u8; 32]; // in production, load from a secret store
 
 let cache = Cache::builder::<String, String>(clock)
     .memory()
     .serialize()
-    .encrypt(&key) // requires the `symcrypt` feature
+    .encrypt_with(my_cipher) // any `AeadCipher` implementation
     .fallback(remote)
     .build();
 
 cache.insert("key".to_string(), "value".to_string()).await?;
 ```
+
+#### Example: a `SymCrypt`-backed AES-256-GCM cipher
+
+[SymCrypt][__link20] is a FIPS-certifiable,
+SDL-approved cryptographic library. The following `AeadCipher` implementation wraps
+it using the [`symcrypt`][__link21] crate; it stores each
+value as `nonce || ciphertext || tag` with a fresh random 96-bit nonce and
+authenticates the storage key as associated data. It is shown here as a reference
+rather than shipped as a compiled feature, because `SymCrypt` requires the native
+library to be present at build and run time. Add `symcrypt` and `getrandom` to your
+own crate to use it.
+
+```rust
+use bytesbuf::BytesView;
+use cachet::{AeadCipher, DecodeOutcome, Error};
+use symcrypt::cipher::BlockCipherType;
+use symcrypt::gcm::GcmExpandedKey;
+
+const NONCE_SIZE: usize = 12;
+const TAG_SIZE: usize = 16;
+
+pub struct Aes256GcmCipher {
+    key: GcmExpandedKey,
+}
+
+impl Aes256GcmCipher {
+    pub fn new(key: &[u8; 32]) -> Self {
+        let key = GcmExpandedKey::new(key, BlockCipherType::AesBlock)
+            .expect("AES-256-GCM key expansion cannot fail for a valid 32-byte key");
+        Self { key }
+    }
+}
+
+impl AeadCipher for Aes256GcmCipher {
+    fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+        let mut nonce = [0u8; NONCE_SIZE];
+        getrandom::fill(&mut nonce).map_err(|e| Error::from_message(format!("nonce: {e}")))?;
+
+        // Assemble `nonce || plaintext || tag`, copying the plaintext in once, then
+        // encrypt the ciphertext region in place and write the tag into the tail.
+        let plaintext_len = plaintext.len();
+        let mut result = vec![0u8; NONCE_SIZE + plaintext_len + TAG_SIZE];
+        result[..NONCE_SIZE].copy_from_slice(&nonce);
+        let mut offset = NONCE_SIZE;
+        for (slice, _) in plaintext.slices() {
+            result[offset..offset + slice.len()].copy_from_slice(slice);
+            offset += slice.len();
+        }
+        let (head, tag) = result.split_at_mut(NONCE_SIZE + plaintext_len);
+        self.key.encrypt_in_place(&nonce, aad, &mut head[NONCE_SIZE..], tag);
+        Ok(result.into())
+    }
+
+    fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+        let bytes = ciphertext.to_vec();
+        if bytes.len() < NONCE_SIZE + TAG_SIZE {
+            return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+        }
+        let (nonce, rest) = bytes.split_at(NONCE_SIZE);
+        let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
+        let nonce: &[u8; NONCE_SIZE] = nonce.try_into().expect("exactly 12 bytes");
+
+        let mut buffer = body.to_vec();
+        match self.key.decrypt_in_place(nonce, aad, &mut buffer, tag) {
+            // Any authentication failure is a soft failure: the entry reads as a miss.
+            Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
+            Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+        }
+    }
+}
+```
+
+Because each encryption uses a fresh random 96-bit nonce, rotate the key
+periodically under extreme write volumes to stay well within the birthday bound.
 
 ## Telemetry
 
@@ -275,13 +341,13 @@ Cachet provides two complementary telemetry channels:
 ### Tracing events
 
 Enable with the `logs` feature and `.enable_logs()` on the cache builder.
-Each tier outcome and operation completion emits a structured [`tracing`][__link20] event.
+Each tier outcome and operation completion emits a structured [`tracing`][__link22] event.
 
 **Tier events** carry `cache.name`, `cache.event`, and `cache.duration_ns`.
 **Operation-complete events** carry `cache.name`, `cache.operation`,
 `cache.duration_ns`, and `cache.coalesced`.
 
-Use [`telemetry::attributes`][__link21] constants to filter and match events in a
+Use [`telemetry::attributes`][__link23] constants to filter and match events in a
 custom `tracing_subscriber::Layer`:
 
 ```rust
@@ -307,10 +373,10 @@ See the `telemetry_subscriber` example for a complete demonstration.
 
 ### Event handler callback API
 
-Register a [`CacheEventHandler`][__link22] via
+Register a [`CacheEventHandler`][__link24] via
 `.event_handler(handler)` on the cache builder to receive typed
-[`CacheTierEvent`][__link23] and
-[`CacheOperationEvent`][__link24] callbacks.
+[`CacheTierEvent`][__link25] and
+[`CacheOperationEvent`][__link26] callbacks.
 Events carry a `request_id` for correlating tier outcomes with their parent
 operation. Works independently of the `logs` feature.
 
@@ -322,7 +388,7 @@ See the `telemetry_accumulator` example for a DashMap-based accumulation pattern
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/cachet">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbYTLaPDmxhiUbCENNbnE-_ecbUgmxqbnD8oYbvcUbjsva5KFhZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbJYL19q8vzBMb_QI_68rGifAb8ItjnxSNMDYbUffk0aZ7s_1hZIiCaGJ5dGVzYnVmZTAuNi4wgmZjYWNoZXRlMC44LjCCbWNhY2hldF9tZW1vcnllMC40LjCCbmNhY2hldF9zZXJ2aWNlZTAuMi44gmtjYWNoZXRfdGllcmUwLjIuNoJkdGlja2UwLjQuMIJndHJhY2luZ2YwLjEuNDSCaXVuaWZsaWdodGUwLjMuMA
  [__link0]: https://docs.rs/cachet/0.8.0/cachet/?search=TimeToRefresh
  [__link1]: https://crates.io/crates/uniflight/0.3.0
  [__link10]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier
@@ -336,11 +402,13 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link18]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::attributes
  [__link19]: https://docs.rs/bytesbuf/0.6.0/bytesbuf/?search=BytesView
  [__link2]: https://docs.rs/cachet/0.8.0/cachet/?search=CacheBuilder::stampede_protection
- [__link20]: https://crates.io/crates/tracing/0.1.44
- [__link21]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::attributes
- [__link22]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheEventHandler
- [__link23]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheTierEvent
- [__link24]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheOperationEvent
+ [__link20]: https://github.com/microsoft/SymCrypt
+ [__link21]: https://crates.io/crates/symcrypt
+ [__link22]: https://crates.io/crates/tracing/0.1.44
+ [__link23]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::attributes
+ [__link24]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheEventHandler
+ [__link25]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheTierEvent
+ [__link26]: https://docs.rs/cachet/0.8.0/cachet/?search=telemetry::handler::CacheOperationEvent
  [__link3]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=CacheTier
  [__link4]: https://docs.rs/cachet_tier/0.2.6/cachet_tier/?search=DynamicCache
  [__link5]: https://docs.rs/cachet/0.8.0/cachet/?search=InsertPolicy

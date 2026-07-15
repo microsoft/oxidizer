@@ -156,7 +156,6 @@
 //! | `service` | ❌ | Enables `ServiceAdapter`, `CacheServiceExt`, and `CacheOperation`/`CacheResponse` types for service middleware integration. |
 //! | `serialize` | ❌ | Enables `.serialize()` on builders for automatic postcard serialization of keys and values to `BytesView`. |
 //! | `encrypt` | ❌ | Enables `.encrypt_with(cipher)` on serialized builders and the `AeadCipher` trait for authenticated value encryption with a caller-supplied cipher. |
-//! | `symcrypt` | ❌ | Enables the built-in `Aes256GcmCipher` (SymCrypt-backed AES-256-GCM) and the `.encrypt(&key)` convenience method. Implies `encrypt`. |
 //! | `test-util` | ❌ | Enables `MockCache`, frozen-clock utilities, and other test helpers. |
 //!
 //! # Examples
@@ -230,23 +229,17 @@
 //!
 //! With the `encrypt` feature, chain `.encrypt_with(cipher)` after `.serialize()` to
 //! encrypt values with a caller-supplied `AeadCipher` before they reach the fallback
-//! tier. The cachet crate ships only the encryption *mechanism* — it has no
-//! cryptographic dependency of its own, so you can plug in a cipher backed by whichever
+//! tier. The cachet crate ships only the encryption *mechanism* — it has **no
+//! cryptographic dependency of its own**, so you plug in a cipher backed by whichever
 //! approved cryptographic library your project mandates. The cipher receives each
 //! value's storage key as associated data and must authenticate it, which
 //! cryptographically binds every value to its key.
 //!
-//! For convenience, the `symcrypt` feature provides a built-in `Aes256GcmCipher`
-//! (SymCrypt-backed AES-256-GCM, FIPS-certifiable) and a `.encrypt(&key)` shortcut for
-//! `.encrypt_with(Aes256GcmCipher::new(&key))`. Each value is encrypted with a fresh
-//! random nonce; keys are left serialized-but-unencrypted so they remain deterministic
-//! and can be looked up. A stored value that fails to decrypt — corrupt, truncated,
-//! wrong key, or relocated to a different key — is treated as a cache miss and emits a
+//! Only values are encrypted: keys are left serialized-but-unencrypted so they remain
+//! deterministic and can be looked up — so do not place secrets or PII in cache keys.
+//! A stored value that fails to decrypt (corrupt, truncated, wrong key, tampered, or
+//! relocated to a different key) is treated as a cache miss and emits a
 //! `cache.decrypt_failed` telemetry event.
-//!
-//! Only values are encrypted: keys are stored in plaintext in the backing tier, so do
-//! not place secrets or PII in cache keys. For extreme write volumes, rotate the key
-//! periodically to stay well within the random-nonce birthday bound.
 //!
 //! ```ignore
 //! use cachet::Cache;
@@ -255,12 +248,11 @@
 //!
 //! let clock = Clock::new_tokio();
 //! let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
-//! let key = [0u8; 32]; // in production, load from a secret store
 //!
 //! let cache = Cache::builder::<String, String>(clock)
 //!     .memory()
 //!     .serialize()
-//!     .encrypt(&key) // requires the `symcrypt` feature
+//!     .encrypt_with(my_cipher) // any `AeadCipher` implementation
 //!     .fallback(remote)
 //!     .build();
 //!
@@ -268,6 +260,80 @@
 //! # Ok::<(), cachet::Error>(())
 //! # };
 //! ```
+//!
+//! ### Example: a `SymCrypt`-backed AES-256-GCM cipher
+//!
+//! [SymCrypt](https://github.com/microsoft/SymCrypt) is a FIPS-certifiable,
+//! SDL-approved cryptographic library. The following `AeadCipher` implementation wraps
+//! it using the [`symcrypt`](https://crates.io/crates/symcrypt) crate; it stores each
+//! value as `nonce || ciphertext || tag` with a fresh random 96-bit nonce and
+//! authenticates the storage key as associated data. It is shown here as a reference
+//! rather than shipped as a compiled feature, because `SymCrypt` requires the native
+//! library to be present at build and run time. Add `symcrypt` and `getrandom` to your
+//! own crate to use it.
+//!
+//! ```ignore
+//! use bytesbuf::BytesView;
+//! use cachet::{AeadCipher, DecodeOutcome, Error};
+//! use symcrypt::cipher::BlockCipherType;
+//! use symcrypt::gcm::GcmExpandedKey;
+//!
+//! const NONCE_SIZE: usize = 12;
+//! const TAG_SIZE: usize = 16;
+//!
+//! pub struct Aes256GcmCipher {
+//!     key: GcmExpandedKey,
+//! }
+//!
+//! impl Aes256GcmCipher {
+//!     pub fn new(key: &[u8; 32]) -> Self {
+//!         let key = GcmExpandedKey::new(key, BlockCipherType::AesBlock)
+//!             .expect("AES-256-GCM key expansion cannot fail for a valid 32-byte key");
+//!         Self { key }
+//!     }
+//! }
+//!
+//! impl AeadCipher for Aes256GcmCipher {
+//!     fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+//!         let mut nonce = [0u8; NONCE_SIZE];
+//!         getrandom::fill(&mut nonce).map_err(|e| Error::from_message(format!("nonce: {e}")))?;
+//!
+//!         // Assemble `nonce || plaintext || tag`, copying the plaintext in once, then
+//!         // encrypt the ciphertext region in place and write the tag into the tail.
+//!         let plaintext_len = plaintext.len();
+//!         let mut result = vec![0u8; NONCE_SIZE + plaintext_len + TAG_SIZE];
+//!         result[..NONCE_SIZE].copy_from_slice(&nonce);
+//!         let mut offset = NONCE_SIZE;
+//!         for (slice, _) in plaintext.slices() {
+//!             result[offset..offset + slice.len()].copy_from_slice(slice);
+//!             offset += slice.len();
+//!         }
+//!         let (head, tag) = result.split_at_mut(NONCE_SIZE + plaintext_len);
+//!         self.key.encrypt_in_place(&nonce, aad, &mut head[NONCE_SIZE..], tag);
+//!         Ok(result.into())
+//!     }
+//!
+//!     fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+//!         let bytes = ciphertext.to_vec();
+//!         if bytes.len() < NONCE_SIZE + TAG_SIZE {
+//!             return Ok(DecodeOutcome::SoftFailure("ciphertext too short"));
+//!         }
+//!         let (nonce, rest) = bytes.split_at(NONCE_SIZE);
+//!         let (body, tag) = rest.split_at(rest.len() - TAG_SIZE);
+//!         let nonce: &[u8; NONCE_SIZE] = nonce.try_into().expect("exactly 12 bytes");
+//!
+//!         let mut buffer = body.to_vec();
+//!         match self.key.decrypt_in_place(nonce, aad, &mut buffer, tag) {
+//!             // Any authentication failure is a soft failure: the entry reads as a miss.
+//!             Ok(()) => Ok(DecodeOutcome::Value(buffer.into())),
+//!             Err(_) => Ok(DecodeOutcome::SoftFailure("AES-GCM decryption failed")),
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! Because each encryption uses a fresh random 96-bit nonce, rotate the key
+//! periodically under extreme write volumes to stay well within the birthday bound.
 //!
 //! # Telemetry
 //!
@@ -359,8 +425,5 @@ pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEv
 #[cfg(feature = "encrypt")]
 #[doc(inline)]
 pub use transform::AeadCipher;
-#[cfg(feature = "symcrypt")]
-#[doc(inline)]
-pub use transform::Aes256GcmCipher;
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};

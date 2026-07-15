@@ -43,7 +43,6 @@ memory = ["dep:cachet_memory"]
 service = ["dep:cachet_service", "dep:layered"]
 serialize = ["dep:serde", "dep:postcard", "dep:bytesbuf"]
 encrypt = ["dep:bytesbuf"]
-symcrypt = ["encrypt", "dep:symcrypt", "dep:getrandom"]
 telemetry = []
 
 [dependencies]
@@ -53,14 +52,12 @@ cachet_memory = { workspace = true, optional = true }
 cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
-getrandom = { workspace = true, optional = true }
 layered = { workspace = true, optional = true }
 ohno = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
-symcrypt = { workspace = true, optional = true }
 tick = { workspace = true, features = [] }
 tracing = { workspace = true, optional = true }
 uniflight = { workspace = true }
@@ -174,10 +171,6 @@ required-features = ["memory", "logs"]
 [[example]]
 name = "serialization"
 required-features = ["memory", "serialize"]
-
-[[example]]
-name = "encrypt_symcrypt"
-required-features = ["memory", "serialize", "symcrypt"]
 
 [lints]
 workspace = true

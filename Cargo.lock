@@ -638,7 +638,6 @@ dependencies = [
  "dashmap",
  "dynosaur",
  "futures",
- "getrandom 0.3.4",
  "layered",
  "ohno 0.3.8",
  "opentelemetry",
@@ -649,7 +648,6 @@ dependencies = [
  "recoverable",
  "seatbelt",
  "serde",
- "symcrypt",
  "testing_aids",
  "tick",
  "tokio",
@@ -3617,26 +3615,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "symcrypt"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45f6e93e13900bae533f1f347c82d2fcf9d7ad7fffd7e58bc9fbd1b68575ca1c"
-dependencies = [
- "lazy_static",
- "libc",
- "symcrypt-sys",
-]
-
-[[package]]
-name = "symcrypt-sys"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0878df9feb068709a68ccdb5cc3201649201e79e823566863f6ca4db4b9201aa"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "symlink"

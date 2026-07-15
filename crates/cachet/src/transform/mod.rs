@@ -38,8 +38,6 @@
 mod codec;
 #[cfg(feature = "encrypt")]
 mod encrypt;
-#[cfg(feature = "symcrypt")]
-mod symcrypt_cipher;
 #[cfg(test)]
 pub(crate) mod testing;
 mod tier;
@@ -49,6 +47,4 @@ pub use codec::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder,
 pub use encrypt::AeadCipher;
 #[cfg(feature = "encrypt")]
 pub(crate) use encrypt::EncryptedTier;
-#[cfg(feature = "symcrypt")]
-pub use symcrypt_cipher::Aes256GcmCipher;
 pub(crate) use tier::TransformAdapter;

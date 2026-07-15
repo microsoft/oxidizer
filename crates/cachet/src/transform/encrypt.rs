@@ -3,16 +3,15 @@
 
 //! Authenticated encryption of cache values stored in an untrusted tier.
 //!
-//! The base `encrypt` feature provides only the encryption *mechanism* — it carries
-//! no cryptographic dependency of its own. [`AeadCipher`] is the pluggable contract:
-//! you supply the actual cipher, backed by your approved cryptographic library, and
-//! register it with [`encrypt_with`](crate::TransformBuilder::encrypt_with).
-//! [`EncryptedTier`] installs that cipher at the storage boundary, where both the key
-//! and value are available, and authenticates each value against its storage key.
+//! This provides only the encryption *mechanism* — it carries no cryptographic
+//! dependency of its own. [`AeadCipher`] is the pluggable contract: you supply the
+//! actual cipher, backed by your approved cryptographic library, and register it with
+//! [`encrypt_with`](crate::TransformBuilder::encrypt_with). [`EncryptedTier`] installs
+//! that cipher at the storage boundary, where both the key and value are available, and
+//! authenticates each value against its storage key.
 //!
-//! If you don't need to supply your own cipher, enable the optional `symcrypt` feature
-//! to get a ready-made, FIPS-certifiable implementation (`Aes256GcmCipher`) plus the
-//! `encrypt(&key)` convenience method.
+//! See the crate-level "Encryption Boundary" docs for a reference `AeadCipher`
+//! implementation backed by `SymCrypt` (FIPS-certifiable AES-256-GCM).
 
 use std::borrow::Cow;
 
@@ -45,10 +44,10 @@ pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
 /// passes the entry's storage key as AAD, so a value is cryptographically bound to
 /// the key it was stored under.
 ///
-/// The base `encrypt` feature supplies no cipher of its own: implement this trait
-/// with your organization's approved cryptographic library and register it via
-/// [`encrypt_with`](crate::TransformBuilder::encrypt_with). Alternatively, enable the
-/// `symcrypt` feature for the built-in `Aes256GcmCipher`.
+/// This trait supplies no cipher of its own: implement it with your organization's
+/// approved cryptographic library and register it via
+/// [`encrypt_with`](crate::TransformBuilder::encrypt_with). See the crate-level
+/// "Encryption Boundary" docs for a reference `SymCrypt`-backed implementation.
 ///
 /// # Security contract
 ///
