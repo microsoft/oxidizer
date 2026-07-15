@@ -7,17 +7,21 @@
 > per-binary constructor. Reach for raw `tracing` events only when you specifically
 > need them; otherwise use `observed` and skip this guide.
 
-This is a how-to guide for testing raw `tracing` output in this repository. Because
-`tracing` subscribers and the `tracing-core` callsite-interest cache are
-process-global state, follow these recipes exactly; they keep capture and coverage
-deterministic without relying on the test runner's process isolation.
+This repository has one **mandatory requirement** for any test binary that touches
+`tracing` (section 1), followed by two optional **how-to** recipes for when you want
+to inspect `tracing` output (sections 2 and 3).
 
-## 1. Initialize tracing in every test binary that touches `tracing`
+## 1. Required: initialize tracing so trace-event lines are counted as covered
 
-Every test binary that emits or inspects `tracing` events MUST install the
-`testing_aids` fallback before any test runs, via a constructor. This is what makes
-`tracing` event coverage deterministic. Where the constructor goes depends on the
-binary kind.
+**This is mandatory for every test binary that emits or inspects `tracing` events,
+whether or not the test inspects the output.** If you skip it, `tracing` event
+emission lines (and the field expressions inside them, such as
+`cache.duration_ns = duration.as_nanos()`) may be reported as **lacking test
+coverage even though they execute during tests** - the coverage miss is
+non-deterministic and depends on test scheduling.
+
+Install the `testing_aids` fallback before any test runs, via a constructor. Where
+the constructor goes depends on the binary kind.
 
 **Unit-test binary** (`#[cfg(test)]` code under `src/`) — add this at the crate
 root, gated on `test`:
@@ -48,8 +52,9 @@ panic with a pointer to this guide rather than failing silently.
 > no-subscriber code paths) must NOT install the fallback and must own its own
 > binary; see `crates/cachet/tests/no_subscriber.rs`.
 
-## 2. Write events to stdout, a file, or a buffer (process-global)
+## 2. Optional: write events to stdout, a file, or a buffer (process-global)
 
+*Do this only if you want to see or assert on `tracing` output across all threads.*
 These helpers route events through the process-global subscriber, so they affect
 all threads. Capture is process-global: **every test in a binary that uses them
 MUST be `#[serial]`.**
@@ -91,12 +96,12 @@ fn emits_event_from_background_thread() {
 }
 ```
 
-## 3. Capture events on a single thread (unit tests)
+## 3. Optional: capture events on a single thread (unit tests)
 
-To capture events emitted on the current thread only, use
-`testing_aids::tracing::Capture` with `set_default`. This is thread-local, so it
-needs no `#[serial]` and does not touch `tracing` global state. Unit tests MUST use
-this form and MUST NOT install a global subscriber.
+*Do this only if you want to assert on `tracing` output emitted on the current
+thread.* Use `testing_aids::tracing::Capture` with `set_default`. This is
+thread-local, so it needs no `#[serial]` and does not touch `tracing` global state.
+Unit tests MUST use this form and MUST NOT install a global subscriber.
 
 ```rust
 use tracing_subscriber::util::SubscriberInitExt;
