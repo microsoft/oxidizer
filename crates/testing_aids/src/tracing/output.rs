@@ -6,11 +6,11 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
-use ::tracing::Level;
-use ::tracing::level_filters::LevelFilter;
+use ::tracing::subscriber::Interest;
+use ::tracing::{Level, Metadata, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::layer::{Context, Filter, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::is_mutation_testing;
@@ -106,10 +106,11 @@ pub fn log_file(file_name: &str) -> String {
 /// with all output sinks silent.
 ///
 /// The installed subscriber is permanently interested in every callsite at every
-/// level (via an unfiltered buffer layer), so once it is present `tracing-core`
-/// can never cache a callsite as disabled. It produces no output on
-/// its own: stdout, file, and buffer sinks are all off until a `log_to_*` helper
-/// turns one on.
+/// level (via an always-interested no-op interest-keeper layer), so once it is
+/// present `tracing-core` can never cache a callsite as disabled and event field
+/// expressions are always evaluated. It produces no output on its own: the stdout,
+/// file, and buffer sinks are separate formatting layers, each off (and skipping
+/// formatting) until a `write_to_*` helper turns it on.
 ///
 /// Installing this from a `#[cfg(test)] #[ctor::ctor]` constructor guarantees the
 /// fallback subscriber is present before any unit test runs, which keeps per-test
@@ -124,33 +125,108 @@ pub fn initialize() {
 
 fn ensure_initialized() {
     INITIALIZER.call_once(|| {
-        // Stdout output is gated by `STDOUT_ENABLED` (off by default) so the
-        // fallback subscriber is silent until a `write_to_stdout*` helper opts in.
+        // Each output sink is a formatting layer gated by a `SinkFilter` that is
+        // active only while that sink is turned on. The filter runs before the
+        // layer formats an event, so when a sink is off its (relatively expensive)
+        // event formatting is skipped entirely rather than being rendered and then
+        // discarded by the writer.
         let terminal_layer = tracing_subscriber::fmt::layer()
             .with_writer(StdoutWriterFactory)
-            .with_filter(LevelFilter::from_level(Level::INFO));
+            .with_filter(SinkFilter {
+                active: stdout_active,
+                max_level: Some(Level::INFO),
+            });
 
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(LogFileWriter)
             // No coloring codes or such fancy stuff in the file, please.
-            .with_ansi(false);
+            .with_ansi(false)
+            .with_filter(SinkFilter {
+                active: file_active,
+                max_level: None,
+            });
 
-        // The buffer layer carries no level filter, so it is interested in every
-        // callsite at every level. This is deliberate and load-bearing: because
-        // this always-interested layer is part of the process-global subscriber
-        // from the very first initialization, `tracing-core` can never cache a
-        // callsite's interest as "disabled". That is what makes both buffer capture
-        // and per-test thread-local capture deterministic regardless of test
-        // execution order. See `docs/tracing-tests.md`.
-        let buffer_layer = tracing_subscriber::fmt::layer().with_writer(BufferWriterFactory).with_ansi(false);
+        let buffer_layer = tracing_subscriber::fmt::layer()
+            .with_writer(BufferWriterFactory)
+            .with_ansi(false)
+            .with_filter(SinkFilter {
+                active: buffer_active,
+                max_level: None,
+            });
 
+        // The interest keeper carries no filter and does no formatting, so it is
+        // permanently interested in every callsite at every level. This is
+        // deliberate and load-bearing on two counts. First, because this
+        // always-interested layer is part of the process-global subscriber from the
+        // very first initialization, `tracing-core` can never cache a callsite's
+        // interest as "disabled", which makes both buffer capture and per-test
+        // thread-local capture deterministic regardless of test execution order.
+        // Second, keeping every callsite enabled forces `tracing` to evaluate event
+        // field expressions (e.g. `duration.as_nanos()`) on every emission even when
+        // no sink is capturing, so coverage of those expressions is deterministic.
+        // See `docs/tracing-tests.md`.
         tracing_subscriber::registry()
+            .with(InterestKeeper)
             .with(terminal_layer)
             .with(file_layer)
             .with(buffer_layer)
             .try_init()
             .expect("this can only happen if something else besides testing_aids has configured logging");
     });
+}
+
+/// No-op layer that is permanently interested in every callsite at every level.
+///
+/// It performs no formatting and produces no output; its sole job is to keep every
+/// `tracing` callsite enabled from process start. This prevents `tracing-core` from
+/// caching a callsite's interest as "disabled" and forces event field expressions to
+/// be evaluated on every emission, which keeps capture and coverage deterministic
+/// independent of which output sinks are active. See `docs/tracing-tests.md`.
+#[derive(Debug)]
+struct InterestKeeper;
+
+impl<S: Subscriber> Layer<S> for InterestKeeper {
+    fn register_callsite(&self, _metadata: &'static Metadata<'static>) -> Interest {
+        Interest::always()
+    }
+}
+
+/// Per-layer filter that enables its formatting layer only while the associated sink
+/// is active, so event formatting is skipped when nothing is capturing.
+///
+/// Returns [`Interest::sometimes`] so the decision is re-evaluated on every event
+/// rather than cached: the sink activation flags change at runtime, and the always
+/// interested [`InterestKeeper`] guarantees no callsite is ever cached as disabled.
+struct SinkFilter {
+    /// Whether this sink is currently active.
+    active: fn() -> bool,
+    /// The most verbose level this sink accepts, or `None` for every level.
+    max_level: Option<Level>,
+}
+
+impl<S> Filter<S> for SinkFilter {
+    fn enabled(&self, meta: &Metadata<'_>, _cx: &Context<'_, S>) -> bool {
+        (self.active)() && self.max_level.is_none_or(|level| *meta.level() <= level)
+    }
+
+    fn callsite_enabled(&self, _metadata: &'static Metadata<'static>) -> Interest {
+        Interest::sometimes()
+    }
+}
+
+/// Whether the stdout sink is currently active.
+fn stdout_active() -> bool {
+    STDOUT_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Whether the file sink is currently active.
+fn file_active() -> bool {
+    LOG_FILE.lock().unwrap().is_some()
+}
+
+/// Whether the buffer sink is currently active.
+fn buffer_active() -> bool {
+    LOG_BUFFER.lock().unwrap().is_some()
 }
 
 static INITIALIZER: Once = Once::new();
