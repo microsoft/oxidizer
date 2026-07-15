@@ -262,7 +262,7 @@ jobs:
       # (forks lack a write token).
       - name: Post Semver Comment
         if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: marocchino/sticky-pull-request-comment@468942ec889968f45256a969e13c75bc7cdec2b6 # v3.0.4
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: semver-check
           path: semver-comment.md
