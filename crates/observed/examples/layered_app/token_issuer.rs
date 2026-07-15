@@ -11,7 +11,8 @@
 use data_privacy::{DataClass, classified};
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Event, Sink, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy;
+
+use crate::taxonomy::MicrosoftEnterpriseDataTaxonomy;
 
 const DC: DataClass = DataClass::new("microsoft", "PublicNonPersonalData");
 

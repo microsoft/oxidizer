@@ -29,14 +29,18 @@
 mod db;
 mod token_issuer;
 
+#[path = "../support/taxonomy.rs"]
+mod taxonomy;
+
 use std::sync::{Arc, LazyLock};
 
 use data_privacy::classified;
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Event, Sink, SinkId, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLogger, SdkLoggerProvider};
+
+use crate::taxonomy::MicrosoftEnterpriseDataTaxonomy;
 
 // ---------------------------------------------------------------------------
 // Classified newtypes

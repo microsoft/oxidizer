@@ -26,7 +26,10 @@ use data_privacy::classified;
 use observed::metadata::EventDescription;
 use observed::processing::{EventProcessor, EventView};
 use observed::{Event, Sink, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy as DataTaxonomy;
+use taxonomy::MicrosoftEnterpriseDataTaxonomy as DataTaxonomy;
+
+#[path = "support/taxonomy.rs"]
+mod taxonomy;
 
 fn main() {
     // A passthrough redaction engine keeps classified values readable for this

@@ -16,9 +16,12 @@ use std::sync::Arc;
 use data_privacy::{DataClass, classified};
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Event, Sink, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SdkLoggerProvider};
+use taxonomy::MicrosoftEnterpriseDataTaxonomy;
+
+#[path = "support/taxonomy.rs"]
+mod taxonomy;
 
 // ---------------------------------------------------------------------------
 // Classified newtypes - every enrichment value has a concrete type with a

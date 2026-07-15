@@ -37,7 +37,6 @@ observed = { workspace = true }
 anyspawn = { workspace = true, features = ["tokio"] }
 data_privacy = { workspace = true }
 observed = { workspace = true, features = ["test-util"] }
-observed_testing = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-stdout = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }

@@ -19,9 +19,12 @@ use std::sync::Arc;
 use data_privacy::{DataClass, classified};
 use observed::enrichment::{EnrichFnExt, EnrichFutureExt};
 use observed::{Enrichment, Event, Sink, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy as DC;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use taxonomy::MicrosoftEnterpriseDataTaxonomy as DC;
+
+#[path = "support/taxonomy.rs"]
+mod taxonomy;
 
 #[classified(DC::PublicNonPersonalData)]
 #[derive(Clone)]

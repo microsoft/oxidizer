@@ -2616,13 +2616,11 @@ dependencies = [
  "criterion",
  "data_privacy",
  "observed_macros",
- "observed_testing",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "pin-project",
  "smallvec",
- "testing_aids",
  "thread_aware",
  "thread_local",
  "tick",
@@ -2661,7 +2659,6 @@ dependencies = [
  "anyspawn",
  "data_privacy",
  "observed",
- "observed_testing",
  "opentelemetry",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -2676,7 +2673,10 @@ version = "0.0.0"
 dependencies = [
  "data_privacy",
  "observed",
+ "opentelemetry",
+ "testing_aids",
  "tick",
+ "tokio",
 ]
 
 [[package]]

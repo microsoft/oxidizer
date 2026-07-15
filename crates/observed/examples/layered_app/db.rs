@@ -10,7 +10,8 @@
 use data_privacy::classified;
 use observed::enrichment::EnrichFnExt;
 use observed::{Enrichment, Event, Sink, emit};
-use observed_testing::MicrosoftEnterpriseDataTaxonomy;
+
+use crate::taxonomy::MicrosoftEnterpriseDataTaxonomy;
 
 // ---------------------------------------------------------------------------
 // Classified newtypes

@@ -19,5 +19,11 @@ data_privacy = { workspace = true }
 observed = { workspace = true, features = ["test-util"] }
 tick = { workspace = true, features = ["test-util"] }
 
+[dev-dependencies]
+opentelemetry = { workspace = true, features = ["logs"] }
+testing_aids = { workspace = true }
+tick = { workspace = true, features = ["test-util", "tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
 [lints]
 workspace = true
