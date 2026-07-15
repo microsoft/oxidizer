@@ -16,6 +16,11 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
+# `uuid` is used only by a doctest in `src/_documentation/recipes.rs`, which
+# cargo-machete does not scan; ignore it to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["uuid"]
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "futures_core::stream::Stream",
@@ -78,7 +83,6 @@ tick = { workspace = true, features = ["fmt"] }
 alloc_tracker = { workspace = true }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
-data_privacy = { path = "../data_privacy" }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }

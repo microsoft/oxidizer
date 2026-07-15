@@ -37,7 +37,6 @@ insta = { workspace = true }
 mutants = { workspace = true }
 regex = { workspace = true, features = ["unicode-perl"] }
 testing_aids = { path = "../testing_aids" }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
