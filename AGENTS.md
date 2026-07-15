@@ -92,7 +92,7 @@ they run.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;
 adding a log/event emission that needs coverage; adding a crate whose tests emit
-`tracing` events (it needs the ctor fallback); tempted to install a global
+`tracing` events (it needs the ctor initialization); tempted to install a global
 subscriber in a unit test.
 
 # [Benchmarks](docs/benchmarks.md)
