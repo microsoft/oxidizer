@@ -52,7 +52,6 @@ cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
-ohno = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
@@ -69,12 +68,6 @@ cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 dashmap = { workspace = true }
-dynosaur = { workspace = true }
-opentelemetry = { workspace = true, features = [
-    "metrics",
-    "logs",
-] }
-opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }

@@ -93,14 +93,14 @@
 //! `plurality` instead returns thin smart pointers that deref (and, for
 //! [`Arc`]/[`Rc`], share ownership) without the pool in hand.
 //!
-//! | Capability | [`plurality`][cr-plurality] | [`slab`][cr-slab] | [`sharded-slab`][cr-sharded-slab] | [`slotmap`][cr-slotmap] | [`object-pool`][cr-object-pool] | [`opool`][cr-opool] | [`deadpool`][cr-deadpool] |
-//! |---|---|---|---|---|---|---|---|
-//! | Thin single-pointer handles (deref without the pool) | yes | no (index) | no (guard) | no (key) | no (guard) | no (guard) | no (guard) |
-//! | Individual free + slot reuse | yes | yes | yes | yes | yes | yes | yes |
-//! | Shared ownership ([`Arc`]/[`Rc`]) | yes | no | no | no | no | no | no |
-//! | Growable, chunked | yes | yes | yes | yes | yes | yes | yes |
-//! | Stable address (value never moves on grow) | yes | no | yes | no | no | no | no |
-//! | Thread safety | `Send + !Sync`, cross-thread frees | single-thread | `Send + Sync` | single-thread | `Send + Sync`, lock-based | `Send + Sync`, lock-free | `Send + Sync`, async |
+//! | Capability | [`plurality`][cr-plurality] | [`slab`][cr-slab] | [`sharded-slab`][cr-sharded-slab] | [`slotmap`][cr-slotmap] | [`object-pool`][cr-object-pool] | [`opool`][cr-opool] | [`deadpool`][cr-deadpool] | [`infinity-pool`][cr-infinity-pool] |
+//! |---|---|---|---|---|---|---|---|---|
+//! | Thin single-pointer handles (deref without the pool) | yes | no (index) | no (guard) | no (key) | no (guard) | no (guard) | no (guard) | yes |
+//! | Individual free + slot reuse | yes | yes | yes | yes | yes | yes | yes | yes |
+//! | Shared ownership ([`Arc`]/[`Rc`]) | yes | no | no | no | no | no | no | yes |
+//! | Growable, chunked | yes | yes | yes | yes | yes | yes | yes | yes |
+//! | Stable address (value never moves on grow) | yes | no | yes | no | no | no | no | yes |
+//! | Thread safety | `Send + !Sync`, cross-thread frees | single-thread | `Send + Sync` | single-thread | `Send + Sync`, lock-based | `Send + Sync`, lock-free | `Send + Sync`, async | `Send + Sync`, or single-thread `Rc` |
 //!
 //! [cr-plurality]: https://crates.io/crates/plurality
 //! [cr-slab]: https://crates.io/crates/slab
@@ -109,6 +109,7 @@
 //! [cr-object-pool]: https://crates.io/crates/object-pool
 //! [cr-opool]: https://crates.io/crates/opool
 //! [cr-deadpool]: https://crates.io/crates/deadpool
+//! [cr-infinity-pool]: https://crates.io/crates/infinity_pool
 //!
 //! # Examples
 //!

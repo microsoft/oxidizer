@@ -72,6 +72,8 @@ const COMPARISON_LABELS: &[(&str, &str)] = &[
     ("object_pool_pull", "object-pool"),
     ("opool_get", "opool"),
     ("deadpool_get", "deadpool"),
+    ("infinity_pinned", "infinity-pool — `PinnedPool`"),
+    ("infinity_raw", "infinity-pool — `RawPinnedPool`"),
 ];
 
 /// One parsed gungraun benchmark.

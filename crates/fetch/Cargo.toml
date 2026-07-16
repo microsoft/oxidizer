@@ -141,7 +141,6 @@ argh = { workspace = true }
 criterion = { workspace = true }
 ctor = { workspace = true }
 fastrand.workspace = true
-hyper = { workspace = true, features = ["http2", "client"] }
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
 mutants = { workspace = true }
@@ -170,7 +169,6 @@ tokio = { workspace = true, features = [
 ] }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-uuid = { workspace = true }
 wiremock = { workspace = true }
 
 [lints]
