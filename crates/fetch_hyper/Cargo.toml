@@ -40,6 +40,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
 native-tls = [
@@ -82,12 +88,6 @@ hyper-tls = { workspace = true, optional = true, features = ["alpn"] }
 native-tls = { workspace = true, optional = true, features = ["alpn"] }
 rustls = { workspace = true, features = ["tls12", "std"], default-features = false, optional = true }
 tokio-native-tls = { workspace = true, optional = true }
-
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
 
 [dev-dependencies]
 anyspawn = { path = "../anyspawn", features = ["tokio"] }

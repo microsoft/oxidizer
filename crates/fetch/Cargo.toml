@@ -45,6 +45,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 tls = ["rustls"]
@@ -54,11 +60,7 @@ rustls = [
     "fetch_hyper?/rustls",
     "fetch_tls/rustls",
 ]
-native-tls = [
-    "dep:native-tls",
-    "fetch_hyper?/native-tls",
-    "fetch_tls/native-tls",
-]
+native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
@@ -120,12 +122,6 @@ rustls = { workspace = true, features = [
     "std",
 ], default-features = false, optional = true }
 rustls-platform-verifier = { workspace = true, optional = true }
-
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
 
 [dev-dependencies]
 # internal

@@ -38,6 +38,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 timeout = []
@@ -64,12 +70,6 @@ thread_aware = { workspace = true }
 tick = { workspace = true }
 tower-service = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
-
-# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
-# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
-# to avoid a false positive.
-[package.metadata.cargo-machete]
-ignored = ["ctor"]
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
