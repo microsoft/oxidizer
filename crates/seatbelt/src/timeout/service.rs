@@ -241,7 +241,6 @@ mod tests {
     use super::*;
     use crate::testing::FailReadyService;
 
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout_emits_log() {
         use testing_aids::tracing_logs::Capture;

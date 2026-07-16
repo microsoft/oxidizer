@@ -488,7 +488,6 @@ mod tests {
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
 
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn breaker_emits_logs() {
         use testing_aids::tracing_logs::Capture;

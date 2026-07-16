@@ -177,7 +177,6 @@ mod tests {
         assert!(tester.collect_attributes().is_empty(), "expected no metrics when guard is disarmed");
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_log_with_hedging_delay() {
         use testing_aids::tracing_logs::Capture;

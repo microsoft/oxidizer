@@ -402,7 +402,6 @@ mod tests {
         );
     }
 
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn retry_emits_log() {
         use testing_aids::tracing_logs::Capture;

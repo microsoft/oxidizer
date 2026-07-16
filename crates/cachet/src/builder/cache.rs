@@ -413,7 +413,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
         use testing_aids::tracing_logs::Capture;
 

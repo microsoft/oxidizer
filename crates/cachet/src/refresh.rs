@@ -343,7 +343,6 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, clock, None, telemetry)
     }
 
-    #[cfg_attr(miri, ignore)] // tracing subscriber setup is not miri-compatible
     #[test]
     fn fallback_miss_logs_refresh_miss_telemetry() {
         block_on(async {
@@ -444,7 +443,6 @@ mod fetch_and_promote_tests {
     /// permanently stuck in the `in_flight` set. Without an RAII guard, the
     /// `finish_refresh` call is skipped on panic, blocking all future refreshes
     /// for that key.
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn panic_in_refresh_does_not_leave_key_stuck_in_flight() {
         let primary = MockCache::<String, i32>::new();
@@ -508,7 +506,6 @@ mod fetch_and_promote_tests {
 
     /// Exercises the early return when a refresh is already in-flight for the
     /// same key (line `if !refresh.try_start_refresh(key) { return; }`).
-    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn do_refresh_already_in_flight_returns_early() {
         let primary = MockCache::<String, i32>::new();
