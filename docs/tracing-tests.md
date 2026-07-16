@@ -59,16 +59,16 @@ this, if a test binary uses these helpers at all, **every test in that binary MU
 concurrently and emits into the shared buffer.
 
 ```rust
-use testing_aids::tracing;
+use testing_aids::tracing_logs;
 
 // To stdout only (INFO and above):
-tracing::write_to_stdout();
+tracing_logs::write_to_stdout();
 
 // To stdout and a file (file captures all levels), until the guard drops:
-let _guard = tracing::write_to_stdout_and_file("my-test.log");
+let _guard = tracing_logs::write_to_stdout_and_file("my-test.log");
 
 // To stdout and an in-memory buffer, one entry per line:
-let guard = tracing::write_to_stdout_and_buffer();
+let guard = tracing_logs::write_to_stdout_and_buffer();
 run_the_operation();
 let lines = guard.into_inner(); // detaches and returns Vec<String>
 assert!(lines.iter().any(|line| line.contains("cache.get")));
