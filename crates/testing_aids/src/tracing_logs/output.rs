@@ -579,6 +579,12 @@ impl Drop for BufferWriter {
 /// We write log entries to this file (if not `None`).
 static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 
+/// Justification for `expect` on the [`LOG_FILE`] mutex: it is only ever locked to read
+/// or swap its `Option` (file-handle clone results are unwrapped only after the lock is
+/// released), operations that cannot panic, so it can never be poisoned.
+const LOG_FILE_NEVER_POISONED: &str =
+    "LOG_FILE is only locked to read or swap its Option, which cannot panic, so the mutex is never poisoned";
+
 /// Lock-free mirror of whether [`LOG_FILE`] currently holds a file. Set under the
 /// `LOG_FILE` lock on attach/detach and read by [`file_active`] on the per-event path
 /// so the filter never has to take the global mutex.
@@ -610,26 +616,45 @@ impl Drop for FileGuard {
             return;
         }
 
-        let mut log_file = LOG_FILE.lock().unwrap();
+        // Clear the slot under the lock, then assert *after* releasing it so a failed
+        // assertion never panics with the lock held and thus never poisons `LOG_FILE`.
+        let was_active = {
+            let mut log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
+            let occupied = log_file.is_some();
+            *log_file = None;
+            FILE_ENABLED.store(false, Ordering::Release);
+            occupied
+        };
 
-        assert!(log_file.is_some());
-        *log_file = None;
-        FILE_ENABLED.store(false, Ordering::Release);
+        assert!(was_active, "a log file scope ended without an active log file");
     }
 }
 
 fn start_log_file_scope(file_name: &str) -> FileGuard {
     let path = log_file(file_name);
 
-    let mut log_file = LOG_FILE.lock().unwrap();
-
+    // Determine whether a file is already active while holding the lock, but release the
+    // lock *before* asserting, so a failed assertion (a `#[serial]` violation) never
+    // panics with the lock held and thus never poisons `LOG_FILE`. Asserting before
+    // creating the file also ensures a serial violation never truncates the file that the
+    // currently-active scope is writing to.
+    let already_active = {
+        let log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
+        log_file.is_some()
+    };
     assert!(
-        log_file.is_none(),
+        !already_active,
         "a log file is already active; multiple tests cannot log to file in parallel within the same process - logging is global state"
     );
 
-    *log_file = Some(File::create(path).unwrap());
-    FILE_ENABLED.store(true, Ordering::Release);
+    // Create the file outside the lock so an I/O failure never poisons `LOG_FILE`.
+    let file = File::create(path).unwrap();
+
+    {
+        let mut log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
+        *log_file = Some(file);
+        FILE_ENABLED.store(true, Ordering::Release);
+    }
 
     FileGuard::new()
 }
@@ -641,10 +666,16 @@ impl<'a> MakeWriter<'a> for LogFileWriter {
     type Writer = LogWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
-        let log_file = LOG_FILE.lock().unwrap();
+        // Clone the file handle under the lock but unwrap the clone result *after*
+        // releasing it, so a `try_clone` failure never panics with the lock held and thus
+        // never poisons `LOG_FILE`.
+        let cloned = {
+            let log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
+            (*log_file).as_ref().map(File::try_clone)
+        };
 
         LogWriter {
-            file: (*log_file).as_ref().map(|f| f.try_clone().unwrap()),
+            file: cloned.map(|result| result.unwrap()),
         }
     }
 }
