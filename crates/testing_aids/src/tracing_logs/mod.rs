@@ -4,7 +4,7 @@
 //! Utilities for testing `tracing` output without cross-test pollution.
 //!
 //! `tracing` subscribers and the `tracing-core` callsite-interest cache are
-//! process-global state. This module installs a silent, always-interested fallback
+//! process-global state. This module installs a silent, always-interested
 //! subscriber (via [`initialize`]) so that no callsite can ever be poisoned into the
 //! disabled state, and provides sanctioned ways to capture emitted events:
 //! thread-local capture with [`Capture`] for unit tests, and the process-global

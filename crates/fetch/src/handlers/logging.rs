@@ -165,7 +165,7 @@ mod tests {
     use http::{Request, StatusCode};
     use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
     use templated_uri::Uri;
-    use testing_aids::tracing::Capture;
+    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::handlers::Dispatch;

@@ -325,7 +325,7 @@ mod tests {
 #[cfg(test)]
 mod fetch_and_promote_tests {
     use cachet_tier::MockCache;
-    use testing_aids::tracing::Capture;
+    use testing_aids::tracing_logs::Capture;
     use tick::Clock;
 
     use super::*;

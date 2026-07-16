@@ -13,7 +13,7 @@ use std::{env, process, thread};
 mod io;
 mod macros;
 mod metrics;
-pub mod tracing;
+pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;

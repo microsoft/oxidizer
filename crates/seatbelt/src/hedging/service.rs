@@ -402,7 +402,7 @@ mod tests {
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn hedging_emits_log() {
-        use testing_aids::tracing::Capture;
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
         let log_capture = Capture::new();

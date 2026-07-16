@@ -86,8 +86,8 @@ why we believe the operation can never cause an out of bounds access.
 # [Testing tracing events](docs/tracing-tests.md)
 
 How to test `tracing` output without cross-test pollution. Key rule: every test
-binary that emits or inspects `tracing` must call `testing_aids::tracing::initialize()`
-from a `#[ctor::ctor]` init function, or trace-event lines may be reported as uncovered even though
+binary that emits or inspects `tracing` must invoke `testing_aids::init_tracing!()`
+at module scope, or trace-event lines may be reported as uncovered even though
 they run.
 
 **Open this when**: writing or moving any test that inspects `tracing` output;

@@ -6,8 +6,8 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 
-use ::tracing::subscriber::Interest;
-use ::tracing::{Level, Metadata, Subscriber};
+use tracing::subscriber::Interest;
+use tracing::{Level, Metadata, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::{Context, Filter, SubscriberExt};
@@ -31,8 +31,9 @@ use crate::is_mutation_testing;
 ///
 /// # Panics
 ///
-/// Panics if `testing_aids::tracing::initialize()` was never called, which means the
-/// test binary is missing its `#[ctor::ctor]` init function. See `docs/tracing-tests.md`.
+/// Panics if `testing_aids::init_tracing!()` was never invoked, which means the
+/// test binary is missing its `#[ctor::ctor]` process-initialization function. See
+/// `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.
@@ -62,8 +63,9 @@ pub fn write_to_stdout() {
 /// # Panics
 ///
 /// Panics if a log file is already active (another test is logging to file in the same
-/// process without `#[serial]`), or if `testing_aids::tracing::initialize()` was never
-/// called, which means the test binary is missing its `#[ctor::ctor]` init function. See
+/// process without `#[serial]`), or if `testing_aids::init_tracing!()` was never
+/// invoked, which means the test binary is missing its `#[ctor::ctor]`
+/// process-initialization function. See
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
     if is_mutation_testing() {
@@ -124,13 +126,19 @@ pub fn log_file(file_name: &str) -> String {
 /// file, and buffer sinks are separate formatting layers, each off (and skipping
 /// formatting) until a `write_to_*` helper turns it on.
 ///
-/// Installing this from a `#[cfg(test)] #[ctor::ctor]` constructor guarantees the
-/// fallback subscriber is present before any unit test runs, which keeps per-test
-/// thread-local subscribers (`tracing::subscriber::set_default`) working
-/// deterministically: a test can shadow the global default on its own thread and
-/// the `DefaultGuard` restores the silent global fallback when dropped, and no
+/// Installing this from a `#[cfg(test)] #[ctor::ctor]` process-initialization
+/// function guarantees the subscriber is present before any unit test runs, which
+/// keeps per-test thread-local subscribers (`tracing::subscriber::set_default`)
+/// working deterministically: a test can shadow the global default on its own thread
+/// and the `DefaultGuard` restores the silent global subscriber when dropped, and no
 /// callsite is ever poisoned into the "disabled" state. See
 /// `docs/tracing-tests.md`.
+///
+/// # Panics
+///
+/// Panics if another global `tracing` subscriber has already been installed by
+/// something other than `testing_aids` (for example a test that called
+/// `tracing::subscriber::set_global_default`). See `docs/tracing-tests.md`.
 pub fn initialize() {
     ensure_initialized();
 }
@@ -238,36 +246,48 @@ fn stdout_active() -> bool {
 }
 
 /// Whether the file sink is currently active.
+///
+/// Reads a lock-free flag rather than locking [`LOG_FILE`] so the per-event filter
+/// stays off the global mutex on the hot path. The flag is kept in sync with
+/// `LOG_FILE` by setting it under that lock whenever the file sink is attached or
+/// detached.
 fn file_active() -> bool {
-    LOG_FILE.lock().unwrap().is_some()
+    FILE_ENABLED.load(Ordering::Acquire)
 }
 
 /// Whether the buffer sink is currently active.
+///
+/// Reads a lock-free flag rather than locking [`LOG_BUFFER`] so the per-event filter
+/// stays off the global mutex on the hot path. The flag is kept in sync with
+/// `LOG_BUFFER` by setting it under that lock whenever the buffer sink is attached or
+/// detached.
 fn buffer_active() -> bool {
-    LOG_BUFFER.lock().unwrap().is_some()
+    BUFFER_ENABLED.load(Ordering::Acquire)
 }
 
 static INITIALIZER: Once = Once::new();
 
 /// Asserts that [`initialize`] has already installed the silent always-interested
-/// fallback subscriber.
+/// subscriber.
 ///
-/// The tracing helpers require that fallback to be present from process start - installed
-/// in a `#[ctor::ctor]` constructor that runs before any test - so that no `tracing`
-/// callsite can be poisoned into the "disabled" state before capture begins. Relying on a
-/// helper to install it lazily would be too late: an earlier emission on a subscriber-less
-/// thread could already have cached the callsite as disabled. See `docs/tracing-tests.md`.
+/// The tracing helpers require that subscriber to be present from process start -
+/// installed in a `#[ctor::ctor]` process-initialization function that runs before any
+/// test - so that no `tracing` callsite can be poisoned into the "disabled" state before
+/// capture begins. Relying on a helper to install it lazily would be too late: an earlier
+/// emission on a subscriber-less thread could already have cached the callsite as
+/// disabled. See `docs/tracing-tests.md`.
 ///
 /// # Panics
 ///
-/// Panics if the fallback was never installed, which means the test binary is missing its
-/// `#[ctor::ctor]` constructor calling [`initialize`].
+/// Panics if the subscriber was never installed, which means the test binary is missing
+/// its `#[ctor::ctor]` process-initialization function calling [`initialize`].
 pub(crate) fn assert_initialized() {
     assert!(
         INITIALIZER.is_completed(),
         "testing_aids tracing was used before initialize() ran; every test binary that \
-         emits or inspects tracing must install the fallback from a `#[ctor::ctor]` constructor \
-         calling `testing_aids::tracing::initialize()`. See docs/tracing-tests.md."
+         emits or inspects tracing must install the subscriber from a `#[ctor::ctor]` \
+         process-initialization function calling `testing_aids::init_tracing!()`. See \
+         docs/tracing-tests.md."
     );
 }
 
@@ -319,9 +339,9 @@ impl Write for StdoutWriter {
 /// messages regardless of level.
 ///
 /// This is the sanctioned way to assert on `tracing` output in tests. It routes
-/// through the single process-global subscriber (initialized by the test binary's
-/// `#[ctor::ctor]` init function and left permanently interested), so a prior
-/// emission on a subscriber-less thread can never suppress later capture. See
+/// through the single process-global subscriber (installed by the test binary's
+/// `#[ctor::ctor]` process-initialization function and left permanently interested), so
+/// a prior emission on a subscriber-less thread can never suppress later capture. See
 /// [`docs/tracing-tests.md`] for the full rationale and rules.
 ///
 /// Capture is process-global: only one buffer can be active at a time, and the
@@ -336,8 +356,8 @@ impl Write for StdoutWriter {
 ///
 /// Panics if a buffer is already active (i.e. another test ran concurrently because
 /// some test in the binary was missing `#[serial]`), or if
-/// `testing_aids::tracing::initialize()` was never called (the binary is missing its
-/// `#[ctor::ctor]` init function).
+/// `testing_aids::init_tracing!()` was never invoked (the binary is missing its
+/// `#[ctor::ctor]` process-initialization function).
 ///
 /// [`docs/tracing-tests.md`]: https://github.com/microsoft/oxidizer/blob/main/docs/tracing-tests.md
 pub fn write_to_stdout_and_buffer() -> BufferGuard {
@@ -355,7 +375,7 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
     {
-        let mut slot = LOG_BUFFER.lock().unwrap();
+        let mut slot = LOG_BUFFER.lock().expect(LOG_BUFFER_NEVER_POISONED);
         assert!(
             slot.is_none(),
             "a log buffer is already active; tracing capture is process-global and records events \
@@ -363,14 +383,29 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
              just the capturing ones - must be annotated `#[serial]`"
         );
         *slot = Some(Arc::clone(&buffer));
+        BUFFER_ENABLED.store(true, Ordering::Release);
     }
 
     BufferGuard { buffer: Some(buffer) }
 }
 
+/// Justification for `expect` on the [`LOG_BUFFER`] mutex: it is only ever locked to
+/// read or swap its `Option`, operations that cannot panic, so it can never be poisoned.
+const LOG_BUFFER_NEVER_POISONED: &str = "LOG_BUFFER is only locked to swap its Option, which cannot panic, so the mutex is never poisoned";
+
+/// Justification for `expect` on a capture buffer mutex: it is only ever locked for
+/// infallible `Vec` operations, so it can never be poisoned.
+const CAPTURE_BUFFER_NEVER_POISONED: &str =
+    "the capture buffer is only locked for infallible Vec operations, so the mutex is never poisoned";
+
 /// The buffer that captured log lines are written to while a [`BufferGuard`] is
 /// active, one entry per line. `None` when no capture is in progress.
 static LOG_BUFFER: Mutex<Option<Arc<Mutex<Vec<String>>>>> = Mutex::new(None);
+
+/// Lock-free mirror of whether [`LOG_BUFFER`] currently holds a buffer. Set under the
+/// `LOG_BUFFER` lock on attach/detach and read by [`buffer_active`] on the per-event
+/// path so the filter never has to take the global mutex.
+static BUFFER_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Scopes an in-memory `tracing` capture started by [`write_to_stdout_and_buffer`].
 ///
@@ -392,15 +427,15 @@ impl BufferGuard {
     /// Use this to poll for an event that is emitted asynchronously (for example,
     /// on a background thread) while the guard remains active. Call
     /// [`into_inner`](Self::into_inner) once at the end to detach and finish.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the buffer mutex is poisoned, or if called after
-    /// [`into_inner`](Self::into_inner) has consumed the guard.
     #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the only expects are on an internal mutex that is never poisoned and on an \
+                  Option that is Some until into_inner consumes the guard; neither can fail"
+    )]
     pub fn snapshot(&self) -> Vec<String> {
         let buffer = self.buffer.as_ref().expect("buffer is present until into_inner consumes the guard");
-        buffer.lock().unwrap().clone()
+        buffer.lock().expect(CAPTURE_BUFFER_NEVER_POISONED).clone()
     }
 
     /// Detaches the capture buffer and returns everything logged during the guard's
@@ -409,18 +444,23 @@ impl BufferGuard {
     /// `tracing`'s formatting layers write synchronously on each event, so there is
     /// no asynchronous buffering to flush; the returned lines are complete as of the
     /// last emission on this thread before the call.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the buffer mutex is poisoned.
     #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the only expects are on internal mutexes that are never poisoned and on an \
+                  Option that is Some until into_inner consumes the guard; neither can fail"
+    )]
     pub fn into_inner(mut self) -> Vec<String> {
         let buffer = self.buffer.take().expect("buffer is present until into_inner consumes the guard");
 
         // Detach global capture so the next test starts clean.
-        *LOG_BUFFER.lock().unwrap() = None;
+        {
+            let mut slot = LOG_BUFFER.lock().expect(LOG_BUFFER_NEVER_POISONED);
+            *slot = None;
+            BUFFER_ENABLED.store(false, Ordering::Release);
+        }
 
-        std::mem::take(&mut *buffer.lock().unwrap())
+        std::mem::take(&mut *buffer.lock().expect(CAPTURE_BUFFER_NEVER_POISONED))
     }
 }
 
@@ -429,7 +469,9 @@ impl Drop for BufferGuard {
         if self.buffer.is_some() {
             // Guard dropped without `into_inner`: detach so capture does not leak
             // into a subsequent test.
-            *LOG_BUFFER.lock().unwrap() = None;
+            let mut slot = LOG_BUFFER.lock().expect(LOG_BUFFER_NEVER_POISONED);
+            *slot = None;
+            BUFFER_ENABLED.store(false, Ordering::Release);
         }
     }
 }
@@ -442,7 +484,7 @@ impl<'a> MakeWriter<'a> for BufferWriterFactory {
     type Writer = BufferWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
-        let slot = LOG_BUFFER.lock().unwrap();
+        let slot = LOG_BUFFER.lock().expect(LOG_BUFFER_NEVER_POISONED);
         BufferWriter {
             buffer: slot.as_ref().map(Arc::clone),
             pending: Vec::new(),
@@ -478,7 +520,7 @@ impl BufferWriter {
 
         let complete = &self.pending[..=last_newline];
         let lines: Vec<String> = String::from_utf8_lossy(complete).lines().map(str::to_string).collect();
-        buffer.lock().unwrap().extend(lines);
+        buffer.lock().expect(CAPTURE_BUFFER_NEVER_POISONED).extend(lines);
         self.pending.drain(..=last_newline);
     }
 
@@ -497,7 +539,7 @@ impl BufferWriter {
         }
 
         let line = String::from_utf8_lossy(&self.pending).into_owned();
-        buffer.lock().unwrap().push(line);
+        buffer.lock().expect(CAPTURE_BUFFER_NEVER_POISONED).push(line);
         self.pending.clear();
     }
 }
@@ -524,6 +566,11 @@ impl Drop for BufferWriter {
 
 /// We write log entries to this file (if not `None`).
 static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
+
+/// Lock-free mirror of whether [`LOG_FILE`] currently holds a file. Set under the
+/// `LOG_FILE` lock on attach/detach and read by [`file_active`] on the per-event path
+/// so the filter never has to take the global mutex.
+static FILE_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Defines the scope within which all log entries (from all threads) go to a log file.
 ///
@@ -555,6 +602,7 @@ impl Drop for FileGuard {
 
         assert!(log_file.is_some());
         *log_file = None;
+        FILE_ENABLED.store(false, Ordering::Release);
     }
 }
 
@@ -570,6 +618,7 @@ fn start_log_file_scope(file_name: &str) -> FileGuard {
         );
 
         *log_file = Some(file);
+        FILE_ENABLED.store(true, Ordering::Release);
     }
 
     FileGuard::new()

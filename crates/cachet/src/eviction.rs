@@ -60,7 +60,7 @@ impl EvictionHook {
 mod tests {
     use std::sync::Arc;
 
-    use testing_aids::tracing::Capture;
+    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::telemetry::attributes;

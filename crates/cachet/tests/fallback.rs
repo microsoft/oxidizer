@@ -9,11 +9,8 @@
 #![cfg(feature = "memory")]
 
 // Integration binaries link the library with `cfg(test)` false, so the crate-root
-// tracing fallback does not run here. Install it directly. See docs/tracing-tests.md.
-#[ctor::ctor(unsafe)]
-fn init_test_tracing() {
-    testing_aids::tracing::initialize();
-}
+// tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
+testing_aids::init_tracing!();
 
 use std::time::Duration;
 
@@ -331,7 +328,7 @@ async fn fallback_builder_stampede_protection() {
 #[cfg(feature = "logs")]
 #[tokio::test]
 async fn fallback_builder_enable_logs_emits_logs() {
-    let capture = testing_aids::tracing::Capture::new();
+    let capture = testing_aids::tracing_logs::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -355,7 +352,7 @@ async fn fallback_builder_enable_logs_emits_logs() {
 #[cfg(feature = "logs")]
 #[tokio::test]
 async fn cache_builder_enable_logs_emits_logs() {
-    let capture = testing_aids::tracing::Capture::new();
+    let capture = testing_aids::tracing_logs::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();

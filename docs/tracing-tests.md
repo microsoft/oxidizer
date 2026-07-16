@@ -20,33 +20,29 @@ emission lines (and the field expressions inside them, such as
 coverage even though they execute during tests** - the coverage miss is
 non-deterministic and depends on test scheduling.
 
-Initialize `testing_aids` tracing before any test runs, via a `#[ctor::ctor]`
-process-init function that runs before `main`. Where it goes depends on the binary
-kind.
+Initialize `testing_aids` tracing before any test runs, via the
+`testing_aids::init_tracing!()` macro. It expands to a `#[ctor::ctor]`
+process-initialization function that runs before `main`; the invoking crate needs a
+dev-dependency on the [`ctor`](https://docs.rs/ctor) crate. Where the macro goes depends
+on the binary kind.
 
-**Unit-test binary** (`#[cfg(test)]` code under `src/`) — add this at the crate
+**Unit-test binary** (`#[cfg(test)]` code under `src/`) - add this at the crate
 root, gated on `test`:
 
 ```rust
 #[cfg(test)]
-#[ctor::ctor(unsafe)]
-fn init_test_tracing() {
-    testing_aids::tracing::initialize();
-}
+testing_aids::init_tracing!();
 ```
 
-**Integration-test binaries** (`tests/*.rs`) — `cfg(test)` is false here, so the
-crate-root init function does not run. Add an ungated file-level `#[ctor::ctor]`
-init function to each `tests/*.rs` file that emits or inspects `tracing`:
+**Integration-test binaries** (`tests/*.rs`) - `cfg(test)` is false here, so the
+crate-root initialization does not run. Invoke the macro bare in each `tests/*.rs`
+file that emits or inspects `tracing`:
 
 ```rust
-#[ctor::ctor(unsafe)]
-fn init_test_tracing() {
-    testing_aids::tracing::initialize();
-}
+testing_aids::init_tracing!();
 ```
 
-`initialize()` is idempotent. If you forget it, the `testing_aids` tracing helpers
+The initialization is idempotent. If you forget it, the `testing_aids` tracing helpers
 panic with a pointer to this guide rather than failing silently.
 
 > A binary that deliberately runs with no subscriber (to exercise the
@@ -87,7 +83,7 @@ For events emitted asynchronously (for example, on a background worker), poll
 use std::time::{Duration, Instant};
 
 use serial_test::serial;
-use testing_aids::tracing::write_to_stdout_and_buffer;
+use testing_aids::tracing_logs::write_to_stdout_and_buffer;
 
 #[test]
 #[serial]
@@ -113,7 +109,7 @@ fn emits_event_from_background_thread() {
 ## 3. Optional: capture events on a single thread (unit tests)
 
 *Do this only if you want to assert on `tracing` output emitted on the current
-thread.* Use `testing_aids::tracing::Capture` with `set_default`. Capture is
+thread.* Use `testing_aids::tracing_logs::Capture` with `set_default`. Capture is
 thread-local: it installs a subscriber for the current thread only (`set_default`),
 so it needs no `#[serial]` and touches no process-global `tracing` state. Beyond the
 one-time process-init call from section 1, a unit test MUST NOT install its own
@@ -122,7 +118,7 @@ its own thread with this form.
 
 ```rust
 use tracing_subscriber::util::SubscriberInitExt;
-use testing_aids::tracing::Capture;
+use testing_aids::tracing_logs::Capture;
 
 #[test]
 fn emits_operation_event() {

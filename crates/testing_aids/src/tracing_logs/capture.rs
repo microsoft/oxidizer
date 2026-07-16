@@ -13,7 +13,7 @@ use tracing_subscriber::layer::SubscriberExt;
 ///
 /// Uses `tracing_subscriber::fmt::MakeWriter` to capture formatted log output
 /// into a shared buffer that can be inspected in tests. Pair with
-/// [`set_default`](::tracing::subscriber::set_default) to scope capture to the current thread.
+/// [`set_default`](tracing::subscriber::set_default) to scope capture to the current thread.
 #[derive(Debug, Clone, Default)]
 pub struct Capture {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
@@ -52,18 +52,18 @@ impl Capture {
 
     /// Creates a `tracing_subscriber` that writes to this capture buffer.
     ///
-    /// Use with [`set_default`](::tracing::subscriber::set_default) to scope capture to the
+    /// Use with [`set_default`](tracing::subscriber::set_default) to scope capture to the
     /// current thread so parallel tests don't interfere with each other.
     ///
     /// # Panics
     ///
-    /// Panics if the silent always-interested fallback subscriber has not been
-    /// installed by a `#[ctor::ctor]` constructor calling
+    /// Panics if the silent always-interested subscriber has not been installed by a
+    /// `#[ctor::ctor]` process-initialization function calling
     /// [`initialize`](super::initialize). Thread-local capture only
-    /// composes deterministically when that fallback is present from process start.
+    /// composes deterministically when that subscriber is present from process start.
     /// See `docs/tracing-tests.md`.
     #[must_use]
-    pub fn subscriber(&self) -> impl ::tracing::Subscriber {
+    pub fn subscriber(&self) -> impl tracing::Subscriber {
         super::output::assert_initialized();
         tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
     }

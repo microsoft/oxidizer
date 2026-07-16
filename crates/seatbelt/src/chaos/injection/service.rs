@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn injection_emits_log() {
-        use testing_aids::tracing::Capture;
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
         let log_capture = Capture::new();

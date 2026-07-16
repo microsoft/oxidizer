@@ -414,7 +414,7 @@ impl CacheTelemetry {
 mod tests {
     use std::sync::Mutex;
 
-    use testing_aids::tracing::Capture;
+    use testing_aids::tracing_logs::Capture;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;

@@ -6,20 +6,17 @@
 
 #![cfg(feature = "memory")]
 
-// The capture bridge asserts the fallback was installed at process start, so install it
-// here. Integration binaries do not run the crate-root `#[cfg(test)]` constructor. See
+// The capture bridge asserts the subscriber was installed at process start, so install it
+// here. Integration binaries do not run the crate-root `#[cfg(test)]` initialization. See
 // docs/tracing-tests.md.
-#[ctor::ctor(unsafe)]
-fn init_test_tracing() {
-    testing_aids::tracing::initialize();
-}
+testing_aids::init_tracing!();
 
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
 use serial_test::serial;
 use testing_aids::TEST_TIMEOUT;
-use testing_aids::tracing::write_to_stdout_and_buffer;
+use testing_aids::tracing_logs::write_to_stdout_and_buffer;
 use tick::Clock;
 
 /// Inserting past the configured `max_capacity` of the underlying moka cache

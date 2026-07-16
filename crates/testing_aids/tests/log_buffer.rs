@@ -10,15 +10,12 @@
 //! otherwise poison `tracing-core`'s process-global callsite-interest cache).
 
 use serial_test::serial;
-use testing_aids::tracing::write_to_stdout_and_buffer;
+use testing_aids::tracing_logs::write_to_stdout_and_buffer;
 
-// The capture bridge asserts the fallback was installed at process start, so install it
-// here. Integration binaries do not run any crate-root `#[cfg(test)]` constructor. See
+// The capture bridge asserts the subscriber was installed at process start, so install it
+// here. Integration binaries do not run any crate-root `#[cfg(test)]` initialization. See
 // docs/tracing-tests.md.
-#[ctor::ctor(unsafe)]
-fn init_test_tracing() {
-    testing_aids::tracing::initialize();
-}
+testing_aids::init_tracing!();
 
 #[test]
 #[serial]

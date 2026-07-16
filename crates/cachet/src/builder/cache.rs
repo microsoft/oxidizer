@@ -415,7 +415,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn builder_enable_logs() {
-        use testing_aids::tracing::Capture;
+        use testing_aids::tracing_logs::Capture;
 
         let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());

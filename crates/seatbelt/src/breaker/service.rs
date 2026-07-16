@@ -491,7 +491,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn breaker_emits_logs() {
-        use testing_aids::tracing::Capture;
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
         let log_capture = Capture::new();
