@@ -295,21 +295,27 @@ jobs:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
-          cargo-tools: CARGO_UDEPS_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
+          cargo-tools: CARGO_UDEPS_VERSION, CARGO_MACHETE_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
-      - name: Udeps
+      - name: Unused dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          # cargo-machete scans source text and flags a direct dependency even
+          # when it is still pulled in transitively (which udeps ignores by
+          # design). It always runs workspace-wide -- it has no package
+          # selection -- so it is the backstop that catches stale unused deps in
+          # crates outside the current PR's impacted set.
+          cargo machete --with-metadata
           # Without --all-targets: enforce that every [dependencies] entry is used
           # by the library/bins (catches normal deps used only by tests/benches/
           # examples -- i.e. misplaced deps that should be [dev-dependencies]).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
           # With --all-targets: enforce that every [dev-dependencies] entry is used
           # by some target (catches unused dev-dependencies).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
