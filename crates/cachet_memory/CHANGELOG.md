@@ -120,7 +120,7 @@
 
   - bump MSRV to 1.91 and refresh dependencies ([#457](https://github.com/microsoft/oxidizer/pull/457))
 
-## [0.2.1]
+## [0.2.1] - 2026-05-19
 
 - ✨ Features
 
@@ -141,6 +141,6 @@
   - Improve thread_aware APIs and anyspawn rt compat. ([#403](https://github.com/microsoft/oxidizer/pull/403))
   - Add LRU eviction policy for in memory cache ([#369](https://github.com/microsoft/oxidizer/pull/369))
 
-## [0.1.0]
+## [0.1.0] - 2026-05-18
 
 Initial release.
