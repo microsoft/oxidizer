@@ -101,7 +101,7 @@ fn traits_compile() {
     assert_eq!(r, &[1, 2, 3]);
     assert_eq!(format!("{a:?}"), "[1, 2, 3]");
     assert_eq!(a, b);
-    assert!(a != c);
+    assert_ne!(a, c);
     assert_eq!(a.cmp(&c), Ordering::Less);
     assert_eq!(a.partial_cmp(&c), Some(Ordering::Less));
     assert_eq!(common::hash_of(&a), common::hash_of(&b));

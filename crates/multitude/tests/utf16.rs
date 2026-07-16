@@ -810,7 +810,7 @@ mod utf16_coverage {
         // PartialEq vs Self / Utf16Str / &Utf16Str
         let lit = utf16str!("hello");
         assert_eq!(s, lit);
-        assert!(s == lit);
+        assert_eq!(s, lit);
 
         // Hash
         let mut h = DefaultHasher::new();
@@ -831,8 +831,8 @@ mod utf16_coverage {
         let _: &Utf16Str = AsRef::as_ref(&a);
         let _: &Utf16Str = Borrow::borrow(&a);
 
-        assert!(a == *utf16str!("hello"));
-        assert!(a == utf16str!("hello"));
+        assert_eq!(a, *utf16str!("hello"));
+        assert_eq!(a, utf16str!("hello"));
 
         let _ = format!("{a}");
         let _ = format!("{a:?}");
@@ -1519,7 +1519,7 @@ mod mutation_coverage {
 
         assert_ne!(a, b);
         assert!(a != "beta");
-        assert!(a != beta);
+        assert_ne!(a, beta);
     }
 
     #[test]
@@ -1632,8 +1632,8 @@ mod mutation_coverage {
         let beta = utf16str!("beta");
 
         assert_ne!(a, b);
-        assert!(a != utf16str!("beta"));
-        assert!(a != beta);
+        assert_ne!(a, utf16str!("beta"));
+        assert_ne!(a, beta);
     }
 
     #[test]
@@ -1726,7 +1726,7 @@ mod mutation_coverage {
         let beta = "beta";
 
         assert!(boxed != "beta");
-        assert!(boxed != beta);
+        assert_ne!(boxed, beta);
     }
 
     #[test]
@@ -1735,8 +1735,8 @@ mod mutation_coverage {
         let boxed: multitude::Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("alpha"));
         let beta = utf16str!("beta");
 
-        assert!(boxed != utf16str!("beta"));
-        assert!(boxed != beta);
+        assert_ne!(boxed, utf16str!("beta"));
+        assert_ne!(boxed, beta);
     }
 
     #[test]
@@ -3352,8 +3352,8 @@ mod utf16_smart_ptr_traits {
         let a: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
         let b: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("same"));
         let c: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("diff"));
-        assert!(a == b);
-        assert!((a != c));
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 
     #[test]
@@ -3362,10 +3362,10 @@ mod utf16_smart_ptr_traits {
         let s: Arc<multitude::strings::Utf16Str> = arena.alloc_utf16_str_arc(utf16str!("xy"));
         let xy: &Utf16Str = utf16str!("xy");
         let no: &Utf16Str = utf16str!("no");
-        assert!(s == *xy);
-        assert!((s != *no));
-        assert!(s == xy);
-        assert!((s != no));
+        assert_eq!(s, *xy);
+        assert_ne!(s, *no);
+        assert_eq!(s, xy);
+        assert_ne!(s, no);
     }
 
     #[test]
@@ -3419,10 +3419,10 @@ mod utf16_smart_ptr_traits {
         let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
         let xy: &Utf16Str = utf16str!("xy");
         let no: &Utf16Str = utf16str!("no");
-        assert!(s == *xy);
-        assert!((s != *no));
-        assert!(s == xy);
-        assert!((s != no));
+        assert_eq!(s, *xy);
+        assert_ne!(s, *no);
+        assert_eq!(s, xy);
+        assert_ne!(s, no);
     }
 
     // Exercises `Utf16Str::PartialEq<widestring::Utf16Str>` directly on the
@@ -3432,8 +3432,8 @@ mod utf16_smart_ptr_traits {
     fn utf16str_newtype_partial_eq_widestring_distinguishes() {
         let arena = Arena::new();
         let s: Box<multitude::strings::Utf16Str> = arena.alloc_utf16_str_box(utf16str!("xy"));
-        assert!(*s == *utf16str!("xy"));
-        assert!(*s != *utf16str!("no"));
+        assert_eq!(*s, *utf16str!("xy"));
+        assert_ne!(*s, *utf16str!("no"));
     }
 
     #[test]
@@ -3527,8 +3527,8 @@ mod box_utf16_str_traits {
         let a = arena.alloc_utf16_str_box(utf16str!("alpha"));
         let b = arena.alloc_utf16_str_box(utf16str!("alpha"));
         let c = arena.alloc_utf16_str_box(utf16str!("beta"));
-        assert!(a == b);
-        assert!(a != c);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
         assert_eq!(a.cmp(&b), Ordering::Equal);
         assert_eq!(a.cmp(&c), Ordering::Less);
         assert_eq!(a.partial_cmp(&c), Some(Ordering::Less));
