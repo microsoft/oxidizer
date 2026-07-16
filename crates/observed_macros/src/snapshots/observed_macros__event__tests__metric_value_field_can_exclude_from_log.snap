@@ -1,0 +1,59 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for OutgoingRequest {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "outgoing_request",
+            ::core::option::Option::Some(::core::any::TypeId::of::<OutgoingRequest>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "outgoing_request",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "method",
+                    ::core::option::Option::Some(LogFieldEntry::new("method")),
+                    ::core::option::Option::None,
+                );
+                visitor(
+                    &FIELD_DESC,
+                    &|engine| Value::from_redacted(&self.method, engine),
+                )?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "duration",
+                    ::core::option::Option::None,
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "duration",
+                            ::observed::metadata::MetricDescription::new(
+                                "outgoing_request",
+                                ::observed::metadata::InstrumentKind::Histogram,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.duration.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

@@ -1,0 +1,36 @@
+---
+source: crates/observed_macros/src/enrichment.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::enrichment::Enrichment for RequestContext {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(3usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new(
+                        "http.method",
+                        self.method,
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new(
+                            "request_id",
+                            self.request_id,
+                        )
+                        .exclude_from_logs(),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "status",
+                        self.status,
+                    ),
+                );
+            entries
+        }
+    }
+};

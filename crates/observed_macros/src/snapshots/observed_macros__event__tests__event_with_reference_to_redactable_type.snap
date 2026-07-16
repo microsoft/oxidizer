@@ -1,0 +1,48 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl<'a> ::observed::Event for BorrowedClassified<'a> {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "borrowed.classified",
+            ::core::option::Option::Some(
+                ::core::any::TypeId::of::<BorrowedClassified<'static>>(),
+            ),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "borrowed.classified",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "name",
+                    ::core::option::Option::Some(LogFieldEntry::new("name")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|engine| Value::from_redacted(self.name, engine))?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "count",
+                    ::core::option::Option::Some(LogFieldEntry::new("count")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.count.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

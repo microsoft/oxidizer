@@ -1,0 +1,31 @@
+---
+source: crates/observed_macros/src/enrichment.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::enrichment::Enrichment for RequestContext {
+        fn into_entries(
+            self,
+        ) -> ::std::vec::Vec<::observed::__private::EnrichmentEntry> {
+            let mut entries = ::std::vec::Vec::with_capacity(2usize);
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::new(
+                        "username",
+                        ::observed::__private::Sensitive::new(
+                            self.username,
+                            DataTaxonomy::Euii,
+                        ),
+                    ),
+                );
+            entries
+                .push(
+                    ::observed::__private::EnrichmentEntry::unclassified(
+                        "status",
+                        self.status,
+                    ),
+                );
+            entries
+        }
+    }
+};

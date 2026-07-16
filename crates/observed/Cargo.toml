@@ -1,0 +1,66 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "observed"
+description = "Structured telemetry events with enrichment, redaction, and per-field routing to OpenTelemetry."
+version = "0.23.0"
+readme = "README.md"
+keywords = ["observed", "telemetry", "tracing", "opentelemetry", "logging"]
+categories = ["development-tools::debugging"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/observed"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    "thread_aware::core::ThreadAware",
+    "observed_macros::Enrichment",
+    "observed_macros::Event",
+    "data_privacy::redaction_engine::RedactionEngine",
+    "data_privacy_core::redacted::RedactedDisplay",
+    "tick::simple_clock::SimpleClock",
+    "opentelemetry::common::Value",
+    "opentelemetry::common::StringValue",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+test-util = []
+
+[dependencies]
+# oxidizer
+data_privacy = { workspace = true }
+observed_macros = { workspace = true }
+thread_aware = { workspace = true, features = ["derive"] }
+tick = { workspace = true }
+
+# 3rd-party
+opentelemetry = { workspace = true, features = ["logs"] }
+pin-project = { workspace = true }
+smallvec = { workspace = true }
+thread_local = { workspace = true }
+
+[dev-dependencies]
+all_the_time = { workspace = true }
+alloc_tracker = { workspace = true }
+criterion = { workspace = true }
+opentelemetry-stdout = { workspace = true, features = ["logs", "metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["logs", "metrics", "testing"] }
+tick = { workspace = true, features = ["test-util", "tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "observed_benchmarks"
+harness = false
+required-features = ["test-util"]

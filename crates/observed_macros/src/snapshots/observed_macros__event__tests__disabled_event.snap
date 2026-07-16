@@ -1,0 +1,58 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for DebugDiagnostics {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "debug.diagnostics",
+            ::core::option::Option::Some(::core::any::TypeId::of::<DebugDiagnostics>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "debug.diagnostics",
+                    ::observed::Severity::Debug,
+                    ::core::option::Option::Some("Internal diagnostics"),
+                ),
+            ),
+            ::core::option::Option::None,
+            true,
+            true,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "queue_depth",
+                    ::core::option::Option::Some(LogFieldEntry::new("queue_depth")),
+                    ::core::option::Option::None,
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.queue_depth.clone()))?;
+            }
+            {
+                const FIELD_DESC: FieldDescriptor = FieldDescriptor::new(
+                    "queue_depth_metric",
+                    ::core::option::Option::Some(
+                        LogFieldEntry::new("queue_depth_metric"),
+                    ),
+                    ::core::option::Option::Some(
+                        MetricFieldEntry::instrument(
+                            "queue_depth_metric",
+                            ::observed::metadata::MetricDescription::new(
+                                "debug.queue_depth",
+                                ::observed::metadata::InstrumentKind::Gauge,
+                                "",
+                                "",
+                            ),
+                        ),
+                    ),
+                );
+                visitor(&FIELD_DESC, &|_| Value::from(self.queue_depth_metric.clone()))?;
+            }
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};

@@ -25,6 +25,8 @@ Please see each crate's change log below:
 - [`http_path_template`](./crates/http_path_template/CHANGELOG.md)
 - [`layered`](./crates/layered/CHANGELOG.md)
 - [`multitude`](./crates/multitude/CHANGELOG.md)
+- [`observed`](./crates/observed/CHANGELOG.md)
+- [`observed_macros`](./crates/observed_macros/CHANGELOG.md)
 - [`ohno`](./crates/ohno/CHANGELOG.md)
 - [`ohno_macros`](./crates/ohno_macros/CHANGELOG.md)
 - [`plurality`](./crates/plurality/CHANGELOG.md)

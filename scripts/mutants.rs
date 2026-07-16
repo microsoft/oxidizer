@@ -43,6 +43,11 @@ const TEST_GROUPS: &[&[&str]] = &[
     &["data_privacy", "data_privacy_core", "data_privacy_macros", "data_privacy_macros_impl"],
     &["fundle", "fundle_macros", "fundle_macros_impl"],
     &["ohno", "ohno_macros"],
+    &[
+        "observed",
+        "observed_macros",
+        "observed_testing",
+    ],
     &["templated_uri", "templated_uri_macros", "templated_uri_macros_impl"],
     &["thread_aware", "thread_aware_macros", "thread_aware_macros_impl"],
 ];
@@ -167,6 +172,16 @@ fn mutate_group(group: &[String], args: &Args) -> Result<(), AppError> {
 
     let package_args: Vec<_> = group.iter().map(|p| format!("--package={p}")).collect();
     cargo_args.extend(package_args);
+
+    // Run the tests of every package in the group for each mutant (not just the
+    // mutated package's own tests, which is cargo-mutants' default). This is
+    // what makes grouping meaningful: e.g. a mutation in a proc-macro crate is
+    // validated by the tests of the crate that consumes the macro, and shared
+    // test-harness crates (kept in the group but excluded from mutation) get to
+    // catch mutants in their sibling crates. For single-package groups this is
+    // equivalent to the default.
+    let test_package_args: Vec<_> = group.iter().map(|p| format!("--test-package={p}")).collect();
+    cargo_args.extend(test_package_args);
 
     automation::run_cargo(cargo_args.into_iter())
 }

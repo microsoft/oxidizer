@@ -1,0 +1,30 @@
+---
+source: crates/observed_macros/src/event.rs
+expression: output
+---
+const _: () = {
+    impl ::observed::Event for NoV2Workloads {
+        const DESCRIPTION: ::observed::metadata::EventDescription = ::observed::metadata::EventDescription::new(
+            "workload.disabled",
+            ::core::option::Option::Some(::core::any::TypeId::of::<NoV2Workloads>()),
+            ::core::option::Option::Some(
+                ::observed::metadata::LogDescription::new(
+                    "workload.disabled",
+                    ::observed::Severity::Info,
+                    ::core::option::Option::None,
+                ),
+            ),
+            ::core::option::Option::None,
+            false,
+            false,
+        );
+        fn visit_fields(
+            &self,
+            visitor: &mut ::observed::processing::FieldVisitorFn<'_>,
+        ) -> ::core::ops::ControlFlow<()> {
+            use ::observed::Value;
+            use ::observed::metadata::{FieldDescriptor, LogFieldEntry, MetricFieldEntry};
+            ::core::ops::ControlFlow::Continue(())
+        }
+    }
+};
