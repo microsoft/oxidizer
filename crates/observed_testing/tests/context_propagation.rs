@@ -69,7 +69,7 @@ fn context_transfer_does_not_affect_source_thread() {
     );
 }
 
-#[cfg(not(miri))] // unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`
+#[cfg_attr(miri, ignore = "unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_enrichment_propagation() {
     let (sink, processor) = test_emitter(TEST_ID);
@@ -91,7 +91,7 @@ async fn async_enrichment_propagation() {
     );
 }
 
-#[cfg(not(miri))] // unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`
+#[cfg_attr(miri, ignore = "unsupported operation: can't call foreign function `CreateIoCompletionPort` on OS `windows`")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn async_enrichment_with_context_transfer() {
     let (sink, processor) = test_emitter(TEST_ID);
