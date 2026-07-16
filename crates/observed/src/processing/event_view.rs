@@ -101,9 +101,6 @@ impl EventEnrichment {
 /// construction. Concurrent enrichment pushes after that point are not
 /// visible to this view - same semantics as the previous live-walk because
 /// the chain is an immutable linked list (`Arc<EnrichmentNode>`).
-///
-/// This is a concrete struct (not a trait) - `EventProcessor::process` takes
-/// `&EventView<'_>` which is object-safe.
 pub struct EventView<'a> {
     event: &'a dyn DynEvent,
     enrichments: EventEnrichment,

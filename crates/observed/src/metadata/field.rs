@@ -27,7 +27,7 @@ impl LogFieldEntry {
 
 /// Per-field metric routing entry.
 ///
-/// If [`instrument`](Self::instrument) is `Some`, the field is the
+/// If [`instrument_description`](Self::instrument_description) is `Some`, the field is the
 /// measurement value recorded for that instrument and is **not** also used as
 /// a dimension. Otherwise the field is a plain metric dimension keyed by
 /// [`key`](Self::key).

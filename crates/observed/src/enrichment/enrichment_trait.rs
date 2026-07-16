@@ -5,7 +5,7 @@
 
 use crate::enrichment::EnrichmentEntry;
 
-/// A typed enrichment struct that converts into enrichment entries.
+/// Trait implemented by typed enrichment structs that convert into enrichment entries.
 ///
 /// Derive this trait via `#[derive(Enrichment)]`. Unlike [`Event`](crate::Event), enrichment
 /// structs have no severity, body, or metrics - they only produce key-value

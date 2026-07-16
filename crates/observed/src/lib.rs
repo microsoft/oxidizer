@@ -203,7 +203,7 @@ pub use key::Key;
 /// A field of type `Option<T>` is captured like a `T` when it is `Some(_)`. When
 /// it is `None`, `#[if_none(...)]` decides the outcome (default
 /// `#[if_none("n/a")]`, or `drop` to omit it) - the same behavior as in
-/// [`Event`].
+/// [`Event`](macro@crate::Event).
 ///
 /// # Redaction paths
 ///
