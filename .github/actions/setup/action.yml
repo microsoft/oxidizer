@@ -25,10 +25,37 @@ inputs:
     description: Install Wild linker for faster linking
     required: false
     default: 'false'
+  free-disk-space:
+    description: >-
+      Remove unused pre-installed toolchains (Android SDK, Haskell/GHC, Swift,
+      Chromium) to reclaim ~18 GB on Linux runners. Guards against intermittent
+      "No space left on device" failures on the heavier build/test jobs. No-op
+      on non-Linux runners.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # GitHub only guarantees 14 GB of storage on standard runners; the heavy
+    # `cargo hack --each-feature` + `--all-features` test build peaks well above
+    # that, so we reclaim space up front. These directories are unused by our
+    # Rust builds. See https://github.com/microsoft/oxidizer (work item 7611559).
+    - name: Free Disk Space
+      if: inputs.free-disk-space == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo "Disk before cleanup:"
+        df -h /
+        # Fast `rm -rf` reclaims (no slow apt purge): Android ~10 GB, Haskell
+        # ~4 GB, Swift ~3 GB, Chromium ~1 GB.
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc /usr/local/.ghcup
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/local/share/chromium /usr/local/share/edge_driver
+        echo "Disk after cleanup:"
+        df -h /
+
     - name: Loading Repo Constants
       shell: bash
       run: |
