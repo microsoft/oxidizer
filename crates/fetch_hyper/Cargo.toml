@@ -116,5 +116,7 @@ wiremock = { workspace = true }
 name = "smoke"
 required-features = ["native-tls"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

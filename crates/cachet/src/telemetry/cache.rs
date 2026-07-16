@@ -142,6 +142,11 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
+    // The body is a no-op when `logs` is off; under `--no-default-features`
+    // it only compiles into non-test builds (e.g. examples) and is never
+    // exercised, so exclude it from coverage rather than chase an untestable
+    // discard. See telemetry tests for the logs-on path.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn record_debug_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
@@ -161,6 +166,7 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn record_info_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {
@@ -180,6 +186,7 @@ impl CacheTelemetry {
         not(feature = "logs"),
         expect(clippy::unused_self, reason = "self.logging_enabled is used when logs is enabled")
     )]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn record_error_with_duration(&self, cache_name: CacheName, event: &'static str, duration: Duration) {
         #[cfg(any(feature = "logs", test))]
         if self.logging_enabled {

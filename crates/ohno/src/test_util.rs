@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![cfg_attr(coverage_nightly, coverage(off))] // coverage doesn't handle panics well
+// The assertion logic lives in `assert_error_message_impl` (a real function),
+// not inline in the macro body, so this module-level `coverage(off)` actually
+// suppresses it. A macro body is re-instrumented at every expansion site and
+// attributed back to this file, so `coverage(off)` here never reached it.
+#![cfg_attr(coverage_nightly, coverage(off))]
 
 //! Test utilities for the ohno crate.
 //!
@@ -30,24 +34,26 @@
 /// ```
 #[macro_export]
 macro_rules! assert_error_message {
-    ($error:expr, $expected:expr) => {{
-        let error_string = $error.to_string();
-        let expected: &str = $expected;
+    ($error:expr, $expected:expr) => {{ $crate::test_util::assert_error_message_impl(&$error.to_string(), $expected) }};
+}
 
-        let test = move || {
-            if error_string == expected {
-                return ();
-            }
-            if let Some(remainder) = error_string.strip_prefix(expected) {
-                // backtrace, caused by, or error trace indicators
-                if remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ") {
-                    return ();
-                }
-            }
-            panic!("left : {expected}\nright: {error_string}");
-        };
-        test();
-    }};
+/// Implementation backing [`assert_error_message!`].
+///
+/// Kept as a function (rather than inline in the macro) so that the
+/// module-level `#[coverage(off)]` applies to the assertion's untested
+/// branches; inlined in the macro they would be instrumented at every
+/// expansion site and reported as coverage gaps in this file.
+///
+/// Not part of the public API; invoke [`assert_error_message!`] instead.
+#[doc(hidden)]
+#[track_caller]
+pub fn assert_error_message_impl(error_string: &str, expected: &str) {
+    let matches = error_string == expected
+        || error_string.strip_prefix(expected).is_some_and(|remainder| {
+            // backtrace, caused by, or error trace indicators
+            remainder.starts_with("\n\nBacktrace:\n") || remainder.starts_with("\ncaused by: ") || remainder.starts_with("\n> ")
+        });
+    assert!(matches, "left : {expected}\nright: {error_string}");
 }
 
 #[cfg(test)]
@@ -79,5 +85,33 @@ mod tests {
     fn test_assert_error_message_mismatch() {
         let error = MyTestError::caused_by("actual message");
         assert_error_message!(error, "expected message");
+    }
+
+    // The three following tests each make exactly one branch of the
+    // accepted-continuation chain in `assert_error_message_impl` the
+    // deciding one (the others false), so the assertion only passes while
+    // those `||`s remain `||`. They exercise the impl directly (rather than
+    // synthesizing real backtrace/caused-by/trace output) because the
+    // strings are what the impl actually inspects.
+    #[test]
+    fn impl_accepts_backtrace_continuation() {
+        super::assert_error_message_impl("base\n\nBacktrace:\n at ...", "base");
+    }
+
+    #[test]
+    fn impl_accepts_caused_by_continuation() {
+        super::assert_error_message_impl("base\ncaused by: inner", "base");
+    }
+
+    #[test]
+    fn impl_accepts_error_trace_continuation() {
+        super::assert_error_message_impl("base\n> trace entry", "base");
+    }
+
+    #[test]
+    #[should_panic(expected = "left : base\nright: base mismatch")]
+    fn impl_rejects_unrelated_continuation() {
+        // A remainder that matches none of the accepted prefixes must fail.
+        super::assert_error_message_impl("base mismatch", "base");
     }
 }

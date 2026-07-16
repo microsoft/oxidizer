@@ -46,5 +46,7 @@ mutants = { workspace = true }
 new_zealand = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

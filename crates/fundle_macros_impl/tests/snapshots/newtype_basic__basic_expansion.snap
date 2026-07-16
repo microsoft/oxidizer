@@ -5,12 +5,12 @@ expression: expand_fundle_newtype!(item)
 #[derive(::std::clone::Clone)]
 #[allow(dead_code)]
 struct Foo(String);
-impl<T> ::std::convert::From<T> for Foo
+impl<__FundleFromT> ::std::convert::From<__FundleFromT> for Foo
 where
-    T: ::std::convert::AsRef<String>,
+    __FundleFromT: ::std::convert::AsRef<String>,
     String: ::std::clone::Clone,
 {
-    fn from(x: T) -> Self {
+    fn from(x: __FundleFromT) -> Self {
         Self(x.as_ref().clone())
     }
 }

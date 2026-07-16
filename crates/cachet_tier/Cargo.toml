@@ -45,5 +45,7 @@ tokio = { workspace = true, features = [
     "rt",
 ] }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

@@ -15,6 +15,19 @@ license = { workspace = true }
 homepage = { workspace = true }
 include = { workspace = true }
 
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
+# public-API surface, so allow all external types — this opts the crate into the
+# external-types check permissively rather than denying its internal use of
+# opentelemetry/tracing/etc.
+allowed_external_types = ["*"]
+
+# Test-helper crate: the whole crate is `#![cfg_attr(coverage_nightly,
+# coverage(off))]` (its utilities are exercised opportunistically by other
+# crates' tests), so it produces no coverage data. Opt out of the gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [dependencies]
 futures = { workspace = true, features = ["executor"] }
 opentelemetry = { workspace = true, features = ["metrics"] }
@@ -26,5 +39,7 @@ tracing-subscriber = { workspace = true, features = ["fmt", "registry"] }
 ctor = { workspace = true }
 serial_test = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

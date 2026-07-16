@@ -50,9 +50,11 @@ once_cell = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "employees"
 path = "examples/employees/main.rs"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

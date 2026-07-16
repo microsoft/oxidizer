@@ -172,5 +172,7 @@ required-features = ["memory", "logs"]
 name = "serialization"
 required-features = ["memory", "serialize"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints
