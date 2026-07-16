@@ -241,6 +241,9 @@ mod tests {
     use super::*;
     use crate::testing::FailReadyService;
 
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn timeout_emits_log() {
         use testing_aids::tracing_logs::Capture;

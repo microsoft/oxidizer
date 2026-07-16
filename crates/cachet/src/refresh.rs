@@ -443,6 +443,9 @@ mod fetch_and_promote_tests {
     /// permanently stuck in the `in_flight` set. Without an RAII guard, the
     /// `finish_refresh` call is skipped on panic, blocking all future refreshes
     /// for that key.
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn panic_in_refresh_does_not_leave_key_stuck_in_flight() {
         let primary = MockCache::<String, i32>::new();
@@ -506,6 +509,9 @@ mod fetch_and_promote_tests {
 
     /// Exercises the early return when a refresh is already in-flight for the
     /// same key (line `if !refresh.try_start_refresh(key) { return; }`).
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
+    #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn do_refresh_already_in_flight_returns_early() {
         let primary = MockCache::<String, i32>::new();
