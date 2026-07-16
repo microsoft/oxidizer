@@ -31,9 +31,9 @@ use crate::is_mutation_testing;
 ///
 /// # Panics
 ///
-/// Panics if `testing_aids::init_tracing!()` was never invoked, which means the
-/// test binary is missing its `#[ctor::ctor]` process-initialization function. See
-/// `docs/tracing-tests.md`.
+/// Outside mutation testing, panics if `testing_aids::init_tracing!()` was never
+/// invoked, which means the test binary is missing its `#[ctor::ctor]`
+/// process-initialization function. See `docs/tracing-tests.md`.
 pub fn write_to_stdout() {
     if is_mutation_testing() {
         // Under mutation testing, we do not log anything, to speed up the tests.
@@ -62,10 +62,10 @@ pub fn write_to_stdout() {
 ///
 /// # Panics
 ///
-/// Panics if a log file is already active (another test is logging to file in the same
-/// process without `#[serial]`), or if `testing_aids::init_tracing!()` was never
-/// invoked, which means the test binary is missing its `#[ctor::ctor]`
-/// process-initialization function. See
+/// Outside mutation testing, panics if a log file is already active (another test
+/// is logging to file in the same process without `#[serial]`), or if
+/// `testing_aids::init_tracing!()` was never invoked, which means the test binary
+/// is missing its `#[ctor::ctor]` process-initialization function. See
 /// `docs/tracing-tests.md`.
 pub fn write_to_stdout_and_file(file_name: &str) -> FileGuard {
     if is_mutation_testing() {
@@ -607,19 +607,17 @@ impl Drop for FileGuard {
 }
 
 fn start_log_file_scope(file_name: &str) -> FileGuard {
-    let file = File::create(log_file(file_name)).unwrap();
+    let path = log_file(file_name);
 
-    {
-        let mut log_file = LOG_FILE.lock().unwrap();
+    let mut log_file = LOG_FILE.lock().unwrap();
 
-        assert!(
-            log_file.is_none(),
-            "a log file is already active; multiple tests cannot log to file in parallel within the same process - logging is global state"
-        );
+    assert!(
+        log_file.is_none(),
+        "a log file is already active; multiple tests cannot log to file in parallel within the same process - logging is global state"
+    );
 
-        *log_file = Some(file);
-        FILE_ENABLED.store(true, Ordering::Release);
-    }
+    *log_file = Some(File::create(path).unwrap());
+    FILE_ENABLED.store(true, Ordering::Release);
 
     FileGuard::new()
 }
