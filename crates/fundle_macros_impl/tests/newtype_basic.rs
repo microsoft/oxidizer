@@ -28,3 +28,14 @@ fn generics_where() {
 
     insta::assert_snapshot!(expand_fundle_newtype!(item));
 }
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn generics_inline_bound() {
+    let item: ItemStruct = parse_quote! {
+        #[newtype]
+        struct Foo<T: Clone>(T);
+    };
+
+    insta::assert_snapshot!(expand_fundle_newtype!(item));
+}

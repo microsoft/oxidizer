@@ -52,7 +52,7 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
     let expanded = quote! {
         #[derive(::std::clone::Clone)]
         #[allow(dead_code)]
-        #vis struct #name #ty_generics(#inner_type) #where_clause;
+        #vis struct #name #generics(#inner_type) #where_clause;
 
         impl #impl_generics_with_from ::std::convert::From<#from_param> for #name #ty_generics
         where
