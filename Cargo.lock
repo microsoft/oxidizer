@@ -2842,6 +2842,7 @@ dependencies = [
  "criterion",
  "deadpool 0.13.0",
  "gungraun",
+ "infinity_pool",
  "loom",
  "mimalloc",
  "mutants",

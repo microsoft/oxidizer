@@ -53,6 +53,7 @@ loom = { workspace = true }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 deadpool = { workspace = true, features = ["unmanaged"] }
 gungraun = { workspace = true, features = ["default"] }
+infinity_pool = { workspace = true }
 object-pool = { workspace = true }
 opool = { workspace = true }
 sharded-slab = { workspace = true }
