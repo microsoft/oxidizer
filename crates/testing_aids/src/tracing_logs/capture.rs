@@ -65,7 +65,7 @@ impl Capture {
     #[must_use]
     pub fn subscriber(&self) -> impl tracing::Subscriber {
         super::output::assert_initialized();
-        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_writer(self.clone()).with_ansi(false))
+        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().without_time().with_writer(self.clone()).with_ansi(false))
     }
 }
 
