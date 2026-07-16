@@ -131,7 +131,7 @@ struct MemoryUsage {
     bytes: i64,
 }
 
-/// A log-only event: no metric fields, so `is_metric` is false.
+/// A log-only event: no metric fields, so `contains_metrics()` is false.
 #[derive(Event)]
 #[event(name = "cache.hit")]
 #[log(severity = debug, message = "Cache lookup succeeded")]

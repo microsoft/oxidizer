@@ -12,7 +12,7 @@
 //!   attached to all events in scope (via RAII guards and `#[derive(Enrichment)]` structs)
 //! - Enforces **redaction** - data-classification metadata on every field, redaction
 //!   applied through a [`RedactionEngine`](data_privacy::RedactionEngine)
-//! - Provides **per-field routing** - one event struct can produce logs and, metrics with
+//! - Provides **per-field routing** - one event struct can produce logs and metrics with
 //!   independent field subsets per signal
 //! - Integrates with **OpenTelemetry** through pluggable [`EventProcessor`](processing::EventProcessor) implementations
 //!

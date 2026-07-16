@@ -22,7 +22,7 @@ The `observed` crate provides a unified telemetry API that:
   attached to all events in scope (via RAII guards and `#[derive(Enrichment)]` structs)
 * Enforces **redaction** - data-classification metadata on every field, redaction
   applied through a [`RedactionEngine`][__link1]
-* Provides **per-field routing** - one event struct can produce logs and, metrics with
+* Provides **per-field routing** - one event struct can produce logs and metrics with
   independent field subsets per signal
 * Integrates with **OpenTelemetry** through pluggable [`EventProcessor`][__link2] implementations
 
@@ -120,7 +120,7 @@ collects all visible entries and passes them to processors along with the event.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/observed">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb1Ttis1NVEO0biT1eJv4jSzIbQm7tpvQ_YAcbW1VGolMmXWFhZIKCbGRhdGFfcHJpdmFjeWYwLjEyLjOCaG9ic2VydmVkZjAuMjMuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQb7KFLaHlptPMbfTfLsQWQKuwbWp2syCa7QWcbgu2wNwlFoH1hZIKCbGRhdGFfcHJpdmFjeWYwLjEyLjOCaG9ic2VydmVkZjAuMjMuMA
  [__link0]: `emit!`
  [__link1]: https://docs.rs/data_privacy/0.12.3/data_privacy/?search=RedactionEngine
  [__link2]: https://docs.rs/observed/0.23.0/observed/?search=processing::EventProcessor

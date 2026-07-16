@@ -65,7 +65,7 @@ impl EventDescription {
     ///
     /// Convenience for building lookup tables keyed by event type.
     #[must_use]
-    pub fn type_id_of<T: crate::event::Event>() -> Option<TypeId> {
+    pub fn type_id_of<T: crate::Event>() -> Option<TypeId> {
         T::DESCRIPTION.type_id
     }
 
