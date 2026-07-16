@@ -104,3 +104,22 @@ fn generate_args_from_impl(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::deps;
+
+    #[test]
+    fn rejects_non_named_fields() {
+        let err = deps(quote! {}, quote! { struct Tuple(u32); }).expect_err("tuple struct has no named fields");
+        assert!(err.to_string().contains("named fields"));
+    }
+
+    #[test]
+    fn rejects_empty_struct() {
+        let err = deps(quote! {}, quote! { struct Empty {} }).expect_err("struct with no fields is rejected");
+        assert!(err.to_string().contains("at least one field"));
+    }
+}

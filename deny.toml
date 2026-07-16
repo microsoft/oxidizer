@@ -1,9 +1,39 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# >>> anvil-managed: anvil-deny-advisories
+[advisories]
+yanked = "deny"
+# Scope of unmaintained-crate checks: "all" surfaces transitive
+# dependencies too; tighten to "workspace" if the noise is high.
+unmaintained = "all"
+# Adopter-owned: repo-specific advisory ignores.
+ignore = [
+    # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
+    # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
+    # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
+    # this for benchmark-only usage.
+    "RUSTSEC-2025-0141",
+    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
+    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
+    # upstream and no production code path depends on it. Tracked for removal once the
+    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
+    "RUSTSEC-2026-0173",
+    # quick-xml 0.39.4 has two DoS advisories fixed only in >=0.41.0, but it is pulled in
+    # transitively via the Azure SDK (typespec <- azure_core 1.0.0), which pins 0.39.x, so
+    # we cannot bump it until an upstream Azure SDK release moves to quick-xml >=0.41. Both
+    # are XML-parsing DoS issues with no production code path parsing untrusted XML here.
+    # Remove once azure_core/typespec upgrade quick-xml.
+    "RUSTSEC-2026-0194", # quadratic-time duplicate-attribute check
+    "RUSTSEC-2026-0195", # unbounded namespace-declaration allocation
+]
+# <<< anvil-managed: anvil-deny-advisories
+
+# >>> anvil-managed: anvil-deny-licenses
 [licenses]
+# Adopter-owned: curated allowlist. Add new entries only from "Permissive OSS
+# licenses" on https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
 allow = [
-    # You can add new entries to the list only from "Permissive OSS licenses" on this Microsoft-internal page: https://docs.opensource.microsoft.com/legal/resources/oss-licenses-by-type/.
     "MIT",
     "Apache-2.0",
     "ISC",
@@ -17,34 +47,20 @@ allow = [
     # `webpki-root-certs` (pulled in transitively via `rustls-platform-verifier`).
     "CDLA-Permissive-2.0",
 ]
-
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
+# <<< anvil-managed: anvil-deny-licenses
 
-[advisories]
-ignore = [
-    # bincode 1.3.3 is unmaintained but pulled in only as a transitive dev-dependency
-    # of `gungraun` (used for Callgrind benchmarks in the `multitude` crate). The bincode
-    # team considers 1.3.3 a complete release; there is no safe upgrade path. We accept
-    # this for benchmark-only usage.
-    "RUSTSEC-2025-0141",
-    # proc-macro-error2 is unmaintained but pulled in only via build/dev tooling
-    # (gungraun-macros, a dev/bench dep of `multitude`). No safe upgrade is available
-    # upstream and no production code path depends on it. Tracked for removal once the
-    # upstream migration lands: https://github.com/GnomedDev/proc-macro-error-2/issues/17
-    "RUSTSEC-2026-0173",
-    # quick-xml 0.39.4 has two DoS advisories on untrusted XML: RUSTSEC-2026-0194 (quadratic
-    # run time when checking a start tag for duplicate attributes, CPU exhaustion) and
-    # RUSTSEC-2026-0195 (unbounded namespace-declaration allocation in `NsReader`, memory
-    # exhaustion). It is pulled in only transitively via the Azure SDK (`typespec` ->
-    # `azure_core` / `typespec_client_core`, used by `fetch_azure`, `anyspawn_azure`,
-    # `azure_storage_blob`, `azure_identity`). Both are fixed in quick-xml >=0.41.0, but
-    # `typespec 1.0.0` pins `quick-xml = "^0.39.0"`, so there is no safe upgrade path until
-    # the Azure SDK loosens that requirement. Azure SDK PR
-    # https://github.com/Azure/azure-sdk-for-rust/pull/4691 updates the pin; remove these
-    # ignores (and update the Azure SDK dependencies to quick-xml >=0.41.0) once it merges.
-    # https://rustsec.org/advisories/RUSTSEC-2026-0194
-    # https://rustsec.org/advisories/RUSTSEC-2026-0195
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-]
+# >>> anvil-managed: anvil-deny-bans
+[bans]
+multiple-versions = "warn"
+# Adopter-owned: internal workspace crates use wildcard (`*`) version
+# requirements; warn rather than deny so the established convention keeps working.
+wildcards = "warn"
+# <<< anvil-managed: anvil-deny-bans
+
+# >>> anvil-managed: anvil-deny-sources
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# <<< anvil-managed: anvil-deny-sources
