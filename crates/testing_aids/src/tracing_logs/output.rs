@@ -338,6 +338,10 @@ impl Write for StdoutWriter {
 /// Terminal output is limited to INFO and above, while the buffer captures all
 /// messages regardless of level.
 ///
+/// Only buffer capture is scoped to the returned guard. As with [`write_to_stdout`],
+/// the stdout sink stays enabled for the remainder of the process once this is called;
+/// dropping the guard detaches the buffer but does not silence stdout.
+///
 /// This is the sanctioned way to assert on `tracing` output in tests. It routes
 /// through the single process-global subscriber (installed by the test binary's
 /// `#[ctor::ctor]` process-initialization function and left permanently interested), so
@@ -374,17 +378,25 @@ pub fn write_to_stdout_and_buffer() -> BufferGuard {
 
     let buffer = Arc::new(Mutex::new(Vec::<String>::new()));
 
-    {
+    // Determine whether a buffer is already active and, if not, install ours - all while
+    // holding the lock - but release the lock *before* asserting, so a failed assertion
+    // (a `#[serial]` violation) never panics with the lock held and thus never poisons
+    // `LOG_BUFFER`. This keeps the `LOG_BUFFER_NEVER_POISONED` justification below honest.
+    let already_active = {
         let mut slot = LOG_BUFFER.lock().expect(LOG_BUFFER_NEVER_POISONED);
-        assert!(
-            slot.is_none(),
-            "a log buffer is already active; tracing capture is process-global and records events \
-             from any thread, so if a binary uses this helper then every test in that binary - not \
-             just the capturing ones - must be annotated `#[serial]`"
-        );
-        *slot = Some(Arc::clone(&buffer));
-        BUFFER_ENABLED.store(true, Ordering::Release);
-    }
+        let occupied = slot.is_some();
+        if !occupied {
+            *slot = Some(Arc::clone(&buffer));
+            BUFFER_ENABLED.store(true, Ordering::Release);
+        }
+        occupied
+    };
+    assert!(
+        !already_active,
+        "a log buffer is already active; tracing capture is process-global and records events \
+         from any thread, so if a binary uses this helper then every test in that binary - not \
+         just the capturing ones - must be annotated `#[serial]`"
+    );
 
     BufferGuard { buffer: Some(buffer) }
 }
