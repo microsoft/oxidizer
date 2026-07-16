@@ -258,11 +258,10 @@ pub use observed_macros::Enrichment;
 ///
 /// ```text
 /// #[derive(Event)]
-/// #[event(name = "<event_name>")]                              // REQUIRED
+/// #[event(name = "<event_name>" [, disabled])]                    // REQUIRED (`disabled` optional)
 /// #[log(severity = <SEVERITY> [, name = "..."] [, message = "..."])]  // optional
 /// #[metric(kind = <KIND> [, field = <field>] [, name = "..."] [, description = "..."] [, unit = "..."])]  // optional
 /// // <KIND> is one of: counter, updown_counter, gauge, histogram
-/// #[disabled]                                                      // optional
 /// struct MyEvent {
 ///     // ── field with default redaction (log-only) ──────────────
 ///     field: T,                             // T: RedactedDisplay
@@ -297,10 +296,9 @@ pub use observed_macros::Enrichment;
 ///
 /// | Attribute | Required | Description |
 /// |-----------|----------|-------------|
-/// | `#[event(name = "...")]` | **yes** | Canonical event name used for routing and identification. |
+/// | `#[event(name = "...")]` | **yes** | Canonical event name used for routing and identification. Add `disabled` (`#[event(name = "...", disabled)]`) to mark the event as opt-in only; processors must explicitly enable it. |
 /// | `#[log(severity = <S>)]` | no | Opt into log emission. `severity` is required; `name` defaults to the event name; `message` is optional. |
 /// | `#[metric(kind = <KIND>, ...)]` | no | Declare a metric instrument (`<KIND>` = `counter`, `updown_counter`, `gauge`, or `histogram`). See [Metric instruments](#metric-instruments). |
-/// | `#[disabled]` | no | Mark the event as opt-in only; processors must explicitly enable it. |
 ///
 /// # Metric instruments
 ///

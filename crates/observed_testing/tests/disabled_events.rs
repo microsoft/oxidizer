@@ -4,7 +4,7 @@
 //! Tests for the disabled event attribute and runtime event configuration.
 //!
 //! Covers DESIGN.md requirements:
-//! - Events can be disabled by default (`#[disabled]`)
+//! - Events can be disabled by default (`#[event(name = "...", disabled)]`)
 //! - Disabled events are not emitted unless a processor explicitly opts in
 
 use std::sync::Arc;
@@ -15,9 +15,8 @@ use observed_testing::types::PublicI64;
 use observed_testing::{ExpectedEvent, MockProcessor, TEST_ID};
 
 #[derive(Debug, Event)]
-#[event(name = "internal.trace_detail")]
+#[event(name = "internal.trace_detail", disabled)]
 #[log(severity = debug)]
-#[disabled]
 struct DisabledEvent {
     detail: PublicI64,
 }

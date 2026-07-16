@@ -226,9 +226,8 @@ fn no_body_in_description() {
 #[test]
 fn disabled_event() {
     #[derive(Debug, Event)]
-    #[event(name = "internal.debug")]
+    #[event(name = "internal.debug", disabled)]
     #[log(severity = debug)]
-    #[disabled]
     struct DisabledEvent {
         #[unredacted]
         detail: i64,
@@ -243,8 +242,7 @@ fn disabled_event() {
 #[test]
 fn exclude_from_logs_without_metric_produces_empty_signals() {
     #[derive(Debug, Event)]
-    #[event(name = "metric.only")]
-    #[disabled]
+    #[event(name = "metric.only", disabled)]
     #[log(severity = info)]
     struct MetricOnlyNoFields {
         #[unredacted]

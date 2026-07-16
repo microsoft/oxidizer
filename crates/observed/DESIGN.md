@@ -214,10 +214,9 @@ Each event uses per-signal attributes at the struct level; both `#[log(...)]` an
 
 | Annotation | Effect |
 | --- | --- |
-| `#[event(name = "...")]` | **Required.** Declares the canonical event name used for routing and identification. |
+| `#[event(name = "...")]` | **Required.** Declares the canonical event name used for routing and identification. Add `disabled` (`#[event(name = "...", disabled)]`) to make the event opt-in: by default no processor receives it; processors must explicitly opt in. |
 | `#[log(severity = <ident>, message = "...")]` | Declares the event as a log. `severity` is one of `trace`, `debug`, `info`, `warn`, `error`, `fatal`. `name` defaults to the event name; `message` is optional. |
 | `#[metric(kind = <Kind>[, name = "..."][, field = ...])]` | Declares an event-level metric instrument, where `<Kind>` is `counter`, `updown_counter`, `gauge`, or `histogram`. `name` defaults to the event name. `kind = counter` may be fieldless and records `1` per emission; the others require `field = <ident>` naming the struct field that supplies the metric value. |
-| `#[disabled]` | The event is opt-in: by default no processor receives it; processors must explicitly opt in. |
 
 ### Dimension (field) properties
 

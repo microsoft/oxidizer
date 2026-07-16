@@ -38,10 +38,12 @@ struct EventDef {
     fields: Vec<FieldDef>,
 }
 
-/// `#[event(name = "...")]`.
+/// `#[event(name = "..." [, disabled])]`.
 #[derive(FromMeta)]
 struct EventArgs {
     name: String,
+    #[darling(default)]
+    disabled: bool,
 }
 
 /// `#[log(severity = <ident> [, name = "..."] [, message = "..."])]`.
@@ -307,7 +309,9 @@ fn parse_event_def(input: &DeriveInput) -> Result<EventDef> {
             if event_name.is_some() {
                 return Err(Error::new_spanned(attr, "duplicate `#[event(...)]` attribute"));
             }
-            event_name = Some(EventArgs::from_meta(&attr.meta).map_err(|e| to_syn(&e, attr))?.name);
+            let args = EventArgs::from_meta(&attr.meta).map_err(|e| to_syn(&e, attr))?;
+            event_name = Some(args.name);
+            disabled = args.disabled;
         } else if attr.path().is_ident("log") {
             if log.is_some() {
                 return Err(Error::new_spanned(attr, "duplicate `#[log(...)]` attribute"));
@@ -318,8 +322,6 @@ fn parse_event_def(input: &DeriveInput) -> Result<EventDef> {
             // `kind`); the bare word form is rejected by `darling`.
             let args = InstrumentArgs::from_meta(&attr.meta).map_err(|e| to_syn(&e, attr))?;
             metric_specs.push(MetricSpec { args, attr: attr.clone() });
-        } else if attr.path().is_ident("disabled") {
-            disabled = true;
         }
     }
 
@@ -942,10 +944,9 @@ mod tests {
     fn test_disabled_event() {
         let output = parse_and_generate(
             r#"
-            #[event(name = "debug.diagnostics")]
+            #[event(name = "debug.diagnostics", disabled)]
             #[log(severity = debug, message = "Internal diagnostics")]
             #[metric(kind = gauge, field = queue_depth_metric, name = "debug.queue_depth")]
-            #[disabled]
             struct DebugDiagnostics {
                 #[unredacted]
                 queue_depth: i64,

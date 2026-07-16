@@ -145,9 +145,8 @@ struct CacheHit {
 /// A disabled event: neither a log nor a metric by default.
 /// An audit processor can still opt in by matching the event name.
 #[derive(Event)]
-#[event(name = "internal.queue_depth")]
+#[event(name = "internal.queue_depth", disabled)]
 #[log(severity = info, message = "Queue depth snapshot")]
-#[disabled]
 struct QueueDepth {
     #[unredacted]
     depth: i64,
