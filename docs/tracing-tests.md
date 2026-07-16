@@ -34,9 +34,10 @@ root, gated on `test`:
 testing_aids::init_tracing!();
 ```
 
-**Integration-test binaries** (`tests/*.rs`) - `cfg(test)` is false here, so the
-crate-root initialization does not run. Invoke the macro bare in each `tests/*.rs`
-file that emits or inspects `tracing`:
+**Integration-test binaries** (`tests/*.rs`) link the library's normal (non-test)
+build, in which `#[cfg(test)]` items - including the crate-root initialization - are
+excluded. So the crate-root initialization never runs for them. Invoke the macro
+directly in each `tests/*.rs` file that emits or inspects `tracing`:
 
 ```rust
 testing_aids::init_tracing!();

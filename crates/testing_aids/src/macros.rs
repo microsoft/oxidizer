@@ -36,9 +36,14 @@ macro_rules! assert_panic {
 #[macro_export]
 macro_rules! init_tracing {
     () => {
-        #[::ctor::ctor(unsafe)]
-        fn __testing_aids_init_tracing() {
-            $crate::tracing_logs::initialize();
-        }
+        // The process-initialization function lives inside an anonymous `const` block so
+        // its item name never collides, even if the macro is invoked more than once in the
+        // same module.
+        const _: () = {
+            #[::ctor::ctor(unsafe)]
+            fn init_tracing() {
+                $crate::tracing_logs::initialize();
+            }
+        };
     };
 }
