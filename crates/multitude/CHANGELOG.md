@@ -81,7 +81,7 @@
 
 - ⚡ Performance
 
-  - split allocator hot paths from cold refill/oversizedΓÇª ([#442](https://github.com/microsoft/oxidizer/pull/442))
+  - split allocator hot paths from cold refill/oversized… ([#442](https://github.com/microsoft/oxidizer/pull/442))
 
 - ✔️ Tasks
 
