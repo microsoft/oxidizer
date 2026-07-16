@@ -76,7 +76,7 @@ impl Capture {
     }
 }
 
-/// Builds [`CaptureWriter`] instances for the `tracing_subscriber` fmt layer.
+/// Builds [`CaptureWriter`] instances for the `tracing_subscriber` formatting layer.
 struct CaptureWriterMaker {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
 }
