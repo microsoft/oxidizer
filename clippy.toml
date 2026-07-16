@@ -1,9 +1,36 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# >>> anvil-managed: anvil-clippy
+# Fine-tuning settings for clippy lints. These cannot be expressed in
+# Cargo.toml's [lints] table (which only carries level: warn/allow/deny);
+# they configure lint *behavior* and live in clippy.toml only.
+
+# Absolute paths up to 3 segments are clarifying — e.g. `std::sync::Mutex`
+# vs `tokio::sync::Mutex` disambiguates the source. Beyond 3 segments
+# we prefer imports or aliases for readability.
 absolute-paths-max-segments = 3
+
+# Workspace code is internal. Clippy should suggest the most correct
+# fix without worrying about non-breaking-change rules, which only
+# matter for published library APIs.
+avoid-breaking-exported-api = false
+
+# Required companion for the clippy.semicolon_outside_block lint we
+# ship in the catalog. Without this, the lint fires on multiline-block
+# forms that are common Rust style.
+semicolon-outside-block-ignore-multiline = true
+
+# Required companions for the clippy.unwrap_used lint we ship.
+# Test code asserts via unwrap()/panic!() — that's how #[test] reports
+# failure. Without these, every test triggers the lint.
 allow-panic-in-tests = true
 allow-unwrap-in-tests = true
-avoid-breaking-exported-api = false
-semicolon-outside-block-ignore-multiline = true
+
+# Aspirational: when clippy.wildcard_imports is re-enabled (currently
+# allowed in cargo-lints-body.toml due to upstream bug rust-clippy#15036),
+# we want the stricter variant that warns on ALL wildcard imports
+# including prelude. Setting it now means flipping the lint level to
+# warn later is a one-line change with no tuning afterthought.
 warn-on-all-wildcard-imports = true
+# <<< anvil-managed: anvil-clippy

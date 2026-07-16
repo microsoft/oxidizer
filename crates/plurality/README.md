@@ -82,14 +82,14 @@ deref while you hold the container, or recycle whole values behind a lock.
 `plurality` instead returns thin smart pointers that deref (and, for
 [`Arc`][__link17]/[`Rc`][__link18], share ownership) without the pool in hand.
 
-|Capability|[`plurality`][__link19]|[`slab`][__link20]|[`sharded-slab`][__link21]|[`slotmap`][__link22]|[`object-pool`][__link23]|[`opool`][__link24]|[`deadpool`][__link25]|
-|----------|-----------|------|--------------|---------|-------------|-------|----------|
-|Thin single-pointer handles (deref without the pool)|yes|no (index)|no (guard)|no (key)|no (guard)|no (guard)|no (guard)|
-|Individual free + slot reuse|yes|yes|yes|yes|yes|yes|yes|
-|Shared ownership ([`Arc`][__link26]/[`Rc`][__link27])|yes|no|no|no|no|no|no|
-|Growable, chunked|yes|yes|yes|yes|yes|yes|yes|
-|Stable address (value never moves on grow)|yes|no|yes|no|no|no|no|
-|Thread safety|`Send + !Sync`, cross-thread frees|single-thread|`Send + Sync`|single-thread|`Send + Sync`, lock-based|`Send + Sync`, lock-free|`Send + Sync`, async|
+|Capability|[`plurality`][__link19]|[`slab`][__link20]|[`sharded-slab`][__link21]|[`slotmap`][__link22]|[`object-pool`][__link23]|[`opool`][__link24]|[`deadpool`][__link25]|[`infinity-pool`][__link26]|
+|----------|-----------|------|--------------|---------|-------------|-------|----------|---------------|
+|Thin single-pointer handles (deref without the pool)|yes|no (index)|no (guard)|no (key)|no (guard)|no (guard)|no (guard)|yes|
+|Individual free + slot reuse|yes|yes|yes|yes|yes|yes|yes|yes|
+|Shared ownership ([`Arc`][__link27]/[`Rc`][__link28])|yes|no|no|no|no|no|no|yes|
+|Growable, chunked|yes|yes|yes|yes|yes|yes|yes|yes|
+|Stable address (value never moves on grow)|yes|no|yes|no|no|no|no|yes|
+|Thread safety|`Send + !Sync`, cross-thread frees|single-thread|`Send + Sync`|single-thread|`Send + Sync`, lock-based|`Send + Sync`, lock-free|`Send + Sync`, async|`Send + Sync`, or single-thread `Rc`|
 
 ## Examples
 
@@ -126,7 +126,7 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbXVSowJfMZPUbgvaJBRDISOEbYNUm3j2gevYbk5D3LFHDmQVhZIGCaXBsdXJhbGl0eWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbDYhwHnp0ppYbTAplEhJy1-QbC9Ei2FOk28IbEtHDOvyLsrphZIGCaXBsdXJhbGl0eWUwLjEuMA
  [__link0]: https://docs.rs/plurality/0.1.0/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.1.0/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
@@ -146,8 +146,9 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link23]: https://crates.io/crates/object-pool
  [__link24]: https://crates.io/crates/opool
  [__link25]: https://crates.io/crates/deadpool
- [__link26]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
- [__link27]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
+ [__link26]: https://crates.io/crates/infinity_pool
+ [__link27]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
+ [__link28]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
  [__link3]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc
  [__link4]: https://docs.rs/plurality/0.1.0/plurality/?search=Rc
  [__link5]: https://docs.rs/plurality/0.1.0/plurality/?search=Arc

@@ -102,9 +102,6 @@ uuid = { workspace = true }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "custom_server"
 path = "examples/custom_server.rs"
@@ -128,3 +125,8 @@ required-features = ["test-util"]
 harness = false
 name = "router_resolve_cg"
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

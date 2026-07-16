@@ -403,10 +403,10 @@ mod tests {
     fn partial_eq() {
         let label = ErrorLabel::from("timeout");
         // PartialEq<&str>
-        assert!(label == "timeout");
+        assert_eq!(label, "timeout");
         assert!(label != "other");
         // PartialEq<str>
-        assert!(label == *"timeout");
+        assert_eq!(label, *"timeout");
         assert!(label != *"other");
     }
 
