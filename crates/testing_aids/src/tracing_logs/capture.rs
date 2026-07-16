@@ -11,8 +11,8 @@ use tracing_subscriber::layer::SubscriberExt;
 
 /// Log capture buffer for testing.
 ///
-/// Uses `tracing_subscriber::fmt::MakeWriter` to capture formatted log output
-/// into a shared buffer that can be inspected in tests. Pair with
+/// Captures formatted log output into a shared buffer that can be inspected in
+/// tests. Pair with
 /// [`set_default`](tracing::subscriber::set_default) to scope capture to the current thread.
 #[derive(Debug, Clone, Default)]
 pub struct Capture {
@@ -68,13 +68,20 @@ impl Capture {
         tracing_subscriber::registry().with(
             tracing_subscriber::fmt::layer()
                 .without_time()
-                .with_writer(self.clone())
+                .with_writer(CaptureWriterMaker {
+                    buffer: std::sync::Arc::clone(&self.buffer),
+                })
                 .with_ansi(false),
         )
     }
 }
 
-impl<'a> MakeWriter<'a> for Capture {
+/// Builds [`CaptureWriter`] instances for the `tracing_subscriber` fmt layer.
+struct CaptureWriterMaker {
+    buffer: std::sync::Arc<Mutex<Vec<u8>>>,
+}
+
+impl<'a> MakeWriter<'a> for CaptureWriterMaker {
     type Writer = CaptureWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
@@ -86,7 +93,7 @@ impl<'a> MakeWriter<'a> for Capture {
 
 /// Writer that appends to a shared buffer.
 #[derive(Debug)]
-pub struct CaptureWriter {
+struct CaptureWriter {
     buffer: std::sync::Arc<Mutex<Vec<u8>>>,
 }
 
