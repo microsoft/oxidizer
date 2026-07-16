@@ -4,23 +4,34 @@ expression: expand_fundle_newtype!(item)
 ---
 #[derive(::std::clone::Clone)]
 #[allow(dead_code)]
-struct Foo(String);
-impl<__FundleFromT> ::std::convert::From<__FundleFromT> for Foo
+struct Foo<T>(
+    T,
+)
 where
-    __FundleFromT: ::std::convert::AsRef<String>,
-    String: ::std::clone::Clone,
+    T: Clone;
+impl<T, __FundleFromT> ::std::convert::From<__FundleFromT> for Foo<T>
+where
+    __FundleFromT: ::std::convert::AsRef<T>,
+    T: ::std::clone::Clone,
+    T: Clone,
 {
     fn from(x: __FundleFromT) -> Self {
         Self(x.as_ref().clone())
     }
 }
-impl ::std::ops::Deref for Foo {
-    type Target = String;
+impl<T> ::std::ops::Deref for Foo<T>
+where
+    T: Clone,
+{
+    type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl ::std::ops::DerefMut for Foo {
+impl<T> ::std::ops::DerefMut for Foo<T>
+where
+    T: Clone,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

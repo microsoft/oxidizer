@@ -34,18 +34,33 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         .expect("internal error: validated len == 1 but first() is None")
         .ty;
 
+    let from_param = quote::format_ident!("__FundleFromT");
+    let impl_generics_with_from = if generics.params.is_empty() {
+        quote!(<#from_param>)
+    } else {
+        let params = &generics.params;
+        quote!(<#params, #from_param>)
+    };
+    let additional_predicates = where_clause.map_or_else(
+        || quote!(),
+        |wc| {
+            let predicates = &wc.predicates;
+            quote!(, #predicates)
+        },
+    );
+
     let expanded = quote! {
         #[derive(::std::clone::Clone)]
         #[allow(dead_code)]
-        #vis struct #name #generics(#inner_type) #where_clause;
+        #vis struct #name #ty_generics(#inner_type) #where_clause;
 
-        impl<T> #impl_generics ::std::convert::From<T> for #name #ty_generics
+        impl #impl_generics_with_from ::std::convert::From<#from_param> for #name #ty_generics
         where
-            T: ::std::convert::AsRef<#inner_type>,
-            #inner_type: ::std::clone::Clone,
-            #where_clause
+            #from_param: ::std::convert::AsRef<#inner_type>,
+            #inner_type: ::std::clone::Clone
+            #additional_predicates
         {
-            fn from(x: T) -> Self {
+            fn from(x: #from_param) -> Self {
                 Self(x.as_ref().clone())
             }
         }

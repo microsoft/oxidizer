@@ -17,3 +17,14 @@ fn basic_expansion() {
 
     insta::assert_snapshot!(expand_fundle_newtype!(item));
 }
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn generics_where() {
+    let item: ItemStruct = parse_quote! {
+        #[newtype]
+        struct Foo<T>(T) where T: Clone;
+    };
+
+    insta::assert_snapshot!(expand_fundle_newtype!(item));
+}
