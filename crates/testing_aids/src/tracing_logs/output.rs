@@ -579,11 +579,13 @@ impl Drop for BufferWriter {
 /// We write log entries to this file (if not `None`).
 static LOG_FILE: Mutex<Option<File>> = Mutex::new(None);
 
-/// Justification for `expect` on the [`LOG_FILE`] mutex: it is only ever locked to read
-/// or swap its `Option` (file-handle clone results are unwrapped only after the lock is
-/// released), operations that cannot panic, so it can never be poisoned.
+/// Justification for `expect` on the [`LOG_FILE`] mutex: while it is held, the only
+/// operations performed are reading or swapping its `Option` and fallible I/O
+/// (`File::create`, `File::try_clone`) whose `Result` is captured but never unwrapped
+/// until after the lock is released. None of these can panic with the lock held, so the
+/// mutex can never be poisoned.
 const LOG_FILE_NEVER_POISONED: &str =
-    "LOG_FILE is only locked to read or swap its Option, which cannot panic, so the mutex is never poisoned";
+    "LOG_FILE is only locked for Option access and non-panicking fallible I/O (unwrapped after release), which cannot poison the mutex";
 
 /// Lock-free mirror of whether [`LOG_FILE`] currently holds a file. Set under the
 /// `LOG_FILE` lock on attach/detach and read by [`file_active`] on the per-event path
@@ -633,29 +635,37 @@ impl Drop for FileGuard {
 fn start_log_file_scope(file_name: &str) -> FileGuard {
     let path = log_file(file_name);
 
-    // Create the file outside the lock so an I/O failure never poisons `LOG_FILE`.
-    let file = File::create(path).unwrap();
-
-    // Check occupancy and install our file atomically under a single lock, then release
-    // the lock *before* asserting, so a failed assertion (a `#[serial]` violation) never
-    // panics with the lock held and thus never poisons `LOG_FILE`. Holding one lock across
-    // the check and the install is what makes them atomic: a second concurrent scope
-    // observes the first's file and installs nothing (dropping its own handle) rather than
-    // both overwriting each other's handle and leaving `FileGuard::drop` bookkeeping
-    // inconsistent. This mirrors `write_to_stdout_and_buffer`'s handling of `LOG_BUFFER`.
-    let already_active = {
+    // Check occupancy and, only if the slot is vacant, create the file and install it -
+    // all under a single lock so the check and install are atomic (a second concurrent
+    // scope observes the first's file and creates nothing, rather than both truncating and
+    // overwriting each other). Creating the file only when vacant also ensures a
+    // `#[serial]` violation never truncates the file the active scope is writing to. The
+    // fallible `File::create` result is captured but *not* unwrapped under the lock, and the
+    // assertion is deferred until after the lock is released, so neither an I/O failure nor
+    // a failed assertion can ever panic while the lock is held and thus poison `LOG_FILE`.
+    let (already_active, create_result) = {
         let mut log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
-        let occupied = log_file.is_some();
-        if !occupied {
-            *log_file = Some(file);
-            FILE_ENABLED.store(true, Ordering::Release);
+        if log_file.is_some() {
+            (true, None)
+        } else {
+            match File::create(path) {
+                Ok(file) => {
+                    *log_file = Some(file);
+                    FILE_ENABLED.store(true, Ordering::Release);
+                    (false, Some(Ok(())))
+                }
+                Err(error) => (false, Some(Err(error))),
+            }
         }
-        occupied
     };
     assert!(
         !already_active,
         "a log file is already active; multiple tests cannot log to file in parallel within the same process - logging is global state"
     );
+    // Surface any `File::create` failure now that the lock is released.
+    if let Some(result) = create_result {
+        result.unwrap();
+    }
 
     FileGuard::new()
 }
