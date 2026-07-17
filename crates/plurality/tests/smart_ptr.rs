@@ -177,6 +177,12 @@ fn eq_ord_forward_to_value() {
     let l1 = pool.alloc(7);
     let l2 = pool.alloc(7);
     assert_eq!(l1, l2);
+    assert_eq!(l1.partial_cmp(&l2), Some(Ordering::Equal));
+    assert_eq!(l1.cmp(&l2), Ordering::Equal);
+    let mut local_set = HashSet::new();
+    local_set.insert(l1);
+    local_set.insert(l2);
+    assert_eq!(local_set.len(), 1);
 }
 
 #[test]

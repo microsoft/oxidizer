@@ -1,324 +1,323 @@
-# Plurality — Architecture & Design
+# Plurality — Architecture
 
-This document describes how the crate is built. For user-facing API docs see the
-crate-level rustdoc (`src/lib.rs`); for unimplemented ideas see
-[`TODO.md`](./TODO.md).
+This document describes the architecture of the pool: the model it presents, the
+patterns that make it fast and safe, and the invariants that hold it together. It
+is intentionally implementation-agnostic — for the concrete API see the
+crate-level rustdoc, and for forward-looking ideas see [`TODO.md`](./TODO.md).
 
-## Goal
+## What plurality is
 
-A growable, fixed-slot object pool that hands out **single-pointer-wide** smart
-pointers which deref to `&T`. Unlike a bump arena, individual values can be
-freed and their slots reused; unlike `slab`/`slotmap`, callers get real smart
-pointers (not indices/keys) that can be shared (`Arc`/`Rc`) and, for the owned
-flavors, outlive the pool itself. The store never moves a value once allocated,
-so the pointers stay valid until dropped.
+Plurality is a **growable, fixed-slot object pool**. It front-loads memory in
+coarse chunks and then serves individual objects out of those chunks, so the
+steady-state cost of allocating and freeing an object is a handful of pointer
+operations rather than a round trip through the global allocator.
 
-## Module layout
+It occupies a deliberate niche between three neighbours:
 
-| File | Responsibility |
-|---|---|
-| `lib.rs` | Crate root, feature gates, re-exports, crate-level docs. |
-| `builder.rs` | `PoolBuilder<T, A>` — chunk size, max chunks, allocator; validates and builds `PoolInner`. |
-| `pool.rs` | `Pool<T, A>` + `PoolInner<T, A>`: allocation methods, the MPSC free list, single-thread growth, the chunk directory, refcount/teardown. |
-| `chunk.rs` | `ChunkHeader<T, A>`, chunk `Layout` math, slot addressing (`slot_at`) and pointer recovery (`header_of`). |
-| `slot.rs` | `SlotCell<T>`, the dual refcount/free-link protocol, refcount-overflow abort. |
-| `boxed.rs` | `Box<T>` — unique owner, `Send`, may outlive the pool. |
-| `alloced.rs` | `Alloc<'pool, T>` — unique owner that borrows the pool; cheapest handle. |
-| `sync.rs` | `Arc<T>` — shared, atomic refcount, `Send + Sync`. |
-| `rc.rs` | `Rc<T>` — shared, non-atomic refcount, `!Send`. |
-| `common.rs` | Macros emitting the shared handle surface (`as_ptr`, `into_pin`, `Unpin`, `AsRef`/`Borrow`, `Debug`/`Display`, `PartialEq`/`Eq`/`Ord`/`Hash`, `Pointer`, and the mutable `as_mut_ptr`/`AsMut`/`BorrowMut`). |
-| `atomic.rs` | Atomic type shim: real `core::sync::atomic` normally, `loom` atomics under `--cfg loom`. |
+- Unlike a **bump/arena** allocator, individual objects can be freed
+  independently and their space reused, without waiting for the whole region to
+  be discarded.
+- Unlike **slab/slotmap** containers, callers receive real smart pointers that
+  dereference to the value, not integer keys or indices they must carry around
+  and re-resolve.
+- Unlike the **global allocator**, objects are drawn from a small, contiguous,
+  cache-friendly working set, and the fast path takes no global lock.
+
+Two properties are guaranteed for the lifetime of every handle:
+
+- **Address stability** — a value never moves once allocated. Its address stays
+  valid until the handle that owns it is dropped.
+- **Detachable lifetime** — the owning handles may outlive the pool object
+  itself. The backing memory persists until the last handle is gone.
+
+## The handle model
+
+The pool's public surface is a family of **smart-pointer handles**, not a
+container you index into. Allocation hands back a handle; dropping the handle
+runs the value's destructor and returns its slot to the pool. There are four
+flavours, spanning two axes — *owned vs. shared* and *pool-bound vs. detachable*:
+
+| Handle  | Ownership | Lifetime            | Thread mobility            | Relative cost      |
+|---------|-----------|---------------------|----------------------------|--------------------|
+| Bound owner | unique | tied to the pool | single-threaded            | cheapest           |
+| Detached owner | unique | may outlive pool | movable across threads¹ | one pool-level step |
+| Shared (atomic) | shared | may outlive pool | shareable across threads¹ | atomic refcount     |
+| Shared (local)  | shared | may outlive pool | single-threaded            | plain refcount      |
+
+¹ subject to the usual `Send`/`Sync` bounds on the contained value and allocator.
+
+The design rationale behind the split:
+
+- The **bound owner** trades reach for speed. Because a borrow statically proves
+  the pool outlives the handle, it can skip the bookkeeping that keeps pool
+  memory alive — making it the cheapest handle — at the price of being neither
+  detachable nor thread-mobile.
+- The **detached owner** is the general-purpose unique pointer: it may be stored
+  `'static` and moved between threads, paying one extra pool-level step on
+  allocate and free to keep the pool memory alive behind it.
+- The two **shared** handles differ only in their reference-count discipline.
+  The atomic one is safe to share across threads; the local one uses cheaper
+  non-atomic counting and is confined to a single thread. They are otherwise
+  interchangeable.
+
+Unique handles expose mutable access to the value; shared handles are read-only,
+deferring mutation to interior mutability inside the value. All four dereference
+to the value and support pinning, comparison, hashing, and formatting so they
+substitute cleanly for the standard smart pointers.
+
+### Thin handles and type erasure
+
+A handle to a sized value is exactly **one pointer wide** — the same footprint as
+a raw reference. This is a core design constraint: the pool adds no per-handle
+metadata that the caller has to carry.
+
+The owning and shared handles can also hold **unsized** values — trait objects
+and slices. In that form they carry the usual pointer metadata (a vtable or a
+length) exactly like the standard library's smart pointers, while the value
+itself stays put in its pool slot. Conversion from a sized handle to an unsized
+one is a **compiler-checked coercion**: the caller supplies a token proving the
+target unsizing is legal, so erasure cannot be requested for an invalid target.
+On drop, an unsized handle reclaims its slot using only the value's runtime size
+and alignment — it never needs to know the original concrete type.
 
 ## Concurrency model
 
-The pool is **single-producer / multi-consumer**:
-
-- `Pool<T, A>` is `Send + !Sync`. Allocation takes `&Pool`, and because `&Pool`
-  cannot be shared across threads there is exactly **one allocator thread** at a
-  time (the whole `Pool` can be *moved* between threads, but only one thread
-  ever holds it).
-- The handles it produces are `Send`/`Sync` (the owned/atomic ones), so **frees
-  race**: many threads may drop `Box`/`Arc` concurrently.
-
-Hence one thread pushes new chunks and pops free slots (uncontended), while many
-threads push freed slots back. The free-list head, the pool refcount, and the
-per-slot refcounts are atomic to make frees safe; the chunk **directory** is
-touched only by the single allocator thread and needs no synchronization. There
-is no `Mutex` anywhere — only `core::sync::atomic`.
-
-## Core data structures
-
-### `PoolInner<T, A>` (`pool.rs`)
-
-The shared, refcounted state behind a `Pool`. It outlives the `Pool` handle when
-smart pointers are still alive.
-
-- `free_head: AtomicU32` — head of the embedded global free list (`FREE_END` =
-  empty / must grow). Single consumer pops, many producers push.
-- `pool_refcount: AtomicUsize` — `1` for the live `Pool` handle plus `1` per
-  live *refcounted* allocation (`Box`/`Arc`/`Rc`). `Alloc` handles do **not**
-  contribute; their borrow already keeps the inner alive.
-- `chunk_size: u32`, `shift: u32` (`log2(chunk_size)`), `mask: u32`
-  (`chunk_size - 1`) — chunk size is a power of two so index math is shift/mask.
-- `max_chunks: Option<u32>` — optional cap; `None` is unbounded.
-- `chunks_allocated: AtomicU32` — count so far (atomic because frees read it for
-  introspection).
-- `chunk_layout: Layout` — fixed layout of one chunk.
-- `directory: UnsafeCell<Vec<NonNull<ChunkHeader<T, A>>>>` — `chunk_index ->`
-  chunk base. Written only on the allocator thread; read there on `pop` and
-  (once quiescent) at teardown. `!Sync` is the soundness gate.
-- `allocator: A` — used for chunk allocations (via `allocator-api2`).
-
-`Pool<T, A>` itself is just `{ inner: NonNull<PoolInner<T, A>> }`.
-
-### `ChunkHeader<T, A>` (`chunk.rs`)
-
-Each chunk is one allocation: a `#[repr(C)]` header followed (after alignment
-padding) by its `[SlotCell<T>; N]` payload.
+The pool follows a **single-producer / multi-consumer** discipline, and this
+single decision shapes the whole design.
 
 ```text
-chunk allocation:  [ ChunkHeader | pad | SlotCell 0 | SlotCell 1 | … | SlotCell N-1 ]
-                   ^ base                ^ slots_offset bytes in
+        ┌──────────────────────────────────────────────┐
+        │            one allocator thread              │
+        │   (holds the pool; grows it; hands out slots)│
+        └───────────────┬──────────────────────────────┘
+                        │ allocate
+                        ▼
+                 ┌─────────────┐   free (many threads)
+                 │  free list  │ ◄───────────────┬───────────┐
+                 └─────────────┘                 │           │
+                        ▲                     ┌───┴───┐   ┌───┴───┐
+                        │ pop                 │ drop  │   │ drop  │  …
+                        │                     └───────┘   └───────┘
 ```
 
-The header stores `pool: NonNull<PoolInner<T, A>>` (raw back-pointer; chunks
-live until pool teardown so there is no cycle), `base_index` (this chunk's first
-global index = `chunk_index * chunk_size`), and `chunk_index`.
+- **Allocation is single-threaded.** Growing the pool and popping free slots
+  happen on exactly one thread at a time. The pool object can be *moved* between
+  threads, but only one thread ever holds it, so these operations are
+  uncontended and need no locking among themselves.
+- **Frees are concurrent.** The owning and shared handles are thread-mobile, so
+  many threads may drop handles — and thus return slots — simultaneously.
 
-`slots_offset::<T, A>()` is `size_of::<ChunkHeader>()` rounded up to
-`align_of::<SlotCell<T>>()` — independent of `N`, so slot addressing and
-recovery are pure arithmetic with no per-pointer masking.
+The consequence is an asymmetric design: one thread pushes new capacity and pops
+slots without contention, while any number of threads concurrently return slots.
+Only the hand-off point between them needs synchronization, and it is expressed
+entirely with atomics — **there is no mutex anywhere in the pool**. State touched
+only by the single allocator thread (notably the directory of chunks) needs no
+synchronization at all; its confinement to that one thread is itself the
+soundness argument.
 
-### `SlotCell<T>` (`slot.rs`)
+## Memory layout
 
-```rust
-#[repr(C)]
-struct SlotCell<T> {
-    value: UnsafeCell<MaybeUninit<T>>,
-    refcount: AtomicU32, // dual-role (see below)
-    index: u32,          // immutable in-chunk index (0..N)
-}
-```
-
-`refcount` is **contextual**, not tagged:
-
-- **Occupied:** a refcount `>= 1` (number of `Arc`/`Rc` sharing the slot; `Box`
-  keeps it at 1 implicitly).
-- **Free:** the next-free *global* index, or `FREE_END` (`u32::MAX`) for
-  end-of-chain.
-
-This is safe because free-list traversal only follows links from slots already
-on the chain (always read as a link), and clone/drop only touch the field on
-slots whose handles are live (always read as a count). The two value ranges
-overlap numerically; the protocol disambiguates by context.
-
-`index` is the **in-chunk** index, written once at chunk init. It is what makes
-single-pointer recovery possible (below), and it yields the slot's global index
-as `header.base_index + index`.
-
-Bounds: `FREE_END = u32::MAX` is reserved, so the highest valid slot index is
-`u32::MAX - 1`. Refcounts are capped at `MAX_REFCOUNT = i32::MAX`, mirroring
-`std::sync::Arc`; overflow aborts the process via a double-panic Bomb (works in
-`no_std`).
-
-### Centralized value access
-
-Reaching the `T` inside `UnsafeCell<MaybeUninit<T>>` is the one genuinely tricky
-pointer dance in the crate. Rather than re-derive it in every handle, it lives in
-four audited `unsafe` primitives on `SlotCell<T>` — `value_ref`, `value_mut`,
-`write_value`, `drop_value` — each with a single documented safety contract.
-Every handle and the pool's `occupy` path call these instead of writing raw
-`(*(*slot).value.get())…` chains, and the shared "drop the value then return the
-slot" sequence is a single `drop_and_free` / `drop_and_free_local` helper in
-`pool.rs`. The remaining per-handle `unsafe` is irreducible and minimal: the
-refcount RMW (atomic for `Arc`, non-atomic for `Rc`) and the slot-pointer deref.
-
-## Single-pointer handles and pointer recovery
-
-A handle is exactly one pointer — `NonNull<SlotCell<T>>` — plus, for `Alloc`, a
-zero-sized lifetime marker. Everything else (the chunk and the owning
-`PoolInner`) is recovered from the slot pointer by arithmetic in
-`header_of` (`chunk.rs`):
-
-1. Read the slot's stored in-chunk `index`.
-2. Step back `index` slots to reach slot 0.
-3. Step back `slots_offset` bytes to reach the `ChunkHeader`.
-4. The header gives `pool` (the `PoolInner` back-pointer) and `base_index`.
-
-`index` must be the **in-chunk** index, not the global one: recovery has to
-locate the header *before* it can read anything stored there, so it can only
-rely on data already in the slot. The global index — needed when pushing onto
-the free list — is derived *after* recovery as `base_index + index`.
-
-Per-operation cost:
-
-- `Deref` → reads `value` only; no recovery.
-- `Arc::clone` → atomic `refcount.fetch_add`; `Rc::clone` → non-atomic `+= 1`.
-- `Drop` → decrement refcount; on reaching 0, recover the header to reach
-  `free_head` (push the derived global index) and, for `Box`/`Arc`/`Rc`,
-  decrement `pool_refcount`. `Alloc` drop pushes the slot but does **not** touch
-  `pool_refcount`.
-
-### The four handle flavors
-
-| Handle | Outlives pool? | `Send`/`Sync` | Per-slot refcount | `pool_refcount` traffic |
-|---|---|---|---|---|
-| `Box<T>` | yes | `Send` (if `T: Send`) | none (unique) | bump on alloc, drop on free |
-| `Alloc<'pool, T>` | no (borrows pool) | `!Send` | none (unique) | **none** — borrow proves the pool outlives it |
-| `Arc<T>` | yes | `Send + Sync` (if `T: Send + Sync`) | atomic | bump/drop per slot |
-| `Rc<T>` | yes | `!Send + !Sync` | non-atomic | bump/drop per slot |
-
-- **`Alloc<'pool, T>`** is a `Box` that borrows the pool. Because the borrow
-  statically guarantees the pool outlives every `Alloc`, it skips the
-  `pool_refcount` atomic RMW on both alloc and free — the cheapest handle. The
-  price: `!Send`, and it cannot be stored `'static`.
-- **`Rc<T>`** is `Arc` with non-atomic refcounting. The `refcount` field stays
-  `AtomicU32` (it is the cross-thread free-list link while free), but `Rc`
-  touches it via `AtomicU32::as_ptr()` with plain `u32` add/sub. This is sound
-  because `Rc` is `!Send + !Sync` (single-threaded), an *occupied* slot is never
-  on the free list (so no other thread accesses its field atomically), and a
-  slot is uniformly `Rc`- or `Arc`-managed. Under `--cfg loom` (where `as_ptr`
-  is unavailable) the inc/dec/read fall back to relaxed atomics. Validated with
-  Miri's data-race checker.
-
-`Box`/`Alloc` are the unique owner of their slot while alive, so they implement
-`Deref + DerefMut`. `Arc`/`Rc` are read-only (`Deref` only); interior mutability
-goes inside `T`.
-
-## Index ↔ pointer mapping
-
-A global index `g` maps to its slot on the allocator thread:
+Memory is acquired in **chunks** — power-of-two-sized batches of slots. Each
+chunk is a single allocation laid out as a small header followed by its array of
+slots:
 
 ```text
-chunk_no = g >> shift     // shift = log2(chunk_size)
-offset   = g & mask       // mask  = chunk_size - 1
-slot     = slot_at(directory[chunk_no], offset)
+ chunk:  ┌────────┬─────┬────────┬────────┬─────┬──────────┐
+         │ header │ pad │ slot 0 │ slot 1 │ ... │ slot N-1 │
+         └────────┴─────┴────────┴────────┴─────┴──────────┘
+              │                 ▲
+              │ back-reference  │ each slot: value + refcount + in-chunk index
+              ▼                 (fixed stride, so addressing is pure arithmetic)
+        shared pool state
 ```
 
-Cheap because `chunk_size` is a power of two. `chunk_size()` exposes the
-effective (rounded-up) value. This lookup only ever happens on the allocator
-thread; the free/push path reaches `PoolInner` by recovery from the slot, never
-through the directory.
+Two properties of this layout are load-bearing:
 
-## Free list and growth
+- **Chunks never move and are never individually freed.** They live until the
+  entire pool tears down. That means a chunk header can hold a plain
+  back-reference to the shared pool state with no risk of a dangling pointer and
+  no reference cycle.
+- **Slot addressing is arithmetic, not lookup.** Because chunk size is a power of
+  two and slot stride is fixed, mapping a global slot index to chunk-and-offset
+  is shift/mask arithmetic, and stepping from a value's address back to its
+  chunk header is fixed-offset arithmetic. No per-object bookkeeping table is
+  consulted on the hot path.
 
-The free list is an embedded MPSC Treiber stack threaded through free slots'
-`refcount` fields. There is **no growth lock**: chunk allocation, directory
-append, and the free-list splice all run on the single allocator thread, racing
-only the producers' pushes on `free_head`.
+### The slot and its dual-purpose counter
 
-**Pop** (allocator thread, single consumer):
-1. `g = free_head.load()`. If `g == FREE_END`, grow.
-2. Map `g -> slot`; `next = slot.refcount.load()` (read as link).
-3. `compare_exchange_weak(free_head, g -> next)`; retry on contention. ABA-free
-   because only this thread pops and a free slot is never re-pushed while free.
+Each slot holds three things: storage for the value, a small counter, and its
+own immutable index within the chunk. The counter is **contextual** — it means
+different things depending on whether the slot is occupied or free:
 
-**Grow** (allocator thread, rare, `#[cold]`): `grow()` returns
-`Option<NonNull<SlotCell<T>>>` — the reserved first slot of the new chunk, or
-`None` if the pool cannot grow (cap reached, the `u32` ceiling hit, or the
-allocator failed). It:
-1. Checks `chunks_allocated` against the cap (`max_chunks`, or `FREE_END /
-   chunk_size` for unbounded pools).
-2. Allocates one chunk via `A`; on failure returns `None`.
-3. Initializes the header and every slot (each slot links to the next; slot 0 is
-   reserved for the caller and the last slot's link is overwritten by the
-   splice, so a uniform `base_index + i + 1` init suffices).
-4. Appends the chunk to the directory and bumps `chunks_allocated`.
-5. Splices slots `1..N-1` onto `free_head` and returns slot 0.
+- **Occupied:** it is the value's reference count (how many shared handles point
+  at it).
+- **Free:** it is a link — the index of the next free slot in the free list.
 
-Returning the reserved slot directly (instead of looping back to `pop`) keeps
-the "grow then allocate" path bounded — there is no spin where a lost race could
-re-empty the free list.
+These two roles never collide because an occupied slot is only ever read as a
+count (by live handles) and a free slot is only ever read as a link (by the free
+list). The slot's stored in-chunk index is what makes single-pointer recovery
+possible: from a bare value pointer, the pool can find the index, step back to
+the chunk header, and from there reach the shared pool state — all without the
+handle carrying any extra data.
 
-**Push** (deallocation, many producers):
-1. Recover the global index `g = base_index + index`.
-2. `h = free_head.load()`; `slot.refcount.store(h)` (now a link);
-   `compare_exchange_weak(free_head, h -> g)`; retry on contention.
+## Reclamation without back-pointers
 
-## Refcount semantics and teardown
+Because a sized handle is just a value pointer, freeing it requires
+reconstructing everything else from that pointer alone. This **pointer-recovery**
+pattern is the architectural heart of the crate:
 
-Two independent refcounts:
+```text
+ value pointer
+      │  read the slot's in-chunk index and counter (fixed offsets past the value)
+      ▼
+ step back to slot 0, then to the chunk header (fixed-stride arithmetic)
+      │
+      ▼
+ chunk header ──► shared pool state (free list, pool-level refcount, teardown hook)
+```
 
-- **Per-slot `refcount`** governs the *value*: how many `Arc`/`Rc` share it.
-- **`pool_refcount`** governs the *pool memory* (all chunks + the directory +
-  `PoolInner`), so handles can outlive the `Pool` handle.
+A crucial architectural choice makes this safe across type erasure: the shared
+pool state that recovery reaches is a **type-agnostic core** — it contains only
+what reclamation needs (the free-list head, the pool-level reference count, and a
+type-restoring teardown hook). Recovery therefore never has to guess the concrete
+value type. The exact original type is restored only by the teardown hook, and
+only once the pool is truly finished. This is what lets an erased trait-object
+handle return its slot correctly even though its concrete type was forgotten at
+the type level.
 
-Transitions:
-- `build` → `pool_refcount = 1` (the `Pool` handle).
-- Allocate a refcounted handle → set slot `refcount = 1`, bump `pool_refcount`
-  (`Alloc` skips the bump).
-- `Arc`/`Rc` clone → bump slot `refcount` only.
-- Drop a handle → `refcount -= 1`; if it hit 0, `drop_in_place(value)`, push the
-  slot, then `pool_refcount -= 1` (`Alloc` pushes but skips the decrement).
-- Drop the `Pool` handle → `pool_refcount -= 1`.
-- When `pool_refcount` hits 0: free every chunk and the directory, then
-  `PoolInner`.
+## The free list
 
-Because every live refcounted allocation holds one `pool_refcount`, by the time
-it reaches 0 there are **no occupied slots left** — teardown never runs
-`T::drop`. Every value is dropped exactly once, on its own handle's drop. So
-`Pool::drop` is not synchronous w.r.t. outstanding handles: the backing memory
-lives until the last handle drops.
+Free slots are threaded together into a **lock-free stack** whose links live
+inside the slots themselves (reusing the dual-purpose counter). This is the
+concurrency hand-off point:
 
-Teardown can run on whichever thread drops the last handle (or the `Pool`),
-which may not be the allocator thread. That is sound: `pool_refcount == 0`
-implies the `Pool` handle is gone (no more allocation/growth) and no handles
-remain, so the directory is quiescent. The `Acquire` on the final
-`pool_refcount` decrement establishes happens-before with every prior handle
-drop. The directory itself is published separately: `grow()` does
-`chunks_allocated.store(Release)` right after each `directory.push`, and
-teardown performs a matching `chunks_allocated.load(Acquire)` before walking
-the directory. (`pool_refcount` increments are `Relaxed`, so they do not
-publish directory growth on their own — `chunks_allocated` is the publish
-point.) The teardown thread therefore sees a complete, frozen directory to
-walk.
+- **Popping** a slot happens only on the single allocator thread, so there is
+  exactly one consumer. This eliminates the classic ABA hazard by construction —
+  a free slot is never simultaneously popped by two threads or re-pushed while
+  still free.
+- **Pushing** a freed slot can happen on any thread. Producers race only on the
+  head of the stack, resolved with a compare-and-swap retry loop.
 
-## Allocation API
+There is **no growth lock**: adding a chunk, extending the directory, and
+splicing the new slots onto the free list all run on the sole allocator thread,
+racing only against concurrent producer pushes at the head.
 
-Each owned/shared flavor (`box`, `alloc`, `arc`, `rc`) offers a triplet plus a
-fallible `try_*` sibling:
+Growth is a **cold, rare path**. When the free list is empty, the allocator
+reserves one slot from a freshly acquired chunk for the immediate request and
+splices the remainder onto the free list in one step. Handing back the reserved
+slot directly — rather than looping back to re-pop — keeps the grow-then-allocate
+path bounded, with no window where a lost race could re-empty the list.
 
-- `alloc_*(value)` — convenience; RVO usually elides the stack copy.
-- `alloc_*_with(f)` — RVO-friendly; the closure body is the construction site.
-- `alloc_uninit_*` → `assume_init` — the only stable way to *guarantee* zero
-  stack round-trip (mirrors `Box::new_uninit` / `Arc::new_uninit`).
+## Two reference counts, two lifetimes
 
-`try_alloc_*` returns `Result<_, AllocError>`, where `AllocError` is the crate's
-own error type. On failure the rejected value is dropped and the `_with` closure
-is not called — matching the convention of `Box::try_new`. The panicking
-`alloc_*` variants panic on a full pool. A pool is "full" for one of two
-reasons, which `AllocError` distinguishes via `is_capacity_exhausted()` and
-`is_allocator_failure()`: the chunk cap (or the `u32` ceiling) is reached and no
-slot is free, or a growth allocation failed. The panic message names the same
-cause.
+The pool tracks **two independent reference counts** governing two different
+resources:
 
-## `no_std`
+- A **per-slot count** governs a single value: how many shared handles point at
+  it. When it reaches zero, the value's destructor runs and the slot returns to
+  the free list.
+- A **pool-level count** governs the pool's memory as a whole — every chunk plus
+  the shared state. Each detachable handle holds one unit of it, which is exactly
+  what allows handles to outlive the pool object.
 
-`alloc` only — no `std`, no `Mutex`. Allocation/growth are single-threaded and
-the free list is a lock-free MPSC stack, so only `core::sync::atomic` is needed.
-Chunk allocations go through `allocator-api2` so custom allocators compose.
+The interplay yields a clean teardown story:
+
+```text
+ build ................. pool-level count = 1  (the pool object holds it)
+ allocate detachable ... +1 pool-level     (bound owner does NOT take one)
+ share (clone) ......... +1 per-slot only
+ drop handle ........... -1 per-slot; at zero: run destructor, return slot,
+                          then -1 pool-level (bound owner skips the pool step)
+ drop pool object ...... -1 pool-level
+ pool-level hits 0 ..... free all chunks and shared state
+```
+
+Because every detachable allocation holds a unit of the pool-level count, by the
+time that count hits zero there are provably **no occupied slots left**.
+Teardown therefore never runs a value's destructor — every value was already
+destroyed on its own handle's drop, exactly once. Dropping the pool object is not
+synchronous with respect to outstanding handles: it merely relinquishes the pool
+object's own claim, and the backing memory survives until the last handle
+departs.
+
+Teardown may run on whatever thread happens to drop the last handle, which need
+not be the allocator thread. This is sound because a zero pool-level count
+implies the pool object is gone (no more allocation or growth can occur) and no
+handles remain, so all shared structures are quiescent. The atomic release/acquire
+discipline on the counts and on the published chunk directory guarantees the
+teardown thread observes a complete, frozen set of chunks to reclaim.
+
+## Allocation surface and failure
+
+Each handle flavour offers the same shape of allocation entry points:
+
+- a **by-value** form for convenience,
+- a **construct-in-place** form whose closure body is the construction site,
+  avoiding an intermediate stack copy, and
+- an **uninitialized-then-initialize** form, the guaranteed zero-copy path,
+  mirroring the standard library's `new_uninit` idioms.
+
+Every form has an infallible variant that panics when the pool cannot satisfy the
+request, and a **fallible** sibling that reports the failure instead. A pool
+"fails" for one of two architecturally distinct reasons, and the error
+distinguishes them:
+
+- **Capacity exhausted** — a configured chunk cap (or the intrinsic index
+  ceiling of an unbounded pool) is reached and no slot is free.
+- **Allocator failure** — acquiring a new chunk from the underlying allocator
+  failed.
+
+On failure the rejected value is dropped and no construction closure is invoked,
+matching the standard fallible-allocation convention.
+
+## `no_std` and allocator integration
+
+The pool depends only on `alloc` — no `std`, and no operating-system
+synchronization primitives. This is feasible precisely because of the concurrency
+model: allocation and growth are single-threaded, and the free list is a
+lock-free stack, so only plain atomics are required. Chunk acquisition goes
+through the standard allocator abstraction, so custom and instrumented allocators
+compose naturally.
+
+## Design invariants at a glance
+
+The safety and correctness of the whole system rest on a short list of
+invariants:
+
+1. **Single allocator thread.** At most one thread at a time grows the pool or
+   pops slots, and the directory of chunks is confined to that thread. This is a
+   "no concurrent allocation" rule, not a thread-affinity rule: the pool may be
+   moved to and resumed on a different thread, so long as allocations never
+   overlap in time.
+2. **Chunks are immortal until teardown.** They never move and are never freed
+   individually, so back-references from chunks to pool state can never dangle.
+3. **The slot counter is context-typed.** Occupied slots read it as a count,
+   free slots as a link; the two never overlap in time.
+4. **Recovery is arithmetic and type-agnostic.** A value pointer reconstructs its
+   slot, chunk, and pool state by fixed offsets, reaching only a type-erased core.
+5. **Two counts, two lifetimes.** The per-slot count owns the value; the
+   pool-level count owns the memory. Every detachable handle holds one unit of
+   the latter, so teardown finds no live values.
+6. **A value is destroyed exactly once**, on its own handle's final drop, never
+   during pool teardown.
 
 ## Verification strategy
 
-The crate is checked by several complementary tools (see `tests/` and
-`benches/`):
+The architecture is validated by a layered suite of complementary techniques,
+each targeting a different failure class:
 
-- **Unit + integration tests** (`tests/integration.rs`, `tests/coverage.rs`) —
-  full API, panics, custom/failing/counting allocators, contention stress.
-- **Miri** — UB / data-race / leak checking across the integration suite,
-  including the non-atomic `Rc` path.
-- **Loom** (`tests/loom.rs`, `src/atomic.rs`) — exhaustive interleavings of the
-  concurrent free path (two `Arc`s on one slot, cross-thread frees, teardown on
-  a worker thread, drop-exactly-once).
-- **Bolero** (`tests/bolero.rs`) — property/fuzz coverage.
-- **Coverage** — line coverage via `cargo +nightly llvm-cov`; genuinely
-  unreachable paths (overflow abort, the `splice_chain` helper) are marked
-  `#[cfg_attr(coverage_nightly, coverage(off))]`.
-- **Mutation testing** — `cargo mutants --all-features`; equivalent/unreachable
-  mutants are skipped inline with `#[cfg_attr(test, mutants::skip)]` next to the
-  code they apply to.
-- **Benchmarks** (`benches/`) — `gungraun_alloc` (Callgrind, instruction-exact)
-  and `criterion_alloc` (wall-clock) run the *same* per-op bodies from
-  `benches/shared/ops.rs` for every allocation function; `pool_comparison` is a
-  cross-crate comparison; `graph_churn` is a 1M-node macro-benchmark vs mimalloc.
-  `scripts/perf_report.rs` runs them and regenerates [`PERF.md`](./PERF.md).
+- **Functional tests** exercise the full handle surface, panic paths, and
+  behaviour under custom, failing, and counting allocators, plus contention
+  stress.
+- **Undefined-behaviour and data-race checking** validates the pointer-recovery
+  arithmetic and the non-atomic shared-handle path.
+- **Exhaustive interleaving exploration** covers the concurrent free path:
+  multiple shared handles on one slot, cross-thread frees, and teardown running
+  on a non-allocator thread — confirming each value is destroyed exactly once.
+- **Property and fuzz testing** probes pool invariants under randomized
+  operation sequences.
+- **Coverage and mutation testing** guard against untested paths and assertions
+  that do not actually constrain behaviour.
+- **Instruction-exact and wall-clock benchmarks** run identical operation bodies
+  so the hot paths are measured consistently, including cross-crate and
+  macro-benchmark comparisons against the system allocator.

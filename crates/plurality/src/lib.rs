@@ -4,21 +4,6 @@
 #![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![allow(
-    clippy::multiple_unsafe_ops_per_block,
-    clippy::allow_attributes,
-    reason = "related unsafe operations are grouped under a single documented safety invariant; `allow` is used over `expect` because these attributes also expand inside macro bodies where the lint may not fire in every instantiation"
-)]
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_ptr_alignment,
-    clippy::cast_precision_loss,
-    reason = "slot-index and chunk-layout arithmetic casts are bounded and correctly aligned by the pool's build-time capacity and `chunk_layout` invariants"
-)]
-#![allow(
-    clippy::elidable_lifetime_names,
-    reason = "the handle macros emit an explicit `'pool` lifetime, which reads more clearly than `'_` and is shared across all four handle types"
-)]
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/plurality/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/plurality/favicon.ico")]
 
@@ -86,6 +71,48 @@
 //! threads). The `Send` handles ([`Box`]/[`Arc`]) may be dropped from any thread;
 //! the `!Send` handles ([`Alloc`]/[`Rc`]) stay on their thread.
 //!
+//! # Memory allocation
+//!
+//! As you allocate instances from a pool, the pool will allocate large chunks of memory from the
+//! supplied allocator. The pool retains this memory until the overall pool is dropped.
+//!
+//! # Cargo features
+//!
+//! - **`std`** *(enabled by default)* — integrates with the standard library
+//!   through [`allocator-api2`]'s `std` feature. The crate is otherwise
+//!   `no_std` (it needs only [`alloc`]); disable default features to build for
+//!   a `no_std` target.
+//! - **`stats`** *(disabled by default)* — enables runtime allocation
+//!   statistics: the `PoolStats` type and the `Pool::stats` method. The
+//!   accounting counters are compiled in only when this feature is active, so
+//!   leaving it off keeps the pool free of any tracking overhead.
+//!
+//! [`allocator-api2`]: https://crates.io/crates/allocator-api2
+//!
+//! # Type erasure
+//!
+//! [`Box<T>`], [`Arc<T>`], and [`Rc<T>`] are generic over `T: ?Sized`, so they can
+//! hold an unsized value — a trait object or a slice — while the value stays in
+//! its pool slot. A sized handle is converted with [`Box::unsize`] /
+//! [`Arc::unsize`] / [`Rc::unsize`], which take a compiler-checked
+//! [`Coercion`](struct@Coercion)
+//! token:
+//!
+//! ```
+//! use core::fmt::Debug;
+//!
+//! use plurality::{Box, Coercion, Pool};
+//!
+//! let pool = Pool::<u32>::new();
+//! let b = pool.alloc_box(7u32);
+//! let erased = Box::unsize(b, Coercion!(to dyn Debug));
+//! assert_eq!(format!("{erased:?}"), "7");
+//! ```
+//!
+//! A sized handle stays exactly one pointer wide; the unsized forms carry the
+//! extra pointer metadata (vtable or length) just like [`alloc::boxed::Box`], and
+//! reclaim the slot from the value's runtime size and alignment on drop.
+//!
 //! # Comparison with other crates
 //!
 //! The closest crates in the ecosystem hand out *indices* or *keys* that only
@@ -147,24 +174,24 @@ mod atomic;
 mod boxed;
 mod builder;
 mod chunk;
+mod coerce;
 mod common;
 mod error;
 mod pool;
+#[cfg(feature = "stats")]
+mod pool_stats;
 mod rc;
 mod slot;
 mod sync;
 
-#[doc(inline)]
 pub use alloced::Alloc;
-#[doc(inline)]
 pub use boxed::Box;
-#[doc(inline)]
 pub use builder::PoolBuilder;
-#[doc(inline)]
+pub use coerce::Coercion;
 pub use error::AllocError;
-#[doc(inline)]
 pub use pool::Pool;
-#[doc(inline)]
+#[cfg(feature = "stats")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
+pub use pool_stats::PoolStats;
 pub use rc::Rc;
-#[doc(inline)]
 pub use sync::Arc;

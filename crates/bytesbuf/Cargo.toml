@@ -39,9 +39,9 @@ test-util = []
 
 [dependencies]
 bytes = { workspace = true, features = ["std"], optional = true }
-infinity_pool = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
+plurality = { workspace = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, features = ["derive"] }
 

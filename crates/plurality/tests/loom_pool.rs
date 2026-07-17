@@ -24,7 +24,7 @@
 //! empty target. Run with:
 //!
 //! ```sh
-//! RUSTFLAGS="--cfg loom" cargo test --test loom --release
+//! RUSTFLAGS="--cfg loom" cargo test --test loom_pool --features loom --release
 //! ```
 #![cfg(loom)]
 

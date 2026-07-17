@@ -1,0 +1,395 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+#![allow(
+    clippy::allow_attributes,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::many_single_char_names,
+    reason = "test code"
+)]
+
+//! Tests for the type-erasing [`Box::unsize`] API: turning a sized `Box<T>`
+//! into a `Box<dyn Trait>` or `Box<[U]>` that still lives in the pool, dispatches
+//! correctly, runs the concrete destructor on drop, and returns its slot.
+
+mod common;
+
+use std::fmt::Debug;
+use std::marker::PhantomPinned;
+use std::ops::DerefMut;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
+use std::ptr::NonNull;
+use std::sync::Arc as StdArc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll, Waker};
+
+use common::DropCounter;
+use plurality::{Box, Coercion, Pool};
+use static_assertions::assert_not_impl_any;
+
+trait Shape {
+    fn area(&self) -> u32;
+}
+
+struct Square(u32);
+impl Shape for Square {
+    fn area(&self) -> u32 {
+        self.0 * self.0
+    }
+}
+
+struct Rect(u32, u32);
+impl Shape for Rect {
+    fn area(&self) -> u32 {
+        self.0 * self.1
+    }
+}
+
+#[test]
+fn unsize_to_trait_object_dispatches_and_frees() {
+    let pool = Pool::<Square>::new();
+    let b = pool.alloc_box(Square(4));
+    let s: Box<dyn Shape> = Box::unsize::<dyn Shape>(b, Coercion!(to dyn Shape));
+    assert_eq!(s.area(), 16);
+    assert_eq!(pool.len(), 1);
+    drop(s);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn heterogeneous_trait_objects_from_separate_pools() {
+    // Different concrete types live in separate (differently-sized) pools, but
+    // the erased handle type unifies them in one collection.
+    let squares = Pool::<Square>::new();
+    let rects = Pool::<Rect>::new();
+
+    let shapes: Vec<Box<dyn Shape>> = vec![
+        Box::unsize::<dyn Shape>(squares.alloc_box(Square(3)), Coercion!(to dyn Shape)),
+        Box::unsize::<dyn Shape>(rects.alloc_box(Rect(2, 5)), Coercion!(to dyn Shape)),
+    ];
+
+    let total: u32 = shapes.iter().map(|s| s.area()).sum();
+    assert_eq!(total, 9 + 10);
+
+    drop(shapes);
+    assert_eq!(squares.len(), 0);
+    assert_eq!(rects.len(), 0);
+}
+
+#[test]
+fn unsize_runs_concrete_destructor_through_vtable() {
+    let counter = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<DropCounter>::new();
+    let b = pool.alloc_box(DropCounter(StdArc::clone(&counter)));
+
+    // Erase to a trait object with no methods; drop must still run
+    // `DropCounter::drop` via the value's metadata and reclaim the slot.
+    let erased: Box<dyn Send> = Box::unsize::<dyn Send>(b, Coercion!(to dyn Send));
+    assert_eq!(pool.len(), 1);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+
+    drop(erased);
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn unsize_array_to_slice() {
+    let pool = Pool::<[u8; 4]>::new();
+    let b = pool.alloc_box([1u8, 2, 3, 4]);
+    let mut s: Box<[u8]> = Box::unsize::<[u8]>(b, Coercion::to_slice());
+
+    assert_eq!(s.len(), 4);
+    assert_eq!(&*s, &[1, 2, 3, 4]);
+    s[0] = 9;
+    assert_eq!(&*s, &[9, 2, 3, 4]);
+    assert_eq!(pool.len(), 1);
+
+    drop(s);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn erased_debug_forwards_to_value() {
+    let pool = Pool::<u32>::new();
+    let d: Box<dyn Debug> = Box::unsize::<dyn Debug>(pool.alloc_box(7u32), Coercion!(to dyn Debug));
+    assert_eq!(format!("{d:?}"), "7");
+}
+
+struct ImmediateReady(u32);
+impl Future for ImmediateReady {
+    type Output = u32;
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<u32> {
+        Poll::Ready(self.0)
+    }
+}
+
+#[test]
+fn unsize_to_dyn_future_and_poll_via_as_pin_mut() {
+    let pool = Pool::<ImmediateReady>::new();
+    let b = pool.alloc_box(ImmediateReady(42));
+    let mut fut: Box<dyn Future<Output = u32>> = Box::unsize::<dyn Future<Output = u32>>(b, Coercion!(to dyn Future<Output = u32>));
+
+    let waker = Waker::noop();
+    let mut cx = Context::from_waker(waker);
+    match fut.as_pin_mut().poll(&mut cx) {
+        Poll::Ready(v) => assert_eq!(v, 42),
+        Poll::Pending => panic!("ImmediateReady must be ready"),
+    }
+    drop(fut);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn slot_reused_after_unsized_drop() {
+    let pool = Pool::<u64>::builder().chunk_size(1).max_chunks(1).build();
+    let b = pool.alloc_box(1u64);
+    let d: Box<dyn Send + Sync> = Box::unsize::<dyn Send + Sync>(b, Coercion!(to dyn Send + Sync));
+    drop(d);
+
+    // The single capped slot must be reusable after the erased handle is freed.
+    let b2 = pool.alloc_box(2u64);
+    assert_eq!(*b2, 2);
+}
+
+#[test]
+fn unsized_box_is_send_and_frees_cross_thread() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Box<dyn Send>>();
+
+    let pool = Pool::<u32>::new();
+    let d: Box<dyn Send> = Box::unsize::<dyn Send>(pool.alloc_box(5u32), Coercion!(to dyn Send));
+    // Drop the erased handle on another thread (cross-thread free).
+    std::thread::spawn(move || drop(d)).join().unwrap();
+    assert_eq!(pool.len(), 0);
+}
+
+// ── Arc / Rc erasure ───────────────────────────────────────────────────────
+
+#[test]
+fn arc_unsize_shares_dispatches_and_frees() {
+    let pool = Pool::<Square>::new();
+    let a: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(pool.alloc_arc(Square(5)), Coercion!(to dyn Shape));
+    let a2 = a.clone();
+    assert_eq!(a.area(), 25);
+    assert_eq!(a2.area(), 25);
+    assert_eq!(pool.len(), 1);
+    drop(a);
+    assert_eq!(pool.len(), 1); // still one clone alive
+    drop(a2);
+    assert_eq!(pool.len(), 0); // last clone freed the slot
+}
+
+#[test]
+fn arc_unsize_runs_destructor_once_on_last_drop() {
+    let counter = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<DropCounter>::new();
+    let a: plurality::Arc<dyn Send> =
+        plurality::Arc::unsize::<dyn Send>(pool.alloc_arc(DropCounter(StdArc::clone(&counter))), Coercion!(to dyn Send));
+    let a2 = a.clone();
+    drop(a);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    drop(a2);
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn arc_sized_and_erased_clones_share_one_slot() {
+    // A sized `Arc<Square>` and an erased `Arc<dyn Shape>` clone can coexist on
+    // one slot; whichever drops last frees it, reconstructing the layout either way.
+    let pool = Pool::<Square>::new();
+    let sized = pool.alloc_arc(Square(4));
+    let erased: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(sized.clone(), Coercion!(to dyn Shape));
+    assert_eq!(sized.area(), 16);
+    assert_eq!(erased.area(), 16);
+    assert_eq!(pool.len(), 1);
+    drop(erased);
+    assert_eq!(pool.len(), 1);
+    drop(sized);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn arc_unsize_to_slice() {
+    let pool = Pool::<[u8; 3]>::new();
+    let a: plurality::Arc<[u8]> = plurality::Arc::unsize::<[u8]>(pool.alloc_arc([7u8, 8, 9]), Coercion::to_slice());
+    assert_eq!(&*a, &[7, 8, 9]);
+    assert_eq!(a.len(), 3);
+    drop(a);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn arc_erased_is_send_sync_and_frees_cross_thread() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<plurality::Arc<dyn Send + Sync>>();
+
+    let pool = Pool::<u32>::new();
+    let a: plurality::Arc<dyn Send + Sync> = plurality::Arc::unsize::<dyn Send + Sync>(pool.alloc_arc(9u32), Coercion!(to dyn Send + Sync));
+    let a2 = a.clone();
+    std::thread::spawn(move || drop(a2)).join().unwrap();
+    drop(a);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn rc_unsize_shares_dispatches_and_frees() {
+    let pool = Pool::<Square>::new();
+    let r: plurality::Rc<dyn Shape> = plurality::Rc::unsize::<dyn Shape>(pool.alloc_rc(Square(6)), Coercion!(to dyn Shape));
+    let r2 = r.clone();
+    assert_eq!(r.area(), 36);
+    assert_eq!(r2.area(), 36);
+    assert_eq!(pool.len(), 1);
+    drop(r);
+    assert_eq!(pool.len(), 1);
+    drop(r2);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn rc_unsize_runs_destructor_once_on_last_drop() {
+    let counter = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<DropCounter>::new();
+    let r: plurality::Rc<dyn std::any::Any> =
+        plurality::Rc::unsize::<dyn std::any::Any>(pool.alloc_rc(DropCounter(StdArc::clone(&counter))), Coercion!(to dyn std::any::Any));
+    let r2 = r.clone();
+    drop(r2);
+    assert_eq!(counter.load(Ordering::SeqCst), 0);
+    drop(r);
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn panicking_coercion_does_not_leak_any_handle() {
+    fn coercion() -> Coercion<u32, dyn Debug, impl FnOnce(*const u32) -> *const dyn Debug> {
+        // SAFETY: this deliberately panicking token never returns a pointer; it
+        // exercises unwind behavior before any conversion can occur.
+        unsafe { Coercion::new(|_| -> *const dyn Debug { panic!("coercion panic") }) }
+    }
+
+    let box_pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = Box::unsize::<dyn Debug>(box_pool.alloc_box(1), coercion());
+        }))
+        .is_err()
+    );
+    assert_eq!(box_pool.len(), 0);
+    drop(box_pool.try_alloc_box(2).unwrap());
+
+    let arc_pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = plurality::Arc::unsize::<dyn Debug>(arc_pool.alloc_arc(1), coercion());
+        }))
+        .is_err()
+    );
+    assert_eq!(arc_pool.len(), 0);
+    drop(arc_pool.try_alloc_arc(2).unwrap());
+
+    let rc_pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = plurality::Rc::unsize::<dyn Debug>(rc_pool.alloc_rc(1), coercion());
+        }))
+        .is_err()
+    );
+    assert_eq!(rc_pool.len(), 0);
+    drop(rc_pool.try_alloc_rc(2).unwrap());
+}
+
+struct AddressSensitive {
+    pinned_at: std::cell::Cell<*const Self>,
+    _pin: PhantomPinned,
+}
+
+impl AddressSensitive {
+    fn new() -> Self {
+        Self {
+            pinned_at: std::cell::Cell::new(std::ptr::null()),
+            _pin: PhantomPinned,
+        }
+    }
+
+    fn initialize(self: Pin<&mut Self>) {
+        self.pinned_at.set(std::ptr::from_ref(self.as_ref().get_ref()));
+    }
+}
+
+impl Drop for AddressSensitive {
+    fn drop(&mut self) {
+        assert_eq!(self.pinned_at.get(), std::ptr::from_ref(self));
+    }
+}
+
+assert_not_impl_any!(Box<AddressSensitive>: DerefMut);
+
+#[test]
+fn pin_borrow_keeps_address_stable() {
+    let pool = Pool::<AddressSensitive>::new();
+    let mut value = pool.alloc_box(AddressSensitive::new());
+    value.as_pin_mut().initialize();
+    let first = NonNull::from(&*value).as_ptr();
+    let second = NonNull::from(&*value.as_pin_mut()).as_ptr();
+    assert_eq!(first, second);
+    drop(value);
+    assert_eq!(pool.len(), 0);
+}
+
+#[repr(align(64))]
+struct OverAligned(u8);
+
+trait ByteValue {
+    fn value(&self) -> u8;
+}
+
+impl ByteValue for OverAligned {
+    fn value(&self) -> u8 {
+        self.0
+    }
+}
+
+struct ZeroSized;
+
+impl ByteValue for ZeroSized {
+    fn value(&self) -> u8 {
+        0
+    }
+}
+
+#[test]
+fn erased_zst_and_overaligned_values_reclaim_correctly() {
+    let aligned_pool = Pool::<OverAligned>::builder().chunk_size(1).max_chunks(1).build();
+    let aligned: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(aligned_pool.alloc_box(OverAligned(7)), Coercion!(to dyn ByteValue));
+    assert_eq!(aligned.value(), 7);
+    drop(aligned);
+    drop(aligned_pool.try_alloc_box(OverAligned(8)).unwrap());
+
+    let zst_pool = Pool::<ZeroSized>::builder().chunk_size(1).max_chunks(1).build();
+    let zst: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(zst_pool.alloc_box(ZeroSized), Coercion!(to dyn ByteValue));
+    assert_eq!(zst.value(), 0);
+    drop(zst);
+    drop(zst_pool.try_alloc_box(ZeroSized).unwrap());
+}
+
+#[test]
+fn unsized_raw_round_trips_preserve_metadata() {
+    let shape_pool = Pool::<Square>::new();
+    let shape: Box<dyn Shape> = Box::unsize::<dyn Shape>(shape_pool.alloc_box(Square(4)), Coercion!(to dyn Shape));
+    let shape_raw = Box::into_raw(shape);
+    // SAFETY: `shape_raw` is the unchanged pointer just returned by `into_raw`.
+    let shape: Box<dyn Shape> = unsafe { Box::from_raw(shape_raw) };
+    assert_eq!(shape.area(), 16);
+    drop(shape);
+
+    let slice_pool = Pool::<[u8; 3]>::new();
+    let slice: Box<[u8]> = Box::unsize::<[u8]>(slice_pool.alloc_box([1, 2, 3]), Coercion::to_slice());
+    let slice_raw = Box::into_raw(slice);
+    // SAFETY: `slice_raw` is the unchanged pointer just returned by `into_raw`.
+    let slice: Box<[u8]> = unsafe { Box::from_raw(slice_raw) };
+    assert_eq!(&*slice, &[1, 2, 3]);
+    drop(slice);
+}
