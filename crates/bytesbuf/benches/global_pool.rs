@@ -4,9 +4,9 @@
 #![expect(missing_docs, reason = "Benchmark code")]
 
 use std::alloc::System;
-use std::time::{Duration, Instant};
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::BytesView;
 use bytesbuf::mem::GlobalPool;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -20,28 +20,6 @@ static ALLOCATOR: Allocator<System> = Allocator::system();
 
 const ONE_MB: usize = 1024 * 1024;
 const TINY: usize = 128;
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
-}
-
-fn time_sample_with_inputs<T, R>(mut setup: impl FnMut() -> T, mut bench: impl FnMut(T) -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let inputs = (0..iters).map(|_| setup()).collect::<Vec<_>>();
-
-        let start = Instant::now();
-        for input in inputs {
-            _ = std::hint::black_box(bench(input));
-        }
-        start.elapsed()
-    }
-}
 
 fn entrypoint(c: &mut Criterion) {
     let allocs = Session::new();

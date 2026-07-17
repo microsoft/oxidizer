@@ -1,9 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #![expect(missing_docs, reason = "benchmark code")]
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
@@ -17,16 +18,6 @@ use tick::Clock;
 
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
-}
 
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("observability");

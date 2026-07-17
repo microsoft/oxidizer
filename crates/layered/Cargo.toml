@@ -36,6 +36,7 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloc_tracker = { workspace = true }
+benchmarking = { path = "../benchmarking" }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 infinity_pool = { workspace = true }

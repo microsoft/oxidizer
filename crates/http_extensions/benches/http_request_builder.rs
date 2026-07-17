@@ -9,9 +9,8 @@
     reason = "improves readability in benchmarks"
 )]
 
-use std::time::{Duration, Instant};
-
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use bytesbuf::mem::testing::TransparentMemory;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http::header::CONTENT_TYPE;
@@ -26,16 +25,6 @@ const URI_STRING: &str = "https://example.com/api/v1/resource?query=value&page=1
 
 fn get_uri() -> Uri {
     URI_STRING.parse().expect("URI_STRING is a valid URI")
-}
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
 }
 
 #[expect(clippy::too_many_lines, reason = "bench code, such is life")]

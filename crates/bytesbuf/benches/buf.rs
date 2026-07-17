@@ -7,9 +7,9 @@ use std::alloc::System;
 use std::hint::black_box;
 use std::iter;
 use std::num::NonZero;
-use std::time::{Duration, Instant};
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::{time_sample, time_sample_with_inputs};
 use bytesbuf::mem::BlockSize;
 use bytesbuf::mem::testing::{FixedBlockMemory, TransparentMemory};
 use bytesbuf::{BytesBuf, BytesView};
@@ -30,28 +30,6 @@ const TEST_DATA: &[u8] = &[88_u8; TEST_SPAN_SIZE.get() as usize];
 const MAX_INLINE_SPANS: usize = bytesbuf::MAX_INLINE_SPANS;
 // This should be more than MAX_INLINE_SPANS.
 const MANY_SPANS: usize = 32;
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
-}
-
-fn time_sample_with_inputs<T, R>(mut setup: impl FnMut() -> T, mut bench: impl FnMut(T) -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let inputs = (0..iters).map(|_| setup()).collect::<Vec<_>>();
-
-        let start = Instant::now();
-        for input in inputs {
-            _ = std::hint::black_box(bench(input));
-        }
-        start.elapsed()
-    }
-}
 
 #[expect(clippy::too_many_lines, reason = "Is fine - lots of benchmarks to do!")]
 fn entrypoint(c: &mut Criterion) {

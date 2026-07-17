@@ -5,9 +5,8 @@
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![expect(missing_docs, reason = "Benchmark code")]
 
-use std::time::{Duration, Instant};
-
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderValue, Method, Request};
@@ -19,16 +18,6 @@ const URI_STRING: &str = "https://example.com/some/path?query=value";
 
 fn get_uri() -> &'static str {
     URI_STRING
-}
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
 }
 
 fn entry(c: &mut Criterion) {

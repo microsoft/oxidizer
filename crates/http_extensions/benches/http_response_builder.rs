@@ -9,25 +9,14 @@
     reason = "improves readability in benchmarks"
 )]
 
-use std::time::{Duration, Instant};
-
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http_extensions::{HttpBodyBuilder, HttpResponseBuilder};
 use serde::{Deserialize, Serialize};
 
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
-
-fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
-    move |iters| {
-        let start = Instant::now();
-        for _ in 0..iters {
-            _ = std::hint::black_box(bench());
-        }
-        start.elapsed()
-    }
-}
 
 fn bodies_benchmarks(c: &mut Criterion) {
     let session = Session::new();

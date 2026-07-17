@@ -4,7 +4,7 @@
 use ohno::AppError;
 
 /// Internal crates that should be skipped in CI checks
-pub const INTERNAL_CRATES: &[&str] = &["automation", "testing_aids"];
+pub const INTERNAL_CRATES: &[&str] = &["automation", "benchmarking", "testing_aids"];
 
 /// Run a cargo command and pipe the output to stdout/stderr
 pub fn run_cargo(args: impl Iterator<Item = impl AsRef<str>>) -> Result<(), AppError> {
