@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-#![expect(missing_docs, reason = "benchmark code")]
+#![expect(missing_docs, reason = "Benchmark code")]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -15,6 +15,16 @@ use tick::Clock;
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
+fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let start = Instant::now();
+        for _ in 0..iters {
+            _ = std::hint::black_box(bench());
+        }
+        start.elapsed()
+    }
+}
+
 fn entry(c: &mut Criterion) {
     let mut group = c.benchmark_group("timeout");
     let session = Session::new();
@@ -23,9 +33,9 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|v: Input| async move { Output::from(v) });
     let operation = session.operation("no-timeout");
     group.bench_function("no-timeout", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -42,9 +52,9 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("with-timeout");
     group.bench_function("with-timeout", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 

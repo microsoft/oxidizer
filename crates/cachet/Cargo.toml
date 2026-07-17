@@ -4,7 +4,7 @@
 [package]
 name = "cachet"
 description = "A composable, customizable multi-tier caching library with rich feature support."
-version = "0.8.0"
+version = "0.9.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -35,6 +35,12 @@ allowed_external_types = [
     "serde_core::ser::Serialize",
 ]
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = ["memory"]
 logs = ["dep:tracing"]
@@ -52,7 +58,6 @@ cachet_service = { workspace = true, optional = true }
 cachet_tier = { workspace = true }
 futures = { workspace = true, features = ["async-await", "executor"] }
 layered = { workspace = true, optional = true }
-ohno = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 postcard = { workspace = true, optional = true }
@@ -67,17 +72,13 @@ bytesbuf = { path = "../bytesbuf" }
 cachet_memory = { path = "../cachet_memory" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 dashmap = { workspace = true }
-dynosaur = { workspace = true }
-opentelemetry = { workspace = true, features = [
-    "metrics",
-    "logs",
-] }
-opentelemetry_sdk = { workspace = true, features = ["logs", "testing"] }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }
 serde = { workspace = true, features = ["derive"] }
+serial_test = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -171,5 +172,7 @@ required-features = ["memory", "logs"]
 name = "serialization"
 required-features = ["memory", "serialize"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

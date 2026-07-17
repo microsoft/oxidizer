@@ -34,18 +34,33 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         .expect("internal error: validated len == 1 but first() is None")
         .ty;
 
+    let from_param = quote::format_ident!("__FundleFromT");
+    let impl_generics_with_from = if generics.params.is_empty() {
+        quote!(<#from_param>)
+    } else {
+        let params = &generics.params;
+        quote!(<#params, #from_param>)
+    };
+    let additional_predicates = where_clause.map_or_else(
+        || quote!(),
+        |wc| {
+            let predicates = &wc.predicates;
+            quote!(, #predicates)
+        },
+    );
+
     let expanded = quote! {
         #[derive(::std::clone::Clone)]
         #[allow(dead_code)]
         #vis struct #name #generics(#inner_type) #where_clause;
 
-        impl<T> #impl_generics ::std::convert::From<T> for #name #ty_generics
+        impl #impl_generics_with_from ::std::convert::From<#from_param> for #name #ty_generics
         where
-            T: ::std::convert::AsRef<#inner_type>,
-            #inner_type: ::std::clone::Clone,
-            #where_clause
+            #from_param: ::std::convert::AsRef<#inner_type>,
+            #inner_type: ::std::clone::Clone
+            #additional_predicates
         {
-            fn from(x: T) -> Self {
+            fn from(x: #from_param) -> Self {
                 Self(x.as_ref().clone())
             }
         }
@@ -66,4 +81,23 @@ pub fn newtype(_attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream
     };
 
     Ok(expanded)
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::quote;
+
+    use super::newtype;
+
+    #[test]
+    fn rejects_named_struct() {
+        let err = newtype(quote! {}, quote! { struct Named { inner: u32 } }).expect_err("named struct is not a tuple struct");
+        assert!(err.to_string().contains("tuple structs"));
+    }
+
+    #[test]
+    fn rejects_multiple_fields() {
+        let err = newtype(quote! {}, quote! { struct Two(u32, u32); }).expect_err("multi-field tuple struct is rejected");
+        assert!(err.to_string().contains("tuple structs"));
+    }
 }

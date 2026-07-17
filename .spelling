@@ -419,6 +419,7 @@ mutator
 mutator's
 mutators
 mutex
+namespace
 namespaced
 natively
 newtype
@@ -633,4 +634,9 @@ representable
 rc
 destructure
 SIMD
+callsite
+callsites
+callsite's
 Callgrind
+matcher
+AST

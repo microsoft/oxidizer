@@ -9,6 +9,8 @@
     reason = "improves readability in benchmarks"
 )]
 
+use std::time::{Duration, Instant};
+
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
 use http_extensions::{HttpBodyBuilder, HttpResponseBuilder};
@@ -17,6 +19,16 @@ use serde::{Deserialize, Serialize};
 #[global_allocator]
 static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
+fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let start = Instant::now();
+        for _ in 0..iters {
+            _ = std::hint::black_box(bench());
+        }
+        start.elapsed()
+    }
+}
+
 fn bodies_benchmarks(c: &mut Criterion) {
     let session = Session::new();
     let mut group = c.benchmark_group("http_response_builder_bodies");
@@ -24,17 +36,17 @@ fn bodies_benchmarks(c: &mut Criterion) {
 
     let operation = session.operation("empty_body");
     group.bench_function("empty_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _response = HttpResponseBuilder::new(&body_builder).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| HttpResponseBuilder::new(&body_builder).build().unwrap())(iters)
         });
     });
 
     let operation = session.operation("text_body");
     group.bench_function("text_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _response = HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| HttpResponseBuilder::new(&body_builder).text("Hello, world!").build().unwrap())(iters)
         });
     });
 
@@ -45,9 +57,9 @@ fn bodies_benchmarks(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_owned");
     group.bench_function("json_body_owned", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _response = HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())(iters)
         });
     });
 
@@ -58,9 +70,9 @@ fn bodies_benchmarks(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_borrowed");
     group.bench_function("json_body_borrowed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _response = HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| HttpResponseBuilder::new(&body_builder).json(&person).build().unwrap())(iters)
         });
     });
 

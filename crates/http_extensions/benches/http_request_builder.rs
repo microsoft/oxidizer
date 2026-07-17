@@ -9,6 +9,8 @@
     reason = "improves readability in benchmarks"
 )]
 
+use std::time::{Duration, Instant};
+
 use alloc_tracker::{Allocator, Session};
 use bytesbuf::mem::testing::TransparentMemory;
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -26,6 +28,16 @@ fn get_uri() -> Uri {
     URI_STRING.parse().expect("URI_STRING is a valid URI")
 }
 
+fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let start = Instant::now();
+        for _ in 0..iters {
+            _ = std::hint::black_box(bench());
+        }
+        start.elapsed()
+    }
+}
+
 #[expect(clippy::too_many_lines, reason = "bench code, such is life")]
 fn entry(c: &mut Criterion) {
     let session = Session::new();
@@ -36,26 +48,30 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("uri_from_string");
     group.bench_function("uri_from_string", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(URI_STRING)
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(URI_STRING)
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
     let uri: Uri = URI_STRING.parse().unwrap();
     let operation = session.operation("uri_pre_parsed");
     group.bench_function("uri_pre_parsed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(uri.clone())
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
@@ -64,27 +80,31 @@ fn entry(c: &mut Criterion) {
     let uri = get_uri();
     let operation = session.operation("empty_body");
     group.bench_function("empty_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(uri.clone())
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
     let uri = get_uri();
     let operation = session.operation("text_body");
     group.bench_function("text_body", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::POST)
-                .uri(uri.clone())
-                .text("Hello World!")
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::POST)
+                    .uri(uri.clone())
+                    .text("Hello World!")
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
@@ -96,14 +116,16 @@ fn entry(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_owned");
     group.bench_function("json_body_owned", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::POST)
-                .uri(uri.clone())
-                .json(&person)
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::POST)
+                    .uri(uri.clone())
+                    .json(&person)
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
@@ -115,14 +137,16 @@ fn entry(c: &mut Criterion) {
     };
     let operation = session.operation("json_body_borrowed");
     group.bench_function("json_body_borrowed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::POST)
-                .uri(uri.clone())
-                .json(&person)
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::POST)
+                    .uri(uri.clone())
+                    .json(&person)
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
@@ -143,14 +167,16 @@ fn entry(c: &mut Criterion) {
     let transparent_body_builder = HttpBodyBuilder::with_custom_memory(TransparentMemory::new(), &tick::Clock::new_frozen());
     let operation = session.operation("json_body_large_transparent");
     group.bench_function("json_body_large_transparent", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&transparent_body_builder)
-                .method(Method::POST)
-                .uri(uri.clone())
-                .json(&large_payload)
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&transparent_body_builder)
+                    .method(Method::POST)
+                    .uri(uri.clone())
+                    .json(&large_payload)
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
@@ -159,40 +185,46 @@ fn entry(c: &mut Criterion) {
     let uri = get_uri();
     let operation = session.operation("no_header");
     group.bench_function("no_header", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(uri.clone())
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
     let uri = get_uri();
     let operation = session.operation("single_header");
     group.bench_function("single_header", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(uri.clone())
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 
     let uri = get_uri();
     let operation = session.operation("two_headers");
     group.bench_function("two_headers", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread().iterations(1);
-            let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
-                .method(Method::GET)
-                .uri(uri.clone())
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-                .build()
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| {
+                let _request: HttpRequest = HttpRequestBuilder::new(&body_builder)
+                    .method(Method::GET)
+                    .uri(uri.clone())
+                    .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+                    .build()
+                    .unwrap();
+            })(iters)
         });
     });
 

@@ -6,26 +6,30 @@
 
 #![cfg(feature = "memory")]
 
+// The capture bridge asserts the subscriber was installed at process start, so install it
+// here. Integration binaries do not run the crate-root `#[cfg(test)]` initialization. See
+// docs/tracing-tests.md.
+testing_aids::init_tracing!();
+
 use std::time::Duration;
 
 use cachet::{Cache, CacheEntry};
-use testing_aids::{LogCapture, TEST_TIMEOUT};
+use serial_test::serial;
+use testing_aids::TEST_TIMEOUT;
+use testing_aids::tracing_logs::write_to_stdout_and_buffer;
 use tick::Clock;
-use tracing_subscriber::Registry;
-use tracing_subscriber::layer::SubscriberExt;
 
 /// Inserting past the configured `max_capacity` of the underlying moka cache
 /// must eventually emit a `cache.eviction` event for the size-based removals.
 #[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
 async fn memory_size_eviction_emits_telemetry() {
-    let capture = LogCapture::new();
     // moka runs the eviction listener on its own background task / worker thread,
-    // so a thread-local subscriber (`set_default`) won't see those events. This
-    // test owns its own test binary, so we can safely install a process-global
-    // subscriber.
-    let subscriber = Registry::default().with(tracing_subscriber::fmt::layer().with_writer(capture.clone()).with_ansi(false));
-    tracing::subscriber::set_global_default(subscriber).expect("no other global subscriber should be installed in this test binary");
+    // so a thread-local subscriber (`set_default`) won't see those events. The
+    // global capture bridge routes every thread's events into one buffer; this
+    // test owns its own test binary, so process-global capture is safe here.
+    let capture = write_to_stdout_and_buffer();
 
     let clock = Clock::new_tokio();
     let cache: Cache<String, i32> = Cache::builder::<String, i32>(clock)
@@ -44,7 +48,11 @@ async fn memory_size_eviction_emits_telemetry() {
             cache.insert(format!("k{i}"), CacheEntry::new(i)).await.unwrap();
             i += 1;
         }
-        if capture.output().contains(cachet::telemetry::attributes::EVENT_EVICTION) {
+        if capture
+            .snapshot()
+            .iter()
+            .any(|line| line.contains(cachet::telemetry::attributes::EVENT_EVICTION))
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -52,6 +60,6 @@ async fn memory_size_eviction_emits_telemetry() {
     panic!(
         "expected `{}` event after exceeding max_capacity; captured output:\n{}",
         cachet::telemetry::attributes::EVENT_EVICTION,
-        capture.output()
+        capture.snapshot().join("\n")
     );
 }

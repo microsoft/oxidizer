@@ -120,8 +120,8 @@ fn debug_display_compare_hash() {
     let a2 = arena.alloc_arc(1_u32);
     assert_eq!(format!("{a:?}"), "1");
     assert_eq!(format!("{a}"), "1");
-    assert!(a == a2);
-    assert!(a != b);
+    assert_eq!(a, a2);
+    assert_ne!(a, b);
     assert!(a < b);
     assert_eq!(a.cmp(&b), Ordering::Less);
     assert_eq!(a.partial_cmp(&b), Some(Ordering::Less));

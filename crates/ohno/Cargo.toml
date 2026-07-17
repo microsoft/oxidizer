@@ -37,16 +37,12 @@ insta = { workspace = true }
 mutants = { workspace = true }
 regex = { workspace = true, features = ["unicode-perl"] }
 testing_aids = { path = "../testing_aids" }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
     "time",
     "rt-multi-thread",
 ] }
-
-[lints]
-workspace = true
 
 [[example]]
 name = "app_err_automatic_conversion"
@@ -87,3 +83,8 @@ required-features = ["app-err"]
 name = "app-err_root_cause"
 path = "examples/app/root_cause.rs"
 required-features = ["app-err"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

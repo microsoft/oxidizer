@@ -282,7 +282,7 @@ impl BytesBuf {
             self.freeze_from_first(total_unfrozen_bytes);
 
             // Debug build paranoia: nothing remains in the span builder, right?
-            debug_assert!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len) == 0);
+            debug_assert_eq!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len), 0);
         }
 
         // We do this first so if we do panic, we have not performed any incomplete operations.

@@ -55,8 +55,8 @@ anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.6.
 anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.3" }
 bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.6.0" }
 bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.6.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.8.0" }
-cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.4.0" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.9.0" }
+cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.5.0" }
 cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.8" }
 cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.6" }
 data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.3" }
@@ -72,6 +72,7 @@ fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
 fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
 fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
 http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.7.0" }
+http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.1.0" }
 layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
@@ -110,6 +111,7 @@ chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
 criterion = { version = "0.8.1", default-features = false }
+ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
 darling = { version = "0.23.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
 deadpool = { version = "0.13.0", default-features = false }
@@ -172,6 +174,7 @@ rustls-platform-verifier = { version = "0.7.0", default-features = false }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
+serial_test = { version = "3.2.0", default-features = false }
 sharded-slab = { version = "0.1.7", default-features = false }
 slab = { version = "0.4.12", default-features = false }
 slotmap = { version = "1.1.1", default-features = false }
@@ -189,7 +192,6 @@ tower-service = { version = "0.3.3", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-appender = { version = "0.2.5", default-features = false }
 tracing-subscriber = { version = "0.3.20", default-features = false }
-tracing-test = { version = "0.2.6", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
@@ -200,90 +202,102 @@ wiremock = { version = "0.6.5", default-features = false }
 xxhash-rust = { version = "0.8.15", default-features = false }
 zerocopy = { version = "0.8.26", default-features = false }
 
-[workspace.lints.rust]
-ambiguous_negative_literals = "warn"
-missing_debug_implementations = "warn"
-missing_docs = "warn"
-redundant_imports = "warn"
-redundant_lifetimes = "warn"
-trivial_numeric_casts = "warn"
-unreachable_pub = "warn"
-unsafe_op_in_unsafe_fn = "warn"
-unused_lifetimes = "warn"
+# >>> anvil-managed: anvil-workspace-lints
+[workspace.lints]
+# Catalog of opinionated lints, in dotted-key form so users can extend the
+# same scope (`[workspace.lints]` or `[lints]`) outside the sentinels.
+# The host-specific table header (`[workspace.lints]` or `[lints]`) is
+# prepended by cargo-anvil based on whether the manifest is a workspace
+# root or a single-crate Cargo.toml.
 
-# Allow our special-purpose nonstandard cfg attributes.
-# - coverage / coverage_nightly: set by cargo-llvm-cov to enable nightly coverage attributes.
-# - loom: set via RUSTFLAGS to swap in the loom model-checker for atomics in select crates.
-# - utc_backend: opt-in flag for the UTC (Microsoft) Rust codegen backend, which caps type
-#   alignment at 8192 bytes. Crates that intentionally exercise larger alignments (e.g.
-#   multitude's over-alignment guard tests) gate the offending items on this cfg so they
-#   compile out when targeting UTC. Set via RUSTFLAGS="--cfg utc_backend" in pipelines
-#   that pin a UTC toolchain (ms-prod-1.95+).
-unexpected_cfgs = { level = "warn", check-cfg = [
+# --- rust ------------------------------------------------------------------
+rust.ambiguous_negative_literals = "warn"
+rust.missing_debug_implementations = "warn"
+rust.redundant_imports = "warn"
+rust.redundant_lifetimes = "warn"
+rust.trivial_numeric_casts = "warn"
+rust.unsafe_op_in_unsafe_fn = "warn"
+rust.unused_lifetimes = "warn"
+# `unexpected_cfgs` is on-by-default at warn since Rust 1.80; combined
+# with the catalog's `-D warnings` cloud-workflow policy, any custom cfg name
+# becomes a hard build failure. Pre-declare the cfgs that
+# `cargo llvm-cov` sets so the recommended coverage-exclusion pattern
+# `#[cfg_attr(coverage_nightly, coverage(off))]` works out of the box.
+# Adopters who need additional cfg names take ownership of this one
+# line (edit the check-cfg array); anvil's drift detector will
+# emit a `.anvil-proposed` sibling on future catalog bumps so the
+# customization is preserved.
+rust.unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(coverage,coverage_nightly)',
     'cfg(loom)',
+    'cfg(miri_race_coverage)',
+    'cfg(miri_strict_provenance)',
+    'cfg(miri_tree_borrows)',
     'cfg(utc_backend)',
 ] }
+# <<< anvil-managed: anvil-workspace-lints
 
-[workspace.lints.clippy]
-cargo = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-correctness = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
-suspicious = { level = "warn", priority = -1 }
+# --- oxidizer-github-specific lint deltas (outside anvil's managed region) ---
+# Preserved from the pre-anvil manual policy; these extend the same
+# `[workspace.lints]` table. Anvil does not manage them.
+rust.missing_docs = "warn"
+rust.unreachable_pub = "warn"
 
-# Lints from the `restriction` group that are not enabled by categories above but are still useful.
-allow_attributes = "warn"
-allow_attributes_without_reason = "warn"
-as_pointer_underscore = "warn"
-assertions_on_result_states = "warn"
-clone_on_ref_ptr = "warn"
-deref_by_slicing = "warn"
-disallowed_script_idents = "warn"
-empty_drop = "warn"
-empty_enum_variants_with_brackets = "warn"
-empty_structs_with_brackets = "warn"
-fn_to_numeric_cast_any = "warn"
-if_then_some_else_none = "warn"
-map_err_ignore = "warn"
-multiple_unsafe_ops_per_block = "warn"
-panic = "warn"
-redundant_type_annotations = "warn"
-renamed_function_params = "warn"
-semicolon_outside_block = "warn"
-undocumented_unsafe_blocks = "warn"
-unnecessary_safety_comment = "warn"
-unnecessary_safety_doc = "warn"
-unneeded_field_pattern = "warn"
-unused_result_ok = "warn"
-unwrap_used = "warn"
-#
-# Below are undesirable lint rules that are enabled by the categories above but are not useful.
-#
+# --- rustdoc ---------------------------------------------------------------
+rustdoc.broken_intra_doc_links = "warn"
+rustdoc.missing_crate_level_docs = "warn"
+rustdoc.unescaped_backticks = "warn"
 
-# This lint in many cases produces less readable code and is not worth the trouble.
-option_if_let_else = "allow"
-# Just because a fn can be const does not mean it should be const. Const is a promise, part of the
-# API contract, and removing it is a breaking change so we need to be careful where we commit to const.
-missing_const_for_fn = "allow"
-# This sometimes prevents marking crate-scoped items as pub(crate), so is not welcome.
-redundant_pub_crate = "allow"
-# Testing panic messages is not universally applicable - panic messages are not an API contract.
-should_panic_without_expect = "allow"
-# This just misfires a lot and claims we can drop values that actually need to remain borrowed.
-# It also often results in much less readable code for no benefit.
-significant_drop_tightening = "allow"
+# --- clippy: category gates (priority -1 so per-lint allows can override) --
+clippy.cargo = { level = "warn", priority = -1 }
+clippy.complexity = { level = "warn", priority = -1 }
+clippy.correctness = { level = "warn", priority = -1 }
+clippy.nursery = { level = "warn", priority = -1 }
+clippy.pedantic = { level = "warn", priority = -1 }
+clippy.perf = { level = "warn", priority = -1 }
+clippy.style = { level = "warn", priority = -1 }
+clippy.suspicious = { level = "warn", priority = -1 }
+
+# --- clippy: opinionated additions -----------------------------------------
+# Two-repo consensus (oxidizer + oxidizer-github). Restriction-group
+# lints that catch real code-smell cases. Adding a workspace-wide lint
+# means adopters can only opt out per-crate or by taking ownership of
+# this region; only enable when the consensus is strong enough to
+# justify that cost.
+clippy.allow_attributes = "warn"
+clippy.allow_attributes_without_reason = "warn"
+clippy.as_pointer_underscore = "warn"
+clippy.assertions_on_result_states = "warn"
+clippy.clone_on_ref_ptr = "warn"
+clippy.deref_by_slicing = "warn"
+clippy.disallowed_script_idents = "warn"
+clippy.empty_drop = "warn"
+clippy.empty_enum_variants_with_brackets = "warn"
+clippy.fn_to_numeric_cast_any = "warn"
+clippy.if_then_some_else_none = "warn"
+clippy.map_err_ignore = "warn"
+clippy.multiple_unsafe_ops_per_block = "warn"
+clippy.redundant_type_annotations = "warn"
+clippy.renamed_function_params = "warn"
+clippy.semicolon_outside_block = "warn"
+clippy.undocumented_unsafe_blocks = "warn"
+clippy.unnecessary_safety_comment = "warn"
+clippy.unnecessary_safety_doc = "warn"
+clippy.unneeded_field_pattern = "warn"
+clippy.unused_result_ok = "warn"
+clippy.unwrap_used = "warn"
+
+# --- clippy: opinionated suppressions of category-enabled lints ------------
+clippy.missing_const_for_fn = "allow"
+clippy.multiple_crate_versions = "allow"
+clippy.option_if_let_else = "allow"
+clippy.redundant_pub_crate = "allow"
+clippy.should_panic_without_expect = "allow"
+clippy.significant_drop_tightening = "allow"
 # Blocked by Clippy bug: https://github.com/rust-lang/rust-clippy/issues/15036
-wildcard_imports = "allow"
-# In a large workspace, duplicate dependencies are inevitable; this lint causes more maintenance burden than practical benefit.
-multiple_crate_versions = "allow"
-
-[workspace.lints.rustdoc]
-missing_crate_level_docs = "warn"
-unescaped_backticks = "warn"
+clippy.wildcard_imports = "allow"
+clippy.empty_structs_with_brackets = "warn"
+clippy.panic = "warn"
 
 # A bit of debugging support for release builds.
 [profile.release]

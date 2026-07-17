@@ -25,10 +25,54 @@ inputs:
     description: Install Wild linker for faster linking
     required: false
     default: 'false'
+  free-disk-space:
+    description: >-
+      Remove unused pre-installed toolchains to reclaim disk space and guard
+      against intermittent "No space left on device" failures on the heavier
+      build/test jobs. Linux reclaims ~18 GB (Android SDK, Haskell/GHC, Swift,
+      Chromium); Windows reclaims ~17 GB (Android SDK, Haskell/GHC). No-op on
+      macOS.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # GitHub only guarantees 14 GB of storage on standard runners; the heavy
+    # `cargo hack --each-feature` + `--all-features` test build peaks well above
+    # that, so we reclaim space up front. These directories are unused by our
+    # Rust builds. See https://github.com/microsoft/oxidizer (work item 7611559).
+    - name: Free Disk Space (Linux)
+      if: inputs.free-disk-space == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo "Disk before cleanup:"
+        df -h /
+        # Fast `rm -rf` reclaims (no slow apt purge): Android ~10 GB, Haskell
+        # ~4 GB, Swift ~3 GB, Chromium ~1 GB.
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc /usr/local/.ghcup
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/local/share/chromium /usr/local/share/edge_driver
+        echo "Disk after cleanup:"
+        df -h /
+
+    # Windows runners start with far less free space (~34 GB vs ~89 GB on Linux)
+    # because the pre-installed tooling (Visual Studio, .NET, Android) is much
+    # larger. Reclaim the big dirs unused by our Rust builds. Visual Studio,
+    # .NET, and the hosted tool cache (holds sccache) are intentionally kept.
+    - name: Free Disk Space (Windows)
+      if: inputs.free-disk-space == 'true' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        function Free-GB { [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1) }
+        "Free before cleanup (GB): $(Free-GB)"
+        # Android SDK ~13 GB, Haskell/ghcup ~4 GB.
+        foreach ($p in 'C:\Program Files (x86)\Android', 'C:\Android', 'C:\ghcup') {
+          if (Test-Path $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        "Free after cleanup (GB): $(Free-GB)"
+
     - name: Loading Repo Constants
       shell: bash
       run: |
@@ -94,23 +138,27 @@ runs:
 
     - name: Start Sccache
       if: inputs.enable-sccache == 'true' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
-      uses: mozilla-actions/sccache-action@v0.0.10
+      uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
       with:
         version: ${{ env.SCCACHE_VERSION }}
 
     - name: Install Rust
       if: inputs.rust-toolchain != ''
-      uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+      uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
       with:
         toolchain: ${{ steps.expand.outputs.toolchain }}
         components: ${{ inputs.rust-components }}
 
     - name: Install Cargo Tools
       if: inputs.cargo-tools != ''
+      # taiki-e/install-action publishes immutable GitHub releases (verified via the GitHub API:
+      # "immutable": true on GET /repos/taiki-e/install-action/releases/tags/v2.81.8). The tag
+      # cannot be retargeted, so this reference is intentionally left unpinned to a commit SHA.
+      # See https://github.com/taiki-e/install-action/releases/tag/v2.81.8
       uses: taiki-e/install-action@v2.81.8
       with:
         tool: ${{ steps.expand.outputs.cargo_tools }}
 
     - name: Install Wild Linker
       if: inputs.enable-wild-linker == 'true'
-      uses: wild-linker/action@0.9.0
+      uses: wild-linker/action@0bbbfa5df4380cab8e63cb8505a1ce65e1d10203 # 0.9.0

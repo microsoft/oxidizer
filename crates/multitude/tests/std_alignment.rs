@@ -1004,48 +1004,48 @@ fn vec_cross_type_partial_eq() {
     v_eq.extend([1, 2, 3]);
     let mut v_ne: MVec<'_, i32> = arena.alloc_vec();
     v_ne.extend([9, 9]);
-    assert!(v == v_eq);
-    assert!(v != v_ne);
+    assert_eq!(v, v_eq);
+    assert_ne!(v, v_ne);
 
     // vs `[U]`, both directions.
     let s: &[i32] = &[1, 2, 3];
     let s_ne: &[i32] = &[1, 2];
-    assert!(v == *s);
-    assert!(*s == v);
-    assert!(v != *s_ne);
-    assert!(*s_ne != v);
+    assert_eq!(v, *s);
+    assert_eq!(*s, v);
+    assert_ne!(v, *s_ne);
+    assert_ne!(*s_ne, v);
 
     // vs `&[U]`, both directions.
-    assert!(v == s);
-    assert!(s == v);
-    assert!(v != s_ne);
-    assert!(s_ne != v);
+    assert_eq!(v, s);
+    assert_eq!(s, v);
+    assert_ne!(v, s_ne);
+    assert_ne!(s_ne, v);
 
     // vs `&mut [U]`, both directions.
     let mut buf_eq = [1, 2, 3];
     let mut buf_ne = [0, 0];
     {
         let m: &mut [i32] = &mut buf_eq;
-        assert!(v == m);
-        assert!(m == v);
+        assert_eq!(v, m);
+        assert_eq!(m, v);
     }
     {
         let m: &mut [i32] = &mut buf_ne;
-        assert!(v != m);
-        assert!(m != v);
+        assert_ne!(v, m);
+        assert_ne!(m, v);
     }
 
     // vs arrays `[U; N]` and `&[U; N]` (Vec-LHS only, mirroring std).
-    assert!(v == [1, 2, 3]);
+    assert_eq!(v, [1, 2, 3]);
     assert!(v != [1, 2, 4]);
-    assert!(v == &[1, 2, 3]);
+    assert_eq!(v, &[1, 2, 3]);
     assert!(v != &[1, 2, 4]);
 
     // `Cow<[U]>` == Vec.
     let cow_eq: Cow<'_, [i32]> = Cow::Borrowed(&[1, 2, 3]);
     let cow_ne: Cow<'_, [i32]> = Cow::Owned(vec![7, 7]);
-    assert!(cow_eq == v);
-    assert!(cow_ne != v);
+    assert_eq!(cow_eq, v);
+    assert_ne!(cow_ne, v);
 }
 
 #[test]
@@ -1056,24 +1056,24 @@ fn string_cross_type_partial_eq() {
     s.push_str("hello");
 
     // vs `str`, both directions.
-    assert!(s == *"hello");
-    assert!(*"hello" == s);
+    assert_eq!(s, *"hello");
+    assert_eq!(*"hello", s);
     assert!(s != *"nope");
     assert!(*"nope" != s);
 
     // vs `&str`, both directions.
-    assert!(s == "hello");
-    assert!("hello" == s);
+    assert_eq!(s, "hello");
+    assert_eq!("hello", s);
     assert!(s != "nope");
     assert!("nope" != s);
 
     // vs `Cow<str>`, both directions.
     let cow_eq: Cow<'_, str> = Cow::Borrowed("hello");
     let cow_ne: Cow<'_, str> = Cow::Owned(std::string::String::from("nope"));
-    assert!(s == cow_eq);
-    assert!(cow_eq == s);
-    assert!(s != cow_ne);
-    assert!(cow_ne != s);
+    assert_eq!(s, cow_eq);
+    assert_eq!(cow_eq, s);
+    assert_ne!(s, cow_ne);
+    assert_ne!(cow_ne, s);
 }
 
 #[cfg(feature = "utf16")]
@@ -1088,14 +1088,14 @@ fn utf16_string_cross_type_partial_eq() {
     let ne = utf16str!("nope");
 
     // vs `Utf16Str`, both directions.
-    assert!(s == *eq);
-    assert!(*eq == s);
-    assert!(s != *ne);
-    assert!(*ne != s);
+    assert_eq!(s, *eq);
+    assert_eq!(*eq, s);
+    assert_ne!(s, *ne);
+    assert_ne!(*ne, s);
 
     // vs `&Utf16Str`, both directions.
-    assert!(s == eq);
-    assert!(eq == s);
-    assert!(s != ne);
-    assert!(ne != s);
+    assert_eq!(s, eq);
+    assert_eq!(eq, s);
+    assert_ne!(s, ne);
+    assert_ne!(ne, s);
 }

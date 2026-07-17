@@ -8,7 +8,7 @@ use http::uri::Authority;
 use http_extensions::UriTemplateLabel;
 use layered::{Layer, Service};
 use ohno::ErrorExt;
-use tick::Clock;
+use tick::SimpleClock;
 use tracing::{Level, event};
 
 use crate::error_labels::collect_error_labels;
@@ -27,17 +27,23 @@ use crate::{HttpRequest, HttpResponse, RequestExt, RequestHandler, Result};
 #[derive(Debug)]
 pub struct Logging<T> {
     inner: T,
-    clock: Clock,
+    clock: SimpleClock,
     redaction_engine: RedactionEngine,
 }
 
 impl Logging<()> {
-    /// Creates a new logging handler layer with the provided clock.
+    /// Creates a new logging handler layer.
+    ///
+    /// By default, timing uses a system clock ([`SimpleClock::new_system`]) and
+    /// path/query redaction uses a default [`RedactionEngine`]. Use
+    /// [`LoggingLayer::clock`] to supply a custom clock (primarily useful for
+    /// deterministic timing in tests) and [`LoggingLayer::redaction_engine`] to
+    /// supply a custom redaction engine.
     #[must_use]
-    pub fn layer(clock: &Clock, redaction_engine: &RedactionEngine) -> LoggingLayer {
+    pub fn layer() -> LoggingLayer {
         LoggingLayer {
-            clock: clock.clone(),
-            redaction_engine: redaction_engine.clone(),
+            clock: None,
+            redaction_engine: None,
         }
     }
 }
@@ -45,8 +51,32 @@ impl Logging<()> {
 /// [`Layer`] that wraps a handler with request/response logging.
 #[derive(Debug)]
 pub struct LoggingLayer {
-    clock: Clock,
-    redaction_engine: RedactionEngine,
+    clock: Option<SimpleClock>,
+    redaction_engine: Option<RedactionEngine>,
+}
+
+impl LoggingLayer {
+    /// Sets the clock used to measure request duration.
+    ///
+    /// When no clock is configured, a system clock ([`SimpleClock::new_system`])
+    /// is used. Supplying a controlled clock (for example
+    /// [`SimpleClock::new_frozen`]) is primarily useful for deterministic timing
+    /// in tests.
+    #[must_use]
+    pub fn clock(mut self, clock: impl Into<SimpleClock>) -> Self {
+        self.clock = Some(clock.into());
+        self
+    }
+
+    /// Sets the [`RedactionEngine`] used to redact the request path and query
+    /// before it is logged.
+    ///
+    /// When no engine is configured, a default [`RedactionEngine`] is used.
+    #[must_use]
+    pub fn redaction_engine(mut self, redaction_engine: &RedactionEngine) -> Self {
+        self.redaction_engine = Some(redaction_engine.clone());
+        self
+    }
 }
 
 impl<S> Layer<S> for LoggingLayer {
@@ -54,12 +84,14 @@ impl<S> Layer<S> for LoggingLayer {
 
     /// Creates a new layer that wraps the given service with logging.
     ///
-    /// This layer will log requests and responses using the provided clock for timing.
+    /// This layer will log requests and responses, using the configured clock
+    /// (or a system clock when none was set) for timing and the configured
+    /// redaction engine (or a default engine when none was set).
     fn layer(&self, inner: S) -> Self::Service {
         Logging {
             inner,
-            clock: self.clock.clone(),
-            redaction_engine: self.redaction_engine.clone(),
+            clock: self.clock.clone().unwrap_or_else(SimpleClock::new_system),
+            redaction_engine: self.redaction_engine.clone().unwrap_or_default(),
         }
     }
 }
@@ -133,7 +165,7 @@ mod tests {
     use http::{Request, StatusCode};
     use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
     use templated_uri::Uri;
-    use testing_aids::LogCapture;
+    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::handlers::Dispatch;
@@ -141,11 +173,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_returns_successful_response() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let clock = Clock::new_frozen();
-        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let layer = Logging::layer().clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::from(StatusCode::OK)));
 
         let request = HttpRequestBuilder::new_fake()
@@ -173,11 +204,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_propagates_inner_error() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
-        let clock = Clock::new_frozen();
-        let layer = Logging::layer(&clock, &RedactionEngine::default());
+        let layer = Logging::layer().clock(SimpleClock::new_frozen());
         let handler = layer.layer(Dispatch::new_fake(FakeHandler::never_completes()));
 
         // Request without scheme/authority triggers a validation error in Dispatch.

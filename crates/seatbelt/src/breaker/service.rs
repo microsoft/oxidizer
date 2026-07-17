@@ -488,14 +488,15 @@ mod tests {
         assert!(closed_called_clone.load(Ordering::SeqCst));
     }
 
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn breaker_emits_logs() {
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
-
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
         let clock_control = ClockControl::new();

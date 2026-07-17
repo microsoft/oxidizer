@@ -9,7 +9,7 @@
 #![allow(clippy::unwrap_used, reason = "benchmark code")]
 #![expect(missing_docs, reason = "Benchmark code")]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alloc_tracker::{Allocator, Session};
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -33,6 +33,16 @@ fn get_uri() -> &'static str {
     URI_STRING
 }
 
+fn time_sample<R>(mut bench: impl FnMut() -> R) -> impl FnMut(u64) -> Duration {
+    move |iters| {
+        let start = Instant::now();
+        for _ in 0..iters {
+            _ = std::hint::black_box(bench());
+        }
+        start.elapsed()
+    }
+}
+
 fn entry(c: &mut Criterion) {
     let session = Session::new();
     let mut group = c.benchmark_group("http_client_pipelines");
@@ -40,9 +50,9 @@ fn entry(c: &mut Criterion) {
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen()).build();
     let standard_allocs = session.operation("standard_pipeline");
     group.bench_function("standard_pipeline", |b| {
-        b.iter(|| {
-            let _measure = standard_allocs.measure_thread().iterations(1);
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = standard_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -51,9 +61,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let minimal_allocs = session.operation("minimal_pipeline");
     group.bench_function("minimal_pipeline", |b| {
-        b.iter(|| {
-            let _measure = minimal_allocs.measure_thread().iterations(1);
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = minimal_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -62,9 +72,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let custom_minimal_allocs = session.operation("custom_minimal_pipeline");
     group.bench_function("custom_minimal_pipeline", |b| {
-        b.iter(|| {
-            let _measure = custom_minimal_allocs.measure_thread().iterations(1);
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = custom_minimal_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -78,8 +88,10 @@ fn entry(c: &mut Criterion) {
                 Timeout::layer("attempt_timeout", context.resilience_context())
                     .timeout(Duration::from_secs(10))
                     .http_timeout_error(),
-                Logging::layer(context.clock(), context.redaction_engine()),
-                Metrics::layer(context.clock()).meter_provider(opentelemetry::global::meter_provider().as_ref()),
+                Logging::layer().redaction_engine(context.redaction_engine()).clock(context.clock()),
+                Metrics::layer()
+                    .clock(context.clock())
+                    .meter_provider(opentelemetry::global::meter_provider().as_ref()),
                 dispatch,
             );
 
@@ -88,9 +100,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let custom_standard_allocs = session.operation("custom_standard_pipeline");
     group.bench_function("custom_standard_pipeline", |b| {
-        b.iter(|| {
-            let _measure = custom_standard_allocs.measure_thread().iterations(1);
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = custom_standard_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 

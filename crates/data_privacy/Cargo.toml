@@ -32,7 +32,7 @@ allowed_external_types = [
 [features]
 default = ["serde"]
 rapidhash = ["dep:rapidhash"]
-serde = ["dep:serde_core", "data_privacy_core/serde"]
+serde = ["data_privacy_core/serde"]
 xxh3 = ["dep:xxhash-rust"]
 
 [dependencies]
@@ -40,7 +40,6 @@ data_privacy_core.workspace = true
 data_privacy_macros.workspace = true
 rapidhash = { workspace = true, optional = true }
 rustc-hash = { workspace = true, features = ["std"] }
-serde_core = { workspace = true, optional = true, default-features = false, features = ["std"] }
 xxhash-rust = { workspace = true, optional = true, features = ["xxh3"] }
 
 [dev-dependencies]
@@ -51,9 +50,11 @@ once_cell = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "employees"
 path = "examples/employees/main.rs"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

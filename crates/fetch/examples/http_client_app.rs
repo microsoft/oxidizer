@@ -47,7 +47,7 @@ async fn main() -> Result<(), ohno::AppError> {
             let meter_provider = meter_provider.clone();
             move |x| {
                 HttpClient::builder_tokio(x)
-                    .meter_provider(&meter_provider)
+                    .meter_provider(meter_provider.clone())
                     .tls_options(TlsOptions::builder_rustls().server_certificate_verifier(custom_verifier).build())
                     .build()
             }

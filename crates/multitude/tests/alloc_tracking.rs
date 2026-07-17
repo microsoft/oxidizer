@@ -34,6 +34,7 @@ const WORKLOAD: usize = 2_000;
 /// Warm-up cycles, generous enough to let the chunk size class fully ratchet
 /// and the cache reach steady state before we measure.
 const WARMUP_CYCLES: usize = 16;
+const STEADY_STATE_CYCLES: usize = 16;
 
 /// A session that neither prints to stdout nor writes JSON to the target dir.
 fn quiet_session() -> Session {
@@ -59,7 +60,7 @@ fn reset_reuses_chunks_without_reallocating() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("first_fill");
     {
-        let _span = first.measure_thread().iterations(1);
+        let _span = first.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             let _v = arena.alloc(i as u64);
         }
@@ -81,7 +82,7 @@ fn reset_reuses_chunks_without_reallocating() {
     // Steady state: an identical fill after reset reuses the existing chunks.
     let reused = session.operation("refill_after_reset");
     {
-        let _span = reused.measure_thread().iterations(1);
+        let _span = reused.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             let _v = arena.alloc(i as u64);
         }
@@ -108,7 +109,7 @@ fn dropping_all_arcs_reclaims_chunks_for_reuse() {
     // The very first fill must obtain chunks from the system.
     let first = session.operation("arc_first_fill");
     {
-        let _span = first.measure_thread().iterations(1);
+        let _span = first.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(arena.alloc_arc(i as u64));
         }
@@ -132,7 +133,7 @@ fn dropping_all_arcs_reclaims_chunks_for_reuse() {
     // Steady state: an identical fill after dropping all arcs reuses chunks.
     let reused = session.operation("arc_refill");
     {
-        let _span = reused.measure_thread().iterations(1);
+        let _span = reused.measure_thread().iterations(WORKLOAD as u64);
         for i in 0..WORKLOAD {
             hold.push(arena.alloc_arc(i as u64));
         }
@@ -164,8 +165,8 @@ fn steady_state_fill_and_drop_does_not_over_allocate() {
     // Steady state: many more cycles must allocate nothing from the system.
     let steady = session.operation("steady_state");
     {
-        let _span = steady.measure_thread().iterations(1);
-        for _round in 0..16 {
+        let _span = steady.measure_thread().iterations((STEADY_STATE_CYCLES * WORKLOAD) as u64);
+        for _round in 0..STEADY_STATE_CYCLES {
             for i in 0..WORKLOAD {
                 hold.push(arena.alloc_arc(i as u64));
             }

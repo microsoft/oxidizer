@@ -30,5 +30,7 @@ thread_aware_macros_impl = { workspace = true }
 [dev-dependencies]
 mutants = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

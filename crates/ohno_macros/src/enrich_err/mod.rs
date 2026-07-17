@@ -38,7 +38,7 @@ fn impl_enrich_err_attribute(msg_args: proc_macro2::TokenStream, mut fn_definiti
     // 2. A format string with args: "format {}", expr
     let msg_expr = if msg_args.is_empty() {
         // No arguments provided, use function name as default message
-        let msg = format!("error in function {}", &fn_definition.sig.ident);
+        let msg = format!("error in function {}", fn_definition.sig.ident);
         quote! { #msg }
     } else {
         generate_msg_expr(msg_args)?

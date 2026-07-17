@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! A composable, multi-tier caching library with stampede protection, background
@@ -309,3 +310,10 @@ pub use refresh::TimeToRefresh;
 pub use telemetry::handler::{CacheEventHandler, CacheOperationEvent, CacheTierEvent};
 #[doc(inline)]
 pub use transform::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
+
+// Installs a silent, always-interested global `tracing` subscriber before any
+// unit test in this crate runs. This keeps `tracing` emission paths executing
+// deterministically (never poisoned into the "disabled" state) and lets per-test
+// thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+#[cfg(test)]
+testing_aids::init_tracing!();

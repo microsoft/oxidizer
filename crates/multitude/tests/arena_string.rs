@@ -1217,7 +1217,7 @@ mod str_smart_ptr_traits {
     fn arc_str_partial_eq_ref_str_true_and_false() {
         let arena = Arena::new();
         let s = arena.alloc_str_arc("hello");
-        assert!(s == "hello");
+        assert_eq!(s, "hello");
         assert!((s != "world"));
     }
 
@@ -1227,8 +1227,8 @@ mod str_smart_ptr_traits {
         let s: Arc<str> = arena.alloc_str_arc("alpha");
         let alpha: std::string::String = "alpha".to_owned();
         let beta: std::string::String = "beta".to_owned();
-        assert!(s == *alpha.as_str());
-        assert!((s != *beta.as_str()));
+        assert_eq!(s, *alpha.as_str());
+        assert_ne!(s, *beta.as_str());
     }
 
     #[test]
@@ -1247,8 +1247,8 @@ mod str_smart_ptr_traits {
         let a = arena.alloc_str_arc("same");
         let b = arena.alloc_str_arc("same");
         let c = arena.alloc_str_arc("diff");
-        assert!(a == b);
-        assert!((a != c));
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 
     #[test]
@@ -1290,8 +1290,8 @@ mod str_smart_ptr_traits {
         let a = arena.alloc_str_box("alpha");
         let b = arena.alloc_str_box("alpha");
         let c = arena.alloc_str_box("beta");
-        assert!(a == b);
-        assert!((a != c));
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 
     #[test]
@@ -1300,15 +1300,15 @@ mod str_smart_ptr_traits {
         let s: Box<str> = arena.alloc_str_box("hi");
         let hi: std::string::String = "hi".to_owned();
         let bye: std::string::String = "bye".to_owned();
-        assert!(s == *hi.as_str());
-        assert!((s != *bye.as_str()));
+        assert_eq!(s, *hi.as_str());
+        assert_ne!(s, *bye.as_str());
     }
 
     #[test]
     fn box_str_partial_eq_ref_str_true_and_false() {
         let arena = Arena::new();
         let s: Box<str> = arena.alloc_str_box("ok");
-        assert!(s == "ok");
+        assert_eq!(s, "ok");
         assert!((s != "no"));
     }
 
@@ -1321,8 +1321,8 @@ mod str_smart_ptr_traits {
         s.push_str("equal");
         let equal: std::string::String = "equal".to_owned();
         let other: std::string::String = "other".to_owned();
-        assert!(s == *equal.as_str());
-        assert!((s != *other.as_str()));
+        assert_eq!(s, *equal.as_str());
+        assert_ne!(s, *other.as_str());
     }
 
     #[test]
@@ -1330,7 +1330,7 @@ mod str_smart_ptr_traits {
         let arena = Arena::new();
         let mut s = arena.alloc_string();
         s.push_str("eq");
-        assert!(s == "eq");
+        assert_eq!(s, "eq");
         assert!((s != "neq"));
     }
 }
@@ -1366,11 +1366,11 @@ mod arc_str_traits_coverage {
         let a = Arena::new();
         let s = a.alloc_str_arc("hello");
         // PartialEq<str>
-        assert!(s == *"hello");
+        assert_eq!(s, *"hello");
         // PartialEq<&str>
-        assert!(s == "hello");
+        assert_eq!(s, "hello");
         let bad = "world";
-        assert!(s != *bad);
+        assert_ne!(s, *bad);
     }
 
     #[test]
@@ -1388,7 +1388,7 @@ mod arc_str_traits_coverage {
         assert!(s.is_empty());
         let one = a.alloc_utf16_str_arc(utf16str!("x"));
         let two = a.alloc_utf16_str_arc(utf16str!("x"));
-        assert!(one == two);
+        assert_eq!(one, two);
         let _ = format!("{one}");
     }
 }
