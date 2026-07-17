@@ -40,6 +40,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 rustls = ["dep:rustls", "dep:hyper-rustls", "fetch_tls/rustls"]
 native-tls = [
@@ -86,6 +92,7 @@ tokio-native-tls = { workspace = true, optional = true }
 [dev-dependencies]
 anyspawn = { path = "../anyspawn", features = ["tokio"] }
 bytes = { workspace = true }
+ctor = { workspace = true }
 fetch_options = { path = "../fetch_options" }
 fetch_tls = { path = "../fetch_tls", features = ["rustls", "native-tls"] }
 futures = { workspace = true, features = ["std", "executor"] }
@@ -103,7 +110,6 @@ testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["tokio", "test-util"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "rt", "net"] }
 tokio-native-tls = { workspace = true }
-tracing-test = { workspace = true, features = ["no-env-filter"] }
 wiremock = { workspace = true }
 
 [[test]]

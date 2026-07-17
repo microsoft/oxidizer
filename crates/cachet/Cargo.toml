@@ -35,6 +35,12 @@ allowed_external_types = [
     "serde_core::ser::Serialize",
 ]
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = ["memory"]
 logs = ["dep:tracing"]
@@ -66,11 +72,13 @@ bytesbuf = { path = "../bytesbuf" }
 cachet_memory = { path = "../cachet_memory" }
 cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
+ctor = { workspace = true }
 dashmap = { workspace = true }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }
 serde = { workspace = true, features = ["derive"] }
+serial_test = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

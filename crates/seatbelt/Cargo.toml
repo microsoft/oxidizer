@@ -38,6 +38,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 timeout = []
@@ -68,6 +74,7 @@ tracing = { workspace = true, optional = true }
 [dev-dependencies]
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
+ctor = { workspace = true }
 fastrand = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
 futures-util = { workspace = true, features = ["alloc"] }
@@ -84,6 +91,7 @@ rstest = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true }
 static_assertions = { workspace = true }
+testing_aids = { path = "../testing_aids" }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 tower = { workspace = true, features = ["util"] }
