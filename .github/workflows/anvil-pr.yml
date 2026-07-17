@@ -1,0 +1,26 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+name: anvil-pr
+
+on:
+  pull_request: {}
+  merge_group: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anvil-pr-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  anvil-pr:
+    uses: ./.github/workflows/anvil-pr-impl.yml
+    permissions:
+      contents: read
+      # Write needed so the pr-fast job can upsert/clear the sticky PR
+      # comment carrying the cargo-semver-checks advisory (and any
+      # future advisory checks that emit target/anvil/comments/*).
+      pull-requests: write
+    secrets: inherit

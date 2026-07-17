@@ -1,0 +1,27 @@
+---
+source: crates/fundle_macros_impl/tests/newtype_basic.rs
+expression: expand_fundle_newtype!(item)
+---
+#[derive(::std::clone::Clone)]
+#[allow(dead_code)]
+struct Foo<T: Clone>(T);
+impl<T: Clone, __FundleFromT> ::std::convert::From<__FundleFromT> for Foo<T>
+where
+    __FundleFromT: ::std::convert::AsRef<T>,
+    T: ::std::clone::Clone,
+{
+    fn from(x: __FundleFromT) -> Self {
+        Self(x.as_ref().clone())
+    }
+}
+impl<T: Clone> ::std::ops::Deref for Foo<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T: Clone> ::std::ops::DerefMut for Foo<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}

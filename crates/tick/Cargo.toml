@@ -69,9 +69,6 @@ static_assertions = { workspace = true }
 time = { workspace = true, features = ["formatting", "local-offset", "macros"] }
 tokio = { workspace = true, features = ["time", "rt", "macros", "rt-multi-thread"] }
 
-[lints]
-workspace = true
-
 [[example]]
 name = "tick_basic"
 required-features = ["tokio", "fmt"]
@@ -103,3 +100,8 @@ required-features = ["test-util"]
 [[bench]]
 name = "clock_bench"
 harness = false
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

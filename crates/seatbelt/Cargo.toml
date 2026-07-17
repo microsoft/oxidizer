@@ -200,5 +200,7 @@ name = "hedging_cg"
 harness = false
 required-features = ["hedging"]
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

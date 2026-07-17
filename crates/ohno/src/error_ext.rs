@@ -98,7 +98,7 @@ mod tests {
 
         assert!(error.has_backtrace());
         let backtrace = error.backtrace();
-        assert!(backtrace.status() == BacktraceStatus::Captured);
+        assert_eq!(backtrace.status(), BacktraceStatus::Captured);
         let display = format!("{error}");
         assert!(display.starts_with("TestError\n\nBacktrace:\n"));
     }
@@ -108,7 +108,7 @@ mod tests {
         let mut error = TestError::new();
         error.0.data.backtrace = Backtrace::disabled();
         assert!(!error.has_backtrace());
-        assert!(error.backtrace().status() == BacktraceStatus::Disabled);
+        assert_eq!(error.backtrace().status(), BacktraceStatus::Disabled);
         let display = format!("{error}");
         assert_eq!(display, "TestError");
     }

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 //! Macros to support the [`fundle`](https://docs.rs/fundle) crate.
 //!
@@ -122,6 +123,7 @@ use proc_macro::TokenStream;
 /// ```
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::bundle(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
@@ -184,6 +186,7 @@ pub fn bundle(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - Only works with structs that have named fields
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::deps(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())
@@ -234,6 +237,7 @@ pub fn deps(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - Any other type that implements `AsRef<Inner>`
 #[proc_macro_attribute]
 #[cfg_attr(test, mutants::skip)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn newtype(attr: TokenStream, item: TokenStream) -> TokenStream {
     fundle_macros_impl::newtype(attr.into(), item.into())
         .unwrap_or_else(|e| e.to_compile_error())

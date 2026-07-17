@@ -15,25 +15,25 @@ Every allocation function, measured as one allocate-then-free against a pre-warm
 
 | Operation | Time / op | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|
-| `Box` — `alloc_box` | 13.56 ns | 54 | 86 | 226 |
-| `Box` — `alloc_box_with` | 15.89 ns | 53 | 85 | 225 |
-| `Box` — `alloc_uninit_box` | 15.80 ns | 53 | 85 | 225 |
-| `Arc` — `alloc_arc` | 14.17 ns | 57 | 92 | 232 |
-| `Arc` — `alloc_arc_with` | 18.43 ns | 61 | 99 | 273 |
-| `Arc` — `alloc_uninit_arc` | 18.35 ns | 61 | 99 | 273 |
-| `Alloc` — `alloc` | 12.78 ns | 51 | 79 | 219 |
-| `Alloc` — `alloc_with` | 13.34 ns | 51 | 79 | 219 |
-| `Alloc` — `alloc_uninit` | 13.35 ns | 51 | 79 | 219 |
-| `Rc` — `alloc_rc` | 14.17 ns | 57 | 91 | 231 |
-| `Rc` — `alloc_rc_with` | 15.80 ns | 59 | 96 | 270 |
-| `Rc` — `alloc_uninit_rc` | 16.15 ns | 59 | 96 | 270 |
+| `Box` — `alloc_box` | 13.72 ns | 54 | 86 | 226 |
+| `Box` — `alloc_box_with` | 16.02 ns | 53 | 85 | 225 |
+| `Box` — `alloc_uninit_box` | 15.96 ns | 53 | 85 | 259 |
+| `Arc` — `alloc_arc` | 14.25 ns | 57 | 92 | 232 |
+| `Arc` — `alloc_arc_with` | 18.51 ns | 62 | 100 | 274 |
+| `Arc` — `alloc_uninit_arc` | 18.39 ns | 62 | 100 | 274 |
+| `Alloc` — `alloc` | 12.90 ns | 51 | 79 | 219 |
+| `Alloc` — `alloc_with` | 13.42 ns | 51 | 79 | 253 |
+| `Alloc` — `alloc_uninit` | 13.46 ns | 51 | 79 | 219 |
+| `Rc` — `alloc_rc` | 14.26 ns | 57 | 91 | 265 |
+| `Rc` — `alloc_rc_with` | 16.11 ns | 60 | 97 | 271 |
+| `Rc` — `alloc_uninit_rc` | 16.04 ns | 60 | 97 | 271 |
 
 ### Clone + drop (shared handles)
 
 | Operation | Time / op | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|---:|
-| `Arc` clone + drop | 4.89 ns | 25 | 41 | 177 |
-| `Rc` clone + drop | 1.29 ns | 26 | 41 | 143 |
+| `Arc` clone + drop | 5.03 ns | 25 | 41 | 143 |
+| `Rc` clone + drop | 1.30 ns | 26 | 41 | 143 |
 
 ## Cross-crate comparison (allocate + free)
 
@@ -42,13 +42,15 @@ From `cargo bench --bench pool_comparison`: 10,000 allocate+free iterations agai
 | Pool | Instructions | Mem accesses | Est. cycles |
 |---|---:|---:|---:|
 | plurality — `Box` | 460,026 | 710,040 | 710,248 |
-| plurality — `Alloc` | 430,023 | 640,035 | 640,209 |
+| plurality — `Alloc` | 430,026 | 640,040 | 640,214 |
 | slab | 390,035 | 590,061 | 590,299 |
-| sharded-slab | 2,090,026 | 2,910,043 | 2,910,161 |
+| sharded-slab | 2,090,026 | 2,910,043 | 2,910,157 |
 | slotmap | 500,028 | 800,047 | 800,251 |
-| object-pool | 640,027 | 980,044 | 980,324 |
-| opool | 1,080,090 | 1,620,137 | 1,645,439 |
-| deadpool | 2,360,021 | 3,300,034 | 3,300,900 |
+| object-pool | 640,027 | 980,044 | 980,328 |
+| opool | 1,080,090 | 1,620,137 | 1,645,479 |
+| deadpool | 2,360,021 | 3,300,034 | 3,300,968 |
+| infinity-pool — `PinnedPool` | 1,940,023 | 3,030,036 | 3,030,120 |
+| infinity-pool — `RawPinnedPool` | 1,140,035 | 1,870,060 | 1,870,242 |
 
 ## Graph churn throughput (wall-clock)
 
@@ -56,7 +58,7 @@ From `cargo bench --bench graph_churn`: 1,000,000 node allocations with a realis
 
 | Backend | Total | ns / alloc | Malloc/s |
 |---|---:|---:|---:|
-| std::Box + mimalloc | 0.1873 s | 187.33 | 5.34 |
-| plurality::Pool | 0.0805 s | 80.45 | 12.43 |
+| std::Box + mimalloc | 0.1733 s | 173.29 | 5.77 |
+| plurality::Pool | 0.0732 s | 73.24 | 13.65 |
 
-**plurality::Pool is 2.33x faster than std::Box + mimalloc.**
+**plurality::Pool is 2.37x faster than std::Box + mimalloc.**
