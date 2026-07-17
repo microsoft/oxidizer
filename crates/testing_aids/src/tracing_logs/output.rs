@@ -633,28 +633,29 @@ impl Drop for FileGuard {
 fn start_log_file_scope(file_name: &str) -> FileGuard {
     let path = log_file(file_name);
 
-    // Determine whether a file is already active while holding the lock, but release the
-    // lock *before* asserting, so a failed assertion (a `#[serial]` violation) never
-    // panics with the lock held and thus never poisons `LOG_FILE`. Asserting before
-    // creating the file also ensures a serial violation never truncates the file that the
-    // currently-active scope is writing to.
+    // Create the file outside the lock so an I/O failure never poisons `LOG_FILE`.
+    let file = File::create(path).unwrap();
+
+    // Check occupancy and install our file atomically under a single lock, then release
+    // the lock *before* asserting, so a failed assertion (a `#[serial]` violation) never
+    // panics with the lock held and thus never poisons `LOG_FILE`. Holding one lock across
+    // the check and the install is what makes them atomic: a second concurrent scope
+    // observes the first's file and installs nothing (dropping its own handle) rather than
+    // both overwriting each other's handle and leaving `FileGuard::drop` bookkeeping
+    // inconsistent. This mirrors `write_to_stdout_and_buffer`'s handling of `LOG_BUFFER`.
     let already_active = {
-        let log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
-        log_file.is_some()
+        let mut log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
+        let occupied = log_file.is_some();
+        if !occupied {
+            *log_file = Some(file);
+            FILE_ENABLED.store(true, Ordering::Release);
+        }
+        occupied
     };
     assert!(
         !already_active,
         "a log file is already active; multiple tests cannot log to file in parallel within the same process - logging is global state"
     );
-
-    // Create the file outside the lock so an I/O failure never poisons `LOG_FILE`.
-    let file = File::create(path).unwrap();
-
-    {
-        let mut log_file = LOG_FILE.lock().expect(LOG_FILE_NEVER_POISONED);
-        *log_file = Some(file);
-        FILE_ENABLED.store(true, Ordering::Release);
-    }
 
     FileGuard::new()
 }
