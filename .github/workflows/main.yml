@@ -202,16 +202,22 @@ jobs:
   # whose `version =` is bumped in this PR (the "publishing set"). The baseline
   # rustdoc is rebuilt from that commit's source, so no registry access is needed
   # and the check behaves identically for OSS and enterprise/offline consumers.
-  # The job is informational only: it never fails the build and posts a fresh PR
-  # comment on every push with a per-crate table (baseline vs this-PR vs the
-  # minimum required version) plus a link to the run. It is a no-op on PRs that
-  # do not bump any crate version, since only version-bumping PRs trigger a
-  # publish and thus need a compatibility check against the previous version.
+  # The version-increment VERDICT is informational: an under-incremented crate is
+  # reported (status=fail) but never fails the build. The check must, however,
+  # actually run — an operational failure (script/tooling error, or a failure to
+  # post the comment) is intentionally BLOCKING so a broken check gets fixed
+  # rather than silently skipped. Results are shown in a single sticky PR comment
+  # (keyed by the `semver-check` header, updated in place on each push) with a
+  # per-crate table (baseline vs this-PR vs the minimum required version) plus a
+  # link to the run. It is a no-op on PRs that do not bump any crate version,
+  # since only version-bumping PRs trigger a publish and thus need a compatibility
+  # check against the previous version.
   semver:
     needs: [delta]
     if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       # prep
@@ -236,10 +242,12 @@ jobs:
       #                                   its API changes; warn = a baseline could
       #                                   not be determined so a check is
       #                                   incomplete; pass = all sufficient)
-      # Kept non-failing so a git/tooling hiccup never blocks the PR.
+      # The version-increment verdict is informational (an under-increment sets
+      # status=fail, but the script still exits 0). This step is intentionally
+      # NOT continue-on-error: an operational failure here (git/tooling error)
+      # must block so the check gets fixed rather than silently skipped.
       - name: Semver Report
         id: report
-        continue-on-error: true
         shell: pwsh
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -249,14 +257,16 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${env:BASE_REF}:refs/remotes/origin/${env:BASE_REF}"
           ./scripts/ci/semver-report.ps1 -BaseRef "origin/${env:BASE_REF}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
 
-      # Post a NEW comment on every push (not a sticky update) so each run's
-      # result is visible in the PR timeline. Only fires when the PR actually
-      # publishes something and is not from a fork (forks lack a write token).
+      # Maintain a single sticky PR comment (keyed by the `semver-check` header)
+      # so each push updates the same comment in place instead of adding a new one.
+      # Only fires when the PR actually publishes something and is not from a fork
+      # (forks lack a write token).
       - name: Post Semver Comment
         if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh pr comment ${{ github.event.pull_request.number }} --body-file semver-comment.md
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: semver-check
+          path: semver-comment.md
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
