@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.0] - 2026-07-15
+
+- 🔧 Maintenance
+
+  - Now requires `0.5.0` of `cachet_memory`
+
+- ⚠️ Breaking
+
+  - surface evicted key and value to on_eviction listeners ([#552](https://github.com/microsoft/oxidizer/pull/552))
+
 ## [0.8.0] - 2026-07-07
 
 - ⚠️ Breaking
