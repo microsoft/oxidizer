@@ -25,10 +25,54 @@ inputs:
     description: Install Wild linker for faster linking
     required: false
     default: 'false'
+  free-disk-space:
+    description: >-
+      Remove unused pre-installed toolchains to reclaim disk space and guard
+      against intermittent "No space left on device" failures on the heavier
+      build/test jobs. Linux reclaims ~18 GB (Android SDK, Haskell/GHC, Swift,
+      Chromium); Windows reclaims ~17 GB (Android SDK, Haskell/GHC). No-op on
+      macOS.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
+    # GitHub only guarantees 14 GB of storage on standard runners; the heavy
+    # `cargo hack --each-feature` + `--all-features` test build peaks well above
+    # that, so we reclaim space up front. These directories are unused by our
+    # Rust builds. See https://github.com/microsoft/oxidizer (work item 7611559).
+    - name: Free Disk Space (Linux)
+      if: inputs.free-disk-space == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        echo "Disk before cleanup:"
+        df -h /
+        # Fast `rm -rf` reclaims (no slow apt purge): Android ~10 GB, Haskell
+        # ~4 GB, Swift ~3 GB, Chromium ~1 GB.
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc /usr/local/.ghcup
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/local/share/chromium /usr/local/share/edge_driver
+        echo "Disk after cleanup:"
+        df -h /
+
+    # Windows runners start with far less free space (~34 GB vs ~89 GB on Linux)
+    # because the pre-installed tooling (Visual Studio, .NET, Android) is much
+    # larger. Reclaim the big dirs unused by our Rust builds. Visual Studio,
+    # .NET, and the hosted tool cache (holds sccache) are intentionally kept.
+    - name: Free Disk Space (Windows)
+      if: inputs.free-disk-space == 'true' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        function Free-GB { [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1) }
+        "Free before cleanup (GB): $(Free-GB)"
+        # Android SDK ~13 GB, Haskell/ghcup ~4 GB.
+        foreach ($p in 'C:\Program Files (x86)\Android', 'C:\Android', 'C:\ghcup') {
+          if (Test-Path $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        "Free after cleanup (GB): $(Free-GB)"
+
     - name: Loading Repo Constants
       shell: bash
       run: |
