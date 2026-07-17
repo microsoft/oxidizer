@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for the arena-backed `hashbrown` collection builders, gated on the
-//! `hashbrown` feature. They cover construction plus enough churn to exercise
-//! the `&Arena` legacy-allocator path under table growth.
+//! Tests for arena-backed `hashbrown` collections under table growth.
 
 #![cfg(feature = "hashbrown")]
 #![allow(clippy::std_instead_of_core, reason = "test code uses std")]

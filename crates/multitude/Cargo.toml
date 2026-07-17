@@ -3,7 +3,7 @@
 
 [package]
 name = "multitude"
-version = "0.6.1"
+version = "0.6.2"
 description = "Fast and flexible arena allocator."
 readme = "README.md"
 keywords = ["arena", "memory", "allocator", "bump"]
@@ -23,10 +23,12 @@ allowed_external_types = [
     "bytemuck::*",
     "bytesbuf::*",
     "hashbrown::*",
+    "multitude_macros::*",
     "ptr_meta::*",
     "ptr_meta_derive::*",
     "serde::*",
     "serde_core::*",
+    "serde_json::*",
     "widestring::*",
     "zerocopy::*",
 ]
@@ -38,7 +40,8 @@ all-features = true
 [features]
 default = ["std"]
 std = []
-serde = ["dep:serde"]
+serde = ["dep:multitude_macros", "dep:serde"]
+serde_json = ["serde", "dep:serde_json"]
 stats = []
 dst = ["ptr_meta/derive"]
 utf16 = ["dep:widestring"]
@@ -62,8 +65,10 @@ bytemuck = { workspace = true, features = ["derive"], optional = true }
 bytes = { workspace = true, optional = true }
 bytesbuf = { workspace = true, optional = true }
 hashbrown = { workspace = true, features = ["allocator-api2", "default-hasher"], optional = true }
+multitude_macros = { workspace = true, optional = true }
 ptr_meta = { workspace = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["alloc"], optional = true }
+serde_json = { workspace = true, features = ["alloc"], optional = true }
 widestring = { workspace = true, features = ["alloc"], optional = true }
 zerocopy = { workspace = true, optional = true }
 
@@ -83,6 +88,7 @@ bumpalo = { workspace = true, features = ["collections"] }
 criterion = { workspace = true }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [target.'cfg(loom)'.dev-dependencies]
@@ -96,6 +102,24 @@ gungraun = { workspace = true, features = ["default"] }
 
 [[bench]]
 name = "criterion_alloc"
+harness = false
+
+[[bench]]
+name = "multitude_serde"
+harness = false
+required-features = ["serde_json"]
+
+[[bench]]
+name = "multitude_serde_cg"
+harness = false
+required-features = ["serde_json"]
+
+[[bench]]
+name = "multitude_teardown"
+harness = false
+
+[[bench]]
+name = "multitude_teardown_cg"
 harness = false
 
 [[bench]]
@@ -138,6 +162,18 @@ name = "multitude_basic"
 
 [[example]]
 name = "strings"
+
+[[example]]
+name = "serde_arena_graph"
+required-features = ["serde_json"]
+
+[[example]]
+name = "serde_borrow_and_reuse"
+required-features = ["serde_json"]
+
+[[example]]
+name = "serde_value_and_limits"
+required-features = ["serde_json"]
 
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
 # discover this target authoritatively; the tests still build under `--cfg loom`.

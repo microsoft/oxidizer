@@ -22,7 +22,6 @@
     expect(
         clippy::exit,
         clippy::missing_docs_in_private_items,
-        unused_qualifications,
         reason = "Triggered by Gungraun macro expansion. Upstream tracking issues are pending."
     )
 )]
@@ -42,5 +41,5 @@ use linux::*;
 gungraun::main!(
     config = gungraun::LibraryBenchmarkConfig::default()
         .tool(gungraun::Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = alloc_group
+    library_benchmark_groups = alloc_group, allocator_grow_group
 );

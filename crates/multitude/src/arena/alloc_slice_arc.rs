@@ -26,6 +26,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_slice_copy_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_copy_arc([1, 2, 3]);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn alloc_slice_copy_arc<T: Copy + Send + Sync>(&self, slice: impl AsRef<[T]>) -> Arc<[T], A>
     where
@@ -40,6 +48,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_copy_arc([1, 2, 3]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_copy_arc<T: Copy + Send + Sync>(&self, slice: impl AsRef<[T]>) -> Result<Arc<[T], A>, AllocError>
     where
@@ -55,6 +73,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// May panic if `T::clone` panics; already-cloned elements are dropped before the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_clone_arc([String::from("a"), String::from("b")]);
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn alloc_slice_clone_arc<T: Clone + Send + Sync>(&self, slice: impl AsRef<[T]>) -> Arc<[T], A>
     where
@@ -69,6 +95,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_clone_arc([String::from("a"), String::from("b")]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_clone_arc<T: Clone + Send + Sync>(&self, slice: impl AsRef<[T]>) -> Result<Arc<[T], A>, AllocError>
     where
@@ -85,6 +121,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// If `f` panics, already-initialized elements are dropped (drop guard) and the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_arc(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_with_arc<T, F>(&self, len: usize, f: F) -> Arc<[T], A>
     where
@@ -101,6 +145,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_arc(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_arc<T, F>(&self, len: usize, f: F) -> Result<Arc<[T], A>, AllocError>
     where
@@ -118,6 +172,14 @@ impl<A: Allocator + Clone> Arena<A> {
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// May also panic if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_iter_arc([3, 1, 4]);
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_iter_arc<T, I>(&self, iter: I) -> Arc<[T], A>
     where
@@ -135,6 +197,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_iter_arc([3, 1, 4]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_iter_arc<T, I>(&self, iter: I) -> Result<Arc<[T], A>, AllocError>
     where
@@ -156,6 +228,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_slice_copy_rc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_copy_rc([1, 2, 3]);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn alloc_slice_copy_rc<T: Copy>(&self, slice: impl AsRef<[T]>) -> Rc<[T], A> {
         self.try_alloc_slice_copy_rc::<T>(slice).expect_alloc()
@@ -167,6 +247,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_copy_rc([1, 2, 3]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_copy_rc<T: Copy>(&self, slice: impl AsRef<[T]>) -> Result<Rc<[T], A>, AllocError> {
         self.impl_alloc_slice_smart_copy::<LocalStrong, T>(slice.as_ref())
@@ -178,6 +268,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// May panic if `T::clone` panics; already-cloned elements are dropped first.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_clone_rc([String::from("a"), String::from("b")]);
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn alloc_slice_clone_rc<T: Clone>(&self, slice: impl AsRef<[T]>) -> Rc<[T], A> {
         self.try_alloc_slice_clone_rc::<T>(slice).expect_alloc()
@@ -189,18 +287,36 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_clone_rc([String::from("a"), String::from("b")]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_clone_rc<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<Rc<[T], A>, AllocError> {
         let s = slice.as_ref();
         self.impl_alloc_slice_smart_with::<LocalStrong, T, _>(s.len(), |i| s[i].clone())
     }
 
-    /// Allocate a slice of `len` elements in a chunk via `f(i)`, returning an [`Rc`].
+    /// Allocate an [`Rc`] slice of `len` elements initialized by `f(i)`.
     ///
     /// # Panics
     ///
     /// Panics if the underlying allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// If `f` panics, already-initialized elements are dropped.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_rc(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_with_rc<T, F>(&self, len: usize, f: F) -> Rc<[T], A>
     where
@@ -215,6 +331,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_rc(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_rc<T, F>(&self, len: usize, f: F) -> Result<Rc<[T], A>, AllocError>
     where
@@ -229,6 +355,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// May also panic if the iterator yields fewer elements than reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_iter_rc([3, 1, 4]);
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_iter_rc<T, I>(&self, iter: I) -> Rc<[T], A>
     where
@@ -244,6 +378,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_iter_rc([3, 1, 4]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_iter_rc<T, I>(&self, iter: I) -> Result<Rc<[T], A>, AllocError>
     where
@@ -279,9 +423,6 @@ impl<A: Allocator + Clone> Arena<A> {
         let len = src.len();
         // `src` is a live `&[T]`, so `size_of_val(src)` is a valid `usize`.
         let payload_bytes = mem::size_of_val(src);
-        // Straight-line fast path: a single in-chunk reservation attempt. The
-        // worst-case refill hint lives in the cold helper, so the hot success
-        // path skips its saturating arithmetic.
         // SAFETY: `payload_bytes == size_of_val(src) == size_of::<T>() * len`,
         // the exact byte count `try_reserve_arc_slice_with_size` requires.
         if let Some((uninit, chunk_ptr)) = unsafe { self.try_reserve_arc_slice_with_size::<S, T>(len, payload_bytes) } {
@@ -348,9 +489,6 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline]
     fn alloc_slice_smart_with_raw<S: Strong, T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<NonNull<u8>, AllocError> {
         check_slice_arc_layout::<T>()?;
-        // Straight-line fast path: a single in-chunk reservation attempt. `f`
-        // is moved into `init_with_ptr` on success, else into the cold helper,
-        // so no `Option<F>` juggling and no refill-hint math on the hot path.
         if let Some((uninit, chunk_ptr)) = self.try_reserve_arc_slice::<S, T>(len) {
             let chunk_ref = self.acquire_current_chunk_ref(chunk_ptr);
             let slice_ptr = uninit.init_with_ptr(f);
@@ -406,8 +544,15 @@ impl<A: Allocator + Clone> Arena<A> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Allocate `len` slots and fill each via `f(i)`, returning a
-    /// [`Pin<Arc<[T], A>>`](core::pin::Pin).
+    /// Allocate a pinned [`Arc`] slice of `len` elements initialized by `f(i)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_arc_pin(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> Pin<Arc<[T], A>>
@@ -424,6 +569,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::try_alloc_slice_fill_with_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_arc_pin(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_arc_pin<T, F>(&self, len: usize, f: F) -> Result<Pin<Arc<[T], A>>, AllocError>
     where
@@ -434,8 +589,15 @@ impl<A: Allocator + Clone> Arena<A> {
         self.try_alloc_slice_fill_with_arc::<T, F>(len, f).map(Arc::into_pin)
     }
 
-    /// Allocate `len` slots and fill each via `f(i)`, returning a
-    /// [`Pin<Rc<[T], A>>`](core::pin::Pin).
+    /// Allocate a pinned [`Rc`] slice of `len` elements initialized by `f(i)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_rc_pin(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_fill_with_rc_pin<T, F>(&self, len: usize, f: F) -> Pin<Rc<[T], A>>
@@ -451,6 +613,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::try_alloc_slice_fill_with_rc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_rc_pin(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_rc_pin<T, F>(&self, len: usize, f: F) -> Result<Pin<Rc<[T], A>>, AllocError>
     where

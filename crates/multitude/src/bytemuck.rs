@@ -37,6 +37,18 @@ use crate::AllocError;
 ///
 /// Exposes safe zero-initialized allocation methods for types implementing
 /// the marker trait. Obtained via [`Arena`](crate::Arena)'s ecosystem-specific accessor.
+///
+/// ```
+/// # #[cfg(feature = "bytemuck")]
+/// # fn main() {
+/// let arena = multitude::Arena::new();
+/// let view: multitude::bytemuck::BytemuckView<'_> = arena.bytemuck();
+/// let value: multitude::Alloc<'_, u32> = view.alloc();
+/// assert_eq!(*value, 0);
+/// # }
+/// # #[cfg(not(feature = "bytemuck"))]
+/// # fn main() {}
+/// ```
 #[derive(Debug)]
 pub struct BytemuckView<'a, A: Allocator + Clone = Global> {
     arena: &'a crate::Arena<A>,
@@ -52,6 +64,17 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// Allocate a zero-initialized `T` and return an owning [`Alloc<T>`](crate::Alloc) into the arena.
     ///
     /// The returned handle's lifetime is tied to the arena.
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Alloc<'_, u32> = arena.bytemuck().alloc::<u32>();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -70,12 +93,35 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Alloc<'_, u32> = arena.bytemuck().try_alloc::<u32>()?;
+    /// assert_eq!(*value, 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc<T: Zeroable>(&self) -> Result<crate::Alloc<'a, T>, AllocError> {
         self.arena.try_alloc_with::<T, _>(T::zeroed)
     }
 
-    /// Allocate a zero-initialized slice of `T` and return an owning [`Alloc<[T]>`](crate::Alloc) into the arena.
+    /// Allocate a zero-initialized `T` slice in an owning [`Alloc`](crate::Alloc).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Alloc<'_, [u32]> = arena.bytemuck().alloc_slice(3);
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -94,12 +140,35 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 64 KiB.
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Alloc<'_, [u32]> = arena.bytemuck().try_alloc_slice(3)?;
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_slice<T: Zeroable>(&self, len: usize) -> Result<crate::Alloc<'a, [T]>, AllocError> {
         self.arena.try_alloc_slice_fill_with(len, |_| T::zeroed())
     }
 
     /// Allocate a zero-initialized `T` and return a [`Box<T, A>`](crate::Box).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Box<u32> = arena.bytemuck().alloc_box();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -118,12 +187,35 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 32 KiB (smart-pointer paths cap alignment at half the chunk alignment).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Box<u32> = arena.bytemuck().try_alloc_box()?;
+    /// assert_eq!(*value, 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_box<T: Zeroable>(&self) -> Result<crate::Box<T, A>, AllocError> {
         self.arena.try_alloc_box_with::<T, _>(T::zeroed)
     }
 
     /// Allocate a zero-initialized `T` and return an [`Arc<T, A>`](crate::Arc).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Arc<u32> = arena.bytemuck().alloc_arc();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -145,6 +237,18 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 32 KiB (smart-pointer paths cap alignment at half the chunk alignment).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Arc<u32> = arena.bytemuck().try_alloc_arc()?;
+    /// assert_eq!(*value, 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_arc<T: Zeroable + Send + Sync>(&self) -> Result<crate::Arc<T, A>, AllocError>
     where
@@ -154,6 +258,17 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     }
 
     /// Allocate a zero-initialized slice of `T` and return an [`Arc<[T], A>`](crate::Arc).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Arc<[u32]> = arena.bytemuck().alloc_slice_arc(3);
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -175,6 +290,18 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 32 KiB (smart-pointer paths cap alignment at half the chunk alignment).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Arc<[u32]> = arena.bytemuck().try_alloc_slice_arc(3)?;
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_slice_arc<T: Zeroable + Send + Sync>(&self, len: usize) -> Result<crate::Arc<[T], A>, AllocError>
     where
@@ -184,6 +311,17 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     }
 
     /// Allocate a zero-initialized `T` and return an [`Rc<T, A>`](crate::Rc).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Rc<u32> = arena.bytemuck().alloc_rc();
+    /// assert_eq!(*value, 0);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -201,12 +339,35 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment greater or equal to 32 KiB.
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let value: multitude::Rc<u32> = arena.bytemuck().try_alloc_rc()?;
+    /// assert_eq!(*value, 0);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_rc<T: Zeroable>(&self) -> Result<crate::Rc<T, A>, AllocError> {
         self.arena.try_alloc_rc_with::<T, _>(T::zeroed)
     }
 
     /// Allocate a zero-initialized slice of `T` and return an [`Rc<[T], A>`](crate::Rc).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Rc<[u32]> = arena.bytemuck().alloc_slice_rc(3);
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -224,12 +385,35 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     /// # Errors
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment greater or equal to 32 KiB.
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Rc<[u32]> = arena.bytemuck().try_alloc_slice_rc(3)?;
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_slice_rc<T: Zeroable>(&self, len: usize) -> Result<crate::Rc<[T], A>, AllocError> {
         self.arena.try_alloc_slice_fill_with_rc::<T, _>(len, |_| T::zeroed())
     }
 
     /// Allocate a zero-initialized slice of `T` and return a [`Box<[T], A>`](crate::Box).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Box<[u32]> = arena.bytemuck().alloc_slice_box(3);
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     ///
     /// # Panics
     ///
@@ -248,6 +432,18 @@ impl<'a, A: Allocator + Clone> BytemuckView<'a, A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if `T` requires alignment
     /// >= 32 KiB (smart-pointer paths cap alignment at half the chunk alignment).
+    ///
+    /// ```
+    /// # #[cfg(feature = "bytemuck")]
+    /// # fn main() -> Result<(), multitude::AllocError> {
+    /// let arena = multitude::Arena::new();
+    /// let values: multitude::Box<[u32]> = arena.bytemuck().try_alloc_slice_box(3)?;
+    /// assert_eq!(&*values, &[0; 3]);
+    /// # Ok(())
+    /// # }
+    /// # #[cfg(not(feature = "bytemuck"))]
+    /// # fn main() {}
+    /// ```
     #[inline]
     pub fn try_alloc_slice_box<T: Zeroable>(&self, len: usize) -> Result<crate::Box<[T], A>, AllocError> {
         self.arena.try_alloc_slice_fill_with_box::<T, _>(len, |_| T::zeroed())

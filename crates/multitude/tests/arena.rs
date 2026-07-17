@@ -30,12 +30,6 @@ fn allocator_accessor() {
     let _: &allocator_api2::alloc::Global = arena.allocator();
 }
 
-// `ChunkSizeOutOfRange` was removed from `BuildError` along with the
-// `chunk_size` builder knob; the adaptive ramp manages chunk sizes
-// itself. The previous boundary tests (chunk_size below min, chunk_size
-// above CHUNK_ALIGN) are no longer reachable via the public API and
-// have been deleted.
-
 #[test]
 #[should_panic(expected = "max_normal_alloc must be in")]
 fn builder_max_normal_alloc_zero_rejected() {
@@ -136,10 +130,7 @@ fn oversized_bump_alloc_does_not_leak_on_drop() {
     let src = vec![0_u8; OVERSIZED_BYTES];
     {
         let arena = Arena::builder_in(alloc.clone()).build();
-        // The source exceeds `MAX_CHUNK_BYTES` (64 KiB), so this
-        // allocation must take the oversized one-shot chunk path.
-        // Previously these chunks were leaked because they were never
-        // linked into current_*, the pinned list, or the cache.
+        // The source exceeds `MAX_CHUNK_BYTES` and uses a one-shot chunk.
         let _slice = arena.alloc_slice_copy(&src);
         assert!(alloc.live_chunks() >= 1);
     }
@@ -188,10 +179,7 @@ fn oversized_slice_fill_with_does_not_leak() {
     assert_eq!(alloc.live_bytes(), 0);
 }
 
-// Regression: a panic inside the user closure of `alloc_with` on a
-// payload large enough to land on an oversized chunk used to leak the
-// chunk because the pin/inc-ref happened only after the closure
-// returned.
+// An oversized chunk is released when its initializer panics.
 #[test]
 fn panic_in_oversized_alloc_with_does_not_leak() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -208,9 +196,6 @@ fn panic_in_oversized_alloc_with_does_not_leak() {
     assert_eq!(alloc.live_bytes(), 0);
 }
 
-// Mirror of `panic_in_normal_alloc_rc_with_does_not_leak` for the
-// `Box` path of `ProtectiveHold` (same Box branch in
-// `ProtectiveHold::drop`).
 #[test]
 fn panic_in_normal_alloc_box_with_does_not_leak() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -227,8 +212,6 @@ fn panic_in_normal_alloc_box_with_does_not_leak() {
     assert_eq!(alloc.live_bytes(), 0);
 }
 
-// Kills mutants on the per-allocation surplus-handout decrement. Mirrors
-// the `ProtectiveHold` test above but on the `Arc` allocation path.
 #[test]
 fn panic_in_normal_alloc_arc_with_does_not_leak() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -245,12 +228,7 @@ fn panic_in_normal_alloc_arc_with_does_not_leak() {
     assert_eq!(alloc.live_bytes(), 0);
 }
 
-// Kills mutants on `chunk_end_addr_fits_in_isize` (and the call-site
-// negation) in `Chunk::allocate`. A pathological allocator that
-// returns a pointer in the upper half of the address space must be
-// rejected by the bounds check: the user-facing observable is a clean
-// `AllocError` from `try_alloc_with` rather than a write through a
-// kernel-space pointer.
+// High-half addresses are rejected before pointer arithmetic.
 #[test]
 fn local_chunk_allocate_rejects_high_address_from_pathological_allocator() {
     let arena = Arena::builder_in(common::BadAddressAllocator).build();
@@ -258,8 +236,6 @@ fn local_chunk_allocate_rejects_high_address_from_pathological_allocator() {
     assert!(result.is_err(), "high-address allocator must produce AllocError");
 }
 
-// Mirror for the `Arc` allocation path. Same pathological allocator;
-// the regression covers the symmetric bounds check in `Chunk::allocate`.
 #[test]
 fn chunk_allocate_rejects_high_address_from_pathological_allocator() {
     use multitude::AllocError;
@@ -469,34 +445,12 @@ mod reset {
         let _ = arena.alloc_arc(11_u32);
     }
 
-    /// Regression for the `reset`-retires-shared-chunks bug.
-    ///
-    /// `reset` must touch only chunks. It used to also retire the
-    /// current chunk (reconcile its surplus + reinstall the empty
-    /// sentinel). That broke workloads that nest arena [`Arc`]s inside an
-    /// outer arena `Arc` in the same chunk: the inner arcs' drops are
-    /// deferred to chunk teardown (refcount reaching 0), but the outer arc's
-    /// own slice elements pin the chunk until then, so the chunk can never
-    /// reach 0 while it is the retired-but-referenced current chunk. Each
-    /// reset therefore allocated **one fresh chunk per cycle**
-    /// (linear growth, slope 1 — the benchmark saw a fresh ~64 KiB chunk
-    /// every iteration).
-    ///
-    /// With reset leaving shared state alone, chunks are bump-filled
-    /// across cycles and a new (larger) chunk is needed only occasionally as
-    /// the size class ratchets up, so the count grows strictly sub-linearly.
-    /// This test pins the slope: across a measured batch of `BATCH` reset
-    /// cycles the shared-chunk count must grow by far less than `BATCH`
-    /// (the buggy code grew by exactly `BATCH`).
+    /// Reset preserves reusable shared chunks, so repeated cycles grow chunk
+    /// count sub-linearly.
     #[cfg(feature = "stats")]
     #[test]
     fn reset_does_not_allocate_a_fresh_chunk_per_cycle() {
-        // Each cycle just needs to *use* a chunk so that `reset`'s
-        // shared-chunk handling is exercised; a single `Arc` allocation
-        // does that. (The nested-structure variant is covered separately
-        // by `reset_keeps_nested_arc_structures_valid_across_cycles`.)
-        // Keeping the per-cycle work to one allocation bounds the Miri
-        // interpreter cost while still pinning the slope.
+        // One allocation per cycle keeps the Miri workload bounded.
         fn build(arena: &Arena) {
             drop(arena.alloc_arc(0xAB_u64));
         }
@@ -516,9 +470,7 @@ mod reset {
         }
         let grew_by = arena.stats().normal_chunks_allocated - before;
 
-        // Buggy `reset` grew by exactly `BATCH` (one fresh chunk per cycle).
-        // The correct behavior grows by only a handful (a few class-size
-        // bumps). A generous sub-linear ceiling cleanly separates the two.
+        // Chunk growth must remain comfortably sub-linear.
         assert!(
             grew_by < BATCH as u64 / 8,
             "reset must not allocate a fresh chunk per cycle: \
@@ -526,8 +478,7 @@ mod reset {
         );
     }
 
-    /// Companion to the leak regression that needs no `stats` feature:
-    /// the nested-`Arc` structure must stay valid and drop cleanly across
+    /// A nested-`Arc` structure stays valid and drops cleanly across
     /// repeated reset cycles. Builds the structure, reads it back, drops it,
     /// resets, and repeats — confirming `reset` leaves outstanding
     /// shared-chunk contents intact.
@@ -785,13 +736,7 @@ mod large_alloc {
         }
 
         let counter = StdArc::new(AtomicUsize::new(0));
-        // The property is: drops run for every live element after the
-        // arena is torn down, even when growth has relocated the
-        // storage. We don't actually need to cross the chunk
-        // boundary — every relocation arm is covered by a single
-        // `reserve(N)` for N past the initial small capacity. Use
-        // a tiny N so the per-element atomic clone cost stays low
-        // under Miri.
+        // Keep the Miri workload small while forcing relocation.
         let n = 16;
         {
             let arena = Arena::new();
@@ -807,10 +752,7 @@ mod large_alloc {
     #[test]
     fn alloc_vec_extend_from_iter_past_chunk_boundary() {
         let arena = Arena::new();
-        // Exercise the `Extend`-from-iterator growth path across the chunk
-        // boundary. Using `u128` reaches `> CHUNK_BYTES` with 8x fewer
-        // elements than `u16`, so the per-element interpreted `extend`
-        // loop (which a lazy `map` iterator forces) is 8x shorter.
+        // `u128` crosses the byte boundary with fewer interpreted iterations.
         let mut v = arena.alloc_vec::<u128>();
         let n = OVER_CHUNK / 16 + 1; // > 64 KiB worth of u128
         v.extend((0..n as u128).map(|i| i.wrapping_mul(13)));
@@ -829,8 +771,6 @@ mod large_alloc {
         let arena = Arena::new();
         let mut v = multitude::vec::vec![in &arena; 0u32; 16];
         assert_eq!(v.len(), 16);
-        // Fixed iteration count rather than `while v.len() < ...` so
-        // that a `Vec::len -> 0` mutation can't drive an infinite loop.
         for next in 16..(OVER_CHUNK / 4) {
             v.push(next as u32);
         }
@@ -839,10 +779,6 @@ mod large_alloc {
         assert_eq!(v[16], 16);
         assert_eq!(v[v.len() - 1], (v.len() - 1) as u32);
     }
-
-    // ============================================================================
-    // String: explicit large capacity and growth
-    // ============================================================================
 
     #[test]
     fn alloc_string_with_capacity_above_chunk_boundary() {
@@ -866,9 +802,7 @@ mod large_alloc {
         let mut s = arena.alloc_string();
         assert_eq!(s.len(), 0);
         s.push_str("hello");
-        // Bulk push instead of OVER_CHUNK individual `push('x')` calls.
-        // The final `assert_eq!(s.len(), ...)` still kills `push_str
-        // -> noop` and `String::len -> 0` mutations.
+        // Bulk push bounds the Miri workload.
         let block = "x".repeat(OVER_CHUNK);
         s.push_str(&block);
         assert_eq!(s.len(), 5 + OVER_CHUNK);
@@ -889,10 +823,6 @@ mod large_alloc {
         assert_eq!(chars.next(), Some('🦀'));
         assert_eq!(chars.last(), Some('🦀'));
     }
-
-    // ============================================================================
-    // Utf16String: same coverage for the 16-bit-encoded sibling
-    // ============================================================================
 
     #[cfg(feature = "utf16")]
     #[test]
@@ -917,14 +847,7 @@ mod large_alloc {
     fn alloc_utf16_string_grows_from_small_to_past_chunk_boundary() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string();
-        // Push a small initial seed, then reserve past the chunk
-        // boundary in one shot. The growth path needs to: re-route
-        // through the oversized chunk allocator, copy the live
-        // elements, update cap. A second small push past the prior
-        // length confirms the new buffer is writable beyond the
-        // initial seed. We avoid the brute-force "transcode 65 KiB"
-        // step entirely — `reserve` exercises the same growth arms
-        // without paying for it.
+        // Reserve past the boundary in one call to bound the Miri workload.
         s.push_from_str("hello");
         s.reserve(OVER_CHUNK);
         assert!(s.capacity() >= 5 + OVER_CHUNK);
@@ -934,10 +857,6 @@ mod large_alloc {
         assert_eq!(v[0], u16::from(b'h'));
         assert_eq!(v[5], u16::from(b'y'));
     }
-
-    // ============================================================================
-    // Stress: many oversized allocations in one arena
-    // ============================================================================
 
     #[test]
     fn many_oversized_allocations_in_one_arena() {
@@ -1120,10 +1039,7 @@ mod large_alloc {
         use bytesbuf::mem::Memory;
         let arena = Arena::new();
         let _buf = arena.reserve(OVER_CHUNK);
-        // The reserve call returned without panicking, which is the
-        // observable that demonstrates the oversized shared path is
-        // working — previously it would have spun in `refill_shared`
-        // until OOM or hit `expect("arena allocation failed")`.
+        // Returning proves the oversized shared path terminates.
     }
 }
 
@@ -1458,9 +1374,7 @@ mod fast_path_correctness {
         assert!(arena.stats().oversized_chunks_allocated >= 1);
     }
 
-    /// A Droppable type — allocating it uses the `DropEntry` path (line 319-325 in arena.rs).
-    /// If alignment math is corrupted (e.g., + → *), the bump pointer advances far too fast,
-    /// and far fewer items fit in a single chunk.
+    /// A value that requires a `DropEntry`.
     #[cfg(feature = "stats")]
     struct Droppable(u64);
     #[cfg(feature = "stats")]
@@ -1474,10 +1388,7 @@ mod fast_path_correctness {
     #[cfg(feature = "stats")]
     #[test]
     fn drop_items_pack_efficiently_in_chunk() {
-        // Each Droppable(u64) needs DropEntry (32 bytes) + value (8 bytes)
-        // = ~40 bytes. The smallest chunk class (1 KiB) leaves about
-        // 768 usable bytes after the header, so ~19 items fit. With the
-        // + → * mutation, only 2-3 items would fit.
+        // The smallest chunk must fit at least ten values and their entries.
         let arena = Arena::builder().build();
         let _prime = arena.alloc(Droppable(0));
         let initial_chunks = arena.stats().normal_chunks_allocated;
@@ -1487,8 +1398,6 @@ mod fast_path_correctness {
             assert_eq!(r.0, count);
             count += 1;
         }
-        // With correct math we should fit at least 10 items per 1 KiB
-        // chunk; mutated multiplicative math would fit 2–3.
         assert!(
             count > 10,
             "Only {count} Droppable items fit in chunk — alignment math may be corrupted"
@@ -1539,8 +1448,6 @@ mod allocator_impl {
 
     #[test]
     fn allocator_shrink_in_place_path() {
-        // shrink is called internally by Vec when capacity reduces.
-        // Exercise that no UB arises from the typical reserve/clear cycle.
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<u32>();
         v.extend(0..50_u32);
@@ -1595,18 +1502,7 @@ mod mutants_for_chunk_provider {
     #[cfg(feature = "stats")]
     #[test]
     fn reserve_budget_admits_exact_fit() {
-        // The chunk-provider charges `header_bytes + payload_bytes` per chunk.
-        // We don't know `header_bytes` exactly, but the smallest cacheable
-        // payload is 512 bytes. Using `with_capacity(512)` forces a
-        // single 512-byte chunk preallocation; once that is reserved, the
-        // running total equals (header + 512). Choosing the byte_budget
-        // equal to that total exercises the boundary.
-        //
-        // We discover `header + 512` by first building with an effectively
-        // infinite budget and reading `total_bytes_allocated`-equivalent
-        // stats. The arena exposes preallocation through stats, so we run
-        // a probe build to learn the total chunk byte cost, then build a
-        // second arena with budget == exact total.
+        // Match the budget to one preallocated 512-byte chunk plus its header.
         let probe = Arena::builder().byte_budget(1024 * 1024).with_capacity(512).build();
         assert_eq!(probe.stats().normal_chunks_allocated, 1);
         drop(probe);
@@ -1653,10 +1549,8 @@ mod mutants_for_chunk_provider {
         struct Block([u64; 512]); // 4096 bytes exactly
         let _b = arena.alloc_box(Block([0_u64; 512]));
         let s = arena.stats();
-        // A boundary-sized value still consumes a chunk (its worst-case
-        // payload includes alignment slack, so it routes to a one-shot
-        // oversized chunk). The local/chunk distinction this test
-        // originally drew no longer exists after chunk unification.
+        // Alignment slack may route this boundary-sized value to a one-shot
+        // chunk, but it must allocate successfully.
         assert!(s.normal_chunks_allocated + s.oversized_chunks_allocated >= 1);
     }
 
@@ -1856,10 +1750,7 @@ mod mutants_for_internal {
     #[test]
     fn to_thin_ptr_returns_chunk_address() {
         let arena = Arena::builder().with_capacity(1024).with_capacity(2048).build();
-        // We requested capacity twice. The second call overrides the first
-        // (builder is fluent), so we expect one preallocated chunk of
-        // class >= the requested bytes. We just check that arcs use the
-        // cached chunk.
+        // The final capacity setting supplies a cached chunk for the Arc.
         let prealloc = arena.stats().normal_chunks_allocated;
         assert!(prealloc >= 1);
         // One arc should reuse the cache — counter should not grow.
@@ -1919,11 +1810,6 @@ mod mutants_for_kill_boundaries {
     const MAX_NORMAL_ALLOC: usize = 16 * 1024;
     const PREFIX_BYTES: usize = core::mem::size_of::<usize>();
 
-    // ---------------------------------------------------------------------------
-    // alloc_str.rs:251 — `if total > max_normal_alloc` in `try_alloc_str_prefixed_local`.
-    // Kills `>` → `>=` at the exact boundary `total == max_normal_alloc`.
-    // ---------------------------------------------------------------------------
-
     #[test]
     fn alloc_str_box_at_boundary_takes_inner_path_not_outer_oversized() {
         let arena = Arena::new();
@@ -1936,10 +1822,6 @@ mod mutants_for_kill_boundaries {
         assert_eq!(s.oversized_chunks_allocated, 0);
     }
 
-    // ---------------------------------------------------------------------------
-    // alloc_str.rs:288 — same boundary in `try_alloc_str_prefixed_shared`.
-    // ---------------------------------------------------------------------------
-
     #[test]
     fn alloc_str_arc_at_boundary_takes_inner_path_not_outer_oversized() {
         let arena: Arena = Arena::new();
@@ -1951,10 +1833,6 @@ mod mutants_for_kill_boundaries {
         assert!(s.normal_chunks_allocated + s.oversized_chunks_allocated >= 1);
     }
 
-    // Past-boundary sanity check: also catches `> → ==` and `> → <` mutants on
-    // the same line (both make the routing false for strictly-greater inputs,
-    // causing the fast path to fail).
-
     #[test]
     fn alloc_str_arc_past_boundary_uses_oversized() {
         let arena: Arena = Arena::new();
@@ -1964,14 +1842,6 @@ mod mutants_for_kill_boundaries {
         assert_eq!(arc.len(), len);
         assert!(arena.stats().oversized_chunks_allocated >= 1);
     }
-
-    // ---------------------------------------------------------------------------
-    // alloc_utf16.rs:25 — `if total > max_normal_alloc` in `try_alloc_utf16_prefixed_local`.
-    // ---------------------------------------------------------------------------
-
-    // ---------------------------------------------------------------------------
-    // alloc_utf16.rs:63 — same boundary in `try_alloc_utf16_prefixed_shared`.
-    // ---------------------------------------------------------------------------
 
     #[cfg(feature = "utf16")]
     #[test]
@@ -2000,20 +1870,10 @@ mod mutants_for_kill_boundaries {
         assert!(arena.stats().oversized_chunks_allocated >= 1);
     }
 
-    // ---------------------------------------------------------------------------
-    // alloc_str.rs:200 — `if len > self.provider.max_normal_alloc` in
-    // `impl_alloc_str_inner` (the simple-reference `alloc_str` path).
-    // Kills `>` → `>=` at `len == max_normal_alloc`.
-    // ---------------------------------------------------------------------------
-
     #[test]
     fn alloc_str_simple_ref_at_max_normal_alloc_boundary_takes_inner_path() {
-        // Use a non-power-of-two `max_normal_alloc` so the rounded chunk
-        // class capacity strictly exceeds the boundary `len`. Then a
-        // 1-byte follow-on alloc fits in the same chunk under the
-        // original `>` semantics, but forces a refill under the `>=`
-        // mutant (which pins the boundary chunk into the simple-ref pin
-        // list, leaving `current` empty).
+        // A non-power-of-two threshold leaves room for the follow-on byte in
+        // the same normal chunk.
         let arena = Arena::builder().max_normal_alloc(5000).build();
         let _ = arena.alloc_str("x".repeat(5000));
         let _ = arena.alloc_str("y");
@@ -2026,34 +1886,16 @@ mod mutants_for_kill_boundaries {
 
     #[test]
     fn alloc_str_simple_ref_past_max_normal_alloc_uses_oversized() {
-        // Past-boundary sanity: kills `> → <` / `> → ==` on the same line
-        // — any flip leaves the oversized path unused for a strictly
-        // larger string, breaking the no-cap promise of `alloc_str`.
         let arena = Arena::builder().max_normal_alloc(5000).build();
         let _ = arena.alloc_str("x".repeat(5001));
         assert!(arena.stats().oversized_chunks_allocated >= 1);
     }
 
-    // ---------------------------------------------------------------------------
-    // alloc_utf16.rs:63 — `if total > max_normal_alloc` in
-    // `try_alloc_utf16_prefixed_shared` for sizes past `MAX_CHUNK_BYTES`.
-    // Kills `>` → `<` on inputs where the mutant would route through
-    // `refill_shared`, which rejects `total > MAX_CHUNK_BYTES` outright.
-    // ---------------------------------------------------------------------------
-
     #[cfg(feature = "utf16")]
     #[test]
     fn alloc_utf16_str_arc_above_max_chunk_bytes_uses_oversized() {
         use widestring::Utf16Str;
-        // Shrink `max_normal_alloc` to its minimum (4 KiB) so a small
-        // (4 KiB + 1)-byte payload triggers the oversized routing
-        // without having to actually copy 80 KiB under Miri. The
-        // mutation under test is `min_payload > max_normal_alloc`
-        // → `<` in `ChunkProvider::acquire_shared`: with `<`, a
-        // request in the gap `(max_normal_alloc, MAX_CHUNK_BYTES]`
-        // wrongly routes to the normal cache instead of oversized,
-        // and `oversized_chunks_allocated == 0` fails the
-        // assertion.
+        // Use the minimum threshold to keep the oversized Miri workload small.
         let arena: Arena = Arena::builder().max_normal_alloc(4096).build();
         // 2049 u16s = 4098 payload bytes, strictly above 4 KiB.
         let len_u16 = 2049_usize;
@@ -2063,13 +1905,6 @@ mod mutants_for_kill_boundaries {
         assert_eq!(arc.len(), len_u16);
         assert!(arena.stats().oversized_chunks_allocated >= 1);
     }
-
-    // ---------------------------------------------------------------------------
-    // inner_value.rs:805 — `if cur_chunk_addr != chunk_addr` chunk-eviction check
-    // in `impl_alloc_inner_with`. Mutant `==` would take the eviction path when
-    // chunks are equal (the common no-eviction case), corrupting state. Any
-    // `alloc_with` of `T: Drop` exercises this check.
-    // ---------------------------------------------------------------------------
 
     #[test]
     fn alloc_with_drop_type_no_eviction_returns_correct_value() {
@@ -2082,46 +1917,19 @@ mod mutants_for_kill_boundaries {
         assert_eq!(r.0, 0x1234_5678_9abc_def0);
     }
 
-    // ---------------------------------------------------------------------------
-    // internals.rs:302 — `align_up`'s arithmetic mutations.
-    // `value.saturating_add(align - 1) & !(align - 1)` —
-    // mutants `- → +/`/`, `& → |/^` would all return wrong aligned values
-    // for any `value` that isn't already aligned. Allocate a `u128`
-    // (align=16) right after a `u8` to force a non-trivial alignment step.
-    // ---------------------------------------------------------------------------
-
     #[test]
     fn align_up_used_by_oversized_dst_alloc_produces_aligned_pointer() {
         use allocator_api2::alloc::{Allocator, Layout};
 
-        // Going through `&Arena as Allocator::allocate` reaches
-        // `Arena::allocate_layout` (in `arena/primitives.rs`), which is
-        // the call site that uses the standalone `align_up` helper.
-        // (The slice / value fast paths inline the same arithmetic via
-        // `try_bump_fit`, not via `align_up`.)
         let arena: Arena = Arena::new();
         let allocator: &Arena = &arena;
-        // A 16-byte-aligned, 48-byte layout. Original `align_up` rounds
-        // the chunk's data pointer up to a 16-aligned address; the
-        // `& → |/^` and `- → +/`/` mutants compute the wrong mask and
-        // return an address whose low 4 bits are non-zero.
         let layout = Layout::from_size_align(48, 16).unwrap();
         let p = allocator.allocate(layout).unwrap();
         let addr = p.as_ptr().cast::<u8>() as usize;
         assert_eq!(addr % 16, 0, "align_up must produce a 16-aligned pointer");
-        // Deallocate so the chunk reclaims its refcount; otherwise Miri (and
-        // any leak-aware allocator) would flag the chunk as leaked.
         // SAFETY: `p` came from `allocator.allocate(layout)` with the same layout.
         unsafe { allocator.deallocate(p.cast(), layout) };
     }
-
-    // ---------------------------------------------------------------------------
-    // alloc_utf16.rs:25 / :63 — `> → <` mutation: at boundary `total < max_normal_alloc`
-    // the original `>` is false (fast path, normal chunk); the `<` mutant is
-    // true and routes to the outer oversized helper → an oversized chunk gets
-    // allocated even though a normal chunk would have served. Detect via the
-    // `oversized_*_chunks_allocated` counters.
-    // ---------------------------------------------------------------------------
 
     #[cfg(feature = "utf16")]
     #[test]
@@ -2138,9 +1946,6 @@ mod mutants_for_kill_boundaries {
             "small utf16 alloc must take the fast path, not the outer oversized helper (shared)"
         );
     }
-
-    // Mirror small-alloc tests for `alloc_str_rc/_box/_arc` so the `> → <`
-    // mutation on those boundary checks is also caught.
 
     #[test]
     fn alloc_str_box_small_stays_in_normal_chunk() {
@@ -2165,14 +1970,6 @@ mod mutants_for_kill_boundaries {
             "small str alloc must take the fast path (shared)"
         );
     }
-
-    // ---------------------------------------------------------------------------
-    // owned_in_chunk.rs:82 / :128 — `Drop` impls of `OwnedIn{Local,Shared}Chunk`
-    // release one chunk refcount. The mutant replaces the body with `()` so the
-    // refcount stays bumped → chunk leaks. Detect via `total_bytes_allocated`
-    // staying nonzero (chunk never freed) plus a follow-up alloc that has to
-    // allocate a NEW chunk (because the leaked one keeps the cache empty).
-    // ---------------------------------------------------------------------------
 
     #[test]
     fn drop_of_owned_in_chunk_decrements_refcount_releases_chunk() {
@@ -2223,10 +2020,6 @@ mod coverage_arena_gaps {
     #[derive(Clone, Copy)]
     struct ChunkAlign;
 
-    // ============================================================================
-    // alloc_value.rs:319 — `try_alloc` (simple reference) success path.
-    // ============================================================================
-
     #[test]
     fn try_alloc_simple_ref_returns_mutable_reference() {
         let arena = Arena::<Global>::new();
@@ -2236,28 +2029,12 @@ mod coverage_arena_gaps {
         assert_eq!(*r, 7);
     }
 
-    // ============================================================================
-    // alloc_uninit.rs:231,233,235 — `try_alloc_uninit_arc` success path.
-    // The existing coverage tests only exercise the failure paths
-    // (failing-allocator and over-aligned).
-    // ============================================================================
-
     #[test]
     fn try_alloc_uninit_arc_succeeds() {
         let arena = Arena::<Global>::new();
         let arc = arena.try_alloc_uninit_arc::<u32>().unwrap();
-        // Just checking that the Arc is well-formed. The MaybeUninit's
-        // content is not initialized; dropping the Arc only releases the
-        // chunk slot via `noop_drop_shim`.
         drop(arc);
     }
-
-    // ============================================================================
-    // inner_value.rs:43, 83–114 — `try_alloc_inner_arc_with` `needs_drop` branch.
-    // The integration suite tests `try_alloc_arc` only with `!needs_drop`
-    // types (`u32` etc.), so the `entry_size > 0` arc fast path is
-    // unobserved.
-    // ============================================================================
 
     #[cfg(feature = "std")]
     #[test]
@@ -2284,13 +2061,6 @@ mod coverage_arena_gaps {
         );
     }
 
-    // ============================================================================
-    // inner_value.rs:50 — `try_alloc_inner_arc_with` oversized routing.
-    // Exercises `try_alloc_inner_arc_oversized_with` via the try-Arc
-    // surface (the existing oversized arc tests use the `alloc_arc`
-    // panicking wrapper, which routes through a different function).
-    // ============================================================================
-
     #[test]
     fn try_alloc_arc_oversized_value_succeeds() {
         let arena = Arena::<Global>::new();
@@ -2299,10 +2069,6 @@ mod coverage_arena_gaps {
         assert_eq!(arc[69_999], 7);
     }
 
-    // ============================================================================
-    // inner_value.rs:147 — `alloc_inner_arc_with_or_panic` over-alignment panic.
-    // ============================================================================
-
     #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
@@ -2310,12 +2076,6 @@ mod coverage_arena_gaps {
         let arena = Arena::<Global>::new();
         let _ = arena.alloc_arc_with::<HalfChunkAlign, _>(|| HalfChunkAlign);
     }
-
-    // ============================================================================
-    // inner_value.rs:770 — `try_alloc_inner_with` oversized routing.
-    // The closure form ensures we exercise `try_alloc_inner_with` itself
-    // rather than the by-value `try_alloc_inner_value` path.
-    // ============================================================================
 
     #[test]
     fn try_alloc_with_oversized_value_succeeds() {
@@ -2494,21 +2254,6 @@ mod coverage_arena_gaps {
         assert_eq!(arc[2047], 2047);
     }
 
-    // ============================================================================
-    // inner_value.rs:481 — `alloc_inner_value_or_panic` over-alignment
-    // panic. Reached via the by-value `alloc`/`alloc_rc`/`alloc_box`
-    // entry points. Using a ZST with high alignment keeps the value's
-    // stack footprint at zero bytes so the Windows chkstk-on-large-align
-    // hazard that blocks the `Drop`-typed `TooAligned` tests in
-    // `coverage_more.rs` does not apply.
-    // ============================================================================
-
-    // ============================================================================
-    // inner_value.rs:39 — `try_alloc_inner_arc_with` over-alignment err path.
-    // Closure form avoids placing a high-alignment value on the test
-    // stack frame (the guard fires before the closure is invoked).
-    // ============================================================================
-
     #[cfg(not(utc_backend))]
     #[test]
     fn try_alloc_arc_with_over_aligned_returns_err() {
@@ -2516,14 +2261,6 @@ mod coverage_arena_gaps {
         let res = arena.try_alloc_arc_with::<HalfChunkAlign, _>(|| HalfChunkAlign);
         assert!(res.is_err());
     }
-
-    // ============================================================================
-    // inner_value.rs:1000–1011 — `alloc_inner_with_or_panic`
-    // closure-induced eviction commit path. A reentrant allocation that
-    // fills the current chunk during the closure forces a refill
-    // that evicts the chunk the outer allocation reserved on; the outer
-    // then takes the cold `commit_alloc_after_eviction` branch.
-    // ============================================================================
 
     #[cfg(feature = "std")]
     #[test]
@@ -2584,11 +2321,6 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_arc::<u8>(0);
     }
 
-    // ============================================================================
-    // inner_slice.rs:788 — `alloc_slice_local_copy_or_panic` panics when
-    // the cold-refill path returns `Err`. Exercised with
-    // `FailingAllocator` configured to fail after the first chunk.
-    // ============================================================================
     #[cfg(feature = "std")]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
@@ -2671,18 +2403,8 @@ mod from_mutants_extras_stats {
     fn oversized_shared_guard_drop_releases_on_panic() {
         // Each oversized arc below uses an 8 KiB blob (1024 u64s) which
         // is still > max_normal_alloc(4096) and so routes oversized.
-        // The byte budget is sized to fit exactly one chunk plus a small
-        // overhead — *not* two. With the guard's drop running, the
-        // panicked chunk's bytes are released and the second arc fits;
-        // with the drop no-op'd, the budget is exhausted and the second
-        // try_alloc returns AllocError.
-        //
-        // We deliberately keep the payload modest so debug-build callers
-        // (e.g. `cargo careful`) don't stack-overflow on the closure's
-        // by-value return type before the panic-on-drop guard logic runs.
-        //
-        // Tight byte_budget — accommodates exactly one 8 KiB oversized
-        // chunk + header overhead, not two.
+        // The budget fits one modest oversized chunk, requiring panic cleanup
+        // before the next allocation.
         let arena = Arena::builder().byte_budget(18 * 1024).max_normal_alloc(4096).build();
 
         // Trigger the panic-during-init oversized path on the Arc/Box.
@@ -2875,11 +2597,7 @@ mod from_mutants_extras_stats {
 
     #[test]
     fn vec_realloc_first_growth_does_not_count_as_relocation() {
-        // The first realloc happens when `old_cap == 0` (allocating the
-        // initial buffer). The `if old_cap > 0` gate prevents counting this
-        // as a relocation. Mutants that change the guard to `>=` or `==`
-        // would either count the initial alloc as a relocation or skip a
-        // real one.
+        // Initial buffer allocation is not a relocation.
         let arena = Arena::new();
         let mut v: ArenaVec<'_, u32> = arena.alloc_vec();
         v.push(0);
@@ -2902,10 +2620,6 @@ mod from_mutants_extras_stats {
         // After this resize, the vec's capacity must be >= 4.
         v.resize_with(4, || 99_u8);
         assert_eq!(v.as_slice(), &[0_u8, 99, 99, 99]);
-        // The Vec only requested `new_len - self.len == 3` extra bytes.
-        // With the mutant `new_len + self.len == 5` would over-allocate
-        // (harmless but technically different). Hard to detect
-        // deterministically — capacity is amortized to a power of 2.
     }
 
     #[test]
@@ -2984,8 +2698,6 @@ mod from_mutants_extras_stats {
         for _ in 0..4 {
             let _filler: Arc<core::mem::MaybeUninit<[u8; 8 * 1024]>> = arena.alloc_uninit_arc::<[u8; 8 * 1024]>();
         }
-        // A short burst still exercises the small-allocation slow refill path
-        // at the peak chunk class.
         for i in 0_u32..16 {
             let _a: Arc<u32> = arena.alloc_arc(i);
         }
@@ -3107,8 +2819,7 @@ mod oversized_routing {
         assert!(after_oversized > before_oversized);
     }
 
-    // Vec::shrink_to_fit boundary: total < mna must reclaim (catches `==`/`>=`
-    // mutants that would early-return at total == mna and below).
+    // A normal buffer strictly below the threshold may reclaim its tail.
     #[test]
     fn shrink_to_fit_reclaims_strictly_below_max_normal_alloc() {
         let mna = 4 * 1024;
@@ -3126,19 +2837,11 @@ mod oversized_routing {
         assert_eq!(v.capacity(), v.len(), "Vec strictly below max_normal_alloc must reclaim tail");
     }
 
-    // Post-reset cache reuse for the floor-bump `==`/`<` mutants on
-    // chunk_provider:219. With the mutant in effect, the floor never
-    // advances (or only at no-op intervals), so post-reset the cache
-    // holds chunks of mixed (smaller) classes. A subsequent alloc at the
-    // saturated class then pops a smaller chunk, fails to fit, refills
-    // → allocates a fresh chunk. Original code: post-reset alloc at the
-    // saturated class pops a class-7 chunk and reuses it (no fresh alloc).
+    // The cache floor preserves reusable saturated-class chunks after reset.
     #[test]
     fn local_cache_floor_advances_so_post_reset_alloc_reuses_chunk() {
         let mut arena = Arena::new();
-        // Drive next_local_class up to its saturated value by issuing enough
-        // local refills. Each `alloc_str` of a string larger than the current
-        // chunk forces a refill and advances the ratchet.
+        // Repeated refills saturate the class ratchet.
         let stride = 1024_usize;
         for _ in 0..8 {
             let s = "y".repeat(stride);
@@ -3146,22 +2849,9 @@ mod oversized_routing {
         }
         let before_reset = arena.stats().normal_chunks_allocated;
         arena.reset();
-        // After reset, retired_local clears → chunks go to cache. Floor
-        // should equal the saturated class so only saturated-class chunks
-        // are retained (smaller ones returned to system).
-        //
-        // Allocate a single small value: the refill triggers acquire_local
-        // at the saturated ratchet class. With the original code, the
-        // cache pops a saturated-class chunk → no fresh allocation.
-        // With `<` / `==` mutants, the floor never grew → cache holds
-        // mixed-class chunks → pop returns one but it might be too small
-        // → refill spin → MORE fresh allocations.
+        // Reset caches only chunks at or above the saturated floor.
         let _ = arena.alloc(0_u8);
         let after_reset = arena.stats().normal_chunks_allocated;
-        // The fresh-alloc count should NOT explode after the small alloc.
-        // Original: at most 1 additional fresh alloc (cache miss for the
-        // saturated class). Mutant: many more as the alloc spins through
-        // smaller cached chunks that don't fit subsequent refills.
         assert!(
             after_reset - before_reset <= 1,
             "post-reset alloc must reuse cached saturated-class chunk; got {} fresh allocs (kills floor-bump mutants)",
@@ -3432,7 +3122,7 @@ mod allocator_impl_paths {
     }
 
     #[test]
-    fn arena_as_allocator_grow_copies_overlap() {
+    fn arena_as_allocator_grow_in_place_preserves_prefix() {
         let arena: Arena<Global> = Arena::new();
         let alloc = &arena;
         let old = Layout::from_size_align(8, 1).unwrap();
@@ -3447,8 +3137,9 @@ mod allocator_impl_paths {
         let new = Layout::from_size_align(32, 1).unwrap();
         // SAFETY: nn was returned by Self::allocate with `old` layout.
         let grown = unsafe { alloc.grow(nn.cast::<u8>(), old, new).unwrap() };
-        // Verify the prefix was copied.
-        // SAFETY: grown is a fresh allocation of at least 32 bytes.
+        assert_eq!(grown.cast::<u8>(), nn.cast::<u8>(), "last allocation should grow in place");
+        // Verify the existing prefix remains intact.
+        // SAFETY: grown addresses the original allocation extended to 32 bytes.
         unsafe {
             for i in 0..8_u8 {
                 assert_eq!(*grown.cast::<u8>().as_ptr().add(usize::from(i)), i);
@@ -3810,8 +3501,7 @@ mod oversized_paths_coverage {
     #![allow(clippy::redundant_slicing, reason = "tests prefer explicit slicing")]
     use multitude::Arena;
 
-    // Drop wrapper so the slice/value allocators take their
-    // `needs_drop::<T>()` oversized arm (registers a drop entry).
+    // A drop type requires an entry on oversized paths.
     #[derive(Clone)]
     struct DropU64(u64);
     impl Drop for DropU64 {
@@ -3835,8 +3525,7 @@ mod oversized_paths_coverage {
         }
     }
 
-    // Verifies the oversized-local slice drop path *replays* destructors
-    // at arena teardown (correctness, not just coverage of the branch).
+    // Oversized-local slices replay destructors at arena teardown.
     #[test]
     fn alloc_slice_fill_with_oversized_drop_replays_destructors() {
         use core::sync::atomic::{AtomicUsize, Ordering};
@@ -4077,30 +3766,6 @@ mod alloc_drop_behavior {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    // --------------------------------------------------------------------
-    // A. Trait-impl mutants: hash forwarders and Pointer formatter.
-    // --------------------------------------------------------------------
-
-    // --------------------------------------------------------------------
-    // B/I. Builder defaults / preallocation paths / resolve_capacity.
-    // --------------------------------------------------------------------
-
-    // --------------------------------------------------------------------
-    // G. OversizedSharedGuard::drop — panic-recovery for arc-oversized.
-    // --------------------------------------------------------------------
-
-    // --------------------------------------------------------------------
-    // C/D/E. Drop-counter exhaustive coverage. Many missed mutants live in
-    // the allocation hot paths and corrupt either the bump
-    // cursor (`+ → -/*`), the drop-entry index/chain (`+1 → *1`), or the
-    // fit/refill comparisons (`> → >=/==`). A test that allocates many
-    // drop-tracking values, drops them, and asserts the exact count would
-    // fail under any of those mutations: a wrong `data_ptr`/`drop_back`
-    // segfaults; a wrong `drop_count` increment leaves entries unrun; a
-    // flipped fit comparison either drops allocations or oversteps the
-    // chunk.
-    // --------------------------------------------------------------------
-
     #[derive(Debug)]
     struct DropCounter(StdArc<AtomicUsize>);
 
@@ -4116,7 +3781,7 @@ mod alloc_drop_behavior {
         {
             let arena = Arena::new();
             let mut keep: std::vec::Vec<Arc<DropCounter>> = std::vec::Vec::new();
-            // 256 Arc allocations still exercise multiple chunks and the
+            // 256 Arc allocations span multiple chunks and the
             // same drop-entry paths this test is targeting.
             for _ in 0..256_u32 {
                 keep.push(arena.alloc_arc_with(|| DropCounter(counter.clone())));
@@ -4143,9 +3808,6 @@ mod alloc_drop_behavior {
                 _payload: [0; 4 * 1024],
                 token: DropCounter(counter.clone()),
             });
-            // Verify alignment: any pointer-arithmetic mutation that
-            // breaks the `align - 1` masking or the `aligned + size`
-            // end-address computation would land us off-alignment.
             let p: *const Big = std::ptr::from_ref::<Big>(&b);
             assert_eq!((p as usize) % 64, 0, "Big must be 64-byte aligned");
             drop(b);
@@ -4153,10 +3815,6 @@ mod alloc_drop_behavior {
         }
         assert_eq!(counter.load(Ordering::Relaxed), 1, "oversized Box's Drop must run");
 
-        // Same path for Arc (oversized shared): exercises the
-        // `try_alloc_inner_arc_oversized_with` match-guard at line 1185
-        // and the `OversizedSharedGuard` happy path (drop is forgotten on
-        // success).
         let counter2 = StdArc::new(AtomicUsize::new(0));
         {
             let arena = Arena::new();
@@ -4171,10 +3829,6 @@ mod alloc_drop_behavior {
         }
         assert_eq!(counter2.load(Ordering::Relaxed), 1);
     }
-
-    // --------------------------------------------------------------------
-    // H. align_offset — exercised transitively via oversized aligned alloc.
-    // --------------------------------------------------------------------
 
     #[test]
     fn oversized_high_alignment_drives_align_offset() {
@@ -4192,10 +3846,6 @@ mod alloc_drop_behavior {
         let p: *const Aligned128 = std::ptr::from_ref::<Aligned128>(&a);
         assert_eq!((p as usize) % 128, 0);
     }
-
-    // --------------------------------------------------------------------
-    // D. try_bump_fit boundary mutant.
-    // --------------------------------------------------------------------
 
     #[test]
     fn many_distinct_size_and_align_combinations_succeed() {
@@ -4328,37 +3978,6 @@ mod alloc_drop_behavior_2 {
         }
     }
 
-    // ============================================================
-    // constants.rs mutants
-    // ============================================================
-
-    // ============================================================
-    // drop_list.rs mutants — PAD_BYTES via mem::size_of::<DropEntry>
-    // ============================================================
-    //
-    // DropEntry is `(fn_ptr=8) + (u16 + u16) + _pad`. With pointer-alignment
-    // target = 8: RAW_USED=12; PAD_BYTES=4; size_of::<DropEntry>()=16.
-    //
-    // The mutants at line 49 change RAW_USED, which changes PAD_BYTES,
-    // which changes size_of::<DropEntry>(). Observe by allocating a
-    // known number of drop-tracked values: each consumes one DropEntry
-    // in the chunk's back-stack. If the entry size changes, the number
-    // of entries that fit in a 64 KiB chunk changes, which (for
-    // sufficient pressure) changes the number of fresh chunks the
-    // arena allocates.
-
-    // ============================================================
-    // arena_builder.rs mutants
-    // ============================================================
-
-    // ============================================================
-    // chunk_provider.rs mutants
-    // ============================================================
-
-    // ============================================================
-    // arena.rs mutants
-    // ============================================================
-
     #[test]
     fn arc_drop_count_increments_on_each_alloc() {
         let counter = StdArc::new(AtomicUsize::new(0));
@@ -4414,11 +4033,7 @@ mod alloc_drop_behavior_2 {
         let a: &multitude::Arena = &arena;
         let layout = Layout::from_size_align(4096, 64).unwrap();
         let mut allocations = std::vec::Vec::new();
-        // Enough iterations to force chunk grows (each chunk holds
-        // ~15 × 4 KiB before refill at max class), but small enough that
-        // Miri completes promptly. A `+ → -` mutation under-refills on
-        // the very first high-alignment request, so a short burst still
-        // catches it.
+        // This count forces refill while keeping Miri runtime bounded.
         for _ in 0..32 {
             let ptr = a.allocate(layout).unwrap();
             let addr = ptr.as_ptr() as *const u8 as usize;
@@ -4601,17 +4216,8 @@ mod alloc_hot_path_behavior {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    // =====================================================================
-    // Helper: a type that needs Drop and is Send+Sync (for Arc allocs)
-    // =====================================================================
     thread_local! {
-        /// Per-test drop counter. `libtest` runs each test on its own
-        /// thread, and these tests perform every `DropTracker`/arena drop on
-        /// that same thread, so a thread-local counter is naturally isolated
-        /// per test. This replaces an earlier global counter plus serializing
-        /// mutex, which was order-sensitive: a test that dropped a
-        /// `DropTracker`-bearing arena *after* releasing the mutex could bump
-        /// the next test's count, producing flaky cross-test failures.
+        /// Per-test thread-local drop counter.
         static DROP_COUNTER: Cell<usize> = const { Cell::new(0) };
     }
 
@@ -4650,10 +4256,6 @@ mod alloc_hot_path_behavior {
         DROP_COUNTER.with(Cell::get)
     }
 
-    // =====================================================================
-    // arena.rs — try_alloc_inner_arc_with slow-path mutants
-    // =====================================================================
-
     #[test]
     fn arena_709_entry_size_gt_zero_arc_with() {
         let _guard = reset_drop_counter();
@@ -4671,14 +4273,9 @@ mod alloc_hot_path_behavior {
     #[cfg(feature = "stats")]
     fn arena_728_size_eq_max_normal_alloc_arc() {
         let _guard = reset_drop_counter();
-        // Default max_normal_alloc is large. Use a small budget to force
-        // the boundary. The default ArenaBuilder sets max_normal_alloc
-        // based on chunk size. We just allocate something and check stats.
         let arena = Arena::builder().build();
-        // Allocate a small arc with drop — exercises the normal path
         let _a1 = arena.alloc_arc_with(|| DropTracker(1));
         let _a2 = arena.alloc_arc_with(|| DropTracker(2));
-        // Both should succeed through normal path, not oversized
         let stats = arena.stats();
         assert_eq!(
             stats.oversized_chunks_allocated, 0,
@@ -4690,7 +4287,6 @@ mod alloc_hot_path_behavior {
     fn arena_731_needed_computation_arc_with() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Fill several arcs to force slow-path refill
         let mut keep = Vec::new();
         for i in 0..100 {
             keep.push(arena.alloc_arc_with(|| DropTracker(i)));
@@ -4701,14 +4297,9 @@ mod alloc_hot_path_behavior {
         assert_eq!(drops, 100, "all 100 DropTrackers must be dropped");
     }
 
-    // =====================================================================
-    // arena.rs — try_alloc_inner_slow_value mutants (1085, 1089, 1101)
-    // =====================================================================
-
     #[test]
     fn arena_1251_oversized_shared_guard_drop() {
         let _guard = reset_drop_counter();
-        // Force oversized path for shared (arc) allocations
         let arena = Arena::builder().max_normal_alloc(4096).build();
         #[repr(C)]
         struct LargeArcDrop {
@@ -4750,18 +4341,12 @@ mod alloc_hot_path_behavior {
         }
     }
 
-    // =====================================================================
-    // arena.rs — slice allocation mutants
-    // =====================================================================
-
     #[test]
     fn arena_2261_slice_local_and_to_or() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Allocate a zero-length slice of a Drop type (reference)
         let empty = arena.alloc_slice_fill_with(0, |_| DropTracker(0));
         assert_eq!(empty.len(), 0);
-        // Allocate a non-empty slice of a non-Drop type (no drop_fn)
         let nums = arena.alloc_slice_fill_with(10, |i| i as u32);
         assert_eq!(nums.len(), 10);
         for (i, v) in nums.iter().enumerate() {
@@ -4772,41 +4357,28 @@ mod alloc_hot_path_behavior {
     #[test]
     fn arena_2266_slice_len_boundary() {
         let arena = Arena::new();
-        // Non-Drop type, len > u16::MAX — should succeed (no drop entry needed)
-        // Use a tiny type to avoid OOM
         let big_len = u16::MAX as usize + 1;
         let result = arena.try_alloc_slice_fill_with(big_len, |i| i as u8);
-        // This may fail due to memory, but should not fail due to the len check
-        // when entry_size == 0. If it fails, it's AllocError from memory, not the len check.
-        // Let's use a smaller test: verify that exactly u16::MAX works for Drop types.
         let arena2 = Arena::new();
-        // len == u16::MAX with Drop type — should succeed (not > u16::MAX)
-        // This would be too much memory, so let's verify the boundary differently.
-        // Actually test len == 0 with Drop type (entry_size should be 0 when len == 0)
         let empty_drop = arena2.alloc_slice_fill_with(0, |_| DropTracker(0));
         assert_eq!(empty_drop.len(), 0);
 
-        // Test len == 1 with Drop type — should succeed
         let _guard = reset_drop_counter();
         let one_drop = arena2.alloc_slice_fill_with(1, |_| DropTracker(42));
         assert_eq!(one_drop.len(), 1);
-        // Just verify the allocation is fine
         drop(result);
     }
 
     #[test]
     fn arena_2655_shared_slice_and_to_or() {
         let arena = Arena::new();
-        // Allocate empty shared (arc) slice of Drop type
         let _guard = reset_drop_counter();
         let empty_arc = arena.alloc_slice_fill_with_arc(0, |_| DropTracker(0));
         assert_eq!(empty_arc.len(), 0);
         drop(empty_arc);
-        // No drops should have occurred for empty slice
         let drops = drops();
         assert_eq!(drops, 0, "empty arc slice should not drop any elements");
 
-        // Allocate non-empty shared slice of non-Drop type
         let nums_arc = arena.alloc_slice_fill_with_arc(5, |i| i as u64);
         assert_eq!(nums_arc.len(), 5);
     }
@@ -4814,7 +4386,6 @@ mod alloc_hot_path_behavior {
     #[test]
     fn arena_2660_shared_slice_len_boundary() {
         let arena = Arena::new();
-        // Drop type, len == 1 via arc — should succeed (len <= u16::MAX)
         let _guard = reset_drop_counter();
         let one = arena.alloc_slice_fill_with_arc(1, |_| DropTracker(99));
         assert_eq!(one.len(), 1);
@@ -4828,7 +4399,6 @@ mod alloc_hot_path_behavior {
     fn arena_2701_shared_slice_entry_size_guard() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Allocate multiple shared slices with Drop to exercise drop_back advancement
         let mut keep = Vec::new();
         for _ in 0..20 {
             keep.push(arena.alloc_slice_fill_with_arc(3, |i| DropTracker(i as u64)));
@@ -4855,7 +4425,6 @@ mod alloc_hot_path_behavior {
     fn arena_2739_refill_shared_entry_size_check() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Force the slow refill path by filling the chunk
         let mut keep = Vec::new();
         for _ in 0..100 {
             keep.push(arena.alloc_slice_fill_with_arc(3, |i| DropTracker(i as u64)));
@@ -4866,39 +4435,21 @@ mod alloc_hot_path_behavior {
         assert_eq!(drops, 300, "100 * 3 = 300 drops");
     }
 
-    // =====================================================================
-    // chunk_provider.rs mutants
-    // =====================================================================
-
     #[test]
     fn chunk_provider_133_reserve_budget_boundary() {
-        // Set byte_budget so that exactly one default chunk fits.
-        // The first allocation should succeed. If `>` becomes `>=`,
-        // even the first allocation might fail.
         let arena = Arena::builder().byte_budget(256 * 1024).build();
-        // Should succeed - within budget
         let _v = arena.alloc(42u64);
     }
 
     #[test]
     fn chunk_provider_441_shared_header_plus_target() {
         let arena = Arena::builder().byte_budget(512 * 1024).build();
-        // Allocate shared (arc) values — each triggers acquire_shared
         let _a1 = arena.alloc_arc(1u64);
         let _a2 = arena.alloc_arc(2u64);
-        // If `+` became `*`, the budget would be consumed much faster
-        // and these allocations would likely fail or the budget check would
-        // prevent them.
     }
-
-    // =====================================================================
-    // constants.rs mutants
-    // =====================================================================
 
     #[test]
     fn constants_76_min_class_ge_to_lt() {
-        // Allocating a large value forces acquire_local with a large payload
-        // that exercises min_class_for_bytes near MAX_CHUNK_BYTES.
         let arena = Arena::new();
         let big = vec![0u8; 64 * 1024];
         let _alloc = arena.alloc_slice_copy(&big);
@@ -4907,24 +4458,9 @@ mod alloc_hot_path_behavior {
     #[test]
     #[cfg(feature = "stats")]
     fn constants_87_loop_boundary() {
-        // Allocate a value that lands on a power-of-two class boundary.
-        // min_class_for_bytes(MIN_CHUNK_BYTES * 2) should return 1.
-        // If `<` becomes `<=`, it returns 2 instead.
-        // We can observe this through stats: with a tight budget,
-        // a higher class means a larger chunk allocation.
         let arena = Arena::builder().byte_budget(128 * 1024).build();
         let _v = arena.alloc(42u64);
-        // The allocation should succeed. If the class is wrong,
-        // the chunk might be too large and blow the budget.
     }
-
-    // =====================================================================
-    // drop_list.rs mutants
-    // =====================================================================
-
-    // =====================================================================
-    // local_chunk.rs / chunk.rs mutants
-    // =====================================================================
 
     #[test]
     fn chunk_143_max_bump_extent() {
@@ -4941,7 +4477,6 @@ mod alloc_hot_path_behavior {
     #[test]
     fn chunk_168_to_thin_ptr() {
         let arena = Arena::new();
-        // Allocate and drop arcs to trigger chunk caching (which uses to_thin_ptr)
         for _ in 0..5 {
             let mut batch = Vec::new();
             for i in 0u64..50 {
@@ -4949,8 +4484,6 @@ mod alloc_hot_path_behavior {
             }
             drop(batch);
         }
-        // If to_thin_ptr returned null, the cache would be broken and
-        // subsequent allocations would fail or crash.
         let final_arc = arena.alloc_arc(42u64);
         assert_eq!(*final_arc, 42);
     }
@@ -4959,8 +4492,6 @@ mod alloc_hot_path_behavior {
     fn chunk_186_payload_rounding() {
         let _guard = reset_drop_counter();
         let arena = Arena::new();
-        // Allocate arc values with Drop to exercise the chunk allocation
-        // with proper payload rounding for drop entries
         let mut keep = Vec::new();
         for i in 0..50 {
             keep.push(arena.alloc_arc_with(|| DropTracker(i)));
@@ -4971,26 +4502,15 @@ mod alloc_hot_path_behavior {
         assert_eq!(drops, 50, "all 50 shared DropTrackers must drop");
     }
 
-    // =====================================================================
-    // strings/string.rs mutants
-    // =====================================================================
-
     #[test]
     fn string_465_try_reserve_boundary() {
         let arena = Arena::new();
         let mut s = arena.alloc_string_with_capacity(10);
-        // Reserve exactly the remaining capacity
         s.try_reserve(10).unwrap(); // needed == cap, should not grow
-        // Now push exactly 10 bytes
         s.push_str("1234567890");
         assert_eq!(s.as_str(), "1234567890");
-        // Reserve 0 more — should be no-op
         s.try_reserve(0).unwrap();
     }
-
-    // =====================================================================
-    // strings/utf16_string.rs mutants
-    // =====================================================================
 
     #[test]
     fn vec_451_resize_reserve() {
@@ -5073,13 +4593,11 @@ mod alloc_hot_path_behavior {
     #[test]
     fn vec_819_realloc_copy_guard() {
         let arena = Arena::new();
-        // Start with cap=0, push to force realloc with len=0 initially
         let mut v = arena.alloc_vec_with_capacity::<u64>(0);
         assert_eq!(v.len(), 0);
-        v.push(1); // triggers realloc from cap=0
+        v.push(1);
         assert_eq!(v[0], 1);
 
-        // Now realloc with len > 0
         v.reserve(100);
         assert_eq!(v[0], 1);
     }
@@ -5132,14 +4650,8 @@ mod alloc_hot_path_behavior {
 
     #[test]
     fn arena_1251_oversized_guard_panic() {
-        // Use an alloc strictly larger than `MAX_CHUNK_BYTES = 64 KiB` so
-        // the chunk is truly oversized: after `reconcile_swap_out` the
-        // backing allocation is freed (and its budget released) rather
-        // than cached. Budget allows ONE such chunk but not two
-        // simultaneously. If `OversizedSharedGuard::drop` is a no-op
-        // (the mutant), the panicked alloc's chunk stays charged against
-        // the budget; the second oversized alloc then fails. We assert
-        // the second alloc succeeds, killing the mutant.
+        // The budget fits one oversized chunk, so panic cleanup must release
+        // it before the second allocation.
         const N: usize = 70_000;
         let arena = Arena::builder().max_normal_alloc(4096).byte_budget(N + 4096).build();
 
@@ -5150,10 +4662,6 @@ mod alloc_hot_path_behavior {
         }));
         assert!(result.is_err(), "should have caught the panic");
 
-        // Only succeeds if the panicked chunk's budget was released by
-        // `OversizedSharedGuard::drop`. If `drop` is no-op'd, the budget
-        // is leaked and this `alloc_arc_with` (which calls `expect_alloc`)
-        // panics with "allocator returned AllocError".
         let _arc2: multitude::Arc<[u8; N]> = arena.alloc_arc_with(|| [0u8; N]);
     }
 
@@ -5165,8 +4673,6 @@ mod alloc_hot_path_behavior {
             data: [u8; 64],
         }
         let arena = Arena::new();
-        // With `+ -> -`: needed = 64 + (64 - 8) = 120 vs 64 - (64 - 8) = 64 - 56 = 8
-        // The `- 56` would request only 8 bytes from refill, too small.
         let mut keep = Vec::new();
         for i in 0u8..100 {
             let v = arena.alloc(Aligned64 { data: [i; 64] });
@@ -5203,9 +4709,7 @@ mod alloc_hot_path_behavior {
     #[test]
     fn arena_2266_large_nondrop_slice() {
         let arena = Arena::new();
-        // Try allocating a large non-Drop slice — should succeed with !=
-        // With == mutation, this would be rejected.
-        // u16::MAX + 1 = 65536 elements of u8 = 64KB
+        // Non-Drop slices are not limited by the drop-entry length field.
         let result = arena.try_alloc_slice_fill_with(65536, |i| i as u8);
         assert!(result.is_ok(), "large non-Drop slice should succeed");
         let s = result.unwrap();
@@ -5382,7 +4886,6 @@ mod alloc_hot_path_behavior {
 
         // Guard should have dropped 3 cloned elements.
         // PanicClone(99) (the value param) is also dropped during unwind = +1.
-        // Total: 4 drops. With the `/` mutation, only 2 cloned + 1 value = 3.
         let drops = DROP_COUNT2.load(Ordering::SeqCst);
         assert_eq!(drops, 4, "guard must drop exactly 3 cloned elements + 1 value; got {drops}");
         assert_eq!(v.len(), 2);
@@ -5424,8 +4927,6 @@ mod routing_boundary_behavior {
 
         v.resize(10, 0xAA);
         assert_eq!(v.len(), 10);
-        // Original: additional = 10 - 5 = 5 ⇒ cap = max(10, 16, 4) = 16.
-        // Mutated `+`: additional = 10 + 5 = 15 ⇒ cap = max(20, 16, 4) = 20.
         assert!(
             v.capacity() <= 16,
             "resize must subtract len from new_len when computing growth (cap={})",
@@ -5503,19 +5004,6 @@ mod alloc_invariants_audit {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    // ============================================================================
-    // vec.rs:473 — resize Guard::drop's `if added > 0`
-    // vec.rs:507 — resize_with's `let added = self.vec.len - self.old_len;`
-    // vec.rs:515/516 — resize_with Guard::drop's `added = len - old` and `if added > 0`
-    //
-    // These are panic-safety guards. Killing requires:
-    //   (a) panic mid-resize after some elements have been written and verify
-    //       only the partial set is dropped (kills `> 0` → `>=` boundary because
-    //       the added==0 case happens when init panics on the very first element);
-    //   (b) panic before any element is written (added == 0) and verify
-    //       len rolls back to old_len without dropping anything.
-    // ============================================================================
-
     #[test]
     fn resize_panic_in_middle_drops_only_added_elements() {
         use core::cell::Cell;
@@ -5540,10 +5028,7 @@ mod alloc_invariants_audit {
             let mut v: ArenaVec<'_, Counter<'_>> = arena.alloc_vec_with_capacity(8);
             v.push(Counter(&drops));
             v.push(Counter(&drops));
-            // 2 pre-existing elements; resize pushes 5 more (4 clones + 1 move).
-            // We arrange the panic to fire after some clones via a cloning side
-            // effect — simulate by using a value whose clone panics. Easier:
-            // use resize_with so we can panic on the Nth call.
+            // Panic after resize_with has initialized several elements.
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 v.resize_with(7, || {
                     let n = panics.get();
@@ -5562,7 +5047,6 @@ mod alloc_invariants_audit {
             assert_eq!(drops.get(), 3, "guard should drop exactly the 3 added elements");
             assert_eq!(v.len(), 2);
         }
-        // Now the 2 originals also dropped.
         drop(arena);
         assert_eq!(drops.get(), 5);
     }
@@ -5584,17 +5068,8 @@ mod alloc_invariants_audit {
         {
             let mut v: ArenaVec<'_, Counter<'_>> = arena.alloc_vec_with_capacity(4);
             v.push(Counter(&drops));
-            // Panic on the very first init call: added == 0 in Guard::drop.
-            // Kills `if added > 0` → `if added >= 0`: with the mutant, the
-            // `>= 0` branch executes `from_raw_parts_mut(..., 0)` and
-            // `drop_in_place` over an empty slice — observationally equivalent.
-            // But the mutant ALSO walks `data.add(old_len)` for an empty
-            // slice; if old_len == cap, that's one-past-the-end which is
-            // legal but Miri / UBSAN would catch invalid pointer arithmetic
-            // if old_len exceeded cap. The mutant survives because a 0-len
-            // slice from a one-past pointer is well-defined — so the only
-            // way to kill is to verify the post-condition (len rolls back
-            // and zero added drops).
+            // Panic before writing any element; length and drop count remain
+            // unchanged.
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 v.resize_with(3, || {
                     panic!("synthetic init panic");
@@ -5608,20 +5083,6 @@ mod alloc_invariants_audit {
         assert_eq!(drops.get(), 1, "the original element drops with the Vec");
     }
 
-    // ============================================================================
-    // vec.rs:621 / vec.rs:838 — into_arena_rc/box's `if self.len > u16::MAX as usize`
-    //
-    // The boundary at `u16::MAX` (65535) is unreachable in the in-place
-    // branch: that branch requires the Vec data buffer to live in the arena's
-    // `current`, which in turn requires `len * size_of::<T>() <=
-    // max_normal_alloc`. With `max_normal_alloc <= max_bump_extent < 64 KiB`
-    // and `size_of::<T>() >= 1` (the in-place branch already short-circuits
-    // the ZST/empty case), `len * size_of::<T>() <= max_bump_extent <
-    // u16::MAX`. So `self.len > u16::MAX` cannot fire on a Vec the in-place
-    // path is willing to handle. The check is defensive and equivalent to
-    // removing it.
-    // ============================================================================
-
     #[cfg(feature = "dst")]
     #[allow(dead_code, reason = "helper kept after moving its consumers to dst.rs; preserved for future tests")]
     struct OneByteDrop(#[allow(dead_code)] u8);
@@ -5629,44 +5090,6 @@ mod alloc_invariants_audit {
     impl Drop for OneByteDrop {
         fn drop(&mut self) {}
     }
-
-    // ============================================================================
-    // vec.rs:634 — into_arena_rc's `if needs_drop && len > 0`
-    // vec.rs:837 — into_box's `if needs_drop && self.len > 0`
-    //
-    // Mutant: `>` → `>=`. With `>= 0` (always true for usize) the empty Drop
-    // vec would attempt to install a slice DropEntry of len=0, which would
-    // panic / abort because the back-stack is full or because the helper
-    // rejects len==0 explicitly. Kill: empty vec of Drop type round-trips
-    // without abort.
-    // ============================================================================
-
-    // ============================================================================
-    // vec.rs:657 / 859 / 878 — `if cap > len` reclaim guard.
-    // Mutant `>=`: at cap == len the mutant tries to reclaim 0 bytes.
-    // `try_shrink_at_cursor(buffer_end, 0)` may decrement the cursor by 0
-    // (no-op) or panic on debug assertions. Kill via stats counter or by
-    // observing that a subsequent allocation lands on the cursor where
-    // the buffer ended.
-    // ============================================================================
-
-    // ============================================================================
-    // vec.rs:911 — into_box's `consumed_cell.set(idx + 1)`
-    // Mutant `+ → *`: at idx==0 both yield 0 → infinite loop / wrong index.
-    // Kill: copy at least 2 elements and verify all are present.
-    // ============================================================================
-
-    // ============================================================================
-    // vec.rs:963 — realloc's `if new_cap > self.cap && self.cap > 0`
-    // Mutant `>=`: with new_cap == self.cap, the mutant tries grow-in-place
-    // of zero bytes, which is a no-op shrink. With self.cap == 0 (fresh vec)
-    // the mutant calls try_grow_in_place with a dangling pointer — would
-    // likely abort.
-    // vec.rs:976 — realloc's `if self.len > 0` for memcpy of old data.
-    // Mutant `>=`: at len==0 the mutant copies 0 bytes from a dangling
-    // pointer (likely OK). To kill: verify a non-empty Vec preserves data
-    // across realloc.
-    // ============================================================================
 
     #[test]
     fn realloc_preserves_data_across_growth() {
@@ -5696,13 +5119,6 @@ mod alloc_invariants_audit {
         assert_eq!(v[0], 7);
         assert_eq!(v.len(), 1);
     }
-
-    // ============================================================================
-    // vec.rs:1311 — Drain TailFix::drop's `if tail_len > 0`
-    // Mutant `>=`: at tail_len == 0 (drained to end) the mutant tries to
-    // `ptr::copy(..., 0)` from one-past-the-end. Well-defined, but kill via
-    // the post-condition (len update is correct).
-    // ============================================================================
 
     #[test]
     fn drain_to_end_leaves_correct_len() {
@@ -5803,12 +5219,8 @@ mod alloc_invariants_audit {
         drop(arena);
     }
 
-    /// Regression: when an unyielded element's `Drop` panics during
-    /// `Drain::drop`, the remaining unyielded drained elements must still
-    /// be dropped (panic-policy parity with `std::vec::Drain::drop`, which
-    /// uses `drop_in_place::<[T]>` to delegate to rustc's slice-drop guard).
-    /// Previously `multitude` used a per-element loop that leaked the tail
-    /// elements past the first panicking drop.
+    /// If an unyielded element panics during `Drain::drop`, slice drop glue
+    /// still drops the remaining unyielded elements.
     #[test]
     fn drain_partial_consume_panic_in_drop_still_drops_remaining_unyielded() {
         use core::cell::Cell;
@@ -5877,14 +5289,6 @@ mod alloc_invariants_audit {
         drop(arena);
     }
 
-    // ============================================================================
-    // arena.rs:1721 — try_alloc_slice_shared_oversized_with's
-    //   `if entry_size != 0 && len > u16::MAX as usize { return Err(...) }`
-    // Mutant `>` → `<`: rejects short Drop-aware slices, accepts long ones.
-    // Kill: verify a short Drop-aware oversized slice succeeds; then verify
-    // a >u16::MAX Drop-aware oversized slice returns Err.
-    // ============================================================================
-
     #[test]
     fn try_alloc_slice_shared_drop_aware_short_oversized_ok() {
         use std::sync::Arc as StdArc;
@@ -5909,14 +5313,6 @@ mod alloc_invariants_audit {
         drop(arena);
         assert_eq!(counter.load(Ordering::Relaxed), 512);
     }
-
-    // ============================================================================
-    // arena.rs:1643 / 1751 — slice oversized helpers' `init_guard.len += 1;`
-    // Mutant `+= → *=`: with init_guard.len starting at 0, `0 *= 1` stays
-    // at 0 forever. Then on init panic mid-way, the SliceInitGuard drops
-    // 0 elements instead of N — leaks T::drop. Kill: panic mid-init in the
-    // oversized helper and verify the right number of drops happened.
-    // ============================================================================
 
     #[test]
     fn try_alloc_slice_shared_oversized_init_panic_drops_partial() {
@@ -5949,59 +5345,6 @@ mod alloc_invariants_audit {
         drop(arena);
     }
 
-    // ============================================================================
-    // arena.rs slice-with paths — `if layout.size() > self.provider.max_normal_alloc`
-    // boundary mutants: at `==` the original takes the fast path; the mutant
-    // `<` keeps small allocations on fast path (already, no change) but
-    // causes large allocations to use the fast path too, which then refills
-    // to an oversized chunk via worst-case-size. Net observable effect is
-    // best caught by allocations *just above* the boundary, where the
-    // original routes through the oversized helper directly.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs:1332 / 2030 — alloc_inner_*_or_panic's `if bumped > MAX_CHUNK_BYTES`
-    // is intrinsically guarded — `bumped` is a compile-time-known size for the
-    // value paths and the safety check is unreachable for any value type a user
-    // can construct. Targeted by other equivalent boundary tests above.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs refill_local/refill_shared bump_extent branch (lines 726, 1055):
-    //   `if capacity > MAX_CHUNK_BYTES { capacity } else { capacity.min(...) }`
-    // Mutant `<`: would invert the condition and use `capacity` for normal
-    // chunks (allowing bump cursor past the first 64 KiB tile). Subsequent
-    // allocations would then resolve the wrong chunk header via the mask.
-    // Kill via stress: many allocations and a Drop type to exercise drop
-    // list replay.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs:3036 / 3608 — slice paths' `if entry_size != 0 && len > u16::MAX`
-    // (panic-first).  Mutant `!=` → `==`: with entry_size == 0 (no drop) the
-    // mutant runs the panic check; with entry_size != 0 it skips. The result
-    // is that a Copy slice longer than u16::MAX would panic. Kill: a Copy
-    // slice of length > u16::MAX must succeed.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs:3039 / 3611 — slice paths' `if layout.size() > self.provider.max_normal_alloc`
-    // (panic-first). The "just above" check on these is the same structural
-    // boundary as the non-panic variants — already covered above. The "at
-    // exact" boundary cannot be observed because both branches eventually
-    // allocate via the oversized path due to compute_worst_case_size adding
-    // `align + entry_size` to the request, which always pushes a slice of
-    // exactly `max_normal_alloc` bytes past the routing threshold inside
-    // `acquire_local`.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs:3097 / 3659 — slice paths' `guard.len += 1` (init guard counter)
-    // Mutant `+= → *=`: same as the oversized-helper variant, but for the
-    // fast path. Kill: panic mid-init in the fast path (small slice fits in
-    // a normal chunk) and verify partial-init drops are exactly N.
-    // ============================================================================
-
     #[test]
     fn alloc_slice_shared_fast_path_init_panic_drops_partial() {
         use std::panic::AssertUnwindSafe;
@@ -6030,20 +5373,6 @@ mod alloc_invariants_audit {
         drop(arena);
     }
 
-    // ============================================================================
-    // The slice paths' drop-fn install guard (`is-Box && drop_fn && len != 0`).
-    // Mutants delete the `!`/swap `!=` to `==`.
-    //
-    // `delete !` mutant: skips the drop_fn install for non-Box paths.
-    // Without the install, the noop_drop_shim stays in the entry → elements
-    // leak. Kill: Rc slice of Drop type, drop the Rc, drop the arena, count
-    // drops.
-    // `!= → ==` mutant: only installs drop_fn when len == 0 — empty slices
-    // don't have an entry installed in the first place (entry_size == 0),
-    // so this mutant is observationally no-op for typical inputs. Kill:
-    // non-empty slice of Drop type via `Rc::from_*` should drop properly.
-    // ============================================================================
-
     #[test]
     fn alloc_slice_shared_arc_drop_type_runs_drop() {
         use std::sync::Arc as StdArc;
@@ -6065,35 +5394,7 @@ mod alloc_invariants_audit {
         assert_eq!(drops.load(Ordering::Relaxed), 8);
     }
 
-    // ============================================================================
-    // arena.rs:3116 / 3676 — slice paths' refill `compute_worst_case_size(layout, entry_size != 0)`
-    // `!= → ==` mutant: passes `entry_size == 0` to compute_worst_case_size, which
-    // flips the "needs entry" flag. The downstream chunk capacity may be too
-    // small to fit both the slice and its drop entry. Kill: large drop-aware
-    // slice that needs a refill — must succeed.
-    // ============================================================================
-
-    // ============================================================================
-    // arena.rs:2076 / 941 — alloc_inner_*_or_panic's drop-count and `needed`
-    // arithmetic. The `+ → *` and `+ → -` mutants on
-    // `let needed = layout.size() + alignment + entry_size`: changing `+` to
-    // `*` produces wildly larger needed-size; if it stays ≤ MAX_CHUNK_BYTES,
-    // the chunk class still satisfies the original request — equivalent.
-    // Kill: at `layout.size() == max_normal_alloc - small_amount` the
-    // difference between `size + align + entry_size` (= max_normal_alloc-ish)
-    // and `size * align * entry_size` (= astronomically larger) routes the
-    // mutant to fail refill or fall back to oversized.
-    // ============================================================================
-
-    // (Hard to test via public API — covered indirectly by all the slice/value
-    // tests above that refill across many chunk classes.)
-
-    // ============================================================================
-    // Per-`Arc` reference counting removes the `u16` element-count cap on
-    // `Arc<[T]>` slices: a Drop-typed slice with `len > u16::MAX` now
-    // allocates (via the oversized path) and drops each element through
-    // `drop_in_place::<[T]>` in `Arc::drop`.
-    // ============================================================================
+    // Per-`Arc` reference counting permits slices longer than `u16::MAX`.
 
     #[cfg(not(miri))]
     #[test]
@@ -6117,12 +5418,6 @@ mod alloc_invariants_audit {
         assert_eq!(drops.load(Ordering::Relaxed), n as u32);
     }
 
-    // ============================================================================
-    // vec.rs:507:34 — `self.reserve(new_len - self.len)` in resize_with.
-    // Mutant `-` -> `+`: reserves `new_len + self.len`. Both work, but mutant
-    // over-reserves. Kill via capacity observation.
-    // ============================================================================
-
     #[test]
     fn resize_with_reserves_minimal_capacity() {
         let arena = Arena::new();
@@ -6134,8 +5429,6 @@ mod alloc_invariants_audit {
         let cap_before = v.capacity();
         v.resize_with(8, || 99_u32);
         let cap_after = v.capacity();
-        // Original: additional = 8 - 4 = 4. doubled = max(4 + 4, 4*2, 4) = 8.
-        // Mutant:   additional = 8 + 4 = 12. doubled = max(4 + 12, 4*2, 4) = 16.
         assert!(
             cap_after < 16,
             "resize_with from len=4 to 8 should not over-reserve (cap_before={cap_before}, cap_after={cap_after})"
@@ -6143,12 +5436,6 @@ mod alloc_invariants_audit {
         assert_eq!(v.len(), 8);
         assert_eq!(v.as_slice(), &[1, 2, 3, 4, 99, 99, 99, 99]);
     }
-
-    // ============================================================================
-    // vec.rs:556:67 — `self.data.as_ptr().add(self.len - 1)` in pop_if.
-    // Mutant `-` -> `/`: passes `self.len / 1 = self.len` (one past end).
-    // Kill: spy on the value the predicate sees.
-    // ============================================================================
 
     #[test]
     fn pop_if_predicate_sees_last_element() {
@@ -6167,14 +5454,6 @@ mod alloc_invariants_audit {
         assert_eq!(r, Some(0xcccc_cccc));
         assert_eq!(v.as_slice(), &[0xaaaa_aaaa, 0xbbbb_bbbb]);
     }
-
-    // ============================================================================
-    // vec.rs:911:35 — `consumed_cell.set(idx + 1)` in `into_box`.
-    // Mutant `+` -> `*`: with idx==0, `0 * 1 == 0`; consumed_cell never
-    // advances, every closure invocation reads `data[0]`. Kill: route the
-    // buffer to an oversized chunk so install fails, then verify boxed
-    // elements distinctly match the source.
-    // ============================================================================
 }
 
 mod string_slice_utf16_behavior {
@@ -6201,16 +5480,6 @@ mod string_slice_utf16_behavior {
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
 
-    // ----------------------------------------------------------------------------
-    // vec.rs:285 — replace - with + in Vec::insert
-    //
-    // Original: `ptr::copy(ptr, ptr.add(1), self.len - idx);`
-    // Mutant:   `ptr::copy(ptr, ptr.add(1), self.len + idx);`
-    //
-    // With `len=3, idx=1`: `len-idx=2`, `len+idx=4`. Original shifts 2
-    // elements (correct); mutant would copy 4 elements (UB / wrong data).
-    // ----------------------------------------------------------------------------
-
     #[test]
     fn vec_insert_middle_shifts_exact_tail() {
         let arena = Arena::new();
@@ -6230,18 +5499,6 @@ mod string_slice_utf16_behavior {
         v.insert(2, 100);
         assert_eq!(v.as_slice(), &[0_u32, 1, 100, 2, 3, 4, 5, 6]);
     }
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:303 — `self.len - idx - 1` in Vec::remove
-    //
-    // Mutants:
-    //   `self.len - idx + 1`  (replaces second `-` with `+`)
-    //   `self.len + idx - 1`  (replaces first `-` with `+`)
-    //   `self.len - idx / 1`  (replaces second `-` with `/`)
-    //
-    // With `len=3, idx=0`: original copies 2 elements; mutants copy
-    // different counts → different remaining contents.
-    // ----------------------------------------------------------------------------
 
     #[test]
     fn vec_remove_first_shifts_all_remaining() {
@@ -6273,101 +5530,15 @@ mod string_slice_utf16_behavior {
         assert_eq!(v.as_slice(), &[10_u32, 30, 40, 50]);
     }
 
-    // ----------------------------------------------------------------------------
-    // vec.rs:359 — replace < with <= in shrink_to_fit
-    //
-    // Original: `if self.len < self.cap && self.realloc(self.len).is_err()`
-    // Mutant:   `if self.len <= self.cap && self.realloc(self.len).is_err()`
-    //
-    // When `len == cap`, original short-circuits (no realloc); mutant enters
-    // the branch and calls `realloc(len)` where `new_cap == self.cap`,
-    // triggering the `debug_assert!(new_cap != self.cap)` in `realloc`.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:429 — replace > with >= in try_reserve_exact
-    //
-    // Original: `if needed > self.cap { self.realloc(needed)?; }`
-    // Mutant:   `if needed >= self.cap { self.realloc(needed)?; }`
-    //
-    // When `needed == cap`, mutant calls `realloc(cap)`, which fires the
-    // `debug_assert!(new_cap != self.cap)` in `realloc`.
-    // ----------------------------------------------------------------------------
-
     #[test]
     #[cfg(debug_assertions)]
     fn vec_try_reserve_exact_at_capacity_is_noop() {
         let arena = Arena::new();
         let mut v: ArenaVec<'_, u32> = arena.alloc_vec_with_capacity(8);
         v.extend([0_u32, 1, 2]);
-        // needed = 3 + 5 = 8 == cap. Original short-circuits; mutant
-        // realloc-call would assert-fail.
         v.try_reserve_exact(5).unwrap();
         assert_eq!(v.capacity(), 8);
     }
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:948 — realloc's in-place grow guards: `new_cap > self.cap && self.cap > 0`
-    // Mutants:
-    //   `new_cap > self.cap || self.cap > 0`   (`&&` → `||`)
-    //   `new_cap >= self.cap && self.cap > 0`  (`>` → `>=`)
-    //   `new_cap > self.cap && self.cap >= 0`  (`>` → `>=`)
-    // vec.rs:959 — `let Some(grown) = unsafe { ... }` then the `>` on Layout::array().is_ok()
-    // vec.rs:968 — `if old_cap > 0 { self.arena.bump_relocation(); }`
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:643 / vec.rs:644 / vec.rs:862-863 / vec.rs:895:
-    //   `reclaim_bytes = (cap - len) * elem_size`  in into_arena_rc/box paths.
-    // Mutants: `(cap - len) + elem_size`, `(cap + len) * elem_size`,
-    //          `(cap - len) / elem_size`, etc.
-    // Detection: assert that the freeze path reclaims exactly the unused
-    // tail so a subsequent allocation lands in the same chunk.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:606 / vec.rs:619 — `needs_drop && self.len > u16::MAX as usize`
-    // Mutants: `&&` → `||`, `>` → `>=`.
-    // Detection: a `T: Drop` slice with exactly `u16::MAX` elements must
-    // take the in-place freeze path (not the copy fallback). A slice with
-    // `u16::MAX + 1` elements must take the copy fallback (the back-stack
-    // entry's length field is u16).
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:458, 502 — Guard::drop's `if added > 0 { drop_in_place(tail) }`
-    // Mutants: `>` → `>=`.
-    //
-    // `added == 0` => `drop_in_place(&mut [])` is a no-op. The mutant adds an
-    // unnecessary call but produces the same observable behavior. Mark these
-    // as documented-equivalent.
-    // ----------------------------------------------------------------------------
-
-    // (No test required — equivalent mutation. Covered by panic-recovery tests
-    //  in arena_vec.rs::resize_panic_in_clone_drops_already_written which
-    //  exercises the Guard::drop code path with `added > 0`.)
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:493 — `reserve(new_len - self.len)` in resize_with
-    // Mutant: `reserve(new_len + self.len)` over-reserves but doesn't break behavior.
-    // The reservation is still sufficient — over-reservation is observable through
-    // `arena.stats()` chunk-allocation counts only.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // vec.rs:1293 — TailFix::drop's `if tail_len > 0 { copy ... }`
-    // Mutant: `>` → `>=`. With `tail_len == 0`, original skips; mutant calls
-    // `ptr::copy(src, dst, 0)` which is a no-op. Equivalent.
-    //
-    // (No test required — equivalent mutation by ptr::copy semantics on len=0.)
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:421 / 452 — try_push_str / try_reserve boundary
-    // Mutants: `needed > self.cap` → `needed >= self.cap`. At needed == cap,
-    // the mutant calls `try_grow_to_at_least(needed)` whose debug_assert!
-    // guards against `min_cap <= self.cap`.
-    // ----------------------------------------------------------------------------
 
     #[test]
     #[cfg(debug_assertions)]
@@ -6375,21 +5546,9 @@ mod string_slice_utf16_behavior {
         let arena = Arena::new();
         let mut s = arena.alloc_string_with_capacity(8);
         s.push_str("abcde");
-        // needed = 5 + 3 = 8 == cap; must skip grow path.
         s.push_str("fgh");
         assert_eq!(&*s, "abcdefgh");
     }
-
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:207 — shrink_to_fit's `if self.cap == 0 || self.len == self.cap { return; }`
-    // Mutant: `||` → `&&`. Then `cap == 0` allocations would attempt to grow,
-    // triggering the `try_grow_to_at_least` debug_assert.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:239 / 359 — insert_str / replace_range boundary `new_len > self.cap`
-    // Mutants: `>` → `>=`. Same kill mechanism as try_push_str.
-    // ----------------------------------------------------------------------------
 
     #[test]
     #[cfg(debug_assertions)]
@@ -6397,7 +5556,6 @@ mod string_slice_utf16_behavior {
         let arena = Arena::new();
         let mut s = arena.alloc_string_with_capacity(6);
         s.push_str("abc");
-        // new_len = 3 + 3 = 6 == cap; must not enter grow path.
         s.insert_str(0, "xyz");
         assert_eq!(&*s, "xyzabc");
     }
@@ -6408,19 +5566,9 @@ mod string_slice_utf16_behavior {
         let arena = Arena::new();
         let mut s = arena.alloc_string_with_capacity(6);
         s.push_str("abc");
-        // Replace 1 char ('b') with 4 chars; new_len = 6 == cap.
         s.replace_range(1..2, "WXYZ");
         assert_eq!(&*s, "aWXYZc");
     }
-
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:268 / utf16_string.rs:348 — remove arithmetic
-    //   `let next = idx + ch.len_utf8(); ... copy(src, dst, self.len - next)`
-    // Mutants: `-` → `+`, `-` → `/`.
-    //
-    // With a single-byte char and 3 chars after it, original copies 3 bytes,
-    // `+` mutant copies wrong count → wrong remaining string.
-    // ----------------------------------------------------------------------------
 
     #[test]
     fn string_remove_first_preserves_rest() {
@@ -6442,13 +5590,6 @@ mod string_slice_utf16_behavior {
         assert_eq!(&*s, "abdef");
     }
 
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:306 — retain's `idx_dst + n_bytes`
-    // Mutants: `+` → `-`, `+` → `*`.
-    //
-    // Original: bytes-from-source moved by `len-n_bytes` count.
-    // ----------------------------------------------------------------------------
-
     #[test]
     fn string_retain_preserves_filtered_chars() {
         let arena = Arena::new();
@@ -6457,11 +5598,6 @@ mod string_slice_utf16_behavior {
         s.retain(|c| !c.is_whitespace());
         assert_eq!(&*s, "helloworld");
     }
-
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:366 — replace_range's `let tail = ... self.len - end_idx`
-    // Mutants: `-` → `+`.
-    // ----------------------------------------------------------------------------
 
     #[test]
     fn string_replace_range_preserves_tail() {
@@ -6490,84 +5626,15 @@ mod string_slice_utf16_behavior {
         assert_eq!(&*s, "abcXghi");
     }
 
-    // ----------------------------------------------------------------------------
-    // strings/string.rs:515 / utf16_string.rs:493 — try_reclaim_tail's
-    //   `if cap >= len { let reclaim = cap - len; }` (or similar).
-    // Mutants: `>=` → `<`, `replace ... with ()`, `-` → `/`.
-    //
-    // `try_reclaim_tail` is called after push/grow operations to release
-    // unused tail capacity. To kill `replace ... with ()`, observe that the
-    // chunk's cursor advances by less than expected after reclaim.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/utf16_string.rs:183 — truncate's `if new_len > self.len { return; }`
-    // Mutant: `>` → `>=`. At new_len == len, original short-circuits; mutant
-    // re-clamps and writes the prefix.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/utf16_string.rs:195 — shrink_to_fit `cap == 0 || len == cap`
-    // Same as string.rs:207 mutant.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/utf16_string.rs:198 / 199 — shrink_to_fit byte-arithmetic
-    //   `reclaim_units = cap - len; reclaim_bytes = reclaim_units * 2;`
-    // Mutants: `-` → `/`, `*` → `+`, `*` → `/`.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // strings/utf16_string.rs:252 / 269 / 290 / 310 / 322 / 398 / 405 / 420 — many
-    // boundary checks; same kill mechanism as string.rs equivalents.
-    // ----------------------------------------------------------------------------
-
     #[test]
     #[cfg(all(debug_assertions, feature = "utf16"))]
     fn utf16_try_push_str_at_exact_capacity_no_grow() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string_with_capacity(8);
         s.push_from_str("abcd");
-        // Worst-case reservation: 4 BMP chars = 8 units; needed == cap.
         s.try_push_from_str("efgh").unwrap();
         assert_eq!(s.len(), 8);
     }
-
-    // ----------------------------------------------------------------------------
-    // box.rs:209 — Box<[T]>::into_rc's `if needs_drop && len > u16::MAX as usize`
-    // Mutants: `&&` → `||`, `>` → `>=`.
-    // Same boundary as vec.rs:606 / 619.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:767 — try_alloc_inner_arc_with's `if bumped > MAX_CHUNK_BYTES`
-    // Mutant: `>` → `>=`. At exact equality, mutant routes to the oversized
-    // path even though the request fits in a normal chunk. Detection through
-    // stats counters.
-    //
-    // (Hard to test deterministically without exact MAX_CHUNK_BYTES; covered
-    //  by `oversized_chunk_used_when_alloc_too_big` already.)
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:825 — `if entry_size > 0` (drop entry installation)
-    // Mutant: `>` → `>=`. Always falsy with usize variable; equivalent only if
-    // entry_size is non-zero. For `T: !Drop`, entry_size is `0`; for `T: Drop`,
-    // entry_size is `size_of::<InnerDropEntry>()` (>0). Both paths already
-    // well-tested by existing Drop-aware tests.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:848 — `if layout.size() > self.provider.max_normal_alloc`
-    // Same `>` → `>=` mutation; detection via oversized stats.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:851 — `let needed = layout.size() + layout.align().saturating_sub(...) + entry_size;`
-    // Mutants: `+` → `-`, `+` → `*`.
-    //
-    // Detection: an alignment-demanding allocation must succeed.
-    // ----------------------------------------------------------------------------
 
     #[repr(align(64))]
     #[derive(Debug)]
@@ -6582,179 +5649,13 @@ mod string_slice_utf16_behavior {
         assert_eq!(ptr.align_offset(64), 0);
     }
 
-    // ----------------------------------------------------------------------------
-    // arena.rs:5155 — check_isize_overflow: `if total > (isize::MAX as usize).saturating_sub(padding)`
-    // Mutant: `>` → `>=`. At exact equality, original returns Ok; mutant errors.
-    //
-    // (No deterministic boundary test feasible — covered by general alloc
-    //  smoke tests that succeed at smaller sizes.)
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:5180 — `check_chunk_alignment -> Result<(), AllocError> with Ok(())`
-    // Mutant replaces the function with `Ok(())`. To kill, allocate with
-    // alignment >= MAX_SMART_PTR_ALIGN through a DST path and observe error.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:5339 / 5348 — try_bump_fit's range checks
-    //   `if end > drop_back_addr { return None; }`
-    //   `if end > payload_end_addr { return None; }`
-    // Mutant: `>` → `>=`. Boundary: at exact equality the original accepts.
-    // ----------------------------------------------------------------------------
-
     #[test]
-    fn try_bump_fit_at_exact_chunk_end_succeeds() {
-        // Cannot exercise the boundary deterministically because the chunk
-        // layout is hidden. But many smoke tests would fail if `>` flipped
-        // to `>=` because every successful bump-fit at the exact end is now
-        // rejected. Covered transitively by `arena_arc.rs` / `arena_box.rs`
-        // tests that allocate near boundaries.
-    }
-
-    // ----------------------------------------------------------------------------
-    // arena_builder.rs:174 — `resolve_capacity`'s `cap - 1` for `next_power_of_two`-style logic.
-    // Mutant: `-` → `+`, `-` → `/`.
-    // Detection: build an arena with a specific preallocation and observe
-    // chunk count.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/constants.rs:77 — min_class_for_bytes arithmetic
-    // Mutant: `bits = usize::BITS - bytes.leading_zeros()` then `-` → `+`.
-    // Detection: directly test `min_class_for_bytes` via integration: build
-    // an arena, allocate at various sizes, verify that class progression
-    // matches expectations through preallocate/stats.
-    //
-    // Indirectly covered by the chunk-acquisition test paths.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/drop_list.rs — pad_bytes / raw_used_bytes arithmetic and replacements
-    // `raw_used_bytes`: `sizeof::<fn>() + 2 + 2`
-    // `pad_bytes`: padding to PAD_TARGET alignment.
-    //
-    // I consolidated these as constants. Mutating the underlying constants
-    // would change `PAD_BYTES`, causing DropEntry layout to misalign. Existing
-    // drop-list tests would catch this. The constants are only computed at
-    // compile time so the mutants are stale (constants don't exist as runtime
-    // functions any more).
-    //
-    // Note: these mutants may be against the previous version of the code.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/local_chunk.rs:132 / chunk.rs:155 — max_bump_extent
-    //   `capacity - drop_count * size_of::<DropEntry>()`
-    // Mutants: `-` → `+`, `-` → `/`. These would change the available
-    // space for bump allocations.
-    //
-    // Detection: many allocations exercise drop-list growth + bump fit;
-    // changing this arithmetic would either over- or under-estimate
-    // available space, causing either premature OOM or write-past-end.
-    //
-    // Covered by existing drop-aware tests.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/local_chunk.rs:158 / chunk.rs:167 — entries_top_offset's
-    // boundary: `if drop_count < entries_top_offset(capacity) / sizeof::<DropEntry>()`
-    // Mutant: `<` → `<=`.
-    //
-    // Off-by-one in drop-list growth gate. Caught by tests that nearly fill
-    // the back-stack.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/chunk_provider.rs:186 / 253 / 419 / 447 — acquire_local/shared arithmetic
-    //   `local_header_size() + rounded_payload` / `class_to_bytes(class) - local_header_size()`
-    //   etc. Mutants: `-` → `+`, `-` → `/`.
-    //
-    // Detection: byte_budget should be consumed by chunk-header + payload.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/chunk_provider.rs:300 — preallocate_local's `if target_class > *h`
-    // I removed this — already addressed.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/chunk_provider.rs:524 — `release_budget(shared_header_size() + cap)`
-    // Mutant: `+` → `*`. Misaccounting in budget release.
-    //
-    // Detection: a workload that recycles chunks must keep the budget bounded.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // internal/constants.rs:123 — `refcount_overflow_abort` impl Drop for ForceAbort
-    // Mutant: replace `drop` with `()`. ForceAbort is `no_std` fallback and
-    // the path is `#[cfg_attr(coverage_nightly, coverage(off))]`. Document as
-    // genuinely unreachable in tested configurations.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:446 — `Arena::builder()` returns `ArenaBuilder<Global>`.
-    // Mutant: `Default::default()` returns the same thing.
-    // EQUIVALENT — both call sites produce the same result; no test required.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:1017 / 1299 / 1388 — `match guard e <= cap.saturating_sub(entry_size) with true`
-    // These are inside the oversized-allocation routes where the provider's
-    // post-condition guarantees the chunk fits. I replaced them with
-    // `assert_unchecked`; the mutants are stale.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:1838 — allocate_layout's `prefix + payload + align - 1`
-    // Mutant: `-` → `+` in `align - 1`. Changes worst-case bytes needed.
-    // ----------------------------------------------------------------------------
-
+    fn try_bump_fit_at_exact_chunk_end_succeeds() {}
     #[test]
     fn allocate_layout_handles_alignment_padding() {
         let arena = Arena::new();
-        // Force an aligned allocation that requires padding.
         let _a: Arc<Align64> = arena.alloc_arc(Align64(1));
     }
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:853 — `needed = layout.size() + layout.align().saturating_sub(...) + entry_size`
-    // in try_alloc_inner_arc_with. Mutating `+` to `*` makes `needed` enormous,
-    // forcing routing through oversized chunks for ordinary small types.
-    // Detection: stats should show no oversized chunks for ordinary allocs.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:1252 — try_alloc_inner_oversized_value: `match aligned.checked_add(layout.size()) { Some(e) if e <= cap.saturating_sub(entry_size) => ... }`
-    // Mutant `&& -> ||`: `e <= cap.saturating_sub(entry_size) || ...` always true.
-    //
-    // This branch is the post-condition guard of `provider.acquire_local`. I
-    // replaced it with `assert_unchecked` for fast-paths but the value-path mutant
-    // remains.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:5180-style — `check_chunk_alignment -> Result<(), AllocError> with Ok(())`
-    // Mutant: function replaced with `Ok(())`. Killed by `dst_arc_rejects_excessive_alignment_via_layout`.
-    // ----------------------------------------------------------------------------
-    // At exact equality of `layout.size()` and `max_normal_alloc`, original keeps
-    // going through normal chunks; mutant routes to oversized.
-    //
-    // The boundary check `size > max_normal_alloc` is mutation-resistant in
-    // practice because the chunk allocator must reserve header + drop-entry
-    // overhead, so a request of exactly `max_normal_alloc` bytes can fail
-    // the bump fit even on a chunk of class `max_normal_alloc`. Both
-    // original and mutated boundaries thus may route to oversized.
-    //
-    // Behavioral correctness is asserted by general-purpose alloc tests.
-    // ----------------------------------------------------------------------------
-
-    // ----------------------------------------------------------------------------
-    // arena.rs:448 — Arena::builder() returns ArenaBuilder<Global>, constructed
-    // via the crate-internal `ArenaBuilder::new()`. `ArenaBuilder` no longer
-    // implements `Default`, so the former `from(Default::default())` mutant is
-    // no longer generated. No test required.
-    // ----------------------------------------------------------------------------
 }
 
 mod freeze_and_box_behavior {
@@ -6774,26 +5675,6 @@ mod freeze_and_box_behavior {
 
     #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
     use crate::common;
-
-    // ============================================================================
-    // Reclaim-tail observability tests
-    // ----------------------------------------------------------------------------
-    // Many missed mutants involve `(cap - len) * elem_size` or string equivalents.
-    // Reclaim returns the unused tail to the chunk's bump cursor, so a subsequent
-    // allocation that needs that exact space MUST succeed without allocating a
-    // new chunk. Wrong arithmetic either reclaims too little (subsequent alloc
-    // spills into a new chunk) or too much (cursor moves into already-allocated
-    // territory and follow-up writes corrupt earlier data).
-    // ============================================================================
-
-    // ============================================================================
-    // drop_list constant-layout test
-    // ----------------------------------------------------------------------------
-    // Mutants on lines 71/75 of drop_list.rs change the computed `PAD_BYTES`,
-    // breaking `size_of::<DropEntry>()` and corrupting drop-list stack walks.
-    // Verified through observable behavior: many drop-typed allocs must each
-    // drop exactly once.
-    // ============================================================================
 
     #[test]
     fn many_drop_typed_arcs_each_drop_exactly_once() {
@@ -6847,21 +5728,6 @@ mod freeze_and_box_behavior {
         assert_eq!(DROPPED.load(Ordering::SeqCst), 64);
     }
 
-    // ============================================================================
-    // `cap == len` short-circuit: into_box at exact cap=len skips reclaim.
-    // ----------------------------------------------------------------------------
-    // At `cap == len`, original skips reclaim; mutant `>=` tries to reclaim 0
-    // bytes (no-op). Behavior observable through chunk count not changing.
-    // ============================================================================
-
-    // ============================================================================
-    // `into_box`'s ZST/empty routing (`== with !=` at line 834)
-    // ----------------------------------------------------------------------------
-    // Mutant inverts the early-return condition. Non-ZST non-empty vec must
-    // take the in-place path (no new chunk). With mutant, it takes the copy
-    // fallback which allocates fresh slice storage.
-    // ============================================================================
-
     #[test]
     fn vec_into_box_empty_routes_through_copy_path() {
         let arena = Arena::new();
@@ -6869,46 +5735,6 @@ mod freeze_and_box_behavior {
         let b: ArenaBox<[u32]> = v.into_boxed_slice();
         assert_eq!(b.len(), 0);
     }
-
-    // ============================================================================
-    // `into_box`'s `consumed_cell.set(idx + 1)` (line 922)
-    // ----------------------------------------------------------------------------
-    // Mutant `+ with *`: `set(idx * 1) = idx`. Loop never advances and resulting
-    // slice holds N copies of element 0. Detection: copy path with distinct
-    // element values must preserve order.
-    // ============================================================================
-
-    // ============================================================================
-    // try_bump_fit `>` boundary (lines 5263/5272)
-    // ----------------------------------------------------------------------------
-    // Mutant `>=` rejects exact-fit allocations. Every successful allocation
-    // must pass this gate, so a workload that allocates many small items would
-    // inflate chunk turnover dramatically with the mutant.
-    // ============================================================================
-
-    // ============================================================================
-    // chunk_provider.rs:536 `+ with *` in release_budget arithmetic
-    // ----------------------------------------------------------------------------
-    // Wrong release arithmetic drifts the budget tracker and eventually fails.
-    // Tightly-budgeted arena cycling allocations exercises this.
-    // ============================================================================
-
-    // ============================================================================
-    // needs_drop_indirect -> true: non-drop slices must not reserve drop entries
-    // ----------------------------------------------------------------------------
-    // Mutant: function always returns true, so non-drop allocations also reserve
-    // a drop-entry slot. Reduces usable payload per chunk and inflates count.
-    // ============================================================================
-
-    // ============================================================================
-    // String / Utf16String shrink_to_fit reclaim arithmetic
-    // ----------------------------------------------------------------------------
-    // Mutants on `let reclaim = self.cap - self.len` or
-    // `reclaim_bytes = reclaim_units * 2` change the bytes returned to the chunk
-    // cursor. With wrong arithmetic, a follow-up allocation either spills to a new
-    // chunk or corrupts the preceding region (asserted by reading back the frozen
-    // handle).
-    // ============================================================================
 }
 
 mod public_surface_behavior {
@@ -6960,7 +5786,6 @@ mod public_surface_behavior {
 
     #[test]
     fn builder_debug_format() {
-        // Drives ArenaBuilder's Debug impl.
         let s = format!("{:?}", Arena::builder());
         assert!(s.contains("ArenaBuilder"));
         assert!(s.contains("max_normal_alloc"));
@@ -6977,11 +5802,7 @@ mod public_surface_behavior {
 
     #[test]
     fn arena_box_drop_unlinks_middle_of_drop_list() {
-        // `unlink_drop_entry` has three positions (head, middle, tail).
-        // The middle case is reached when the entry being removed has both
-        // a `prev` and a `next`. ArenaBox<T: Drop>::drop calls unlink. We
-        // create three drop-needing ArenaBox values, then drop the second
-        // one first → exercises the `Some(prev)` AND `Some(next)` branches.
+        // Dropping the middle value unlinks an entry with both neighbors.
         let arena = Arena::new();
         let mut b1 = arena.alloc_box(std::string::String::from("first"));
         let mut b2 = arena.alloc_box(std::string::String::from("middle"));
@@ -7095,16 +5916,6 @@ mod public_surface_behavior {
         assert!(arena.try_alloc_string_with_capacity(cap).is_err());
     }
 
-    // Note: the `align > CHUNK_ALIGN` guard inside the typed alloc paths
-    // (`Arena::try_alloc_with`, `Arena::try_reserve_and_init`) cannot be
-    // exercised from a test that names a `#[repr(align(N))]` `T` with
-    // `N > CHUNK_ALIGN` — even though the closure / value would never be
-    // constructed, the compiled function's stack frame inherits `T`'s
-    // alignment, producing a STATUS_ACCESS_VIOLATION on call. The
-    // equivalent guard is exercised through the layout-based path in
-    // `alloc_uninit_dst_rejects_excessive_alignment` above (which uses
-    // `Layout::from_size_align` directly without naming a `T`).
-
     #[test]
     fn arena_string_grow_through_chunk_rotation() {
         // Drives the `if needs_teardown { teardown_chunk(chunk, true); }`
@@ -7171,7 +5982,6 @@ mod public_surface_behavior {
                 })
             };
             assert_eq!(arc.len(), 1);
-            // Move arc to another thread (exercises the Send+Sync path).
             let h = std::thread::spawn(move || arc.len());
             let val = h.join().unwrap();
             assert_eq!(val, 1);
@@ -7186,10 +5996,6 @@ mod public_surface_behavior {
     fn builder_type_is_constructible() {
         let _: ArenaBuilder = Arena::builder();
     }
-
-    // Infallible Arc / Box slice constructors and the strait-`alloc_arc` family.
-    // These wrap their `try_*` cousins with `unwrap_or_else(panic_alloc)`; the
-    // happy path was previously uncovered.
 
     #[test]
     fn arena_try_alloc_str_arc_succeeds() {
@@ -7216,9 +6022,6 @@ mod public_surface_behavior {
         unsafe { m.as_bytes_mut()[0] = b'A' };
         assert_eq!(s.as_str(), "Abc");
     }
-
-    // ArenaString::with_capacity_in (cap > 0) — exercises allocate_initial path
-    // (line 102 / 324) and into_arena_str slack reclamation (line 258).
 
     #[test]
     fn alloc_string_with_capacity_allocates_buffer() {
@@ -7314,9 +6117,6 @@ mod public_surface_behavior {
         let _ = arena.alloc_string_with_capacity(64);
     }
 
-    // Drive `build`'s `unwrap_or_else(panic_build)` closure for each
-    // allocator monomorphization so the per-instantiation region count
-    // reaches 100% in the coverage report.
     #[test]
     #[should_panic(expected = "multitude::ArenaBuilder::build")]
     fn build_panics_on_failing_allocator() {
@@ -7436,9 +6236,6 @@ mod public_surface_behavior {
         assert!(r.is_err());
     }
 
-    // Failure-driven coverage tests — drive `?` Err propagation and panicking
-    // `unwrap_or_else(|_| panic_alloc())` lambda bodies via FailingAllocator.
-
     use std::panic::AssertUnwindSafe;
 
     fn expect_panic<F: FnOnce()>(f: F) {
@@ -7453,8 +6250,6 @@ mod public_surface_behavior {
     fn send_fail_arena() -> Arena<SendFailingAllocator> {
         Arena::new_in(SendFailingAllocator::new(0))
     }
-
-    // Panicking method bodies (every `unwrap_or_else(|_| panic_alloc())` lambda).
 
     #[test]
     fn panic_alloc_with() {
@@ -7528,8 +6323,6 @@ mod public_surface_behavior {
         });
     }
 
-    // `try_*` Err-propagation branches (the `?` lines).
-
     #[test]
     fn try_alloc_str_err() {
         let a = fail_arena();
@@ -7572,11 +6365,6 @@ mod public_surface_behavior {
         assert!(a.try_alloc_zeroed_slice_arc::<u32>(4).is_err());
     }
 
-    // Uninit slice with T: Drop drives the register_drop=true `?` propagation
-    // in reserve_slice (line 1625) under failure.
-
-    // ArenaString grow-path failures.
-
     #[test]
     fn arena_string_try_push_str_initial_alloc_err() {
         let a = fail_arena();
@@ -7615,7 +6403,6 @@ mod public_surface_behavior {
         let mut s = a.alloc_string();
         // Force at least one grow_for_string call. Initial cap == 16.
         s.push_str("x".repeat(64));
-        // Multiple grows to ensure we exercise the slow-path relocate.
         s.push_str("y".repeat(8 * 1024));
         drop(s);
     }
@@ -7725,8 +6512,6 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_drain_debug_and_next_back() {
-        // Lines 833-835: Drain Debug format.
-        // Lines 865-875: Drain::next_back (DoubleEndedIterator).
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..5 {
@@ -7808,15 +6593,12 @@ mod public_surface_behavior {
 
     #[test]
     fn shared_bump_fit_in_current_chunk() {
-        // Lines 593-594: try_get_chunk_for_shared fits in current chunk.
-        // This exercises the shared slow-path fit check that returns the current chunk.
         let arena = Arena::new();
         // Allocate many small Arcs to fill the current chunk, then one that
         // might go through the slow path on a second chunk. The first Arc establishes
         // the chunk.
         let _a1 = arena.alloc_arc(1_u32);
         let _a2 = arena.alloc_arc(2_u32);
-        // Both fit in the same chunk → shared bump fit path is exercised.
     }
 
     #[test]
@@ -7846,7 +6628,6 @@ mod public_surface_behavior {
         for _ in 0..n {
             s.push('A'); // This grows the string builder, pinning the chunk.
         }
-        // If the chunk was pinned, it goes to the pinned list (line 603 equivalent in local path).
         assert!(s.len() >= n);
     }
 
@@ -7937,11 +6718,6 @@ mod public_surface_behavior {
 
     #[test]
     fn slice_init_guard_drops_prefix_on_panic() {
-        // Lines 3767-3772: SliceInitGuard drops initialized elements on panic.
-        // SliceInitGuard is used in try_alloc_slice_fill_with (non-Rc) for both
-        // Drop and non-Drop types. Exercise via alloc_slice_fill_with (the non-Rc version)
-        // with a type that has Drop.
-
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
         #[derive(Clone)]
@@ -7967,10 +6743,7 @@ mod public_surface_behavior {
         assert!(DROP_COUNT.load(Ordering::Relaxed) >= 3);
     }
 
-    /// Exercises the fast path in `try_alloc_slice_copy` where
-    /// `the current-chunk bump path` succeeds on an already-populated chunk.
-    /// A first small allocation populates `current`, then a second
-    /// `alloc_slice_copy` fits in the same chunk without needing the slow path.
+    /// A slice copy fits in an already-populated current chunk.
     #[test]
     fn alloc_slice_copy_fast_path_bump() {
         let arena = Arena::new();
@@ -8252,10 +7025,6 @@ mod public_surface_behavior_2 {
         assert_eq!(*value, 42);
     }
 
-    // ---- src/internal/local_chunk.rs gaps ----
-
-    // ---- src/strings/string.rs gaps ----
-
     #[test]
     fn string_retain_panic_restores_guard_len() {
         let arena = Arena::new();
@@ -8273,11 +7042,7 @@ mod public_surface_behavior_2 {
         assert_eq!(s.as_str(), "a");
     }
 
-    /// Regression: `Vec::retain`/`Vec::retain_mut`/`Vec::dedup*` used to
-    /// silently wipe ALL elements when the predicate panicked (because
-    /// `with_apivec` zeroed the raw parts before delegating, and the
-    /// panicking `ApiVec::Drop` then freed the whole buffer). They now
-    /// match `std::Vec::retain`'s contract: the kept prefix is preserved.
+    /// If the predicate panics, `Vec::retain` preserves the kept prefix.
     #[test]
     fn vec_retain_panic_preserves_kept_prefix() {
         use std::cell::Cell;
@@ -8352,7 +7117,7 @@ mod public_surface_behavior_2 {
         // regardless of size; a moderate replacement (well past the
         // initial small chunk's residual capacity) is sufficient.
         let replacement = "x".repeat(1024);
-        s.replace_range(0..1, &replacement);
+        s.replace_range(0..1, replacement);
     }
 
     #[test]
@@ -8497,8 +7262,61 @@ mod public_surface_behavior_2 {
         let old = Layout::from_size_align(16, 8).unwrap();
         let ptr = alloc.allocate(old).unwrap().cast::<u8>();
         let smaller = Layout::from_size_align(8, 8).unwrap();
-        let shrunk = unsafe { Allocator::grow(&alloc, ptr, old, smaller) }.unwrap();
+        let shrunk = unsafe { Allocator::shrink(&alloc, ptr, old, smaller) }.unwrap();
         unsafe { Allocator::deallocate(&alloc, shrunk.cast(), smaller) };
+    }
+
+    #[test]
+    fn arena_allocator_grow_zeroed_extends_in_place() {
+        let arena = Arena::new();
+        let alloc = &arena;
+        let old = Layout::from_size_align(8, 8).unwrap();
+        let new = Layout::from_size_align(32, 8).unwrap();
+        let ptr = alloc.allocate(old).unwrap().cast::<u8>();
+        // SAFETY: `ptr` addresses 8 writable bytes.
+        unsafe { ptr.as_ptr().write_bytes(0xA5, old.size()) };
+
+        // SAFETY: `ptr` came from `alloc` with `old`; `new` is larger.
+        let grown = unsafe { Allocator::grow_zeroed(&alloc, ptr, old, new) }.unwrap();
+        assert_eq!(grown.cast::<u8>(), ptr);
+        // SAFETY: `grown` addresses 32 initialized bytes.
+        unsafe {
+            assert!(
+                core::slice::from_raw_parts(grown.cast::<u8>().as_ptr(), old.size())
+                    .iter()
+                    .all(|&b| b == 0xA5)
+            );
+            assert!(
+                core::slice::from_raw_parts(grown.cast::<u8>().as_ptr().add(old.size()), new.size() - old.size())
+                    .iter()
+                    .all(|&b| b == 0)
+            );
+            Allocator::deallocate(&alloc, grown.cast(), new);
+        }
+    }
+
+    #[test]
+    fn arena_allocator_shrink_reuses_nonzero_block() {
+        let arena = Arena::new();
+        let alloc = &arena;
+        let old = Layout::from_size_align(32, 8).unwrap();
+        let new = Layout::from_size_align(8, 8).unwrap();
+        let ptr = alloc.allocate(old).unwrap().cast::<u8>();
+        // SAFETY: `ptr` addresses 32 writable bytes.
+        unsafe { ptr.as_ptr().write_bytes(0x5A, old.size()) };
+
+        // SAFETY: `ptr` came from `alloc` with `old`; `new` is smaller.
+        let shrunk = unsafe { Allocator::shrink(&alloc, ptr, old, new) }.unwrap();
+        assert_eq!(shrunk.cast::<u8>(), ptr);
+        // SAFETY: `shrunk` addresses at least 8 initialized bytes.
+        unsafe {
+            assert!(
+                core::slice::from_raw_parts(shrunk.cast::<u8>().as_ptr(), new.size())
+                    .iter()
+                    .all(|&b| b == 0x5A)
+            );
+            Allocator::deallocate(&alloc, shrunk.cast(), new);
+        }
     }
 
     // ---- src/arena.rs gaps ----
@@ -8579,13 +7397,7 @@ mod public_surface_behavior_3 {
         }
     }
 
-    // ---- arc.rs / rc.rs: drop-list retarget loop must traverse past first entry. ----
-    //
-    // The drop list is a back-stack: index 0 is the OLDEST entry, index drop_count-1
-    // the NEWEST. `assume_init` scans from i=0 forward and breaks on the matching
-    // `value_offset`. To exercise the i>0 iterations we allocate a "decoy" drop
-    // entry first, then allocate the `MaybeUninit` to be assume_init'd, so the
-    // match happens at the LAST slot, not the first.
+    // A decoy entry forces initialization retargeting past the first entry.
 
     #[test]
     fn arc_single_assume_init_loop_traverses_past_first_drop_entry() {
@@ -8614,8 +7426,6 @@ mod public_surface_behavior_3 {
         let arc = unsafe { arc_uninit.assume_init() };
         assert_eq!(arc[1].0, "b");
     }
-
-    // ---- vec.rs: cleanup_after_partial_move fires when an IntoIter is dropped mid-way. ----
 
     #[test]
     fn vec_swap_remove_last_index_skips_copy() {
@@ -8649,8 +7459,7 @@ mod public_surface_behavior_3 {
             v.push(Tracked(i));
         }
         let mut it = v.into_iter();
-        // Consume 2 of 4; the IntoIter's Drop must then compact and drop the
-        // remaining 2, which exercises `cleanup_after_partial_move`.
+        // Dropping a partially consumed iterator compacts and drops its tail.
         let _a = it.next().unwrap();
         let _b = it.next().unwrap();
         drop(_a);
@@ -8661,10 +7470,6 @@ mod public_surface_behavior_3 {
         // Dropping the iter compacts the surviving tail (2 elements) and drops them.
         assert_eq!(DROPPED.load(Ordering::Relaxed), 4);
     }
-
-    // ---- vec.rs: realloc same-cap is unreachable (callers gate); see realloc's debug_assert. ----
-
-    // ---- arena.rs: MAX_SMART_PTR_ALIGN guard in `try_alloc_slice_shared_no_drop_with`. ----
 
     #[cfg(not(utc_backend))]
     #[repr(align(32768))]
@@ -8689,14 +7494,6 @@ mod public_surface_behavior_3 {
         assert!(result.is_err());
     }
 
-    // ---- arena.rs: DST allocator metadata size check ----
-    //
-    // `metadata_to_u16` checks that `T::Metadata` is `usize`-sized. For sized `T`
-    // the metadata is `()` (zero bytes), so the check returns `Err` immediately.
-
-    // ---- chunk_provider.rs CAS contention paths: spin up two threads that push to
-    // the shared-cache concurrently to force the CAS retry arm. ----
-
     #[test]
     fn cache_push_pop_contention_drives_cas_retries() {
         use std::sync::Barrier;
@@ -8706,16 +7503,7 @@ mod public_surface_behavior_3 {
         // hammering the same arena from many threads simultaneously.
         let arena: Arena = Arena::builder().max_normal_alloc(4096).byte_budget(128 * 1024 * 1024).build();
 
-        // Pre-allocate Arcs grouped per thread so all the work happens during
-        // the dropping phase (cross-thread chunk releases).
-        //
-        // The test makes no assertions: it only exists to give coverage to
-        // the CAS retry branches in `push` / `pop`.
-        // A few dozen concurrent drops per thread is more than enough to
-        // exercise those branches; the bottleneck for finding races is
-        // scheduler-interleaving variety (covered by Miri's many-seeds race
-        // sweep and by the OS scheduler under native runs), not raw op
-        // count.
+        // Group handles per thread so releases contend on the shared cache.
         let nthreads = 8;
         let per_thread = 32;
         let mut sets: Vec<Vec<multitude::Arc<u64>>> = (0..nthreads).map(|_| Vec::with_capacity(per_thread)).collect();
@@ -8742,20 +7530,9 @@ mod public_surface_behavior_3 {
         }
     }
 
-    // ============================================================================
-    // ============================================================================
-    // vec.rs — shrink_to_fit no-ops when the buffer is not at the bump cursor
-    // ============================================================================
-
     #[test]
     fn vec_shrink_to_fit_is_a_noop_when_not_at_cursor() {
-        // `shrink_to_fit` no longer allocates: when the buffer is not at
-        // the current bump cursor (because intervening allocations have
-        // moved the cursor past the buffer), the arena cannot reclaim
-        // partial allocations, so the call no-ops instead of churning
-        // chunk space via allocate-copy-deallocate. This test exercises
-        // the no-op path under a one-shot allocator that would refuse a
-        // refill, demonstrating that no allocator call is made.
+        // A buffer behind the bump cursor cannot reclaim storage.
         let alloc = common::FailingAllocator::new(2);
         let arena = Arena::new_in(alloc);
         let mut v = arena.alloc_vec::<u8>();

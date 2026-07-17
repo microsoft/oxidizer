@@ -77,6 +77,16 @@ fn alloc_str_empty() {
 }
 
 #[test]
+fn alloc_str_copies_every_inline_length() {
+    let arena = Arena::new();
+    let source = "abcdefghi";
+
+    for len in 0..=9 {
+        assert_eq!(&*arena.alloc_str(&source[..len]), &source[..len]);
+    }
+}
+
+#[test]
 fn alloc_slice_copy_mutable() {
     let arena = Arena::new();
     let mut s = arena.alloc_slice_copy([1, 2, 3, 4, 5]);
@@ -482,9 +492,7 @@ fn wasted_tail_decreases_monotonically_as_pinned_arcs_drop() {
         }
     }
     let peak = arena.stats().wasted_tail_bytes;
-    // We may not get a contribution from every iteration (some Arcs
-    // may share a chunk with later ones), but at least some chunks
-    // were retired while pinned.
+    // Shared chunks may coalesce contributions, but pinned retirement adds waste.
     assert!(peak > 0, "expected outstanding pins to keep retired chunks counted");
     // Drop the pins. The counter must never grow, never underflow,
     // and end at most equal to whatever the currently-active chunk
@@ -683,8 +691,7 @@ fn alloc_forwarding_trait_impls() {
     assert_eq!(PartialOrd::partial_cmp(&a, &a2), Some(Ordering::Equal));
 
     // Hash
-    // Hash — compare the handle's hash against hashing the underlying value
-    // directly, so a no-op `hash` impl diverges (kills the `hash -> ()` mutant).
+    // Hashing a handle is identical to hashing its value.
     let mut h_handle = DefaultHasher::new();
     a.hash(&mut h_handle);
     let mut h_value = DefaultHasher::new();

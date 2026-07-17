@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Reproducer tests for findings from the correctness audit. Each test
-//! fails on the original code and passes after the corresponding fix.
+//! Correctness tests for allocator layout, initialization, and ZST handouts.
 
 #![allow(clippy::std_instead_of_core, reason = "test code")]
 #![allow(clippy::unwrap_used, reason = "test code")]
@@ -15,10 +14,13 @@
     reason = "explicit clones in #[should_panic] tests keep the counter visible after the panic"
 )]
 
+use core::alloc::Layout;
 use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use allocator_api2::alloc::{Allocator, Global};
 use multitude::{Arc, Arena};
 
 struct DropCounter(StdArc<AtomicUsize>);
@@ -29,11 +31,48 @@ impl Drop for DropCounter {
     }
 }
 
-/// Same leak, Box variant: `arena.alloc_box(MaybeUninit::new(x)).assume_init()`.
-///
+#[derive(Clone)]
+struct LargeAllocator {
+    _state: [u8; 60 * 1024],
+}
+
+unsafe impl Allocator for LargeAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+        Global.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded under the caller's Allocator contract.
+        unsafe { Global.deallocate(ptr, layout) };
+    }
+}
+
+#[repr(align(8192))]
+struct HighlyAligned([u8; 8192]);
+
+/// Chunk headers must remain in the first 64-KiB tile regardless of the
+/// backing allocator's state size. Storing `A` inline in every chunk made the
+/// header unbounded and caused smart-pointer drop to recover a false header.
+#[test]
+fn large_allocator_state_does_not_displace_smart_pointer_payloads() {
+    let allocator = LargeAllocator { _state: [0; 60 * 1024] };
+    let (boxed, arc, rc) = {
+        let arena = Arena::new_in(allocator);
+        (
+            arena.alloc_box(HighlyAligned([1; 8192])),
+            arena.alloc_arc(HighlyAligned([2; 8192])),
+            arena.alloc_rc(HighlyAligned([3; 8192])),
+        )
+    };
+
+    assert_eq!(boxed.0[0], 1);
+    assert_eq!(arc.0[0], 2);
+    assert_eq!(rc.0[0], 3);
+}
+
 /// `Box::drop` calls `drop_in_place::<T>(ptr)`, so for `T = U` after
 /// `assume_init`, the value's `Drop` *does* run via `drop_in_place`
-/// regardless of any chunk drop list — so this case is sound.
+/// regardless of any chunk drop list.
 #[test]
 fn alloc_box_of_maybeuninit_assume_init_drops_inner() {
     let counter = StdArc::new(AtomicUsize::new(0));
@@ -48,8 +87,7 @@ fn alloc_box_of_maybeuninit_assume_init_drops_inner() {
 
 /// With per-`Arc` reference counting, `alloc_arc(MaybeUninit::new(x))`
 /// followed by `assume_init` works correctly: `Arc::drop` runs the inner
-/// value's destructor eagerly on the last clone (no chunk drop entry is
-/// involved), so the previously-unsupported pattern is now sound.
+/// value's destructor eagerly on the last clone without a chunk drop entry.
 #[test]
 fn alloc_arc_of_maybeuninit_assume_init_drops_inner() {
     let counter = StdArc::new(AtomicUsize::new(0));
@@ -81,18 +119,9 @@ fn alloc_uninit_arc_assume_init_drops_inner() {
     assert_eq!(counter.load(Ordering::Relaxed), 1);
 }
 
-/// Audit finding #1: `Arc::<MaybeUninit<T>>::assume_init` writes the
-/// drop-entry's `drop_fn` field non-atomically. Two threads each
-/// holding a clone of the same allocation can race on that store.
+/// Concurrent `assume_init` calls publish initialization metadata atomically.
 ///
-/// The reproducer launches two threads that concurrently call
-/// `assume_init` on cloned `Arc<MaybeUninit<DropCounter>>` handles.
-/// Without atomic stores, this is a write/write data race on the
-/// same memory location and Miri (or TSAN) flags it. After the fix
-/// the field is published atomically and the test passes cleanly
-/// under Miri.
-///
-/// Run under Miri to actually catch the race:
+/// Run under Miri to detect metadata races:
 /// `MIRIFLAGS="-Zmiri-many-seeds=0..16" cargo +nightly miri test ...`
 #[test]
 fn arc_concurrent_assume_init_no_race() {
@@ -122,17 +151,10 @@ fn arc_concurrent_assume_init_no_race() {
     );
 }
 
-/// Audit finding #5: `try_alloc_slice_local_no_drop_with` uses
-/// `MAX_SMART_PTR_ALIGN` (32 KiB) as the alignment cap even when the
-/// caller is a `SimpleRef` slice path. The Copy slice sibling already
-/// uses `CHUNK_ALIGN` (64 KiB), and the documented cap on
-/// `alloc_slice_fill_with` is 64 KiB. A 32 KiB-aligned non-Drop type
-/// must succeed via `alloc_slice_fill_with` / `alloc_slice_clone`.
+/// Reference slices accept non-Drop types aligned below `CHUNK_ALIGN`.
 ///
 /// We use a ZST with `#[repr(align(32768))]` so the type's alignment
-/// exercises the cap without forcing a 32 KiB stack frame (Windows
-/// MSVC chokes on rustc-emitted stack alignment of that size; see
-/// the `HalfChunkAlign` / `ChunkAlign` note in `coverage_arena_gaps.rs`).
+/// checks the cap without forcing a 32 KiB stack frame.
 #[cfg(not(utc_backend))]
 #[test]
 fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
@@ -148,21 +170,8 @@ fn alloc_slice_ref_accepts_half_chunk_alignment_for_non_drop() {
     assert_eq!(c.len(), 1);
 }
 
-/// Audit finding: non-`Drop` ZST `alloc_arc` / `alloc_box` handouts did
-/// not advance the bump cursor (`try_alloc(0, _)` is a cursor no-op), so
-/// a single chunk could hand out unbounded refcounted handles. Each
-/// handout draws down the pre-credited shared-ref surplus via the
-/// non-atomic `local_shared_count`; an unbounded run exhausts it,
-/// driving the chunk's atomic refcount to zero while the chunk is still
-/// installed (use-after-free) or underflowing the surplus reconciliation
-/// at retire (double-free). The fix reserves a 1-byte tag per such
-/// handout so the cursor advances and per-chunk handouts stay bounded by
-/// the chunk capacity (far below the surplus).
-///
-/// Deterministic regression proxy: consecutive ZST shared handouts must
-/// occupy distinct addresses (pre-fix they shared one address and the
-/// cursor never moved). The create-and-drop loop exercises the refills
-/// the tag now forces and confirms the arena stays consistent afterward.
+/// Each refcounted ZST handout reserves a distinct one-byte tag, bounding
+/// per-chunk handouts and preserving refcount surplus invariants.
 #[test]
 fn zst_shared_handouts_advance_cursor() {
     let arena = Arena::new();
@@ -177,17 +186,12 @@ fn zst_shared_handouts_advance_cursor() {
     let bx2 = arena.alloc_box(());
     assert_ne!(bx1.as_ptr(), bx2.as_ptr(), "ZST Box handouts must get distinct addresses");
 
-    // A few hundred create-and-drop cycles still force the (512-byte
-    // starter) chunk to fill (1 byte each) and refill at least once. Pre-fix
-    // the cursor never advanced, so this pattern could drive the live
-    // chunk's atomic refcount to zero. A few hundred iterations exercise the
-    // refill the tag now forces without a multi-thousand Miri loop.
+    // Fill and refill the starter chunk without an excessive Miri loop.
     for _ in 0..600 {
         drop(arena.alloc_arc(()));
         drop(arena.alloc_box(()));
     }
 
-    // Arena remains usable for references and smart pointers after the churn.
     let z = arena.alloc_arc(());
     let _ = arena.alloc_arc(7_u64);
     assert!(!z.as_ptr().is_null());

@@ -130,7 +130,9 @@ matchit = { version = "0.8.4", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
-multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
+multitude = { path = "crates/multitude", default-features = false, version = "0.6.2" }
+multitude_macros = { path = "crates/multitude_macros", default-features = false, version = "0.1.0" }
+multitude_macros_impl = { path = "crates/multitude_macros_impl", default-features = false, version = "0.1.0" }
 mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }

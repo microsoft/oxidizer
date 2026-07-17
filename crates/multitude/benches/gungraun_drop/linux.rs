@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise drop benchmarks for multitude.
+//! Instruction-precise clone and drop benchmarks for multitude.
 //!
 //! Mirrors `benches/criterion_drop.rs` 1:1: each gungraun function
 //! `drop_<variant>` corresponds to a criterion benchmark `drop/<variant>`.
@@ -22,7 +22,7 @@ const N: usize = 1_000;
 const SLICE_LEN: usize = 8;
 
 // `std::Box<u64>` is the `T: Drop` test type — its destructor calls into the
-// global allocator, exercising the chunk drop-list traversal.
+// global allocator, exercising eager in-place value destruction.
 type DroppyT = std::boxed::Box<u64>;
 
 #[expect(clippy::unnecessary_box_returns, reason = "Box<u64> is the T: Drop probe")]
@@ -181,6 +181,20 @@ fn setup_alloc() -> Arena {
     arena
 }
 
+// ===== clone setup =====
+
+fn setup_clone_rc_u64() -> (Rc<u64>, Arena, Vec<Rc<u64>>) {
+    let arena = Arena::new();
+    let source = arena.alloc_rc(42_u64);
+    (source, arena, Vec::with_capacity(N))
+}
+
+fn setup_clone_arc_u64() -> (Arc<u64>, Arena, Vec<Arc<u64>>) {
+    let arena = Arena::new();
+    let source = arena.alloc_arc(42_u64);
+    (source, arena, Vec::with_capacity(N))
+}
+
 // ===== bench bodies — drop happens at scope exit =====
 
 #[library_benchmark]
@@ -279,6 +293,26 @@ fn alloc(state: Arena) {
     black_box(state);
 }
 
+#[library_benchmark]
+#[bench::run(setup_clone_rc_u64())]
+fn clone_rc_u64(state: (Rc<u64>, Arena, Vec<Rc<u64>>)) -> (Rc<u64>, Arena, Vec<Rc<u64>>) {
+    let (source, arena, mut clones) = state;
+    for _ in 0..N {
+        clones.push(black_box(source.clone()));
+    }
+    (source, arena, clones)
+}
+
+#[library_benchmark]
+#[bench::run(setup_clone_arc_u64())]
+fn clone_arc_u64(state: (Arc<u64>, Arena, Vec<Arc<u64>>)) -> (Arc<u64>, Arena, Vec<Arc<u64>>) {
+    let (source, arena, mut clones) = state;
+    for _ in 0..N {
+        clones.push(black_box(source.clone()));
+    }
+    (source, arena, clones)
+}
+
 library_benchmark_group!(
     name = drop_group;
     benchmarks =
@@ -290,8 +324,13 @@ library_benchmark_group!(
         alloc
 );
 
+library_benchmark_group!(
+    name = clone_group;
+    benchmarks = clone_rc_u64, clone_arc_u64
+);
+
 main!(
     config = LibraryBenchmarkConfig::default()
         .tool(Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = drop_group
+    library_benchmark_groups = drop_group, clone_group
 );

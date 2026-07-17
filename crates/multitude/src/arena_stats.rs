@@ -11,6 +11,17 @@
 ///
 /// The fields are `pub` because this is a value-semantic data type; the
 /// arena owns the running counters internally and hands you a copy.
+///
+/// # Example
+///
+/// ```
+/// # #[cfg(feature = "stats")]
+/// # {
+/// let arena = multitude::Arena::new();
+/// let stats: multitude::ArenaStats = arena.stats();
+/// assert!(format!("{stats:?}").starts_with("ArenaStats"));
+/// # }
+/// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "stats")))]
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -19,12 +30,34 @@ pub struct ArenaStats {
     ///
     /// A normal-size chunk is a cacheable power-of-two chunk that backs any
     /// mix of arena-lifetime references and `Arc`/`Box` smart pointers.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let _value = arena.alloc(1_u8);
+    /// assert!(arena.stats().normal_chunks_allocated >= 1);
+    /// # }
+    /// ```
     pub normal_chunks_allocated: u64,
 
     /// Total oversized stand-alone chunks ever allocated by this arena.
     ///
     /// Oversized chunks hold a single allocation that exceeded
     /// `max_normal_alloc`; they are never cached.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::builder().max_normal_alloc(4096).build();
+    /// let _value = arena.alloc_slice_copy([0_u8; 5000]);
+    /// assert!(arena.stats().oversized_chunks_allocated >= 1);
+    /// # }
+    /// ```
     pub oversized_chunks_allocated: u64,
 
     /// Total bytes currently held from the underlying allocator.
@@ -40,6 +73,17 @@ pub struct ArenaStats {
     /// (headers and alignment padding), so it reflects real allocator
     /// footprint rather than the sum of user-requested `Layout::size()`
     /// bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let _value = arena.alloc(1_u8);
+    /// assert!(arena.stats().total_bytes_allocated > 0);
+    /// # }
+    /// ```
     pub total_bytes_allocated: u64,
 
     /// Bytes "wasted" as unused tail space across the arena's chunks.
@@ -58,6 +102,17 @@ pub struct ArenaStats {
     ///
     /// Does **not** include fragmentation inside a chunk (multiple
     /// allocations leaving gaps between them).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let _value = arena.alloc(1_u8);
+    /// assert!(arena.stats().wasted_tail_bytes > 0);
+    /// # }
+    /// ```
     pub wasted_tail_bytes: u64,
 
     /// Number of growing-collection buffer relocations.
@@ -68,5 +123,15 @@ pub struct ArenaStats {
     /// Each relocation wastes memory (old buffer abandoned in chunk)
     /// and costs a copy. Pre-sizing collections or using larger chunks
     /// can reduce this.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "stats")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// assert_eq!(arena.stats().relocations, 0);
+    /// # }
+    /// ```
     pub relocations: u64,
 }

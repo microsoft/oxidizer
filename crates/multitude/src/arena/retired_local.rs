@@ -3,26 +3,13 @@
 
 //! Intrusive singly-linked list of retired chunks held alive for `&Arena`.
 //!
-//! The arena keeps a LIFO list of [`Chunk`]s it has rotated out of
-//! `current` but cannot recycle yet, because they handed out arena-lifetime
-//! [`Alloc`](crate::Alloc) handles (or growable-collection buffers — see
-//! [`crate::vec::Vec`] / [`crate::strings::String`]) that borrow the chunk
-//! storage for the whole `&Arena` lifetime. Each chunk on the list holds one
-//! strong reference — the same `+1` that the originally-retiring
-//! [`ChunkMutator`] held — plus, possibly, additional references owned by
-//! escaped `Arc`/`Box`/`Rc` handles living in the same chunk.
+//! The arena retains rotated chunks while arena-lifetime allocations still
+//! borrow their storage. Each list entry owns the retiring [`ChunkMutator`]'s
+//! strong reference; escaped smart pointers may own additional references.
 //!
-//! Linkage is **intrusive**: each `Chunk` carries a [`next`](Chunk::next)
-//! field used to thread chunks together without per-retirement heap
-//! allocation. The list head holds a thin `*mut u8` to the topmost chunk's
-//! header (`null` for empty); the fat DST pointer is reconstructed via
-//! [`Chunk::header_to_fat`] when the list is drained.
-//!
-//! Only two writers ever touch this structure:
-//! * [`Arena::refill`](crate::Arena) pushes a rotated-out chunk that handed
-//!   out an arena-lifetime reference.
-//! * [`Arena::reset`](crate::Arena), `Arena::drop`, and the
-//!   oversized-Vec-grow path drain (or splice from) the list.
+//! The list uses [`Chunk::next`] for intrusive linkage. [`Arena::refill`]
+//! pushes entries, while reset, drop, and oversized vector growth drain or
+//! splice them.
 //!
 //! The drain is iterative *and* re-checks `head` on each pass so that
 //! reentrant pushes performed by user-supplied chunk-teardown destructors
@@ -56,7 +43,7 @@ pub(in crate::arena) struct RetiredLocalChunks<A: Allocator + Clone> {
 // logically holds the same `+1` a mutator does and is single-owner; moving
 // the arena between threads moves every node with it. `!Sync` is inherited
 // from `Cell`, matching the bound `Arena` needs.
-unsafe impl<A: Allocator + Clone + Send> Send for RetiredLocalChunks<A> {}
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for RetiredLocalChunks<A> {}
 
 impl<A: Allocator + Clone> RetiredLocalChunks<A> {
     #[inline]
@@ -106,11 +93,8 @@ impl<A: Allocator + Clone> RetiredLocalChunks<A> {
                 unsafe {
                     let fat = Chunk::<A>::header_to_fat(cur);
                     let chunk = NonNull::new_unchecked(fat);
-                    // Detach the node *before* releasing its refcount: a
-                    // panicking drop shim invoked from `teardown_and_release`
-                    // must not see this chunk re-entrantly through the list.
-                    // We also clear the field so the chunk, if recycled into
-                    // the provider cache, starts in a clean state.
+                    // Detach before release to prevent reentrant list access
+                    // and leave recycled chunks unlinked.
                     let next = Chunk::next(chunk);
                     Chunk::set_next(chunk, ptr::null_mut());
                     Self::release_retired_chunk(chunk);

@@ -33,6 +33,16 @@ enum ErrorKind {
 /// * computing the request's layout overflowed the addressable range.
 ///
 /// Like [`core::alloc::AllocError`], this carries no backtrace or source error.
+///
+/// ```
+/// use multitude::{AllocError, Arena};
+///
+/// let arena = Arena::builder().byte_budget(0).build();
+/// let Some(error): Option<AllocError> = arena.try_alloc(1_u8).err() else {
+///     panic!("zero budget must reject allocation");
+/// };
+/// assert!(error.is_allocator_failure());
+/// ```
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct AllocError {
     kind: ErrorKind,
@@ -63,26 +73,54 @@ impl AllocError {
         kind: ErrorKind::CapacityOverflow,
     };
 
-    /// Returns `true` if allocation failed because the backing allocator could
-    /// not provide memory for a new chunk, or the arena reached its configured
-    /// byte budget and cannot grow.
+    /// Report whether the backing allocator or byte budget prevented growth.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().byte_budget(0).build();
+    /// let Some(error) = arena.try_alloc(1_u8).err() else {
+    ///     panic!("zero budget must reject allocation");
+    /// };
+    /// assert!(error.is_allocator_failure());
+    /// ```
     #[must_use]
     pub fn is_allocator_failure(self) -> bool {
         matches!(self.kind, ErrorKind::AllocatorFailed)
     }
 
-    /// Returns `true` if allocation failed because the request needs an
-    /// alignment larger than the arena can satisfy. Such a request can never
+    /// Report whether the request exceeded the arena's supported alignment.
+    ///
+    /// Such a request can never
     /// succeed, regardless of how much memory is available.
+    ///
+    /// ```
+    /// #[repr(align(32768))]
+    /// struct OverAligned;
+    ///
+    /// let arena = multitude::Arena::new();
+    /// let Some(error) = arena.try_alloc(OverAligned).err() else {
+    ///     panic!("over-aligned values must be rejected");
+    /// };
+    /// assert!(error.is_alignment_too_large());
+    /// ```
     #[must_use]
     pub fn is_alignment_too_large(self) -> bool {
         matches!(self.kind, ErrorKind::AlignmentTooLarge)
     }
 
-    /// Returns `true` if allocation failed because computing the request's
-    /// layout overflowed the addressable range (the size arithmetic wrapped
-    /// `usize` or the total exceeded `isize::MAX`). Such a request can never
+    /// Report whether request layout computation exceeded the addressable range.
+    ///
+    /// This includes wrapped `usize` size arithmetic or totals above
+    /// `isize::MAX`. Such a request can never
     /// succeed.
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let mut values = arena.alloc_vec::<u16>();
+    /// let Some(error) = values.try_reserve(usize::MAX).err() else {
+    ///     panic!("the capacity calculation must overflow");
+    /// };
+    /// assert!(error.is_capacity_overflow());
+    /// ```
     #[must_use]
     pub fn is_capacity_overflow(self) -> bool {
         matches!(self.kind, ErrorKind::CapacityOverflow)

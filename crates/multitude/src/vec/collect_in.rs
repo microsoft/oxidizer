@@ -6,8 +6,7 @@ use allocator_api2::alloc::Allocator;
 use crate::Arena;
 use crate::vec::FromIteratorIn;
 
-/// Extension trait on iterators that lets you collect directly into an
-/// arena-backed collection.
+/// Collects iterators directly into arena-backed collections.
 ///
 /// Blanket-implemented for every `IntoIterator`. Usage typically annotates
 /// the result type so the compiler picks the right `C`:

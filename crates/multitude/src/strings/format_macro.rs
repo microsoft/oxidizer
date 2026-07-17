@@ -40,7 +40,7 @@ use allocator_api2::alloc::Allocator;
 use crate::strings::String;
 
 impl<A: Allocator + Clone> fmt::Write for String<'_, A> {
-    #[allow(
+    #[expect(
         clippy::map_err_ignore,
         reason = "fmt::Error carries no payload; the original AllocError has no useful information to preserve"
     )]
@@ -48,7 +48,7 @@ impl<A: Allocator + Clone> fmt::Write for String<'_, A> {
         self.try_push_str(s).map_err(|_| fmt::Error)
     }
 
-    #[allow(
+    #[expect(
         clippy::map_err_ignore,
         reason = "fmt::Error carries no payload; the original AllocError has no useful information to preserve"
     )]
