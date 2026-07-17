@@ -274,9 +274,10 @@ jobs:
       # Maintain a single sticky PR comment (keyed by the `semver-check` header)
       # so each push updates the same comment in place instead of adding a new one.
       # Only fires when the PR actually publishes something and is not from a fork
-      # (forks lack a write token).
+      # (forks lack a write token). Restricted to `pull_request` events: merge
+      # groups have no PR to comment on (`github.event.pull_request` is null).
       - name: Post Semver Comment
-        if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'pull_request' && steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: semver-check
