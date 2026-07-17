@@ -177,14 +177,12 @@ mod tests {
         assert!(tester.collect_attributes().is_empty(), "expected no metrics when guard is disarmed");
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
     fn guard_emits_log_with_hedging_delay() {
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
-
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _default = log_capture.subscriber().set_default();
 
         let context = crate::ResilienceContext::<String, String>::new(Clock::new_frozen())

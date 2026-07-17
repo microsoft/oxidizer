@@ -83,6 +83,18 @@ wrong and it does not explain why we believe this access can never be out of bou
 This is good code: `self_span.get(self_offset..).expect("guarded by min() above to never exceed span length")` - this explains
 why we believe the operation can never cause an out of bounds access.
 
+# [Testing tracing events](docs/tracing-tests.md)
+
+How to test `tracing` output without cross-test pollution. Key rule: every test
+binary that emits or inspects `tracing` must invoke `testing_aids::init_tracing!()`
+at module scope, or trace-event lines may be reported as uncovered even though
+they run.
+
+**Open this when**: writing or moving any test that inspects `tracing` output;
+adding a log/event emission that needs coverage; adding a crate whose tests emit
+`tracing` events (it needs the ctor initialization); tempted to install a global
+subscriber in a unit test.
+
 # [Benchmarks](docs/benchmarks.md)
 
 Criterion benchmark design (single-threaded by default, elementary operations,

@@ -18,15 +18,12 @@ use std::time::Duration;
 use std::{env, process, thread};
 
 mod io;
-mod log;
-mod log_capture;
 mod macros;
 mod metrics;
+pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;
-pub use log::*;
-pub use log_capture::*;
 pub use metrics::*;
 pub use yielding::*;
 

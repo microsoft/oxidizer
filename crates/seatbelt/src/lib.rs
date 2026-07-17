@@ -280,3 +280,10 @@ mod metrics;
 pub(crate) mod testing;
 
 pub(crate) type TelemetryString = std::borrow::Cow<'static, str>;
+
+// Installs a silent, always-interested global `tracing` subscriber before any
+// unit test in this crate runs. This keeps `tracing` emission paths executing
+// deterministically (never poisoned into the "disabled" state) and lets per-test
+// thread-local subscribers compose safely. See `docs/tracing-tests.md`.
+#[cfg(test)]
+testing_aids::init_tracing!();
