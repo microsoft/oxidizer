@@ -34,6 +34,7 @@ include = [
     "/examples/**",
     "/benches/**",
     "/tests/**",
+    "!/tests/__fuzz__/**",
     "/docs/**/*.md",
     "/Cargo.toml",
     "/README.md",
@@ -50,55 +51,19 @@ include = [
 
 [workspace.dependencies]
 
-# local dependencies
-anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.6.0" }
-anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.3" }
-bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.6.0" }
-bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.6.0" }
-cachet = { path = "crates/cachet", default-features = false, version = "0.9.0" }
-cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.5.0" }
-cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.8" }
-cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.6" }
-data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.3" }
-data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
-data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.3" }
-data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.3" }
-fetch = { path = "crates/fetch", default-features = false, version = "0.13.0" }
-fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.3.0" }
-fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.6" }
-fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
-fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.5" }
-fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
-fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
-fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
-http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.7.0" }
-http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.1.0" }
-layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
-multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
-ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
-ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
-plurality = { path = "crates/plurality", default-features = false, version = "0.1.1" }
-recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
-seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.6.0" }
-seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.5.0" }
-templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.4" }
-templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.6" }
-templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.6" }
-testing_aids = { path = "crates/testing_aids", default-features = false }
-thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.8.0" }
-thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.5" }
-thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.7.4" }
-tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
-uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
-
 # external dependencies
 ahash = { version = "0.8.4", default-features = false }
 alloc_tracker = { version = "0.6.0", default-features = false }
 allocator-api2 = { version = "0.4.0", default-features = false }
 anyhow = { version = "1.0.100", default-features = false }
+
+# local dependencies
+anyspawn = { path = "crates/anyspawn", default-features = false, version = "0.6.0" }
+anyspawn_azure = { path = "crates/anyspawn_azure", default-features = false, version = "0.1.3" }
 argh = { version = "0.1.13", default-features = false }
 async-once-cell = { version = "0.5.0", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
+axum = { version = "0.8.9", default-features = false }
 azure_core = { version = "1.0.0", default-features = false }
 azure_identity = { version = "1.0.0", default-features = false }
 azure_storage_blob = { version = "1.0.0", default-features = false }
@@ -107,6 +72,12 @@ bolero = { version = "0.13.4", default-features = false }
 bumpalo = { version = "3.20.2", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
+bytesbuf = { path = "crates/bytesbuf", default-features = false, version = "0.6.0" }
+bytesbuf_io = { path = "crates/bytesbuf_io", default-features = false, version = "0.6.0" }
+cachet = { path = "crates/cachet", default-features = false, version = "0.9.0" }
+cachet_memory = { path = "crates/cachet_memory", default-features = false, version = "0.5.0" }
+cachet_service = { path = "crates/cachet_service", default-features = false, version = "0.2.8" }
+cachet_tier = { path = "crates/cachet_tier", default-features = false, version = "0.2.6" }
 chrono = { version = "0.4.40", default-features = false }
 chrono-tz = { version = "0.10.4", default-features = false }
 chumsky = { version = "0.13.0", default-features = false }
@@ -114,12 +85,24 @@ criterion = { version = "0.8.1", default-features = false }
 ctor = { version = "1.0.8", default-features = false, features = ["proc_macro"] }
 darling = { version = "0.23.0", default-features = false }
 dashmap = { version = "6.1.0", default-features = false }
+data_privacy = { path = "crates/data_privacy", default-features = false, version = "0.12.3" }
+data_privacy_core = { path = "crates/data_privacy_core", default-features = false, version = "0.1.2" }
+data_privacy_macros = { path = "crates/data_privacy_macros", default-features = false, version = "0.10.3" }
+data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.3" }
 deadpool = { version = "0.13.0", default-features = false }
 derive_more = { version = "2.0.1", default-features = false }
 duct = { version = "1.1.1", default-features = false }
 dynosaur = { version = "0.3.0", default-features = false }
 fastrand = { version = "2.3.0", default-features = false, features = ["std"] }
+fetch = { path = "crates/fetch", default-features = false, version = "0.13.0" }
+fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.3.0" }
+fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.6" }
+fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
+fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.5" }
 foldhash = { version = "0.2.0", default-features = false }
+fundle = { path = "crates/fundle", default-features = false, version = "0.3.4" }
+fundle_macros = { path = "crates/fundle_macros", default-features = false, version = "0.3.4" }
+fundle_macros_impl = { path = "crates/fundle_macros_impl", default-features = false, version = "0.3.4" }
 futures = { version = "0.3.31", default-features = false }
 futures-channel = { version = "0.3.31", default-features = false }
 futures-core = { version = "0.3.31", default-features = false }
@@ -129,24 +112,32 @@ hashbrown = { version = "0.17.0", default-features = false }
 http = { version = "1.4.1", default-features = false, features = ["std"] }
 http-body = { version = "1.0.1", default-features = false }
 http-body-util = { version = "0.1.3", default-features = false }
+http_extensions = { path = "crates/http_extensions", default-features = false, version = "0.7.0" }
+http_path_template = { path = "crates/http_path_template", default-features = false, version = "0.2.0" }
 hyper = { version = "1.10.1", default-features = false }
 hyper-rustls = { version = "0.27.9", default-features = false }
 hyper-tls = { version = "0.6.0", default-features = false }
 hyper-util = { version = "0.1.20", default-features = false }
 infinity_pool = { version = "0.8.1", default-features = false }
 insta = { version = "1.44.1", default-features = false }
+itoa = { version = "1.0.17", default-features = false }
 jiff = { version = "0.2.21", default-features = false }
+layered = { path = "crates/layered", default-features = false, version = "0.3.5" }
 libc = { version = "0.2.178", default-features = false }
 loom = { version = "0.7.2", default-features = false }
 many_cpus = { version = "2.1.0", default-features = false }
+matchit = { version = "0.8.4", default-features = false }
 mimalloc = { version = "0.1.52", default-features = false }
 mockall = { version = "0.14.0", default-features = false }
 moka = { version = "0.12.14", default-features = false }
+multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
 mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
+ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
+ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", default-features = false }
@@ -154,25 +145,37 @@ opentelemetry-stdout = { version = "0.32.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.0", default-features = false }
 opool = { version = "0.2.0", default-features = false }
 parking_lot = { version = "0.12.5", default-features = false }
+path-tree = { version = "0.8.3", default-features = false }
 pct-str = { version = "3.0.1", default-features = false }
 pin-project = { version = "1.1.8", default-features = false }
 pin-project-lite = { version = "0.2.13", default-features = false }
+plurality = { path = "crates/plurality", default-features = false, version = "0.1.0" }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
 pretty_assertions = { version = "1.4.1", default-features = false }
 prettyplease = { version = "0.2.37", default-features = false }
+proc-macro-crate = { version = "2.0.2", default-features = false }
 proc-macro2 = { version = "1.0.103", default-features = false }
 ptr_meta = { version = "0.3.1", default-features = false }
 quote = { version = "1.0.42", default-features = false }
 rapidhash = { version = "4.1.1", default-features = false }
+recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 regex = { version = "1.12.2", default-features = false }
+route-recognizer = { version = "0.3.1", default-features = false }
+routerama = { path = "crates/routerama", default-features = false, version = "0.1.0" }
+routerama_build = { path = "crates/routerama_build", default-features = false, version = "0.1.0" }
+routerama_macros = { path = "crates/routerama_macros", default-features = false, version = "0.1.0" }
 rstest = { version = "0.26.0", default-features = false }
 rustc-hash = { version = "2.1.0", default-features = false }
 rustls = { version = "0.23.40", default-features = false }
 rustls-pki-types = { version = "1.14.1", default-features = false }
 rustls-platform-verifier = { version = "0.7.0", default-features = false }
+seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.6.0" }
+seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.5.0" }
 serde = { version = "1.0.228", default-features = false }
 serde_core = { version = "1.0.228", default-features = false }
+serde_html_form = { version = "0.4.1", default-features = false }
 serde_json = { version = "1.0.145", default-features = false }
+serde_urlencoded = { version = "0.7.1", default-features = false }
 serial_test = { version = "3.2.0", default-features = false }
 sharded-slab = { version = "0.1.7", default-features = false }
 slab = { version = "0.4.12", default-features = false }
@@ -181,7 +184,15 @@ smallvec = { version = "1.15.1", default-features = false }
 smol = { version = "2.0.0", default-features = false }
 static_assertions = { version = "1.1.0", default-features = false }
 syn = { version = "2.0.111", default-features = false }
+templated_uri = { path = "crates/templated_uri", default-features = false, version = "0.3.4" }
+templated_uri_macros = { path = "crates/templated_uri_macros", default-features = false, version = "0.2.6" }
+templated_uri_macros_impl = { path = "crates/templated_uri_macros_impl", default-features = false, version = "0.2.6" }
+testing_aids = { path = "crates/testing_aids", default-features = false }
 thiserror = { version = "2.0.17", default-features = false }
+thread_aware = { path = "crates/thread_aware", default-features = false, version = "0.8.0" }
+thread_aware_macros = { path = "crates/thread_aware_macros", default-features = false, version = "0.7.5" }
+thread_aware_macros_impl = { path = "crates/thread_aware_macros_impl", default-features = false, version = "0.7.4" }
+tick = { path = "crates/tick", default-features = false, version = "0.4.0" }
 time = { version = "0.3.47", default-features = false }
 tokio = { version = "1.48.0", default-features = false }
 tokio-native-tls = { version = "0.3.1", default-features = false }
@@ -194,6 +205,8 @@ tracing-subscriber = { version = "0.3.20", default-features = false }
 trait-variant = { version = "0.1.2", default-features = false }
 trybuild = { version = "1.0.114", default-features = false }
 typeid = { version = "1.0.3", default-features = false }
+unicode-ident = { version = "1.0.22", default-features = false }
+uniflight = { path = "crates/uniflight", default-features = false, version = "0.3.0" }
 uuid = { version = "1.21.0", default-features = false }
 widestring = { version = "1.2.1", default-features = false }
 windows-sys = { version = "0.61.2", default-features = false }
