@@ -1,44 +1,98 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(clippy::option_if_let_else, reason = "Darling's macro expansion currently uses this pattern")]
-#![expect(
-    clippy::needless_continue,
-    reason = "Darling's macro expansion triggers this lint until next version gets released (https://github.com/TedDriggs/darling/pull/402)"
-)]
-
 use std::collections::HashSet;
 
-use darling::{FromAttributes, FromField};
 use proc_macro2::{Ident, TokenStream};
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
-use syn::{Attribute, DataStruct, Field};
+use syn::{Attribute, DataStruct, Field, LitStr};
 
 use crate::template_parser::{ParamGroup, TemplatePart, UriTemplate};
 
 type FieldMap<'a> = std::collections::HashMap<String, &'a Field>;
 type FieldOptsMap<'a> = std::collections::HashMap<String, &'a FieldOpts>;
 
-#[derive(Debug, FromAttributes)]
-#[darling(attributes(templated))]
+#[derive(Debug)]
 pub(crate) struct Opts {
-    #[darling(rename = "template")]
     pub input_template: String,
-    #[darling(default)]
     pub unredacted: bool,
     /// Optional label for telemetry. When provided, this label is used in metrics
     /// instead of the full template string, which is useful for complex templates.
-    #[darling(default)]
     pub label: Option<String>,
 }
 
-#[derive(Debug, FromField)]
-#[darling(attributes(templated))]
+impl Opts {
+    pub(crate) fn from_attributes(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut input_template: Option<String> = None;
+        let mut unredacted = false;
+        let mut label: Option<String> = None;
+
+        for attr in attrs {
+            if !attr.path().is_ident("templated") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("template") {
+                    let s: LitStr = meta.value()?.parse()?;
+                    input_template = Some(s.value());
+                    Ok(())
+                } else if meta.path.is_ident("unredacted") {
+                    unredacted = true;
+                    Ok(())
+                } else if meta.path.is_ident("label") {
+                    let s: LitStr = meta.value()?.parse()?;
+                    label = Some(s.value());
+                    Ok(())
+                } else {
+                    Err(meta.error("unrecognized `templated` attribute"))
+                }
+            })?;
+        }
+
+        let input_template = input_template.ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "missing required `template` attribute in `#[templated(...)]`",
+            )
+        })?;
+
+        Ok(Opts {
+            input_template,
+            unredacted,
+            label,
+        })
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct FieldOpts {
     pub ident: Option<Ident>,
-    #[darling(default)]
     pub unredacted: bool,
+}
+
+impl FieldOpts {
+    pub(crate) fn from_field(field: &Field) -> syn::Result<Self> {
+        let mut unredacted = false;
+        for attr in &field.attrs {
+            if attr.path().is_ident("templated") {
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("unredacted") {
+                        unredacted = true;
+                        Ok(())
+                    } else {
+                        Err(meta.error("unrecognized `templated` field attribute"))
+                    }
+                })?;
+            } else if attr.path().is_ident("unredacted") {
+                unredacted = true;
+            }
+        }
+        Ok(FieldOpts {
+            ident: field.ident.clone(),
+            unredacted,
+        })
+    }
 }
 
 /// Represents the fields of a struct with their options parsed from attributes.
@@ -48,18 +102,8 @@ struct Fields {
 
 impl Fields {
     /// Constructs a new `Fields` instance by parsing a slice of `Field`.
-    fn from_fields(fields: &[&Field]) -> darling::Result<Self> {
-        let fields = fields
-            .iter()
-            .map(|&f| {
-                let mut opts = FieldOpts::from_field(f)?;
-                // Also check for standalone #[unredacted] attribute
-                if !opts.unredacted {
-                    opts.unredacted = f.attrs.iter().any(|attr| attr.path().is_ident("unredacted"));
-                }
-                Ok(opts)
-            })
-            .collect::<darling::Result<Vec<_>>>()?;
+    fn from_fields(fields: &[&Field]) -> syn::Result<Self> {
+        let fields = fields.iter().map(|&f| FieldOpts::from_field(f)).collect::<syn::Result<Vec<_>>>()?;
         Ok(Self { fields })
     }
 
@@ -86,7 +130,7 @@ pub(crate) fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribut
         label,
     } = match Opts::from_attributes(attrs) {
         Ok(opts) => opts,
-        Err(err) => return err.write_errors(),
+        Err(err) => return err.to_compile_error(),
     };
 
     let template = match UriTemplate::parse(&input_template) {
@@ -103,7 +147,7 @@ pub(crate) fn struct_template(ident: Ident, data: &DataStruct, attrs: &[Attribut
 
     let fields = match Fields::from_fields(struct_fields.as_slice()) {
         Ok(fields) => fields,
-        Err(err) => return err.write_errors(),
+        Err(err) => return err.to_compile_error(),
     };
 
     let struct_field_names = fields.field_names();
