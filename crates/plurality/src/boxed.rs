@@ -60,18 +60,18 @@ impl<T, A: Allocator> Box<T, A> {
     /// a slice), keeping the value in its pool slot.
     ///
     /// The [`Coercion`](struct@Coercion) token proves that `T` can be unsized to `U` while
-    /// preserving the value's address and provenance. Use the [`Coercion!`](crate::Coercion!)
+    /// preserving the value's address and provenance. Use the [`coerce!`](crate::coerce!)
     /// macro for arbitrary trait objects or a provided constructor such as
     /// [`Coercion::to_slice`].
     ///
     /// ```
     /// use core::fmt::Debug;
     ///
-    /// use plurality::{Box, Coercion, Pool};
+    /// use plurality::{Box, Pool, coerce};
     ///
     /// let pool = Pool::<u32>::new();
     /// let b = pool.alloc_box(7u32);
-    /// let dyn_b: Box<dyn Debug> = Box::unsize::<dyn Debug>(b, Coercion!(to dyn Debug));
+    /// let dyn_b: Box<dyn Debug> = Box::unsize::<dyn Debug>(b, coerce!(dyn Debug));
     /// assert_eq!(format!("{dyn_b:?}"), "7");
     /// ```
     ///

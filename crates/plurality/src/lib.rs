@@ -101,11 +101,11 @@
 //! ```
 //! use core::fmt::Debug;
 //!
-//! use plurality::{Box, Coercion, Pool};
+//! use plurality::{Box, Pool, coerce};
 //!
 //! let pool = Pool::<u32>::new();
 //! let b = pool.alloc_box(7u32);
-//! let erased = Box::unsize(b, Coercion!(to dyn Debug));
+//! let erased = Box::unsize(b, coerce!(dyn Debug));
 //! assert_eq!(format!("{erased:?}"), "7");
 //! ```
 //!

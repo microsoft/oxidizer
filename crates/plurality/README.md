@@ -103,11 +103,11 @@ token:
 ```rust
 use core::fmt::Debug;
 
-use plurality::{Box, Coercion, Pool};
+use plurality::{Box, Pool, coerce};
 
 let pool = Pool::<u32>::new();
 let b = pool.alloc_box(7u32);
-let erased = Box::unsize(b, Coercion!(to dyn Debug));
+let erased = Box::unsize(b, coerce!(dyn Debug));
 assert_eq!(format!("{erased:?}"), "7");
 ```
 
@@ -166,7 +166,7 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbjzKDgAj0y_sbtY3INVb9Xlkbk8hV2mzsxgob5ZNXemyQodhhZIGCaXBsdXJhbGl0eWUwLjEuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbtfM-dLtH0TEbQJuotuGwrQ4bK8ip4V4e5yAbDy5HNprUNINhZIGCaXBsdXJhbGl0eWUwLjEuMQ
  [__link0]: https://docs.rs/plurality/0.1.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.1.1/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.1.1/plurality/?search=Rc

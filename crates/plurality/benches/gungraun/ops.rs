@@ -25,7 +25,7 @@
 use std::hint::black_box;
 
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-use plurality::{Arc, Coercion, Pool, Rc};
+use plurality::{Arc, Pool, Rc, coerce};
 
 /// A small (~32-byte), `Drop`-free payload, so the benchmarks measure the
 /// pool's own allocate/free cost rather than user destructors.
@@ -117,14 +117,14 @@ pub(crate) fn box_uninit(p: &Pool<Obj>, i: u64) {
 #[inline]
 pub(crate) fn arc_unsize(p: &Pool<Obj>, i: u64) {
     let a = p.alloc_arc(black_box(Obj::new(i)));
-    let d: plurality::Arc<dyn Marker> = plurality::Arc::unsize::<dyn Marker>(a, plurality::Coercion!(to dyn Marker));
+    let d: plurality::Arc<dyn Marker> = plurality::Arc::unsize::<dyn Marker>(a, plurality::coerce!(dyn Marker));
     drop(black_box(d));
 }
 
 #[inline]
 pub(crate) fn box_unsize(p: &Pool<Obj>, i: u64) {
     let b = p.alloc_box(black_box(Obj::new(i)));
-    let d: plurality::Box<dyn Marker> = plurality::Box::unsize::<dyn Marker>(b, plurality::Coercion!(to dyn Marker));
+    let d: plurality::Box<dyn Marker> = plurality::Box::unsize::<dyn Marker>(b, plurality::coerce!(dyn Marker));
     drop(black_box(d));
 }
 
@@ -209,7 +209,7 @@ pub(crate) fn setup_plurality(n: usize) -> Pool<Obj> {
     assert!(pool.capacity() >= n as u64);
     assert!(pool.is_empty());
     let handle = pool.alloc_box(Obj::new(n as u64));
-    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, Coercion!(to dyn Marker));
+    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
     assert_eq!(handle.tag(), 0xFF);
     drop(handle);
     pool
@@ -283,7 +283,7 @@ pub(crate) fn setup_std_box(n: usize) {
 #[inline]
 pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
     let handle = pool.alloc_box(black_box(Obj::new(i)));
-    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, Coercion!(to dyn Marker));
+    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
     invoke_dyn(&*handle);
     drop(black_box(handle));
 }

@@ -66,11 +66,11 @@ impl<T, A: Allocator> Arc<T, A> {
     /// ```
     /// use core::fmt::Debug;
     ///
-    /// use plurality::{Arc, Coercion, Pool};
+    /// use plurality::{Arc, Pool, coerce};
     ///
     /// let pool = Pool::<u32>::new();
     /// let a = pool.alloc_arc(7u32);
-    /// let dyn_a: Arc<dyn Debug> = Arc::unsize::<dyn Debug>(a, Coercion!(to dyn Debug));
+    /// let dyn_a: Arc<dyn Debug> = Arc::unsize::<dyn Debug>(a, coerce!(dyn Debug));
     /// assert_eq!(format!("{dyn_a:?}"), "7");
     /// ```
     ///

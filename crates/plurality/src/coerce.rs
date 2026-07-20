@@ -15,7 +15,7 @@
 //! coercion, [`unsize`] simply applies the function and reinterprets the result;
 //! it makes no assumptions about the internal layout of fat pointers.
 //!
-//! Build a token with the safe [`Coercion!`](crate::Coercion!) macro (for trait
+//! Build a token with the safe [`coerce!`](crate::coerce!) macro (for trait
 //! objects) or [`Coercion::to_slice`] (for arrays). [`Coercion::new`] is the
 //! `unsafe` escape hatch for coercions the macro cannot express.
 
@@ -26,7 +26,7 @@ use core::ptr::NonNull;
 ///
 /// Pass one to [`Box::unsize`](crate::Box::unsize),
 /// [`Arc::unsize`](crate::Arc::unsize) or [`Rc::unsize`](crate::Rc::unsize).
-/// Construct it with the [`Coercion!`](crate::Coercion!) macro, with
+/// Construct it with the [`coerce!`](crate::coerce!) macro, with
 /// [`Coercion::to_slice`], or — for coercions those cannot express — with the
 /// `unsafe` [`Coercion::new`].
 pub struct Coercion<T, U: ?Sized, F: FnOnce(*const T) -> *const U = fn(*const T) -> *const U> {
@@ -37,7 +37,7 @@ pub struct Coercion<T, U: ?Sized, F: FnOnce(*const T) -> *const U = fn(*const T)
 impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> Coercion<T, U, F> {
     /// Wraps a coercion function in a token.
     ///
-    /// The [`Coercion!`](crate::Coercion!) macro and [`Coercion::to_slice`] cover
+    /// The [`coerce!`](crate::coerce!) macro and [`Coercion::to_slice`] cover
     /// the common cases safely; reach for this only when neither fits.
     ///
     /// # Safety
@@ -110,20 +110,21 @@ pub(crate) fn unsize<T, U: ?Sized, F: FnOnce(*const T) -> *const U>(ptr: NonNull
 
 /// Builds a [`Coercion`](struct@crate::Coercion) that unsizes to a trait object.
 ///
-/// The syntax mirrors a trait-object type: `Coercion!(to dyn Trait)`, including
-/// bounds such as `Coercion!(to dyn Trait + Send)`.
+/// The syntax is `coerce!(dyn Trait)`, including bounds such as
+/// `coerce!(dyn Trait + Send)`.
 ///
 /// ```
 /// use core::fmt::Debug;
-/// use plurality::{Box, Coercion, Pool};
+///
+/// use plurality::{Box, Pool, coerce};
 ///
 /// let pool = Pool::<u32>::new();
-/// let erased: Box<dyn Debug> = Box::unsize(pool.alloc_box(7), Coercion!(to dyn Debug));
+/// let erased: Box<dyn Debug> = Box::unsize(pool.alloc_box(7), coerce!(dyn Debug));
 /// assert_eq!(format!("{erased:?}"), "7");
 /// ```
 #[macro_export]
-macro_rules! Coercion {
-    (to dyn $($bounds:tt)*) => {
+macro_rules! coerce {
+    (dyn $($bounds:tt)*) => {
         // SAFETY: `coerce` only unsizes the pointer to the trait object; its body
         // is a plain compiler coercion.
         #[allow(unused_unsafe)]

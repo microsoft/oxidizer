@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use common::DropCounter;
-use plurality::{Box, Coercion, Pool};
+use plurality::{Box, Coercion, Pool, coerce};
 use static_assertions::assert_not_impl_any;
 
 trait Shape {
@@ -50,7 +50,7 @@ impl Shape for Rect {
 fn unsize_to_trait_object_dispatches_and_frees() {
     let pool = Pool::<Square>::new();
     let b = pool.alloc_box(Square(4));
-    let s: Box<dyn Shape> = Box::unsize::<dyn Shape>(b, Coercion!(to dyn Shape));
+    let s: Box<dyn Shape> = Box::unsize::<dyn Shape>(b, coerce!(dyn Shape));
     assert_eq!(s.area(), 16);
     assert_eq!(pool.len(), 1);
     drop(s);
@@ -65,8 +65,8 @@ fn heterogeneous_trait_objects_from_separate_pools() {
     let rects = Pool::<Rect>::new();
 
     let shapes: Vec<Box<dyn Shape>> = vec![
-        Box::unsize::<dyn Shape>(squares.alloc_box(Square(3)), Coercion!(to dyn Shape)),
-        Box::unsize::<dyn Shape>(rects.alloc_box(Rect(2, 5)), Coercion!(to dyn Shape)),
+        Box::unsize::<dyn Shape>(squares.alloc_box(Square(3)), coerce!(dyn Shape)),
+        Box::unsize::<dyn Shape>(rects.alloc_box(Rect(2, 5)), coerce!(dyn Shape)),
     ];
 
     let total: u32 = shapes.iter().map(|s| s.area()).sum();
@@ -85,7 +85,7 @@ fn unsize_runs_concrete_destructor_through_vtable() {
 
     // Erase to a trait object with no methods; drop must still run
     // `DropCounter::drop` via the value's metadata and reclaim the slot.
-    let erased: Box<dyn Send> = Box::unsize::<dyn Send>(b, Coercion!(to dyn Send));
+    let erased: Box<dyn Send> = Box::unsize::<dyn Send>(b, coerce!(dyn Send));
     assert_eq!(pool.len(), 1);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
 
@@ -134,7 +134,7 @@ fn unsized_slices_drop_every_element_and_reclaim_slots() {
 #[test]
 fn erased_debug_forwards_to_value() {
     let pool = Pool::<u32>::new();
-    let d: Box<dyn Debug> = Box::unsize::<dyn Debug>(pool.alloc_box(7u32), Coercion!(to dyn Debug));
+    let d: Box<dyn Debug> = Box::unsize::<dyn Debug>(pool.alloc_box(7u32), coerce!(dyn Debug));
     assert_eq!(format!("{d:?}"), "7");
 }
 
@@ -155,7 +155,7 @@ impl Future for ImmediateReady {
 fn unsize_to_dyn_future_and_poll_via_as_pin_mut() {
     let pool = Pool::<ImmediateReady>::new();
     let b = pool.alloc_box(ImmediateReady(42));
-    let mut fut: Box<dyn Future<Output = u32>> = Box::unsize::<dyn Future<Output = u32>>(b, Coercion!(to dyn Future<Output = u32>));
+    let mut fut: Box<dyn Future<Output = u32>> = Box::unsize::<dyn Future<Output = u32>>(b, coerce!(dyn Future<Output = u32>));
 
     let waker = Waker::noop();
     let mut cx = Context::from_waker(waker);
@@ -171,7 +171,7 @@ fn unsize_to_dyn_future_and_poll_via_as_pin_mut() {
 fn slot_reused_after_unsized_drop() {
     let pool = Pool::<u64>::builder().chunk_size(1).max_chunks(1).build();
     let b = pool.alloc_box(1u64);
-    let d: Box<dyn Send + Sync> = Box::unsize::<dyn Send + Sync>(b, Coercion!(to dyn Send + Sync));
+    let d: Box<dyn Send + Sync> = Box::unsize::<dyn Send + Sync>(b, coerce!(dyn Send + Sync));
     drop(d);
 
     // The single capped slot must be reusable after the erased handle is freed.
@@ -185,7 +185,7 @@ fn unsized_box_is_send_and_frees_cross_thread() {
     assert_send::<Box<dyn Send>>();
 
     let pool = Pool::<u32>::new();
-    let d: Box<dyn Send> = Box::unsize::<dyn Send>(pool.alloc_box(5u32), Coercion!(to dyn Send));
+    let d: Box<dyn Send> = Box::unsize::<dyn Send>(pool.alloc_box(5u32), coerce!(dyn Send));
     // Drop the erased handle on another thread (cross-thread free).
     std::thread::spawn(move || drop(d)).join().unwrap();
     assert_eq!(pool.len(), 0);
@@ -196,7 +196,7 @@ fn unsized_box_is_send_and_frees_cross_thread() {
 #[test]
 fn arc_unsize_shares_dispatches_and_frees() {
     let pool = Pool::<Square>::new();
-    let a: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(pool.alloc_arc(Square(5)), Coercion!(to dyn Shape));
+    let a: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(pool.alloc_arc(Square(5)), coerce!(dyn Shape));
     let a2 = a.clone();
     assert_eq!(a.area(), 25);
     assert_eq!(a2.area(), 25);
@@ -212,7 +212,7 @@ fn arc_unsize_runs_destructor_once_on_last_drop() {
     let counter = StdArc::new(AtomicUsize::new(0));
     let pool = Pool::<DropCounter>::new();
     let a: plurality::Arc<dyn Send> =
-        plurality::Arc::unsize::<dyn Send>(pool.alloc_arc(DropCounter(StdArc::clone(&counter))), Coercion!(to dyn Send));
+        plurality::Arc::unsize::<dyn Send>(pool.alloc_arc(DropCounter(StdArc::clone(&counter))), coerce!(dyn Send));
     let a2 = a.clone();
     drop(a);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -227,7 +227,7 @@ fn arc_sized_and_erased_clones_share_one_slot() {
     // one slot; whichever drops last frees it, reconstructing the layout either way.
     let pool = Pool::<Square>::new();
     let sized = pool.alloc_arc(Square(4));
-    let erased: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(sized.clone(), Coercion!(to dyn Shape));
+    let erased: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(sized.clone(), coerce!(dyn Shape));
     assert_eq!(sized.area(), 16);
     assert_eq!(erased.area(), 16);
     assert_eq!(pool.len(), 1);
@@ -253,7 +253,7 @@ fn arc_erased_is_send_sync_and_frees_cross_thread() {
     assert_send_sync::<plurality::Arc<dyn Send + Sync>>();
 
     let pool = Pool::<u32>::new();
-    let a: plurality::Arc<dyn Send + Sync> = plurality::Arc::unsize::<dyn Send + Sync>(pool.alloc_arc(9u32), Coercion!(to dyn Send + Sync));
+    let a: plurality::Arc<dyn Send + Sync> = plurality::Arc::unsize::<dyn Send + Sync>(pool.alloc_arc(9u32), coerce!(dyn Send + Sync));
     let a2 = a.clone();
     std::thread::spawn(move || drop(a2)).join().unwrap();
     drop(a);
@@ -263,7 +263,7 @@ fn arc_erased_is_send_sync_and_frees_cross_thread() {
 #[test]
 fn rc_unsize_shares_dispatches_and_frees() {
     let pool = Pool::<Square>::new();
-    let r: plurality::Rc<dyn Shape> = plurality::Rc::unsize::<dyn Shape>(pool.alloc_rc(Square(6)), Coercion!(to dyn Shape));
+    let r: plurality::Rc<dyn Shape> = plurality::Rc::unsize::<dyn Shape>(pool.alloc_rc(Square(6)), coerce!(dyn Shape));
     let r2 = r.clone();
     assert_eq!(r.area(), 36);
     assert_eq!(r2.area(), 36);
@@ -279,7 +279,7 @@ fn rc_unsize_runs_destructor_once_on_last_drop() {
     let counter = StdArc::new(AtomicUsize::new(0));
     let pool = Pool::<DropCounter>::new();
     let r: plurality::Rc<dyn std::any::Any> =
-        plurality::Rc::unsize::<dyn std::any::Any>(pool.alloc_rc(DropCounter(StdArc::clone(&counter))), Coercion!(to dyn std::any::Any));
+        plurality::Rc::unsize::<dyn std::any::Any>(pool.alloc_rc(DropCounter(StdArc::clone(&counter))), coerce!(dyn std::any::Any));
     let r2 = r.clone();
     drop(r2);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -389,13 +389,13 @@ impl ByteValue for ZeroSized {
 #[test]
 fn erased_zst_and_overaligned_values_reclaim_correctly() {
     let aligned_pool = Pool::<OverAligned>::builder().chunk_size(1).max_chunks(1).build();
-    let aligned: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(aligned_pool.alloc_box(OverAligned(7)), Coercion!(to dyn ByteValue));
+    let aligned: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(aligned_pool.alloc_box(OverAligned(7)), coerce!(dyn ByteValue));
     assert_eq!(aligned.value(), 7);
     drop(aligned);
     drop(aligned_pool.try_alloc_box(OverAligned(8)).unwrap());
 
     let zst_pool = Pool::<ZeroSized>::builder().chunk_size(1).max_chunks(1).build();
-    let zst: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(zst_pool.alloc_box(ZeroSized), Coercion!(to dyn ByteValue));
+    let zst: Box<dyn ByteValue> = Box::unsize::<dyn ByteValue>(zst_pool.alloc_box(ZeroSized), coerce!(dyn ByteValue));
     assert_eq!(zst.value(), 0);
     drop(zst);
     drop(zst_pool.try_alloc_box(ZeroSized).unwrap());
@@ -404,7 +404,7 @@ fn erased_zst_and_overaligned_values_reclaim_correctly() {
 #[test]
 fn unsized_raw_round_trips_preserve_metadata() {
     let shape_pool = Pool::<Square>::new();
-    let shape: Box<dyn Shape> = Box::unsize::<dyn Shape>(shape_pool.alloc_box(Square(4)), Coercion!(to dyn Shape));
+    let shape: Box<dyn Shape> = Box::unsize::<dyn Shape>(shape_pool.alloc_box(Square(4)), coerce!(dyn Shape));
     let shape_raw = Box::into_raw(shape);
     // SAFETY: `shape_raw` is the unchanged pointer just returned by `into_raw`.
     let shape: Box<dyn Shape> = unsafe { Box::from_raw(shape_raw) };

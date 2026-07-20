@@ -921,11 +921,10 @@ impl<T> Drop for LocalSlotGuard<T> {
 /// for a possibly-unsized `T`, by reconstructing the slot and chunk layout from
 /// the value's runtime size and alignment.
 ///
-/// This is the erased counterpart of [`drop_and_free`]: it never names
-/// `SlotCell<T>` (which is illegal for unsized `T`), so it can drive the drop
-/// path for an unsized handle. For a `Sized` `T`, `size_of_val`/`align_of_val`
-/// fold to the same constants the monomorphized path uses, so the arithmetic
-/// collapses to the identical offsets.
+/// This erased path never names `SlotCell<T>` (which is illegal for unsized
+/// `T`), so it can reclaim an unsized handle. For a `Sized` `T`,
+/// `size_of_val`/`align_of_val` fold to the same constants the monomorphized
+/// path uses, so the arithmetic collapses to the identical offsets.
 ///
 /// # Safety
 /// `value` must point at the initialized value of an occupied slot whose last
@@ -1027,8 +1026,8 @@ pub(crate) unsafe fn refcount_ptr<T: ?Sized>(value: NonNull<T>) -> *mut AtomicU3
     }
 }
 
-/// Like [`drop_and_free`] but for a lifetime-bound `Alloc`: returns the slot
-/// **without** touching `pool_refcount`.
+/// Drops and frees a lifetime-bound `Alloc`, returning the slot **without**
+/// touching `pool_refcount`.
 ///
 /// # Safety
 /// `slot` must be an occupied, initialized slot whose `Alloc` handle is being

@@ -36,7 +36,7 @@ mod dyn_box_ops {
     use std::hint::black_box;
 
     use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-    use plurality::{Coercion, Pool};
+    use plurality::{Pool, coerce};
 
     /// Number of reusable slots provisioned before measurement.
     pub(crate) const CAP: usize = 1024;
@@ -82,7 +82,7 @@ mod dyn_box_ops {
         assert!(pool.capacity() >= n as u64);
         assert!(pool.is_empty());
         let handle = pool.alloc_box(Obj::new(n as u64));
-        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, Coercion!(to dyn Marker));
+        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
         assert_eq!(handle.tag(), 0xFF);
         drop(handle);
         pool
@@ -154,7 +154,7 @@ mod dyn_box_ops {
     #[inline]
     pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
         let handle = pool.alloc_box(black_box(Obj::new(i)));
-        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, Coercion!(to dyn Marker));
+        let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
         invoke_dyn(&*handle);
         drop(black_box(handle));
     }

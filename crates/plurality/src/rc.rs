@@ -141,11 +141,11 @@ impl<T, A: Allocator> Rc<T, A> {
     /// ```
     /// use core::fmt::Debug;
     ///
-    /// use plurality::{Coercion, Pool, Rc};
+    /// use plurality::{Pool, Rc, coerce};
     ///
     /// let pool = Pool::<u32>::new();
     /// let r = pool.alloc_rc(7u32);
-    /// let dyn_r: Rc<dyn Debug> = Rc::unsize::<dyn Debug>(r, Coercion!(to dyn Debug));
+    /// let dyn_r: Rc<dyn Debug> = Rc::unsize::<dyn Debug>(r, coerce!(dyn Debug));
     /// assert_eq!(format!("{dyn_r:?}"), "7");
     /// ```
     ///
