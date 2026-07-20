@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 pub(crate) use define_fn_wrapper::define_fn_wrapper;
 
+mod boxed_future;
+pub(crate) use boxed_future::boxed_future;
+
 #[cfg(any(feature = "metrics", test))]
 mod attributes;
 #[cfg(any(feature = "metrics", test))]

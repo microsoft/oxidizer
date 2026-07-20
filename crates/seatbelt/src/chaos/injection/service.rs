@@ -2,9 +2,6 @@
 // Licensed under the MIT License.
 
 use std::borrow::Cow;
-use std::fmt::Debug;
-#[cfg(any(feature = "tower-service", test))]
-use std::pin::Pin;
 use std::sync::Arc;
 #[cfg(any(feature = "tower-service", test))]
 use std::task::{Context, Poll};
@@ -125,27 +122,10 @@ where
     }
 }
 
-/// Future returned by [`Injection`] when used as a tower [`Service`](tower_service::Service).
-#[cfg(any(feature = "tower-service", test))]
-pub struct InjectionFuture<Out> {
-    inner: Pin<Box<dyn Future<Output = Out> + Send>>,
-}
-
-#[cfg(any(feature = "tower-service", test))]
-impl<Out> Debug for InjectionFuture<Out> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InjectionFuture").finish_non_exhaustive()
-    }
-}
-
-#[cfg(any(feature = "tower-service", test))]
-impl<Out> Future for InjectionFuture<Out> {
-    type Output = Out;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.inner.as_mut().poll(cx)
-    }
-}
+crate::utils::boxed_future!(
+    /// Future returned by [`Injection`] when used as a tower [`Service`](tower_service::Service).
+    pub InjectionFuture
+);
 
 // IMPORTANT: The `tower_service::Service` impl below and the `layered::Service` impl above
 // contain logic-equivalent orchestration code. Any change to the `call` body MUST be mirrored
