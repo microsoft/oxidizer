@@ -9,11 +9,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  merge_group: {}
 
 jobs:
   # Emits per-tier `--exclude NAME ...` args (modified/affected/required) to scope
-  # downstream `cargo --workspace` jobs. PRs snapshot base vs. the merge commit
-  # (same SHA downstream jobs build); pushes emit empty (full backstop).
+  # downstream `cargo --workspace` jobs. PRs and merge groups snapshot base vs. the
+  # merge commit (same SHA downstream jobs build); pushes emit empty (full backstop).
   # `skip=true` when no crates are impacted (e.g. doc-only PR).
   delta:
     runs-on: ubuntu-latest
@@ -28,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./.github/actions/setup
         with:
           rust-toolchain: RUST_LATEST
@@ -37,11 +38,15 @@ jobs:
         id: compute
         shell: bash
         env:
+          # `pull_request` diffs against the target branch tip (`BASE_REF`);
+          # `merge_group` diffs against the exact base the queue built on
+          # (`BASE_SHA`, already present in history via `fetch-depth: 0`).
           BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            # push to main (or any non-PR trigger) -> full backstop: no excludes.
+          if [[ "${{ github.event_name }}" != "pull_request" && "${{ github.event_name }}" != "merge_group" ]]; then
+            # push to main (or any other non-PR/non-merge-group trigger) -> full backstop: no excludes.
             {
               echo "exclude_not_modified="
               echo "exclude_not_affected="
@@ -56,8 +61,13 @@ jobs:
           current="$RUNNER_TEMP/delta-current.json"
 
           head_sha=$(git rev-parse HEAD)
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          git checkout "origin/$BASE_REF"
+          # Baseline: merge_group -> the queue's base commit (BASE_SHA); PR -> target branch tip.
+          if [[ -n "$BASE_SHA" ]]; then
+            git checkout "$BASE_SHA"
+          else
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+            git checkout "origin/$BASE_REF"
+          fi
           cargo delta -c .delta.toml snapshot > "$baseline"
           git checkout "$head_sha"
           cargo delta -c .delta.toml snapshot > "$current"
@@ -215,7 +225,7 @@ jobs:
   # check against the previous version.
   semver:
     needs: [delta]
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -251,19 +261,24 @@ jobs:
         id: report
         shell: pwsh
         env:
-          BASE_REF: ${{ github.base_ref }}
+          # For `pull_request` this is the target branch (e.g. `main`); for
+          # `merge_group` `github.base_ref` is empty, so fall back to the merge
+          # group's base ref (`refs/heads/main`) and strip the prefix below.
+          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          git fetch --no-tags origin "+refs/heads/${env:BASE_REF}:refs/remotes/origin/${env:BASE_REF}"
-          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${env:BASE_REF}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
+          $baseRef = "${env:BASE_REF}" -replace '^refs/heads/', ''
+          git fetch --no-tags origin "+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${baseRef}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
 
       # Maintain a single sticky PR comment (keyed by the `semver-check` header)
       # so each push updates the same comment in place instead of adding a new one.
       # Only fires when the PR actually publishes something and is not from a fork
-      # (forks lack a write token).
+      # (forks lack a write token). Restricted to `pull_request` events: merge
+      # groups have no PR to comment on (`github.event.pull_request` is null).
       - name: Post Semver Comment
-        if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'pull_request' && steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: semver-check
@@ -271,7 +286,7 @@ jobs:
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing, static-analysis]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -325,7 +340,7 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
 
   model-checking:
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -345,7 +360,7 @@ jobs:
         run: just loom
 
   fuzz-testing:
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -365,7 +380,7 @@ jobs:
         run: just bolero 60s
 
   mutation-testing:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     needs: [testing]
     runs-on: ubuntu-latest
     steps:
