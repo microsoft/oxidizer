@@ -111,10 +111,36 @@ fn unsize_array_to_slice() {
 }
 
 #[test]
+fn unsized_slices_drop_every_element_and_reclaim_slots() {
+    let counter = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<[DropCounter; 3]>::builder().chunk_size(1).max_chunks(1).build();
+
+    let boxed = pool.alloc_box(core::array::from_fn(|_| DropCounter(StdArc::clone(&counter))));
+    let slice: Box<[DropCounter]> = Box::unsize(boxed, Coercion::to_slice());
+    drop(slice);
+    assert_eq!(counter.load(Ordering::SeqCst), 3);
+    assert_eq!(pool.len(), 0);
+
+    let arc = pool.alloc_arc(core::array::from_fn(|_| DropCounter(StdArc::clone(&counter))));
+    let slice: plurality::Arc<[DropCounter]> = plurality::Arc::unsize(arc, Coercion::to_slice());
+    let clone = slice.clone();
+    drop(slice);
+    assert_eq!(counter.load(Ordering::SeqCst), 3);
+    drop(clone);
+    assert_eq!(counter.load(Ordering::SeqCst), 6);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
 fn erased_debug_forwards_to_value() {
     let pool = Pool::<u32>::new();
     let d: Box<dyn Debug> = Box::unsize::<dyn Debug>(pool.alloc_box(7u32), Coercion!(to dyn Debug));
     assert_eq!(format!("{d:?}"), "7");
+}
+
+#[test]
+fn coercion_debug_is_non_exhaustive() {
+    assert_eq!(format!("{:?}", Coercion::<[u8; 1], [u8]>::to_slice()), "Coercion { .. }");
 }
 
 struct ImmediateReady(u32);
