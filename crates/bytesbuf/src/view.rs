@@ -928,20 +928,66 @@ impl<const LEN: usize> PartialEq<BytesView> for &[u8; LEN] {
 
 impl Eq for BytesView {}
 
+/// Block size used when hashing a [`BytesView`], chosen as one cache line so that small views
+/// (the common case) are hashed with a single `write` call while larger views still drive the
+/// hasher with a bounded number of bulk writes. The exact value only affects performance; any
+/// fixed constant yields a correct, segmentation-independent hash.
+const HASH_BLOCK_BYTES: usize = 64;
+
 impl Hash for BytesView {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // Hash all bytes in logical order, consistent with PartialEq.
-        // We also hash the cached length as an additional input, but equality and hashing are
-        // both defined by the logical byte sequence rather than how it is segmented into spans.
+        // Equality is defined by the logical byte sequence, independent of how it is segmented
+        // into spans, so hashing must be independent of segmentation too. The `Hasher` contract
+        // does not guarantee that `write(a); write(b)` produces the same result as
+        // `write(a ++ b)`, so hashing one span at a time would let span boundaries leak into the
+        // hash: two equal views with different segmentation could then produce different hashes,
+        // violating the `Hash`/`Eq` contract and breaking `HashMap` lookups.
         //
-        // We iterate over spans_reversed using an index to avoid cloning the view,
-        // which would increment atomic reference counts for every span.
+        // Instead we re-chunk the logical byte sequence into fixed-size blocks using a small stack
+        // buffer and feed those blocks to the hasher. Block boundaries depend only on the byte
+        // content (a full block every `HASH_BLOCK_BYTES` bytes, then a final partial block), never
+        // on span boundaries, so equal views always drive the hasher with an identical sequence of
+        // `write` calls. This is allocation-free, unlike gathering the bytes into a contiguous
+        // buffer.
+        //
+        // We also write the length as a prefix to keep the hash prefix-free, matching how the
+        // standard library hashes byte slices.
         self.len.hash(state);
-        let mut span_idx = self.spans_reversed.len();
-        while span_idx > 0 {
-            span_idx -= 1;
-            let span: &[u8] = &self.spans_reversed[span_idx];
-            state.write(span);
+
+        let mut block = [0_u8; HASH_BLOCK_BYTES];
+        let mut filled = 0_usize;
+
+        // We iterate over spans_reversed in reverse (logical order) using references, which does
+        // not clone the spans and therefore does not touch their atomic reference counts.
+        for span in self.spans_reversed.iter().rev() {
+            let mut remaining: &[u8] = span;
+            while !remaining.is_empty() {
+                // Fast path: when the buffer is empty we are aligned to a block boundary, so if the
+                // span holds at least a full block we can hash it directly from the span without
+                // copying it through the stack buffer. The resulting `write` call carries exactly
+                // the same bytes as the buffered path would, so the canonical call sequence is
+                // preserved while avoiding a copy of large contiguous spans.
+                if filled == 0 && remaining.len() >= HASH_BLOCK_BYTES {
+                    let (full_block, rest) = remaining.split_at(HASH_BLOCK_BYTES);
+                    state.write(full_block);
+                    remaining = rest;
+                    continue;
+                }
+
+                let take = (HASH_BLOCK_BYTES - filled).min(remaining.len());
+                block[filled..filled + take].copy_from_slice(&remaining[..take]);
+                filled += take;
+                remaining = &remaining[take..];
+
+                if filled == HASH_BLOCK_BYTES {
+                    state.write(&block);
+                    filled = 0;
+                }
+            }
+        }
+
+        if filled > 0 {
+            state.write(&block[..filled]);
         }
     }
 }
@@ -1879,5 +1925,149 @@ mod tests {
         };
 
         assert_ne!(hash_of(&a), hash_of(&b));
+    }
+
+    /// A `Hasher` for which `write(a); write(b)` differs from `write(a ++ b)`, because it mixes the
+    /// length of every individual `write` call into the state. A correct [`Hash`] implementation
+    /// must not depend on how the bytes are chunked across `write` calls, so it must produce the
+    /// same hash for equal views regardless of their span segmentation even under such a hasher.
+    #[derive(Default)]
+    struct BoundarySensitiveHasher {
+        state: u64,
+    }
+
+    impl Hasher for BoundarySensitiveHasher {
+        fn finish(&self) -> u64 {
+            self.state
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            self.state = self.state.wrapping_mul(31).wrapping_add(bytes.len() as u64);
+            for &byte in bytes {
+                self.state = self.state.wrapping_mul(31).wrapping_add(u64::from(byte));
+            }
+        }
+    }
+
+    #[test]
+    fn hash_is_independent_of_span_segmentation() {
+        // Same logical bytes, three different span segmentations: one, two, and three spans.
+        let one_span = BytesView::from(vec![1, 2, 3, 4, 5, 6]);
+
+        let mut two_spans = BytesView::from(vec![1, 2, 3]);
+        two_spans.append(BytesView::from(vec![4, 5, 6]));
+
+        let mut three_spans = BytesView::from(vec![1, 2]);
+        three_spans.append(BytesView::from(vec![3, 4]));
+        three_spans.append(BytesView::from(vec![5, 6]));
+
+        // All three are equal per the boundary-independent equality.
+        assert_eq!(one_span, two_spans);
+        assert_eq!(one_span, three_spans);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = BoundarySensitiveHasher::default();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        // The Hash/Eq contract requires equal values to hash equally, even under a hasher that is
+        // sensitive to how bytes are chunked across write() calls.
+        assert_eq!(hash_of(&one_span), hash_of(&two_spans));
+        assert_eq!(hash_of(&one_span), hash_of(&three_spans));
+    }
+
+    #[test]
+    fn hash_is_independent_of_span_segmentation_across_block_boundary() {
+        // Content longer than HASH_BLOCK_BYTES so hashing spills across multiple blocks, with span
+        // splits that do not line up with the block boundaries. The hash must still ignore how the
+        // bytes are segmented into spans.
+        let content: Vec<u8> = (0..=u8::MAX).cycle().take(HASH_BLOCK_BYTES * 2 + 5).collect();
+
+        let one_span = BytesView::from(content.clone());
+
+        // Split at offsets that straddle the 64-byte block boundary (before, on, and after it).
+        let split_points = [1, HASH_BLOCK_BYTES - 3, HASH_BLOCK_BYTES, HASH_BLOCK_BYTES + 7];
+        let mut many_spans = BytesView::new();
+        let mut previous = 0;
+        for &point in &split_points {
+            many_spans.append(BytesView::from(content[previous..point].to_vec()));
+            previous = point;
+        }
+        many_spans.append(BytesView::from(content[previous..].to_vec()));
+
+        assert_eq!(one_span, many_spans);
+
+        let hash_of = |v: &BytesView| {
+            let mut h = BoundarySensitiveHasher::default();
+            v.hash(&mut h);
+            h.finish()
+        };
+
+        assert_eq!(hash_of(&one_span), hash_of(&many_spans));
+    }
+
+    /// A `Hasher` that records the exact bytes of every `write` call, so tests can assert that two
+    /// views drive the hasher with an identical sequence of calls rather than only comparing the
+    /// final (potentially colliding) hash value.
+    #[derive(Default)]
+    struct RecordingHasher {
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl Hasher for RecordingHasher {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            self.writes.push(bytes.to_vec());
+        }
+    }
+
+    #[test]
+    fn hash_write_sequence_is_identical_regardless_of_segmentation() {
+        // Splits `content` into spans of at most `segment_len` bytes each.
+        fn segmented_view(content: &[u8], segment_len: usize) -> BytesView {
+            let mut view = BytesView::new();
+            for chunk in content.chunks(segment_len) {
+                view.append(BytesView::from(chunk.to_vec()));
+            }
+            view
+        }
+
+        let record = |v: &BytesView| {
+            let mut h = RecordingHasher::default();
+            v.hash(&mut h);
+            h.writes
+        };
+
+        // Cover lengths around the block boundary (HASH_BLOCK_BYTES == 64) and beyond.
+        for len in [0_usize, 1, 63, 64, 65, 128, 130, 200] {
+            let content: Vec<u8> = (0..=u8::MAX).cycle().take(len).collect();
+
+            let single = BytesView::from(content.clone());
+            let baseline = record(&single);
+
+            // Pin the absolute write sequence: the length prefix followed by the content split
+            // into HASH_BLOCK_BYTES chunks, with no trailing empty write (`chunks` never yields an
+            // empty slice, including for an empty view). Asserting the exact sequence - rather than
+            // only comparing segmentations against each other - is what catches a spurious empty
+            // trailing write when the length is an exact multiple of the block size.
+            let mut expected: Vec<Vec<u8>> = vec![len.to_ne_bytes().to_vec()];
+            expected.extend(content.chunks(HASH_BLOCK_BYTES).map(<[u8]>::to_vec));
+            assert_eq!(baseline, expected, "unexpected hash write sequence for len {len}");
+
+            for segment_len in [1, 7, 63, 64, 65, 100] {
+                let segmented = segmented_view(&content, segment_len);
+
+                assert_eq!(single, segmented, "len {len}, segment {segment_len}");
+                assert_eq!(
+                    record(&segmented),
+                    baseline,
+                    "hash write sequence differs for len {len}, segment {segment_len}",
+                );
+            }
+        }
     }
 }
