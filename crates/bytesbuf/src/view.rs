@@ -213,7 +213,7 @@ impl BytesView {
     /// _ = view.get_byte();
     /// assert_eq!(view.len(), 4);
     ///
-    /// _ = view.get_num_le::<u16>();
+    /// _ = view.get_u16_le();
     /// assert_eq!(view.len(), 2);
     /// ```
     #[cfg_attr(test, mutants::skip)] // Mutating this can cause infinite loops.
@@ -1098,14 +1098,14 @@ mod tests {
         assert_eq!(4, slice.len());
 
         // We read 8 bytes here, so should land straight inside span3.
-        assert_eq!(view.get_num_ne::<u64>(), 1234);
+        assert_eq!(view.get_u64_ne(), 1234);
 
         assert_eq!(2, view.len());
 
         let slice = view.first_slice();
         assert_eq!(2, slice.len());
 
-        assert_eq!(view.get_num_ne::<u16>(), 16);
+        assert_eq!(view.get_u16_ne(), 16);
 
         assert_eq!(0, view.len());
         assert!(view.is_empty());
@@ -1126,8 +1126,8 @@ mod tests {
 
         assert_eq!(10, view.len());
 
-        assert_eq!(view.get_num_ne::<u64>(), 1234);
-        assert_panic!(_ = view.get_num_ne::<u32>()); // Reads 4 but only has 2 remaining.
+        assert_eq!(view.get_u64_ne(), 1234);
+        assert_panic!(_ = view.get_u32_ne()); // Reads 4 but only has 2 remaining.
     }
 
     #[test]
@@ -1191,8 +1191,8 @@ mod tests {
 
         assert_eq!(16, combined_view.len());
 
-        assert_eq!(combined_view.get_num_ne::<u64>(), 1234);
-        assert_eq!(combined_view.get_num_ne::<u64>(), 5678);
+        assert_eq!(combined_view.get_u64_ne(), 1234);
+        assert_eq!(combined_view.get_u64_ne(), 5678);
     }
 
     #[test]
