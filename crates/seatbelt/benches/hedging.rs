@@ -3,6 +3,7 @@
 #![expect(missing_docs, reason = "benchmark code")]
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
@@ -21,9 +22,9 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|v: Input| async move { Output::from(v) });
     let operation = session.operation("no-hedging");
     group.bench_function("no-hedging", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -40,9 +41,9 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("with-hedging-delay");
     group.bench_function("with-hedging-delay", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -60,9 +61,9 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("with-hedging-passthrough");
     group.bench_function("with-hedging-passthrough", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 

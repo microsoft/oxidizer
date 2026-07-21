@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #![expect(missing_docs, reason = "benchmark code")]
+
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
@@ -20,9 +22,9 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|_input: Input| async move { Output });
     let operation = session.operation("no-breaker");
     group.bench_function("no-breaker", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input(0)));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input(0))))(iters)
         });
     });
 
@@ -40,9 +42,9 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("with-breaker");
     group.bench_function("with-breaker", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input(0)));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input(0))))(iters)
         });
     });
 
@@ -51,9 +53,9 @@ fn entry(c: &mut Criterion) {
     let service = warmed_partitioned(0..1);
     let operation = session.operation("with-partitioned");
     group.bench_function("with-partitioned", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input(0)));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input(0))))(iters)
         });
     });
 
@@ -61,9 +63,9 @@ fn entry(c: &mut Criterion) {
     let service = warmed_partitioned(0..16);
     let operation = session.operation("with-partitioned-many");
     group.bench_function("with-partitioned-many", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input(0)));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input(0))))(iters)
         });
     });
 
@@ -71,9 +73,9 @@ fn entry(c: &mut Criterion) {
     let service = warmed_partitioned(0..256);
     let operation = session.operation("with-partitioned-large");
     group.bench_function("with-partitioned-large", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input(0)));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input(0))))(iters)
         });
     });
 

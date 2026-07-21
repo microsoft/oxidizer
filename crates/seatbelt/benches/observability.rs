@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
@@ -34,9 +35,9 @@ fn entry(c: &mut Criterion) {
         .into_service();
     let operation = session.operation("retry-no-telemetry");
     group.bench_function("retry-no-telemetry", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -53,9 +54,9 @@ fn entry(c: &mut Criterion) {
         .into_service();
     let operation = session.operation("retry-metrics");
     group.bench_function("retry-metrics", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -71,9 +72,9 @@ fn entry(c: &mut Criterion) {
         .into_service();
     let operation = session.operation("retry-logs");
     group.bench_function("retry-logs", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 

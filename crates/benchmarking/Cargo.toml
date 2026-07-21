@@ -1,0 +1,29 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "benchmarking"
+description = "Shared support code for benchmarks."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+publish = false
+
+[package.metadata.cargo_check_external_types]
+# Internal crate (publish = false; listed in automation::INTERNAL_CRATES). Not a
+# public-API surface, so allow all external types.
+allowed_external_types = ["*"]
+
+# Benchmark-helper crate: it is exercised by benchmark targets rather than the
+# regular test suite, so it may legitimately produce no coverage data.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

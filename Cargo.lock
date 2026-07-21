@@ -25,9 +25,9 @@ dependencies = [
 
 [[package]]
 name = "alloc_tracker"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0160148c6badd4fb18605f8373adda8d89a43abcacf9a1b7868aa33643eacdb7"
+checksum = "66dc7d41d01f66319dcf8ff2c80463dfc096ff26d6a25cb142debd2ea11b93f9"
 dependencies = [
  "folo_utils",
  "serde",
@@ -424,6 +424,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "benchmarking"
+version = "0.1.0"
+
+[[package]]
 name = "bincode-next"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -594,6 +598,7 @@ name = "bytesbuf"
 version = "0.6.0"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "bytes",
  "criterion",
  "gungraun",
@@ -1299,6 +1304,7 @@ dependencies = [
  "alloc_tracker",
  "anyspawn",
  "argh",
+ "benchmarking",
  "bytes",
  "bytesbuf",
  "criterion",
@@ -1458,9 +1464,9 @@ checksum = "c9da2799288b7822cb94d4b15fb5f0eef6de0bcb9d26ce99c8512597bb0dda81"
 
 [[package]]
 name = "folo_utils"
-version = "0.1.8"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc135ea093a19d41324dcf04daaf9da2e9c625147e3eb19073e9869580a89db"
+checksum = "9333d94e08221df95e40c29e8a239396501e635f037a840dec43f33efc4bb054"
 dependencies = [
  "serde",
  "serde_json",
@@ -1838,6 +1844,7 @@ name = "http_extensions"
 version = "0.7.0"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "bytes",
  "bytesbuf",
  "criterion",
@@ -2265,6 +2272,7 @@ name = "layered"
 version = "0.3.5"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "criterion",
  "futures",
  "infinity_pool",
@@ -3368,6 +3376,7 @@ name = "seatbelt"
 version = "0.6.0"
 dependencies = [
  "alloc_tracker",
+ "benchmarking",
  "criterion",
  "ctor",
  "fastrand",

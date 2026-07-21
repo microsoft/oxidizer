@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use fetch::HttpClient;
 use fetch::handlers::{Logging, Metrics};
@@ -40,9 +41,9 @@ fn entry(c: &mut Criterion) {
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen()).build();
     let standard_allocs = session.operation("standard_pipeline");
     group.bench_function("standard_pipeline", |b| {
-        b.iter(|| {
-            let _measure = standard_allocs.measure_thread();
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = standard_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -51,9 +52,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let minimal_allocs = session.operation("minimal_pipeline");
     group.bench_function("minimal_pipeline", |b| {
-        b.iter(|| {
-            let _measure = minimal_allocs.measure_thread();
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = minimal_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -62,9 +63,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let custom_minimal_allocs = session.operation("custom_minimal_pipeline");
     group.bench_function("custom_minimal_pipeline", |b| {
-        b.iter(|| {
-            let _measure = custom_minimal_allocs.measure_thread();
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = custom_minimal_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 
@@ -90,9 +91,9 @@ fn entry(c: &mut Criterion) {
         .build();
     let custom_standard_allocs = session.operation("custom_standard_pipeline");
     group.bench_function("custom_standard_pipeline", |b| {
-        b.iter(|| {
-            let _measure = custom_standard_allocs.measure_thread();
-            _ = block_on(client.get(get_uri()).fetch()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = custom_standard_allocs.measure_thread().iterations(iters);
+            time_sample(|| block_on(client.get(get_uri()).fetch()).unwrap())(iters)
         });
     });
 

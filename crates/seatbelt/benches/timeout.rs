@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-#![expect(missing_docs, reason = "benchmark code")]
+#![expect(missing_docs, reason = "Benchmark code")]
 
 use std::time::Duration;
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{Execute, Service, Stack};
@@ -23,9 +24,9 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|v: Input| async move { Output::from(v) });
     let operation = session.operation("no-timeout");
     group.bench_function("no-timeout", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 
@@ -42,9 +43,9 @@ fn entry(c: &mut Criterion) {
 
     let operation = session.operation("with-timeout");
     group.bench_function("with-timeout", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(Input));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(Input)))(iters)
         });
     });
 

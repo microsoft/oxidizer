@@ -4,6 +4,7 @@
 #![allow(missing_docs, reason = "Benchmarks don't require documentation")]
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use layered::{DynamicServiceExt, Execute, Intercept, Service, Stack};
@@ -18,27 +19,27 @@ fn entry(c: &mut Criterion) {
     let service = Execute::new(|v| async move { v });
     let operation = session.operation("typed");
     group.bench_function("typed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(10));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(10)))(iters)
         });
     });
 
     let service = Execute::new(|v| async move { v }).into_dynamic();
     let operation = session.operation("dynamic");
     group.bench_function("dynamic", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(10));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(10)))(iters)
         });
     });
 
     let service = (Intercept::layer(), Execute::new(|v| async move { v })).into_service();
     let operation = session.operation("wrapped_typed");
     group.bench_function("wrapped_typed", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(10));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(10)))(iters)
         });
     });
 
@@ -47,9 +48,9 @@ fn entry(c: &mut Criterion) {
         .into_dynamic();
     let operation = session.operation("wrapped_dynamic");
     group.bench_function("wrapped_dynamic", |b| {
-        b.iter(|| {
-            let _span = operation.measure_thread();
-            _ = block_on(service.execute(10));
+        b.iter_custom(|iters| {
+            let _span = operation.measure_thread().iterations(iters);
+            time_sample(|| block_on(service.execute(10)))(iters)
         });
     });
 }

@@ -6,6 +6,7 @@
 #![expect(missing_docs, reason = "Benchmark code")]
 
 use alloc_tracker::{Allocator, Session};
+use benchmarking::time_sample;
 use criterion::{Criterion, criterion_group, criterion_main};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderValue, Method, Request};
@@ -25,44 +26,48 @@ fn entry(c: &mut Criterion) {
 
     let uri_allocs = session.operation("uri");
     group.bench_function("uri", |b| {
-        b.iter(|| {
-            let _measure = uri_allocs.measure_thread();
-            let _request = Request::builder().method(Method::GET).uri(get_uri()).body(()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = uri_allocs.measure_thread().iterations(iters);
+            time_sample(|| Request::builder().method(Method::GET).uri(get_uri()).body(()).unwrap())(iters)
         });
     });
 
     let uri_raw_allocs = session.operation("uri_raw");
     group.bench_function("uri_raw", |b| {
-        b.iter(|| {
-            let _measure = uri_raw_allocs.measure_thread();
-            let _request = Request::builder().method(Method::GET).uri(URI_STRING).body(()).unwrap();
+        b.iter_custom(|iters| {
+            let _measure = uri_raw_allocs.measure_thread().iterations(iters);
+            time_sample(|| Request::builder().method(Method::GET).uri(URI_STRING).body(()).unwrap())(iters)
         });
     });
 
     let single_header_allocs = session.operation("uri_single_header");
     group.bench_function("uri_single_header", |b| {
-        b.iter(|| {
-            let _measure = single_header_allocs.measure_thread();
-            let _request = Request::builder()
-                .method(Method::GET)
-                .uri(get_uri())
-                .header(CONTENT_LENGTH, HeaderValue::from_static("0"))
-                .body(())
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _measure = single_header_allocs.measure_thread().iterations(iters);
+            time_sample(|| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(get_uri())
+                    .header(CONTENT_LENGTH, HeaderValue::from_static("0"))
+                    .body(())
+                    .unwrap()
+            })(iters)
         });
     });
 
     let two_headers_allocs = session.operation("uri_two_headers");
     group.bench_function("uri_two_headers", |b| {
-        b.iter(|| {
-            let _measure = two_headers_allocs.measure_thread();
-            let _request = Request::builder()
-                .method(Method::GET)
-                .uri(get_uri())
-                .header(CONTENT_LENGTH, HeaderValue::from_static("0"))
-                .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
-                .body(())
-                .unwrap();
+        b.iter_custom(|iters| {
+            let _measure = two_headers_allocs.measure_thread().iterations(iters);
+            time_sample(|| {
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(get_uri())
+                    .header(CONTENT_LENGTH, HeaderValue::from_static("0"))
+                    .header(CONTENT_TYPE, HeaderValue::from_static("text/plain"))
+                    .body(())
+                    .unwrap()
+            })(iters)
         });
     });
 
