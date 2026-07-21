@@ -65,6 +65,7 @@ data_privacy_macros = { path = "crates/data_privacy_macros", default-features = 
 data_privacy_macros_impl = { path = "crates/data_privacy_macros_impl", default-features = false, version = "0.10.3" }
 fetch = { path = "crates/fetch", default-features = false, version = "0.13.0" }
 fetch_azure = { path = "crates/fetch_azure", default-features = false, version = "0.3.0" }
+fetch_grpc = { path = "crates/fetch_grpc", default-features = false, version = "0.1.0" }
 fetch_hyper = { path = "crates/fetch_hyper", default-features = false, version = "0.4.6" }
 fetch_options = { path = "crates/fetch_options", default-features = false, version = "0.2.3" }
 fetch_tls = { path = "crates/fetch_tls", default-features = false, version = "0.2.5" }

@@ -1,0 +1,28 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "fetch_grpc"
+description = "gRPC transport backed by the fetch HTTP client."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "grpc", "fetch", "http", "transport"]
+categories = ["network-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fetch_grpc"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

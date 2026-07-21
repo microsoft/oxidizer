@@ -1362,6 +1362,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fetch_grpc"
+version = "0.1.0"
+
+[[package]]
 name = "fetch_hyper"
 version = "0.4.6"
 dependencies = [

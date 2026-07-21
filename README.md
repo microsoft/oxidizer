@@ -37,6 +37,7 @@ These are the primary crates built out of this repo:
 - [`data_privacy`](./crates/data_privacy/README.md) - Mechanisms to classify, manipulate, and redact sensitive data.
 - [`fetch`](./crates/fetch/README.md) - "Universal, composable and resilient HTTP client."
 - [`fetch_azure`](./crates/fetch_azure/README.md) - Azure SDK HTTP transport backed by the fetch HTTP client.
+- [`fetch_grpc`](./crates/fetch_grpc/README.md) - gRPC transport backed by the fetch HTTP client.
 - [`fetch_hyper`](./crates/fetch_hyper/README.md) - Hyper-based HTTP transport utilities for fetch.
 - [`fetch_options`](./crates/fetch_options/README.md) - Options types for 'fetch' crate.
 - [`fundle`](./crates/fundle/README.md) - Compile-time safe dependency injection for Rust.
