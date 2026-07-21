@@ -59,7 +59,7 @@ impl<T, A: Allocator> Box<T, A> {
     /// Erases a `Box<T>` into a `Box<U>` for an unsized `U` (e.g. `dyn Trait` or
     /// a slice), keeping the value in its pool slot.
     ///
-    /// The [`Coercion`](struct@Coercion) token proves that `T` can be unsized to `U` while
+    /// The [`Coercion`] token proves that `T` can be unsized to `U` while
     /// preserving the value's address and provenance. Use the [`coerce!`](crate::coerce!)
     /// macro for arbitrary trait objects or a provided constructor such as
     /// [`Coercion::to_slice`].

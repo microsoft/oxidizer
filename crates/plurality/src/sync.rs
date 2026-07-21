@@ -60,7 +60,7 @@ impl<T, A: Allocator> Arc<T, A> {
     /// object or slice), transferring this handle's share of the slot.
     ///
     /// Like [`Box::unsize`](crate::Box::unsize), the
-    /// [`Coercion`](struct@Coercion) token proves
+    /// [`Coercion`] token proves
     /// that the conversion preserves the slot's address and provenance:
     ///
     /// ```

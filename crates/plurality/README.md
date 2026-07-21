@@ -166,7 +166,7 @@ assert!(pool.try_alloc_box(2).is_err());
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/plurality">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbtfM-dLtH0TEbQJuotuGwrQ4bK8ip4V4e5yAbDy5HNprUNINhZIGCaXBsdXJhbGl0eWUwLjEuMQ
+ [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG5fMTMzy4UGnG1kTnRsEXYRXG8-JQrhebgRtG5v01AZ0Vm6uYWSBgmlwbHVyYWxpdHllMC4xLjE
  [__link0]: https://docs.rs/plurality/0.1.1/plurality/?search=Pool
  [__link1]: https://docs.rs/plurality/0.1.1/plurality/?search=Box
  [__link10]: https://docs.rs/plurality/0.1.1/plurality/?search=Rc
@@ -185,7 +185,7 @@ This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Br
  [__link22]: https://docs.rs/plurality/0.1.1/plurality/?search=Box::unsize
  [__link23]: https://docs.rs/plurality/0.1.1/plurality/?search=Arc::unsize
  [__link24]: https://docs.rs/plurality/0.1.1/plurality/?search=Rc::unsize
- [__link25]: struct@Coercion
+ [__link25]: https://docs.rs/plurality/latest/plurality/struct.Coercion.html
  [__link26]: https://doc.rust-lang.org/stable/alloc/?search=boxed::Box
  [__link27]: https://docs.rs/plurality/0.1.1/plurality/?search=Arc
  [__link28]: https://docs.rs/plurality/0.1.1/plurality/?search=Rc

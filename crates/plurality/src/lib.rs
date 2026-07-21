@@ -95,7 +95,7 @@
 //! hold an unsized value — a trait object or a slice — while the value stays in
 //! its pool slot. A sized handle is converted with [`Box::unsize`] /
 //! [`Arc::unsize`] / [`Rc::unsize`], which take a compiler-checked
-//! [`Coercion`](struct@Coercion)
+//! [`Coercion`](https://docs.rs/plurality/latest/plurality/struct.Coercion.html)
 //! token:
 //!
 //! ```
