@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use plurality::{Coercion, Pool};
+use plurality::Pool;
 
 use crate::Service;
 
@@ -61,16 +61,6 @@ pub struct DynamicService<In, Out> {
 pub(crate) trait SendFuture<Out>: Future<Output = Out> + Send {}
 impl<Out: Send + 'static, F: Future<Output = Out> + Send> SendFuture<Out> for F {}
 
-fn send_future_coercion<Out: 'static, F: SendFuture<Out> + 'static>() -> Coercion<F, dyn SendFuture<Out>> {
-    fn coerce<Out, F: SendFuture<Out> + 'static>(future: *const F) -> *const dyn SendFuture<Out> {
-        future
-    }
-
-    // SAFETY: this function performs only the compiler-checked pointer
-    // unsizing from `F` to the trait object, preserving its address.
-    unsafe { Coercion::new(coerce::<Out, F>) }
-}
-
 impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
     pub(crate) fn new<T>(strategy: T) -> Self
     where
@@ -95,7 +85,7 @@ impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
                 // lock), so a poisoned guard indicates a fatal prior failure.
                 .expect("dynamic-service pool mutex poisoned by a prior panic under this guard")
                 .alloc_box(fut);
-            plurality::Box::unsize::<dyn SendFuture<Out>>(boxed, send_future_coercion::<Out, _>())
+            plurality::Box::unsize::<dyn SendFuture<Out>>(boxed, plurality::coerce!(<Out> dyn SendFuture<Out>))
         };
 
         Self { exec: Arc::new(exec) }

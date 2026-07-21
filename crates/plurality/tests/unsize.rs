@@ -32,6 +32,18 @@ trait Shape {
     fn area(&self) -> u32;
 }
 
+trait Contains<T> {
+    fn value(&self) -> &T;
+}
+
+struct GenericValue<T>(T);
+
+impl<T> Contains<T> for GenericValue<T> {
+    fn value(&self) -> &T {
+        &self.0
+    }
+}
+
 struct Square(u32);
 impl Shape for Square {
     fn area(&self) -> u32 {
@@ -55,6 +67,17 @@ fn unsize_to_trait_object_dispatches_and_frees() {
     assert_eq!(pool.len(), 1);
     drop(s);
     assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn unsize_to_trait_object_with_generic_argument() {
+    fn erase<T: 'static>(pool: &Pool<GenericValue<T>>, value: T) -> Box<dyn Contains<T>> {
+        Box::unsize(pool.alloc_box(GenericValue(value)), coerce!(<T> dyn Contains<T>))
+    }
+
+    let pool = Pool::<GenericValue<u32>>::new();
+    let value = erase(&pool, 42);
+    assert_eq!(*value.value(), 42);
 }
 
 #[test]

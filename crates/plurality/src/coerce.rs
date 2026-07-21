@@ -111,7 +111,8 @@ pub(crate) fn unsize<T, U: ?Sized, F: FnOnce(*const T) -> *const U>(ptr: NonNull
 /// Builds a [`Coercion`](struct@crate::Coercion) that unsizes to a trait object.
 ///
 /// The syntax is `coerce!(dyn Trait)`, including bounds such as
-/// `coerce!(dyn Trait + Send)`.
+/// `coerce!(dyn Trait + Send)`. If the trait object refers to an enclosing
+/// generic type, bind it explicitly with `coerce!(<T> dyn Trait<T>)`.
 ///
 /// ```
 /// use core::fmt::Debug;
@@ -124,6 +125,22 @@ pub(crate) fn unsize<T, U: ?Sized, F: FnOnce(*const T) -> *const U>(ptr: NonNull
 /// ```
 #[macro_export]
 macro_rules! coerce {
+    (<$($generic:ident),+> dyn $($bounds:tt)*) => {
+        // SAFETY: `coerce` only unsizes the pointer to the trait object; its body
+        // is a plain compiler coercion.
+        #[allow(unused_unsafe)]
+        unsafe {
+            $crate::Coercion::new({
+                #[allow(unused_parens)]
+                fn coerce<'lt, $($generic: 'lt),+>(
+                    ptr: *const (impl $($bounds)* + 'lt),
+                ) -> *const (dyn $($bounds)* + 'lt) {
+                    ptr
+                }
+                coerce::<$($generic),+>
+            })
+        }
+    };
     (dyn $($bounds:tt)*) => {
         // SAFETY: `coerce` only unsizes the pointer to the trait object; its body
         // is a plain compiler coercion.
