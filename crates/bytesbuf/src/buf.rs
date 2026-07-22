@@ -128,13 +128,13 @@ pub struct BytesBuf {
     available: usize,
 }
 
-/// Panics if `len + available` would exceed `usize::MAX`, i.e. would violate the buffer's
-/// `capacity() <= usize::MAX` type invariant.
+/// Panics if the true (non-wrapping) sum `len + available` would overflow `usize`.
 ///
-/// The two capacity-growing sites (`reserve` and `append`) each grow only one of `len` or
+/// `capacity()` returns `len + available`, so that sum must fit in `usize` for `capacity()` not to
+/// wrap. The two capacity-growing sites (`reserve` and `append`) each grow only one of `len` or
 /// `available`. A bounds check on the grown component alone is insufficient: `len` can grow via
 /// appended shared memory while `available` holds separately reserved capacity, so only their sum
-/// is bounded by the invariant.
+/// is bounded.
 #[track_caller]
 fn assert_capacity_within_bounds(len: usize, available: usize) {
     assert!(
