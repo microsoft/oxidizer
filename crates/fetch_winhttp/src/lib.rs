@@ -22,3 +22,12 @@
 
 #![doc(html_logo_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/logo.png")]
 #![doc(html_favicon_url = "https://media.githubusercontent.com/media/microsoft/oxidizer/refs/heads/main/crates/fetch_winhttp/favicon.ico")]
+
+#[cfg(test)]
+mod tests {
+    /// The crate is a design-only placeholder with no implementation yet, so it
+    /// exposes no behavior to exercise. This test gives the test runner a target
+    /// to execute (`cargo nextest` treats an empty test set as an error).
+    #[test]
+    fn placeholder() {}
+}
