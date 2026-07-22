@@ -2,15 +2,15 @@
 // Licensed under the MIT License.
 
 use std::cell::UnsafeCell;
-use std::mem::{self, MaybeUninit, offset_of};
+use std::iter;
+use std::mem::{MaybeUninit, offset_of};
 use std::num::NonZero;
 use std::ptr::NonNull;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
-use std::{iter, ptr};
 
-use infinity_pool::{RawPinnedPool, RawPooled, RawPooledMut};
 use nm::{Event, Magnitude};
+use plurality::Pool;
 use thread_aware::ThreadAware;
 
 use crate::BytesBuf;
@@ -94,7 +94,33 @@ impl Memory for GlobalPool {
     }
 }
 
-type SubPool<const SIZE: usize> = Arc<Mutex<RawPinnedPool<MaybeUninit<NeutralBlock<SIZE>>>>>;
+type SubPool<const SIZE: usize> = Arc<Mutex<Pool<NeutralBlock<SIZE>>>>;
+
+/// A block's handle to its own pool slot, used by the last reference to return
+/// the block to the pool. It is a raw pointer produced by
+/// [`plurality::Box::into_raw`]; reconstructing and dropping the box on the last
+/// release returns the slot (via plurality's lock-free reclaim path).
+#[derive(Clone, Copy, Debug)]
+struct BlockHandle<const SIZE: usize>(NonNull<NeutralBlock<SIZE>>);
+
+// SAFETY: the handle only ever reconstructs the owning box to free the slot,
+// which plurality supports from any thread (the free list is atomic MPSC), and
+// the block's lifecycle is governed by the atomic `ref_count`. It carries no
+// thread-affinity, so it is safe to move and share across threads — mirroring
+// the `Send + Sync` raw pool handle it replaces.
+unsafe impl<const SIZE: usize> Send for BlockHandle<SIZE> {}
+// SAFETY: see the `Send` justification above.
+unsafe impl<const SIZE: usize> Sync for BlockHandle<SIZE> {}
+
+/// Creates a sub-pool for `SIZE`-byte blocks with a chunk size that keeps each
+/// chunk near a uniform footprint regardless of block size, so growth
+/// granularity is consistent across the four sub-pools.
+fn new_block_pool<const SIZE: usize>() -> Pool<NeutralBlock<SIZE>> {
+    const TARGET_CHUNK_BYTES: usize = 64 * 1024;
+    #[expect(clippy::cast_possible_truncation, reason = "slot count is bounded by TARGET / SIZE, always small")]
+    let slots_per_chunk = (TARGET_CHUNK_BYTES / SIZE).max(1) as u32;
+    Pool::builder().chunk_size(slots_per_chunk).build()
+}
 
 #[derive(Debug)]
 #[expect(
@@ -111,11 +137,15 @@ struct GlobalPoolInner {
     // to be contended because we target a thread-isolated architecture (any single pool is
     // effectively owned by one thread/core at a time). We have measured that, at least on the x64
     // platform, an uncontended mutex is sufficiently cheap to be almost an annotation, so there is
-    // no need to reach for a more complex lock-free or per-core fast-path design.
+    // no need to reach for a more complex lock-free or per-core fast-path design. The mutex only
+    // guards *allocation*; blocks are returned to the pool lock-free (plurality's reclaim path is
+    // an atomic MPSC free list), so a block may be released on any thread without taking the lock.
     //
-    // Each sub-pool is wrapped in an Arc because each pool item has a reference back to the sub-pool
-    // that contains it. This means there is a reference cycle in there! The sub-pool can only be
-    // dropped once all items in the sub-pool have been returned. This is both good and bad.
+    // Each sub-pool is wrapped in an Arc so a block can be released after the `GlobalPool` that
+    // created it is gone. We do not need an explicit back-pointer cycle for that: each block is
+    // handed out as a leaked `plurality::Box` (via `into_raw`), which retains a pool reference
+    // count. That keeps the pool's backing storage alive until the block is returned, even if the
+    // `GlobalPool` and its `Pool` handles have already been dropped. This is both good and bad.
     //
     // On the upside, it ensures that even if whoever created the pool (e.g. an application
     // framework or a test harness) drops the pool when the memory is still in use (e.g. by some
@@ -127,9 +157,9 @@ struct GlobalPoolInner {
     // memory is still in use. We might be able to supplement this with metrics to help detect
     // mysteriously growing pools, thereby mitigating this risk somewhat.
     //
-    // We delay-initialize each item in the pool because the items own their own pool handles.
-    // Therefore, they must be wrapped in MaybeUninit. Once actually in use, always guaranteed
-    // to be initialized, however - we only use MaybeUninit capabilities during insertion.
+    // We delay-initialize each block because it owns its own self-handle: the block is reserved
+    // uninitialized (`alloc_uninit_box`), its self-pointer is captured, and only then is the block
+    // written. Once in use it is always initialized.
     pool_1k: SubPool<1024>,
     pool_4k: SubPool<4096>,
     pool_16k: SubPool<16_384>,
@@ -141,10 +171,10 @@ impl GlobalPoolInner {
         INSTANCES_CREATED.with(Event::observe_once);
 
         Self {
-            pool_1k: Arc::new(Mutex::new(RawPinnedPool::new())),
-            pool_4k: Arc::new(Mutex::new(RawPinnedPool::new())),
-            pool_16k: Arc::new(Mutex::new(RawPinnedPool::new())),
-            pool_64k: Arc::new(Mutex::new(RawPinnedPool::new())),
+            pool_1k: Arc::new(Mutex::new(new_block_pool())),
+            pool_4k: Arc::new(Mutex::new(new_block_pool())),
+            pool_16k: Arc::new(Mutex::new(new_block_pool())),
+            pool_64k: Arc::new(Mutex::new(new_block_pool())),
         }
     }
 
@@ -189,18 +219,16 @@ fn allocate_uniform<const SIZE: usize>(
         // section minimal. This also avoids re-entrant locking should the block be released while
         // we still held the lock.
         let block = {
-            let mut pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
-            pool.reserve(block_count);
-            allocate_block(&mut pool, pool_arc, vtable)
+            let pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
+            allocate_block(&pool, vtable)
         };
 
         return BytesBuf::from_block(block);
     }
 
-    let mut pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
-    pool.reserve(block_count);
+    let pool = pool_arc.lock().expect(ERR_POISONED_LOCK);
 
-    let blocks = iter::repeat_with(|| allocate_block(&mut *pool, pool_arc, vtable)).take(block_count);
+    let blocks = iter::repeat_with(|| allocate_block(&pool, vtable)).take(block_count);
 
     BytesBuf::from_blocks(blocks)
 }
@@ -208,20 +236,10 @@ fn allocate_uniform<const SIZE: usize>(
 /// Allocates a single block from the given sub-pool.
 ///
 /// The caller is responsible for locking the pool and observing metrics.
-fn allocate_block<const SIZE: usize>(
-    pool: &mut RawPinnedPool<MaybeUninit<NeutralBlock<SIZE>>>,
-    pool_arc: &SubPool<SIZE>,
-    vtable: &'static BlockRefVTable<BlockMeta<SIZE>>,
-) -> Block {
-    let initialize_block = |place: &mut MaybeUninit<NeutralBlock<SIZE>>, handle: RawPooledMut<NeutralBlock<SIZE>>| {
-        // The BlockMeta wants a shared handle, so we need to downgrade immediately.
-        // Handles are not references so we can still create exclusive references
-        // for as long as we can unsafely guarantee no aliasing violations exist.
-        let handle = handle.into_shared();
-
+fn allocate_block<const SIZE: usize>(pool: &Pool<NeutralBlock<SIZE>>, vtable: &'static BlockRefVTable<BlockMeta<SIZE>>) -> Block {
+    let initialize_block = |place: &mut MaybeUninit<NeutralBlock<SIZE>>, handle: NonNull<NeutralBlock<SIZE>>| {
         let meta = BlockMeta {
-            block_pool: Arc::clone(pool_arc),
-            handle,
+            handle: BlockHandle(handle),
             ref_count: AtomicUsize::new(1),
         };
 
@@ -291,12 +309,11 @@ unsafe impl<const SIZE: usize> Sync for NeutralBlock<SIZE> {}
 /// public metadata.
 #[derive(Debug)]
 struct BlockMeta<const SIZE: usize> {
-    /// The pool that this block is to be returned to. See comments in `GlobalPoolInner`.
-    block_pool: SubPool<SIZE>,
-
     /// The block has a handle to itself. This is used by the last reference to return
-    /// the capacity to the pool once the last reference is dropped.
-    handle: RawPooled<NeutralBlock<SIZE>>,
+    /// the capacity to the pool once the last reference is dropped. The handle retains a
+    /// plurality pool reference count, keeping the pool's backing storage alive until the
+    /// block is returned (so a block may outlive the `GlobalPool`).
+    handle: BlockHandle<SIZE>,
 
     /// Whoever decrements this to zero is responsible for returning the block to the pool.
     ref_count: AtomicUsize,
@@ -317,36 +334,62 @@ fn in_place_initialize_block<const SIZE: usize>(block: &mut MaybeUninit<NeutralB
     // We do not need to initialize the `memory` field - it starts as fully uninitialized.
 }
 
-/// Inserts a `T` into a pool of `MaybeUninit<T>`, providing the object
-/// its own handle on creation.
+/// RAII guard that owns the uninitialized pool slot returned by
+/// [`plurality::Box::into_raw`]. If it is dropped before [`Self::into_raw`]
+/// hands ownership back, it reconstructs and frees the box, returning the slot
+/// to the pool on the unwinding path.
+struct UninitBoxGuard<T> {
+    ptr: NonNull<MaybeUninit<T>>,
+}
+
+impl<T> UninitBoxGuard<T> {
+    fn into_raw(self) -> NonNull<MaybeUninit<T>> {
+        let ptr = self.ptr;
+        core::mem::forget(self);
+        ptr
+    }
+}
+
+impl<T> Drop for UninitBoxGuard<T> {
+    fn drop(&mut self) {
+        // SAFETY: the guard uniquely owns the pointer returned by into_raw and
+        // reconstructs it only on unwind before initialization completed.
+        unsafe { drop(plurality::Box::<MaybeUninit<T>>::from_raw(self.ptr)) };
+    }
+}
+
+/// Reserves an uninitialized slot in `pool`, provides the object its own handle,
+/// and runs `initialize` to fill it in.
 ///
-/// After this method returns, the object in the pool is guaranteed to be initialized.
-/// Correspondingly, the handle it is provided is stripped of the `MaybeUninit` wrapper.
+/// After this function returns, the object in the slot is guaranteed to be
+/// initialized, and the returned handle points at the initialized value. The
+/// slot stays occupied — ownership is held by the raw handle until the block's
+/// last reference reconstructs the box (via [`plurality::Box::from_raw`]) and
+/// drops it.
 ///
 /// # Safety
 ///
 /// The `initialize` function must fully initialize the object before returning.
 ///
 /// The provided handle may only be dereferenced after this function returns.
-unsafe fn insert_with_handle_to_self<F, T, R>(pool: &mut RawPinnedPool<MaybeUninit<T>>, initialize: F) -> R
+unsafe fn insert_with_handle_to_self<F, T, R>(pool: &Pool<T>, initialize: F) -> R
 where
-    F: FnOnce(&mut MaybeUninit<T>, RawPooledMut<T>) -> R,
+    F: FnOnce(&mut MaybeUninit<T>, NonNull<T>) -> R,
 {
-    // SAFETY: We are required to fully initialize the object. We "do" because the entire
-    // object `T` is wrapped in MaybeUninit, so we are not required to do anything at all.
-    // We do this purely to get the handle, because we need the handle to do the real
-    // initialization.
-    let handle = unsafe { pool.insert_with(|_| {}) };
+    // Preserve the full-provenance pointer returned by into_raw while a guard
+    // retains ownership until initialization succeeds.
+    let mut uninit_ptr = plurality::Box::into_raw(pool.alloc_uninit_box());
+    let guard = UninitBoxGuard { ptr: uninit_ptr };
 
-    // SAFETY: This is the only reference that exists, ensuring no conflicts.
-    let object_uninit = unsafe { handle.ptr().as_mut() };
+    // The self-handle is the value pointer (the slot address is stable). It may
+    // only be dereferenced after `initialize` fully initializes the value.
+    let handle = uninit_ptr.cast::<T>();
 
-    // SAFETY: After this function returns, the object is guaranteed to be initialized.
-    // The provided handle may only be dereferenced after this function returns. Therefore,
-    // the handle can only be used to access the object when already initialized.
-    let handle = unsafe { mem::transmute::<RawPooledMut<MaybeUninit<T>>, RawPooledMut<T>>(handle) };
-
-    initialize(object_uninit, handle)
+    // SAFETY: the guard uniquely owns the slot and no other reference exists.
+    let result = initialize(unsafe { uninit_ptr.as_mut() }, handle);
+    let owned = guard.into_raw().cast::<T>();
+    debug_assert_eq!(owned, handle);
+    result
 }
 
 const BLOCK_REF_FNS_1K: BlockRefVTable<BlockMeta<1024>> = BlockRefVTable::from_trait();
@@ -389,20 +432,26 @@ unsafe impl<const SIZE: usize> BlockRefDynamic for BlockMeta<SIZE> {
         // On x86 this does nothing but on weaker memory models writes could be delayed.
         atomic::fence(atomic::Ordering::Acquire);
 
-        // We make local copies of what we need because the next part will invalidate `state`.
-        // We are essentially inside a ManuallyDrop<state> here, just not expressed as such.
+        // Copy the self-handle out before we relinquish `state`: reconstructing and
+        // dropping the box below runs the block's destructor, which invalidates it.
         let handle = state.handle;
 
-        // SAFETY: We are moving out of state part of manual drop logic.
-        let pool = unsafe { ptr::read(&raw const state.block_pool) };
-
-        let mut pool = pool.lock().expect(ERR_POISONED_LOCK);
-
-        // SAFETY: We must promise that it is no longer references and is still in the pool.
-        // Sure, we can promise that because tracking that is the entire purpose of this type.
-        unsafe {
-            pool.remove(handle);
-        }
+        // Reconstruct the owning box from the block's self-handle and drop it.
+        // Dropping the box runs the block's destructor and returns the slot to the
+        // pool.
+        //
+        // The self-handle was produced by `into_raw` on a `Box<MaybeUninit<_>>`, so
+        // we reconstruct with that same type before `assume_init` to match
+        // `from_raw`'s "exact pointer returned by into_raw" contract.
+        //
+        // SAFETY: this is the block's own handle, produced by `into_raw` at
+        // allocation; the last-reference check above guarantees it is reconstructed
+        // exactly once and that no references to the block remain.
+        let uninit = unsafe { plurality::Box::<MaybeUninit<NeutralBlock<SIZE>>>::from_raw(handle.0.cast()) };
+        // SAFETY: the block was fully initialized before its first reference was
+        // handed out, so the slot holds an initialized value.
+        let block = unsafe { uninit.assume_init() };
+        drop(block);
     }
 }
 
@@ -458,6 +507,41 @@ mod tests {
         assert!(inner.pool_4k.lock().unwrap().is_empty());
         assert!(inner.pool_16k.lock().unwrap().is_empty());
         assert!(inner.pool_64k.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn block_pool_chunk_sizes_target_64_kib() {
+        fn assert_chunk_size<const SIZE: usize>(expected_slots: u64) {
+            let pool = new_block_pool::<SIZE>();
+            let slot = pool.alloc_uninit_box();
+            assert_eq!(pool.capacity(), expected_slots);
+            drop(slot);
+        }
+
+        assert_chunk_size::<1024>(64);
+        assert_chunk_size::<4096>(16);
+        assert_chunk_size::<16_384>(4);
+        assert_chunk_size::<65_536>(1);
+    }
+
+    #[test]
+    fn panicking_self_handle_initializer_returns_slot() {
+        let pool = Pool::<u64>::builder().chunk_size(1).max_chunks(1).build();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: the callback never returns, so it cannot expose an
+            // uninitialized value or dereference the provisional handle.
+            unsafe {
+                insert_with_handle_to_self::<_, u64, ()>(&pool, |_, _| {
+                    panic!("initialization failed");
+                });
+            }
+        }));
+
+        assert!(result.is_err());
+        assert!(pool.is_empty());
+        drop(pool.alloc_box(7));
+        assert!(pool.is_empty());
     }
 
     #[test]

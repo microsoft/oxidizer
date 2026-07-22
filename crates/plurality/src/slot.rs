@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::ptr::{NonNull, drop_in_place};
@@ -10,6 +15,15 @@ use crate::atomic::AtomicU32;
 /// Free-list end-of-chain sentinel; the highest valid slot index is therefore
 /// `u32::MAX - 1`.
 pub(crate) const FREE_END: u32 = u32::MAX;
+
+/// Largest pool whose live-allocation count plus the pool owner fits in
+/// `AtomicUsize`, while every slot still has a non-sentinel `u32` index.
+#[cfg(target_pointer_width = "64")]
+pub(crate) const MAX_POOL_SLOTS: u64 = FREE_END as u64;
+
+/// On narrow-pointer targets, the pool lifetime refcount is the tighter bound.
+#[cfg(not(target_pointer_width = "64"))]
+pub(crate) const MAX_POOL_SLOTS: u64 = (usize::MAX as u64).saturating_sub(1);
 
 /// Refcount overflow guard, mirroring `alloc::sync::Arc`.
 const MAX_REFCOUNT: u32 = i32::MAX as u32;
@@ -37,7 +51,7 @@ pub(crate) fn check_refcount_overflow(old: u32) {
 #[cold]
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-#[allow(clippy::panic, reason = "deliberate double-panic to abort on refcount overflow in no_std")]
+#[expect(clippy::panic, reason = "deliberate double-panic to abort on refcount overflow in no_std")]
 fn abort() -> ! {
     struct Bomb;
     impl Drop for Bomb {
@@ -59,9 +73,9 @@ pub(crate) struct SlotCell<T> {
     pub(crate) value: UnsafeCell<MaybeUninit<T>>,
     /// Dual-role:
     /// - Occupied: the reference count (`>= 1`) for a shared handle (`Arc`/`Rc`);
-    ///   a `Box` sets it to `1` but never reads it. An `Alloc` neither writes
-    ///   nor reads it, so the lifetime-bound path leaves the stale free-list
-    ///   value in place — `push_free` overwrites it on drop.
+    ///   `Box` and `Alloc` neither write nor read it, so their unique-owner
+    ///   paths leave the stale free-list value in place — `push_free`
+    ///   overwrites it on drop.
     /// - Free: the next free *global* index, or [`FREE_END`].
     ///
     /// `Arc` accesses this atomically; `Rc` accesses it non-atomically via
@@ -73,10 +87,9 @@ pub(crate) struct SlotCell<T> {
     pub(crate) index: u32,
 }
 
-/// Value accessors that centralize the one tricky pointer chain in the crate —
-/// reaching the `T` inside `UnsafeCell<MaybeUninit<T>>`. Keeping it in one place
-/// means every handle shares a single audited `unsafe` body instead of
-/// re-deriving the raw-pointer dance.
+/// Value accessors centralizing the raw-pointer access into the slot's
+/// `UnsafeCell<MaybeUninit<T>>`, so every handle shares one audited `unsafe`
+/// body.
 impl<T> SlotCell<T> {
     /// Borrows the contained value.
     ///
