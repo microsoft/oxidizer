@@ -135,8 +135,12 @@ pub struct BytesBuf {
 /// `available`. A bounds check on the grown component alone is insufficient: `len` can grow via
 /// appended shared memory while `available` holds separately reserved capacity, so only their sum
 /// is bounded by the invariant.
+#[track_caller]
 fn assert_capacity_within_bounds(len: usize, available: usize) {
-    assert!(len.checked_add(available).is_some(), "buffer capacity cannot exceed usize::MAX");
+    assert!(
+        len.checked_add(available).is_some(),
+        "buffer capacity cannot exceed usize::MAX (len={len}, available={available})"
+    );
 }
 
 impl BytesBuf {
