@@ -43,8 +43,10 @@ pub(crate) mod testing;
 mod tier;
 
 pub use codec::{Codec, DecodeOutcome, Encoder, TransformCodec, TransformEncoder, infallible, infallible_owned};
+#[cfg(all(feature = "encrypt", any(feature = "test-util", test)))]
+pub use encrypt::MockValueProtector;
 #[cfg(feature = "encrypt")]
-pub use encrypt::AeadCipher;
+pub(crate) use encrypt::ProtectedTier;
 #[cfg(feature = "encrypt")]
-pub(crate) use encrypt::EncryptedTier;
+pub use encrypt::ValueProtector;
 pub(crate) use tier::TransformAdapter;

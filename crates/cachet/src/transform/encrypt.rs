@@ -1,16 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Authenticated encryption of cache values stored in an untrusted tier.
+//! Authenticated protection of cache values stored in an untrusted tier.
 //!
-//! This provides only the encryption *mechanism* — it carries no cryptographic
-//! dependency of its own. [`AeadCipher`] is the pluggable contract: you supply the
-//! actual cipher, backed by your approved cryptographic library, and register it with
-//! [`encrypt_with`](crate::TransformBuilder::encrypt_with). [`EncryptedTier`] installs
-//! that cipher at the storage boundary, where both the key and value are available, and
-//! authenticates each value against its storage key.
+//! This provides only the protection *mechanism* — it carries no cryptographic
+//! dependency of its own. [`ValueProtector`] is the pluggable contract: you supply the
+//! actual implementation, backed by your approved cryptographic library, and register
+//! it with [`protect_with`](crate::TransformBuilder::protect_with). [`ProtectedTier`]
+//! installs that protector at the storage boundary, where both the key and value are
+//! available, and binds each value to its storage key.
 //!
-//! See the crate-level "Encryption Boundary" docs for a reference `AeadCipher`
+//! See the crate-level "Encryption Boundary" docs for a reference `ValueProtector`
 //! implementation backed by `SymCrypt` (FIPS-certifiable AES-256-GCM).
 
 use std::borrow::Cow;
@@ -37,83 +37,194 @@ pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     }
 }
 
-/// Authenticated encryption with associated data (AEAD) for cache values.
+/// Authenticated protection of cache values before they reach an untrusted tier.
 ///
-/// Implementations turn a value's plaintext bytes into stored bytes and back,
-/// authenticating a caller-supplied *associated data* (AAD) value. `EncryptedTier`
-/// passes the entry's storage key as AAD, so a value is cryptographically bound to
-/// the key it was stored under.
+/// Implementations turn a value's plaintext bytes into stored bytes and back, binding
+/// a caller-supplied *context* value. `ProtectedTier` passes the entry's storage key as
+/// the context, so a value is cryptographically bound to the key it was stored under.
 ///
-/// This trait supplies no cipher of its own: implement it with your organization's
-/// approved cryptographic library and register it via
-/// [`encrypt_with`](crate::TransformBuilder::encrypt_with). See the crate-level
+/// This trait supplies no implementation of its own: implement it with your
+/// organization's approved cryptographic library and register it via
+/// [`protect_with`](crate::TransformBuilder::protect_with). See the crate-level
 /// "Encryption Boundary" docs for a reference `SymCrypt`-backed implementation.
 ///
 /// # Security contract
 ///
-/// Implementors **must** authenticate `aad`: [`decrypt`](Self::decrypt) must return
-/// [`DecodeOutcome::SoftFailure`] when the `aad` does not match the value supplied to
-/// [`encrypt`](Self::encrypt). This is what binds each value to its storage key,
+/// Implementors **must** bind `context`: [`unprotect`](Self::unprotect) must return
+/// [`DecodeOutcome::SoftFailure`] when the `context` does not match the value supplied
+/// to [`protect`](Self::protect). This is what binds each value to its storage key,
 /// preventing a value from being relocated to a different key in the backing store.
 /// Implementors using a nonce-based scheme are responsible for nonce discipline — use
-/// a fresh nonce per [`encrypt`](Self::encrypt), or a nonce-misuse-resistant scheme.
+/// a fresh nonce per [`protect`](Self::protect), or a nonce-misuse-resistant scheme.
 ///
-/// [`decrypt`](Self::decrypt) distinguishes two failure modes:
-/// - `Ok(DecodeOutcome::SoftFailure(_))` — the ciphertext is undecodable (corrupt,
-///   truncated, tampered, wrong key, or AAD mismatch); the cache treats it as a miss.
+/// [`unprotect`](Self::unprotect) distinguishes two failure modes:
+/// - `Ok(DecodeOutcome::SoftFailure(_))` — the stored value is unrecoverable (corrupt,
+///   truncated, tampered, wrong key, or context mismatch); the cache treats it as a
+///   miss.
 /// - `Err(_)` — the operation could not be attempted (e.g. an unavailable backend);
 ///   the error propagates to the caller.
-pub trait AeadCipher: Send + Sync {
-    /// Encrypts `plaintext`, authenticating `aad`, and returns the stored representation.
+pub trait ValueProtector: Send + Sync {
+    /// Protects `plaintext`, binding `context`, and returns the stored representation.
     ///
     /// # Errors
     ///
-    /// Returns an error if encryption cannot be performed.
-    fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error>;
+    /// Returns an error if protection cannot be performed.
+    fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error>;
 
-    /// Decrypts `ciphertext`, verifying `aad`.
+    /// Recovers a value previously protected under `context`.
     ///
     /// # Errors
     ///
-    /// Returns `Err` only if decryption could not be attempted. An authentication or
+    /// Returns `Err` only if the operation could not be attempted. An authentication or
     /// format failure is reported as `Ok(DecodeOutcome::SoftFailure(_))`.
-    fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error>;
+    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error>;
 }
 
-/// A cache tier that transparently encrypts values with an [`AeadCipher`].
+/// Length of the mock protector's nonce prefix, in bytes.
+#[cfg(any(feature = "test-util", test))]
+const MOCK_NONCE_SIZE: usize = 12;
+
+/// A deterministic, crypto-free [`ValueProtector`] for tests.
+///
+/// Available with the `test-util` feature. Use it to exercise a
+/// [`protect_with`](crate::TransformBuilder::protect_with) pipeline — round-trips, key
+/// binding, and unprotect failures — without a real cryptographic library or a source
+/// of entropy, keeping tests fast and reproducible.
+///
+/// The stored form is `nonce || context_len || context || masked_body`. The nonce comes
+/// from a monotonic counter (so repeated `protect` calls of identical input still
+/// differ, yet stay reproducible), and `masked_body` is the plaintext combined with a
+/// nonce-derived keystream via XOR. It binds the `context`: [`unprotect`](ValueProtector::unprotect)
+/// returns [`DecodeOutcome::SoftFailure`] on a context mismatch, truncation, or
+/// corruption, mirroring the [`ValueProtector`] security contract.
+///
+/// # Security
+///
+/// This provides **no confidentiality or integrity** — the transform is trivially
+/// reversible and the key is ignored. It is gated behind `test-util` and must never be
+/// used in production.
+///
+/// # Examples
+///
+/// ```
+/// # #[cfg(all(feature = "serialize", feature = "memory"))] {
+/// use cachet::{Cache, MockValueProtector};
+/// use tick::Clock;
+///
+/// let clock = Clock::new_frozen();
+/// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
+/// let cache = Cache::builder::<String, String>(clock)
+///     .memory()
+///     .serialize()
+///     .protect_with(MockValueProtector::new())
+///     .fallback(remote)
+///     .build();
+/// # }
+/// ```
+#[cfg(any(feature = "test-util", test))]
+#[derive(Debug, Default)]
+pub struct MockValueProtector {
+    counter: std::sync::atomic::AtomicU32,
+}
+
+#[cfg(any(feature = "test-util", test))]
+impl MockValueProtector {
+    /// Creates a new mock protector.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Derives a nonce from the counter (counter in the first 4 bytes, then filler).
+    fn nonce_bytes(counter: u32) -> [u8; MOCK_NONCE_SIZE] {
+        let mut nonce = [0xA5u8; MOCK_NONCE_SIZE];
+        nonce[..4].copy_from_slice(&counter.to_le_bytes());
+        nonce
+    }
+
+    /// Reversible keystream transform: `body[i] ^= 0x5A ^ nonce[i % NONCE]`.
+    fn mask(nonce: &[u8; MOCK_NONCE_SIZE], body: &mut [u8]) {
+        for (i, byte) in body.iter_mut().enumerate() {
+            *byte ^= 0x5A ^ nonce[i % MOCK_NONCE_SIZE];
+        }
+    }
+}
+
+#[cfg(any(feature = "test-util", test))]
+impl ValueProtector for MockValueProtector {
+    fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
+        use std::sync::atomic::Ordering;
+
+        let nonce = Self::nonce_bytes(self.counter.fetch_add(1, Ordering::Relaxed));
+        let mut out = Vec::with_capacity(MOCK_NONCE_SIZE + 4 + context.len() + plaintext.len());
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&u32::try_from(context.len()).expect("context fits in u32").to_le_bytes());
+        out.extend_from_slice(context);
+        let body_start = out.len();
+        for (slice, _) in plaintext.slices() {
+            out.extend_from_slice(slice);
+        }
+        Self::mask(&nonce, &mut out[body_start..]);
+        Ok(BytesView::from(out))
+    }
+
+    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+        let bytes = protected.to_vec();
+        let Some(nonce) = bytes.get(..MOCK_NONCE_SIZE) else {
+            return Ok(DecodeOutcome::SoftFailure("mock: truncated nonce"));
+        };
+        let nonce: [u8; MOCK_NONCE_SIZE] = nonce.try_into().expect("MOCK_NONCE_SIZE bytes");
+        let rest = &bytes[MOCK_NONCE_SIZE..];
+        let Some(len_bytes) = rest.get(..4) else {
+            return Ok(DecodeOutcome::SoftFailure("mock: truncated length"));
+        };
+        let context_len = u32::from_le_bytes(len_bytes.try_into().expect("4 bytes")) as usize;
+        let Some(stored_context) = rest.get(4..4 + context_len) else {
+            return Ok(DecodeOutcome::SoftFailure("mock: truncated context"));
+        };
+        if stored_context != context {
+            return Ok(DecodeOutcome::SoftFailure("mock: context mismatch"));
+        }
+        let mut body = rest[4 + context_len..].to_vec();
+        Self::mask(&nonce, &mut body);
+        Ok(DecodeOutcome::Value(BytesView::from(body)))
+    }
+}
+
+/// A cache tier that transparently protects values with a [`ValueProtector`].
 ///
 /// It wraps an inner `CacheTier<BytesView, BytesView>` (typically a remote tier
-/// holding serialized bytes). On insert it encrypts the value, authenticating the
-/// storage key as AAD; on get it decrypts, and an authentication failure — corrupt
-/// bytes, a tampered entry, or a value relocated from a different key — surfaces as
-/// a cache miss (`Ok(None)`) rather than an error. Each such failure emits a
-/// `cache.decrypt_failed` telemetry event so that tampering with the backing store
-/// is observable rather than silent.
-pub(crate) struct EncryptedTier<S> {
+/// holding serialized bytes). On insert it protects the value, binding the storage key
+/// as context; on get it recovers it, and an authentication failure — corrupt bytes, a
+/// tampered entry, or a value relocated from a different key — surfaces as a cache miss
+/// (`Ok(None)`) rather than an error. Each such failure emits a `cache.unprotect_failed`
+/// telemetry event so that tampering with the backing store is observable rather than
+/// silent.
+pub(crate) struct ProtectedTier<S> {
     inner: S,
-    cipher: Box<dyn AeadCipher>,
+    protector: Box<dyn ValueProtector>,
     telemetry: CacheTelemetry,
     name: CacheName,
 }
 
-impl<S> EncryptedTier<S> {
-    pub(crate) fn new(inner: S, cipher: Box<dyn AeadCipher>, telemetry: CacheTelemetry, name: CacheName) -> Self {
+impl<S> ProtectedTier<S> {
+    pub(crate) fn new(inner: S, protector: Box<dyn ValueProtector>, telemetry: CacheTelemetry, name: CacheName) -> Self {
         Self {
             inner,
-            cipher,
+            protector,
             telemetry,
             name,
         }
     }
 }
 
-impl<S: std::fmt::Debug> std::fmt::Debug for EncryptedTier<S> {
+impl<S: std::fmt::Debug> std::fmt::Debug for ProtectedTier<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedTier").field("inner", &self.inner).finish_non_exhaustive()
+        f.debug_struct("ProtectedTier").field("inner", &self.inner).finish_non_exhaustive()
     }
 }
 
-impl<S> CacheTier<BytesView, BytesView> for EncryptedTier<S>
+impl<S> CacheTier<BytesView, BytesView> for ProtectedTier<S>
 where
     S: CacheTier<BytesView, BytesView> + Send + Sync,
 {
@@ -124,31 +235,31 @@ where
         let ttl = entry.ttl();
         let cached_at = entry.cached_at();
         let value = entry.into_value();
-        // The storage key is authenticated as AAD, so a value planted under the
-        // wrong key fails decryption and is treated as a miss.
-        let aad = to_contiguous(key);
-        match self.cipher.decrypt(aad.as_ref(), &value)? {
+        // The storage key is bound as context, so a value planted under the
+        // wrong key fails to unprotect and is treated as a miss.
+        let context = to_contiguous(key);
+        match self.protector.unprotect(context.as_ref(), &value)? {
             DecodeOutcome::Value(value) => {
-                let mut decrypted = CacheEntry::new(value);
+                let mut recovered = CacheEntry::new(value);
                 if let Some(ttl) = ttl {
-                    decrypted.set_ttl(ttl);
+                    recovered.set_ttl(ttl);
                 }
                 if let Some(cached_at) = cached_at {
-                    decrypted.ensure_cached_at(cached_at);
+                    recovered.ensure_cached_at(cached_at);
                 }
-                Ok(Some(decrypted))
+                Ok(Some(recovered))
             }
             DecodeOutcome::SoftFailure(_) => {
-                self.telemetry.record_decrypt_failure(self.name);
+                self.telemetry.record_unprotect_failure(self.name);
                 Ok(None)
             }
         }
     }
 
     async fn insert(&self, key: BytesView, entry: CacheEntry<BytesView>) -> Result<(), Error> {
-        let aad = to_contiguous(&key);
-        let encrypted = entry.try_map_value(|value| self.cipher.encrypt(aad.as_ref(), &value))?;
-        self.inner.insert(key, encrypted).await
+        let context = to_contiguous(&key);
+        let protected = entry.try_map_value(|value| self.protector.protect(context.as_ref(), &value))?;
+        self.inner.insert(key, protected).await
     }
 
     async fn invalidate(&self, key: &BytesView) -> Result<(), Error> {
@@ -174,57 +285,25 @@ mod tests {
         BytesView::from(data.to_vec())
     }
 
-    /// A crypto-free [`AeadCipher`] for exercising the tier mechanism. It "seals"
-    /// a value as `aad_len || aad || plaintext` and, on decrypt, treats an AAD
-    /// mismatch or malformed input as a soft failure — mirroring how a real AEAD
-    /// binds the value to its key without performing any real cryptography.
-    struct MockAeadCipher;
+    /// A protector whose operations always hard-error, for exercising error propagation.
+    struct FailingProtector;
 
-    impl AeadCipher for MockAeadCipher {
-        fn encrypt(&self, aad: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
-            let plaintext = plaintext.to_vec();
-            let mut out = Vec::with_capacity(4 + aad.len() + plaintext.len());
-            out.extend_from_slice(&(u32::try_from(aad.len()).expect("aad fits in u32")).to_le_bytes());
-            out.extend_from_slice(aad);
-            out.extend_from_slice(&plaintext);
-            Ok(out.into())
+    impl ValueProtector for FailingProtector {
+        fn protect(&self, _context: &[u8], _plaintext: &BytesView) -> Result<BytesView, Error> {
+            Err(Error::from_message("protect failed"))
         }
 
-        fn decrypt(&self, aad: &[u8], ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
-            let bytes = ciphertext.to_vec();
-            let Some(len_bytes) = bytes.get(0..4) else {
-                return Ok(DecodeOutcome::SoftFailure("mock: missing length prefix"));
-            };
-            let aad_len = u32::from_le_bytes(len_bytes.try_into().expect("4 bytes")) as usize;
-            let Some(stored_aad) = bytes.get(4..4 + aad_len) else {
-                return Ok(DecodeOutcome::SoftFailure("mock: truncated aad"));
-            };
-            if stored_aad != aad {
-                return Ok(DecodeOutcome::SoftFailure("mock: aad mismatch"));
-            }
-            Ok(DecodeOutcome::Value(bytes[4 + aad_len..].to_vec().into()))
+        fn unprotect(&self, _context: &[u8], _protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
+            Err(Error::from_message("unprotect failed"))
         }
     }
 
-    /// A cipher whose operations always hard-error, for exercising error propagation.
-    struct FailingCipher;
-
-    impl AeadCipher for FailingCipher {
-        fn encrypt(&self, _aad: &[u8], _plaintext: &BytesView) -> Result<BytesView, Error> {
-            Err(Error::from_message("encrypt failed"))
-        }
-
-        fn decrypt(&self, _aad: &[u8], _ciphertext: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
-            Err(Error::from_message("decrypt failed"))
-        }
+    fn tier<S>(inner: S) -> ProtectedTier<S> {
+        ProtectedTier::new(inner, Box::new(MockValueProtector::new()), CacheTelemetry::new(), "encrypted-test")
     }
 
-    fn tier<S>(inner: S) -> EncryptedTier<S> {
-        EncryptedTier::new(inner, Box::new(MockAeadCipher), CacheTelemetry::new(), "encrypted-test")
-    }
-
-    fn failing_tier<S>(inner: S) -> EncryptedTier<S> {
-        EncryptedTier::new(inner, Box::new(FailingCipher), CacheTelemetry::new(), "failing-test")
+    fn failing_tier<S>(inner: S) -> ProtectedTier<S> {
+        ProtectedTier::new(inner, Box::new(FailingProtector), CacheTelemetry::new(), "failing-test")
     }
 
     #[cfg_attr(miri, ignore)]
@@ -324,7 +403,7 @@ mod tests {
     #[test]
     fn debug_omits_inner_secrets() {
         let tier = tier(MockCache::<BytesView, BytesView>::new());
-        assert!(format!("{tier:?}").contains("EncryptedTier"));
+        assert!(format!("{tier:?}").contains("ProtectedTier"));
     }
 
     #[cfg_attr(miri, ignore)]
@@ -336,9 +415,9 @@ mod tests {
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = EncryptedTier::new(
+        let tier = ProtectedTier::new(
             inner.clone(),
-            Box::new(MockAeadCipher),
+            Box::new(MockValueProtector::new()),
             CacheTelemetry::with_logging(),
             "encrypted-test",
         );
@@ -353,7 +432,7 @@ mod tests {
             tier.get(&view(b"k")).await.expect("get ok").is_none(),
             "undecodable value must read as a miss"
         );
-        capture.assert_contains(crate::telemetry::attributes::EVENT_DECRYPT_FAILED);
+        capture.assert_contains(crate::telemetry::attributes::EVENT_UNPROTECT_FAILED);
     }
 
     #[cfg_attr(miri, ignore)]
@@ -419,13 +498,20 @@ mod tests {
     }
 
     #[test]
-    fn mock_cipher_treats_truncated_aad_as_soft_failure() {
-        // A valid 4-byte length prefix declaring a 4-byte AAD, but with no bytes
-        // following it, must decode as a soft failure rather than panic.
-        let blob = 4u32.to_le_bytes().to_vec();
-        let outcome = MockAeadCipher
-            .decrypt(b"aad", &BytesView::from(blob))
-            .expect("malformed input is a soft failure, not a hard error");
-        assert!(matches!(outcome, DecodeOutcome::SoftFailure(_)));
+    fn mock_protector_soft_fails_on_malformed_input() {
+        let p = MockValueProtector::new();
+        let soft = |bytes: Vec<u8>| matches!(p.unprotect(b"context", &BytesView::from(bytes)), Ok(DecodeOutcome::SoftFailure(_)));
+
+        // Too short to hold the nonce prefix.
+        assert!(soft(vec![0u8; 4]), "truncated nonce must soft-fail");
+        // Nonce present, but no room for the 4-byte length prefix.
+        assert!(soft(vec![0xA5u8; MOCK_NONCE_SIZE]), "truncated length must soft-fail");
+        // Length prefix declares a 4-byte context, but no context bytes follow.
+        let mut declares_missing_context = vec![0xA5u8; MOCK_NONCE_SIZE];
+        declares_missing_context.extend_from_slice(&4u32.to_le_bytes());
+        assert!(soft(declares_missing_context), "truncated context must soft-fail");
+        // A well-formed round-trip must NOT soft-fail.
+        let valid = p.protect(b"context", &view(b"value")).expect("protect should succeed");
+        assert!(!soft(valid.to_vec()), "a valid round-trip must recover, not soft-fail");
     }
 }

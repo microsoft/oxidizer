@@ -279,8 +279,12 @@ crates.io
 crypto
 cryptographic
 cryptographically
+CryptProtectData
+DPAPI
+keystream
 SymCrypt
 undecryptable
+unprotect
 customizable
 cutover
 dSMS

@@ -1,13 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Builder for applying an authenticated-encryption boundary in the cache pipeline.
+//! Builder for applying an authenticated value-protection boundary in the cache
+//! pipeline.
 //!
-//! `.encrypt_with(cipher)` becomes available once a [`TransformBuilder`] has reduced
+//! `.protect_with(protector)` becomes available once a [`TransformBuilder`] has reduced
 //! values to [`BytesView`](bytesbuf::BytesView) (typically via
 //! [`serialize`](crate::CacheBuilder::serialize)). It produces an
-//! [`EncryptedTransformBuilder`], whose post-transform tier chain is wrapped in an
-//! internal `EncryptedTier` at build time.
+//! [`ProtectedTransformBuilder`], whose post-transform tier chain is wrapped in an
+//! internal `ProtectedTier` at build time.
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -22,31 +23,30 @@ use super::fallback::FallbackBuilder;
 use super::sealed::{CacheTierBuilder, Sealed};
 use super::transform::TransformBuilder;
 use crate::telemetry::CacheTelemetry;
-use crate::transform::{AeadCipher, EncryptedTier, TransformAdapter};
+use crate::transform::{ProtectedTier, TransformAdapter, ValueProtector};
 use crate::{Codec, Encoder};
 
-/// The builder produced by [`TransformBuilder::encrypt_with`].
+/// The builder produced by [`TransformBuilder::protect_with`].
 ///
 /// It mirrors [`TransformBuilder`] but fixes the storage types to
-/// [`BytesView`] and carries an authenticated cipher. At build time the
-/// post-transform tier chain is wrapped in an internal `EncryptedTier`, which
-/// encrypts values and authenticates each value against its storage key. Add post
-/// tiers with [`fallback`](Self::fallback) and finish with [`build`](Self::build),
-/// exactly as with `TransformBuilder`.
-pub struct EncryptedTransformBuilder<K, V, Pre, Post = ()> {
+/// [`BytesView`] and carries a value protector. At build time the post-transform tier
+/// chain is wrapped in an internal `ProtectedTier`, which protects values and binds
+/// each value to its storage key. Add post tiers with [`fallback`](Self::fallback) and
+/// finish with [`build`](Self::build), exactly as with `TransformBuilder`.
+pub struct ProtectedTransformBuilder<K, V, Pre, Post = ()> {
     pre: Pre,
     post: Post,
     key_encoder: Box<dyn Encoder<K, BytesView>>,
     value_codec: Box<dyn Codec<V, BytesView>>,
-    cipher: Box<dyn AeadCipher>,
+    protector: Box<dyn ValueProtector>,
     clock: Clock,
     telemetry: CacheTelemetry,
     stampede_protection: bool,
 }
 
-impl<K, V, Pre: Debug, Post: Debug> Debug for EncryptedTransformBuilder<K, V, Pre, Post> {
+impl<K, V, Pre: Debug, Post: Debug> Debug for ProtectedTransformBuilder<K, V, Pre, Post> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedTransformBuilder")
+        f.debug_struct("ProtectedTransformBuilder")
             .field("pre", &self.pre)
             .field("post", &self.post)
             .field("K", &std::any::type_name::<K>())
@@ -55,42 +55,42 @@ impl<K, V, Pre: Debug, Post: Debug> Debug for EncryptedTransformBuilder<K, V, Pr
     }
 }
 
-// ── .encrypt() / .encrypt_with() on TransformBuilder ──
+// ── .protect_with() on TransformBuilder ──
 
 impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
-    /// Encrypts values with the given [`AeadCipher`](crate::AeadCipher) before they
-    /// reach the post-transform tier.
+    /// Protects values with the given [`ValueProtector`](crate::ValueProtector) before
+    /// they reach the post-transform tier.
     ///
     /// Available once values are [`BytesView`] (typically after
-    /// [`serialize`](crate::CacheBuilder::serialize)). Supply a cipher backed by your
-    /// approved cryptographic library; the cipher receives the storage key as
-    /// associated data and must authenticate it (see the
-    /// [`AeadCipher`](crate::AeadCipher) contract). Keys themselves are never
-    /// encrypted, and a value that fails authentication is treated as a cache miss.
+    /// [`serialize`](crate::CacheBuilder::serialize)). Supply a protector backed by
+    /// your approved cryptographic library; it receives the storage key as its context
+    /// and must bind it (see the [`ValueProtector`](crate::ValueProtector) contract).
+    /// Keys themselves are never protected, and a value that fails authentication is
+    /// treated as a cache miss.
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// use cachet::{AeadCipher, Cache, DecodeOutcome, Error};
+    /// use cachet::{Cache, DecodeOutcome, Error, ValueProtector};
     /// use tick::Clock;
     ///
-    /// struct MyCipher;
-    /// impl AeadCipher for MyCipher {
-    ///     fn encrypt(
+    /// struct MyProtector;
+    /// impl ValueProtector for MyProtector {
+    ///     fn protect(
     ///         &self,
-    ///         aad: &[u8],
+    ///         context: &[u8],
     ///         plaintext: &bytesbuf::BytesView,
     ///     ) -> Result<bytesbuf::BytesView, Error> {
     /// #       unimplemented!()
-    ///         // ... encrypt with your approved library, authenticating `aad` ...
+    ///         // ... protect with your approved library, binding `context` ...
     ///     }
-    ///     fn decrypt(
+    ///     fn unprotect(
     ///         &self,
-    ///         aad: &[u8],
-    ///         ciphertext: &bytesbuf::BytesView,
+    ///         context: &[u8],
+    ///         protected: &bytesbuf::BytesView,
     ///     ) -> Result<DecodeOutcome<bytesbuf::BytesView>, Error> {
     /// #       unimplemented!()
-    ///         // ... decrypt, returning SoftFailure on any authentication failure ...
+    ///         // ... recover, returning SoftFailure on any authentication failure ...
     ///     }
     /// }
     ///
@@ -100,18 +100,18 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     /// let cache = Cache::builder::<String, String>(clock)
     ///     .memory()
     ///     .serialize()
-    ///     .encrypt_with(MyCipher)
+    ///     .protect_with(MyProtector)
     ///     .fallback(remote)
     ///     .build();
     /// ```
     #[must_use]
-    pub fn encrypt_with(self, cipher: impl AeadCipher + 'static) -> EncryptedTransformBuilder<K, V, Pre, Post> {
-        EncryptedTransformBuilder {
+    pub fn protect_with(self, protector: impl ValueProtector + 'static) -> ProtectedTransformBuilder<K, V, Pre, Post> {
+        ProtectedTransformBuilder {
             pre: self.pre,
             post: self.post,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
-            cipher: Box::new(cipher),
+            protector: Box::new(protector),
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -119,20 +119,20 @@ impl<K, V, Pre, Post> TransformBuilder<K, V, BytesView, BytesView, Pre, Post> {
     }
 }
 
-// ── .fallback() on EncryptedTransformBuilder ──
+// ── .fallback() on ProtectedTransformBuilder ──
 
-impl<K, V, Pre> EncryptedTransformBuilder<K, V, Pre, ()> {
+impl<K, V, Pre> ProtectedTransformBuilder<K, V, Pre, ()> {
     /// Sets the first post-transform storage tier (speaks encrypted `BytesView`).
-    pub fn fallback<FB>(self, fallback: FB) -> EncryptedTransformBuilder<K, V, Pre, FB>
+    pub fn fallback<FB>(self, fallback: FB) -> ProtectedTransformBuilder<K, V, Pre, FB>
     where
         FB: CacheTierBuilder<BytesView, BytesView>,
     {
-        EncryptedTransformBuilder {
+        ProtectedTransformBuilder {
             pre: self.pre,
             post: fallback,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
-            cipher: self.cipher,
+            protector: self.protector,
             clock: self.clock,
             telemetry: self.telemetry,
             stampede_protection: self.stampede_protection,
@@ -140,12 +140,12 @@ impl<K, V, Pre> EncryptedTransformBuilder<K, V, Pre, ()> {
     }
 }
 
-impl<K, V, Pre, Post> EncryptedTransformBuilder<K, V, Pre, Post>
+impl<K, V, Pre, Post> ProtectedTransformBuilder<K, V, Pre, Post>
 where
     Post: CacheTierBuilder<BytesView, BytesView>,
 {
     /// Adds another post-transform fallback tier (speaks encrypted `BytesView`).
-    pub fn fallback<FB>(self, fallback: FB) -> EncryptedTransformBuilder<K, V, Pre, FallbackBuilder<BytesView, BytesView, Post, FB>>
+    pub fn fallback<FB>(self, fallback: FB) -> ProtectedTransformBuilder<K, V, Pre, FallbackBuilder<BytesView, BytesView, Post, FB>>
     where
         FB: CacheTierBuilder<BytesView, BytesView>,
     {
@@ -164,12 +164,12 @@ where
             _phantom: PhantomData,
         };
 
-        EncryptedTransformBuilder {
+        ProtectedTransformBuilder {
             pre: self.pre,
             post: post_chain,
             key_encoder: self.key_encoder,
             value_codec: self.value_codec,
-            cipher: self.cipher,
+            protector: self.protector,
             clock,
             telemetry,
             stampede_protection,
@@ -179,24 +179,24 @@ where
 
 // ── Sealed + CacheTierBuilder (allow nesting an encrypted transform) ──
 
-impl<K, V, Pre, Post> Sealed for EncryptedTransformBuilder<K, V, Pre, Post>
+impl<K, V, Pre, Post> Sealed for ProtectedTransformBuilder<K, V, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
 }
 
-impl<K, V, Pre, Post> CacheTierBuilder<K, V> for EncryptedTransformBuilder<K, V, Pre, Post>
+impl<K, V, Pre, Post> CacheTierBuilder<K, V> for ProtectedTransformBuilder<K, V, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
 {
 }
 
-// ── .build() on EncryptedTransformBuilder ──
+// ── .build() on ProtectedTransformBuilder ──
 
 #[expect(private_bounds, reason = "Buildable is an internal trait")]
-impl<K, V, Pre, Post> EncryptedTransformBuilder<K, V, Pre, Post>
+impl<K, V, Pre, Post> ProtectedTransformBuilder<K, V, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
@@ -209,7 +209,7 @@ where
     }
 }
 
-impl<K, V, Pre, Post> Buildable<K, V> for EncryptedTransformBuilder<K, V, Pre, Post>
+impl<K, V, Pre, Post> Buildable<K, V> for ProtectedTransformBuilder<K, V, Pre, Post>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Clone + Send + Sync + 'static,
@@ -230,16 +230,16 @@ where
     fn build_tier(self, clock: Clock, telemetry: CacheTelemetry, fallback: bool) -> Self::TierOutput {
         let pre_tier = self.pre.build_tier(clock.clone(), telemetry.clone(), fallback);
 
-        // Build the post-transform tier chain and wrap it so values are encrypted
-        // (and key-authenticated) before reaching it.
+        // Build the post-transform tier chain and wrap it so values are protected
+        // (and key-bound) before reaching it.
         let post_tier = self.post.build_tier(clock.clone(), telemetry.clone(), true);
-        let encrypted = EncryptedTier::new(
+        let protected = ProtectedTier::new(
             post_tier,
-            self.cipher,
+            self.protector,
             telemetry.clone(),
-            type_name::<EncryptedTier<Post::TierOutput>>(None),
+            type_name::<ProtectedTier<Post::TierOutput>>(None),
         );
-        let adapted = TransformAdapter::from_boxed(encrypted, self.key_encoder, self.value_codec);
+        let adapted = TransformAdapter::from_boxed(protected, self.key_encoder, self.value_codec);
 
         let fallback = crate::fallback::FallbackCache::new(type_name::<Self::TierOutput>(None), pre_tier, adapted, clock, None, telemetry);
 
