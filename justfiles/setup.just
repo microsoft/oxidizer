@@ -28,6 +28,7 @@ install-tools:
         cargo-hack@$env:CARGO_HACK_VERSION `
         cargo-heather@$env:CARGO_HEATHER_VERSION `
         cargo-llvm-cov@$env:CARGO_LLVM_COV_VERSION `
+        cargo-machete@$env:CARGO_MACHETE_VERSION `
         cargo-mutants@$env:CARGO_MUTANTS_VERSION `
         cargo-nextest@$env:CARGO_NEXTEST_VERSION `
         cargo-semver-checks@$env:CARGO_SEMVER_CHECKS_VERSION `

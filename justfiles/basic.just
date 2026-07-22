@@ -228,7 +228,7 @@ udeps:
     $PSNativeCommandUseErrorActionPreference = $true
 
     # Run without and with --all-targets to catch both dependency-placement
-    # variants (mirrors the CI 'Udeps' step):
+    # variants (mirrors the CI 'Unused dependencies' step):
     #  - without --all-targets: enforce [dependencies] are used by lib/bins
     #    (catches normal deps used only by dev targets -- misplaced deps that
     #    should be [dev-dependencies]).
@@ -236,3 +236,21 @@ udeps:
     #    (catches unused dev-dependencies).
     cargo +$env:RUST_NIGHTLY udeps {{ target_package }} --locked --all-features
     cargo +$env:RUST_NIGHTLY udeps {{ target_package }} --locked --all-features --all-targets
+
+# Detect unused dependencies with both cargo-machete and cargo-udeps.
+[script]
+unused-dependencies-check: udeps
+    $ErrorActionPreference = "Stop"
+    $PSNativeCommandUseErrorActionPreference = $true
+
+    # The two tools use different algorithms and cover each other's gaps:
+    #  - cargo-machete scans source text and flags a direct dependency even when
+    #    it is still pulled in transitively (which udeps ignores by design). It
+    #    always runs workspace-wide -- it has no package selection.
+    #  - cargo-udeps performs a real per-target build (see the 'udeps' recipe,
+    #    which runs first as a dependency of this recipe).
+    #
+    # --with-metadata resolves the dependency graph via `cargo metadata`, which
+    # makes machete more accurate (at the cost of a metadata query).
+    cargo machete --with-metadata
+

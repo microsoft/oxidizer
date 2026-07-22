@@ -20,6 +20,11 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/fundle"
 [package.metadata.cargo_check_external_types]
 allowed_external_types = ["fundle_macros::*"]
 
+# Facade crate: only macro re-exports, marker structs, and trait definitions --
+# no executable bodies, so it produces no coverage data. Opt out of the gate.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -29,5 +34,7 @@ fundle_macros = { workspace = true }
 [dev-dependencies]
 trybuild = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

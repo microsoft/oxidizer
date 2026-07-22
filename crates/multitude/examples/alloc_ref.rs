@@ -68,12 +68,12 @@ fn main() {
     let rc = arena.alloc_arc(Point { x: 3.0, y: 4.0 });
     let mut bump_ref = arena.alloc(vec![1, 2, 3]);
     bump_ref.push(4);
-    println!("rc = {:?}, bump_ref = {:?}", &*rc, &*bump_ref);
+    println!("rc = {:?}, bump_ref = {:?}", *rc, *bump_ref);
 
     // The handles' lifetimes expire when `arena` is dropped. Because each
     // `Alloc` runs its value's destructor on drop, drop the outstanding
     // handles before the arena (the `Arc` may live on):
     drop((counter, greeting, primes, tokens, xs, bump_ref));
     drop(arena);
-    println!("rc still valid after arena drop: {:?}", &*rc);
+    println!("rc still valid after arena drop: {:?}", *rc);
 }

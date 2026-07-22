@@ -1,4 +1,23 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+# >>> anvil-managed: anvil-rustfmt
+edition = "2024"
 max_width = 140
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true
+# The following options require nightly rustfmt. anvil-fmt invokes
+# `cargo +{{ rust_nightly }} fmt`; see justfiles/anvil/versions.just
+# for the pin and docs/design/local.md#nightly-pinning for the policy.
+unstable_features = true
+# Format Rust code blocks inside `///` doc comments. Catches stale
+# examples that drift from the prose.
+format_code_in_doc_comments = true
+# One use-statement per module (vs collapsed `a::{b, c, d}` form).
+# Diffs touch only the lines that actually changed.
+imports_granularity = "Module"
+# Group imports: std, then external crates, then crate-internal. Matches
+# the convention used across the surveyed Microsoft Rust repos.
+group_imports = "StdExternalCrate"
+# <<< anvil-managed: anvil-rustfmt

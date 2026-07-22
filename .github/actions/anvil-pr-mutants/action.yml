@@ -1,0 +1,48 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Owned by cargo-anvil; edit via `cargo anvil`.
+# The token pr-mutants is substituted by cargo-anvil at emit time with
+# the concrete check-group name (pr-fast, pr-test, scheduled-runtime-analysis, ...).
+name: anvil-pr-mutants
+description: Run the pr-mutants check group.
+inputs:
+  include_modified:
+    description: |
+      Pre-formatted --package args (e.g. "--package alpha@1.0.0 --package
+      beta@0.2.0") for the modified tier, or the sentinel "--skip" when
+      nothing modified. Packages are version-qualified cargo specs so they
+      resolve uniquely even when a like-named crate is also a transitive
+      dependency. Local invocations leave it unset; recipes default to
+      --workspace.
+    default: ""
+    required: false
+  include_affected:
+    description: |
+      Same shape as include_modified, but for the affected tier
+      (modified ∪ rev-deps).
+    default: ""
+    required: false
+  include_required:
+    description: |
+      Same shape as include_modified, but for the required tier
+      (affected ∪ workspace-internal transitive deps).
+    default: ""
+    required: false
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/anvil-setup
+      with:
+        group: pr-mutants
+    - name: Run just anvil-pr-mutants
+      shell: bash
+      env:
+        ANVIL_INCLUDE_MODIFIED: ${{ inputs.include_modified }}
+        ANVIL_INCLUDE_AFFECTED: ${{ inputs.include_affected }}
+        ANVIL_INCLUDE_REQUIRED: ${{ inputs.include_required }}
+        # Some checks (e.g. cargo-aprz, run only by groups that include it)
+        # hit the GitHub API; pass the built-in token so they use the
+        # authenticated quota (1000 vs 60 req/hr). Harmless for groups whose
+        # checks never read it.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: just anvil-pr-mutants

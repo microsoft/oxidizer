@@ -297,7 +297,6 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    #[tracing_test::traced_test]
     fn report_connection_error_records_metric() {
         let tester = MetricTester::new();
         let histogram = tester
@@ -323,7 +322,6 @@ mod tests {
 
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
-    #[tracing_test::traced_test]
     async fn connect_with_timeout_records_metric_on_success() {
         use bytes::Bytes;
 

@@ -9,11 +9,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  merge_group: {}
 
 jobs:
   # Emits per-tier `--exclude NAME ...` args (modified/affected/required) to scope
-  # downstream `cargo --workspace` jobs. PRs snapshot base vs. the merge commit
-  # (same SHA downstream jobs build); pushes emit empty (full backstop).
+  # downstream `cargo --workspace` jobs. PRs and merge groups snapshot base vs. the
+  # merge commit (same SHA downstream jobs build); pushes emit empty (full backstop).
   # `skip=true` when no crates are impacted (e.g. doc-only PR).
   delta:
     runs-on: ubuntu-latest
@@ -24,11 +25,11 @@ jobs:
       skip: ${{ steps.compute.outputs.skip }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: ./.github/actions/setup
         with:
           rust-toolchain: RUST_LATEST
@@ -37,11 +38,15 @@ jobs:
         id: compute
         shell: bash
         env:
+          # `pull_request` diffs against the target branch tip (`BASE_REF`);
+          # `merge_group` diffs against the exact base the queue built on
+          # (`BASE_SHA`, already present in history via `fetch-depth: 0`).
           BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
-            # push to main (or any non-PR trigger) -> full backstop: no excludes.
+          if [[ "${{ github.event_name }}" != "pull_request" && "${{ github.event_name }}" != "merge_group" ]]; then
+            # push to main (or any other non-PR/non-merge-group trigger) -> full backstop: no excludes.
             {
               echo "exclude_not_modified="
               echo "exclude_not_affected="
@@ -56,8 +61,13 @@ jobs:
           current="$RUNNER_TEMP/delta-current.json"
 
           head_sha=$(git rev-parse HEAD)
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          git checkout "origin/$BASE_REF"
+          # Baseline: merge_group -> the queue's base commit (BASE_SHA); PR -> target branch tip.
+          if [[ -n "$BASE_SHA" ]]; then
+            git checkout "$BASE_SHA"
+          else
+            git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+            git checkout "origin/$BASE_REF"
+          fi
           cargo delta -c .delta.toml snapshot > "$baseline"
           git checkout "$head_sha"
           cargo delta -c .delta.toml snapshot > "$current"
@@ -101,11 +111,12 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
+          free-disk-space: true
           rust-toolchain: RUST_MSRV, RUST_NIGHTLY
           cargo-tools: CARGO_NEXTEST_VERSION, CARGO_HACK_VERSION, JUST_VERSION
 
@@ -141,7 +152,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -184,7 +195,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -202,21 +213,27 @@ jobs:
   # whose `version =` is bumped in this PR (the "publishing set"). The baseline
   # rustdoc is rebuilt from that commit's source, so no registry access is needed
   # and the check behaves identically for OSS and enterprise/offline consumers.
-  # The job is informational only: it never fails the build and posts a fresh PR
-  # comment on every push with a per-crate table (baseline vs this-PR vs the
-  # minimum required version) plus a link to the run. It is a no-op on PRs that
-  # do not bump any crate version, since only version-bumping PRs trigger a
-  # publish and thus need a compatibility check against the previous version.
+  # The version-increment VERDICT is informational: an under-incremented crate is
+  # reported (status=fail) but never fails the build. The check must, however,
+  # actually run — an operational failure (script/tooling error, or a failure to
+  # post the comment) is intentionally BLOCKING so a broken check gets fixed
+  # rather than silently skipped. Results are shown in a single sticky PR comment
+  # (keyed by the `semver-check` header, updated in place on each push) with a
+  # per-crate table (baseline vs this-PR vs the minimum required version) plus a
+  # link to the run. It is a no-op on PRs that do not bump any crate version,
+  # since only version-bumping PRs trigger a publish and thus need a compatibility
+  # check against the previous version.
   semver:
     needs: [delta]
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -236,31 +253,40 @@ jobs:
       #                                   its API changes; warn = a baseline could
       #                                   not be determined so a check is
       #                                   incomplete; pass = all sufficient)
-      # Kept non-failing so a git/tooling hiccup never blocks the PR.
+      # The version-increment verdict is informational (an under-increment sets
+      # status=fail, but the script still exits 0). This step is intentionally
+      # NOT continue-on-error: an operational failure here (git/tooling error)
+      # must block so the check gets fixed rather than silently skipped.
       - name: Semver Report
         id: report
-        continue-on-error: true
         shell: pwsh
         env:
-          BASE_REF: ${{ github.base_ref }}
+          # For `pull_request` this is the target branch (e.g. `main`); for
+          # `merge_group` `github.base_ref` is empty, so fall back to the merge
+          # group's base ref (`refs/heads/main`) and strip the prefix below.
+          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          git fetch --no-tags origin "+refs/heads/${env:BASE_REF}:refs/remotes/origin/${env:BASE_REF}"
-          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${env:BASE_REF}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
+          $baseRef = "${env:BASE_REF}" -replace '^refs/heads/', ''
+          git fetch --no-tags origin "+refs/heads/${baseRef}:refs/remotes/origin/${baseRef}"
+          ./scripts/ci/semver-report.ps1 -BaseRef "origin/${baseRef}" -ReportPath semver-comment.md -RunUrl "${env:RUN_URL}"
 
-      # Post a NEW comment on every push (not a sticky update) so each run's
-      # result is visible in the PR timeline. Only fires when the PR actually
-      # publishes something and is not from a fork (forks lack a write token).
+      # Maintain a single sticky PR comment (keyed by the `semver-check` header)
+      # so each push updates the same comment in place instead of adding a new one.
+      # Only fires when the PR actually publishes something and is not from a fork
+      # (forks lack a write token). Restricted to `pull_request` events: merge
+      # groups have no PR to comment on (`github.event.pull_request` is null).
       - name: Post Semver Comment
-        if: steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh pr comment ${{ github.event.pull_request.number }} --body-file semver-comment.md
+        if: github.event_name == 'pull_request' && steps.report.outputs.publishing == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: semver-check
+          path: semver-comment.md
 
   extended-analysis:
     name: extended-analysis (${{ matrix.os }})
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing, static-analysis]
     runs-on: ${{ matrix.os }}
     strategy:
@@ -278,28 +304,34 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
           enable-sccache: true
           rust-toolchain: RUST_NIGHTLY
           rust-components: miri
-          cargo-tools: CARGO_UDEPS_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
+          cargo-tools: CARGO_UDEPS_VERSION, CARGO_MACHETE_VERSION, CARGO_CAREFUL_VERSION, CARGO_NEXTEST_VERSION
 
       # execute
-      - name: Udeps
+      - name: Unused dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $PSNativeCommandUseErrorActionPreference = $true
+          # cargo-machete scans source text and flags a direct dependency even
+          # when it is still pulled in transitively (which udeps ignores by
+          # design). It always runs workspace-wide -- it has no package
+          # selection -- so it is the backstop that catches stale unused deps in
+          # crates outside the current PR's impacted set.
+          cargo machete --with-metadata
           # Without --all-targets: enforce that every [dependencies] entry is used
           # by the library/bins (catches normal deps used only by tests/benches/
           # examples -- i.e. misplaced deps that should be [dev-dependencies]).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
           # With --all-targets: enforce that every [dev-dependencies] entry is used
           # by some target (catches unused dev-dependencies).
-          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_modified }} --color always
+          cargo +${{ env.RUST_NIGHTLY }} udeps --locked --all-features --all-targets --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always
       - name: Careful
         if: success() || failure()
         run: cargo +${{ env.RUST_NIGHTLY }} careful nextest run --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --color always --target ${{ matrix.target }}
@@ -308,14 +340,14 @@ jobs:
         run: cargo +${{ env.RUST_NIGHTLY }} miri test --all-features --workspace ${{ needs.delta.outputs.exclude_not_affected }} --lib --tests
 
   model-checking:
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -328,14 +360,14 @@ jobs:
         run: just loom
 
   fuzz-testing:
-    if: github.event_name == 'pull_request' && needs.delta.outputs.skip != 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.delta.outputs.skip != 'true'
     needs: [delta, testing]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -348,13 +380,13 @@ jobs:
         run: just bolero 60s
 
   mutation-testing:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     needs: [testing]
     runs-on: ubuntu-latest
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
       - name: Setup
@@ -395,7 +427,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -410,6 +442,11 @@ jobs:
       - name: Generate Coverage (no-default-features)
         run: cargo +${{ env.RUST_NIGHTLY }} llvm-cov --no-default-features --workspace --lcov --output-path lcov-no-def.info
       - name: Upload Coverage to Codecov
+        # codecov/codecov-action publishes immutable GitHub releases (verified via the GitHub API:
+        # "immutable": true on GET /repos/codecov/codecov-action/releases/tags/v7.0.0). An immutable
+        # release's tag can never be retargeted to a different commit, so pinning to a SHA adds no
+        # extra protection here; this reference is intentionally left as a tag.
+        # See https://github.com/codecov/codecov-action/releases/tag/v7.0.0
         uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -421,7 +458,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Check PR Title
-        uses: amannn/action-semantic-pull-request@v6.1.1
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -445,7 +482,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - name: Setup
@@ -468,7 +505,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         uses: ./.github/actions/setup
         with:
@@ -495,7 +532,7 @@ jobs:
     steps:
       # prep
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup
         # The synthetic-workspace fixture builder shells out to `cargo metadata`,
         # so Rust must be available even though no Rust code is compiled.

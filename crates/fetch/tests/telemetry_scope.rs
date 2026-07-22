@@ -74,7 +74,7 @@ async fn fake_transport_scope_attribute() {
 
     let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
         .insecure_allow_http()
-        .meter_provider(&provider)
+        .meter_provider(provider.clone())
         .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -108,7 +108,7 @@ async fn custom_transport_scope_attribute() {
         deps,
     )
     .insecure_allow_http()
-    .meter_provider(&provider)
+    .meter_provider(provider.clone())
     .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -148,7 +148,7 @@ async fn custom_transport_instrument_inherits_scope() {
         deps,
     )
     .insecure_allow_http()
-    .meter_provider(&provider)
+    .meter_provider(provider.clone())
     .build();
 
     client.get("http://example.com").fetch().await.unwrap();
@@ -168,7 +168,7 @@ async fn tokio_transport_connection_metric_scope_attribute() {
 
     let client = HttpClient::builder_tokio(TokioDeps::default())
         .insecure_allow_http()
-        .meter_provider(&provider)
+        .meter_provider(provider.clone())
         .build();
 
     let server = serve(Bytes::from_static(b"hello")).await;
@@ -184,6 +184,50 @@ async fn tokio_transport_connection_metric_scope_attribute() {
         runtime_and_transport_for_metric(&exporter, "http.client.request.duration"),
         (Some("tokio".to_owned()), Some("hyper".to_owned())),
         "the request metric must carry the tokio runtime and hyper transport scope"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn client_name_set_before_meter_provider_is_reported() {
+    let (exporter, provider) = exporter_and_provider();
+
+    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+        .insecure_allow_http()
+        .name("named_before_provider")
+        .meter_provider(provider.clone())
+        .build();
+
+    client.get("http://example.com").fetch().await.unwrap();
+    provider.force_flush().unwrap();
+
+    assert_eq!(
+        scope_attribute_for_metric(&exporter, "http.client.request.duration", "http.client.name"),
+        Some("named_before_provider".to_owned()),
+        "a client name set before meter_provider must be reported as the http.client.name scope attribute"
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[tokio::test]
+async fn client_name_set_after_meter_provider_is_reported() {
+    let (exporter, provider) = exporter_and_provider();
+
+    // Setting the meter provider *before* the name exercises the deferred-scope path: the
+    // custom meter is only materialized at build time, so the later name still applies.
+    let client = HttpClient::builder_fake(StatusCode::OK, &Clock::new_frozen())
+        .insecure_allow_http()
+        .meter_provider(provider.clone())
+        .name("named_after_provider")
+        .build();
+
+    client.get("http://example.com").fetch().await.unwrap();
+    provider.force_flush().unwrap();
+
+    assert_eq!(
+        scope_attribute_for_metric(&exporter, "http.client.request.duration", "http.client.name"),
+        Some("named_after_provider".to_owned()),
+        "a client name set after meter_provider must be reported as the http.client.name scope attribute"
     );
 }
 

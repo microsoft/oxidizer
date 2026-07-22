@@ -29,7 +29,9 @@
 //!
 //! There are many helper methods on this type for easily consuming bytes from the view:
 //!
-//! * [`get_num_le::<T>()`] reads numbers. Big-endian/native-endian variants also exist.
+//! * [`get_u64_le()`] and the sibling `get_<type>_<endianness>()` methods read numbers of a
+//!   specific primitive type (`u16`/`i16` through `u128`/`i128`, plus `f32`/`f64`) in little-,
+//!   big-, or native-endian byte order.
 //! * [`get_byte()`] reads a single byte.
 //! * [`copy_to_slice()`] copies bytes into a provided slice.
 //! * [`copy_to_uninit_slice()`] copies bytes into a provided uninitialized slice.
@@ -46,7 +48,7 @@
 //!     let mut sum: u64 = 0;
 //!
 //!     while !message.is_empty() {
-//!         let word = message.get_num_le::<u64>();
+//!         let word = message.get_u64_le();
 //!         sum = sum.saturating_add(word);
 //!     }
 //!
@@ -100,7 +102,7 @@
 //! assert_eq!(bytes_clone.len(), 16);
 //!
 //! // Consume 8 bytes from the front.
-//! _ = bytes_clone.get_num_le::<u64>();
+//! _ = bytes_clone.get_u64_le();
 //! assert_eq!(bytes_clone.len(), 8);
 //!
 //! // Operations on the clone have no effect on the original view.
@@ -147,7 +149,9 @@
 //!
 //! There are many helper methods on [`BytesBuf`] for easily appending bytes to the buffer:
 //!
-//! * [`put_num_le::<T>()`] appends numbers. Big-endian/native-endian variants also exist.
+//! * [`put_u64_le()`] and the sibling `put_<type>_<endianness>()` methods append numbers of a
+//!   specific primitive type (`u16`/`i16` through `u128`/`i128`, plus `f32`/`f64`) in little-,
+//!   big-, or native-endian byte order.
 //! * [`put_slice()`] appends a slice of bytes.
 //! * [`put_byte()`] appends a single byte.
 //! * [`put_byte_repeated()`] appends multiple repetitions of a byte.
@@ -163,8 +167,8 @@
 //!
 //! let mut buf = memory.reserve(100);
 //!
-//! buf.put_num_be(1234_u64);
-//! buf.put_num_be(5678_u64);
+//! buf.put_u64_be(1234);
+//! buf.put_u64_be(5678);
 //! buf.put_slice(*b"Hello, world!");
 //! ```
 //!
@@ -218,8 +222,8 @@
 //!
 //! let mut buf = memory.reserve(100);
 //!
-//! buf.put_num_be(1234_u64);
-//! buf.put_num_be(5678_u64);
+//! buf.put_u64_be(1234);
+//! buf.put_u64_be(5678);
 //! buf.put_slice(*b"Hello, world!");
 //!
 //! let message = buf.consume_all();
@@ -238,8 +242,8 @@
 //!
 //! let mut buf = memory.reserve(100);
 //!
-//! buf.put_num_be(1234_u64);
-//! buf.put_num_be(5678_u64);
+//! buf.put_u64_be(1234);
+//! buf.put_u64_be(5678);
 //!
 //! let first_8_bytes = buf.consume(8);
 //! let second_8_bytes = buf.consume(8);
@@ -262,7 +266,7 @@
 //! let memory = connection.memory();
 //!
 //! let mut header_builder = memory.reserve(16);
-//! header_builder.put_num_be(1234_u64);
+//! header_builder.put_u64_be(1234);
 //! let header = header_builder.consume_all();
 //!
 //! let mut buf = memory.reserve(128);
@@ -529,13 +533,13 @@
 //!
 //! See the `mem::testing` module for details (requires `test-util` Cargo feature).
 //!
-//! [`get_num_le::<T>()`]: crate::BytesView::get_num_le
+//! [`get_u64_le()`]: crate::BytesView::get_u64_le
 //! [`get_byte()`]: crate::BytesView::get_byte
 //! [`copy_to_slice()`]: crate::BytesView::copy_to_slice
 //! [`copy_to_uninit_slice()`]: crate::BytesView::copy_to_uninit_slice
 //! [`first_slice()`]: crate::BytesView::first_slice
 //! [ViewAdvance]: crate::BytesView::advance
-//! [`put_num_le::<T>()`]: crate::BytesBuf::put_num_le
+//! [`put_u64_le()`]: crate::BytesBuf::put_u64_le
 //! [`put_slice()`]: crate::BytesBuf::put_slice
 //! [`put_byte()`]: crate::BytesBuf::put_byte
 //! [`put_byte_repeated()`]: crate::BytesBuf::put_byte_repeated

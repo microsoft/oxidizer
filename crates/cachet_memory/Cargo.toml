@@ -4,7 +4,7 @@
 [package]
 name = "cachet_memory"
 description = "In-memory cache tier backed by Moka for the cachet caching library."
-version = "0.4.0"
+version = "0.5.0"
 readme = "README.md"
 keywords = ["oxidizer", "caching", "concurrency"]
 categories = ["caching", "concurrency"]
@@ -44,5 +44,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 name = "overhead"
 harness = false
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

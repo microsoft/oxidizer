@@ -5,6 +5,10 @@
 
 #![cfg(feature = "memory")]
 
+// Integration binaries link the library with `cfg(test)` false, so the crate-root
+// tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
+testing_aids::init_tracing!();
+
 use cachet::{Cache, CacheEntry, Error};
 use cachet_tier::MockCache;
 use tick::Clock;
@@ -916,7 +920,7 @@ mod service_tests {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing_logs::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -931,7 +935,7 @@ async fn get_or_insert_with_logging_emits_operation_and_events() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn try_get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing_logs::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
@@ -946,7 +950,7 @@ async fn try_get_or_insert_with_logging_emits_operation_and_events() {
 #[cfg_attr(miri, ignore)]
 #[tokio::test]
 async fn optionally_get_or_insert_with_logging_emits_operation_and_events() {
-    let capture = testing_aids::LogCapture::new();
+    let capture = testing_aids::tracing_logs::Capture::new();
     let _guard = tracing::subscriber::set_default(capture.subscriber());
 
     let clock = Clock::new_frozen();
