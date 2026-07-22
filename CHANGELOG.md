@@ -18,6 +18,7 @@ Please see each crate's change log below:
 - [`fetch_hyper`](./crates/fetch_hyper/CHANGELOG.md)
 - [`fetch_options`](./crates/fetch_options/CHANGELOG.md)
 - [`fetch_tls`](./crates/fetch_tls/CHANGELOG.md)
+- [`fetch_winhttp`](./crates/fetch_winhttp/CHANGELOG.md)
 - [`fundle`](./crates/fundle/CHANGELOG.md)
 - [`fundle_macros`](./crates/fundle_macros/CHANGELOG.md)
 - [`fundle_macros_impl`](./crates/fundle_macros_impl/CHANGELOG.md)
