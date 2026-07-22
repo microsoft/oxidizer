@@ -295,6 +295,17 @@ impl BytesBuf {
 
         let bytes_len = bytes.len();
 
+        // Validate capacity before performing any mutation (including the freeze below), so a
+        // rejected append leaves the buffer untouched. Freezing changes neither `len` nor
+        // `available`, so this check is equivalent whether run before or after it.
+        //
+        // Appended memory is shared (immutable) and may be aliased by other views, so the logical
+        // length can grow independently of physical address-space consumption. We must guard the
+        // total capacity (`len + available`), not just `len`, to uphold the invariant `capacity()`
+        // relies on.
+        let new_len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
+        assert_capacity_within_bounds(new_len, self.available);
+
         // Only the first span builder may hold unfrozen data (the rest are for spare capacity).
         let total_unfrozen_bytes = NonZero::new(self.span_builders_reversed.last().map_or(0, SpanBuilder::len));
 
@@ -306,16 +317,6 @@ impl BytesBuf {
             // Debug build paranoia: nothing remains in the span builder, right?
             debug_assert_eq!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len), 0);
         }
-
-        // We do this first so if we do panic, we have not performed any incomplete operations.
-        // The freezing above is safe even if we panic here - freezing is an atomic operation.
-        let new_len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
-
-        // Appended memory is shared (immutable) and may be aliased by other views, so the logical
-        // length can grow independently of physical address-space consumption. We must guard the
-        // total capacity (`len + available`), not just `len`, to uphold the invariant `capacity()`
-        // relies on.
-        assert_capacity_within_bounds(new_len, self.available);
 
         self.len = new_len;
 
