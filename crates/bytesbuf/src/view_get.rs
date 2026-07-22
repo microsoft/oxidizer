@@ -6,9 +6,54 @@
 use std::mem::MaybeUninit;
 use std::ptr;
 
-use num_traits::FromBytes;
-
 use crate::BytesView;
+
+/// Generates the little-, big-, and native-endian read accessors for a primitive numeric type.
+///
+/// The generated methods delegate to [`BytesView::get_array`] for the shared span traversal and
+/// only select the byte order via the primitive's inherent `from_*_bytes` associated function.
+macro_rules! get_num_accessors {
+    ($t:ty, $le:ident, $be:ident, $ne:ident) => {
+        #[doc = concat!("Consumes a `", stringify!($t), "` from the view in little-endian byte order.")]
+        ///
+        /// The bytes are dropped from the view, moving any remaining bytes to the front.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the view does not cover enough bytes of data.
+        #[inline]
+        #[must_use]
+        pub fn $le(&mut self) -> $t {
+            <$t>::from_le_bytes(self.get_array())
+        }
+
+        #[doc = concat!("Consumes a `", stringify!($t), "` from the view in big-endian byte order.")]
+        ///
+        /// The bytes are dropped from the view, moving any remaining bytes to the front.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the view does not cover enough bytes of data.
+        #[inline]
+        #[must_use]
+        pub fn $be(&mut self) -> $t {
+            <$t>::from_be_bytes(self.get_array())
+        }
+
+        #[doc = concat!("Consumes a `", stringify!($t), "` from the view in native-endian byte order.")]
+        ///
+        /// The bytes are dropped from the view, moving any remaining bytes to the front.
+        ///
+        /// # Panics
+        ///
+        /// Panics if the view does not cover enough bytes of data.
+        #[inline]
+        #[must_use]
+        pub fn $ne(&mut self) -> $t {
+            <$t>::from_ne_bytes(self.get_array())
+        }
+    };
+}
 
 impl BytesView {
     /// Consumes a `u8` from the byte sequence.
@@ -150,318 +195,92 @@ impl BytesView {
         }
     }
 
-    /// Reads a `T` directly from the first span when that span fully contains it, consuming the
-    /// bytes in a single span lookup. Returns `None` when the value straddles a span boundary, in
-    /// which case the caller must fall back to buffered assembly.
+    /// Consumes exactly `N` bytes from the front of the view and returns them as an array.
     ///
-    /// The caller must have already verified that the view covers at least `size_of::<T::Bytes>()`
-    /// bytes.
+    /// The numeric accessors delegate here; `N` is the byte width of the primitive, and the caller
+    /// decodes the array with the primitive's `from_{le,be,ne}_bytes` associated function.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the view does not cover at least `N` bytes.
     #[inline]
-    // This is a behavior-preserving fast path: returning `None` (or declining the value that exactly
-    // fills the first span) routes the caller to `get_num_*_buffered`, which produces an identical
-    // result. Mutations that disable the fast path or shift its span-boundary check are therefore
-    // functionally equivalent and cannot be observed by behavioral tests.
-    #[cfg_attr(test, mutants::skip)]
-    fn get_num_in_first_span<T, F>(&mut self, convert: F) -> Option<T>
-    where
-        T: FromBytes,
-        T::Bytes: Sized,
-        F: FnOnce(&T::Bytes) -> T,
-    {
-        let size = size_of::<T::Bytes>();
+    fn get_array<const N: usize>(&mut self) -> [u8; N] {
+        assert!(self.len() >= N);
 
+        if let Some(array) = self.get_array_from_first_span::<N>() {
+            return array;
+        }
+
+        // The bytes straddle a span boundary, so we gather them into a buffer instead.
+        self.get_array_buffered::<N>()
+    }
+
+    /// Reads `N` bytes directly from the first span when that span fully contains them. Returns
+    /// `None` when the bytes straddle a span boundary, in which case the caller must fall back to
+    /// buffered assembly.
+    ///
+    /// The caller must have already verified that the view covers at least `N` bytes.
+    #[inline]
+    // The span-fit decision is an optimization: when it declines (returns `None`), the caller falls
+    // back to `get_array_buffered`, which yields an identical result. Mutation testing cannot
+    // distinguish a fast path that declines more eagerly from one that never declines, so we skip
+    // this function to avoid reporting those equivalent mutants. The read itself (the byte copy and
+    // span consumption) is instead exercised by the single-span behavioral tests below, and the
+    // `get_array` / `get_array_buffered` wrappers remain mutation-tested.
+    #[cfg_attr(test, mutants::skip)]
+    fn get_array_from_first_span<const N: usize>(&mut self) -> Option<[u8; N]> {
         let front = self.spans_reversed.last_mut()?;
         let front_len = front.len() as usize;
 
-        if size > front_len {
+        if N > front_len {
             return None;
         }
 
-        // SAFETY: the first span holds at least `size_of::<T::Bytes>()` bytes, so reading a
-        // `T::Bytes` from its start stays in bounds. We use an unaligned read because the span is
-        // backed by a byte buffer with no alignment guarantee, while `T::Bytes` may demand a larger
-        // alignment; the read materializes a properly aligned local that we then borrow.
-        let bytes_array = unsafe { ptr::read_unaligned(front.as_ptr().cast::<T::Bytes>()) };
-        let result = convert(&bytes_array);
+        // A byte-wise copy tolerates the span's lack of alignment, and reading into a `[u8; N]`
+        // can never construct an invalid value regardless of the source bytes. The zero-init is
+        // optimized away: `copy_from_slice` fully overwrites the array, so the compiler elides it
+        // (verified via Callgrind - identical to a `MaybeUninit` variant, which we avoid to keep
+        // this path free of `unsafe`).
+        let mut array = [0_u8; N];
+        array.copy_from_slice(&front[..N]);
 
-        if front_len == size {
+        if front_len == N {
             self.spans_reversed.pop();
         } else {
-            // SAFETY: `size < front_len`, so advancing the span by `size` stays in bounds.
+            // SAFETY: `N < front_len`, so advancing the span by `N` stays in bounds.
             unsafe {
-                front.advance(size);
+                front.advance(N);
             }
         }
 
-        // The caller verified the view covers at least `size` bytes, which we just removed.
-        self.shrink_len(size);
+        // The caller verified the view covers at least `N` bytes, which we just removed.
+        self.shrink_len(N);
 
-        Some(result)
+        Some(array)
     }
 
-    /// Consumes a number of type `T` in little-endian representation.
+    /// Assembles `N` bytes gathered across one or more span boundaries.
     ///
-    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
-    ///
-    /// If permitted by memory layout considerations and reference counts, the memory capacity
-    /// backing the dropped bytes is released back to the memory provider.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::BytesView;
-    ///
-    /// // Little-endian: least significant byte first.
-    /// let data: &[u8] = &[
-    ///     0x34, 0x12, // u16: 0x1234
-    ///     0x78, 0x56, 0x34, 0x12, // u32: 0x12345678
-    /// ];
-    /// let mut view = BytesView::copied_from_slice(data, &memory);
-    ///
-    /// assert_eq!(view.get_num_le::<u16>(), 0x1234);
-    /// assert_eq!(view.get_num_le::<u32>(), 0x12345678);
-    /// assert!(view.is_empty());
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if the view does not cover enough bytes of data.
-    #[inline]
-    #[must_use]
-    pub fn get_num_le<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let size = size_of::<T::Bytes>();
-        assert!(self.len() >= size);
-
-        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_le_bytes) {
-            return result;
-        }
-
-        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
-        // and deserialize from there.
-        // SAFETY: We guarantee the view covers enough bytes - we checked it above.
-        unsafe { self.get_num_le_buffered() }
-    }
-
-    /// # Safety
-    ///
-    /// The caller is responsible for ensuring that the view covers enough bytes.
-    /// We do not duplicate length checking as this method is only assumed to be
-    /// called as a fallback when non-buffered reading proved impossible.
+    /// Only reached as a fallback when the bytes are not contiguous in the first span. The caller
+    /// must have already verified that the view covers at least `N` bytes.
     #[cold] // Most reads will not straddle a slice boundary and not require buffering.
-    unsafe fn get_num_le_buffered<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
-        let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
-
-        let mut bytes_remaining = size_of::<T::Bytes>();
-
-        while bytes_remaining > 0 {
-            let first_slice = self.first_slice();
-            let bytes_to_copy = bytes_remaining.min(first_slice.len());
-
-            // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
-            // so we will not overflow the buffer.
-            // Both sides are byte arrays/slices so there are no alignment concerns.
-            unsafe {
-                ptr::copy_nonoverlapping(first_slice.as_ptr(), buffer_cursor, bytes_to_copy);
-            }
-
-            // This cannot overflow because we it is guarded by min() above.
-            bytes_remaining = bytes_remaining.wrapping_sub(bytes_to_copy);
-
-            // SAFETY: We are advancing the cursor in-bounds of the buffer.
-            buffer_cursor = unsafe { buffer_cursor.add(bytes_to_copy) };
-
-            self.advance(bytes_to_copy);
-        }
-
-        // SAFETY: We have filled the buffer with data, initializing it fully.
-        T::from_le_bytes(&unsafe { buffer.assume_init() })
+    #[inline(never)] // Keep the buffered loop out of the hot path's stack frame (avoids extra register spills).
+    fn get_array_buffered<const N: usize>(&mut self) -> [u8; N] {
+        let mut array = [0_u8; N];
+        self.copy_to_slice(&mut array);
+        array
     }
 
-    /// Consumes a number of type `T` in big-endian representation.
-    ///
-    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
-    ///
-    /// If permitted by memory layout considerations and reference counts, the memory capacity
-    /// backing the dropped bytes is released back to the memory provider.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::BytesView;
-    ///
-    /// // Big-endian: most significant byte first.
-    /// let data: &[u8] = &[
-    ///     0x12, 0x34, 0x56, 0x78, // u32: 0x12345678
-    ///     0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, // u64: 0x0123456789ABCDEF
-    /// ];
-    /// let mut view = BytesView::copied_from_slice(data, &memory);
-    ///
-    /// assert_eq!(view.get_num_be::<u32>(), 0x12345678);
-    /// assert_eq!(view.get_num_be::<u64>(), 0x0123456789ABCDEF);
-    /// assert!(view.is_empty());
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if the view does not cover enough bytes of data.
-    #[inline]
-    #[must_use]
-    pub fn get_num_be<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let size = size_of::<T::Bytes>();
-        assert!(self.len() >= size);
-
-        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_be_bytes) {
-            return result;
-        }
-
-        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
-        // and deserialize from there.
-        // SAFETY: We guarantee the view covers enough bytes - we checked it above.
-        unsafe { self.get_num_be_buffered() }
-    }
-
-    /// # Safety
-    ///
-    /// The caller is responsible for ensuring that the view covers enough bytes.
-    /// We do not duplicate length checking as this method is only assumed to be
-    /// called as a fallback when non-buffered reading proved impossible.
-    #[cold] // Most reads will not straddle a slice boundary and not require buffering.
-    unsafe fn get_num_be_buffered<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
-        let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
-
-        let mut bytes_remaining = size_of::<T::Bytes>();
-
-        while bytes_remaining > 0 {
-            let first_slice = self.first_slice();
-            let bytes_to_copy = bytes_remaining.min(first_slice.len());
-
-            // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
-            // so we will not overflow the buffer.
-            // Both sides are byte arrays/slices so there are no alignment concerns.
-            unsafe {
-                ptr::copy_nonoverlapping(first_slice.as_ptr(), buffer_cursor, bytes_to_copy);
-            }
-
-            // This cannot overflow because we it is guarded by min() above.
-            bytes_remaining = bytes_remaining.wrapping_sub(bytes_to_copy);
-
-            // SAFETY: We are advancing the cursor in-bounds of the buffer.
-            buffer_cursor = unsafe { buffer_cursor.add(bytes_to_copy) };
-
-            self.advance(bytes_to_copy);
-        }
-
-        // SAFETY: We have filled the buffer with data, initializing it fully.
-        T::from_be_bytes(&unsafe { buffer.assume_init() })
-    }
-
-    /// Consumes a number of type `T` in native-endian representation.
-    ///
-    /// The bytes of the `T` are dropped from the view, moving any remaining bytes to the front.
-    ///
-    /// If permitted by memory layout considerations and reference counts, the memory capacity
-    /// backing the dropped bytes is released back to the memory provider.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # let memory = bytesbuf::mem::GlobalPool::new();
-    /// use bytesbuf::BytesView;
-    ///
-    /// // Native-endian: byte order matches the platform.
-    /// let value1: u16 = 0x1234;
-    /// let value2: u64 = 0x0123456789ABCDEF;
-    ///
-    /// let mut data = Vec::new();
-    /// data.extend_from_slice(&value1.to_ne_bytes());
-    /// data.extend_from_slice(&value2.to_ne_bytes());
-    ///
-    /// let mut view = BytesView::copied_from_slice(&data, &memory);
-    ///
-    /// assert_eq!(view.get_num_ne::<u16>(), 0x1234);
-    /// assert_eq!(view.get_num_ne::<u64>(), 0x0123456789ABCDEF);
-    /// assert!(view.is_empty());
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// Panics if the view does not cover enough bytes of data.
-    #[inline]
-    #[must_use]
-    pub fn get_num_ne<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let size = size_of::<T::Bytes>();
-        assert!(self.len() >= size);
-
-        if let Some(result) = self.get_num_in_first_span::<T, _>(T::from_ne_bytes) {
-            return result;
-        }
-
-        // The value straddles a span boundary, so we collect bytes into an intermediate buffer
-        // and deserialize from there.
-        // SAFETY: We guarantee the view covers enough bytes - we checked it above.
-        unsafe { self.get_num_ne_buffered() }
-    }
-
-    /// # Safety
-    ///
-    /// The caller is responsible for ensuring that the view covers enough bytes.
-    /// We do not duplicate length checking as this method is only assumed to be
-    /// called as a fallback when non-buffered reading proved impossible.
-    #[cold] // Most reads will not straddle a slice boundary and not require buffering.
-    unsafe fn get_num_ne_buffered<T: FromBytes>(&mut self) -> T
-    where
-        T::Bytes: Sized,
-    {
-        let mut buffer: MaybeUninit<T::Bytes> = MaybeUninit::uninit();
-        let mut buffer_cursor = buffer.as_mut_ptr().cast::<u8>();
-
-        let mut bytes_remaining = size_of::<T::Bytes>();
-
-        while bytes_remaining > 0 {
-            let first_slice = self.first_slice();
-            let bytes_to_copy = bytes_remaining.min(first_slice.len());
-
-            // SAFETY: The caller has guaranteed that the view covers enough bytes.
-            // We only copy up to bytes_remaining, which is at most size_of::<T::Bytes>(),
-            // so we will not overflow the buffer.
-            // Both sides are byte arrays/slices so there are no alignment concerns.
-            unsafe {
-                ptr::copy_nonoverlapping(first_slice.as_ptr(), buffer_cursor, bytes_to_copy);
-            }
-
-            // This cannot overflow because we it is guarded by min() above.
-            bytes_remaining = bytes_remaining.wrapping_sub(bytes_to_copy);
-
-            // SAFETY: We are advancing the cursor in-bounds of the buffer.
-            buffer_cursor = unsafe { buffer_cursor.add(bytes_to_copy) };
-
-            self.advance(bytes_to_copy);
-        }
-
-        // SAFETY: We have filled the buffer with data, initializing it fully.
-        T::from_ne_bytes(&unsafe { buffer.assume_init() })
-    }
+    get_num_accessors!(u16, get_u16_le, get_u16_be, get_u16_ne);
+    get_num_accessors!(i16, get_i16_le, get_i16_be, get_i16_ne);
+    get_num_accessors!(u32, get_u32_le, get_u32_be, get_u32_ne);
+    get_num_accessors!(i32, get_i32_le, get_i32_be, get_i32_ne);
+    get_num_accessors!(u64, get_u64_le, get_u64_be, get_u64_ne);
+    get_num_accessors!(i64, get_i64_le, get_i64_be, get_i64_ne);
+    get_num_accessors!(u128, get_u128_le, get_u128_be, get_u128_ne);
+    get_num_accessors!(i128, get_i128_le, get_i128_be, get_i128_ne);
+    get_num_accessors!(f32, get_f32_le, get_f32_be, get_f32_ne);
+    get_num_accessors!(f64, get_f64_le, get_f64_be, get_f64_ne);
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -592,308 +411,144 @@ mod tests {
     }
 
     #[test]
-    fn get_num_le() {
+    fn get_u16_le() {
         let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
-        assert_eq!(view.get_num_le::<u16>(), 0x1234);
-        assert_eq!(view.get_num_le::<u16>(), 0x5678);
+        assert_eq!(view.get_u16_le(), 0x1234);
+        assert_eq!(view.get_u16_le(), 0x5678);
 
         assert!(view.is_empty());
     }
 
     #[test]
-    fn get_num_le_multi_span() {
+    fn get_u32_le_multi_span() {
         let memory = TransparentMemory::new();
-        let data_part1 = [0x78_u8, 0x56];
-        let data_part2 = [0x34_u8, 0x12];
-        let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
-        let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
+        let view_part1 = BytesView::copied_from_slice(&[0x78_u8, 0x56], &memory);
+        let view_part2 = BytesView::copied_from_slice(&[0x34_u8, 0x12], &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        assert_eq!(view_combined.get_num_le::<u32>(), 0x1234_5678);
+        assert_eq!(view_combined.get_u32_le(), 0x1234_5678);
 
         assert!(view_combined.is_empty());
     }
 
     #[test]
-    fn get_num_be() {
+    fn get_u16_be() {
         let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x12, 0x34, 0x56, 0x78], &memory);
 
-        assert_eq!(view.get_num_be::<u16>(), 0x1234);
-        assert_eq!(view.get_num_be::<u16>(), 0x5678);
+        assert_eq!(view.get_u16_be(), 0x1234);
+        assert_eq!(view.get_u16_be(), 0x5678);
 
         assert!(view.is_empty());
     }
 
     #[test]
-    fn get_num_be_multi_span() {
+    fn get_u32_be_multi_span() {
         let memory = TransparentMemory::new();
-        let data_part1 = [0x12_u8, 0x34];
-        let data_part2 = [0x56_u8, 0x78];
-        let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
-        let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
+        let view_part1 = BytesView::copied_from_slice(&[0x12_u8, 0x34], &memory);
+        let view_part2 = BytesView::copied_from_slice(&[0x56_u8, 0x78], &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
-        assert_eq!(view_combined.get_num_be::<u32>(), 0x1234_5678);
+        assert_eq!(view_combined.get_u32_be(), 0x1234_5678);
 
         assert!(view_combined.is_empty());
     }
 
     #[test]
-    fn get_num_ne() {
+    fn get_u16_ne() {
         let memory = TransparentMemory::new();
         let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
 
         if cfg!(target_endian = "big") {
-            assert_eq!(view.get_num_ne::<u16>(), 0x3412);
-            assert_eq!(view.get_num_ne::<u16>(), 0x7856);
+            assert_eq!(view.get_u16_ne(), 0x3412);
+            assert_eq!(view.get_u16_ne(), 0x7856);
         } else {
-            assert_eq!(view.get_num_ne::<u16>(), 0x1234);
-            assert_eq!(view.get_num_ne::<u16>(), 0x5678);
+            assert_eq!(view.get_u16_ne(), 0x1234);
+            assert_eq!(view.get_u16_ne(), 0x5678);
         }
 
         assert!(view.is_empty());
     }
 
     #[test]
-    fn get_num_ne_multi_span() {
+    fn get_u32_ne_multi_span() {
         let memory = TransparentMemory::new();
-        let data_part1 = [0x78_u8, 0x56];
-        let data_part2 = [0x34_u8, 0x12];
-        let view_part1 = BytesView::copied_from_slice(&data_part1, &memory);
-        let view_part2 = BytesView::copied_from_slice(&data_part2, &memory);
+        let view_part1 = BytesView::copied_from_slice(&[0x78_u8, 0x56], &memory);
+        let view_part2 = BytesView::copied_from_slice(&[0x34_u8, 0x12], &memory);
         let mut view_combined = BytesView::from_views([view_part1, view_part2]);
 
         if cfg!(target_endian = "big") {
-            assert_eq!(view_combined.get_num_ne::<u32>(), 0x7856_3412);
+            assert_eq!(view_combined.get_u32_ne(), 0x7856_3412);
         } else {
-            assert_eq!(view_combined.get_num_ne::<u32>(), 0x1234_5678);
+            assert_eq!(view_combined.get_u32_ne(), 0x1234_5678);
         }
 
         assert!(view_combined.is_empty());
     }
 
-    /// Soundness coverage for `FromBytes` implementations whose `Bytes` associated type does not
-    /// match the value type `T` in size or alignment.
-    ///
-    /// The standard integer and float types use `Bytes = [u8; size_of::<T>()]`, so for them
-    /// `size_of::<T>() == size_of::<T::Bytes>()` and `align_of::<T::Bytes>() == 1`. The numeric
-    /// reads must size, advance, and bound by `T::Bytes` (not `T`) and must tolerate any source
-    /// alignment, which only these custom types can exercise.
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    mod from_bytes_soundness {
-        use std::borrow::{Borrow, BorrowMut};
+    #[test]
+    fn get_signed_and_float_round_trip() {
+        let memory = TransparentMemory::new();
 
-        use num_traits::FromBytes;
+        let mut data = Vec::new();
+        data.extend_from_slice(&(-12345_i16).to_le_bytes());
+        data.extend_from_slice(&(-2_000_000_000_i32).to_be_bytes());
+        data.extend_from_slice(&(-9_000_000_000_000_i64).to_le_bytes());
+        data.extend_from_slice(&i128::MIN.to_be_bytes());
+        data.extend_from_slice(&std::f32::consts::PI.to_le_bytes());
+        data.extend_from_slice(&std::f64::consts::E.to_be_bytes());
 
-        use crate::BytesView;
-        use crate::mem::testing::TransparentMemory;
+        let mut view = BytesView::copied_from_slice(&data, &memory);
 
-        /// `Bytes` is wider than the value it produces: `size_of::<NarrowValue>() == 1` while the
-        /// serialized form is four bytes. Sizing reads by `size_of::<T>()` would read past a
-        /// one-byte first-span slice and leave the buffered path's `MaybeUninit<[u8; 4]>` only
-        /// partially initialized before `assume_init`.
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-        struct NarrowValue(u8);
+        assert_eq!(view.get_i16_le(), -12345);
+        assert_eq!(view.get_i32_be(), -2_000_000_000);
+        assert_eq!(view.get_i64_le(), -9_000_000_000_000);
+        assert_eq!(view.get_i128_be(), i128::MIN);
+        assert_eq!(view.get_f32_le().to_bits(), std::f32::consts::PI.to_bits());
+        assert_eq!(view.get_f64_be().to_bits(), std::f64::consts::E.to_bits());
+        assert!(view.is_empty());
+    }
 
-        impl FromBytes for NarrowValue {
-            type Bytes = [u8; 4];
+    #[test]
+    fn get_wide_value_multi_span() {
+        let memory = TransparentMemory::new();
+        let value: u128 = 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210;
+        let bytes = value.to_le_bytes();
 
-            fn from_le_bytes(bytes: &[u8; 4]) -> Self {
-                Self(bytes[0])
-            }
+        // Split at an odd offset so the value straddles the span boundary and exercises buffering.
+        let view_part1 = BytesView::copied_from_slice(&bytes[..5], &memory);
+        let view_part2 = BytesView::copied_from_slice(&bytes[5..], &memory);
+        let mut view = BytesView::from_views([view_part1, view_part2]);
 
-            fn from_be_bytes(bytes: &[u8; 4]) -> Self {
-                Self(bytes[3])
-            }
-        }
+        assert_eq!(view.get_u128_le(), value);
+        assert!(view.is_empty());
+    }
 
-        /// `Bytes` is narrower than the value it produces: `size_of::<WideValue>() == 8` while the
-        /// serialized form is two bytes. Sizing reads by `size_of::<T>()` would over-advance the
-        /// view and, in the buffered path, copy eight bytes into a two-byte `MaybeUninit<[u8; 2]>`
-        /// buffer.
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-        struct WideValue(u64);
+    #[test]
+    fn get_misaligned_single_span() {
+        let memory = TransparentMemory::new();
 
-        impl FromBytes for WideValue {
-            type Bytes = [u8; 2];
+        // Drop a single leading byte so the eight value bytes sit at an odd offset from the
+        // allocation base, exercising the fast path against a misaligned source.
+        let value: u64 = 0x0123_4567_89AB_CDEF;
+        let mut data = vec![0xFF_u8];
+        data.extend_from_slice(&value.to_le_bytes());
+        let mut view = BytesView::copied_from_slice(&data, &memory);
 
-            fn from_le_bytes(bytes: &[u8; 2]) -> Self {
-                Self(u16::from_le_bytes(*bytes).into())
-            }
+        assert_eq!(view.get_byte(), 0xFF);
+        assert_eq!(view.get_u64_le(), value);
+        assert!(view.is_empty());
+    }
 
-            fn from_be_bytes(bytes: &[u8; 2]) -> Self {
-                Self(u16::from_be_bytes(*bytes).into())
-            }
-        }
+    #[test]
+    #[should_panic]
+    fn get_num_insufficient_bytes_panics() {
+        let memory = TransparentMemory::new();
+        let mut view = BytesView::copied_from_slice(&[0x00, 0x01, 0x02], &memory);
 
-        /// A `Bytes` type whose alignment exceeds one. Constructing a `&OverAligned` reference from
-        /// an unaligned byte-slice pointer is undefined behavior, so the read must materialize the
-        /// value through an alignment-agnostic copy. `NumBytes` is satisfied via its blanket impl
-        /// over the manual `AsRef`/`AsMut`/`Borrow`/`BorrowMut` and the derived comparison traits.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        #[repr(align(8))]
-        struct OverAligned([u8; 8]);
-
-        impl AsRef<[u8]> for OverAligned {
-            fn as_ref(&self) -> &[u8] {
-                &self.0
-            }
-        }
-
-        impl AsMut<[u8]> for OverAligned {
-            fn as_mut(&mut self) -> &mut [u8] {
-                &mut self.0
-            }
-        }
-
-        impl Borrow<[u8]> for OverAligned {
-            fn borrow(&self) -> &[u8] {
-                &self.0
-            }
-        }
-
-        impl BorrowMut<[u8]> for OverAligned {
-            fn borrow_mut(&mut self) -> &mut [u8] {
-                &mut self.0
-            }
-        }
-
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-        struct OverAlignedValue(u64);
-
-        impl FromBytes for OverAlignedValue {
-            type Bytes = OverAligned;
-
-            fn from_le_bytes(bytes: &OverAligned) -> Self {
-                Self(u64::from_le_bytes(bytes.0))
-            }
-
-            fn from_be_bytes(bytes: &OverAligned) -> Self {
-                Self(u64::from_be_bytes(bytes.0))
-            }
-        }
-
-        #[test]
-        fn narrow_bytes_le_single_span() {
-            let memory = TransparentMemory::new();
-            let mut view = BytesView::copied_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD], &memory);
-
-            // Four bytes are consumed even though the value occupies a single byte.
-            assert_eq!(view.get_num_le::<NarrowValue>(), NarrowValue(0xAA));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn narrow_bytes_be_single_span() {
-            let memory = TransparentMemory::new();
-            let mut view = BytesView::copied_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD], &memory);
-
-            assert_eq!(view.get_num_be::<NarrowValue>(), NarrowValue(0xDD));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn narrow_bytes_le_multi_span() {
-            let memory = TransparentMemory::new();
-            let view_part1 = BytesView::copied_from_slice(&[0xAA, 0xBB], &memory);
-            let view_part2 = BytesView::copied_from_slice(&[0xCC, 0xDD], &memory);
-            let mut view = BytesView::from_views([view_part1, view_part2]);
-
-            // The value straddles the span boundary, forcing the buffered path to fill all four
-            // bytes of the `MaybeUninit<[u8; 4]>` before `assume_init`.
-            assert_eq!(view.get_num_le::<NarrowValue>(), NarrowValue(0xAA));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn wide_bytes_le_single_span() {
-            let memory = TransparentMemory::new();
-            let mut view = BytesView::copied_from_slice(&[0x34, 0x12, 0x78, 0x56], &memory);
-
-            // Each read advances by exactly two bytes (the size of `Bytes`), not eight.
-            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x1234));
-            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x5678));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn wide_bytes_be_single_span() {
-            let memory = TransparentMemory::new();
-            let mut view = BytesView::copied_from_slice(&[0x12, 0x34, 0x56, 0x78], &memory);
-
-            assert_eq!(view.get_num_be::<WideValue>(), WideValue(0x1234));
-            assert_eq!(view.get_num_be::<WideValue>(), WideValue(0x5678));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn wide_bytes_le_multi_span() {
-            let memory = TransparentMemory::new();
-            let view_part1 = BytesView::copied_from_slice(&[0x34], &memory);
-            let view_part2 = BytesView::copied_from_slice(&[0x12], &memory);
-            let mut view = BytesView::from_views([view_part1, view_part2]);
-
-            // The buffered path must size its copy by `Bytes` (two bytes), not by the eight-byte
-            // value type, to avoid overflowing the `MaybeUninit<[u8; 2]>` buffer.
-            assert_eq!(view.get_num_le::<WideValue>(), WideValue(0x1234));
-            assert!(view.is_empty());
-        }
-
-        const OVER_ALIGNED_VALUE: u64 = 0x0123_4567_89AB_CDEF;
-
-        #[test]
-        fn over_aligned_le_single_span() {
-            let memory = TransparentMemory::new();
-            let mut view = BytesView::copied_from_slice(&OVER_ALIGNED_VALUE.to_le_bytes(), &memory);
-
-            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn over_aligned_le_misaligned_single_span() {
-            let memory = TransparentMemory::new();
-
-            // A single leading byte that we drop, leaving the eight value bytes at an odd offset
-            // from the allocation base. Whenever that base is itself eight-byte aligned (the
-            // common case for the global allocator), the value bytes are misaligned for an
-            // eight-byte read, so the fast path must not assume the source is aligned.
-            let mut data = vec![0xFF_u8];
-            data.extend_from_slice(&OVER_ALIGNED_VALUE.to_le_bytes());
-            let mut view = BytesView::copied_from_slice(&data, &memory);
-
-            assert_eq!(view.get_byte(), 0xFF);
-            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn over_aligned_le_multi_span() {
-            let memory = TransparentMemory::new();
-            let bytes = OVER_ALIGNED_VALUE.to_le_bytes();
-            let view_part1 = BytesView::copied_from_slice(&bytes[..3], &memory);
-            let view_part2 = BytesView::copied_from_slice(&bytes[3..], &memory);
-            let mut view = BytesView::from_views([view_part1, view_part2]);
-
-            // The buffered path assembles the value in a properly aligned `MaybeUninit<OverAligned>`.
-            assert_eq!(view.get_num_le::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
-            assert!(view.is_empty());
-        }
-
-        #[test]
-        fn over_aligned_ne_misaligned_single_span() {
-            let memory = TransparentMemory::new();
-
-            let mut data = vec![0xFF_u8];
-            data.extend_from_slice(&OVER_ALIGNED_VALUE.to_ne_bytes());
-            let mut view = BytesView::copied_from_slice(&data, &memory);
-
-            assert_eq!(view.get_byte(), 0xFF);
-            assert_eq!(view.get_num_ne::<OverAlignedValue>(), OverAlignedValue(OVER_ALIGNED_VALUE));
-            assert!(view.is_empty());
-        }
+        // Only three bytes are available, so reading a four-byte value must panic.
+        let _ = view.get_u32_le();
     }
 }

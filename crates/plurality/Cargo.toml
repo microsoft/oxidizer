@@ -3,7 +3,7 @@
 
 [package]
 name = "plurality"
-version = "0.1.0"
+version = "0.1.1"
 description = "A highly efficient pooling memory allocator"
 readme = "README.md"
 keywords = ["pool", "memory", "allocator"]
@@ -18,7 +18,7 @@ include.workspace = true
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/plurality"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = ["allocator_api2::*"]
+allowed_external_types = ["allocator_api2::alloc::Allocator", "allocator_api2::alloc::global::Global"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -27,6 +27,11 @@ all-features = true
 [features]
 default = ["std"]
 std = ["allocator-api2/std"]
+# Enables runtime allocation statistics: the `PoolStats` type and
+# `Pool::stats`. The accounting counters are compiled in only when this
+# feature is active, so disabling it keeps the pool free of any tracking
+# overhead.
+stats = []
 # Marker feature selecting the loom model-checking test target via its
 # `required-features`. The feature itself is empty; the actual loom build is
 # driven by `--cfg loom` (see the `target.'cfg(loom)'` tables below).
@@ -43,6 +48,7 @@ alloc_tracker = "0.6"
 allocator-api2 = { workspace = true, features = ["alloc"] }
 bolero = { workspace = true, features = ["std"] }
 criterion = { workspace = true }
+infinity_pool = { workspace = true }
 mimalloc = { workspace = true }
 mutants = { workspace = true }
 static_assertions = { workspace = true }
@@ -53,7 +59,6 @@ loom = { workspace = true }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 deadpool = { workspace = true, features = ["unmanaged"] }
 gungraun = { workspace = true, features = ["default"] }
-infinity_pool = { workspace = true }
 object-pool = { workspace = true }
 opool = { workspace = true }
 sharded-slab = { workspace = true }
@@ -61,7 +66,7 @@ slab = { workspace = true, features = ["std"] }
 slotmap = { workspace = true, features = ["std"] }
 
 [[bench]]
-name = "criterion_alloc"
+name = "criterion"
 harness = false
 
 [[bench]]
@@ -69,7 +74,7 @@ name = "graph_churn"
 harness = false
 
 [[bench]]
-name = "gungraun_alloc"
+name = "gungraun"
 harness = false
 
 [[bench]]
@@ -79,8 +84,8 @@ harness = false
 # Loom model-checking tests. `required-features = ["loom"]` lets `anvil-loom`
 # discover this target authoritatively; the tests still build under `--cfg loom`.
 [[test]]
-name = "loom"
-path = "tests/loom.rs"
+name = "loom_pool"
+path = "tests/loom_pool.rs"
 required-features = ["loom"]
 
 # >>> anvil-managed: anvil-lints

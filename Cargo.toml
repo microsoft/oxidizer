@@ -78,7 +78,7 @@ layered = { path = "crates/layered", default-features = false, version = "0.3.5"
 multitude = { path = "crates/multitude", default-features = false, version = "0.6.1" }
 ohno = { path = "crates/ohno", default-features = false, version = "0.3.8" }
 ohno_macros = { path = "crates/ohno_macros", default-features = false, version = "0.3.5" }
-plurality = { path = "crates/plurality", default-features = false, version = "0.1.0" }
+plurality = { path = "crates/plurality", default-features = false, version = "0.1.1" }
 recoverable = { path = "crates/recoverable", default-features = false, version = "0.1.7" }
 seatbelt = { path = "crates/seatbelt", default-features = false, version = "0.6.0" }
 seatbelt_http = { path = "crates/seatbelt_http", default-features = false, version = "0.5.0" }
@@ -147,7 +147,6 @@ mutants = { version = "0.0.3", default-features = false }
 native-tls = { version = "0.2.18", default-features = false }
 new_zealand = { version = "1.0.4", default-features = false }
 nm = { version = "0.1.21", default-features = false }
-num-traits = { version = "0.2.19", default-features = false }
 object-pool = { version = "0.6.0", default-features = false }
 once_cell = { version = "1.21.3", default-features = false }
 opentelemetry = { version = "0.32.0", default-features = false }

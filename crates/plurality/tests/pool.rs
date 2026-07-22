@@ -22,7 +22,7 @@
 mod common;
 
 use std::sync::Arc as StdArc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use allocator_api2::alloc::Global;
 use common::DropCounter;
@@ -235,6 +235,66 @@ fn closure_panic_returns_slot_to_pool() {
     check(|p| {
         let _ = p.try_alloc_rc_with(|| panic!("boom"));
     });
+}
+
+struct PanicOnce(StdArc<AtomicBool>);
+
+impl Drop for PanicOnce {
+    fn drop(&mut self) {
+        // This value panics the first time it is dropped and returns normally
+        // on every later drop, exercising an unwind through the pool's reclaim
+        // path. `swap` returns the previous flag: it is `false` on the first
+        // drop (so the assert fails and unwinds) and `true` afterwards (so the
+        // assert passes).
+        let dropped_before = self.0.swap(true, Ordering::SeqCst);
+        assert!(dropped_before, "PanicOnce panics on its first drop");
+    }
+}
+
+#[test]
+fn panicking_destructor_returns_refcounted_slots() {
+    fn check_box() {
+        let panicked = StdArc::new(AtomicBool::new(false));
+        let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(pool.alloc_box(PanicOnce(panicked.clone())));
+            }))
+            .is_err()
+        );
+        assert_eq!(pool.len(), 0);
+        drop(pool.alloc_box(PanicOnce(panicked)));
+    }
+
+    fn check_arc() {
+        let panicked = StdArc::new(AtomicBool::new(false));
+        let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(pool.alloc_arc(PanicOnce(panicked.clone())));
+            }))
+            .is_err()
+        );
+        assert_eq!(pool.len(), 0);
+        drop(pool.alloc_arc(PanicOnce(panicked)));
+    }
+
+    fn check_rc() {
+        let panicked = StdArc::new(AtomicBool::new(false));
+        let pool = Pool::<PanicOnce>::builder().chunk_size(1).max_chunks(1).build();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(pool.alloc_rc(PanicOnce(panicked.clone())));
+            }))
+            .is_err()
+        );
+        assert_eq!(pool.len(), 0);
+        drop(pool.alloc_rc(PanicOnce(panicked)));
+    }
+
+    check_box();
+    check_arc();
+    check_rc();
 }
 
 #[test]
