@@ -472,7 +472,8 @@ impl BytesBuf {
         let frozen_len = self.frozen_spans.iter().map(|x| x.len() as usize).sum::<usize>();
         let unfrozen_len = self.span_builders_reversed.last().map_or(0, SpanBuilder::len) as usize;
 
-        // Will not overflow - `capacity <= usize::MAX` is a type invariant and obviously `len < capacity`.
+        // Will not overflow: `len` is a component of the total capacity `len + available`, which
+        // never overflows `usize` (enforced at the growth sites).
         frozen_len.wrapping_add(unfrozen_len)
     }
 
@@ -512,7 +513,8 @@ impl BytesBuf {
     /// ```
     #[must_use]
     pub fn capacity(&self) -> usize {
-        // Will not overflow - `capacity <= usize::MAX` is a type invariant.
+        // Will not overflow: `len + available` never overflows `usize` - the growth sites enforce
+        // this via `assert_capacity_within_bounds`.
         self.len().wrapping_add(self.remaining_capacity())
     }
 
@@ -656,8 +658,8 @@ impl BytesBuf {
             let span_len = span.len();
 
             if span_len as usize <= len {
-                // Will not wrap because a type invariant is `capacity <= usize::MAX`, so if
-                // capacity is in-bounds, the number of spans could not possibly be greater.
+                // Will not wrap: `len + available` never overflows `usize`, so the number of
+                // spans (each holding at least one byte) certainly cannot be a greater number.
                 detach_complete_frozen_spans = detach_complete_frozen_spans.wrapping_add(1);
 
                 len = len
@@ -1208,8 +1210,8 @@ struct ConsumeManifest {
 impl ConsumeManifest {
     const fn required_spans_capacity(&self) -> usize {
         if self.consume_partial_span_bytes != 0 {
-            // This will not wrap because a type invariant is `capacity <= usize::MAX`, so if
-            // capacity is already in-bounds, the count of spans certainly is not a greater number.
+            // This will not wrap: `len + available` never overflows `usize`, so the count of
+            // spans certainly cannot be a greater number.
             self.detach_complete_frozen_spans.wrapping_add(1)
         } else {
             self.detach_complete_frozen_spans
@@ -1331,8 +1333,8 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
         let next_span_builder_index = self.next_span_builder_index?;
 
         self.next_span_builder_index = Some(
-            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
-            // so the count of span builders certainly cannot be greater.
+            // Will not overflow: `len + available` never overflows `usize`, so the count of span
+            // builders certainly cannot be greater.
             next_span_builder_index.wrapping_add(1),
         );
         if self.next_span_builder_index == Some(self.buf.span_builders_reversed.len()) {
@@ -1345,8 +1347,8 @@ impl<'a> Iterator for BytesBufRemaining<'a> {
             .buf
             .span_builders_reversed
             .len()
-            // Will not overflow because `capacity <= usize::MAX` is a type invariant,
-            // so the count of span builders certainly cannot be greater.
+            // Will not overflow: `len + available` never overflows `usize`, so the count of span
+            // builders certainly cannot be greater.
             .wrapping_sub(next_span_builder_index + 1);
 
         let span_builder = self
