@@ -1,22 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Authenticated protection of cache values stored in an untrusted tier.
-//!
-//! This provides only the protection *mechanism* — it carries no cryptographic
-//! dependency of its own. [`ValueProtector`] is the pluggable contract: you supply the
-//! actual implementation, backed by your approved cryptographic library, and register
-//! it with [`protect_with`](crate::TransformBuilder::protect_with). [`ProtectedTier`]
-//! installs that protector at the storage boundary, where both the key and value are
-//! available, and binds each value to its storage key.
-//!
-//! See the crate-level "Encryption Boundary" docs for a reference `ValueProtector`
-//! implementation backed by `SymCrypt` (FIPS-certifiable AES-256-GCM).
+//! The [`ProtectedTier`] cache tier that applies a [`ValueProtector`] at the boundary.
 
 use std::borrow::Cow;
 
 use bytesbuf::BytesView;
 
+use super::ValueProtector;
 use crate::cache::CacheName;
 use crate::telemetry::CacheTelemetry;
 use crate::transform::DecodeOutcome;
@@ -24,7 +15,7 @@ use crate::{CacheEntry, CacheTier, Error, SizeError};
 
 /// Returns a contiguous byte slice from a [`BytesView`]. Borrows for single-span
 /// views (the common case) and gathers into a `Vec` only for multi-span views.
-pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
+fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
     let first = view.first_slice();
     if first.len() == view.len() {
         Cow::Borrowed(first)
@@ -34,159 +25,6 @@ pub(crate) fn to_contiguous(view: &BytesView) -> Cow<'_, [u8]> {
             buf.extend_from_slice(slice);
         }
         Cow::Owned(buf)
-    }
-}
-
-/// Authenticated protection of cache values before they reach an untrusted tier.
-///
-/// Implementations turn a value's plaintext bytes into stored bytes and back, binding
-/// a caller-supplied *context* value. `ProtectedTier` passes the entry's storage key as
-/// the context, so a value is cryptographically bound to the key it was stored under.
-///
-/// This trait supplies no implementation of its own: implement it with your
-/// organization's approved cryptographic library and register it via
-/// [`protect_with`](crate::TransformBuilder::protect_with). See the crate-level
-/// "Encryption Boundary" docs for a reference `SymCrypt`-backed implementation.
-///
-/// # Security contract
-///
-/// Implementors **must** bind `context`: [`unprotect`](Self::unprotect) must return
-/// [`DecodeOutcome::SoftFailure`] when the `context` does not match the value supplied
-/// to [`protect`](Self::protect). This is what binds each value to its storage key,
-/// preventing a value from being relocated to a different key in the backing store.
-/// Implementors using a nonce-based scheme are responsible for nonce discipline — use
-/// a fresh nonce per [`protect`](Self::protect), or a nonce-misuse-resistant scheme.
-///
-/// [`unprotect`](Self::unprotect) distinguishes two failure modes:
-/// - `Ok(DecodeOutcome::SoftFailure(_))` — the stored value is unrecoverable (corrupt,
-///   truncated, tampered, wrong key, or context mismatch); the cache treats it as a
-///   miss.
-/// - `Err(_)` — the operation could not be attempted (e.g. an unavailable backend);
-///   the error propagates to the caller.
-pub trait ValueProtector: Send + Sync {
-    /// Protects `plaintext`, binding `context`, and returns the stored representation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if protection cannot be performed.
-    fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error>;
-
-    /// Recovers a value previously protected under `context`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` only if the operation could not be attempted. An authentication or
-    /// format failure is reported as `Ok(DecodeOutcome::SoftFailure(_))`.
-    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error>;
-}
-
-/// Length of the mock protector's nonce prefix, in bytes.
-#[cfg(any(feature = "test-util", test))]
-const MOCK_NONCE_SIZE: usize = 12;
-
-/// A deterministic, crypto-free [`ValueProtector`] for tests.
-///
-/// Available with the `test-util` feature. Use it to exercise a
-/// [`protect_with`](crate::TransformBuilder::protect_with) pipeline — round-trips, key
-/// binding, and unprotect failures — without a real cryptographic library or a source
-/// of entropy, keeping tests fast and reproducible.
-///
-/// The stored form is `nonce || context_len || context || masked_body`. The nonce comes
-/// from a monotonic counter (so repeated `protect` calls of identical input still
-/// differ, yet stay reproducible), and `masked_body` is the plaintext combined with a
-/// nonce-derived keystream via XOR. It binds the `context`: [`unprotect`](ValueProtector::unprotect)
-/// returns [`DecodeOutcome::SoftFailure`] on a context mismatch, truncation, or
-/// corruption, mirroring the [`ValueProtector`] security contract.
-///
-/// # Security
-///
-/// This provides **no confidentiality or integrity** — the transform is trivially
-/// reversible and the key is ignored. It is gated behind `test-util` and must never be
-/// used in production.
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(all(feature = "serialize", feature = "memory"))] {
-/// use cachet::{Cache, MockValueProtector};
-/// use tick::Clock;
-///
-/// let clock = Clock::new_frozen();
-/// let remote = Cache::builder::<bytesbuf::BytesView, bytesbuf::BytesView>(clock.clone()).memory();
-/// let cache = Cache::builder::<String, String>(clock)
-///     .memory()
-///     .serialize()
-///     .protect_with(MockValueProtector::new())
-///     .fallback(remote)
-///     .build();
-/// # }
-/// ```
-#[cfg(any(feature = "test-util", test))]
-#[derive(Debug, Default)]
-pub struct MockValueProtector {
-    counter: std::sync::atomic::AtomicU32,
-}
-
-#[cfg(any(feature = "test-util", test))]
-impl MockValueProtector {
-    /// Creates a new mock protector.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Derives a deterministic nonce from the counter bytes (repeated to fill).
-    fn nonce_bytes(counter: u32) -> [u8; MOCK_NONCE_SIZE] {
-        let counter_bytes = counter.to_le_bytes();
-        std::array::from_fn(|i| counter_bytes[i % counter_bytes.len()])
-    }
-
-    /// Reversible keystream transform: `body[i] ^= 0x5A ^ nonce[i % NONCE]`.
-    fn mask(nonce: &[u8; MOCK_NONCE_SIZE], body: &mut [u8]) {
-        for (i, byte) in body.iter_mut().enumerate() {
-            *byte ^= 0x5A ^ nonce[i % MOCK_NONCE_SIZE];
-        }
-    }
-}
-
-#[cfg(any(feature = "test-util", test))]
-impl ValueProtector for MockValueProtector {
-    fn protect(&self, context: &[u8], plaintext: &BytesView) -> Result<BytesView, Error> {
-        use std::sync::atomic::Ordering;
-
-        let nonce = Self::nonce_bytes(self.counter.fetch_add(1, Ordering::Relaxed));
-        let mut out = Vec::with_capacity(MOCK_NONCE_SIZE + 4 + context.len() + plaintext.len());
-        out.extend_from_slice(&nonce);
-        out.extend_from_slice(&u32::try_from(context.len()).expect("context fits in u32").to_le_bytes());
-        out.extend_from_slice(context);
-        let body_start = out.len();
-        for (slice, _) in plaintext.slices() {
-            out.extend_from_slice(slice);
-        }
-        Self::mask(&nonce, &mut out[body_start..]);
-        Ok(BytesView::from(out))
-    }
-
-    fn unprotect(&self, context: &[u8], protected: &BytesView) -> Result<DecodeOutcome<BytesView>, Error> {
-        let bytes = protected.to_vec();
-        let Some(nonce) = bytes.get(..MOCK_NONCE_SIZE) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated nonce"));
-        };
-        let nonce: [u8; MOCK_NONCE_SIZE] = nonce.try_into().expect("MOCK_NONCE_SIZE bytes");
-        let rest = &bytes[MOCK_NONCE_SIZE..];
-        let Some(len_bytes) = rest.get(..4) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated length"));
-        };
-        let context_len = u32::from_le_bytes(len_bytes.try_into().expect("4 bytes")) as usize;
-        let Some(stored_context) = rest.get(4..4 + context_len) else {
-            return Ok(DecodeOutcome::SoftFailure("mock: truncated context"));
-        };
-        if stored_context != context {
-            return Ok(DecodeOutcome::SoftFailure("mock: context mismatch"));
-        }
-        let mut body = rest[4 + context_len..].to_vec();
-        Self::mask(&nonce, &mut body);
-        Ok(DecodeOutcome::Value(BytesView::from(body)))
     }
 }
 
@@ -278,6 +116,7 @@ where
 mod tests {
     use cachet_tier::MockCache;
 
+    use super::super::MockValueProtector;
     use super::*;
 
     fn view(data: &[u8]) -> BytesView {
@@ -408,9 +247,9 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn decrypt_failure_emits_telemetry() {
-        use testing_aids::LogCapture;
+        use testing_aids::tracing_logs::Capture;
 
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let inner = MockCache::<BytesView, BytesView>::new();
@@ -460,25 +299,6 @@ mod tests {
         );
     }
 
-    #[cfg_attr(miri, ignore)]
-    #[tokio::test]
-    async fn inner_tier_errors_propagate() {
-        use cachet_tier::CacheOp;
-
-        let inner = MockCache::<BytesView, BytesView>::new();
-        let tier = tier(inner.clone());
-
-        inner.fail_when(|_op: &CacheOp<BytesView, BytesView>| true);
-
-        assert!(tier.get(&view(b"k")).await.is_err(), "inner get error must propagate");
-        assert!(
-            tier.insert(view(b"k"), CacheEntry::new(view(b"v"))).await.is_err(),
-            "inner insert error must propagate"
-        );
-        assert!(tier.invalidate(&view(b"k")).await.is_err(), "inner invalidate error must propagate");
-        assert!(tier.clear().await.is_err(), "inner clear error must propagate");
-    }
-
     #[test]
     fn to_contiguous_gathers_every_span() {
         // Single-span: returns the full contents (borrowed).
@@ -494,23 +314,5 @@ mod tests {
             b"first-second",
             "to_contiguous must gather every span, not return only the first"
         );
-    }
-
-    #[test]
-    fn mock_protector_soft_fails_on_malformed_input() {
-        let p = MockValueProtector::new();
-        let soft = |bytes: Vec<u8>| matches!(p.unprotect(b"context", &BytesView::from(bytes)), Ok(DecodeOutcome::SoftFailure(_)));
-
-        // Too short to hold the nonce prefix.
-        assert!(soft(vec![0u8; 4]), "truncated nonce must soft-fail");
-        // Nonce present, but no room for the 4-byte length prefix.
-        assert!(soft(vec![0xA5u8; MOCK_NONCE_SIZE]), "truncated length must soft-fail");
-        // Length prefix declares a 4-byte context, but no context bytes follow.
-        let mut declares_missing_context = vec![0xA5u8; MOCK_NONCE_SIZE];
-        declares_missing_context.extend_from_slice(&4u32.to_le_bytes());
-        assert!(soft(declares_missing_context), "truncated context must soft-fail");
-        // A well-formed round-trip must NOT soft-fail.
-        let valid = p.protect(b"context", &view(b"value")).expect("protect should succeed");
-        assert!(!soft(valid.to_vec()), "a valid round-trip must recover, not soft-fail");
     }
 }
