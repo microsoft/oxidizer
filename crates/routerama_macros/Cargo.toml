@@ -1,0 +1,30 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "routerama_macros"
+description = "Procedural macros for the routerama crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["http", "router", "routing", "macro", "codegen"]
+categories = ["web-programming", "development-tools::procedural-macro-helpers"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/routerama_macros"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+routerama_build = { workspace = true, default-features = false, features = ["codegen"] }
+
+[dev-dependencies]
+mutants = { workspace = true }
+
+[lints]
+workspace = true
