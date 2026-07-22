@@ -280,28 +280,74 @@ is a best-effort optimizer outcome (RVO/NRVO), never a language guarantee — th
 same limitation `std`'s `Box::new`/`Arc::new` have. The only guaranteed escape
 today is `alloc_uninit` + write + `assume_init`, which is `unsafe` and clunky.
 
-`alloc_*_emplace` wraps that into a safe, guaranteed-in-place closure: the pool
+`alloc_*_emplace` wraps that into a guaranteed-in-place closure: the pool
 reserves the slot and hands its raw memory to an **initializer that writes
 through a pointer** instead of returning a value. The construction site *is* the
 destination — no stack temporary, no caller-visible `assume_init`. This is the
 `pin-init` pattern (as used by Rust-for-Linux for `Box::pin_init`/`Arc::pin_init`,
 precisely because `Box::new` cannot place large pinned structs).
 
-### Shape
+### Soundness constraint — the API cannot be a naive safe `fn`
+
+The obvious signature is **unsound as a safe `fn`** and must not ship as one:
+
+```rust
+// UNSOUND if `pub fn`: nothing forces `init` to initialize the slot.
+pub fn alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>)) -> Alloc<'_, T, A>;
+```
+
+Internally the pool reserves via `try_alloc_uninit`, runs `init` on the slot's
+`&mut MaybeUninit<T>`, then calls `assume_init`. But `&mut MaybeUninit<T>` is a
+safe type that carries **no obligation to write anything**, so this is 100% safe
+caller code that fabricates a `T` from uninitialized memory (UB):
+
+```rust
+pool.alloc_emplace(|_slot| {}); // wrote nothing → assume_init on garbage
+```
+
+A safe function reachable to UB from safe input is unsound. (The `*_with`
+methods are fine because a returned-by-value `T` is initialized by construction;
+that guarantee is exactly what the raw-pointer initializer drops.) The internal
+`assume_init` is unsafe either way — that is expected and not the issue; the
+question is solely whether the *public* signature can be safe. There are two
+viable shapes, and item 3 must pick one:
+
+### Shape A — `unsafe fn`, caller-initializes contract
 
 ```rust
 // Alloc<T> flavor; the others mirror this exactly.
+//
+// # Safety
+// `init` must fully initialize the slot (leave a valid `T`) before returning.
+pub unsafe fn alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>))
+    -> Alloc<'_, T, A>;
 
-// Infallible initializer: writes the value directly into the reserved slot.
-pub fn alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>)) -> Alloc<'_, T, A>;
-
-pub fn try_alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>))
+pub unsafe fn try_alloc_emplace(&self, init: impl FnOnce(&mut MaybeUninit<T>))
     -> Result<Alloc<'_, T, A>, AllocError>;
 ```
 
-Internally: reserve via `try_alloc_uninit`, run `init` on the slot's
-`&mut MaybeUninit<T>`, then `assume_init`. The RAII uninit handle frees the slot
-if `init` panics — no capacity leak (same guarantee as the `*_with` methods).
+Minimal and closure-shape-preserving, at the cost of pushing the initialization
+proof onto the caller as an `unsafe` obligation.
+
+### Shape B — safe `fn` with a proof-carrying initializer
+
+Keep the API safe by making full initialization a *type-system* requirement: the
+closure receives an uninit guard and can only return the proof token by writing
+the value (the `pin-init` approach, under its macros).
+
+```rust
+// `Init<'_, T>` is only constructible by writing through the `Uninit<'_, T>`,
+// so a returning closure has provably initialized the slot.
+pub fn alloc_emplace(&self, init: impl FnOnce(Uninit<'_, T>) -> Init<'_, T>)
+    -> Alloc<'_, T, A>;
+```
+
+A runtime-checked variant — `FnOnce(&mut MaybeUninit<T>) -> &mut T` with the pool
+asserting the returned reference aliases the slot — is also safe, trading a cheap
+guard for a slightly looser contract.
+
+In every shape the RAII uninit handle frees the slot if `init` panics — no
+capacity leak (same guarantee as the `*_with` methods).
 
 ### The complement across all flavors
 

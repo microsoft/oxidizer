@@ -325,7 +325,7 @@ mod tests {
 #[cfg(test)]
 mod fetch_and_promote_tests {
     use cachet_tier::MockCache;
-    use testing_aids::LogCapture;
+    use testing_aids::tracing_logs::Capture;
     use tick::Clock;
 
     use super::*;
@@ -343,11 +343,10 @@ mod fetch_and_promote_tests {
         FallbackCache::new("test", primary, fallback, clock, None, telemetry)
     }
 
-    #[cfg_attr(miri, ignore)] // tracing subscriber setup is not miri-compatible
     #[test]
     fn fallback_miss_logs_refresh_miss_telemetry() {
         block_on(async {
-            let capture = LogCapture::new();
+            let capture = Capture::new();
             let _guard = tracing::subscriber::set_default(capture.subscriber());
 
             let clock = Clock::new_frozen();
@@ -444,6 +443,8 @@ mod fetch_and_promote_tests {
     /// permanently stuck in the `in_flight` set. Without an RAII guard, the
     /// `finish_refresh` call is skipped on panic, blocking all future refreshes
     /// for that key.
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn panic_in_refresh_does_not_leave_key_stuck_in_flight() {
@@ -508,6 +509,8 @@ mod fetch_and_promote_tests {
 
     /// Exercises the early return when a refresh is already in-flight for the
     /// same key (line `if !refresh.try_start_refresh(key) { return; }`).
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn do_refresh_already_in_flight_returns_early() {

@@ -66,5 +66,7 @@ rstest = { workspace = true }
 rustls = { workspace = true, features = ["tls12", "std", "aws-lc-rs"], default-features = false }
 static_assertions = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

@@ -11,8 +11,8 @@ use allocator_api2::alloc::{Allocator, Global};
 
 use crate::atomic::{AtomicU32, AtomicUsize};
 use crate::chunk::chunk_layout;
-use crate::pool::{Pool, PoolInner};
-use crate::slot::FREE_END;
+use crate::pool::{Pool, PoolCore, PoolInner, teardown_erased};
+use crate::slot::{FREE_END, MAX_POOL_SLOTS};
 
 /// Default number of slots per chunk.
 const DEFAULT_CHUNK_SIZE: u32 = 32;
@@ -107,25 +107,30 @@ impl<T, A: Allocator> PoolBuilder<T, A> {
             //   allocations`, so `1 + total` must fit in `usize`.
             // On 64-bit the u32 index ceiling binds; on 32-bit the `usize` one
             // does, rejecting `total == u32::MAX` (where `1 + total` would wrap).
-            let ceiling = u64::from(FREE_END).min((usize::MAX as u64).saturating_sub(1));
             assert!(
-                total <= ceiling,
+                total <= MAX_POOL_SLOTS,
                 "chunk_size * max_chunks exceeds the addressable slot/refcount ceiling"
             );
         }
-        let layout = chunk_layout::<T, A>(chunk_size as usize).expect("chunk layout overflow");
+        let layout = chunk_layout::<T>(chunk_size as usize).expect("chunk layout overflow");
 
         let inner = PoolInner {
-            free_head: AtomicU32::new(FREE_END),
-            pool_refcount: AtomicUsize::new(1),
+            core: PoolCore {
+                free_head: AtomicU32::new(FREE_END),
+                pool_refcount: AtomicUsize::new(1),
+                teardown: teardown_erased::<T, A>,
+            },
             chunk_size,
             shift: chunk_size.trailing_zeros(),
             mask: chunk_size - 1,
             max_chunks: self.max_chunks,
             chunks_allocated: AtomicU32::new(0),
+            #[cfg(feature = "stats")]
+            bytes_allocated: AtomicUsize::new(0),
             chunk_layout: layout,
             directory: UnsafeCell::new(Vec::new()),
             allocator: self.allocator,
+            _marker: PhantomData,
         };
         let raw = AllocBox::into_raw(AllocBox::new(inner));
         let inner = NonNull::new(raw).expect("Box::into_raw never returns a null pointer");

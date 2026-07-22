@@ -18,11 +18,7 @@ include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/data_privacy_macros_impl"
 
 [package.metadata.cargo_check_external_types]
-allowed_external_types = [
-    "proc_macro2::TokenStream",
-    "syn::error::Error",
-    "syn::error::Result",
-]
+allowed_external_types = ["proc_macro2::TokenStream", "syn::error::Error", "syn::error::Result"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -42,5 +38,7 @@ syn = { workspace = true, features = [
 insta = { workspace = true, features = ["yaml"] }
 prettyplease = { workspace = true }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

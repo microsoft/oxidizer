@@ -228,11 +228,10 @@ mod tests {
 
     #[tokio::test]
     async fn fallback_emits_log() {
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
-
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
         let clock = tick::Clock::new_frozen();

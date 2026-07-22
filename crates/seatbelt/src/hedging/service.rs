@@ -399,14 +399,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    // The tokio runtime builds an IO driver (mio IOCP/epoll) under `--all-features`
+    // feature unification (tokio `net`), which is unsupported under Miri.
     #[cfg_attr(miri, ignore)]
+    #[tokio::test]
     async fn hedging_emits_log() {
+        use testing_aids::tracing_logs::Capture;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        use crate::testing::LogCapture;
-
-        let log_capture = LogCapture::new();
+        let log_capture = Capture::new();
         let _guard = log_capture.subscriber().set_default();
 
         let clock = ClockControl::default().auto_advance_timers(true).to_clock();

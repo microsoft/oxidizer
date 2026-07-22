@@ -165,7 +165,7 @@ mod tests {
     use http::{Request, StatusCode};
     use http_extensions::{FakeHandler, HttpBodyBuilder, HttpRequestBuilder};
     use templated_uri::Uri;
-    use testing_aids::LogCapture;
+    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::handlers::Dispatch;
@@ -173,7 +173,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_returns_successful_response() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let layer = Logging::layer().clock(SimpleClock::new_frozen());
@@ -204,7 +204,7 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     #[tokio::test]
     async fn execute_logs_and_propagates_inner_error() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let layer = Logging::layer().clock(SimpleClock::new_frozen());

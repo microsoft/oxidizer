@@ -1,6 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![expect(
+    clippy::multiple_unsafe_ops_per_block,
+    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
+)]
+
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ops::{Deref, DerefMut};
@@ -30,7 +35,7 @@ pub struct Alloc<'pool, T, A: Allocator = Global> {
     _pool: PhantomData<&'pool Pool<T, A>>,
 }
 
-impl<'pool, T, A: Allocator> Alloc<'pool, T, A> {
+impl<T, A: Allocator> Alloc<'_, T, A> {
     #[inline]
     pub(crate) fn from_slot(slot: NonNull<SlotCell<T>>) -> Self {
         Self { slot, _pool: PhantomData }
@@ -65,7 +70,7 @@ impl<'pool, T, A: Allocator> Alloc<'pool, MaybeUninit<T>, A> {
     }
 }
 
-impl<'pool, T, A: Allocator> Deref for Alloc<'pool, T, A> {
+impl<T, A: Allocator> Deref for Alloc<'_, T, A> {
     type Target = T;
 
     #[inline]
@@ -75,7 +80,7 @@ impl<'pool, T, A: Allocator> Deref for Alloc<'pool, T, A> {
     }
 }
 
-impl<'pool, T, A: Allocator> DerefMut for Alloc<'pool, T, A> {
+impl<T, A: Allocator> DerefMut for Alloc<'_, T, A> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         // SAFETY: this `Alloc` is the unique owner of the occupied slot.
@@ -83,12 +88,12 @@ impl<'pool, T, A: Allocator> DerefMut for Alloc<'pool, T, A> {
     }
 }
 
-impl<'pool, T, A: Allocator> Drop for Alloc<'pool, T, A> {
+impl<T, A: Allocator> Drop for Alloc<'_, T, A> {
     #[inline]
     fn drop(&mut self) {
         // SAFETY: unique owner of the occupied slot. No `pool_refcount` work —
         // the `'pool` borrow proves the pool is alive.
-        unsafe { drop_and_free_local::<T, A>(self.slot) };
+        unsafe { drop_and_free_local::<T>(self.slot) };
     }
 }
 

@@ -1,6 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// Test-only helper crate: its utilities are exercised opportunistically by
+// other crates' tests, so per-package line coverage is not a meaningful gate
+// here. Exclude the whole crate from instrumentation (mirrors the codecov.yml
+// `ignore` this replaces).
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(coverage_nightly, coverage(off))]
+
 //! An unpublished crate containing testing utilities for use within this repo.
 
 #![allow(clippy::panic, clippy::unwrap_used, missing_docs, reason = "Test code")]
@@ -11,15 +18,12 @@ use std::time::Duration;
 use std::{env, process, thread};
 
 mod io;
-mod log;
-mod log_capture;
 mod macros;
 mod metrics;
+pub mod tracing_logs;
 mod yielding;
 
 pub use io::*;
-pub use log::*;
-pub use log_capture::*;
 pub use metrics::*;
 pub use yielding::*;
 

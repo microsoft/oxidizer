@@ -26,11 +26,11 @@ allowed_external_types = ["tower_layer::Layer", "tower_service::Service"]
 [features]
 default = []
 intercept = []
-dynamic-service = ["dep:infinity_pool"]
+dynamic-service = ["dep:plurality"]
 tower-service = ["dep:tower-service"]
 
 [dependencies]
-infinity_pool = { workspace = true, optional = true }
+plurality = { workspace = true, optional = true }
 tower-layer = { workspace = true }
 tower-service = { workspace = true, optional = true }
 
@@ -38,16 +38,12 @@ tower-service = { workspace = true, optional = true }
 alloc_tracker = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-infinity_pool = { workspace = true }
 mutants = { workspace = true }
 pin-project-lite = { workspace = true }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["limit", "util"] }
 tower-service = { workspace = true }
-
-[lints]
-workspace = true
 
 [[example]]
 name = "custom_layer"
@@ -74,3 +70,8 @@ required-features = ["intercept"]
 harness = false
 name = "tower"
 required-features = ["intercept", "tower-service"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

@@ -4,8 +4,8 @@
 //! Callgrind benchmarks for `BytesBuf` write fast paths in the `bytesbuf` package.
 //!
 //! Paired with `buf.rs`, which covers the same operations under wall-clock measurement. The
-//! `put_slice` and `put_num_le` benchmarks pair with the Criterion `BytesBuf/put_slice` and
-//! `BytesBuf/put_num_le` benchmarks (the Callgrind variants isolate a single write).
+//! `put_slice` and `put_u32_le` benchmarks pair with the Criterion `BytesBuf/put_slice` and
+//! `BytesBuf/put_u32_le` benchmarks (the Callgrind variants isolate a single write).
 //!
 //! Each setup function reserves the destination capacity outside the measured region so the
 //! timed body exercises only the fused write into the first unfilled slice, never allocation.
@@ -57,14 +57,14 @@ mod linux {
     // Fused single-slice numeric write.
     #[library_benchmark]
     #[bench::single_span(reserved())]
-    fn bytes_buf_put_num_le(mut buf: BytesBuf) -> BytesBuf {
-        buf.put_num_le(black_box(0x1234_5678_u32));
+    fn bytes_buf_put_u32_le(mut buf: BytesBuf) -> BytesBuf {
+        buf.put_u32_le(black_box(0x1234_5678_u32));
         buf
     }
 
     library_benchmark_group!(
         name = bytes_buf;
-        benchmarks = bytes_buf_put_slice, bytes_buf_put_num_le
+        benchmarks = bytes_buf_put_slice, bytes_buf_put_u32_le
     );
 }
 

@@ -10,11 +10,16 @@ edition = "2021"
 //! Run the benchmark suites and regenerate `docs/PERF.md`.
 //!
 //! The allocation suite comes as two aligned halves that exercise the *same*
-//! per-operation bodies (`benches/shared/ops.rs`):
-//!   * `gungraun_alloc`  — Callgrind, runs each op **once** (instruction-precise,
+//! per-operation bodies (`benches/gungraun/ops.rs` and its `benches/criterion/`
+//! twin):
+//!   * `gungraun`  — Callgrind, runs each op **once** (instruction-precise,
 //!     deterministic).
-//!   * `criterion_alloc` — wall-clock, loops each op `N` times. The reported
+//!   * `criterion` — wall-clock, loops each op `N` times. The reported
 //!     median is for `N` ops, so this script divides by `N` for per-op time.
+//!
+//! Each bench binary carries both the allocation groups and the owning
+//! fat-pointer comparison group, so one `cargo bench` invocation per harness
+//! covers everything.
 //!
 //! Two further benches stand on their own:
 //!   * `pool_comparison` — gungraun cross-crate alloc+free comparison.
@@ -36,7 +41,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
-/// Operations per criterion iteration (must match `N` in `criterion_alloc.rs`).
+/// Operations per criterion iteration (must match `N` in `benches/criterion/main.rs`).
 const N: f64 = 1000.0;
 
 /// The aligned allocation operations: `(name, pretty label)`. `name` is both the
@@ -45,9 +50,11 @@ const ALLOC_OPS: &[(&str, &str)] = &[
     ("box_val", "`Box` — `alloc_box`"),
     ("box_with", "`Box` — `alloc_box_with`"),
     ("box_uninit", "`Box` — `alloc_uninit_box`"),
+    ("box_unsize", "`Box` — allocate, unsize, and free"),
     ("arc_val", "`Arc` — `alloc_arc`"),
     ("arc_with", "`Arc` — `alloc_arc_with`"),
     ("arc_uninit", "`Arc` — `alloc_uninit_arc`"),
+    ("arc_unsize", "`Arc` — allocate, unsize, and free"),
     ("alloc_val", "`Alloc` — `alloc`"),
     ("alloc_with", "`Alloc` — `alloc_with`"),
     ("alloc_uninit", "`Alloc` — `alloc_uninit`"),
@@ -62,6 +69,28 @@ const CLONE_OPS: &[(&str, &str)] = &[
     ("rc_clone", "`Rc` clone + drop"),
 ];
 
+/// Comparable owning handles that erase a concrete pooled value to `dyn Marker`.
+const DYN_BOX_OPS: &[(&str, &str)] = &[
+    ("plurality_box", "plurality — `Box<dyn Trait>`"),
+    (
+        "infinity_pinned",
+        "infinity-pool — `PinnedPool` / `PooledMut<dyn Trait>`",
+    ),
+    (
+        "infinity_local_pinned",
+        "infinity-pool — `LocalPinnedPool` / `LocalPooledMut<dyn Trait>`",
+    ),
+    (
+        "infinity_blind",
+        "infinity-pool — `BlindPool` / `BlindPooledMut<dyn Trait>` (heterogeneous)",
+    ),
+    (
+        "infinity_local_blind",
+        "infinity-pool — `LocalBlindPool` / `LocalBlindPooledMut<dyn Trait>` (heterogeneous)",
+    ),
+    ("std_box", "standard library — `Box<dyn Trait>`"),
+];
+
 /// Pretty labels for the cross-crate `pool_comparison` benchmark fns.
 const COMPARISON_LABELS: &[(&str, &str)] = &[
     ("plurality_box", "plurality — `Box`"),
@@ -72,6 +101,8 @@ const COMPARISON_LABELS: &[(&str, &str)] = &[
     ("object_pool_pull", "object-pool"),
     ("opool_get", "opool"),
     ("deadpool_get", "deadpool"),
+    ("infinity_pinned", "infinity-pool — `PinnedPool`"),
+    ("infinity_raw", "infinity-pool — `RawPinnedPool`"),
 ];
 
 /// One parsed gungraun benchmark.
@@ -127,9 +158,9 @@ fn run(no_gungraun: bool, no_wallclock: bool, fast: bool) -> Result<(), String> 
         true
     };
 
-    let (gung_alloc_log, comparison_log) = if run_gungraun {
+    let (gung_log, comparison_log) = if run_gungraun {
         (
-            run_bench(&crate_dir, "gungraun_alloc", &[], "gungraun: gungraun_alloc")?,
+            run_bench(&crate_dir, "gungraun", &[], "gungraun")?,
             run_bench(&crate_dir, "pool_comparison", &[], "gungraun: pool_comparison")?,
         )
     } else {
@@ -145,21 +176,16 @@ fn run(no_gungraun: bool, no_wallclock: bool, fast: bool) -> Result<(), String> 
             "--warm-up-time", warm, "--measurement-time", meas, "--sample-size", samples,
         ];
         (
-            run_bench(
-                &crate_dir,
-                "criterion_alloc",
-                &crit_args,
-                "wall-clock: criterion_alloc",
-            )?,
+            run_bench(&crate_dir, "criterion", &crit_args, "wall-clock: criterion")?,
             run_bench(&crate_dir, "graph_churn", &[], "wall-clock: graph_churn")?,
         )
     };
 
     println!("==> Building docs/PERF.md");
-    let gung_alloc = parse_gungraun(&gung_alloc_log, "gungraun_alloc");
+    let gung = parse_gungraun(&gung_log, "gungraun");
     let cmp = parse_gungraun(&comparison_log, "pool_comparison");
     let crit = parse_criterion(&crit_log);
-    let mut report = build_report(&gung_alloc, &cmp, &crit, &graph_log);
+    let mut report = build_report(&gung, &gung, &cmp, &crit, &graph_log);
     report.truncate(report.trim_end().len());
     report.push('\n');
 
@@ -168,9 +194,9 @@ fn run(no_gungraun: bool, no_wallclock: bool, fast: bool) -> Result<(), String> 
     let out_path = docs.join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| format!("writing {}: {e}", out_path.display()))?;
     println!(
-        "==> Done. Wrote {} ({} gungraun_alloc, {} comparison, {} criterion benches).",
+        "==> Done. Wrote {} ({} gungraun, {} comparison, {} criterion benches).",
         out_path.display(),
-        gung_alloc.len(),
+        gung.len(),
         cmp.len(),
         crit.len()
     );
@@ -404,6 +430,13 @@ fn fmt_ns(ns: Option<f64>) -> String {
     }
 }
 
+fn fmt_ratio(value: Option<f64>, baseline: Option<f64>) -> String {
+    match (value, baseline) {
+        (Some(value), Some(baseline)) if baseline != 0.0 => format!("{:.2}×", value / baseline),
+        _ => "—".into(),
+    }
+}
+
 fn label_for(func: &str, table: &[(&str, &str)]) -> String {
     table
         .iter()
@@ -416,6 +449,7 @@ fn label_for(func: &str, table: &[(&str, &str)]) -> String {
 
 fn build_report(
     gung_alloc: &[Gung],
+    gung_dyn_box: &[Gung],
     cmp: &[Gung],
     crit: &[(String, f64)],
     graph_log: &str,
@@ -438,7 +472,7 @@ fn build_report(
     );
     out.push_str(
         "The wall-clock and Callgrind halves run the **same** per-operation \
-         bodies (`benches/shared/ops.rs`); the only difference is that criterion \
+         bodies under `benches/`; the only difference is that criterion \
          loops each body where gungraun runs it once.\n\n",
     );
     out.push_str("[gungraun]: https://github.com/gungraun/gungraun\n\n");
@@ -448,7 +482,7 @@ fn build_report(
     out.push_str(
         "Every allocation function, measured as one allocate-then-free against a \
          pre-warmed pool (steady-state slot reuse, no growth). \
-         `cargo bench --bench criterion_alloc` + `--bench gungraun_alloc`.\n\n",
+         `cargo bench --bench criterion` + `--bench gungraun`.\n\n",
     );
     emit_aligned_table(&mut out, ALLOC_OPS, "alloc", gung_alloc, crit);
 
@@ -504,7 +538,42 @@ fn build_report(
         if let Some(s) = gsummary {
             let _ = writeln!(out, "**{s}.**");
         }
+        out.push('\n');
     }
+
+    // ── Owning fat-pointer comparison ──
+    out.push_str("## Owning fat-pointer comparison\n\n");
+    out.push_str(
+        "Each row allocates the same concrete 32-byte value, converts its owning \
+         handle to `dyn Trait`, performs one virtual call, and drops the handle. \
+         Before measurement, every pool materializes a 1,024-object working set \
+         using its default layout policy, drops every object, and executes the \
+         exact operation once. This keeps growth, layout-map creation, and \
+         first-use effects outside the timed region; an allocation-tracking test \
+         confirms 1,024 consecutive executions of every pooled measured body \
+         perform zero system allocations. The standard-library setup is warmed \
+         the same way, but its measured body necessarily performs one heap \
+         allocation through the process's default system allocator. \
+         infinity-pool is the only other crate found with reusable owning \
+         `?Sized` handles, but no one variant matches plurality on both axes: \
+         plurality combines `Send` handles and cross-thread drops with \
+         single-threaded, lock-free allocation; infinity-pool's `PinnedPool` \
+         variants support concurrent, lock-based allocation with `Send` handles, \
+         while their faster `Local` variants make both pool and handles \
+         single-threaded. The `BlindPool` rows additionally support heterogeneous \
+         layouts and therefore pay for more capability. Other \
+         surveyed pool crates return keys or pool-borrowing guards rather than \
+         owning fat-pointer handles. \
+         `cargo bench --bench criterion` + \
+         `--bench gungraun`.\n\n",
+    );
+    emit_dyn_box_table(&mut out, gung_dyn_box, crit);
+    out.push_str(
+        "The standard-library row is an allocator best case: every allocation is \
+         the same size and is immediately freed, so allocator thread caches are \
+         maximally effective. The graph-churn benchmark above measures a broader \
+         live set and locality effects.\n\n",
+    );
 
     out
 }
@@ -529,6 +598,37 @@ fn emit_aligned_table(
             fmt_int(g.and_then(|g| g.instructions)),
             fmt_int(g.and_then(|g| g.mem)),
             fmt_int(g.and_then(|g| g.cycles)),
+        );
+    }
+    out.push('\n');
+}
+
+fn emit_dyn_box_table(out: &mut String, gung: &[Gung], crit: &[(String, f64)]) {
+    let baseline_time = crit_per_op(crit, "dyn_box/plurality_box");
+    let baseline_instructions =
+        gung_for(gung, "plurality_box").and_then(|entry| entry.instructions);
+
+    out.push_str(
+        "| Handle | Time / op | Time vs plurality | Instructions | Instructions vs plurality | Mem accesses | Est. cycles |\n",
+    );
+    out.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    for (name, label) in DYN_BOX_OPS {
+        let time = crit_per_op(crit, &format!("dyn_box/{name}"));
+        let entry = gung_for(gung, name);
+        let instructions = entry.and_then(|entry| entry.instructions);
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            label,
+            fmt_ns(time),
+            fmt_ratio(time, baseline_time),
+            fmt_int(instructions),
+            fmt_ratio(
+                instructions.map(|value| value as f64),
+                baseline_instructions.map(|value| value as f64),
+            ),
+            fmt_int(entry.and_then(|entry| entry.mem)),
+            fmt_int(entry.and_then(|entry| entry.cycles)),
         );
     }
     out.push('\n');

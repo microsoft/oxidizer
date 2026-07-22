@@ -39,6 +39,10 @@
 //!     that skips the refcount). `plurality_alloc` is the fair analog to the
 //!     borrow-bound guards of `object-pool`/`opool`/`deadpool`; `slab`,
 //!     `slotmap`, and `sharded-slab` instead return integer keys.
+//!   * `infinity_pool` is likewise shown twice: `infinity_pinned`
+//!     (`PinnedPool`, reference-counted handle, analog of `plurality_box`) and
+//!     `infinity_raw` (`RawPinnedPool`, no refcount with manual lifetimes,
+//!     analog of `plurality_alloc`).
 //!
 //! Run with: `cargo bench --bench pool_comparison`
 //!
@@ -238,6 +242,57 @@ fn deadpool_get(pool: deadpool::unmanaged::Pool<Obj>) -> deadpool::unmanaged::Po
     pool
 }
 
+// ---------------------------------------------------------------------------
+// infinity_pool (pinned pool; refcounted and raw access models)
+// ---------------------------------------------------------------------------
+
+fn setup_infinity_pinned(n: usize) -> infinity_pool::PinnedPool<Obj> {
+    let pool = infinity_pool::PinnedPool::<Obj>::new();
+    pool.reserve(n);
+    let warm: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
+    drop(warm);
+    pool
+}
+
+// Thread-safe, reference-counted handle (`Arc` style) — the fair analog to
+// `plurality_box`.
+#[library_benchmark]
+#[bench::churn(args = (CAP,), setup = setup_infinity_pinned)]
+fn infinity_pinned(pool: infinity_pool::PinnedPool<Obj>) -> infinity_pool::PinnedPool<Obj> {
+    for i in 0..COUNT {
+        let h = pool.insert(black_box(Obj::new(i)));
+        drop(black_box(h));
+    }
+    pool
+}
+
+fn setup_infinity_raw(n: usize) -> infinity_pool::RawPinnedPool<Obj> {
+    let mut pool = infinity_pool::RawPinnedPool::<Obj>::new();
+    let handles: Vec<_> = (0..n).map(|i| pool.insert(Obj::new(i as u64))).collect();
+    for h in handles {
+        // SAFETY: each handle was just returned by this pool's `insert` and is removed exactly once.
+        unsafe {
+            pool.remove(h);
+        }
+    }
+    pool
+}
+
+// Raw access model with no reference counting (manual lifetime management) —
+// the fair analog to `plurality_alloc`.
+#[library_benchmark]
+#[bench::churn(args = (CAP,), setup = setup_infinity_raw)]
+fn infinity_raw(mut pool: infinity_pool::RawPinnedPool<Obj>) -> infinity_pool::RawPinnedPool<Obj> {
+    for i in 0..COUNT {
+        let h = pool.insert(black_box(Obj::new(i)));
+        // SAFETY: `h` was just returned by this pool's `insert` and is removed exactly once.
+        unsafe {
+            pool.remove(black_box(h));
+        }
+    }
+    pool
+}
+
 library_benchmark_group!(
     name = comparison,
     benchmarks = [
@@ -248,6 +303,8 @@ library_benchmark_group!(
         slotmap_insert_remove,
         object_pool_pull,
         opool_get,
-        deadpool_get
+        deadpool_get,
+        infinity_pinned,
+        infinity_raw
     ]
 );

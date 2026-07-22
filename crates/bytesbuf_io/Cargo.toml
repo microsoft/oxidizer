@@ -7,12 +7,7 @@ description = "Asynchronous I/O abstractions expressed via `bytesbuf` types."
 version = "0.6.0"
 readme = "README.md"
 keywords = ["oxidizer", "io", "zero-copy", "performance", "async"]
-categories = [
-    "data-structures",
-    "network-programming",
-    "asynchronous",
-    "filesystem",
-]
+categories = ["data-structures", "network-programming", "asynchronous", "filesystem"]
 
 edition.workspace = true
 rust-version.workspace = true
@@ -46,5 +41,7 @@ mutants = { workspace = true }
 new_zealand = { workspace = true }
 testing_aids = { path = "../testing_aids" }
 
+# >>> anvil-managed: anvil-lints
 [lints]
 workspace = true
+# <<< anvil-managed: anvil-lints

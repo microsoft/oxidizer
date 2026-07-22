@@ -77,9 +77,6 @@ uuid = { workspace = true, features = ["v4"] }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "hot_path"
 harness = false
@@ -111,3 +108,8 @@ path = "examples/classified_templating.rs"
 [[example]]
 name = "uri_templating"
 path = "examples/uri_templating.rs"
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

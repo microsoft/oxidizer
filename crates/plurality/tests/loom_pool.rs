@@ -24,10 +24,14 @@
 //! empty target. Run with:
 //!
 //! ```sh
-//! RUSTFLAGS="--cfg loom" cargo test --test loom --release
+//! RUSTFLAGS="--cfg loom" cargo test --test loom_pool --features loom --release
 //! ```
 #![cfg(loom)]
 
+use core::alloc::Layout;
+use core::ptr::NonNull;
+
+use allocator_api2::alloc::{AllocError, Allocator, Global};
 use loom::sync::Arc as LoomArc;
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::thread;
@@ -40,6 +44,31 @@ struct Tracked(LoomArc<AtomicUsize>);
 impl Drop for Tracked {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::Release);
+    }
+}
+
+struct GrowthRaceAllocator {
+    allocations: LoomArc<AtomicUsize>,
+    stage: LoomArc<AtomicUsize>,
+}
+
+// SAFETY: allocations and deallocations are forwarded unchanged to `Global`;
+// the loom state only coordinates when the second allocation returns.
+unsafe impl Allocator for GrowthRaceAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        let allocation = Global.allocate(layout)?;
+        if self.allocations.fetch_add(1, Ordering::Relaxed) == 1 {
+            self.stage.store(1, Ordering::Release);
+            while self.stage.load(Ordering::Acquire) != 2 {
+                thread::yield_now();
+            }
+        }
+        Ok(allocation)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: `ptr` was returned by `Global::allocate` above with `layout`.
+        unsafe { Global.deallocate(ptr, layout) };
     }
 }
 
@@ -98,6 +127,44 @@ fn concurrent_frees_distinct_slots() {
         t2.join().unwrap();
 
         drop(pool);
+    });
+}
+
+/// Pauses second-chunk allocation while another thread frees an old slot. The
+/// subsequent splice must retain both the new chunk's free chain and the
+/// concurrently published old slot.
+#[test]
+fn free_during_growth_is_preserved_by_splice() {
+    loom::model(|| {
+        let allocations = LoomArc::new(AtomicUsize::new(0));
+        let stage = LoomArc::new(AtomicUsize::new(0));
+        let allocator = GrowthRaceAllocator {
+            allocations: LoomArc::clone(&allocations),
+            stage: LoomArc::clone(&stage),
+        };
+        let pool = Pool::<u32>::builder().chunk_size(2).allocator(allocator).build();
+        let first = pool.alloc_box(1);
+        let second = pool.alloc_box(2);
+
+        let worker_stage = LoomArc::clone(&stage);
+        let worker = thread::spawn(move || {
+            while worker_stage.load(Ordering::Acquire) != 1 {
+                thread::yield_now();
+            }
+            drop(first);
+            worker_stage.store(2, Ordering::Release);
+        });
+
+        let third = pool.alloc_box(3);
+        worker.join().unwrap();
+        assert_eq!(pool.chunks_allocated(), 2);
+
+        let fourth = pool.alloc_box(4);
+        let fifth = pool.alloc_box(5);
+        assert_eq!(pool.chunks_allocated(), 2, "growth splice lost the concurrently freed slot");
+
+        drop((second, third, fourth, fifth));
+        assert_eq!(pool.len(), 0);
     });
 }
 

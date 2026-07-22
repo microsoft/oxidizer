@@ -3,10 +3,10 @@
 
 use std::fmt::Debug;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use infinity_pool::{BlindPool, BlindPooledMut, define_pooled_dyn_cast};
+use plurality::Pool;
 
 use crate::Service;
 
@@ -55,26 +55,37 @@ where
 /// }
 /// ```
 pub struct DynamicService<In, Out> {
-    exec: Arc<dyn Fn(In) -> BlindPooledMut<dyn SendFuture<Out>> + Send + Sync>,
+    exec: Arc<dyn Fn(In) -> plurality::Box<dyn SendFuture<Out>> + Send + Sync>,
 }
 
 pub(crate) trait SendFuture<Out>: Future<Output = Out> + Send {}
 impl<Out: Send + 'static, F: Future<Output = Out> + Send> SendFuture<Out> for F {}
-define_pooled_dyn_cast!(SendFuture<Out>);
 
 impl<In: Send + 'static, Out: Send + 'static> DynamicService<In, Out> {
     pub(crate) fn new<T>(strategy: T) -> Self
     where
         T: Service<In, Out = Out> + Send + Sync + 'static,
     {
-        let pool = BlindPool::new();
+        // Each concrete `T` produces a single future type, so one typed pool
+        // suffices. The pool is `Send + !Sync`, so a mutex guards it — expected
+        // to be uncontended in the thread-isolated common case. The erased
+        // handle owns its slot, so it stays valid after the lock is released.
+        let pool = Mutex::new(Pool::new());
         let service = Arc::new(strategy);
-        // define a delegate that wraps the service execution in a
-        // future and inserts it into the pool
+        // Wrap each service execution in a future, pool it, and hand back a
+        // type-erased handle so `DynamicService` need not carry the future type.
         let exec = move |input: In| {
             let cloned = Arc::clone(&service);
             let fut = async move { cloned.execute(input).await };
-            pool.insert(fut).cast_send_future()
+            let boxed = pool
+                .lock()
+                // Poisoned only if a prior holder panicked under this guard. No user
+                // code runs here: `alloc_box` just moves the already-constructed
+                // `fut` into a pool slot (the future is polled later, outside the
+                // lock), so a poisoned guard indicates a fatal prior failure.
+                .expect("dynamic-service pool mutex poisoned by a prior panic under this guard")
+                .alloc_box(fut);
+            plurality::Box::unsize::<dyn SendFuture<Out>>(boxed, plurality::coerce!(<Out> dyn SendFuture<Out>))
         };
 
         Self { exec: Arc::new(exec) }
@@ -92,7 +103,7 @@ impl<In: Send, Out: Send> Service<In> for DynamicService<In, Out> {
 }
 
 struct ServiceFuture<Out> {
-    handle: BlindPooledMut<dyn SendFuture<Out>>,
+    handle: plurality::Box<dyn SendFuture<Out>>,
 }
 
 impl<Out> Future for ServiceFuture<Out> {
@@ -120,8 +131,6 @@ impl<In, Out> Clone for DynamicService<In, Out> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use futures::executor::block_on;
     use static_assertions::assert_impl_all;
 

@@ -78,9 +78,9 @@ checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
 name = "anyspawn"
@@ -597,12 +597,11 @@ dependencies = [
  "bytes",
  "criterion",
  "gungraun",
- "infinity_pool",
  "libc",
  "mutants",
  "new_zealand",
  "nm",
- "num-traits",
+ "plurality",
  "smallvec",
  "static_assertions",
  "testing_aids",
@@ -626,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "cachet"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "alloc_tracker",
  "anyspawn",
@@ -635,6 +634,7 @@ dependencies = [
  "cachet_service",
  "cachet_tier",
  "criterion",
+ "ctor",
  "dashmap",
  "futures",
  "layered",
@@ -644,6 +644,7 @@ dependencies = [
  "recoverable",
  "seatbelt",
  "serde",
+ "serial_test",
  "testing_aids",
  "tick",
  "tokio",
@@ -654,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "cachet_memory"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cachet_tier",
  "criterion",
@@ -962,6 +963,15 @@ name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
+
+[[package]]
+name = "ctor"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb22e947478ccf9dc44d8922042c677a63fbb88f2cb468521d1145816e5087cb"
+dependencies = [
+ "linktime-proc-macro",
+]
 
 [[package]]
 name = "darling"
@@ -1291,6 +1301,7 @@ dependencies = [
  "bytes",
  "bytesbuf",
  "criterion",
+ "ctor",
  "data_privacy",
  "fastrand",
  "fetch_hyper",
@@ -1356,6 +1367,7 @@ dependencies = [
  "anyspawn",
  "bytes",
  "bytesbuf",
+ "ctor",
  "fetch_options",
  "fetch_tls",
  "futures",
@@ -1384,7 +1396,6 @@ dependencies = [
  "tokio-native-tls",
  "tower",
  "tracing",
- "tracing-test",
  "wiremock",
 ]
 
@@ -2255,9 +2266,9 @@ dependencies = [
  "alloc_tracker",
  "criterion",
  "futures",
- "infinity_pool",
  "mutants",
  "pin-project-lite",
+ "plurality",
  "static_assertions",
  "tokio",
  "tower",
@@ -2285,6 +2296,12 @@ checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
 dependencies = [
  "cc",
 ]
+
+[[package]]
+name = "linktime-proc-macro"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c7b0a3383c2a1002d11349c92c85a666a5fb679e96c79d782cf0dbe557fd6ee"
 
 [[package]]
 name = "linux-raw-sys"
@@ -2834,7 +2851,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plurality"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.4.0",
@@ -2842,6 +2859,7 @@ dependencies = [
  "criterion",
  "deadpool 0.13.0",
  "gungraun",
+ "infinity_pool",
  "loom",
  "mimalloc",
  "mutants",
@@ -3350,6 +3368,7 @@ version = "0.6.0"
 dependencies = [
  "alloc_tracker",
  "criterion",
+ "ctor",
  "fastrand",
  "futures",
  "futures-util",
@@ -3368,6 +3387,7 @@ dependencies = [
  "serde",
  "serde_json",
  "static_assertions",
+ "testing_aids",
  "thread_aware",
  "tick",
  "tokio",
@@ -3471,6 +3491,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "serial_test"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699f4197115b8a7e7ff19c9a315a4bd6fffec26cc4626ef45ecaea389e081c6d"
+dependencies = [
+ "once_cell",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e153fc76e1c6a068703d6d29c508a0b15c061c4b7e43da59cc097bc342673c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3722,9 +3764,11 @@ dependencies = [
 name = "testing_aids"
 version = "0.0.0"
 dependencies = [
+ "ctor",
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
+ "serial_test",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4086,27 +4130,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "tracing-test"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a4c448db514d4f24c5ddb9f73f2ee71bfb24c526cf0c570ba142d1119e0051"
-dependencies = [
- "tracing-core",
- "tracing-subscriber",
- "tracing-test-macro",
-]
-
-[[package]]
-name = "tracing-test-macro"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad06847b7afb65c7866a36664b75c40b895e318cea4f71299f013fb22965329d"
-dependencies = [
- "quote",
- "syn",
 ]
 
 [[package]]

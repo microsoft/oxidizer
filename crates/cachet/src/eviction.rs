@@ -60,15 +60,14 @@ impl EvictionHook {
 mod tests {
     use std::sync::Arc;
 
-    use testing_aids::LogCapture;
+    use testing_aids::tracing_logs::Capture;
 
     use super::*;
     use crate::telemetry::attributes;
 
-    #[cfg_attr(miri, ignore)]
     #[test]
     fn handle_before_init_is_noop() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let hook = EvictionHook::new();
@@ -77,10 +76,9 @@ mod tests {
         assert!(capture.output().is_empty(), "no event should fire before init");
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
     fn handle_after_init_routes_by_cause() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         let hook = Arc::new(EvictionHook::new());
@@ -100,10 +98,9 @@ mod tests {
         capture.assert_contains(attributes::EVENT_EXPIRED);
     }
 
-    #[cfg_attr(miri, ignore)]
     #[test]
     fn handle_without_logging_emits_no_tracing_events() {
-        let capture = LogCapture::new();
+        let capture = Capture::new();
         let _guard = tracing::subscriber::set_default(capture.subscriber());
 
         // Logging disabled — covers the false branch of the logging_enabled check

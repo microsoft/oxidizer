@@ -23,8 +23,6 @@ allowed_external_types = [
     "bytes::buf::buf_impl::Buf",
     "bytes::buf::uninit_slice::UninitSlice",
     "bytes::buf::buf_mut::BufMut",
-    "num_traits::ops::bytes::FromBytes",
-    "num_traits::ops::bytes::ToBytes",
     "thread_aware::affinity::MemoryAffinity",
     "thread_aware::affinity::PinnedAffinity",
     "thread_aware::core::ThreadAware",
@@ -41,10 +39,9 @@ test-util = []
 
 [dependencies]
 bytes = { workspace = true, features = ["std"], optional = true }
-infinity_pool = { workspace = true }
 new_zealand = { workspace = true }
 nm = { workspace = true }
-num-traits = { workspace = true }
+plurality = { workspace = true }
 smallvec = { workspace = true, features = ["const_new", "union"] }
 thread_aware = { workspace = true, features = ["derive"] }
 
@@ -64,9 +61,6 @@ libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 windows-sys = { workspace = true }
-
-[lints]
-workspace = true
 
 [[bench]]
 name = "buf"
@@ -112,3 +106,8 @@ required-features = ["test-util"]
 [[example]]
 name = "bb_static_data"
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

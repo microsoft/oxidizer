@@ -62,9 +62,9 @@ use crate::{BytesBufWriter, BytesView, MAX_INLINE_SPANS, MemoryGuard, Span, Span
 ///
 /// // Build a message from various pieces.
 /// buf.put_slice(HEADER_MAGIC);
-/// buf.put_num_be(1_u16); // Version
-/// buf.put_num_be(42_u32); // Payload length
-/// buf.put_num_be(0xDEAD_BEEF_u64); // Checksum
+/// buf.put_u16_be(1); // Version
+/// buf.put_u32_be(42); // Payload length
+/// buf.put_u64_be(0xDEAD_BEEF); // Checksum
 ///
 /// // Consume the buffered data as an immutable BytesView.
 /// let message = buf.consume_all();
@@ -217,7 +217,7 @@ impl BytesBuf {
     /// buf.reserve(16, &memory);
     /// assert!(buf.remaining_capacity() >= 16);
     ///
-    /// buf.put_num_be(0x1234_5678_u32);
+    /// buf.put_u32_be(0x1234_5678);
     ///
     /// // Can reserve more capacity at any time.
     /// buf.reserve(100, &memory);
@@ -282,7 +282,7 @@ impl BytesBuf {
             self.freeze_from_first(total_unfrozen_bytes);
 
             // Debug build paranoia: nothing remains in the span builder, right?
-            debug_assert!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len) == 0);
+            debug_assert_eq!(self.span_builders_reversed.last().map_or(0, SpanBuilder::len), 0);
         }
 
         // We do this first so if we do panic, we have not performed any incomplete operations.
@@ -367,13 +367,13 @@ impl BytesBuf {
     /// use bytesbuf::mem::Memory;
     ///
     /// let mut buf = memory.reserve(16);
-    /// buf.put_num_be(0x1234_u16);
-    /// buf.put_num_be(0x5678_u16);
+    /// buf.put_u16_be(0x1234);
+    /// buf.put_u16_be(0x5678);
     ///
     /// // Peek at the data without consuming it.
     /// let mut peeked = buf.peek();
-    /// assert_eq!(peeked.get_num_be::<u16>(), 0x1234);
-    /// assert_eq!(peeked.get_num_be::<u16>(), 0x5678);
+    /// assert_eq!(peeked.get_u16_be(), 0x1234);
+    /// assert_eq!(peeked.get_u16_be(), 0x5678);
     ///
     /// // Despite consuming from peeked, the buffer still contains all data.
     /// assert_eq!(buf.len(), 4);
@@ -419,7 +419,7 @@ impl BytesBuf {
     /// let mut buf = memory.reserve(32);
     /// assert_eq!(buf.len(), 0);
     ///
-    /// buf.put_num_be(0x1234_5678_u32);
+    /// buf.put_u32_be(0x1234_5678);
     /// assert_eq!(buf.len(), 4);
     ///
     /// buf.put_slice(*b"Hello");
@@ -541,20 +541,20 @@ impl BytesBuf {
     ///
     /// let mut buf = memory.reserve(32);
     ///
-    /// buf.put_num_be(0x1111_u16);
-    /// buf.put_num_be(0x2222_u16);
+    /// buf.put_u16_be(0x1111);
+    /// buf.put_u16_be(0x2222);
     ///
     /// // Consume first part.
     /// let mut first = buf.consume(2);
-    /// assert_eq!(first.get_num_be::<u16>(), 0x1111);
+    /// assert_eq!(first.get_u16_be(), 0x1111);
     ///
     /// // Write more data.
-    /// buf.put_num_be(0x3333_u16);
+    /// buf.put_u16_be(0x3333);
     ///
     /// // Consume remaining data.
     /// let mut rest = buf.consume(4);
-    /// assert_eq!(rest.get_num_be::<u16>(), 0x2222);
-    /// assert_eq!(rest.get_num_be::<u16>(), 0x3333);
+    /// assert_eq!(rest.get_u16_be(), 0x2222);
+    /// assert_eq!(rest.get_u16_be(), 0x3333);
     /// ```
     ///
     /// # Panics
@@ -664,7 +664,7 @@ impl BytesBuf {
     /// let mut buf = memory.reserve(32);
     /// buf.put_slice(*b"Hello, ");
     /// buf.put_slice(*b"world!");
-    /// buf.put_num_be(0x2121_u16); // "!!"
+    /// buf.put_u16_be(0x2121); // "!!"
     ///
     /// let message = buf.consume_all();
     ///
@@ -694,7 +694,7 @@ impl BytesBuf {
     ///
     /// let mut buf = memory.reserve(64);
     ///
-    /// buf.put_num_be(0xDEAD_u16);
+    /// buf.put_u16_be(0xDEAD);
     ///
     /// let remaining_before = buf.remaining_capacity();
     /// let mut split = buf.split_off_remaining(20);
@@ -708,7 +708,7 @@ impl BytesBuf {
     /// assert_eq!(buf.len(), 2);
     ///
     /// // The split-off buffer can be used independently.
-    /// split.put_num_be(0xBEEF_u16);
+    /// split.put_u16_be(0xBEEF);
     /// assert_eq!(split.len(), 2);
     /// ```
     ///
@@ -1416,10 +1416,10 @@ mod tests {
         assert_eq!(buf.len(), 0);
         assert!(buf.is_empty());
 
-        buf.put_num_ne(1234_u64);
-        buf.put_num_ne(5678_u64);
-        buf.put_num_ne(1234_u64);
-        buf.put_num_ne(5678_u64);
+        buf.put_u64_ne(1234);
+        buf.put_u64_ne(5678);
+        buf.put_u64_ne(1234);
+        buf.put_u64_ne(5678);
 
         assert_eq!(buf.len(), 32);
         assert!(!buf.is_empty());
@@ -1436,13 +1436,13 @@ mod tests {
         assert_eq!(second_two.len(), 16);
         assert_eq!(buf.len(), 0);
 
-        assert_eq!(first_two.get_num_ne::<u64>(), 1234);
-        assert_eq!(first_two.get_num_ne::<u64>(), 5678);
+        assert_eq!(first_two.get_u64_ne(), 1234);
+        assert_eq!(first_two.get_u64_ne(), 5678);
 
-        assert_eq!(second_two.get_num_ne::<u64>(), 1234);
-        assert_eq!(second_two.get_num_ne::<u64>(), 5678);
+        assert_eq!(second_two.get_u64_ne(), 1234);
+        assert_eq!(second_two.get_u64_ne(), 5678);
 
-        buf.put_num_ne(1111_u64);
+        buf.put_u64_ne(1111);
 
         assert_eq!(buf.len(), 8);
 
@@ -1451,7 +1451,7 @@ mod tests {
         assert_eq!(last.len(), 8);
         assert_eq!(buf.len(), 0);
 
-        assert_eq!(last.get_num_ne::<u64>(), 1111);
+        assert_eq!(last.get_u64_ne(), 1111);
 
         assert!(buf.consume_checked(1).is_none());
         assert!(buf.consume_all().is_empty());
@@ -1473,8 +1473,8 @@ mod tests {
         assert_eq!(buf.remaining_capacity(), 100);
 
         // Write 10 bytes of data just to verify that it does not affect "capacity" logic.
-        buf.put_num_ne(1234_u64);
-        buf.put_num_ne(5678_u16);
+        buf.put_u64_ne(1234);
+        buf.put_u16_ne(5678);
 
         assert_eq!(buf.len(), 10);
         assert_eq!(buf.remaining_capacity(), 90);
@@ -1508,17 +1508,17 @@ mod tests {
         let mut target_buffer = memory.reserve(min_length);
 
         // First we make a couple pieces to append.
-        payload_buffer.put_num_ne(1111_u64);
-        payload_buffer.put_num_ne(2222_u64);
-        payload_buffer.put_num_ne(3333_u64);
-        payload_buffer.put_num_ne(4444_u64);
+        payload_buffer.put_u64_ne(1111);
+        payload_buffer.put_u64_ne(2222);
+        payload_buffer.put_u64_ne(3333);
+        payload_buffer.put_u64_ne(4444);
 
         let payload1 = payload_buffer.consume(TWO_U64_SIZE);
         let payload2 = payload_buffer.consume(TWO_U64_SIZE);
 
         // Then we prefill some data to start us off.
-        target_buffer.put_num_ne(5555_u64);
-        target_buffer.put_num_ne(6666_u64);
+        target_buffer.put_u64_ne(5555);
+        target_buffer.put_u64_ne(6666);
 
         // Consume a little just for extra complexity.
         let _ = target_buffer.consume(U64_SIZE);
@@ -1531,18 +1531,18 @@ mod tests {
         target_buffer.put_bytes(BytesView::default());
 
         // Add some custom data at the end.
-        target_buffer.put_num_ne(7777_u64);
+        target_buffer.put_u64_ne(7777);
 
         assert_eq!(target_buffer.len(), 48);
 
         let mut result = target_buffer.consume(48);
 
-        assert_eq!(result.get_num_ne::<u64>(), 6666);
-        assert_eq!(result.get_num_ne::<u64>(), 1111);
-        assert_eq!(result.get_num_ne::<u64>(), 2222);
-        assert_eq!(result.get_num_ne::<u64>(), 3333);
-        assert_eq!(result.get_num_ne::<u64>(), 4444);
-        assert_eq!(result.get_num_ne::<u64>(), 7777);
+        assert_eq!(result.get_u64_ne(), 6666);
+        assert_eq!(result.get_u64_ne(), 1111);
+        assert_eq!(result.get_u64_ne(), 2222);
+        assert_eq!(result.get_u64_ne(), 3333);
+        assert_eq!(result.get_u64_ne(), 4444);
+        assert_eq!(result.get_u64_ne(), 7777);
     }
 
     #[test]
@@ -1552,8 +1552,8 @@ mod tests {
 
         // Reserve some capacity and add initial data.
         buf.reserve(16, &memory);
-        buf.put_num_ne(1111_u64);
-        buf.put_num_ne(2222_u64);
+        buf.put_u64_ne(1111);
+        buf.put_u64_ne(2222);
 
         // Consume some data (the 1111).
         let _ = buf.consume(8);
@@ -1561,21 +1561,21 @@ mod tests {
         // Append a sequence (the 3333).
         let mut append_buf = BytesBuf::new();
         append_buf.reserve(8, &memory);
-        append_buf.put_num_ne(3333_u64);
+        append_buf.put_u64_ne(3333);
         let reused_bytes_to_append = append_buf.consume_all();
         buf.append(reused_bytes_to_append);
 
         // Add more data (the 4444).
         buf.reserve(8, &memory);
-        buf.put_num_ne(4444_u64);
+        buf.put_u64_ne(4444);
 
         // Consume all data and validate we got all the pieces.
         let mut result = buf.consume_all();
 
         assert_eq!(result.len(), 24);
-        assert_eq!(result.get_num_ne::<u64>(), 2222);
-        assert_eq!(result.get_num_ne::<u64>(), 3333);
-        assert_eq!(result.get_num_ne::<u64>(), 4444);
+        assert_eq!(result.get_u64_ne(), 2222);
+        assert_eq!(result.get_u64_ne(), 3333);
+        assert_eq!(result.get_u64_ne(), 4444);
     }
 
     #[test]
@@ -1596,22 +1596,22 @@ mod tests {
 
         assert_eq!(buf.capacity(), 100);
 
-        buf.put_num_ne(1111_u64);
+        buf.put_u64_ne(1111);
 
         // We have 0 frozen spans and 10 span builders,
         // the first of which has 8 bytes of filled content.
         let mut peeked = buf.peek();
         assert_eq!(peeked.first_slice().len(), 8);
-        assert_eq!(peeked.get_num_ne::<u64>(), 1111);
+        assert_eq!(peeked.get_u64_ne(), 1111);
         assert_eq!(peeked.len(), 0);
 
-        buf.put_num_ne(2222_u64);
-        buf.put_num_ne(3333_u64);
-        buf.put_num_ne(4444_u64);
-        buf.put_num_ne(5555_u64);
-        buf.put_num_ne(6666_u64);
-        buf.put_num_ne(7777_u64);
-        buf.put_num_ne(8888_u64);
+        buf.put_u64_ne(2222);
+        buf.put_u64_ne(3333);
+        buf.put_u64_ne(4444);
+        buf.put_u64_ne(5555);
+        buf.put_u64_ne(6666);
+        buf.put_u64_ne(7777);
+        buf.put_u64_ne(8888);
         // These will cross a span boundary so we can also observe
         // crossing that boundary during peeking.
         buf.put_byte_repeated(9, 8);
@@ -1629,8 +1629,8 @@ mod tests {
         // This should be the first frozen span of 10 bytes.
         assert_eq!(peeked.first_slice().len(), 10);
 
-        assert_eq!(peeked.get_num_ne::<u64>(), 1111);
-        assert_eq!(peeked.get_num_ne::<u64>(), 2222);
+        assert_eq!(peeked.get_u64_ne(), 1111);
+        assert_eq!(peeked.get_u64_ne(), 2222);
 
         // The length of the buffer does not change just because we peek at its data.
         assert_eq!(buf.len(), 72);
@@ -1638,12 +1638,12 @@ mod tests {
         // We consumed 16 bytes from the peeked view, so should be looking at the remaining 4 bytes in the 2nd span.
         assert_eq!(peeked.first_slice().len(), 4);
 
-        assert_eq!(peeked.get_num_ne::<u64>(), 3333);
-        assert_eq!(peeked.get_num_ne::<u64>(), 4444);
-        assert_eq!(peeked.get_num_ne::<u64>(), 5555);
-        assert_eq!(peeked.get_num_ne::<u64>(), 6666);
-        assert_eq!(peeked.get_num_ne::<u64>(), 7777);
-        assert_eq!(peeked.get_num_ne::<u64>(), 8888);
+        assert_eq!(peeked.get_u64_ne(), 3333);
+        assert_eq!(peeked.get_u64_ne(), 4444);
+        assert_eq!(peeked.get_u64_ne(), 5555);
+        assert_eq!(peeked.get_u64_ne(), 6666);
+        assert_eq!(peeked.get_u64_ne(), 7777);
+        assert_eq!(peeked.get_u64_ne(), 8888);
 
         for _ in 0..8 {
             assert_eq!(peeked.get_byte(), 9);
@@ -1678,19 +1678,19 @@ mod tests {
 
         assert_eq!(buf.capacity(), 100);
 
-        buf.put_num_ne(1111_u64);
+        buf.put_u64_ne(1111);
         // This freezes the first span of 10, as we filled it all up.
-        buf.put_num_ne(2222_u64);
+        buf.put_u64_ne(2222);
 
         let mut first8 = buf.consume(U64_SIZE);
-        assert_eq!(first8.get_num_ne::<u64>(), 1111);
+        assert_eq!(first8.get_u64_ne(), 1111);
         assert!(first8.is_empty());
 
-        buf.put_num_ne(3333_u64);
+        buf.put_u64_ne(3333);
 
         let mut second16 = buf.consume(16);
-        assert_eq!(second16.get_num_ne::<u64>(), 2222);
-        assert_eq!(second16.get_num_ne::<u64>(), 3333);
+        assert_eq!(second16.get_u64_ne(), 2222);
+        assert_eq!(second16.get_u64_ne(), 3333);
         assert!(second16.is_empty());
     }
 
@@ -1756,7 +1756,7 @@ mod tests {
 
         // We write an u64 - this fills half the capacity and should result in
         // the first span builder being frozen and the second remaining in its entirety.
-        buf.put_num_ne(1234_u64);
+        buf.put_u64_ne(1234);
 
         assert_eq!(buf.len(), 8);
         assert_eq!(buf.remaining_capacity(), 8);
@@ -1767,7 +1767,7 @@ mod tests {
 
         // We write a u32 - this fills half the remaining capacity, which results
         // in a half-filled span builder remaining in the buffer.
-        buf.put_num_ne(5678_u32);
+        buf.put_u32_ne(5678);
 
         assert_eq!(buf.len(), 12);
         assert_eq!(buf.remaining_capacity(), 4);
@@ -1777,7 +1777,7 @@ mod tests {
         assert_eq!(available_slices[0].len(), 4);
 
         // We write a final u32 to use up all the capacity.
-        buf.put_num_ne(9012_u32);
+        buf.put_u32_ne(9012);
 
         assert_eq!(buf.len(), 16);
         assert_eq!(buf.remaining_capacity(), 0);
@@ -1853,7 +1853,7 @@ mod tests {
         assert_eq!(buf.capacity(), 8);
 
         let mut result = buf.consume(U64_SIZE);
-        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
+        assert_eq!(result.get_u64_ne(), 0x3333_3333_3333_3333);
     }
 
     #[test]
@@ -1915,10 +1915,10 @@ mod tests {
         assert_eq!(buf.capacity(), 24);
 
         let mut result = buf.consume(THREE_U64_SIZE);
-        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
-        assert_eq!(result.get_num_ne::<u32>(), 0x4444_4444);
-        assert_eq!(result.get_num_ne::<u32>(), 0x5555_5555);
-        assert_eq!(result.get_num_ne::<u64>(), 0x6666_6666_6666_6666);
+        assert_eq!(result.get_u64_ne(), 0x3333_3333_3333_3333);
+        assert_eq!(result.get_u32_ne(), 0x4444_4444);
+        assert_eq!(result.get_u32_ne(), 0x5555_5555);
+        assert_eq!(result.get_u64_ne(), 0x6666_6666_6666_6666);
     }
 
     #[test]
@@ -1979,10 +1979,10 @@ mod tests {
         assert_eq!(buf.capacity(), 24);
 
         let mut result = buf.consume(THREE_U64_SIZE);
-        assert_eq!(result.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
-        assert_eq!(result.get_num_ne::<u32>(), 0x4444_4444);
-        assert_eq!(result.get_num_ne::<u32>(), 0x5555_5555);
-        assert_eq!(result.get_num_ne::<u64>(), 0x6666_6666_6666_6666);
+        assert_eq!(result.get_u64_ne(), 0x3333_3333_3333_3333);
+        assert_eq!(result.get_u32_ne(), 0x4444_4444);
+        assert_eq!(result.get_u32_ne(), 0x5555_5555);
+        assert_eq!(result.get_u64_ne(), 0x6666_6666_6666_6666);
     }
 
     #[test]
@@ -2081,7 +2081,7 @@ mod tests {
             let mut buf = BytesBuf::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
-            buf.put_num_ne(1234_u64);
+            buf.put_u64_ne(1234);
 
             assert_eq!(buf.frozen_spans.len(), 1);
             assert_eq!(buf.span_builders_reversed.len(), 1);
@@ -2125,7 +2125,7 @@ mod tests {
             let mut buf = BytesBuf::from_blocks([block1, block2]);
 
             // Freezes first span of 8, retains one span builder.
-            buf.put_num_ne(1234_u64);
+            buf.put_u64_ne(1234);
 
             assert_eq!(buf.frozen_spans.len(), 1);
             assert_eq!(buf.span_builders_reversed.len(), 1);
@@ -2169,10 +2169,10 @@ mod tests {
         buf.reserve(100, &memory);
 
         // 32 bytes in 3 spans.
-        buf.put_num_ne(1111_u64);
-        buf.put_num_ne(1111_u64);
-        buf.put_num_ne(1111_u64);
-        buf.put_num_ne(1111_u64);
+        buf.put_u64_ne(1111);
+        buf.put_u64_ne(1111);
+        buf.put_u64_ne(1111);
+        buf.put_u64_ne(1111);
 
         // Freeze it all - a precondition to consuming is to freeze everything first.
         buf.ensure_frozen(32);
@@ -2240,16 +2240,16 @@ mod tests {
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
-        buf.put_num_ne(0x1111_1111_1111_1111_u64);
-        buf.put_num_ne(0x2222_2222_2222_2222_u64);
+        buf.put_u64_ne(0x1111_1111_1111_1111);
+        buf.put_u64_ne(0x2222_2222_2222_2222);
         // Both blocks are now frozen (filled completely)
         assert_eq!(buf.len(), 16);
 
         let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 16);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x1111_1111_1111_1111);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x2222_2222_2222_2222);
+        assert_eq!(peeked.get_u64_ne(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_u64_ne(), 0x2222_2222_2222_2222);
 
         // Original builder still has the data
         assert_eq!(buf.len(), 16);
@@ -2261,16 +2261,16 @@ mod tests {
         let mut buf = BytesBuf::new();
 
         buf.reserve(10, &memory);
-        buf.put_num_ne(0x3333_3333_3333_3333_u64);
-        buf.put_num_ne(0x4444_u16);
+        buf.put_u64_ne(0x3333_3333_3333_3333);
+        buf.put_u16_ne(0x4444);
         // We have 10 bytes filled in a 10-byte block
         assert_eq!(buf.len(), 10);
 
         let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 10);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
-        assert_eq!(peeked.get_num_ne::<u16>(), 0x4444);
+        assert_eq!(peeked.get_u64_ne(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_u16_ne(), 0x4444);
 
         // Original builder still has the data
         assert_eq!(buf.len(), 10);
@@ -2282,7 +2282,7 @@ mod tests {
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
-        buf.put_num_ne(0x5555_5555_5555_5555_u64);
+        buf.put_u64_ne(0x5555_5555_5555_5555);
 
         // We have 8 bytes filled and 12 bytes remaining capacity
         assert_eq!(buf.len(), 8);
@@ -2291,22 +2291,22 @@ mod tests {
         let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 8);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x5555_5555_5555_5555);
+        assert_eq!(peeked.get_u64_ne(), 0x5555_5555_5555_5555);
 
         // CRITICAL TEST: Capacity should be preserved
         assert_eq!(buf.len(), 8);
         assert_eq!(buf.remaining_capacity(), 12);
 
         // We should still be able to write more data
-        buf.put_num_ne(0x6666_6666_u32);
+        buf.put_u32_ne(0x6666_6666);
         assert_eq!(buf.len(), 12);
         assert_eq!(buf.remaining_capacity(), 8);
 
         // And we can peek again to see the updated data
         let mut peeked2 = buf.peek();
         assert_eq!(peeked2.len(), 12);
-        assert_eq!(peeked2.get_num_ne::<u64>(), 0x5555_5555_5555_5555);
-        assert_eq!(peeked2.get_num_ne::<u32>(), 0x6666_6666);
+        assert_eq!(peeked2.get_u64_ne(), 0x5555_5555_5555_5555);
+        assert_eq!(peeked2.get_u32_ne(), 0x6666_6666);
     }
 
     #[test]
@@ -2317,15 +2317,15 @@ mod tests {
         buf.reserve(30, &memory);
 
         // Fill first block completely (10 bytes) - will be frozen
-        buf.put_num_ne(0x1111_1111_1111_1111_u64);
-        buf.put_num_ne(0x2222_u16);
+        buf.put_u64_ne(0x1111_1111_1111_1111);
+        buf.put_u16_ne(0x2222);
 
         // Fill second block completely (10 bytes) - will be frozen
-        buf.put_num_ne(0x3333_3333_3333_3333_u64);
-        buf.put_num_ne(0x4444_u16);
+        buf.put_u64_ne(0x3333_3333_3333_3333);
+        buf.put_u16_ne(0x4444);
 
         // Partially fill third block (only 4 bytes) - will remain unfrozen
-        buf.put_num_ne(0x5555_5555_u32);
+        buf.put_u32_ne(0x5555_5555);
 
         assert_eq!(buf.len(), 24);
         assert_eq!(buf.remaining_capacity(), 6);
@@ -2333,11 +2333,11 @@ mod tests {
         let mut peeked = buf.peek();
 
         assert_eq!(peeked.len(), 24);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x1111_1111_1111_1111);
-        assert_eq!(peeked.get_num_ne::<u16>(), 0x2222);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x3333_3333_3333_3333);
-        assert_eq!(peeked.get_num_ne::<u16>(), 0x4444);
-        assert_eq!(peeked.get_num_ne::<u32>(), 0x5555_5555);
+        assert_eq!(peeked.get_u64_ne(), 0x1111_1111_1111_1111);
+        assert_eq!(peeked.get_u16_ne(), 0x2222);
+        assert_eq!(peeked.get_u64_ne(), 0x3333_3333_3333_3333);
+        assert_eq!(peeked.get_u16_ne(), 0x4444);
+        assert_eq!(peeked.get_u32_ne(), 0x5555_5555);
         // Original builder still has all the data and capacity
         assert_eq!(buf.len(), 24);
         assert_eq!(buf.remaining_capacity(), 6);
@@ -2349,21 +2349,21 @@ mod tests {
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
-        buf.put_num_ne(0x7777_7777_7777_7777_u64);
-        buf.put_num_ne(0x8888_8888_u32);
+        buf.put_u64_ne(0x7777_7777_7777_7777);
+        buf.put_u32_ne(0x8888_8888);
         assert_eq!(buf.len(), 12);
 
         // Peek at the data
         let mut peeked = buf.peek();
         assert_eq!(peeked.len(), 12);
-        assert_eq!(peeked.get_num_ne::<u64>(), 0x7777_7777_7777_7777);
+        assert_eq!(peeked.get_u64_ne(), 0x7777_7777_7777_7777);
 
         // Original builder still has the data
         assert_eq!(buf.len(), 12);
 
         // Now consume some of it
         let mut consumed = buf.consume(8);
-        assert_eq!(consumed.get_num_ne::<u64>(), 0x7777_7777_7777_7777);
+        assert_eq!(consumed.get_u64_ne(), 0x7777_7777_7777_7777);
 
         // Builder should have less data now
         assert_eq!(buf.len(), 4);
@@ -2371,7 +2371,7 @@ mod tests {
         // Peek again should show the remaining data
         let mut peeked2 = buf.peek();
         assert_eq!(peeked2.len(), 4);
-        assert_eq!(peeked2.get_num_ne::<u32>(), 0x8888_8888);
+        assert_eq!(peeked2.get_u32_ne(), 0x8888_8888);
     }
 
     #[test]
@@ -2380,14 +2380,14 @@ mod tests {
         let mut buf = BytesBuf::new();
 
         buf.reserve(20, &memory);
-        buf.put_num_ne(0xAAAA_AAAA_AAAA_AAAA_u64);
+        buf.put_u64_ne(0xAAAA_AAAA_AAAA_AAAA);
 
         // Peek multiple times - each should work independently
         let mut peeked1 = buf.peek();
         let mut peeked2 = buf.peek();
 
-        assert_eq!(peeked1.get_num_ne::<u64>(), 0xAAAA_AAAA_AAAA_AAAA);
-        assert_eq!(peeked2.get_num_ne::<u64>(), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(peeked1.get_u64_ne(), 0xAAAA_AAAA_AAAA_AAAA);
+        assert_eq!(peeked2.get_u64_ne(), 0xAAAA_AAAA_AAAA_AAAA);
 
         // Original builder still intact
         assert_eq!(buf.len(), 8);
@@ -2442,7 +2442,7 @@ mod tests {
         let memory = FixedBlockMemory::new(nz!(100));
         let mut buf = memory.reserve(100);
 
-        buf.put_num_ne(1234_u64);
+        buf.put_u64_ne(1234);
 
         let remaining_before_split = buf.remaining_capacity();
 
@@ -2462,23 +2462,23 @@ mod tests {
         let memory = FixedBlockMemory::new(nz!(100));
         let mut buf = memory.reserve(100);
 
-        buf.put_num_ne(1111_u64);
+        buf.put_u64_ne(1111);
 
         let mut split = buf.split_off_remaining(40);
 
         // Write into the split-off buffer.
-        split.put_num_ne(2222_u64);
-        split.put_num_ne(3333_u64);
+        split.put_u64_ne(2222);
+        split.put_u64_ne(3333);
 
         assert_eq!(split.len(), TWO_U64_SIZE);
 
         let mut split_view = split.consume_all();
-        assert_eq!(split_view.get_num_ne::<u64>(), 2222);
-        assert_eq!(split_view.get_num_ne::<u64>(), 3333);
+        assert_eq!(split_view.get_u64_ne(), 2222);
+        assert_eq!(split_view.get_u64_ne(), 3333);
 
         // Original buffer data is unaffected.
         let mut original_view = buf.consume_all();
-        assert_eq!(original_view.get_num_ne::<u64>(), 1111);
+        assert_eq!(original_view.get_u64_ne(), 1111);
     }
 
     #[test]
@@ -2513,7 +2513,7 @@ mod tests {
         // Reserve enough to trigger multiple blocks.
         let mut buf = memory.reserve(30);
 
-        buf.put_num_ne(1234_u64);
+        buf.put_u64_ne(1234);
 
         let original_remaining = buf.remaining_capacity();
 
@@ -2529,7 +2529,7 @@ mod tests {
 
         // Original data is unaffected.
         let mut original_view = buf.consume(U64_SIZE);
-        assert_eq!(original_view.get_num_ne::<u64>(), 1234);
+        assert_eq!(original_view.get_u64_ne(), 1234);
     }
 
     #[test]

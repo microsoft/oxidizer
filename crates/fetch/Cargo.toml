@@ -45,6 +45,12 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 all-features = true
 
+# `ctor` is used only through the `testing_aids::init_tracing!` macro expansion
+# (`#[::ctor::ctor]`), which cargo-machete's source scan does not see; ignore it
+# to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["ctor"]
+
 [features]
 default = []
 tls = ["rustls"]
@@ -54,11 +60,7 @@ rustls = [
     "fetch_hyper?/rustls",
     "fetch_tls/rustls",
 ]
-native-tls = [
-    "dep:native-tls",
-    "fetch_hyper?/native-tls",
-    "fetch_tls/native-tls",
-]
+native-tls = ["dep:native-tls", "fetch_hyper?/native-tls", "fetch_tls/native-tls"]
 json = ["http_extensions/json"]
 test-util = ["tick/test-util", "http_extensions/test-util"]
 tokio = [
@@ -139,6 +141,7 @@ tick = { path = "../tick", features = [
 alloc_tracker = { workspace = true }
 argh = { workspace = true }
 criterion = { workspace = true }
+ctor = { workspace = true }
 fastrand.workspace = true
 hyper-util = { workspace = true, features = ["tokio", "http1", "http2", "client-legacy"] }
 insta = { workspace = true }
@@ -169,9 +172,6 @@ tokio = { workspace = true, features = [
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock = { workspace = true }
-
-[lints]
-workspace = true
 
 [[example]]
 name = "http_client_fake"
@@ -285,3 +285,8 @@ required-features = ["test-util"]
 [[test]]
 name = "timeout"
 required-features = ["test-util"]
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
