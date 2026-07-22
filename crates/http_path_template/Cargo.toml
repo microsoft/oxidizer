@@ -31,9 +31,6 @@ mutants = { workspace = true }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gungraun = { workspace = true, features = ["default"] }
 
-[lints]
-workspace = true
-
 [[bench]]
 name = "hpt_parse"
 harness = false
@@ -42,3 +39,7 @@ harness = false
 name = "hpt_parse_cg"
 harness = false
 
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints

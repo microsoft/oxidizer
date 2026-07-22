@@ -1,11 +1,16 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../docs/design/checks.md for the tier structure.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # PR tier: every check that should run on every pull request, split
 # into two groups so the fast checks aren't blocked behind the slow
 # ones in cloud workflows.
+
+# Run all pull request checks.
 [group("anvil")]
 anvil-pr: anvil-pr-validate-prereqs \
     anvil-pr-fast \
@@ -15,6 +20,8 @@ anvil-pr: anvil-pr-validate-prereqs \
 # without a commit (advisories, flakes) + the truly expensive
 # exhaustive checks that don't fit in a PR budget. Runs on a schedule
 # against `main`, not on PRs.
+
+# Run all scheduled checks.
 [group("anvil")]
 anvil-scheduled: anvil-scheduled-validate-prereqs \
     anvil-scheduled-test \
@@ -40,16 +47,19 @@ anvil-full: anvil-full-validate-prereqs \
 # `anvil-pr-fast-setup` rather than the global `anvil-setup`).
 # Local users who want "install everything" run `just anvil-setup`.
 
+# Install prerequisites for the `anvil-pr` recipe.
 [group("anvil-setup")]
 anvil-pr-setup installer="install": \
     (anvil-pr-fast-setup installer) \
     (anvil-pr-slow-setup installer)
 
+# Validate prerequisites for the `anvil-pr` recipe.
 [group("anvil-setup")]
 anvil-pr-validate-prereqs: \
     anvil-pr-fast-validate-prereqs \
     anvil-pr-slow-validate-prereqs
 
+# Install prerequisites for the `anvil-scheduled` recipe.
 [group("anvil-setup")]
 anvil-scheduled-setup installer="install": \
     (anvil-scheduled-test-setup installer) \
@@ -57,6 +67,7 @@ anvil-scheduled-setup installer="install": \
     (anvil-scheduled-runtime-analysis-setup installer) \
     (anvil-scheduled-exhaustive-setup installer)
 
+# Validate prerequisites for the `anvil-scheduled` recipe.
 [group("anvil-setup")]
 anvil-scheduled-validate-prereqs: \
     anvil-scheduled-test-validate-prereqs \
@@ -64,11 +75,13 @@ anvil-scheduled-validate-prereqs: \
     anvil-scheduled-runtime-analysis-validate-prereqs \
     anvil-scheduled-exhaustive-validate-prereqs
 
+# Install prerequisites for the `anvil-full` recipe.
 [group("anvil-setup")]
 anvil-full-setup installer="install": \
     (anvil-pr-setup installer) \
     (anvil-scheduled-setup installer)
 
+# Validate prerequisites for the `anvil-full` recipe.
 [group("anvil-setup")]
 anvil-full-validate-prereqs: \
     anvil-pr-validate-prereqs \
@@ -86,8 +99,11 @@ anvil-full-validate-prereqs: \
 # `anvil-setup` is "install everything the catalog knows about", so it
 # includes cargo-delta too (a local `just anvil-setup` then provisions a
 # complete environment, impact tool included).
+
+# Install every tool and component in the anvil catalog.
 [group("anvil-setup")]
 anvil-setup installer="install": (anvil-full-setup installer) (anvil-tool-cargo-delta-install installer)
 
+# Validate every tool and component in the anvil catalog.
 [group("anvil-setup")]
 anvil-validate-prereqs: anvil-full-validate-prereqs anvil-tool-cargo-delta-validate-prereqs

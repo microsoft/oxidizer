@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
 name: anvil-scheduled-impl
 
 on:
@@ -43,8 +45,10 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-scheduled-test
+        with:
+          free-disk-space: true
       - name: Upload coverage to Codecov
         # Upload from every leg except windows-11-arm (see the matching
         # comment in pr-impl-workflow.yml for the rationale).
@@ -52,7 +56,7 @@ jobs:
         # the Codecov UI can distinguish PR-tier uploads from scheduled
         # uploads while still tracking each platform separately.
         if: matrix.os != 'windows-arm'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: target/coverage/lcov-all-features.info,target/coverage/lcov-no-default.info
           flags: scheduled,${{ matrix.os }}
@@ -72,7 +76,7 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-scheduled-advisories
 
   scheduled-runtime-analysis:
@@ -95,7 +99,7 @@ jobs:
       || matrix.os == 'linux-arm' && inputs.linux_arm_runner
       || inputs.windows_arm_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-scheduled-runtime-analysis
 
   scheduled-exhaustive:
@@ -108,5 +112,5 @@ jobs:
         os: [linux, windows]
     runs-on: ${{ matrix.os == 'linux' && inputs.linux_runner || inputs.windows_runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/anvil-scheduled-exhaustive

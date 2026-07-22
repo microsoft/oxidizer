@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # cargo-aprz queries the GitHub advisory API. Unauthenticated access is
 # capped at 60 requests/hour and fails on a full run; an authenticated
@@ -13,6 +16,8 @@
 # unauthenticated.
 #
 # Unscoped (consults external risk DB).
+
+# Analyze dependency features and version requirements with cargo-aprz.
 [script("pwsh")]
 anvil-aprz: anvil-aprz-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -32,8 +37,10 @@ anvil-aprz: anvil-aprz-validate-prereqs
     cargo aprz deps --error-if-high-risk --console appraisal
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Install prerequisites for the `anvil-aprz` recipe.
 [group("anvil-setup")]
 anvil-aprz-setup installer="install": (anvil-tool-cargo-aprz-install installer)
 
+# Validate prerequisites for the `anvil-aprz` recipe.
 [group("anvil-setup")]
 anvil-aprz-validate-prereqs: anvil-tool-cargo-aprz-validate-prereqs

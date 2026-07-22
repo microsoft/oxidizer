@@ -1,12 +1,16 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Nightly checks always run full-workspace; impact env vars aren't set
 # by the scheduled workflow, so the affected-tier default (--workspace)
 # applies. Skip guards are still included for local diff-scoped runs.
 
+# Run Miri tests for affected workspace packages.
 [script("pwsh")]
 anvil-miri: anvil-miri-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -41,8 +45,10 @@ anvil-miri: anvil-miri-validate-prereqs
 
 # --- pr-runtime-analysis members ---
 
+# Install prerequisites for the `anvil-miri` recipe.
 [group("anvil-setup")]
 anvil-miri-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
+# Validate prerequisites for the `anvil-miri` recipe.
 [group("anvil-setup")]
 anvil-miri-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs

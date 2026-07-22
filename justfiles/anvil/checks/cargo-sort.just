@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Modified tier.
 #
@@ -16,6 +19,8 @@
 # (e.g. blank-line-separated dependency blocks) intact, matching
 # oxidizer-github's convention; without it cargo-sort would flag those
 # blank lines as a formatting diff and fail the check.
+
+# Check that Cargo.toml dependency tables are sorted.
 [script("pwsh")]
 anvil-cargo-sort: anvil-cargo-sort-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -23,8 +28,10 @@ anvil-cargo-sort: anvil-cargo-sort-validate-prereqs
     cargo sort --workspace --grouped --check --check-format
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+# Install prerequisites for the `anvil-cargo-sort` recipe.
 [group("anvil-setup")]
 anvil-cargo-sort-setup installer="install": (anvil-tool-cargo-sort-install installer)
 
+# Validate prerequisites for the `anvil-cargo-sort` recipe.
 [group("anvil-setup")]
 anvil-cargo-sort-validate-prereqs: anvil-tool-cargo-sort-validate-prereqs

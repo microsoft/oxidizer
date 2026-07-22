@@ -1,7 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Owned by cargo-anvil; edit via `cargo anvil`.
-# See ../../../docs/design/checks.md for the catalog and rationale.
+# Managed by cargo-anvil. Update the corresponding template in the cargo-anvil
+# crate unless the change is repository-specific.
+# Update behaviour: https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/updates.md
+
+# See https://github.com/microsoft/ox-tools/blob/main/crates/cargo-anvil/docs/design/checks.md
 
 # Stricter miri profiles. Each runs miri over the full workspace
 # with a profile-specific MIRIFLAGS plus a profile-specific
@@ -15,6 +18,8 @@
 # does not set ANVIL_INCLUDE_AFFECTED); the --skip / affected guards
 # below only apply if an adopter invokes them locally with the env
 # vars set.
+
+# Run Miri tests with the Tree Borrows model.
 [script("pwsh")]
 anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
     $ErrorActionPreference = 'Stop'
@@ -29,8 +34,11 @@ anvil-miri-tree-borrows: anvil-miri-tree-borrows-validate-prereqs
 # as anvil-miri; they only differ in the MIRIFLAGS / RUSTFLAGS the
 # recipe sets. Separate setup recipes keep the per-check fan-out
 # regular (groups.just can iterate without special-casing).
+
+# Install prerequisites for the `anvil-miri-tree-borrows` recipe.
 [group("anvil-setup")]
 anvil-miri-tree-borrows-setup installer="install": anvil-component-nightly-miri-install anvil-component-nightly-rust-src-install
 
+# Validate prerequisites for the `anvil-miri-tree-borrows` recipe.
 [group("anvil-setup")]
 anvil-miri-tree-borrows-validate-prereqs: anvil-component-nightly-miri-validate-prereqs anvil-component-nightly-rust-src-validate-prereqs
