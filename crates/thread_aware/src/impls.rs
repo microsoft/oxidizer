@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ impl_transfer!(String);
 impl_transfer!(PathBuf);
 impl_transfer!(Duration);
 impl_transfer!(&Path);
+impl_transfer!(SocketAddr);
 
 impl_transfer!(&'static str);
 
