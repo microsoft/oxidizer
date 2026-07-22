@@ -1,0 +1,44 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "http_path_template"
+description = "Parser for the google.api.http path-template grammar"
+version = "0.1.0"
+readme = "README.md"
+keywords = ["grpc", "rest", "path", "template", "http"]
+categories = ["parser-implementations", "web-programming"]
+
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+include.workspace = true
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_path_template"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+all-features = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { workspace = true }
+mutants = { workspace = true }
+
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "hpt_parse"
+harness = false
+
+[[bench]]
+name = "hpt_parse_cg"
+harness = false
+

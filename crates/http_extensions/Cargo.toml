@@ -16,6 +16,11 @@ homepage = { workspace = true }
 include = { workspace = true }
 repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions"
 
+# `uuid` is used only by a doctest in `src/_documentation/recipes.rs`, which
+# cargo-machete does not scan; ignore it to avoid a false positive.
+[package.metadata.cargo-machete]
+ignored = ["uuid"]
+
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
     "futures_core::stream::Stream",
@@ -78,7 +83,6 @@ tick = { workspace = true, features = ["fmt"] }
 alloc_tracker = { workspace = true }
 bytesbuf = { path = "../bytesbuf", features = ["bytes-compat", "test-util"] }
 criterion = { workspace = true }
-data_privacy = { path = "../data_privacy" }
 futures = { workspace = true, features = ["std", "executor"] }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
@@ -93,6 +97,10 @@ templated_uri = { path = "../templated_uri", features = ["uuid"] }
 tick = { path = "../tick", features = ["test-util", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 uuid = { workspace = true }
+
+# Callgrind instruction-count benchmarks (Valgrind is Linux-only).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true
@@ -110,3 +118,13 @@ required-features = ["test-util", "json"]
 harness = false
 name = "http_response_builder"
 required-features = ["test-util", "json"]
+
+[[bench]]
+harness = false
+name = "router_resolve"
+required-features = ["test-util"]
+
+[[bench]]
+harness = false
+name = "router_resolve_cg"
+required-features = ["test-util"]

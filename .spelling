@@ -434,6 +434,7 @@ mutator
 mutator's
 mutators
 mutex
+namespace
 namespaced
 natively
 newtype
@@ -649,3 +650,7 @@ DAGs
 representable
 rc
 destructure
+SIMD
+Callgrind
+matcher
+AST

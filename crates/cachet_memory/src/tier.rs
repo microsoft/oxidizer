@@ -163,9 +163,17 @@ where
             moka_builder = moka_builder.name(name);
         }
 
-        if let Some(listener) = builder.eviction_listener {
-            moka_builder = moka_builder.eviction_listener(move |_key, _value, cause| {
-                listener(crate::notification::from_moka(cause));
+        let value_listener = builder.eviction_listener;
+        let removal_observers = builder.removal_observers;
+        if value_listener.is_some() || !removal_observers.is_empty() {
+            moka_builder = moka_builder.eviction_listener(move |key, entry: CacheEntry<V>, moka_cause| {
+                let cause = crate::notification::from_moka(moka_cause);
+                for observer in &removal_observers {
+                    observer(cause);
+                }
+                if let Some(listener) = &value_listener {
+                    listener(key, entry.into_value(), cause);
+                }
             });
         }
 
@@ -498,5 +506,97 @@ mod tests {
 
         // The cache should only have max_capacity entries
         assert_eq!(cache.len().await.expect("len should return Ok"), capacity);
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[tokio::test]
+    async fn on_eviction_receives_key_and_value() {
+        use std::sync::{Arc as StdArc, Mutex};
+
+        let evicted: StdArc<Mutex<Vec<(String, u64, crate::RemovalCause)>>> = StdArc::new(Mutex::new(Vec::new()));
+        let recorder = StdArc::clone(&evicted);
+
+        let capacity = 2;
+        let cache = InMemoryCache::<String, u64>::builder()
+            .max_capacity(capacity)
+            .on_eviction(move |key: StdArc<String>, value, cause| {
+                recorder.lock().unwrap().push(((*key).clone(), value, cause));
+            })
+            .build()
+            .expect("Cache should build successfully");
+
+        // Insert enough entries to force at least one size-based eviction.
+        for i in 0..(capacity + 3) {
+            cache
+                .insert(format!("key{i}"), CacheEntry::new(i))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+        }
+
+        let evictions = evicted.lock().unwrap();
+        assert!(!evictions.is_empty(), "at least one size eviction should have fired");
+        // Every reported eviction must carry the original key/value pair we inserted.
+        for (key, value, cause) in evictions.iter() {
+            assert_eq!(*cause, crate::RemovalCause::Size, "capacity churn should evict by size");
+            let index: u64 = key
+                .strip_prefix("key")
+                .expect("key uses the 'keyN' format")
+                .parse()
+                .expect("N is numeric");
+            assert_eq!(*value, index, "value must match the key it was inserted with");
+        }
+    }
+
+    #[cfg_attr(miri, ignore)] // crossbeam-epoch triggers Stacked Borrows violations under Miri
+    #[tokio::test]
+    async fn eviction_notifies_both_value_listener_and_removal_observer() {
+        use std::sync::{Arc as StdArc, Mutex};
+
+        // The value listener (on_eviction) and cause-only removal observers use
+        // independent channels, so a single eviction must reach both without the
+        // value being cloned onto a shared channel.
+        let seen: StdArc<Mutex<Vec<(String, u64)>>> = StdArc::new(Mutex::new(Vec::new()));
+        let causes: StdArc<Mutex<Vec<crate::RemovalCause>>> = StdArc::new(Mutex::new(Vec::new()));
+        let seen_rec = StdArc::clone(&seen);
+        let causes_rec = StdArc::clone(&causes);
+
+        let capacity = 2;
+        let cache = InMemoryCache::<String, u64>::builder()
+            .max_capacity(capacity)
+            .with_removal_observer(move |cause| causes_rec.lock().unwrap().push(cause))
+            .on_eviction(move |key: StdArc<String>, value, _cause| {
+                seen_rec.lock().unwrap().push(((*key).clone(), value));
+            })
+            .build()
+            .expect("Cache should build successfully");
+
+        // Insert enough entries to force at least one size-based eviction.
+        for i in 0..(capacity + 3) {
+            cache
+                .insert(format!("key{i}"), CacheEntry::new(i))
+                .await
+                .expect("Insert should succeed");
+            cache.inner.run_pending_tasks().await;
+        }
+
+        let value_events = seen.lock().unwrap();
+        let cause_events = causes.lock().unwrap();
+        assert!(!value_events.is_empty(), "value listener should have observed an eviction");
+        assert!(!cause_events.is_empty(), "removal observer should have observed an eviction");
+        // Both channels observe the same evictions.
+        assert_eq!(value_events.len(), cause_events.len(), "both channels must fire once per eviction");
+        assert!(
+            cause_events.iter().all(|c| *c == crate::RemovalCause::Size),
+            "capacity churn should evict by size"
+        );
+        for (key, value) in value_events.iter() {
+            let index: u64 = key
+                .strip_prefix("key")
+                .expect("key uses the 'keyN' format")
+                .parse()
+                .expect("N is numeric");
+            assert_eq!(*value, index, "value must match the key it was inserted with");
+        }
     }
 }

@@ -26,12 +26,14 @@ jobs:
     runs-on: ubuntu-slim
     steps:
     - name: Checkout
-      uses: actions/checkout@v7.0.0
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@v1
+    - name: Setup
+      uses: ./.github/actions/setup
+      with:
+        rust-toolchain: RUST_NIGHTLY
 
     - name: Create GitHub Release
       env:
         GH_TOKEN: ${{ github.token }}
-      run: cargo +nightly -Zscript scripts/publish-gh-release.rs --repo "${{ github.repository }}" "${{ inputs.tag || github.ref_name }}"
+      run: cargo +${{ env.RUST_NIGHTLY }} -Zscript scripts/publish-gh-release.rs --repo "${{ github.repository }}" "${{ inputs.tag || github.ref_name }}"

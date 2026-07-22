@@ -148,6 +148,50 @@ impl Uri {
         self.path_and_query.clone()
     }
 
+    /// Materializes into an [`http::Uri`], reusing an already-rendered path-and-query instead
+    /// of re-rendering the templated path of this URI.
+    ///
+    /// This is the request hot-path counterpart of [`http::Uri::try_from`]: when a caller has
+    /// already rendered the path once (e.g. at request-build time) and only the [`BaseUri`] may
+    /// have changed since (as happens during routing, which swaps the base but never the path),
+    /// it can pass that rendering here to join it onto the base without paying for a second
+    /// template render.
+    ///
+    /// `rendered` must be the standalone rendering of the path-and-query of this URI - exactly
+    /// what [`http::uri::PathAndQuery::try_from`] produces from the [`PathAndQuery`] of this
+    /// URI - and must be `Some` if and only if the URI has a path. The result is byte-identical
+    /// to [`http::Uri::try_from`] of the same URI.
+    /// Accepts either a bare `&http::uri::PathAndQuery` (coerced to `Some`) or `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`UriError`] if `rendered`'s presence does not match whether this URI has a
+    /// path (a caller contract violation that would otherwise silently drop or introduce a
+    /// path), or if the rendered path and base cannot be assembled into a valid [`http::Uri`].
+    pub fn to_http_uri<'a>(&self, rendered: impl Into<Option<&'a HttpPathAndQuery>>) -> Result<http::Uri, UriError> {
+        let rendered = rendered.into();
+        // Reject the contract violation explicitly: a mismatch here would silently drop this
+        // URI's path (rendered `None` against a path) or splice in a stray one, yielding an
+        // `http::Uri` that does not correspond to `self`.
+        if self.path_and_query.is_some() != rendered.is_some() {
+            return Err(UriError::invalid_uri(
+                "rendered path must be provided if and only if the URI has a path",
+            ));
+        }
+        match (self.base_uri.as_ref(), rendered) {
+            // Join the already-rendered path onto the base without re-rendering the template.
+            (Some(base), Some(path)) => base.build_http_uri_inner(path),
+            (Some(base), None) => Ok(base.clone().into()),
+            // No base: assemble the (possibly absent) rendered path directly, mirroring
+            // `TryFrom<Uri>`'s base-less branch exactly.
+            (None, rendered) => {
+                let mut parts = Parts::default();
+                parts.path_and_query = rendered.cloned();
+                http::Uri::from_parts(parts).map_err(Into::into)
+            }
+        }
+    }
+
     /// Returns the URI as a [`Sensitive`] string, classified under [`Uri::DATA_CLASS`].
     ///
     /// This shadows [`ToString::to_string`] to ensure callers receive a classified value
@@ -306,14 +350,15 @@ impl TryFrom<Uri> for http::Uri {
     fn try_from(value: Uri) -> Result<Self, Self::Error> {
         let Uri { base_uri, path_and_query } = value;
 
-        let path_and_query = path_and_query.map(|pq| HttpPathAndQuery::try_from(&pq)).transpose()?;
-
         match (base_uri, path_and_query) {
+            // Hot path: render, join onto the base, and validate in a single pass instead of
+            // materializing the path into a standalone `http::PathAndQuery` first.
+            (Some(base_uri), Some(pq)) => base_uri.build_http_uri_from_paq(&pq),
             (Some(base_uri), None) => Ok(base_uri.into()),
-            (Some(base_uri), Some(path_and_query)) => base_uri.build_http_uri(path_and_query),
             (None, pq) => {
+                let path_and_query = pq.map(|pq| HttpPathAndQuery::try_from(&pq)).transpose()?;
                 let mut parts = Parts::default();
-                parts.path_and_query = pq;
+                parts.path_and_query = path_and_query;
                 Self::from_parts(parts).map_err(Into::into)
             }
         }
@@ -388,6 +433,58 @@ mod tests {
     fn from_static_parses_full_uri() {
         let uri = Uri::from_static("https://example.com/path?query=1");
         assert_eq!(uri.to_string().declassify_ref(), "https://example.com/path?query=1");
+    }
+
+    #[test]
+    fn to_http_uri_matches_try_from() {
+        // `to_http_uri` (the request hot-path reuse point) must produce a
+        // byte-identical `http::Uri` to `TryFrom<Uri>` across every base/path combination,
+        // when handed the standalone rendering of the path of the URI.
+        let base = BaseUri::from_static("https://api.example.com/v1/");
+        let paths = ["/users/42", "/users/42?active=true", "//double/slash", "/"];
+
+        for path_str in paths {
+            let http_pq = HttpPathAndQuery::from_static(path_str);
+            let pq = PathAndQuery::from(http_pq.clone());
+
+            for base_opt in [Some(base.clone()), None] {
+                let uri = Uri::from_parts(base_opt.clone(), Some(pq.clone()));
+                // The standalone rendering of the path of the URI.
+                let rendered = HttpPathAndQuery::try_from(&pq).expect("valid standalone path");
+
+                let expected = http::Uri::try_from(uri.clone()).expect("try_from should succeed");
+                let reused = uri.to_http_uri(Some(&rendered)).expect("reuse should succeed");
+
+                assert_eq!(reused, expected, "mismatch for base {base_opt:?} + path {path_str:?}");
+            }
+        }
+
+        // Base-only (no path) and empty URIs must also match.
+        let base_only = Uri::from_parts(Some(base), None);
+        assert_eq!(base_only.to_http_uri(None).unwrap(), http::Uri::try_from(base_only).unwrap());
+
+        let empty = Uri::from_parts(None, None);
+        assert_eq!(empty.to_http_uri(None).unwrap(), http::Uri::try_from(empty).unwrap());
+    }
+
+    #[test]
+    fn to_http_uri_rejects_presence_mismatch() {
+        use ohno::Labeled;
+
+        let rendered = HttpPathAndQuery::from_static("/users/42");
+
+        // URI has a path but no rendering supplied: would silently drop the path.
+        let with_path = Uri::from_parts(
+            BaseUri::from_static("https://api.example.com"),
+            PathAndQuery::from_static("/users/42"),
+        );
+        let err = with_path.to_http_uri(None).unwrap_err();
+        assert_eq!(err.label(), "uri_invalid", "unexpected error: {err}");
+
+        // URI has no path but a rendering supplied: would splice in a stray path.
+        let without_path = Uri::from_parts(BaseUri::from_static("https://api.example.com"), None);
+        let err = without_path.to_http_uri(Some(&rendered)).unwrap_err();
+        assert_eq!(err.label(), "uri_invalid", "unexpected error: {err}");
     }
 
     #[test]
