@@ -128,6 +128,17 @@ pub struct BytesBuf {
     available: usize,
 }
 
+/// Panics if `len + available` would exceed `usize::MAX`, i.e. would violate the buffer's
+/// `capacity() <= usize::MAX` type invariant.
+///
+/// The two capacity-growing sites (`reserve` and `append`) each grow only one of `len` or
+/// `available`. A bounds check on the grown component alone is insufficient: `len` can grow via
+/// appended shared memory while `available` holds separately reserved capacity, so only their sum
+/// is bounded by the invariant.
+fn assert_capacity_within_bounds(len: usize, available: usize) {
+    assert!(len.checked_add(available).is_some(), "buffer capacity cannot exceed usize::MAX");
+}
+
 impl BytesBuf {
     /// Creates an instance without any memory capacity.
     #[must_use]
@@ -246,10 +257,17 @@ impl BytesBuf {
         debug_assert!(additional_memory.capacity() >= bytes.get());
         debug_assert!(additional_memory.is_empty());
 
-        self.available = self
+        let new_available = self
             .available
             .checked_add(additional_memory.capacity())
             .expect("buffer capacity cannot exceed usize::MAX");
+
+        // Growing `available` must not push the total capacity (`len + available`) past `usize::MAX`.
+        // Checking `available` alone is insufficient because `len` can grow independently via
+        // appended shared memory (see `append`). This upholds the invariant relied on by `capacity()`.
+        assert_capacity_within_bounds(self.len, new_available);
+
+        self.available = new_available;
 
         // We put the new ones in front (existing content needs to stay at the end).
         self.span_builders_reversed.insert_many(0, additional_memory.span_builders_reversed);
@@ -287,7 +305,15 @@ impl BytesBuf {
 
         // We do this first so if we do panic, we have not performed any incomplete operations.
         // The freezing above is safe even if we panic here - freezing is an atomic operation.
-        self.len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
+        let new_len = self.len.checked_add(bytes_len).expect("buffer capacity cannot exceed usize::MAX");
+
+        // Appended memory is shared (immutable) and may be aliased by other views, so the logical
+        // length can grow independently of physical address-space consumption. We must guard the
+        // total capacity (`len + available`), not just `len`, to uphold the invariant `capacity()`
+        // relies on.
+        assert_capacity_within_bounds(new_len, self.available);
+
+        self.len = new_len;
 
         // Any appended BytesView is frozen by definition, as contents of a BytesView are immutable.
         // This cannot wrap because we verified `len` is in-bounds and `frozen <= len` is a type invariant.
@@ -2564,6 +2590,26 @@ mod tests {
 
         // Buffer is unmodified.
         assert_eq!(buf.remaining_capacity(), capacity);
+    }
+
+    #[test]
+    fn capacity_bounds_check_accepts_maximum_total() {
+        // The largest representable total capacity is permitted; only exceeding it is rejected.
+        assert_capacity_within_bounds(usize::MAX, 0);
+        assert_capacity_within_bounds(0, usize::MAX);
+        assert_capacity_within_bounds(usize::MAX - 1, 1);
+        assert_capacity_within_bounds(usize::MAX / 2, usize::MAX / 2);
+    }
+
+    #[test]
+    fn capacity_bounds_check_rejects_len_plus_available_overflow() {
+        // Neither component overflows on its own, but their sum exceeds usize::MAX. This is the
+        // situation that arises when `len` grows via appended shared memory (in `append`) while
+        // `available` holds separately reserved capacity (in `extend_capacity_by_at_least`): each
+        // site guards only the component it grows, so only this combined check catches the overflow.
+        assert_panic!(assert_capacity_within_bounds(usize::MAX, 1));
+        assert_panic!(assert_capacity_within_bounds(usize::MAX - 4, 8));
+        assert_panic!(assert_capacity_within_bounds(usize::MAX / 2 + 1, usize::MAX / 2 + 1));
     }
 
     // Compile time test
