@@ -980,10 +980,9 @@ The natural bridge to `fetch` is `ReadExt::into_futures_stream`, which turns a
 `bytesbuf_io::Read` into a `Stream<Item = Result<BytesView>>` that
 `HttpBodyBuilder::stream` accepts directly. This requires `ReadAsFuturesStream<S>`'s
 boxed in-flight read future to be `Send` (so the stream satisfies
-`HttpBodyBuilder::stream`'s `Send + 'static` bound); the fix adding that `+ Send`
-bound in `bytesbuf_io` is in the merge queue, so we assume it available. It is sound
-because `bytesbuf_io::Read` is `#[trait_variant::make(Send)]` and its read futures
-are already `Send`. The response body is then simply:
+`HttpBodyBuilder::stream`'s `Send + 'static` bound), which `bytesbuf_io` provides.
+It is sound because `bytesbuf_io::Read` is `#[trait_variant::make(Send)]` and its
+read futures are already `Send`. The response body is then simply:
 
 ```rust,ignore
 let stream = WinHttpBodyReader::new(/* .. */).into_futures_stream();
@@ -1288,8 +1287,8 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
   vendors only `windows-sys`), features `Win32_Networking_WinHttp` and
   `Win32_Foundation`, target-gated via `[target.'cfg(windows)'.dependencies]`.
 - `fetch`, `http_extensions`, `fetch_options`, `bytesbuf`, `bytesbuf_io` (whose
-  `ReadExt::into_futures_stream` feeds the response body; its `+ Send` fix is
-  assumed available, §11.2), `thread_aware`, `tick`, `events_once`, `plurality`,
+  `ReadExt::into_futures_stream` feeds the response body, §11.2), `thread_aware`,
+  `tick`, `events_once`, `plurality`,
   `ohno`, `recoverable`, `http`, `http-body`, `opentelemetry` (meter), `tracing`,
   `widestring` (UTF-16), `smallvec`. No `anyspawn`: nothing the transport calls
   can block (§3.1), so there is no blocking pool and no `Spawner`.
