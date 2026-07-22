@@ -91,7 +91,7 @@ block (§3.1).
 (crypto providers, verifiers, client-cert resolvers) that is meaningless to
 Schannel. WinHTTP does TLS itself and accepts only a small set of knobs, so
 `fetch_winhttp` ignores `CustomContext::tls` and takes its own `WinHttpTlsConfig`
-through `Extras` (§9). That TLS configuration is inherently transport-specific is,
+through `Extras` (§9). TLS configuration being inherently transport-specific is,
 in our view, a `fetch` API shortcoming; see §17.
 
 ### 1.3 Architecture at a glance
