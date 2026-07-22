@@ -135,10 +135,13 @@ impl MockValueProtector {
         Self::default()
     }
 
-    /// Derives a nonce from the counter (counter in the first 4 bytes, then filler).
+    /// Derives a deterministic nonce from the counter bytes (repeated to fill).
     fn nonce_bytes(counter: u32) -> [u8; MOCK_NONCE_SIZE] {
-        let mut nonce = [0xA5u8; MOCK_NONCE_SIZE];
-        nonce[..4].copy_from_slice(&counter.to_le_bytes());
+        let counter_bytes = counter.to_le_bytes();
+        let mut nonce = [0u8; MOCK_NONCE_SIZE];
+        for (i, byte) in nonce.iter_mut().enumerate() {
+            *byte = counter_bytes[i % counter_bytes.len()];
+        }
         nonce
     }
 
