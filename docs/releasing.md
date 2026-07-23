@@ -274,6 +274,10 @@ change:
 - Every proc-macro-only package in the release set is shown in the
   standard interactive package dialog, even when it was supplied via
   `-Packages` or was cascade-added without changes in its own folder.
+- The dialog uses the same renderer, choices, and decision handling as
+  every other package. Proc-macro detection only bypasses the unsupported
+  automated check and records that the standard decision was made
+  manually.
 - Use **View diff**, then either keep the currently planned change type
   or select breaking / non-breaking / patch. For a targeted package, a
   new selection replaces the provisional `-Packages` change type. For a
@@ -322,7 +326,7 @@ cargo test -p templated_uri
 ```
 
 The `patch` token is the provisional plan entry, not an automated
-compatibility verdict. In the mandatory proc-macro dialog, view the diff
+compatibility verdict. In the standard package dialog, view the diff
 and choose the actual change type before allowing the release to proceed.
 If that choice is breaking, the planner next requires review of
 `templated_uri`, its direct published consumer; keep or elevate
