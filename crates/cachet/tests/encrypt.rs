@@ -9,6 +9,10 @@
 
 #![cfg(all(feature = "encrypt", feature = "serialize", feature = "test-util"))]
 
+// Integration binaries link the library with `cfg(test)` false, so the crate-root
+// tracing initialization does not run here. Install it directly. See docs/tracing-tests.md.
+testing_aids::init_tracing!();
+
 use bytesbuf::BytesView;
 use cachet::{Cache, CacheEntry, CacheOp, CacheTier, MockCache, MockValueProtector};
 use tick::Clock;
