@@ -19,6 +19,16 @@ use crate::internal::arena_buf::DrainAll;
 /// then yields ownership of each element via an internal drain. The
 /// buffer's backing storage is reclaimed by the arena when the arena
 /// itself is torn down.
+/// ```
+/// use multitude::Arena;
+/// use multitude::vec::IntoIter;
+///
+/// let arena = Arena::new();
+/// let mut values = arena.alloc_vec();
+/// values.extend_from_slice([1, 2]);
+/// let iter: IntoIter<'_, i32, _> = values.into_iter();
+/// assert_eq!(iter.collect::<std::vec::Vec<_>>(), [1, 2]);
+/// ```
 pub struct IntoIter<'a, T, A: Allocator + Clone> {
     inner: DrainAll<'a, T>,
     // Hold the arena reference so the iterator's lifetime is tied to it.

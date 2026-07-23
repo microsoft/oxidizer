@@ -23,6 +23,17 @@ use crate::{AllocError, Arc, Box, Rc};
 #[cfg_attr(docsrs, doc(cfg(feature = "utf16")))]
 impl<A: Allocator + Clone> Arena<A> {
     /// Copy `s` into a chunk and return an `Arc<Utf16Str>`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_arc(widestring::utf16str!("wide"));
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Arc<Utf16Str, A>
@@ -38,6 +49,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_arc(widestring::utf16str!("wide")) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_arc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<Arc<Utf16Str, A>, AllocError>
     where
@@ -47,6 +71,17 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Copy `s` into a chunk and return an `Rc<Utf16Str>` (non-atomic).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_rc(widestring::utf16str!("wide"));
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_rc(&self, s: impl AsRef<widestring::Utf16Str>) -> Rc<Utf16Str, A> {
@@ -59,6 +94,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_rc(widestring::utf16str!("wide")) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_rc(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<Rc<Utf16Str, A>, AllocError> {
         self.impl_alloc_utf16_str_smart::<LocalStrong>(s.as_ref().as_slice())
@@ -80,6 +128,17 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Copy `s` into the arena and return a `Box<Utf16Str>`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_box(widestring::utf16str!("wide"));
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Box<Utf16Str, A> {
@@ -92,6 +151,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_box(widestring::utf16str!("wide")) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "wide");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_box(&self, s: impl AsRef<widestring::Utf16Str>) -> Result<Box<Utf16Str, A>, AllocError> {
         self.impl_alloc_prefixed_shared::<u16>(s.as_ref().as_slice()).map(|ptr|
@@ -104,6 +176,17 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Transcode `s` from UTF-8 to UTF-16 and return an `Arc<Utf16Str>`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_arc_from_str("AΩ");
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Arc<Utf16Str, A>
@@ -119,6 +202,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_arc_from_str("AΩ") else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_arc_from_str(&self, s: impl AsRef<str>) -> Result<Arc<Utf16Str, A>, AllocError>
     where
@@ -128,6 +224,17 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Transcode `s` from UTF-8 to UTF-16 and return an `Rc<Utf16Str>` (non-atomic).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_rc_from_str("AΩ");
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_rc_from_str(&self, s: impl AsRef<str>) -> Rc<Utf16Str, A> {
@@ -140,12 +247,36 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_rc_from_str("AΩ") else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_rc_from_str(&self, s: impl AsRef<str>) -> Result<Rc<Utf16Str, A>, AllocError> {
         self.impl_alloc_utf16_prefixed_from_str_arc::<LocalStrong>(s.as_ref())
     }
 
     /// Transcode `s` from UTF-8 to UTF-16 and return a `Box<Utf16Str>`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_str_box_from_str("AΩ");
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Box<Utf16Str, A> {
@@ -158,6 +289,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_str_box_from_str("AΩ") else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.to_string(), "AΩ");
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_str_box_from_str(&self, s: impl AsRef<str>) -> Result<Box<Utf16Str, A>, AllocError> {
         self.impl_alloc_utf16_prefixed_from_str(s.as_ref()).map(|ptr|
@@ -170,6 +314,18 @@ impl<A: Allocator + Clone> Arena<A> {
     }
 
     /// Create a new, empty growable [`Utf16String`](crate::strings::Utf16String) backed by this arena.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let mut value = arena.alloc_utf16_string();
+    /// value.push('A');
+    /// assert_eq!(value.to_string(), "A");
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub const fn alloc_utf16_string(&self) -> Utf16String<'_, A> {
@@ -184,6 +340,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails. Use
     /// [`Self::try_alloc_utf16_string_with_capacity`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_utf16_string_with_capacity(8);
+    /// assert!(value.capacity() >= 8);
+    /// # }
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_utf16_string_with_capacity(&self, cap: usize) -> Utf16String<'_, A> {
@@ -196,6 +363,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the source
     /// string is too large to allocate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "utf16")]
+    /// # {
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_utf16_string_with_capacity(8) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert!(value.capacity() >= 8);
+    /// # }
+    /// ```
     #[inline]
     pub fn try_alloc_utf16_string_with_capacity(&self, cap: usize) -> Result<Utf16String<'_, A>, AllocError> {
         Utf16String::try_with_capacity_in(cap, self)
@@ -212,16 +392,8 @@ impl<A: Allocator + Clone> Arena<A> {
     /// the first payload element.
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // size-hint mutation ⇒ refill spin (OOM)
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "base reservation is align_of::<u16>() (passed to try_alloc); `base + PREFIX_BYTES` is u16-aligned"
-    )]
     fn impl_alloc_utf16_prefixed_from_str(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
-        // `encode_utf16` is lazy; pre-walking is O(n) but lets us size
-        // the reservation exactly without over-allocating for ASCII.
-        // Each char's UTF-16 unit count never exceeds its UTF-8 byte length, so
-        // this total can never exceed `s.len()` (which fits in `isize`); the
-        // checked accumulation makes that no-overflow guarantee explicit.
+        // Precompute the exact UTF-16 length; it cannot exceed `s.len()`.
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))
@@ -279,11 +451,7 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // size-hint mutation ⇒ refill spin (OOM)
     fn alloc_utf16_prefixed_from_str_raw<S: Strong>(&self, s: &str) -> Result<NonNull<u16>, AllocError> {
-        // Each char's UTF-16 unit count never exceeds its UTF-8 byte length, so
-        // this total can never exceed `s.len()` (which fits in `isize`); the
-        // checked accumulation makes that no-overflow guarantee explicit and
-        // returns `AllocError` rather than wrapping should the invariant ever be
-        // violated.
+        // The exact UTF-16 length cannot exceed `s.len()`.
         let exact = s
             .chars()
             .try_fold(0_usize, |acc, c| acc.checked_add(c.len_utf16()))
@@ -316,12 +484,8 @@ impl<A: Allocator + Clone> Arena<A> {
 /// via `encode_utf16` into the `u16` payload immediately after, and
 /// returns a thin pointer to the first payload element. `exact` must
 /// match `s.chars().map(char::len_utf16).sum()` from a pre-walk.
-//
-// Skip `inline(always)` under coverage: a real out-of-line body lets
-// llvm-cov attribute hits reliably, since the source-line mapping for
-// inlined copies is fragile and shifts with the dep graph.
 #[cfg_attr(not(coverage_nightly), inline(always))]
-#[allow(
+#[expect(
     clippy::cast_ptr_alignment,
     reason = "see callers: `base + PREFIX_BYTES` is u16-aligned by construction"
 )]

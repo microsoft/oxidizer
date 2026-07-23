@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Pin support coverage: scalar / uninit / slice / DST allocators
-//! producing `Pin<P<T>>` for `Box`, `Rc`, and `Arc`. Verifies the
-//! pin contract (stable address until drop) holds across clones,
-//! arena drop, and reset.
+//! Pin-contract tests for scalar, uninitialized, slice, and DST allocations.
 
 #![allow(clippy::std_instead_of_core, reason = "test code")]
 #![allow(clippy::unwrap_used, reason = "test code")]

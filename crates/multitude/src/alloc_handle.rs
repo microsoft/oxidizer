@@ -9,8 +9,7 @@ use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::{fmt, ptr};
 
-/// An owning handle to a value in an [`Arena`](crate::Arena),
-/// with a lifetime tied to that arena.
+/// An owning handle to a value tied to its [`Arena`](crate::Arena).
 ///
 /// # Memory reclamation
 ///
@@ -61,12 +60,20 @@ impl<'a, T: ?Sized> Alloc<'a, T> {
         Self { inner }
     }
 
-    /// Consumes the `Alloc` and returns the underlying `&'a mut T` borrow,
-    /// **without** running the value's destructor.
+    /// Returns the mutable borrow without running the value's destructor.
     ///
     /// This is the escape hatch back to a bare arena-lifetime reference: the
     /// value lives until the arena is reset or dropped, and its destructor is
     /// never run.
+    ///
+    /// ```
+    /// use multitude::{Alloc, Arena};
+    ///
+    /// let arena = Arena::new();
+    /// let value = Alloc::leak(arena.alloc(String::from("kept")));
+    /// value.push_str(" alive");
+    /// assert_eq!(value, "kept alive");
+    /// ```
     #[must_use]
     #[inline]
     pub fn leak(this: Self) -> &'a mut T {
@@ -87,6 +94,14 @@ impl<'a, T: ?Sized> Alloc<'a, T> {
     /// Sound for any `T` (including `!Unpin`): the value's address is fixed at
     /// allocation time and the `Alloc` finalizes it in place through its normal
     /// [`Drop`].
+    ///
+    /// ```
+    /// use multitude::{Alloc, Arena};
+    ///
+    /// let arena = Arena::new();
+    /// let pinned = Alloc::into_pin(arena.alloc(42_u32));
+    /// assert_eq!(*pinned, 42);
+    /// ```
     #[must_use]
     #[inline]
     pub fn into_pin(this: Self) -> Pin<Self> {

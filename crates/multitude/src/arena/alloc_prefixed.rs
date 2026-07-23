@@ -25,6 +25,7 @@ use super::alloc_value::acquire_chunk_ref;
 use crate::AllocError;
 use crate::internal::chunk_ref::ChunkRef;
 use crate::internal::thin_dst;
+use crate::internal::uninit::copy_bytes_nonoverlapping;
 
 /// Byte size of the inline element-count prefix written immediately
 /// before every prefixed-shared payload.
@@ -76,15 +77,8 @@ impl<A: Allocator + Clone> Arena<A> {
         // recovery invariant used by the smart pointers' `Drop`.
         let payload_bytes = len.checked_mul(elem_size).ok_or(AllocError::CAPACITY_OVERFLOW)?.max(elem_align);
         let total = PREFIX_BYTES.checked_add(payload_bytes).ok_or(AllocError::CAPACITY_OVERFLOW)?;
-        // `total` is an exact reservation size, not a worst-case hint: unlike
-        // the slice paths (which permit over-aligned `T` and so add `elem_align`
-        // of front-padding slack to their routing hint), the const-assert above
-        // bounds `elem_align <= align_of::<usize>() <= value_align`. A fresh
-        // chunk's payload base is `value_align`-aligned, so an `elem_align`
-        // reservation on a freshly refilled chunk never consumes front padding.
-        // Routing/refilling with `total` therefore always yields a chunk into
-        // which the retry's `try_alloc_with_chunk(total, elem_align)` fits — no
-        // `total` vs `total + elem_align` boundary loop is possible here.
+        // A fresh chunk's payload is `value_align`-aligned and `elem_align` is
+        // no larger, so `total` is the exact reservation with no front padding.
         loop {
             // Allocate `total` bytes aligned to `align_of::<T>()` so the
             // payload (at offset PREFIX_BYTES, a multiple of any align
@@ -229,7 +223,11 @@ fn write_prefixed_payload<T: Copy>(base: NonNull<u8>, src: &[T]) -> NonNull<T> {
     unsafe {
         ptr::write_unaligned(base.as_ptr().cast::<usize>(), len);
         let payload_ptr = base.as_ptr().add(PREFIX_BYTES).cast::<T>();
-        ptr::copy_nonoverlapping(src.as_ptr(), payload_ptr, len);
+        if const { mem::size_of::<T>() == 1 } {
+            copy_bytes_nonoverlapping(src.as_ptr().cast(), payload_ptr.cast(), len);
+        } else {
+            ptr::copy_nonoverlapping(src.as_ptr(), payload_ptr, len);
+        }
         NonNull::new_unchecked(payload_ptr)
     }
 }

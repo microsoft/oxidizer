@@ -1,0 +1,36 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "multitude_macros"
+description = "Macros for the multitude crate."
+version = "0.1.0"
+readme = "README.md"
+keywords = ["oxidizer", "arena", "allocator", "macro", "derive"]
+categories = ["data-structures"]
+
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+homepage = { workspace = true }
+include = { workspace = true }
+repository = "https://github.com/microsoft/oxidizer/tree/main/crates/multitude_macros"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+multitude_macros_impl = { workspace = true }
+syn = { workspace = true, features = ["full", "derive", "printing", "parsing", "extra-traits", "proc-macro", "clone-impls"] }
+
+[dev-dependencies]
+mutants = { workspace = true }
+
+# >>> anvil-managed: anvil-lints
+[lints]
+workspace = true
+# <<< anvil-managed: anvil-lints
