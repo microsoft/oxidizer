@@ -8,7 +8,8 @@
 #![cfg(all(feature = "build", not(miri)))] // filesystem I/O is unsupported under Miri.
 
 use http_path_template::{Grammar, PathTemplate};
-use rest_over_grpc::build::{Binding, Generator, HttpMethod, HttpRule, ResponseBody, ServiceDefinition, generate_router};
+use rest_over_grpc::build::{Binding, Generator, HttpRule, ResponseBody, ServiceDefinition, generate_router};
+use routerama::HttpMethod;
 
 fn rule(rpc: &str, method: HttpMethod, pattern: &str) -> HttpRule {
     HttpRule::new(
@@ -37,10 +38,10 @@ fn generator_renders_and_inspects_services() {
     assert!(transcoder.to_string().contains("struct Transcoder"));
     let library = generated.iter().find(|g| g.trait_name() == "Library").expect("Library generated");
     assert_eq!(library.module_name(), "library");
-    assert!(library.r#trait().to_string().contains("get_shelf"));
+    assert!(library.service_trait().to_string().contains("get_shelf"));
     // The tonic bridge is on by default; the trait itself carries no bridge impl.
     assert!(library.tonic_bridge().is_some());
-    assert!(library.r#trait().to_string().contains("pub trait Library"));
+    assert!(library.service_trait().to_string().contains("pub trait Library"));
 }
 
 #[test]
@@ -72,14 +73,14 @@ fn generator_concatenates_services_sharing_a_module() {
 
     // Two services grouped into the same module are concatenated into one file.
     let mut books = ServiceDefinition::new("Books", None);
-    books.module("catalog").add_method(
+    books.set_module_name("catalog").add_method(
         rule("GetBook", HttpMethod::GET, "/v1/books/{book}"),
         "crate::Req",
         "crate::Resp",
         None,
     );
     let mut shelves = ServiceDefinition::new("Shelves", None);
-    shelves.module("catalog").add_method(
+    shelves.set_module_name("catalog").add_method(
         rule("GetShelf", HttpMethod::GET, "/v1/shelves/{shelf}"),
         "crate::Req",
         "crate::Resp",
@@ -294,7 +295,8 @@ mod descriptor {
     #[cfg(feature = "build-openapi")]
     #[test]
     fn generate_exposes_the_openapi_spec_per_service() {
-        use rest_over_grpc::build::{HttpMethod, HttpRule, OpenApiInfo};
+        use rest_over_grpc::build::{HttpRule, OpenApiInfo};
+        use routerama::HttpMethod;
 
         let descriptor = descriptor_set(PROTO);
 

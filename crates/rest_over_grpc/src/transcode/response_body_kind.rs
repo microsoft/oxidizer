@@ -17,7 +17,7 @@
 /// let field = ResponseBodyKind::Field("name");
 /// assert_eq!(field, ResponseBodyKind::Field("name"));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResponseBodyKind {
     /// The whole response message is the body.
     Whole,

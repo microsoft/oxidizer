@@ -81,6 +81,7 @@ async fn error_in_stream_is_propagated() {
 
 #[test]
 fn content_types_match_encodings() {
+    assert_eq!(StreamEncoding::default(), StreamEncoding::JsonArray);
     assert_eq!(StreamEncoding::JsonArray.content_type(), "application/json");
     assert_eq!(StreamEncoding::NdJson.content_type(), "application/x-ndjson");
     assert_eq!(StreamEncoding::Sse.content_type(), "text/event-stream");
@@ -198,9 +199,24 @@ async fn streaming_response_encodes_ndjson_frames_lazily() {
     assert_eq!(String::from_utf8(frames.concat()).expect("utf8"), "{\"n\":1}\n{\"n\":2}\n");
 }
 
+#[tokio::test]
+async fn streaming_response_applies_response_body_mapping() {
+    let items = stream::iter(vec![Ok::<_, Status>(Msg { n: 7 })]);
+    let response = StreamingResponse::encode_response(
+        items,
+        StreamEncoding::JsonArray,
+        rest_over_grpc::codegen_helpers::ResponseBodyKind::Field("n"),
+    );
+    let frames: Vec<Vec<u8>> = response.into_frames().map(|frame| frame.expect("frame")).collect().await;
+    assert_eq!(frames.concat(), b"[7]");
+}
+
 #[test]
 fn streaming_response_merges_response_headers() {
-    let mut response = StreamingResponse::new("application/json", stream::empty::<Result<Vec<u8>, Status>>());
+    let mut response = StreamingResponse::new(
+        http::HeaderValue::from_static("application/json"),
+        stream::empty::<Result<Vec<u8>, Status>>(),
+    );
     let mut headers = http::HeaderMap::new();
     _ = headers.insert("x-trace", "abc".parse().expect("valid header value"));
     response.merge_headers(headers);

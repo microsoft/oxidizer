@@ -2,7 +2,10 @@
 # Licensed under the MIT License.
 
 examine_globs = ["crates/**"]
-exclude_globs = ["crates/testing_aids/**"]
+exclude_globs = [
+    "crates/rest_over_grpc_examples/**",
+    "crates/testing_aids/**",
+]
 all_features = true
 cap_lints = true
 profile = "mutants"

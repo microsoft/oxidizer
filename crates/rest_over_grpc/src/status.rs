@@ -66,7 +66,7 @@ impl Status {
         }
     }
 
-    /// Creates an [`Code::InvalidArgument`] status.
+    /// Creates a [`Code::InvalidArgument`] status.
     ///
     /// # Examples
     ///
@@ -203,7 +203,7 @@ impl Status {
 
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}: {}", self.code, self.message)
+        write!(f, "{}: {}", self.code, self.message)
     }
 }
 
@@ -218,5 +218,10 @@ mod tests {
         let status = Status::invalid_argument("bad").with_detail(serde_json::json!({ "field": "shelf" }));
         assert_eq!(status.details().len(), 1);
         assert_eq!(status.details()[0]["field"], "shelf");
+    }
+
+    #[test]
+    fn display_uses_canonical_code_name() {
+        assert_eq!(Status::not_found("gone").to_string(), "NOT_FOUND: gone");
     }
 }

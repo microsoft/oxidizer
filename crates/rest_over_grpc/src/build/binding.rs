@@ -14,7 +14,8 @@ use super::route::Route;
 ///
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
-/// use rest_over_grpc::build::{Binding, HttpMethod, RequestBody};
+/// use rest_over_grpc::build::{Binding, RequestBody};
+/// use routerama::HttpMethod;
 ///
 /// let binding = Binding::new(
 ///     HttpMethod::GET,
@@ -74,8 +75,9 @@ impl Binding {
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "only unreachable panics")]
     pub fn template(&self) -> PathTemplate<'_> {
-        // The pattern was parsed and validated when this `Binding` was created,
-        // so re-parsing it with the affix-enabled grammar preserves its AST.
+        // PathTemplate borrows its input, so the owned pattern is parsed on
+        // access. The affix grammar is deliberately used here as a superset of
+        // the constructor's grammar so rendered affixes recover as Segment::Affix.
         PathTemplate::parse(&self.pattern, Grammar::default().with_segment_affixes())
             .expect("pattern was validated when the Binding was created")
     }

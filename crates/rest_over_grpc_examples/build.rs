@@ -26,6 +26,8 @@ fn main() {
     build_custom(&proto_dir, &out_dir.join("custom"));
 
     println!("cargo:rerun-if-changed=proto/library.proto");
+    println!("cargo:rerun-if-changed=proto/google/api/annotations.proto");
+    println!("cargo:rerun-if-changed=proto/google/api/http.proto");
     println!("cargo:rerun-if-changed=build.rs");
 }
 

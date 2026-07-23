@@ -11,19 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release of `rest_over_grpc`, the framework-neutral runtime for transcoding
   gRPC services into REST/JSON endpoints.
-- `Code` plus `map_code_to_http` / `map_http_to_code` for translating between
-  gRPC status codes and HTTP status codes.
-- Generated-router support types: `split_path`, `Segments`, and `Binding`.
-- `Status` and `HttpResponse`: neutral request/response value types returned by
-  generated dispatchers.
-- `transcode` module: serde-based JSON⇄message request/response transcoding
-  (`decode_request`, `encode_response`, `BodyKind`, `ResponseBodyKind`,
-  `status_response`, `not_found_response`), composing with `pbjson`-generated
-  proto3-canonical serde.
+- `Code::to_http_status` and `Code::from_http_status` for translating between
+  gRPC and HTTP status codes.
+- Build-time generation through `Generator`, `ServiceDefinition`, `HttpRule`,
+  and `Binding`.
+- Framework-neutral handling and response types: `Status`, `Context`,
+  `HttpResponse`, `StreamingResponse`, and `TranscodeResponse`.
+- Serde-based JSON⇄message transcoding through `decode_request` and
+  `encode_response`, using `RequestBodyKind` and `ResponseBodyKind` and
+  composing with `pbjson`-generated proto3-canonical serde.
 - Query-string helpers `split_query` and `parse_query`.
-- Web-stack adapters: `HttpResponse::into_http`, `adapter::transcode_http`, and
-  `adapter::RestService`, bridging the neutral dispatcher to the `http`/`http-body`
-  ecosystem. `RestService` implements both `tower::Service` (feature `tower`) and
-  `layered::Service` (feature `layered`) over the same dispatcher.
-- Examples: `tower_service` and `layered_service` demonstrate serving requests
-  through each adapter.
+- Serving adapters `serve_http`, `serve_http_fn`, and `RestService`, bridging
+  generated transcoders to the `http`/`http-body` ecosystem. `RestService`
+  implements both `tower::Service` (feature `tower`) and `layered::Service`
+  (feature `layered`).
+- Runnable examples covering Tower, Axum, direct transcoding, streaming,
+  OpenAPI generation, custom handlers, and gRPC-stack bridges.

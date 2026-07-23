@@ -42,14 +42,23 @@ pub(crate) struct CodegenOptions {
 /// # #[cfg(not(feature = "build"))]
 /// # fn main() {}
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct Generator {
     pub(crate) services: Vec<ServiceDefinition>,
-    // Stored inverted so the derived `Default` yields output with the `tonic`
-    // bridge emitted.
-    pub(crate) no_tonic: bool,
+    pub(crate) emit_tonic: bool,
     #[cfg(feature = "build-openapi")]
     pub(crate) openapi: Option<OpenApiInfo>,
+}
+
+impl Default for Generator {
+    fn default() -> Self {
+        Self {
+            services: Vec::new(),
+            emit_tonic: true,
+            #[cfg(feature = "build-openapi")]
+            openapi: None,
+        }
+    }
 }
 
 impl Generator {
@@ -91,7 +100,7 @@ impl Generator {
     /// The code-generation options configured on this generator.
     fn codegen_options(&self) -> CodegenOptions {
         CodegenOptions {
-            emit_tonic: !self.no_tonic,
+            emit_tonic: self.emit_tonic,
         }
     }
 
@@ -150,7 +159,7 @@ impl Generator {
         #[cfg(feature = "build-openapi")]
         let mut openapi_by_module: Vec<(String, Vec<String>)> = Vec::new();
         for output in outputs {
-            let mut code = output.r#trait().to_string();
+            let mut code = output.service_trait().to_string();
             if let Some(bridge) = output.tonic_bridge() {
                 code.push('\n');
                 code.push_str(&bridge.to_string());

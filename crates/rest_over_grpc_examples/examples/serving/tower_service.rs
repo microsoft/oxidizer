@@ -23,10 +23,13 @@ use rest_over_grpc::serving::RestService;
 use rest_over_grpc_examples::tonic_bridge::{LibraryService, Transcoder};
 use tower_service::Service as _;
 
+const MAX_BODY_BYTES: usize = 1 << 20;
+
 fn main() {
     // `RestService::new` wraps the generated `Transcoder` (any `Transcode`) as a
-    // `tower` service directly — no hand-written wiring closure needed.
-    let mut service = RestService::new(Transcoder::new(LibraryService));
+    // `tower` service directly. Cap buffered requests before exposing it to
+    // untrusted clients.
+    let mut service = RestService::new(Transcoder::new(LibraryService)).with_max_body_bytes(MAX_BODY_BYTES);
 
     for target in ["/v1/shelves/history", "/v1/shelves:stream", "/v1/nope"] {
         let request = Request::builder()

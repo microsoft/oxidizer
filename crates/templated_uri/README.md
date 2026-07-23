@@ -1,5 +1,5 @@
 <div align="center">
- <img src="./logo.png" alt="Templated Uri Logo" width="96">
+ <img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="Templated Uri Logo" width="96">
 
 # Templated Uri
 
@@ -8,8 +8,8 @@
 [![MSRV](https://img.shields.io/crates/msrv/templated_uri)](https://crates.io/crates/templated_uri)
 [![CI](https://github.com/microsoft/oxidizer/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/microsoft/oxidizer/actions/workflows/main.yml)
 [![Coverage](https://codecov.io/gh/microsoft/oxidizer/graph/badge.svg?token=FCUG0EL5TI)](https://codecov.io/gh/microsoft/oxidizer)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
-<a href="../.."><img src="../../logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/microsoft/oxidizer/blob/main/LICENSE)
+<a href="https://github.com/microsoft/oxidizer"><img src="https://raw.githubusercontent.com/microsoft/oxidizer/refs/heads/main/logo.svg" alt="This crate was developed as part of the Oxidizer project" width="20"></a>
 
 </div>
 
@@ -195,10 +195,10 @@ and servers based on [`hyper`][__link16] like [`reqwest`][__link17].
 
 <hr/>
 <sub>
-This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
+This crate was developed as part of <a href="https://github.com/microsoft/oxidizer">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/templated_uri">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbreJMElgxp0kbqex4QSgBMK8bdglL8RqN6aobvSfumN6CAithZIKCZGh0dHBlMS40LjKCbXRlbXBsYXRlZF91cmllMC4zLjQ
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQb11VxC_uAPOQbtUn4Wx2-BfAbid3Nt1Y27Pobprn8Z6FjFy9hYvRhcoQbreJMElgxp0kbqex4QSgBMK8bdglL8RqN6aobvSfumN6CAithZIKCZGh0dHBlMS40LjKCbXRlbXBsYXRlZF91cmllMC4zLjQ
  [__link0]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Uri
  [__link1]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=BaseUri
  [__link10]: https://docs.rs/templated_uri/0.3.4/templated_uri/?search=Escape

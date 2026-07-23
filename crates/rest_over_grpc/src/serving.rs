@@ -30,7 +30,7 @@
 //!     }
 //! }
 //!
-//! let _svc = RestService::new(Api);
+//! let _svc = RestService::new(Api).with_max_body_bytes(1 << 20);
 //! # }
 //! # }
 //! ```
@@ -384,8 +384,9 @@ where
 /// #     }
 /// # }
 ///
-/// // `Api` is a generated `Transcoder`; mount it directly.
-/// let _service = RestService::new(Api);
+/// // `Api` is a generated `Transcoder`; cap buffered requests when serving
+/// // untrusted clients.
+/// let _service = RestService::new(Api).with_max_body_bytes(1 << 20);
 /// # }
 /// # }
 /// ```

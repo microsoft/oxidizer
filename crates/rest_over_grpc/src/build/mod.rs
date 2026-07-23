@@ -19,6 +19,13 @@
 //! [`GeneratorBuilder::emit_tonic_bridge`] with `false` when implementing the
 //! generated REST trait directly or using another gRPC stack.
 //!
+//! Descriptor lowering belongs here because `google.api.http` annotations and
+//! protobuf type information are available only after the consuming build
+//! script has produced a descriptor set. A source-level procedural macro cannot
+//! consume that build output, while `routerama_build` intentionally remains
+//! independent of protobuf and gRPC semantics. This module translates those
+//! semantics into `routerama` routes after message generation.
+//!
 //! ```ignore
 //! use rest_over_grpc::build::{DescriptorOptions, Generator, ServiceDefinition};
 //!
@@ -46,21 +53,31 @@ mod route;
 mod service_definition;
 mod service_method;
 
+#[doc(inline)]
 pub use binding::Binding;
+#[doc(inline)]
 pub use descriptor_error::DescriptorError;
+#[doc(inline)]
 pub use descriptor_options::DescriptorOptions;
 // Internal primitive, `pub` only so the `rest_over_grpc_tests` crate can build a
 // bare `Route::resolve`; not part of the documented public API.
 #[doc(hidden)]
 pub use emit::generate_router;
+#[doc(inline)]
 pub use generator::{Generator, compile_fds};
+#[doc(inline)]
 pub use generator_builder::GeneratorBuilder;
+#[doc(inline)]
 pub use generator_output::GeneratedOutput;
+#[doc(inline)]
 pub use http_rule::HttpRule;
 #[cfg(feature = "build-openapi")]
 #[cfg_attr(docsrs, doc(cfg(feature = "build-openapi")))]
+#[doc(inline)]
 pub use openapi::OpenApiInfo;
+#[doc(inline)]
 pub use request_body::RequestBody;
+#[doc(inline)]
 pub use response_body::ResponseBody;
-pub use routerama::HttpMethod;
+#[doc(inline)]
 pub use service_definition::ServiceDefinition;

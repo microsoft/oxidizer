@@ -14,7 +14,7 @@ use core::fmt;
 /// assert_eq!(ResponseBody::default(), ResponseBody::Whole);
 ///
 /// // `Display` renders the `HttpRule.response_body` value.
-/// assert_eq!(ResponseBody::Whole.to_string(), "*");
+/// assert_eq!(ResponseBody::Whole.to_string(), "");
 /// assert_eq!(ResponseBody::Field("book".to_owned()).to_string(), "book");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -31,7 +31,7 @@ pub enum ResponseBody {
 impl fmt::Display for ResponseBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Whole => f.write_str("*"),
+            Self::Whole => Ok(()),
             Self::Field(field) => f.write_str(field),
         }
     }
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn display_renders_http_rule_values() {
-        assert_eq!(ResponseBody::Whole.to_string(), "*");
+        assert_eq!(ResponseBody::Whole.to_string(), "");
         assert_eq!(ResponseBody::Field("book".to_owned()).to_string(), "book");
     }
 }

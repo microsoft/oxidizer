@@ -10,9 +10,8 @@ use serde::Serialize;
 use super::route::Route;
 use super::{RequestBody, ResponseBody};
 
-/// Metadata for the generated OpenAPI document that the `.proto` file cannot
-/// carry: the API title and version (both required by the OpenAPI
-/// specification) and optional server base URLs.
+/// Metadata for the generated OpenAPI document that the `.proto` file doesn't
+/// carry.
 ///
 /// Generation derives paths, parameters, request bodies, responses, and
 /// component schemas from descriptor-decoded services. It does not add
@@ -27,7 +26,7 @@ use super::{RequestBody, ResponseBody};
 /// let info = OpenApiInfo::new("Library", "v1").add_server("https://api.example.test");
 /// assert_eq!(info.title(), "Library");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenApiInfo {
     title: String,
     version: String,

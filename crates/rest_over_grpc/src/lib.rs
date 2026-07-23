@@ -13,6 +13,8 @@
 //! the gRPC service, so you can reuse the same handlers without a separate
 //! gateway hop.
 //!
+//! # Three layers
+//!
 //! The crate is organized around three layers:
 //!
 //! - **Serving**: adapt network I/O to the transcoder and back.
@@ -21,7 +23,47 @@
 //! - **Handling**: implement the generated service trait directly or bridge an
 //!   existing gRPC stack into it.
 //!
-//! ## Quick start: bridge an existing `tonic` service
+//! ## Serving
+//!
+//! Pick the integration that fits your stack:
+//!
+//! - `tower`: wrap a generated transcoder with [`RestService::new`](serving::RestService::new) to get a [`tower_service::Service`].
+//! - `layered`: the same [`RestService`](serving::RestService) also implements [`layered::Service`].
+//! - `axum`: the `tower`-based [`RestService`](serving::RestService) mounts directly in `axum`; with the `axum` feature, the neutral response types also implement [`IntoResponse`](https://docs.rs/axum-core/latest/axum_core/response/trait.IntoResponse.html).
+//! - direct HTTP: call [`serve_http`](serving::serve_http) or [`serve_http_fn`](serving::serve_http_fn) yourself.
+//! - custom transport: disable `serving` and call [`transcode`](transcoding::Transcode::transcode) / [`try_transcode`](transcoding::Transcode::try_transcode) with `(method, target, headers, body)`.
+//!
+//! ## Transcoding
+//!
+//! Generated transcoders support unary and server-streaming RPCs. Unary calls
+//! return a buffered [`HttpResponse`](transcoding::HttpResponse); server-streaming
+//! calls return a [`StreamingResponse`](transcoding::StreamingResponse) whose
+//! frames are forwarded as they are produced.
+//!
+//! Server-streaming response encoding is negotiated from `Accept`: JSON array
+//! (`application/json`, `*/*`, or absent), NDJSON (`application/x-ndjson`), or
+//! Server-Sent Events (`text/event-stream`).
+//!
+//! Use [`transcode`](transcoding::Transcode::transcode) when unmatched routes
+//! should become `404`; use [`try_transcode`](transcoding::Transcode::try_transcode)
+//! when you want to fall back to custom routing.
+//!
+//! ## Handling
+//!
+//! The generated `<Service>` trait has one method per RPC, each taking the
+//! decoded request plus a mutable [`Context`](handling::Context).
+//!
+//! - `tonic`: the [`build`] module emits a blanket bridge so a `tonic`
+//!   implementation can serve REST too.
+//! - direct implementation: implement the generated trait yourself.
+//! - other gRPC stacks: write a small bridge that forwards into the generated
+//!   trait.
+//!
+//! Server-streaming methods return a [`ResponseStream`](handling::ResponseStream),
+//! and handlers report failures with [`Status`](handling::Status). Use
+//! `Context` for request metadata and to set response headers.
+//!
+//! # Quick start: bridge an existing `tonic` service
 //!
 //! The normal setup generates protobuf messages, proto3-JSON serde
 //! implementations, and the REST layer from the same descriptor set.
@@ -137,47 +179,16 @@
 //! [generated includes]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/src/tonic_bridge.rs
 //! [tonic handler]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc_examples/src/tonic_bridge.rs
 //!
-//! ## Serving
+//! # Examples
 //!
-//! Pick the integration that fits your stack:
+//! The [example index] maps common tasks to runnable examples. It covers
+//! end-to-end generation, serving, direct transcoding, custom fallback,
+//! streaming, OpenAPI, direct handlers, `tonic` bridging, and non-`tonic`
+//! bridges. [`generate_service.rs`] demonstrates the lower-level manual
+//! `HttpRule` API; annotation-driven generation is shown in the [complete build
+//! script].
 //!
-//! - `tower`: wrap a generated transcoder with [`RestService::new`](serving::RestService::new) to get a [`tower_service::Service`].
-//! - `layered`: the same [`RestService`](serving::RestService) also implements [`layered::Service`].
-//! - `axum`: the `tower`-based [`RestService`](serving::RestService) mounts directly in `axum`; with the `axum` feature, the neutral response types also implement [`IntoResponse`](https://docs.rs/axum-core/latest/axum_core/response/trait.IntoResponse.html).
-//! - direct HTTP: call [`serve_http`](serving::serve_http) or [`serve_http_fn`](serving::serve_http_fn) yourself.
-//! - custom transport: disable `serving` and call [`transcode`](transcoding::Transcode::transcode) / [`try_transcode`](transcoding::Transcode::try_transcode) with `(method, target, headers, body)`.
-//!
-//! ## Transcoding
-//!
-//! Generated transcoders support unary and server-streaming RPCs. Unary calls
-//! return a buffered [`HttpResponse`](transcoding::HttpResponse); server-streaming
-//! calls return a [`StreamingResponse`](transcoding::StreamingResponse) whose
-//! frames are forwarded as they are produced.
-//!
-//! Server-streaming response encoding is negotiated from `Accept`: JSON array
-//! (`application/json`, `*/*`, or absent), NDJSON (`application/x-ndjson`), or
-//! Server-Sent Events (`text/event-stream`).
-//!
-//! Use [`transcode`](transcoding::Transcode::transcode) when unmatched routes
-//! should become `404`; use [`try_transcode`](transcoding::Transcode::try_transcode)
-//! when you want to fall back to custom routing.
-//!
-//! ## Handling
-//!
-//! The generated `<Service>` trait has one method per RPC, each taking the
-//! decoded request plus a mutable [`Context`](handling::Context).
-//!
-//! - `tonic`: the [`build`] module emits a blanket bridge so a `tonic`
-//!   implementation can serve REST too.
-//! - direct implementation: implement the generated trait yourself.
-//! - other gRPC stacks: write a small bridge that forwards into the generated
-//!   trait.
-//!
-//! Server-streaming methods return a [`ResponseStream`](handling::ResponseStream),
-//! and handlers report failures with [`Status`](handling::Status). Use
-//! `Context` for request metadata and to set response headers.
-//!
-//! ## Limitations
+//! # Limitations
 //!
 //! The crate supports unary and server-streaming RPCs only. Client-streaming
 //! and bidirectional RPCs have no `google.api.http` mapping and are rejected by
@@ -186,7 +197,7 @@
 //! Requests are buffered and parsed as JSON, so there is no incremental request
 //! body path and binary payloads must fit JSON-friendly encoding.
 //!
-//! ## Features
+//! # Cargo features
 //!
 //! - `serving` (default): [`serve_http`](serving::serve_http), [`serve_http_fn`](serving::serve_http_fn), and [`RestBody`](serving::RestBody).
 //! - `tower`: [`RestService`](serving::RestService) as a [`tower_service::Service`].
@@ -198,15 +209,6 @@
 //! `tower` and `layered` imply `serving`. The `axum` feature only adds
 //! `IntoResponse`; enable `tower` as well to mount [`RestService`](serving::RestService)
 //! as an Axum fallback service.
-//!
-//! ## Examples
-//!
-//! The [example index] maps common tasks to runnable examples. It covers
-//! end-to-end generation, serving, direct transcoding, custom fallback,
-//! streaming, OpenAPI, direct handlers, `tonic` bridging, and non-`tonic`
-//! bridges. [`generate_service.rs`] demonstrates the lower-level manual
-//! `HttpRule` API; annotation-driven generation is shown in the [complete build
-//! script].
 //!
 //! [example index]: https://github.com/microsoft/oxidizer/tree/main/crates/rest_over_grpc_examples#examples
 //! [`generate_service.rs`]: https://github.com/microsoft/oxidizer/blob/main/crates/rest_over_grpc/examples/generate_service.rs

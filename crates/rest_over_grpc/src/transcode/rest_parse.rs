@@ -240,6 +240,7 @@ mod tests {
         assert!(parse_path_field::<f64>("NaN").expect("NaN").is_nan());
         let infinity = parse_path_field::<f64>("Infinity").expect("infinity");
         assert!(infinity.is_infinite() && infinity.is_sign_positive());
+        let _ = parse_path_field::<f32>("3.5e38").expect_err("finite f32 range");
         let _ = parse_path_field::<f64>("inf").expect_err("non-canonical infinity");
         let _ = parse_path_field::<f64>("+1.0").expect_err("leading plus");
     }
@@ -275,6 +276,11 @@ mod tests {
         assert_eq!(parse_path_enum_value("2", from_str_name).expect("by number"), 2);
         let bad = parse_path_enum_value("BOGUS", from_str_name).expect_err("unknown name");
         assert_eq!(bad.code(), crate::handling::Code::InvalidArgument);
+
+        assert_eq!(parse_reserved_path_enum_value("ACTIVE", from_str_name).expect("reserved name"), 1);
+        assert_eq!(parse_reserved_path_enum_value("2", from_str_name).expect("reserved number"), 2);
+        let _ = parse_reserved_path_enum_value("%FF", from_str_name).expect_err("invalid encoding");
+        let _ = parse_reserved_path_enum_value("BOGUS", from_str_name).expect_err("unknown name");
     }
 
     #[test]

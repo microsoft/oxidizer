@@ -8,7 +8,7 @@ use proc_macro2::TokenStream;
 ///
 /// The generated code is split into its distinct pieces:
 ///
-/// - `r#trait` — the service trait.
+/// - [`service_trait`](Self::service_trait) — the service trait.
 /// - [`tonic_bridge`](Self::tonic_bridge) — the blanket `impl` bridging a
 ///   `tonic`-generated server, present only when
 ///   [`GeneratorBuilder::emit_tonic_bridge`](crate::build::GeneratorBuilder::emit_tonic_bridge)
@@ -62,7 +62,7 @@ impl GeneratedOutput {
 
     /// The generated service trait.
     #[must_use]
-    pub fn r#trait(&self) -> &TokenStream {
+    pub fn service_trait(&self) -> &TokenStream {
         &self.service_trait
     }
 

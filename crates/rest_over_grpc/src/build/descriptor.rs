@@ -72,7 +72,7 @@ pub(crate) fn definitions_from_descriptor(
         let package = service.package_name().to_owned();
         let mut definition = ServiceDefinition::new(service.name(), service_leading_comment(&service));
         if !package.is_empty() {
-            definition.module(&package);
+            definition.set_module_name(&package);
         }
         #[cfg(feature = "build-openapi")]
         let mut openapi = super::openapi::Builder::default();
@@ -569,7 +569,7 @@ mod tests {
         let mut code: String = outputs
             .iter()
             .map(|service| {
-                let mut code = service.r#trait().to_string();
+                let mut code = service.service_trait().to_string();
                 if let Some(bridge) = service.tonic_bridge() {
                     code.push('\n');
                     code.push_str(&bridge.to_string());

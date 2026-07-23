@@ -20,10 +20,8 @@ use core::fmt;
 use core::pin::Pin;
 
 #[cfg(any(feature = "serving", feature = "axum"))]
-use bytes::Bytes;
-use http::HeaderMap;
-#[cfg(any(feature = "serving", feature = "axum"))]
-use http::{HeaderValue, header};
+use http::header;
+use http::{HeaderMap, HeaderValue};
 use serde::Serialize;
 
 use crate::context::append_headers;
@@ -96,7 +94,7 @@ pub type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send
 /// # }
 /// ```
 pub struct StreamingResponse {
-    content_type: &'static str,
+    content_type: HeaderValue,
     headers: HeaderMap,
     frames: FrameStream,
 }
@@ -109,7 +107,7 @@ impl StreamingResponse {
     /// handler messages in a negotiated [`StreamEncoding`]. This lower-level
     /// constructor is for adapters that produce their own framing.
     #[must_use]
-    pub fn new<S>(content_type: &'static str, frames: S) -> Self
+    pub fn new<S>(content_type: HeaderValue, frames: S) -> Self
     where
         S: Stream<Item = Result<Vec<u8>, Status>> + Send + 'static,
     {
@@ -151,7 +149,7 @@ impl StreamingResponse {
         S: Stream<Item = Result<T, Status>> + Send + 'static,
         T: Serialize + 'static,
     {
-        Self::new(encoding.content_type(), encode_frames(items, encoding))
+        Self::new(HeaderValue::from_static(encoding.content_type()), encode_frames(items, encoding))
     }
 
     /// Builds a streaming response while applying an `HttpRule.response_body`
@@ -163,13 +161,16 @@ impl StreamingResponse {
         S: Stream<Item = Result<T, Status>> + Send + 'static,
         T: Serialize + 'static,
     {
-        Self::new(encoding.content_type(), encode_frames_response(items, encoding, response_body))
+        Self::new(
+            HeaderValue::from_static(encoding.content_type()),
+            encode_frames_response(items, encoding, response_body),
+        )
     }
 
     /// The `Content-Type` header value for this response's encoding.
     #[must_use]
-    pub const fn content_type(&self) -> &'static str {
-        self.content_type
+    pub const fn content_type(&self) -> &HeaderValue {
+        &self.content_type
     }
 
     /// The custom response headers to send with this streaming response
@@ -199,7 +200,7 @@ impl StreamingResponse {
     /// Consumes the response, returning its content type, custom headers, and
     /// stream of encoded body frames.
     #[must_use]
-    pub fn into_parts(self) -> (&'static str, HeaderMap, FrameStream) {
+    pub fn into_parts(self) -> (HeaderValue, HeaderMap, FrameStream) {
         (self.content_type, self.headers, self.frames)
     }
 }
@@ -272,14 +273,12 @@ impl std::error::Error for StreamingError {}
 
 /// Writes a streaming response's custom `headers` and its negotiated
 /// `content_type` onto `dst`. The negotiated content type overrides custom
-/// values; malformed caller-provided values are ignored.
+/// values.
 #[cfg(any(feature = "serving", feature = "axum"))]
-pub(crate) fn apply_stream_headers(dst: &mut HeaderMap, content_type: &'static str, mut headers: HeaderMap) {
+pub(crate) fn apply_stream_headers(dst: &mut HeaderMap, content_type: HeaderValue, mut headers: HeaderMap) {
     headers.remove(header::CONTENT_TYPE);
     append_headers(dst, headers);
-    if let Ok(value) = HeaderValue::from_maybe_shared(Bytes::from_static(content_type.as_bytes())) {
-        let _ = dst.insert(header::CONTENT_TYPE, value);
-    }
+    let _ = dst.insert(header::CONTENT_TYPE, content_type);
 }
 
 #[cfg(test)]
@@ -314,21 +313,11 @@ mod tests {
         let _ = custom.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/plain"));
 
         let mut dst = http::HeaderMap::new();
-        apply_stream_headers(&mut dst, "application/json", custom);
+        apply_stream_headers(&mut dst, HeaderValue::from_static("application/json"), custom);
 
         assert_eq!(dst.get_all(http::header::CONTENT_TYPE).iter().count(), 1);
         assert_eq!(dst[http::header::CONTENT_TYPE], "application/json");
         // Repeated custom values are preserved.
         assert_eq!(dst.get_all(http::header::SET_COOKIE).iter().count(), 2);
-    }
-
-    #[cfg(any(feature = "serving", feature = "axum"))]
-    #[test]
-    fn apply_stream_headers_drops_a_malformed_content_type_without_panicking() {
-        // A caller-supplied (via `StreamingResponse::new`) invalid content type is
-        // dropped rather than panicking in the adapter.
-        let mut dst = http::HeaderMap::new();
-        apply_stream_headers(&mut dst, "in\nvalid", http::HeaderMap::new());
-        assert!(dst.get(http::header::CONTENT_TYPE).is_none());
     }
 }

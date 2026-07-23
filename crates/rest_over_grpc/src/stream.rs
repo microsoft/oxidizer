@@ -35,7 +35,7 @@ use serde::Serialize;
 use serde_json::to_writer;
 
 use crate::handling::Status;
-use crate::transcode::{ResponseBodyKind, TranscodeError, encode_response};
+use crate::transcode::{ResponseBodyKind, TranscodeError, encode_response_into};
 
 /// How a sequence of server-streamed response messages is rendered onto the
 /// HTTP response body.
@@ -56,10 +56,12 @@ use crate::transcode::{ResponseBodyKind, TranscodeError, encode_response};
 /// # }
 /// # }
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum StreamEncoding {
     /// The whole sequence as a single JSON array (`[a, b, …]`); an empty stream
     /// renders as `[]`. Content type `application/json`.
+    #[default]
     JsonArray,
     /// Newline-delimited JSON: each message is a compact JSON value followed by
     /// a `\n`. Content type `application/x-ndjson`.
@@ -138,11 +140,14 @@ impl StreamEncoding {
             let media_type = parts.next().unwrap_or("").trim();
             let encoding = if media_type.eq_ignore_ascii_case("text/event-stream") {
                 Self::Sse
-            } else if media_type.eq_ignore_ascii_case("application/x-ndjson") || media_type.eq_ignore_ascii_case("application/jsonl") {
+            } else if ["application/x-ndjson", "application/jsonl"]
+                .iter()
+                .any(|candidate| media_type.eq_ignore_ascii_case(candidate))
+            {
                 Self::NdJson
-            } else if media_type.eq_ignore_ascii_case("application/json")
-                || media_type == "*/*"
-                || media_type.eq_ignore_ascii_case("application/*")
+            } else if ["application/json", "*/*", "application/*"]
+                .iter()
+                .any(|candidate| media_type.eq_ignore_ascii_case(candidate))
             {
                 Self::JsonArray
             } else {
@@ -186,8 +191,7 @@ fn serialize_framed_item<T: Serialize>(
             to_writer(&mut frame, message).map_err(|error| Status::internal(format!("failed to serialize a streamed message: {error}")))?;
         }
         ResponseBodyKind::Field(_) => {
-            let body = encode_response(message, response_body).map_err(TranscodeError::into_status)?;
-            frame.extend_from_slice(&body);
+            encode_response_into(message, response_body, &mut frame).map_err(TranscodeError::into_status)?;
         }
     }
     match encoding {
@@ -416,6 +420,8 @@ mod tests {
 
     #[test]
     fn from_accept_honors_quality_values() {
+        assert_eq!(StreamEncoding::from_accept("text/event-stream;q=0"), StreamEncoding::JsonArray);
+        assert_eq!(StreamEncoding::from_accept("text/event-stream;q=1.1"), StreamEncoding::JsonArray);
         assert_eq!(
             StreamEncoding::from_accept("text/event-stream;q=0, application/x-ndjson;q=0.5"),
             StreamEncoding::NdJson
@@ -428,5 +434,12 @@ mod tests {
             StreamEncoding::from_accept("application/x-ndjson;q=0.8, text/event-stream;q=0.8"),
             StreamEncoding::NdJson
         );
+    }
+
+    #[test]
+    fn from_accept_recognizes_each_ndjson_media_type() {
+        for media_type in ["application/x-ndjson", "application/jsonl"] {
+            assert_eq!(StreamEncoding::from_accept(media_type), StreamEncoding::NdJson);
+        }
     }
 }

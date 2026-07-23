@@ -15,7 +15,7 @@
 ///     .package(".library")
 ///     .extern_path(".google.protobuf.Empty", "::prost_types::Empty");
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DescriptorOptions {
     packages: Vec<String>,
     extern_paths: Vec<(String, String)>,

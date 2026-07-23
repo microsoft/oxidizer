@@ -40,9 +40,6 @@ impl IntoResponse for StreamingResponse {
         let (content_type, headers, frames) = self.into_parts();
         let body = axum_core::body::Body::from_stream(frames.map(|item| item.map(Bytes::from).map_err(StreamingError)));
 
-        // `Response::new` never fails, so a malformed caller-supplied
-        // `content_type` cannot panic here; the negotiated `Content-Type` stays
-        // authoritative over any custom header a handler set.
         let mut response = http::Response::new(body);
         apply_stream_headers(response.headers_mut(), content_type, headers);
         response.into_response()

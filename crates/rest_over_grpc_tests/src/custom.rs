@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async-trait lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "synchronous fixtures implement the generated async service trait"
+)]
+
 //! The "custom handler" modality: wiring a hand-written (`prost`) gRPC service
 //! into a REST API.
 //!

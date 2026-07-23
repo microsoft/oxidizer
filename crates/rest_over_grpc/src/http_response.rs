@@ -3,7 +3,6 @@
 
 //! The [`HttpResponse`] neutral HTTP response value type.
 
-use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, header};
 use serde::Serialize;
 use serde_json::{Value, to_vec};
@@ -42,7 +41,7 @@ struct StatusBody<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
     status: StatusCode,
-    content_type: &'static str,
+    content_type: HeaderValue,
     headers: HeaderMap,
     body: Vec<u8>,
 }
@@ -57,13 +56,17 @@ impl HttpResponse {
     /// use http::StatusCode;
     /// use rest_over_grpc::transcoding::HttpResponse;
     ///
-    /// let response = HttpResponse::new(StatusCode::ACCEPTED, "text/plain", b"queued".to_vec());
+    /// let response = HttpResponse::new(
+    ///     StatusCode::ACCEPTED,
+    ///     http::HeaderValue::from_static("text/plain"),
+    ///     b"queued".to_vec(),
+    /// );
     /// assert_eq!(response.status(), StatusCode::ACCEPTED);
     /// assert_eq!(response.content_type(), "text/plain");
     /// assert_eq!(response.body(), b"queued");
     /// ```
     #[must_use]
-    pub fn new(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Self {
+    pub fn new(status: StatusCode, content_type: HeaderValue, body: Vec<u8>) -> Self {
         Self {
             status,
             content_type,
@@ -86,7 +89,7 @@ impl HttpResponse {
     /// ```
     #[must_use]
     pub fn ok_json(body: Vec<u8>) -> Self {
-        Self::new(StatusCode::OK, "application/json", body)
+        Self::new(StatusCode::OK, HeaderValue::from_static("application/json"), body)
     }
 
     /// Creates an `application/json` response with an explicit `status`.
@@ -104,7 +107,7 @@ impl HttpResponse {
     /// ```
     #[must_use]
     pub fn json(status: StatusCode, body: Vec<u8>) -> Self {
-        Self::new(status, "application/json", body)
+        Self::new(status, HeaderValue::from_static("application/json"), body)
     }
 
     /// Renders a [`Status`] as a JSON response, mapping its [`Code`](crate::handling::Code)
@@ -129,6 +132,7 @@ impl HttpResponse {
     /// # Ok::<(), serde_json::Error>(())
     /// ```
     #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "only unreachable panic")]
     pub fn from_status(status: &Status) -> Self {
         let http = status.code().to_http_status();
         let body = StatusBody {
@@ -136,7 +140,7 @@ impl HttpResponse {
             message: status.message(),
             details: status.details(),
         };
-        let bytes = to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+        let bytes = to_vec(&body).expect("StatusBody contains only serde_json::Value fields and always serializes");
         Self::json(http, bytes)
     }
 
@@ -157,13 +161,14 @@ impl HttpResponse {
     /// # Ok::<(), serde_json::Error>(())
     /// ```
     #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "only unreachable panic")]
     pub fn not_found() -> Self {
         let body = StatusBody {
             code: Code::NotFound.as_i32(),
             message: "no route matches the request",
             details: &[],
         };
-        let bytes = to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+        let bytes = to_vec(&body).expect("StatusBody contains only serde_json::Value fields and always serializes");
         Self::json(Code::NotFound.to_http_status(), bytes)
     }
 
@@ -194,8 +199,8 @@ impl HttpResponse {
     /// assert_eq!(response.content_type(), "application/json");
     /// ```
     #[must_use]
-    pub const fn content_type(&self) -> &'static str {
-        self.content_type
+    pub const fn content_type(&self) -> &HeaderValue {
+        &self.content_type
     }
 
     /// The custom response headers set on this response (excluding the
@@ -325,11 +330,6 @@ impl HttpResponse {
             mut headers,
             body,
         } = self;
-        let Ok(content_type) = HeaderValue::from_maybe_shared(Bytes::from_static(content_type.as_bytes())) else {
-            let mut fallback = Response::new(Vec::new());
-            *fallback.status_mut() = status;
-            return fallback;
-        };
         let mut response = Response::new(body);
         *response.status_mut() = status;
         let dst = response.headers_mut();
@@ -337,6 +337,18 @@ impl HttpResponse {
         let _ = dst.insert(header::CONTENT_TYPE, content_type);
         append_headers(dst, headers);
         response
+    }
+}
+
+impl From<&Status> for HttpResponse {
+    fn from(status: &Status) -> Self {
+        Self::from_status(status)
+    }
+}
+
+impl From<Status> for HttpResponse {
+    fn from(status: Status) -> Self {
+        Self::from_status(&status)
     }
 }
 

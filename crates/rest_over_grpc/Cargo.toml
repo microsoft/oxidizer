@@ -5,6 +5,7 @@
 name = "rest_over_grpc"
 version = "0.1.0"
 description = "Automatically transcode gRPC services to REST/JSON endpoints"
+documentation = "https://docs.rs/rest_over_grpc"
 readme = "README.md"
 keywords = ["grpc", "rest", "json", "transcoding", "router"]
 categories = ["web-programming", "network-programming", "encoding"]

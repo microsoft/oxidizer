@@ -25,7 +25,8 @@ use super::{DescriptorError, DescriptorOptions};
 ///
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
-/// use rest_over_grpc::build::{Generator, HttpMethod, HttpRule, ServiceDefinition};
+/// use rest_over_grpc::build::{Generator, HttpRule, ServiceDefinition};
+/// use routerama::HttpMethod;
 ///
 /// let rule = HttpRule::new(
 ///     "CreateShelf",
@@ -44,7 +45,7 @@ use super::{DescriptorError, DescriptorOptions};
 /// let (_transcoder, generated) = Generator::new().add(library).generate();
 /// assert!(
 ///     generated[0]
-///         .r#trait()
+///         .service_trait()
 ///         .to_string()
 ///         .contains("pub trait LibraryService")
 /// );
@@ -69,7 +70,7 @@ impl ServiceDefinition {
     /// line); `None` emits no doc comment.
     ///
     /// The output module defaults to the snake-cased trait name; override it with
-    /// [`module`](Self::module).
+    /// [`set_module_name`](Self::set_module_name).
     ///
     /// # Examples
     ///
@@ -100,7 +101,7 @@ impl ServiceDefinition {
     /// name.
     ///
     /// Returns `&mut Self` so calls can be chained.
-    pub fn module(&mut self, module: impl Into<String>) -> &mut Self {
+    pub fn set_module_name(&mut self, module: impl Into<String>) -> &mut Self {
         self.module = module.into();
         self
     }
@@ -141,7 +142,8 @@ impl ServiceDefinition {
     ///
     /// ```
     /// use http_path_template::{Grammar, PathTemplate};
-    /// use rest_over_grpc::build::{Generator, HttpMethod, HttpRule, ServiceDefinition};
+    /// use rest_over_grpc::build::{Generator, HttpRule, ServiceDefinition};
+    /// use routerama::HttpMethod;
     ///
     /// let rule = HttpRule::new(
     ///     "GetShelf",
@@ -153,7 +155,12 @@ impl ServiceDefinition {
     /// generator.add_method(rule, "crate::pb::GetShelfRequest", "crate::pb::Shelf", None);
     ///
     /// let (_transcoder, generated) = Generator::new().add(generator).generate();
-    /// assert!(generated[0].r#trait().to_string().contains("get_shelf"));
+    /// assert!(
+    ///     generated[0]
+    ///         .service_trait()
+    ///         .to_string()
+    ///         .contains("get_shelf")
+    /// );
     /// ```
     pub fn add_method(
         &mut self,
@@ -919,7 +926,7 @@ fn decode_and_poke(variant: &RouteVariant, req_ty: &TokenStream, body_kind: &Tok
     let pokes = variant_pokes(variant);
     quote! {
         (|| -> ::core::result::Result<#req_ty, ::rest_over_grpc::handling::Status> {
-            let mut request = ::rest_over_grpc::codegen_helpers::decode_request::<#req_ty>(&query_pairs, body, #body_kind)
+            let mut request = ::rest_over_grpc::codegen_helpers::decode_request::<#req_ty>(query_pairs.as_slice(), body, #body_kind)
                 .map_err(::rest_over_grpc::codegen_helpers::TranscodeError::into_status)?;
             #pokes
             ::core::result::Result::Ok(request)
@@ -1253,6 +1260,12 @@ mod tests {
             "crate::pb::ListByStateResponse",
             None,
         );
+        generator.add_method(
+            rule("ListByStatePath", HttpMethod::GET, "/v1/{state=states/**}").path_field_enum("state", "crate::pb::BookState"),
+            "crate::pb::ListByStateRequest",
+            "crate::pb::ListByStateResponse",
+            None,
+        );
 
         let file: syn::File = syn::parse2(generator.generate(CodegenOptions::default())).expect("generated service must be valid Rust");
         let pretty = prettyplease::unparse(&file);
@@ -1260,6 +1273,12 @@ mod tests {
         assert!(
             flat.contains(
                 "request.state=::rest_over_grpc::codegen_helpers::parse_path_enum_value(__cap0,crate::pb::BookState::from_str_name"
+            ),
+            "{pretty}"
+        );
+        assert!(
+            flat.contains(
+                "request.state=::rest_over_grpc::codegen_helpers::parse_reserved_path_enum_value(__cap0,crate::pb::BookState::from_str_name"
             ),
             "{pretty}"
         );
@@ -1445,6 +1464,15 @@ mod tests {
 
         let flat = generator.generate(CodegenOptions::default()).to_string().replace(' ', "");
         assert!(flat.contains("parse_reserved_path_field(__cap0"), "{flat}");
+    }
+
+    #[test]
+    fn reserved_capture_conditions_are_independent() {
+        let multi_segment = PathTemplate::parse("/v1/{name=items/*}", Grammar::default()).expect("valid multi-segment capture");
+        assert_eq!(capture_signature(&multi_segment).1, [true]);
+
+        let rest_only = PathTemplate::parse("/v1/{name=**}", Grammar::default()).expect("valid rest capture");
+        assert_eq!(capture_signature(&rest_only).1, [true]);
     }
 
     #[test]

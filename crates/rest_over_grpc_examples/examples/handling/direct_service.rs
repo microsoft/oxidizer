@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async-trait lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "synchronous example implements the generated async service trait"
+)]
+
 //! Implementing the generated service trait directly.
 //!
 //! When you are not bridging an existing gRPC stack (`tonic` — see
@@ -179,10 +185,14 @@ fn report_streaming(label: &str, response: TranscodeResponse) {
     let TranscodeResponse::Streaming(stream) = response else {
         unreachable!("the streaming route is server-streaming");
     };
-    let content_type = stream.content_type();
+    let content_type = stream.content_type().clone();
     let body = block_on(async {
         let frames: Vec<Vec<u8>> = stream.into_frames().map(|frame| frame.expect("frame")).collect().await;
         frames.concat()
     });
-    println!("{label} -> streaming [{content_type}] {}", String::from_utf8_lossy(&body));
+    println!(
+        "{label} -> streaming [{}] {}",
+        content_type.to_str().expect("generated content type is ASCII"),
+        String::from_utf8_lossy(&body)
+    );
 }

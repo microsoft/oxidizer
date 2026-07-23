@@ -12,9 +12,8 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use http_path_template::{Grammar, PathTemplate};
-use rest_over_grpc::build::{
-    DescriptorOptions, Generator, HttpMethod, HttpRule, OpenApiInfo, ServiceDefinition, compile_fds, generate_router,
-};
+use rest_over_grpc::build::{DescriptorOptions, Generator, HttpRule, OpenApiInfo, ServiceDefinition, compile_fds, generate_router};
+use routerama::HttpMethod;
 
 // The large benchmark route table (`ROUTES`), shared with the benchmark.
 include!("bench_routes.rs");
@@ -69,6 +68,8 @@ fn main() {
     println!("cargo:rerun-if-changed=bench_routes.rs");
     println!("cargo:rerun-if-changed=proto/greeter.proto");
     println!("cargo:rerun-if-changed=proto/library.proto");
+    println!("cargo:rerun-if-changed=proto/google/api/annotations.proto");
+    println!("cargo:rerun-if-changed=proto/google/api/http.proto");
     println!("cargo:rerun-if-changed=build.rs");
 }
 

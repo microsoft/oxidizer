@@ -64,7 +64,7 @@ async fn handle(library: &Transcoder<InMemoryLibrary>, request: Request<Full<Byt
     // Build our own wire response, adding a header the adapters can't attach.
     Response::builder()
         .status(response.status())
-        .header(CONTENT_TYPE, response.content_type())
+        .header(CONTENT_TYPE, response.content_type().clone())
         .header("access-control-allow-origin", "*")
         .body(response.into_body())
         .expect("response builds")
@@ -76,7 +76,11 @@ async fn handle(library: &Transcoder<InMemoryLibrary>, request: Request<Full<Byt
 /// as soon as it crosses `max`; a [`Full`] body is already in memory, so here we
 /// simply check the collected length.
 async fn read_capped(body: Full<Bytes>, max: usize) -> Result<Bytes, TooLarge> {
-    let bytes = body.collect().await.map(http_body_util::Collected::to_bytes).unwrap_or_default();
+    let bytes = body
+        .collect()
+        .await
+        .expect("Full<Bytes> cannot fail because its body error type is Infallible")
+        .to_bytes();
     if bytes.len() > max { Err(TooLarge) } else { Ok(bytes) }
 }
 

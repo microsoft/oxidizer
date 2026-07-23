@@ -13,6 +13,33 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 
+# Private generated-code fixture: its public surface intentionally mirrors
+# prost, tonic, and rest_over_grpc APIs.
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["*"]
+
+# These dependencies are consumed by build.rs, generated Rust included from
+# OUT_DIR, or rustdoc links, which cargo-machete's source scan cannot attribute.
+[package.metadata.cargo-machete]
+ignored = [
+    "http-body",
+    "http_path_template",
+    "pbjson",
+    "pbjson-build",
+    "prost",
+    "prost-build",
+    "protox",
+    "routerama",
+    "serde",
+    "tonic-prost",
+    "tonic-prost-build",
+]
+
+# This fixture crate is excluded from repository coverage; production coverage
+# is enforced on rest_over_grpc itself.
+[package.metadata.coverage-gate]
+min-lines-percent = 0
+
 [dependencies]
 futures-util = { workspace = true, features = ["std"] }
 http = { workspace = true, features = ["std"] }
@@ -30,6 +57,7 @@ pbjson-build = { workspace = true }
 prost-build = { workspace = true }
 protox = { workspace = true }
 rest_over_grpc = { workspace = true, features = ["build-openapi"] }
+routerama = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]

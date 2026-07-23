@@ -17,7 +17,8 @@
 //! ```
 
 use http_path_template::{Grammar, PathTemplate};
-use rest_over_grpc::build::{Generator, HttpMethod, HttpRule, RequestBody, ServiceDefinition};
+use rest_over_grpc::build::{Generator, HttpRule, RequestBody, ServiceDefinition};
+use routerama::HttpMethod;
 
 fn main() {
     // Each RPC's HTTP binding. `GetShelf` captures the `{shelf}` path variable;
@@ -47,7 +48,7 @@ fn main() {
     // Render the generated Rust for display; a build script would instead
     // write the code to files under `OUT_DIR` with `Generator::write`.
     for service in generated {
-        let mut code = service.r#trait().clone();
+        let mut code = service.service_trait().clone();
         if let Some(bridge) = service.tonic_bridge() {
             code.extend(bridge.clone());
         }

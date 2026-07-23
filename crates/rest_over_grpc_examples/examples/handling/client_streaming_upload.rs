@@ -97,12 +97,10 @@ where
     let method = request.method().clone();
     let target = request.uri().path_and_query().map_or("/", |pq| pq.as_str()).to_owned();
     let headers = request.headers().clone();
-    let bytes = request
-        .into_body()
-        .collect()
-        .await
-        .map(http_body_util::Collected::to_bytes)
-        .unwrap_or_default();
+    let bytes = match request.into_body().collect().await {
+        Ok(body) => body.to_bytes(),
+        Err(_) => return text(StatusCode::BAD_REQUEST, "error reading request body"),
+    };
     let TranscodeResponse::Unary(response) = library.transcode(method.as_str(), &target, headers, &bytes).await else {
         return text(StatusCode::INTERNAL_SERVER_ERROR, "unexpected streaming response");
     };
@@ -127,6 +125,31 @@ fn text(status: StatusCode, message: &str) -> Response<Vec<u8>> {
 
 fn report(label: &str, response: &Response<Vec<u8>>) {
     println!("{label} -> {} {}", response.status(), String::from_utf8_lossy(response.body()));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use futures_util::stream;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn unary_body_read_failure_returns_bad_request() {
+        let library = Transcoder::new(InMemoryLibrary);
+        let body = StreamBody::new(stream::iter([Err::<Frame<Bytes>, _>(io::Error::other("body read failed"))]));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/shelves")
+            .body(body)
+            .expect("request builds");
+
+        let response = route(&library, request).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.body(), b"error reading request body");
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]

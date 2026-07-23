@@ -3593,6 +3593,7 @@ dependencies = [
  "prost-build",
  "protox",
  "rest_over_grpc",
+ "routerama",
  "serde",
  "serde_json",
  "tokio",

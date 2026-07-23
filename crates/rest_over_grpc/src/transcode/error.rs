@@ -205,7 +205,7 @@ impl TranscodeError {
             TranscodeErrorKind::Body => "invalid request body JSON",
             TranscodeErrorKind::Structure => "invalid request structure",
             TranscodeErrorKind::Deserialize => "request did not match the expected message",
-            TranscodeErrorKind::Serialize => "failed to serialize the response message",
+            TranscodeErrorKind::Serialize => "failed to encode the response",
         }
     }
 }
@@ -225,5 +225,19 @@ impl fmt::Display for TranscodeError {
 impl Error for TranscodeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source.as_ref().map(|source| source.as_ref() as &(dyn Error + 'static))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn body_or_deserialize_classifies_json_errors() {
+        let syntax = serde_json::from_slice::<u32>(b"not json").expect_err("invalid JSON");
+        assert_eq!(TranscodeError::body_or_deserialize(syntax).kind, TranscodeErrorKind::Body);
+
+        let shape = serde_json::from_slice::<u32>(br#""text""#).expect_err("wrong JSON shape");
+        assert_eq!(TranscodeError::body_or_deserialize(shape).kind, TranscodeErrorKind::Deserialize);
     }
 }

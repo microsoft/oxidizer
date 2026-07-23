@@ -65,7 +65,8 @@ fn route_to_routerama(route: &Route) -> routerama_build::Route {
 ///
 /// ```
 /// use http_path_template::{Grammar, PathTemplate};
-/// use rest_over_grpc::build::{HttpMethod, HttpRule, generate_router};
+/// use rest_over_grpc::build::{HttpRule, generate_router};
+/// use routerama::HttpMethod;
 ///
 /// let rule = HttpRule::new(
 ///     "ListBooks",

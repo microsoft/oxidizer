@@ -100,14 +100,16 @@ fn response_accessors() {
 }
 
 #[test]
-fn into_http_falls_back_on_invalid_content_type() {
-    // A content type with control bytes can't be set as a header value, so
-    // `into_http` takes its bare-response fallback while preserving the status.
-    let r = HttpResponse::new(StatusCode::IM_A_TEAPOT, "bad\nvalue", b"body".to_vec());
+fn into_http_preserves_typed_content_type() {
+    let r = HttpResponse::new(
+        StatusCode::IM_A_TEAPOT,
+        http::HeaderValue::from_static("application/problem+json"),
+        b"body".to_vec(),
+    );
     let http = r.into_http();
     assert_eq!(http.status(), StatusCode::IM_A_TEAPOT);
-    assert!(http.headers().get(http::header::CONTENT_TYPE).is_none());
-    assert!(http.body().is_empty());
+    assert_eq!(http.headers()[http::header::CONTENT_TYPE], "application/problem+json");
+    assert_eq!(http.body(), b"body");
 }
 
 #[test]
@@ -118,6 +120,10 @@ fn from_conversions_match_inherent_methods() {
     let http = http::Response::<Vec<u8>>::from(HttpResponse::ok_json(b"[]".to_vec()));
     assert_eq!(http.status(), StatusCode::OK);
     assert_eq!(http.headers()[http::header::CONTENT_TYPE], "application/json");
+
+    let status = Status::not_found("gone");
+    assert_eq!(HttpResponse::from(&status), HttpResponse::from_status(&status));
+    assert_eq!(HttpResponse::from(status.clone()), HttpResponse::from_status(&status));
 }
 
 #[test]

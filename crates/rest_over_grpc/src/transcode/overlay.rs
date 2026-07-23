@@ -9,6 +9,7 @@
 
 use core::fmt;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::vec::IntoIter;
 
 use serde::de::value::{StrDeserializer, StringDeserializer};
@@ -58,9 +59,15 @@ fn all_flat(query: &[(&str, &str)]) -> bool {
 
 fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)]) -> Result<T, TranscodeError> {
     let mut overlay: Vec<(&str, Vec<Cow<'_, str>>)> = Vec::with_capacity(query.len());
+    let mut overlay_index: HashMap<&str, usize> = HashMap::with_capacity(query.len());
     for (key, value) in query {
         let decoded = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
-        upsert(&mut overlay, key, decoded);
+        if let Some(&index) = overlay_index.get(key) {
+            overlay[index].1.push(decoded);
+        } else {
+            overlay_index.insert(*key, overlay.len());
+            overlay.push((key, vec![decoded]));
+        }
     }
 
     let mut body_entries = match body {
@@ -71,7 +78,7 @@ fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)])
         _ => Vec::new(),
     };
 
-    body_entries.retain(|(key, _)| !overlay.iter().any(|(overlay_key, _)| *overlay_key == key.as_str()));
+    body_entries.retain(|(key, _)| !overlay_index.contains_key(key.as_str()));
 
     let map = OverlayMap {
         body: body_entries.into_iter(),
@@ -79,14 +86,6 @@ fn decode_flat<T: DeserializeOwned>(body: Option<&[u8]>, query: &[(&str, &str)])
         pending: None,
     };
     T::deserialize(OverlayDeserializer { map }).map_err(TranscodeError::deserialize)
-}
-
-fn upsert<'p>(overlay: &mut Vec<(&'p str, Vec<Cow<'p, str>>)>, key: &'p str, value: Cow<'p, str>) {
-    if let Some((_, values)) = overlay.iter_mut().find(|(existing, _)| *existing == key) {
-        values.push(value);
-    } else {
-        overlay.push((key, vec![value]));
-    }
 }
 
 fn classify_body_error(bytes: &[u8]) -> TranscodeError {
@@ -115,11 +114,13 @@ impl<'de> serde::Deserialize<'de> for BodyTop<'de> {
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut entries: Vec<(String, &'de RawValue)> = Vec::new();
+                let mut entry_index: HashMap<String, usize> = HashMap::new();
                 while let Some(key) = map.next_key::<String>()? {
                     let value: &'de RawValue = map.next_value()?;
-                    if let Some(slot) = entries.iter_mut().find(|(k, _)| *k == key) {
-                        slot.1 = value;
+                    if let Some(&index) = entry_index.get(&key) {
+                        entries[index].1 = value;
                     } else {
+                        entry_index.insert(key.clone(), entries.len());
                         entries.push((key, value));
                     }
                 }
@@ -229,6 +230,18 @@ macro_rules! deserialize_query_string {
     };
 }
 
+macro_rules! deserialize_query_integer {
+    ($(($method:ident, $ty:ty, $visit:ident)),+ $(,)?) => {
+        $(
+            fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+                let value = self.one()?;
+                let parsed = value.parse::<$ty>().map_err(serde::de::Error::custom)?;
+                visitor.$visit(parsed)
+            }
+        )+
+    };
+}
+
 fn looks_like_noncanonical_number(value: &str) -> bool {
     value
         .as_bytes()
@@ -298,22 +311,24 @@ impl<'de> Deserializer<'de> for QueryValue<'de> {
         })
     }
 
+    deserialize_query_integer!(
+        (deserialize_i8, i8, visit_i8),
+        (deserialize_i16, i16, visit_i16),
+        (deserialize_i32, i32, visit_i32),
+        (deserialize_i64, i64, visit_i64),
+        (deserialize_i128, i128, visit_i128),
+        (deserialize_u8, u8, visit_u8),
+        (deserialize_u16, u16, visit_u16),
+        (deserialize_u32, u32, visit_u32),
+        (deserialize_u64, u64, visit_u64),
+        (deserialize_u128, u128, visit_u128),
+    );
     deserialize_query_string!(
-        deserialize_i8,
-        deserialize_i16,
-        deserialize_i32,
-        deserialize_i64,
-        deserialize_i128,
-        deserialize_u8,
-        deserialize_u16,
-        deserialize_u32,
-        deserialize_u64,
-        deserialize_u128,
         deserialize_char,
         deserialize_bytes,
         deserialize_byte_buf,
         deserialize_unit,
-        deserialize_identifier,
+        deserialize_identifier
     );
 
     serde::forward_to_deserialize_any! {
@@ -536,6 +551,22 @@ mod tests {
     }
 
     #[test]
+    fn repeated_query_values_preserve_their_order() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Tags {
+            tag: Vec<String>,
+        }
+
+        let decoded: Tags = decode_flat(None, &[("tag", "first"), ("tag", "second")]).expect("decodes");
+        assert_eq!(
+            decoded,
+            Tags {
+                tag: vec!["first".to_owned(), "second".to_owned()]
+            }
+        );
+    }
+
+    #[test]
     fn try_decode_overlay_takes_the_fast_path_for_flat_inputs() {
         let decoded: Option<Result<Shelf, _>> = try_decode_overlay(&RequestBodyKind::None, &[("shelf", "7"), ("theme", "history")], b"");
         let shelf = decoded.expect("flat inputs take the overlay fast path").expect("decodes");
@@ -573,5 +604,239 @@ mod tests {
                 theme: "second".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn query_shadows_repeated_body_keys() {
+        let body = br#"{"theme":"first","shelf":"body","theme":"second"}"#;
+        let decoded: Shelf = decode_flat(Some(body), &[("shelf", "query")]).expect("decodes");
+        assert_eq!(
+            decoded,
+            Shelf {
+                shelf: "query".to_owned(),
+                theme: "second".to_owned()
+            }
+        );
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum AnyScalar {
+        I64(i64),
+        U64(u64),
+        F64,
+        String(String),
+    }
+
+    impl<'de> Deserialize<'de> for AnyScalar {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct AnyVisitor;
+
+            impl Visitor<'_> for AnyVisitor {
+                type Value = AnyScalar;
+
+                #[cfg_attr(coverage_nightly, coverage(off))]
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("a query scalar")
+                }
+
+                fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                    Ok(AnyScalar::I64(v))
+                }
+
+                fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                    Ok(AnyScalar::U64(v))
+                }
+
+                fn visit_f64<E: serde::de::Error>(self, _value: f64) -> Result<Self::Value, E> {
+                    Ok(AnyScalar::F64)
+                }
+
+                #[cfg_attr(coverage_nightly, coverage(off))]
+                fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                    Ok(AnyScalar::String(v.to_owned()))
+                }
+
+                fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+                    Ok(AnyScalar::String(v))
+                }
+            }
+
+            deserializer.deserialize_any(AnyVisitor)
+        }
+    }
+
+    #[test]
+    fn query_any_scalar_covers_canonical_value_kinds() {
+        #[derive(Debug, Deserialize)]
+        struct Scalars {
+            i: AnyScalar,
+            u: AnyScalar,
+            nan: AnyScalar,
+            infinity: AnyScalar,
+            negative_infinity: AnyScalar,
+            decimal: AnyScalar,
+            text: AnyScalar,
+        }
+
+        let decoded: Scalars = decode_flat(
+            None,
+            &[
+                ("i", "-2"),
+                ("u", "9223372036854775808"),
+                ("nan", "NaN"),
+                ("infinity", "Infinity"),
+                ("negative_infinity", "-Infinity"),
+                ("decimal", "1.5"),
+                ("text", "hello"),
+            ],
+        )
+        .expect("canonical scalars decode");
+        assert_eq!(decoded.i, AnyScalar::I64(-2));
+        assert_eq!(decoded.u, AnyScalar::U64(9_223_372_036_854_775_808));
+        assert_eq!(decoded.nan, AnyScalar::F64);
+        assert_eq!(decoded.infinity, AnyScalar::F64);
+        assert_eq!(decoded.negative_infinity, AnyScalar::F64);
+        assert_eq!(decoded.decimal, AnyScalar::F64);
+        assert_eq!(decoded.text, AnyScalar::String("hello".to_owned()));
+    }
+
+    #[test]
+    fn typed_query_scalars_cover_direct_deserializer_methods() {
+        #[derive(Debug)]
+        struct ViaStr(String);
+
+        impl<'de> Deserialize<'de> for ViaStr {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct StrVisitor;
+
+                impl Visitor<'_> for StrVisitor {
+                    type Value = ViaStr;
+
+                    #[cfg_attr(coverage_nightly, coverage(off))]
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        formatter.write_str("a string")
+                    }
+
+                    #[cfg_attr(coverage_nightly, coverage(off))]
+                    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                        Ok(ViaStr(v.to_owned()))
+                    }
+
+                    fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+                        Ok(ViaStr(v))
+                    }
+                }
+
+                deserializer.deserialize_str(StrVisitor)
+            }
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct Typed {
+            integer: i32,
+            boolean: bool,
+            character: char,
+            float32: f32,
+            float64: f64,
+            nan: f32,
+            infinity: f64,
+            negative_infinity: f64,
+            optional: Option<i32>,
+            via_str: ViaStr,
+        }
+
+        let decoded: Typed = decode_flat(
+            None,
+            &[
+                ("integer", "7"),
+                ("boolean", "false"),
+                ("character", "x"),
+                ("float32", "1.25"),
+                ("float64", "2.5"),
+                ("nan", "NaN"),
+                ("infinity", "Infinity"),
+                ("negative_infinity", "-Infinity"),
+                ("optional", "9"),
+                ("via_str", "text"),
+            ],
+        )
+        .expect("typed scalars decode");
+        assert_eq!(decoded.integer, 7);
+        assert!(!decoded.boolean);
+        assert_eq!(decoded.character, 'x');
+        assert!((decoded.float32 - 1.25).abs() < f32::EPSILON);
+        assert!((decoded.float64 - 2.5).abs() < f64::EPSILON);
+        assert!(decoded.nan.is_nan());
+        assert!(decoded.infinity.is_infinite() && decoded.infinity.is_sign_positive());
+        assert!(decoded.negative_infinity.is_infinite() && decoded.negative_infinity.is_sign_negative());
+        assert_eq!(decoded.optional, Some(9));
+        assert_eq!(decoded.via_str.0, "text");
+
+        let _ = decode_flat::<Typed>(None, &[("boolean", "not-bool")]).expect_err("invalid boolean");
+        let _ = decode_flat::<Typed>(None, &[("float32", "3.5e38")]).expect_err("out-of-range float");
+    }
+
+    #[test]
+    fn noncanonical_any_numbers_are_rejected() {
+        #[derive(Debug, Deserialize)]
+        #[expect(dead_code, reason = "the field is only exercised through failing deserialization")]
+        struct One {
+            value: AnyScalar,
+        }
+
+        let digit_prefixed = decode_flat::<One>(None, &[("value", "1e+")]).expect_err("malformed number");
+        assert!(digit_prefixed.to_string().contains("canonical protobuf JSON"));
+        let named = decode_flat::<One>(None, &[("value", "inf")]).expect_err("noncanonical infinity");
+        assert!(named.to_string().contains("canonical protobuf JSON"));
+    }
+
+    #[test]
+    fn tree_overlay_covers_optional_nested_values_and_conflicts() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Root {
+            nested: Option<Nested>,
+        }
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct Nested {
+            value: i32,
+        }
+
+        let decoded: Root = decode_tree(None, &[("nested.value", "7")]).expect("optional nested query");
+        assert_eq!(
+            decoded,
+            Root {
+                nested: Some(Nested { value: 7 })
+            }
+        );
+        let _ = decode_tree::<Root>(Some(b"{"), &[("nested.value", "7")]).expect_err("invalid body");
+        let _ = decode_tree::<Root>(None, &[("nested.value", "7"), ("nested", "8")]).expect_err("conflicting query paths");
+    }
+
+    #[test]
+    fn field_overlay_rejects_an_invalid_body() {
+        let decoded: Option<Result<Shelf, _>> = try_decode_overlay(&RequestBodyKind::Field("shelf"), &[("theme", "history")], b"{");
+        let _ = decoded.expect("field query uses overlay").expect_err("invalid field body");
+    }
+
+    #[test]
+    fn tree_map_rejects_a_value_requested_before_its_key() {
+        struct StringSeed;
+
+        impl<'de> DeserializeSeed<'de> for StringSeed {
+            type Value = String;
+
+            #[cfg_attr(coverage_nightly, coverage(off))]
+            fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+                String::deserialize(deserializer)
+            }
+        }
+
+        let mut map = TreeMap {
+            body: Vec::new().into_iter(),
+            query: Vec::new().into_iter(),
+            pending: None,
+        };
+        let error = map.next_value_seed(StringSeed).expect_err("next_key_seed must be called first");
+        assert!(error.to_string().contains("before key"));
     }
 }

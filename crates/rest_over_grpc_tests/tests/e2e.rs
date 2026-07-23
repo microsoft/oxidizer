@@ -29,7 +29,7 @@ async fn streaming(response: TranscodeResponse) -> (String, Vec<u8>) {
         TranscodeResponse::Unary(_) => None,
     }
     .expect("expected a streaming response");
-    let content_type = stream.content_type().to_owned();
+    let content_type = stream.content_type().to_str().expect("generated content type is ASCII").to_owned();
     let frames: Vec<Vec<u8>> = stream.into_frames().map(|frame| frame.expect("frame")).collect().await;
     (content_type, frames.concat())
 }

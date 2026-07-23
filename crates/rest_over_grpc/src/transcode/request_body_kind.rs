@@ -18,7 +18,7 @@
 ///     RequestBodyKind::Field("book")
 /// );
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequestBodyKind {
     /// No request body is consumed.
     None,

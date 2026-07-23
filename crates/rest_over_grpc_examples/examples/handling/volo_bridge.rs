@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![allow(unknown_lints, reason = "the pinned and latest Clippy versions expose different async-trait lints")]
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "synchronous examples implement generated async service traits"
+)]
+
 //! Writing a custom bridge for a non-`tonic` gRPC stack — here a stand-in for
 //! [`volo`](https://github.com/cloudwego/volo)-grpc.
 //!

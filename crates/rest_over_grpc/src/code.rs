@@ -231,12 +231,12 @@ impl Code {
     /// assert_eq!(Code::OutOfRange.to_http_status(), StatusCode::BAD_REQUEST);
     /// ```
     #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "only unreachable panic")]
     pub fn to_http_status(self) -> StatusCode {
         match self {
             Self::Ok => StatusCode::OK,
-            // 499 "Client Closed Request" is non-standard but is what gateways use;
-            // it is always a valid status code, so the fallback is unreachable.
-            Self::Cancelled => StatusCode::from_u16(499).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            // 499 "Client Closed Request" is non-standard but is what gateways use.
+            Self::Cancelled => StatusCode::from_u16(499).expect("499 is a valid HTTP status code"),
             Self::Unknown | Self::Internal | Self::DataLoss => StatusCode::INTERNAL_SERVER_ERROR,
             Self::InvalidArgument | Self::FailedPrecondition | Self::OutOfRange => StatusCode::BAD_REQUEST,
             Self::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,

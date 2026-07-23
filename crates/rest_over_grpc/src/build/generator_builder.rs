@@ -19,13 +19,21 @@ use super::OpenApiInfo;
 ///
 /// let generator = Generator::builder().emit_tonic_bridge(true).build();
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct GeneratorBuilder {
-    // Stored inverted so the derived `Default` yields output with the `tonic`
-    // bridge emitted.
-    no_tonic: bool,
+    emit_tonic: bool,
     #[cfg(feature = "build-openapi")]
     openapi: Option<OpenApiInfo>,
+}
+
+impl Default for GeneratorBuilder {
+    fn default() -> Self {
+        Self {
+            emit_tonic: true,
+            #[cfg(feature = "build-openapi")]
+            openapi: None,
+        }
+    }
 }
 
 impl GeneratorBuilder {
@@ -37,7 +45,7 @@ impl GeneratorBuilder {
     /// Disable it when implementing the generated REST trait directly.
     #[must_use]
     pub fn emit_tonic_bridge(mut self, emit: bool) -> Self {
-        self.no_tonic = !emit;
+        self.emit_tonic = emit;
         self
     }
 
@@ -63,7 +71,7 @@ impl GeneratorBuilder {
     pub fn build(self) -> Generator {
         Generator {
             services: Vec::new(),
-            no_tonic: self.no_tonic,
+            emit_tonic: self.emit_tonic,
             #[cfg(feature = "build-openapi")]
             openapi: self.openapi,
         }

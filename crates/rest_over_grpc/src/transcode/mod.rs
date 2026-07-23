@@ -27,7 +27,7 @@ pub use rest_parse::{RestParse, parse_path_enum_value, parse_path_field, parse_r
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde::de::value::MapDeserializer;
-use serde_json::{Map, Value, from_slice, from_value, to_value, to_vec};
+use serde_json::{from_slice, to_value, to_writer};
 
 /// Decodes an HTTP request body and query into a typed request message `T`.
 ///
@@ -73,41 +73,8 @@ pub fn decode_request<T: DeserializeOwned>(query: &[(&str, &str)], body: &[u8], 
         return result;
     }
 
-    let mut root = match body_kind {
-        RequestBodyKind::None => Value::Object(Map::new()),
-        RequestBodyKind::Whole => {
-            if body.is_empty() {
-                Value::Object(Map::new())
-            } else {
-                from_slice(body).map_err(TranscodeError::body)?
-            }
-        }
-        RequestBodyKind::Field(field) => {
-            let mut obj = Map::new();
-            if !body.is_empty() {
-                let value = from_slice(body).map_err(TranscodeError::body)?;
-                obj.insert(field.to_owned(), value);
-            }
-            Value::Object(obj)
-        }
-    };
-
-    let obj = root
-        .as_object_mut()
-        .ok_or_else(|| TranscodeError::structure("request body must be a JSON object"))?;
-
-    let mut seen_query_keys: Vec<String> = Vec::new();
-    for (key, value) in query {
-        let key = percent::decode_query(key).ok_or_else(|| TranscodeError::invalid_encoding("query parameter name"))?;
-        let value = percent::decode_query(value).ok_or_else(|| TranscodeError::invalid_encoding("query parameter value"))?;
-        let repeated = seen_query_keys.iter().any(|seen| seen == key.as_ref());
-        if !repeated {
-            seen_query_keys.push(key.as_ref().to_owned());
-        }
-        set_query_field(obj, key.as_ref(), Value::String(value.into_owned()), repeated)?;
-    }
-
-    from_value(root).map_err(TranscodeError::deserialize)
+    debug_assert!(matches!(body_kind, RequestBodyKind::Field(_)) && query.is_empty() && body.is_empty());
+    from_slice(b"{}").map_err(TranscodeError::deserialize)
 }
 
 /// Deserializes directly when no body/query merge is needed.
@@ -165,75 +132,31 @@ fn try_decode_fast<T: DeserializeOwned>(
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn encode_response<T: Serialize>(message: &T, kind: ResponseBodyKind) -> Result<Vec<u8>, TranscodeError> {
+    let mut body = Vec::new();
+    encode_response_into(message, kind, &mut body)?;
+    Ok(body)
+}
+
+pub(crate) fn encode_response_into<T: Serialize>(message: &T, kind: ResponseBodyKind, body: &mut Vec<u8>) -> Result<(), TranscodeError> {
     match kind {
-        ResponseBodyKind::Whole => to_vec(message).map_err(TranscodeError::serialize),
-        ResponseBodyKind::Field(field) => {
-            let mut body = Vec::new();
-            match message.serialize(FieldSerializer::new(field, &mut body)) {
-                Ok(()) => Ok(body),
-                Err(FieldSerError::Absent) => Err(TranscodeError::response_structure("response_body field is absent from the message")),
-                Err(FieldSerError::Unsupported) => encode_field_via_value(message, field),
-                Err(FieldSerError::Json(source)) => Err(TranscodeError::serialize(source)),
-                Err(FieldSerError::Custom(detail)) => Err(TranscodeError::serialize_message(detail)),
-            }
-        }
+        ResponseBodyKind::Whole => to_writer(body, message).map_err(TranscodeError::serialize),
+        ResponseBodyKind::Field(field) => match message.serialize(FieldSerializer::new(field, body)) {
+            Ok(()) => Ok(()),
+            Err(FieldSerError::Absent) => Err(TranscodeError::response_structure("response_body field is absent from the message")),
+            Err(FieldSerError::Unsupported) => encode_field_via_value_into(message, field, body),
+            Err(FieldSerError::Json(source)) => Err(TranscodeError::serialize(source)),
+            Err(FieldSerError::Custom(detail)) => Err(TranscodeError::serialize_message(detail)),
+        },
     }
 }
 
 /// Handles non-struct response shapes through a JSON value.
-fn encode_field_via_value<T: Serialize>(message: &T, field: &str) -> Result<Vec<u8>, TranscodeError> {
+fn encode_field_via_value_into<T: Serialize>(message: &T, field: &str, body: &mut Vec<u8>) -> Result<(), TranscodeError> {
     let value = to_value(message).map_err(TranscodeError::serialize)?;
     let selected = value
         .get(field)
         .ok_or_else(|| TranscodeError::response_structure("response_body field is absent from the message"))?;
-    to_vec(selected).map_err(TranscodeError::serialize)
-}
-
-#[cfg(test)]
-fn set_field<'a>(obj: &mut Map<String, Value>, path: impl IntoIterator<Item = &'a str>, value: Value) -> Result<(), TranscodeError> {
-    set_field_impl(obj, path, value, false)
-}
-
-fn set_query_field(obj: &mut Map<String, Value>, key: &str, value: Value, repeated: bool) -> Result<(), TranscodeError> {
-    set_field_impl(obj, key.split('.'), value, repeated)
-}
-
-fn set_field_impl<'a>(
-    mut obj: &mut Map<String, Value>,
-    path: impl IntoIterator<Item = &'a str>,
-    value: Value,
-    append: bool,
-) -> Result<(), TranscodeError> {
-    let mut path = path.into_iter();
-    let Some(mut key) = path.next() else {
-        return Ok(());
-    };
-
-    loop {
-        let Some(next) = path.next() else {
-            if append {
-                let existing = obj
-                    .get_mut(key)
-                    .ok_or_else(|| TranscodeError::structure("repeated query parameter has no initial value"))?;
-                match existing {
-                    Value::Array(values) => values.push(value),
-                    slot => {
-                        let first = core::mem::replace(slot, Value::Null);
-                        *slot = Value::Array(vec![first, value]);
-                    }
-                }
-            } else {
-                obj.insert(key.to_owned(), value);
-            }
-            return Ok(());
-        };
-
-        let entry = obj.entry(key.to_owned()).or_insert_with(|| Value::Object(Map::new()));
-        obj = entry
-            .as_object_mut()
-            .ok_or_else(|| TranscodeError::structure("path variable conflicts with a scalar field"))?;
-        key = next;
-    }
+    to_writer(body, selected).map_err(TranscodeError::serialize)
 }
 
 #[cfg(test)]
@@ -241,6 +164,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use serde::Deserialize;
+    use serde_json::Value;
 
     use super::*;
     use crate::handling::{Code, Status};
@@ -312,13 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn set_field_with_an_empty_path_is_a_no_op() {
-        let mut obj = Map::new();
-        set_field(&mut obj, std::iter::empty::<&str>(), Value::String("x".to_owned())).expect("empty path is Ok");
-        assert!(obj.is_empty());
-    }
-
-    #[test]
     fn encodes_whole_response() {
         let resp = Resp {
             name: "shelves/1".to_owned(),
@@ -338,6 +255,19 @@ mod tests {
         };
         let bytes = encode_response(&resp, ResponseBodyKind::Field("name")).expect("encodes");
         assert_eq!(bytes, br#""shelves/1""#);
+    }
+
+    #[test]
+    fn response_encoding_appends_to_an_existing_buffer() {
+        let resp = Resp {
+            name: "shelves/1".to_owned(),
+            size: 3,
+        };
+        let mut body = b"prefix:".to_vec();
+
+        encode_response_into(&resp, ResponseBodyKind::Field("name"), &mut body).expect("encodes");
+
+        assert_eq!(body, br#"prefix:"shelves/1""#);
     }
 
     #[test]
@@ -418,7 +348,7 @@ mod tests {
     fn field_selection_on_non_object_is_absent() {
         let err = encode_response(&"scalar", ResponseBodyKind::Field("name")).expect_err("no fields");
         assert_eq!(err.code(), Code::Internal);
-        assert!(err.to_string().contains("serialize"));
+        assert!(err.to_string().starts_with("failed to encode the response:"));
     }
 
     #[test]
@@ -495,6 +425,23 @@ mod tests {
         let decoded: Shelf = decode_request(&[("shelf", "s"), ("theme", "t")], b"", RequestBodyKind::Field("theme")).expect("decodes");
         assert_eq!(decoded.shelf, "s");
         assert_eq!(decoded.theme, "t");
+    }
+
+    #[test]
+    fn empty_requests_cover_direct_and_empty_field_paths() {
+        #[derive(Debug, Deserialize, PartialEq)]
+        #[expect(clippy::empty_structs_with_brackets, reason = "represents an empty JSON object")]
+        struct Empty {}
+
+        assert_eq!(
+            decode_request::<Empty>(&[], b"", RequestBodyKind::None).expect("empty request"),
+            Empty {}
+        );
+        assert_eq!(
+            decode_request::<Empty>(&[], b"", RequestBodyKind::Field("payload")).expect("empty field request"),
+            Empty {}
+        );
+        let _ = decode_request::<Shelf>(&[], b"", RequestBodyKind::None).expect_err("required fields are absent");
     }
 
     #[test]
@@ -643,6 +590,7 @@ mod tests {
                 impl serde::de::Visitor<'_> for GenreVisitor {
                     type Value = Genre;
 
+                    #[cfg_attr(coverage_nightly, coverage(off))]
                     fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                         formatter.write_str("SCIENCE or 2")
                     }
@@ -677,6 +625,20 @@ mod tests {
                 string_number: "2".to_owned(),
             }
         );
+
+        let named: Query = decode_request(
+            &[("enabled", "true"), ("tags", "one"), ("genre", "SCIENCE"), ("string_number", "2")],
+            b"",
+            RequestBodyKind::None,
+        )
+        .expect("enum name decodes");
+        assert_eq!(named.genre, Genre::Science);
+        let _ = decode_request::<Query>(
+            &[("enabled", "true"), ("tags", "one"), ("genre", "BOGUS"), ("string_number", "2")],
+            b"",
+            RequestBodyKind::None,
+        )
+        .expect_err("unknown enum name");
     }
 
     #[test]
@@ -749,6 +711,7 @@ mod tests {
         )
         .expect_err("absent");
         assert_eq!(err.code(), Code::Internal);
+        assert!(err.into_status().message().starts_with("failed to encode the response:"));
     }
 
     #[test]
