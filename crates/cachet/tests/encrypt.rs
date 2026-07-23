@@ -180,7 +180,7 @@ async fn relocated_ciphertext_reads_as_a_miss() {
         .expect("planting the blob should succeed");
 
     // Reading B must fail the AAD check and read as a miss — never A's value.
-    let result = cache.get(&"B".to_string()).await.expect("get should succeed");
+    let result = cache.get("B").await.expect("get should succeed");
     assert!(result.is_none(), "relocated ciphertext must not decrypt under a different key");
 }
 
@@ -214,11 +214,7 @@ async fn encrypt_chained_post_transform_fallbacks() {
 
     // Force a read past L1 so the encrypted post chain decrypts the value.
     l1.invalidate(&"k".to_string()).await.expect("invalidate should succeed");
-    let fetched = cache
-        .get(&"k".to_string())
-        .await
-        .expect("get should succeed")
-        .expect("value present");
+    let fetched = cache.get("k").await.expect("get should succeed").expect("value present");
     assert_eq!(
         *fetched.value(),
         "v",
