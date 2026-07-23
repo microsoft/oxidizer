@@ -83,40 +83,39 @@ Describe 'Format-PackageMenu' {
     }
 
     Context 'manual proc-macro SemVer review' {
-        It 'explains the unsupported automated check and offers the standard decision choices' {
+        It 'renders the same menu as an ordinary package already in the release plan' {
+            $ordinary = NewFinding -Folder 'macros' -CurrentVersion '1.2.3'
+            $ordinary | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+
             $finding = NewFinding -Folder 'macros' -CurrentVersion '1.2.3'
             $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro'
             $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @()
-            $finding | Add-Member -NotePropertyName PlannedChangeType -NotePropertyValue 'patch'
 
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
 
-            $out | Should -Match 'Manual SemVer review required for proc-macro-only package: macros'
-            $out | Should -Match 'cargo-semver-checks cannot inspect procedural macro names'
-            $out | Should -Match 'Review the diff and choose the appropriate change type manually'
-            $out | Should -Match '2\. Keep the planned patch release after manual review'
-            $out | Should -Match '3\. Release as breaking change'
-            $out | Should -Match '4\. Release as non-breaking change'
-            $out | Should -Match '5\. Release as patch'
+            $out | Should -Be (Format-PackageMenu -Finding $ordinary -RemainingCount 0)
+            $out | Should -Match 'Detected package with unreleased modifications: macros'
+            $out | Should -Match '2\. Keep the currently planned release level'
+            $out | Should -Not -Match 'Manual SemVer|cargo-semver-checks|proc-macro'
         }
 
-        It 'explains one-hop propagation for an ordinary dependent of a reviewed breaking package' {
+        It 'renders the same menu for a mandatory downstream review as for an ordinary package' {
+            $ordinary = NewFinding -Folder 'facade' -CurrentVersion '1.2.3'
+            $ordinary | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
+
             $finding = NewFinding -Folder 'facade' -CurrentVersion '1.2.3'
             $finding | Add-Member -NotePropertyName InReleaseSet -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName RequiresManualSemverReview -NotePropertyValue $true
             $finding | Add-Member -NotePropertyName ManualSemverReviewKind -NotePropertyValue 'proc-macro-dependent'
             $finding | Add-Member -NotePropertyName ManualSemverReviewSources -NotePropertyValue @('macros')
-            $finding | Add-Member -NotePropertyName PlannedChangeType -NotePropertyValue 'patch'
 
             $out = Format-PackageMenu -Finding $finding -RemainingCount 0
 
-            $out | Should -Match 'package affected by a breaking proc-macro review chain: facade'
-            $out | Should -Match 'Direct dependency with a manually reviewed breaking release: macros'
-            $out | Should -Match 'cargo-semver-checks still classifies this library'
-            $out | Should -Match 'breaking result continues review to direct published consumers'
-            $out | Should -Match 'weaker result stops propagation here'
+            $out | Should -Be (Format-PackageMenu -Finding $ordinary -RemainingCount 0)
+            $out | Should -Match 'Detected package with unreleased modifications: facade'
+            $out | Should -Not -Match 'Manual SemVer|cargo-semver-checks|proc-macro'
         }
     }
 
@@ -970,7 +969,7 @@ Describe 'Invoke-PlanReview iteration-cap behaviour' {
                     CurrentVersion         = '1.0.0'
                     EffectiveChangeType    = 'non-breaking'
                     EffectiveTargetVersion = '1.1.0'
-                    Source                 = 'user'
+                    Source                 = if ($t.Name -eq 'p1') { 'user' } else { 'cascade' }
                     AutoUpgraded           = $false
                     CascadeReasons         = New-Object 'System.Collections.Generic.List[object]'
                     RawToken               = $t.RawToken
@@ -1200,7 +1199,6 @@ Describe 'Invoke-PlanReview mandatory proc-macro review precedence' {
                 RequiresManualSemverReview = $true
                 ManualSemverReviewKind = 'proc-macro'
                 ManualSemverReviewSources = @()
-                PlannedChangeType = 'patch'
             }
         }
 

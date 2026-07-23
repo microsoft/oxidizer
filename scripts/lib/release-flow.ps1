@@ -606,7 +606,6 @@ function Get-ManualSemverReviewFindings {
             RequiresManualSemverReview = $true
             ManualSemverReviewKind      = 'proc-macro'
             ManualSemverReviewSources   = @()
-            PlannedChangeType           = $entry.EffectiveChangeType
         }
     }
 
@@ -663,7 +662,6 @@ function Get-ManualSemverReviewFindings {
                 RequiresManualSemverReview = $true
                 ManualSemverReviewKind      = 'proc-macro-dependent'
                 ManualSemverReviewSources   = @($sourceEntry.Name)
-                PlannedChangeType           = $dependentEntry.EffectiveChangeType
             }
         }
     }
@@ -1259,25 +1257,12 @@ function Format-PackageMenu {
     }
     $hasChanges = $changeCount -gt 0
 
-    $requiresManualSemverReview = $false
-    if ($null -ne $Finding.PSObject.Properties['RequiresManualSemverReview']) {
-        $requiresManualSemverReview = [bool]$Finding.RequiresManualSemverReview
+    $inReleaseSet = $false
+    if ($null -ne $Finding.PSObject.Properties['InReleaseSet']) {
+        $inReleaseSet = [bool]$Finding.InReleaseSet
     }
 
-    $manualReviewKind = ''
-    if ($null -ne $Finding.PSObject.Properties['ManualSemverReviewKind']) {
-        $manualReviewKind = [string]$Finding.ManualSemverReviewKind
-    }
-    $manualReviewSources = @()
-    if ($null -ne $Finding.PSObject.Properties['ManualSemverReviewSources']) {
-        $manualReviewSources = @($Finding.ManualSemverReviewSources)
-    }
-
-    $headerLine = if ($requiresManualSemverReview -and $manualReviewKind -eq 'proc-macro-dependent') {
-        "Manual SemVer review required for package affected by a breaking proc-macro review chain: $folder$queueSuffix"
-    } elseif ($requiresManualSemverReview) {
-        "Manual SemVer review required for proc-macro-only package: $folder$queueSuffix"
-    } elseif ($hasChanges) {
+    $headerLine = if ($hasChanges) {
         "Detected package with unreleased modifications: $folder$queueSuffix"
     } else {
         "Reviewing package (no detected changes): $folder$queueSuffix"
@@ -1287,16 +1272,6 @@ function Format-PackageMenu {
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine($headerLine)
-    if ($requiresManualSemverReview -and $manualReviewKind -eq 'proc-macro-dependent') {
-        $sourceLabel = if ($manualReviewSources.Count -eq 1) { 'dependency' } else { 'dependencies' }
-        [void]$sb.AppendLine("  Direct $sourceLabel with a manually reviewed breaking release: $($manualReviewSources -join ', ')")
-        [void]$sb.AppendLine('  cargo-semver-checks still classifies this library, but cannot prove whether the procedural macro contract is re-exported or otherwise exposed.')
-        [void]$sb.AppendLine('  Review the diff and public contract manually. A breaking result continues review to direct published consumers; any weaker result stops propagation here.')
-    } elseif ($requiresManualSemverReview) {
-        [void]$sb.AppendLine('  cargo-semver-checks cannot inspect procedural macro names, accepted inputs, or generated output.')
-        [void]$sb.AppendLine('  Review the diff and choose the appropriate change type manually.')
-        [void]$sb.AppendLine('  A breaking result continues manual review to direct published consumers; any weaker result leaves them on the normal cascade path.')
-    }
     # Show direct in-workspace dependents (packages that import this one
     # directly) as a comma-separated list. We deliberately omit transitive
     # dependents and full chains: in a workspace with hundreds of packages
@@ -1323,13 +1298,8 @@ function Format-PackageMenu {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("  1. $viewDiffLabel")
-    if ($requiresManualSemverReview -and $Finding.InReleaseSet) {
-        $plannedChangeType = if ([string]::IsNullOrWhiteSpace([string]$Finding.PlannedChangeType)) {
-            'current'
-        } else {
-            [string]$Finding.PlannedChangeType
-        }
-        [void]$sb.AppendLine("  2. Keep the planned $plannedChangeType release after manual review")
+    if ($inReleaseSet) {
+        [void]$sb.AppendLine('  2. Keep the currently planned release level')
     } else {
         [void]$sb.AppendLine('  2. No material changes - release only if required by cascade logic')
     }
@@ -1856,25 +1826,20 @@ function Invoke-PlanReview {
             $next      = $queue[0]
             $remaining = $queue.Count - 1
             $decision  = Get-PackageReleaseDecision -Finding $next -RemainingCount $remaining -RepoRoot $RepoRoot
+            $isManualSemverReview = [bool]$next.RequiresManualSemverReview
+            if ($isManualSemverReview) {
+                # Proc-macro status affects why this decision is required and
+                # how review propagates, not the menu or decision semantics.
+                [void]$reviewedManualSemver.Add($next.Folder)
+            }
 
             if ($decision.Action -eq 'ignore') {
-                if ($next.RequiresManualSemverReview) {
-                    [void]$reviewedManualSemver.Add($next.Folder)
-                    if ($next.InReleaseSet) {
-                        $plannedLevel = $resolvedHash[$next.Folder].EffectiveChangeType
-                        if ($next.ManualSemverReviewKind -eq 'proc-macro-dependent') {
-                            Write-Host "  Keeping '$($next.Folder)' at its manually reviewed $plannedLevel level after the breaking proc-macro dependency review." -ForegroundColor DarkGray
-                        } else {
-                            Write-Host "  Keeping '$($next.Folder)' at its manually reviewed $plannedLevel level; cargo-semver-checks was not run for this proc-macro-only package." -ForegroundColor DarkGray
-                        }
-                    } else {
-                        Write-Host "  Skipping '$($next.Folder)' after manual proc-macro review; cascade may still pull it into the release plan on a later iteration." -ForegroundColor DarkGray
-                        [void]$declined.Add($next.Folder)
+                if ($next.InReleaseSet) {
+                    $plannedLevel = $resolvedHash[$next.Folder].EffectiveChangeType
+                    Write-Host "  Keeping '$($next.Folder)' at its currently planned $plannedLevel release level." -ForegroundColor DarkGray
+                    if (-not $isManualSemverReview) {
+                        [void]$reviewedCascadeAsIs.Add($next.Folder)
                     }
-                } elseif ($next.InReleaseSet) {
-                    $cascadeLevel = $resolvedHash[$next.Folder].EffectiveChangeType
-                    Write-Host "  Keeping '$($next.Folder)' at its cascade-applied $cascadeLevel level; reviewer should confirm no further elevation is needed." -ForegroundColor DarkGray
-                    [void]$reviewedCascadeAsIs.Add($next.Folder)
                 } else {
                     Write-Host "  Skipping '$($next.Folder)'; cascade may still pull it into the release plan on a later iteration." -ForegroundColor DarkGray
                     [void]$declined.Add($next.Folder)
@@ -1887,10 +1852,9 @@ function Invoke-PlanReview {
             # change-spec vocabulary ('breaking'/'nonbreaking'/'patch').
             #
             # For both new and elevation cases we craft the parsed-token object
-            # directly rather than going through Parse-ReleaseTokens. Ordinary
-            # re-surfaced findings are cascade-source entries. A mandatory
-            # proc-macro review can also re-surface a user-source entry; that
-            # path replaces its provisional token below to avoid a duplicate.
+            # directly rather than going through Parse-ReleaseTokens. A finding
+            # can also re-surface a user-source entry; replace its provisional
+            # token below instead of adding a duplicate.
             $changeSpec = switch ($decision.Action) {
                 'breaking'     { 'breaking' }
                 'non-breaking' { 'nonbreaking' }
@@ -1905,35 +1869,28 @@ function Invoke-PlanReview {
                 RawToken               = $newToken
             }
 
-            if ($next.RequiresManualSemverReview) {
-                [void]$reviewedManualSemver.Add($next.Folder)
-                $existingEntry = $resolvedHash[$next.Folder]
-                if ($null -ne $existingEntry -and $existingEntry.Source -eq 'user') {
-                    # The package was already a user-source token (targeted mode).
-                    # Replace that provisional decision with the one made after
-                    # viewing the manual SemVer review dialog instead of appending a
-                    # duplicate token that Resolve-ReleaseSet would reject.
-                    $folderNorm = $next.Folder.Replace('-', '_')
-                    $cargoNorm  = $existingEntry.Name.Replace('-', '_')
-                    $tokenIndex = -1
-                    for ($i = 0; $i -lt $userTokens.Count; $i++) {
-                        $tokenNorm = $userTokens[$i].Name.Replace('-', '_')
-                        if ($tokenNorm -eq $folderNorm -or $tokenNorm -eq $cargoNorm) {
-                            $tokenIndex = $i
-                            break
-                        }
+            $existingEntry = $resolvedHash[$next.Folder]
+            if ($null -ne $existingEntry -and $existingEntry.Source -eq 'user') {
+                # The package was already a user-source token (targeted mode).
+                # Replace that provisional decision instead of appending a
+                # duplicate token that Resolve-ReleaseSet would reject.
+                $folderNorm = $next.Folder.Replace('-', '_')
+                $cargoNorm  = $existingEntry.Name.Replace('-', '_')
+                $tokenIndex = -1
+                for ($i = 0; $i -lt $userTokens.Count; $i++) {
+                    $tokenNorm = $userTokens[$i].Name.Replace('-', '_')
+                    if ($tokenNorm -eq $folderNorm -or $tokenNorm -eq $cargoNorm) {
+                        $tokenIndex = $i
+                        break
                     }
-                    if ($tokenIndex -lt 0) {
-                        throw "Internal error: could not locate the user token for manually reviewed package '$($next.Folder)'."
-                    }
-                    $userTokens[$tokenIndex] = $newTokenEntry
-                } else {
-                    $userTokens.Add($newTokenEntry)
                 }
-                continue
+                if ($tokenIndex -lt 0) {
+                    throw "Internal error: could not locate the user token for reviewed package '$($next.Folder)'."
+                }
+                $userTokens[$tokenIndex] = $newTokenEntry
+            } else {
+                $userTokens.Add($newTokenEntry)
             }
-
-            $userTokens.Add($newTokenEntry)
         }
 
         Write-Warning "Plan review reached its runaway-cap of $runawayCap iterations; aborting further prompts. This is a defence-in-depth safety net — the state-signature check above should have caught any logic loop earlier; if you see this, please report."
