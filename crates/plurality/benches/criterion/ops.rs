@@ -15,18 +15,13 @@
     reason = "test and benchmark code"
 )]
 
-//! Single-operation benchmark bodies for the criterion (wall-clock) alloc and
-//! fat-pointer suites.
-//!
-//! Each `fn` performs **exactly one** hot operation; the criterion harness loops
-//! each one `N` times for a wall-clock signal. The gungraun suite has its own
-//! copy of these bodies (`benches/gungraun/ops.rs`) that it runs once under
-//! Callgrind.
+//! Single-operation bodies for criterion allocation and fat-pointer benchmarks.
 
+use std::boxed::Box as StdBox;
 use std::hint::black_box;
 
 use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool, define_pooled_dyn_cast};
-use plurality::{Arc, Pool, Rc, coerce};
+use plurality::{Arc, Box as PoolBox, Pool, Rc, coerce};
 
 /// A small (~32-byte), `Drop`-free payload, so the benchmarks measure the
 /// pool's own allocate/free cost rather than user destructors.
@@ -104,14 +99,14 @@ pub(crate) fn box_uninit(p: &Pool<Obj>, i: u64) {
 #[inline]
 pub(crate) fn arc_unsize(p: &Pool<Obj>, i: u64) {
     let a = p.alloc_arc(black_box(Obj::new(i)));
-    let d: plurality::Arc<dyn Marker> = plurality::Arc::unsize::<dyn Marker>(a, plurality::coerce!(dyn Marker));
+    let d: Arc<dyn Marker> = Arc::unsize::<dyn Marker>(a, coerce!(dyn Marker));
     drop(black_box(d));
 }
 
 #[inline]
 pub(crate) fn box_unsize(p: &Pool<Obj>, i: u64) {
     let b = p.alloc_box(black_box(Obj::new(i)));
-    let d: plurality::Box<dyn Marker> = plurality::Box::unsize::<dyn Marker>(b, plurality::coerce!(dyn Marker));
+    let d: PoolBox<dyn Marker> = PoolBox::unsize::<dyn Marker>(b, coerce!(dyn Marker));
     drop(black_box(d));
 }
 
@@ -196,7 +191,7 @@ pub(crate) fn setup_plurality(n: usize) -> Pool<Obj> {
     assert!(pool.capacity() >= n as u64);
     assert!(pool.is_empty());
     let handle = pool.alloc_box(Obj::new(n as u64));
-    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
     assert_eq!(handle.tag(), 0xFF);
     drop(handle);
     pool
@@ -255,12 +250,10 @@ pub(crate) fn setup_infinity_local_blind(n: usize) -> LocalBlindPool {
 }
 
 pub(crate) fn setup_std_box(n: usize) {
-    let warm: Vec<std::boxed::Box<dyn Marker>> = (0..n)
-        .map(|i| std::boxed::Box::new(Obj::new(i as u64)) as std::boxed::Box<dyn Marker>)
-        .collect();
+    let warm: Vec<StdBox<dyn Marker>> = (0..n).map(|i| StdBox::new(Obj::new(i as u64)) as StdBox<dyn Marker>).collect();
     black_box(&warm);
     drop(warm);
-    let handle: std::boxed::Box<dyn Marker> = std::boxed::Box::new(Obj::new(n as u64));
+    let handle: StdBox<dyn Marker> = StdBox::new(Obj::new(n as u64));
     assert_eq!(black_box::<&dyn Marker>(&*handle).tag(), 0xFF);
     drop(black_box(handle));
 }
@@ -270,7 +263,7 @@ pub(crate) fn setup_std_box(n: usize) {
 #[inline]
 pub(crate) fn plurality_box(pool: &Pool<Obj>, i: u64) {
     let handle = pool.alloc_box(black_box(Obj::new(i)));
-    let handle: plurality::Box<dyn Marker> = plurality::Box::unsize(handle, coerce!(dyn Marker));
+    let handle: PoolBox<dyn Marker> = PoolBox::unsize(handle, coerce!(dyn Marker));
     invoke_dyn(&*handle);
     drop(black_box(handle));
 }
@@ -305,7 +298,7 @@ pub(crate) fn infinity_local_blind(pool: &LocalBlindPool, i: u64) {
 
 #[inline]
 pub(crate) fn std_box(i: u64) {
-    let handle: std::boxed::Box<dyn Marker> = std::boxed::Box::new(black_box(Obj::new(i)));
+    let handle: StdBox<dyn Marker> = StdBox::new(black_box(Obj::new(i)));
     invoke_dyn(&*handle);
     drop(black_box(handle));
 }
