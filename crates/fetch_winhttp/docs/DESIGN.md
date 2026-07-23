@@ -719,20 +719,13 @@ Because none is faithful, **v1 does not implement `connection_lifetime` for
 (`WINHTTP_OPTION_EXPIRE_CONNECTION` remains a candidate for a different feature:
 error-driven poisoning of a connection after a protocol failure.)
 
-Silently ignoring the option would let a caller who configured a bounded
-connection age (for cert rotation or load-balancer rebalancing) believe a
-guarantee is in force when it is not. But hard-erroring is also wrong: the option
-arrives through the generic `fetch` `ConnectionPoolOptions` that callers set
-transport-agnostically, and rejecting a config that works on `fetch_hyper` would
-break `fetch_winhttp` as a drop-in transport. The compromise: at build time, if
-`connection_lifetime` is `Fixed`/`PerConnection`, the transport emits a `warn`-level
-`tracing` event (and a telemetry counter) recording that the setting is not
-honored, then proceeds. The limitation is thereby visible in logs/telemetry rather
-than silent, without failing otherwise-valid clients. A future version may add a
-proper mechanism (most likely whole-session recycling gated behind an explicit
-opt-in, given its cost and coarse granularity). That this option arrives from the
-`fetch` layer at all, rather than being configured on the transport that owns the
-connections, is noted as `fetch` API feedback in §17.
+Rather than silently ignore a `Fixed`/`PerConnection` setting - which would let a
+caller believe a bounded-connection-age guarantee is in force when it is not - the
+transport warns at build time per the general unhonorable-option policy (§17.1). A
+future version may add a proper mechanism (most likely whole-session recycling gated
+behind an explicit opt-in, given its cost and coarse granularity). That this option
+arrives from the `fetch` layer at all, rather than being configured on the transport
+that owns the connections, is noted as `fetch` API feedback in §17.
 
 ## 8. HTTP protocol negotiation
 
@@ -1359,6 +1352,25 @@ the items below are instances of that split being in the wrong place today.
   `fetch` to model them. The mismatch today is that `fetch` reaches down to model a
   connect timeout while leaving the rest to transports - it should leave all
   network-phase timers to the transport and keep only pipeline-level deadlines.
+
+### 17.1 Unhonorable options are warned, not rejected
+
+The over-abstractions above have a shared practical consequence: because these
+options arrive through the generic `fetch` configuration and callers set them
+transport-agnostically, the transport routinely receives settings it cannot honor -
+a `connection_lifetime` of `Fixed`/`PerConnection` (§7.5), an idle timeout WinHTTP
+ignores (§7.4), and so on. The transport applies one policy to all of them: at build
+time, for each configured option it cannot faithfully honor, it emits a `warn`-level
+`tracing` event (and a telemetry counter) naming the option, then proceeds.
+
+The two alternatives are both worse. Silently ignoring an option would let a caller
+who configured, say, a bounded connection age for cert rotation believe a guarantee
+is in force when it is not. Hard-erroring would break `fetch_winhttp` as a drop-in
+transport, since the offending config arrives through the generic
+`ConnectionPoolOptions`/`TlsOptions` surface and works fine on `fetch_hyper`. Warning
+makes the gap visible in logs and telemetry without failing otherwise-valid clients.
+These gaps are a direct symptom of the over-abstraction above; the proper fix is
+transport-level configuration, and until then the warning is the safety net.
 
 
 [`RequestHandler`]: https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions
