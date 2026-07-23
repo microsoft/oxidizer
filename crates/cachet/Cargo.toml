@@ -75,6 +75,7 @@ cachet_tier = { path = "../cachet_tier", features = ["test-util"] }
 criterion = { workspace = true }
 ctor = { workspace = true }
 dashmap = { workspace = true }
+mutants = { workspace = true }
 postcard = { workspace = true }
 recoverable = { path = "../recoverable" }
 seatbelt = { path = "../seatbelt", features = ["retry", "tower-service"] }

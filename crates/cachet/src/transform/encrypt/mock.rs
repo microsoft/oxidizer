@@ -63,12 +63,14 @@ impl MockValueProtector {
     }
 
     /// Derives a deterministic nonce from the counter bytes (repeated to fill).
+    #[cfg_attr(test, mutants::skip)] // Test-only mock: no contract on the exact keystream, only that it is deterministic and reversible (verified by round-trip tests).
     fn nonce_bytes(counter: u32) -> [u8; MOCK_NONCE_SIZE] {
         let counter_bytes = counter.to_le_bytes();
         std::array::from_fn(|i| counter_bytes[i % counter_bytes.len()])
     }
 
     /// Reversible keystream transform: `body[i] ^= 0x5A ^ nonce[i % NONCE]`.
+    #[cfg_attr(test, mutants::skip)] // Test-only mock: no contract on the exact keystream, only that it is deterministic and reversible (verified by round-trip tests).
     fn mask(nonce: &[u8; MOCK_NONCE_SIZE], body: &mut [u8]) {
         for (i, byte) in body.iter_mut().enumerate() {
             *byte ^= 0x5A ^ nonce[i % MOCK_NONCE_SIZE];
