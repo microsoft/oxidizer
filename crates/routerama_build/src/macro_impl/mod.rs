@@ -20,6 +20,7 @@ use crate::{Route, is_http_token, route_field_name};
 mod field;
 mod query;
 mod resolver;
+mod service;
 
 /// Expands `#[derive(FromQuery)]`.
 #[must_use]
@@ -44,6 +45,37 @@ pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {
         .and_then(|attr| syn::parse2::<ItemEnum>(item).map(|item| (attr, item)))
         .and_then(|(attr, item)| resolver::expand_named(item, attr.name))
         .unwrap_or_else(syn::Error::into_compile_error)
+}
+
+/// Expands `#[service]`.
+#[must_use]
+pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
+    syn::parse2::<ServiceAttr>(attr)
+        .and_then(|attr| syn::parse2::<syn::ItemImpl>(item).map(|item| (attr, item)))
+        .and_then(|(attr, item)| service::expand(item, attr.context))
+        .unwrap_or_else(syn::Error::into_compile_error)
+}
+
+#[derive(Default)]
+struct ServiceAttr {
+    context: bool,
+}
+
+impl Parse for ServiceAttr {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(Self::default());
+        }
+        let argument: Ident = input.parse()?;
+        if argument != "context" {
+            return Err(syn::Error::new(argument.span(), "expected `context`"));
+        }
+        let _trailing_comma = input.parse::<Option<Token![,]>>()?;
+        if !input.is_empty() {
+            return Err(input.error("unexpected service attribute argument"));
+        }
+        Ok(Self { context: true })
+    }
 }
 
 #[derive(Default)]
@@ -78,9 +110,9 @@ impl Parse for ResolverAttr {
 ///
 /// Identifier methods are normalized to uppercase; string methods are used
 /// exactly as written and allow any RFC 9110 token.
-struct RouteAttr {
-    method: String,
-    path: LitStr,
+pub(crate) struct RouteAttr {
+    pub(crate) method: String,
+    pub(crate) path: LitStr,
 }
 
 impl Parse for RouteAttr {
@@ -338,6 +370,16 @@ mod tests {
             quote! { name = ApiResolver, extra },
         ] {
             assert!(syn::parse2::<ResolverAttr>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn service_accepts_only_the_optional_context_argument() {
+        assert!(!syn::parse2::<ServiceAttr>(quote! {}).expect("bare service").context);
+        assert!(syn::parse2::<ServiceAttr>(quote! { context }).expect("context service").context);
+        assert!(syn::parse2::<ServiceAttr>(quote! { context, }).expect("trailing comma").context);
+        for invalid in [quote! { input }, quote! { context, extra }] {
+            assert!(syn::parse2::<ServiceAttr>(invalid).is_err());
         }
     }
 

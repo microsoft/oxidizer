@@ -68,6 +68,44 @@
 //! (decode-then-parse) — work on either kind. A dynamic route must use capture
 //! names that are valid Rust identifiers matching its field names.
 //!
+//! ## Generated service dispatch
+//!
+//! [`#[service]`](macro@service) can make async handler methods the source of
+//! truth and generate the route enum plus exhaustive dispatch:
+//!
+//! ```
+//! struct BooksApi;
+//! struct RequestContext;
+//!
+//! #[routerama::service]
+//! impl BooksApi {
+//!     #[route(GET, "/books")]
+//!     async fn list_books(&self, request: &RequestContext) -> &'static str {
+//!         let _ = request;
+//!         "books"
+//!     }
+//!
+//!     #[route(GET, "/books/{id}")]
+//!     async fn get_book(&self, id: u32, request: &RequestContext) -> &'static str {
+//!         let _ = (id, request);
+//!         "book"
+//!     }
+//! }
+//!
+//! # async fn example() -> Result<(), routerama::ResolveError<'static>> {
+//! let api = BooksApi;
+//! let context = RequestContext;
+//! assert_eq!(api.dispatch("GET", "/books/42", &context).await?, "book");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Use `#[service(context)]` when the first handler parameter after `&self`
+//! should be forwarded as an owned, shared, or mutable context. Services with
+//! `#[route(dynamic)]` handlers additionally generate a persistent router and
+//! builder. See [`service`] for the complete contract and a mixed-route
+//! example.
+//!
 //! # Query string processing
 //!
 //! You describe a query schema as a named-field struct deriving
@@ -225,6 +263,155 @@ pub use http_method::HttpMethod;
 /// # }
 /// ```
 pub use routerama_macros::resolver;
+/// Generates route resolution and asynchronous dispatch from service methods.
+///
+/// `#[service]` makes annotated handler methods the source of truth. It
+/// generates a private route enum, applies [`resolver`] to that enum, and
+/// generates an exhaustive match that invokes each handler directly. There is
+/// no handler registry, trait object, function-pointer table, or per-request
+/// initialization.
+///
+/// # Static routes
+///
+/// Annotate a static handler with `#[route(METHOD, "path")]`. Capture
+/// parameters must have the same names as the path captures. Static captures
+/// support the same types as [`resolver`], including zero-copy `&str`,
+/// decode-on-demand `Cow<'_, str>`, owned `String`, and parsed `FromStr`
+/// values.
+///
+/// A service containing only static routes receives:
+///
+/// ```text
+/// service.dispatch(method, path, context).await
+/// ```
+///
+/// Construction remains infallible because its route trie is compiled into
+/// the program.
+///
+/// # Context forwarding
+///
+/// Use `#[service(context)]` to reserve the first handler parameter after
+/// `&self` as the context. Its concrete type is inferred from the handlers and
+/// must be identical across all routes. The type is forwarded unchanged, so
+/// contexts may be owned, shared, or mutable:
+///
+/// ```text
+/// async fn handler(&self, context: Context, capture: u32) -> Response
+/// async fn handler(&self, context: &Context, capture: u32) -> Response
+/// async fn handler(&self, context: &mut Context, capture: u32) -> Response
+/// ```
+///
+/// Context remains the final argument to `dispatch`; only the handler position
+/// is reserved:
+///
+/// ```text
+/// service.dispatch(method, path, context).await
+/// router.dispatch(&service, method, path, context).await
+/// ```
+///
+/// Bare `#[service]` retains the original convention: one shared borrowed
+/// context argument may appear anywhere that does not correspond to a static
+/// capture. The explicit context mode is recommended when the context is
+/// owned or mutable, and removes ambiguity between context and dynamic capture
+/// parameters.
+///
+/// # Dynamic routes
+///
+/// Annotate a handler with `#[route(dynamic)]` when its method and path
+/// template are supplied at run time. All non-context parameters become path
+/// captures. Dynamic captures must be owned: use `String` for decoded text or
+/// another owned `FromStr` type.
+///
+/// A service containing any dynamic handler receives a generated
+/// `<Service>RouterBuilder` and `<Service>Router`. Configure the dynamic paths
+/// once, retain the built router, and dispatch through it:
+///
+/// ```
+/// use routerama::{HttpMethod, service};
+///
+/// struct RequestContext {
+///     request_id: u64,
+/// }
+///
+/// struct BooksApi;
+///
+/// #[service(context)]
+/// impl BooksApi {
+///     #[route(GET, "/health")]
+///     async fn health(&self, context: &mut RequestContext) -> String {
+///         context.request_id += 1;
+///         std::future::ready(format!("healthy:{}", context.request_id)).await
+///     }
+///
+///     #[route(dynamic)]
+///     async fn get_book(&self, context: &mut RequestContext, id: u32) -> String {
+///         context.request_id += 1;
+///         std::future::ready(format!("book:{id}:{}", context.request_id)).await
+///     }
+/// }
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let api = BooksApi;
+/// let mut context = RequestContext { request_id: 7 };
+/// let router = BooksApi::router_builder()
+///     .add_get_book(HttpMethod::GET, "/books/{id}")
+///     .add_get_book(HttpMethod::GET, "/library/{id}")
+///     .build()?;
+///
+/// assert_eq!(
+///     router
+///         .dispatch(&api, "GET", "/health", &mut context)
+///         .await?,
+///     "healthy:8"
+/// );
+/// assert_eq!(
+///     router
+///         .dispatch(&api, "GET", "/library/42", &mut context)
+///         .await?,
+///     "book:42:9"
+/// );
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Calling an `add_<handler>` method more than once registers aliases for that
+/// handler. Every dynamic handler must be registered at least once.
+/// [`ConfigurationError`] returned by `build` aggregates missing
+/// registrations, invalid templates, capture mismatches, and conflicting
+/// dynamic routes. Static routes are resolved before dynamic routes.
+///
+/// # Handler contract
+///
+/// Every annotated handler must:
+///
+/// - be an `async` method in a non-generic inherent impl;
+/// - begin with shared `&self`;
+/// - contain either one shared borrowed context argument in bare mode or one
+///   context argument immediately after `&self` in context mode;
+/// - use the same context type and explicit response type as every other
+///   handler; and
+/// - use simple identifier parameter patterns.
+///
+/// Non-annotated methods remain unchanged. Generic or conditionally compiled
+/// impl blocks and handlers are not currently supported.
+///
+/// # Errors
+///
+/// Dispatch returns [`ResolveError::InvalidPath`] for a path containing a
+/// query or fragment, [`ResolveError::NotFound`] when nothing matches, and the
+/// corresponding capture error when conversion fails. Handler return values
+/// are not interpreted; for example, if every handler returns
+/// `Result<Response, AppError>`, dispatch returns
+/// `Result<Result<Response, AppError>, ResolveError>`.
+///
+/// # Performance
+///
+/// Static and dynamic matching use `routerama`'s existing tries. After
+/// resolution, dispatch performs one enum match and a direct monomorphized
+/// handler call. Dynamic routing adds persistent startup-built resolver state,
+/// but does not add indirect handler dispatch or allocations beyond those
+/// required by the selected capture types.
+pub use routerama_macros::service;
 
 mod affix_edge;
 mod build_error_entry;

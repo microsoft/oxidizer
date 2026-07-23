@@ -185,3 +185,59 @@ pub fn derive_to_query(input: TokenStream) -> TokenStream {
 pub fn resolver(attr: TokenStream, item: TokenStream) -> TokenStream {
     routerama_build::macro_impl::resolver(attr.into(), item.into()).into()
 }
+
+/// Generates static and dynamic route dispatch for an annotated inherent impl.
+///
+/// Use `#[route(METHOD, "path")]` for compile-time static routes and
+/// `#[route(dynamic)]` for handlers whose method and path are registered at
+/// startup. Every handler must be async, begin with `&self`, and return the
+/// same explicit response type. With bare `#[service]`, handlers also accept
+/// one shared request-context reference.
+///
+/// `#[service(context)]` instead reserves the first parameter after `&self` as
+/// context and forwards its exact concrete type. It may be `Context`,
+/// `&Context`, or `&mut Context`, but must be identical for every handler.
+/// Dispatch continues to accept context as its final argument.
+///
+/// Static capture arguments are named after the path captures and may borrow
+/// the path. Dynamic capture arguments are inferred from every non-context
+/// parameter and must be owned.
+///
+/// Static-only services receive
+/// `service.dispatch(method, path, context)`. Services with dynamic handlers
+/// receive `Service::router_builder()`, generated `add_<handler>` methods, and
+/// a persistent router whose
+/// `router.dispatch(&service, method, path, context)` method performs the same
+/// exhaustive direct dispatch.
+///
+/// # Example
+///
+/// ```ignore
+/// #[routerama::service(context)]
+/// impl Api {
+///     #[route(GET, "/health")]
+///     async fn health(&self, context: &mut Context) -> Response {
+///         // ...
+///     }
+///
+///     #[route(dynamic)]
+///     async fn plugin(&self, context: &mut Context, name: String) -> Response {
+///         // ...
+///     }
+/// }
+///
+/// let router = Api::router_builder()
+///     .add_plugin(routerama::HttpMethod::GET, "/plugins/{name}")
+///     .build()?;
+/// let response = router.dispatch(&api, method, path, &mut context).await?;
+/// ```
+///
+/// Router construction reports `routerama::ConfigurationError`; dispatch
+/// reports `routerama::ResolveError`. The generated implementation uses
+/// `routerama`'s existing tries and direct handler calls, without a runtime
+/// handler registry or trait objects.
+#[cfg_attr(test, mutants::skip)]
+#[proc_macro_attribute]
+pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
+    routerama_build::macro_impl::service(attr.into(), item.into()).into()
+}

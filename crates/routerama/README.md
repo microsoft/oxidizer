@@ -75,11 +75,46 @@ owned types — `String` (percent-decoded) and any `T: FromStr`
 (decode-then-parse) — work on either kind. A dynamic route must use capture
 names that are valid Rust identifiers matching its field names.
 
+### Generated service dispatch
+
+[`#[service]`][__link3] can make async handler methods the source of
+truth and generate the route enum plus exhaustive dispatch:
+
+```rust
+struct BooksApi;
+struct RequestContext;
+
+#[routerama::service]
+impl BooksApi {
+    #[route(GET, "/books")]
+    async fn list_books(&self, request: &RequestContext) -> &'static str {
+        let _ = request;
+        "books"
+    }
+
+    #[route(GET, "/books/{id}")]
+    async fn get_book(&self, id: u32, request: &RequestContext) -> &'static str {
+        let _ = (id, request);
+        "book"
+    }
+}
+
+let api = BooksApi;
+let context = RequestContext;
+assert_eq!(api.dispatch("GET", "/books/42", &context).await?, "book");
+```
+
+Use `#[service(context)]` when the first handler parameter after `&self`
+should be forwarded as an owned, shared, or mutable context. Services with
+`#[route(dynamic)]` handlers additionally generate a persistent router and
+builder. See [`service`][__link4] for the complete contract and a mixed-route
+example.
+
 ## Query string processing
 
 You describe a query schema as a named-field struct deriving
-[`FromQuery`][__link3],
-[`ToQuery`][__link4],
+[`FromQuery`][__link5],
+[`ToQuery`][__link6],
 or both. Its fields may be:
 
 * **scalar** — required while decoding, with string forms handled directly
@@ -135,9 +170,9 @@ field map, Serde, dynamic dispatch, or a generated top-level state type.
 The `#[query(...)]` helper attributes rename fields, add decoding aliases,
 provide defaults, flatten nested query types, skip fields, and reject
 unknown parameters. The
-[`FromQuery`][__link5]
+[`FromQuery`][__link7]
 and
-[`ToQuery`][__link6]
+[`ToQuery`][__link8]
 derive pages document the complete attribute contract.
 
 ## Securing route resolution and query processing
@@ -177,11 +212,13 @@ requires `std`.
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/routerama">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGkYW0CYXSEGy4k8ldDFPOhG2VNeXtD5nnKG6EPY6OfW5wBG8g18NOFNdxpYXKEG6-fiLAwLMD3G4641CpERAgJGwDcE54cDpLlGy3rTYRh7r4FYWSBgmlyb3V0ZXJhbWFlMC4xLjA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbmWTWA1L2sRMbV_7lnVOeH-UbOPaYM91svj0biHjKqME0YzZhZIKCaXJvdXRlcmFtYWUwLjEuMIJwcm91dGVyYW1hX21hY3Jvc2UwLjEuMA
  [__link0]: macro@resolver
  [__link1]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver
  [__link2]: https://docs.rs/routerama/0.1.0/routerama/?search=Resolver::resolve
- [__link3]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
- [__link4]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
+ [__link3]: macro@service
+ [__link4]: https://docs.rs/routerama_macros/0.1.0/routerama_macros/?search=service
  [__link5]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
  [__link6]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html
+ [__link7]: https://docs.rs/routerama/latest/routerama/query/derive.FromQuery.html
+ [__link8]: https://docs.rs/routerama/latest/routerama/query/derive.ToQuery.html

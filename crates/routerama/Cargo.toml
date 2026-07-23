@@ -22,6 +22,7 @@ allowed_external_types = [
     "routerama_macros::FromQuery",
     "routerama_macros::ToQuery",
     "routerama_macros::resolver",
+    "routerama_macros::service",
 ]
 
 [features]
