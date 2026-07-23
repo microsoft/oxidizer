@@ -454,7 +454,7 @@ jobs:
           fail_ci_if_error: true
 
   pr-title:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout
