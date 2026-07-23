@@ -91,8 +91,9 @@ block (§3.1).
 (crypto providers, verifiers, client-cert resolvers) that is meaningless to
 Schannel. WinHTTP does TLS itself and accepts only a small set of knobs, so
 `fetch_winhttp` ignores `CustomContext::tls` and takes its own `WinHttpTlsConfig`
-through `Extras` (§9). TLS configuration being inherently transport-specific is,
-in our view, a `fetch` API shortcoming; see §17.
+through `Extras` (§9). Different transports inherently support different TLS
+configuration models, so trying to configure TLS uniformly at the transport-abstract
+`fetch` level is over-abstraction on `fetch`'s part; see §17.
 
 ### 1.3 Architecture at a glance
 
@@ -1051,7 +1052,7 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
 | Response timeout | `http_extensions::ResponseTimeout` | Above transport, in `fetch::HttpClient::execute` (wraps the whole pipeline, maps to `HttpError::timeout`) | `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` as backstop |
 | Body idle timeout | `http_extensions::BodyTimeout` | We apply it, like `fetch_hyper`, via `HttpBodyOptions::timeout` on the response body (§11.2) | `WINHTTP_OPTION_RECEIVE_TIMEOUT` per read as backstop |
 | Seatbelt request timeout | `seatbelt::TimeoutLayer` (30 s) | Above transport | n/a |
-| Resolve/send timeouts | (no distinct `fetch` concept; TODO v2, below) | this transport | `WinHttpSetTimeouts` resolve/send fields, set from `WinHttpOptions` |
+| Resolve/send timeouts | (no distinct `fetch` concept; transport-specific by design, §17) | this transport | `WinHttpSetTimeouts` resolve/send fields, set from `WinHttpOptions` |
 
 `WinHttpSetTimeouts(resolve, connect, send, receive)` sets the four base timers;
 `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` is set separately and is forced by
@@ -1062,9 +1063,9 @@ connect deadline (§12.2) is the sole exception.
 "Connect timeout" is a universal concept `fetch` already models
 (`TransportOptions.connect_timeout`) but leaves each transport to enforce, which
 is why this transport wires it to `WINHTTP_OPTION_CONNECT_TIMEOUT`. Resolve and
-send timeouts have no distinct `fetch` concept, so v1 exposes them only as
-transport-specific `WinHttpOptions` knobs - a workaround flagged as `fetch` API
-feedback in §17.
+send timeouts have no distinct `fetch` concept, so they are exposed as
+transport-specific `WinHttpOptions` knobs - the appropriate home for
+fine-grained network-phase timers, as discussed in the `fetch` API feedback (§17).
 
 ### 12.2 One transport-scheduled delay: the outer connect deadline
 
@@ -1350,12 +1351,15 @@ the items below are instances of that split being in the wrong place today.
   predictable, avoid a Hyper-colored default, and treat every transport uniformly.
   The slightly more verbose hello-world is worth the consistency.
 
-- **TLS configuration lives at the wrong layer.** `fetch`'s generic `TlsOptions`
+- **TLS configuration is over-abstracted.** `fetch`'s generic `TlsOptions`
   carries rustls/native-tls material that only the Hyper transport understands;
-  Schannel-based WinHTTP cannot consume it and needs its own knobs (§1.2, §9). TLS
-  is inherently a property of the transport, so it should be configured on the
-  transport, not through a generic `fetch`-level option. The same
-  `HttpClient::build(transport().tls(cfg))` shape would express this cleanly.
+  Schannel-based WinHTTP cannot consume it and needs its own knobs (§1.2, §9).
+  Different transports inherently support different TLS configuration models - it is
+  a fact of life, not a `fetch` design choice, that they cannot be configured
+  uniformly. The shortcoming is that `fetch` tries to abstract TLS at the
+  transport-agnostic level anyway; it should instead be configured per transport, on
+  the transport being plugged in. The same `HttpClient::build(transport().tls(cfg))`
+  shape would express this cleanly.
 
 - **Connection-management options live at the wrong layer.** `fetch` exposes
   `max_connections`, `connection_idle_timeout`, and `connection_lifetime` (§7.4), but
@@ -1366,14 +1370,19 @@ the items below are instances of that split being in the wrong place today.
   transport that manages its own sockets. Connection-management configuration
   therefore belongs on the transport that manages the connections, not on `fetch`.
 
-- **Timeouts are only partly modeled.** `fetch` models connect timeout but has no
-  concept for resolve or send timeouts, forcing this transport to expose them as
-  transport-specific `WinHttpOptions` knobs (§12.1). The natural split is by scope:
-  *network-phase* timers (resolve, connect, send, receive) are transport concerns and
-  each transport should model them uniformly on its own configuration, whereas
-  *end-to-end* deadlines (the overall response timeout, `seatbelt`'s request timeout)
-  are pipeline concerns that rightly live above the transport (§12.1). Today the
-  network-phase timers are only partially represented at the `fetch` layer.
+- **Timeouts are over-abstracted, not under-modeled.** `fetch` models a connect
+  timeout but has no concept for resolve or send timeouts. That absence is *not* the
+  problem: different transports support different sets of fine-grained timers, measure
+  them against different phase boundaries (what each timer includes or excludes), or
+  cannot express some of them at all, so there is no uniform fine-grained timeout model
+  to standardize. The right split is by scope. *End-to-end* pipeline deadlines (the
+  overall response timeout, `seatbelt`'s request timeout) belong in `fetch`, above the
+  transport. *Network-phase* timers (resolve, connect, send, receive) are inherently
+  transport-specific and should be configured on each transport, which is exactly why
+  this transport exposes them as `WinHttpOptions` knobs (§12.1) rather than expecting
+  `fetch` to model them. The mismatch today is that `fetch` reaches down to model a
+  connect timeout while leaving the rest to transports - it should leave all
+  network-phase timers to the transport and keep only pipeline-level deadlines.
 
 
 [`RequestHandler`]: https://github.com/microsoft/oxidizer/tree/main/crates/http_extensions
