@@ -21,7 +21,7 @@ use tick::Clock;
 /// what the `serialize()` boundary produces before protection.
 fn serialized(value: &str) -> Vec<u8> {
     let mut out = vec![1u8]; // FORMAT_VERSION
-    out.extend_from_slice(&postcard::to_allocvec(&value.to_string()).expect("postcard serialization should not fail"));
+    out.extend_from_slice(&postcard::to_allocvec(value).expect("postcard serialization should not fail"));
     out
 }
 

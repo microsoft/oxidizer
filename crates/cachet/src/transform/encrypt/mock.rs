@@ -99,7 +99,9 @@ impl ValueProtector for MockValueProtector {
         let Some(nonce) = bytes.get(..MOCK_NONCE_SIZE) else {
             return Ok(DecodeOutcome::SoftFailure("mock: truncated nonce"));
         };
-        let nonce: [u8; MOCK_NONCE_SIZE] = nonce.try_into().expect("MOCK_NONCE_SIZE bytes");
+        let nonce: [u8; MOCK_NONCE_SIZE] = nonce
+            .try_into()
+            .expect("nonce slice is MOCK_NONCE_SIZE bytes, guarded by get(..MOCK_NONCE_SIZE) above");
         let rest = &bytes[MOCK_NONCE_SIZE..];
         // The caller supplies `context`, so its length is known; slice it off directly
         // without any stored length or arithmetic on untrusted input.
