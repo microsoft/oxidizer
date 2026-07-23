@@ -454,29 +454,19 @@ jobs:
           fail_ci_if_error: true
 
   pr-title:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - name: Check PR Title
-        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Setup
+        uses: ./.github/actions/setup
         with:
-          types: |
-            build
-            chore
-            ci
-            doc
-            docs
-            feat
-            fix
-            misc
-            miscellaneous
-            perf
-            refactor
-            style
-            task
-            test
+          cargo-tools: JUST_VERSION
+      - name: Check PR Title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: just anvil-pr-title
 
   license-headers:
     runs-on: ubuntu-slim
