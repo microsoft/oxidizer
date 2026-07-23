@@ -577,46 +577,30 @@ non-blocking (§3.1).
 
 ## 6. Object and event pooling
 
-Per §4.1, callbacks are hot and frequent, and each request issues several async
-steps. To avoid reallocating the FFI context and the completion events on every
-step, the transport keeps two pools.
-
-**Sync requirement.** A `fetch` transport handler must be `Send + Sync`:
-`layered::Service` requires it and the handler is stored in an `Arc<T>` shared into
-every request future. `Isolation::Isolated` gives each core its own transport
-*instance* but does not relax that bound, so every field must be `Sync` (or made so).
+Callbacks are hot and frequent and each request issues several async steps, so
+the transport avoids per-step allocation by keeping two transport-owned pools that
+requests rent from. Both must fit the `Send + Sync` bound a `fetch` handler
+requires: the handler is stored in an `Arc<T>` shared into every request
+future, and `Isolation::Isolated` gives each core its own instance but does not
+relax that bound.
 
 - **`events_once::EventPool<CompletionResult>`.** For each async step the driver
-  (or the response body reader) rents one `(sender, receiver)`; the endpoints
-  recycle themselves into the pool when both ends drop. `EventPool` is already
-  `Send + Sync` (internally an `Arc` over a mutex-guarded slab), is a cheap
-  clonable handle whose backing outlives both the handle and the rented endpoints,
-  and returns an endpoint to the pool on drop with no external access. So it is
-  held as a plain field and cloned into each request (letting the body reader rent
-  after `execute` returns) with no wrapping of our own, and a WinHTTP callback may
-  complete or discard an event on any thread.
+  (or the response body reader) rents one `(sender, receiver)` pair, and the callback
+  sends the completion through it (§4.3). The pool is already `Send + Sync`, so it is
+  held as a plain field, cloned into each request, and a callback may complete an
+  event on any thread.
 - **`plurality::Pool<RequestContext>` behind a `Mutex`.** A request rents one
-  `plurality::Box<RequestContext>` at start, for its whole lifetime (reclaimed when
-  the callback drops it on `HANDLE_CLOSING`, §5.3). `plurality::Pool` is
-  `Send + !Sync` - only one thread may allocate at a time - so it is the one field
-  that is not already `Sync`. We wrap it in a single `std::sync::Mutex`: a coarse lock is
-  preferable to fine-grained complexity here, and it is essentially uncontended
-  because the pool is touched only to *rent a context at request start* - never
-  across an `.await` (a `MutexGuard` is `!Send` and must not cross one, which would
-  also break the `Send` request future), never by the body reader (which reuses the
-  already-rented context), and never in a WinHTTP callback (the context `Box`
-  returns itself to the pool through its own reference-counted `Drop`, §5.3, holding
-  no `&Pool` and so taking no lock). Under the thread-per-core deployment a given
-  instance is used from one thread in the common case anyway. The pooled backing
-  memory is reference-counted and outlives the `Pool` handle, exactly as the
-  deferred FFI free in §5.3 requires.
+  `plurality::Box<RequestContext>` at start and holds it for its whole lifetime
+  (reclaimed when the callback drops it on `HANDLE_CLOSING`, §5.3). `plurality::Pool`
+  is `Send + !Sync`, so it is the one field we wrap in a `std::sync::Mutex`. The lock
+  is coarse but essentially uncontended: it is taken only to rent a context at request
+  start - never across an `.await`, never by the body reader (which reuses the
+  already-rented context), and never in a callback (the context returns itself to the
+  pool through its own `Drop`, holding no `&Pool`).
 
 Read buffers come from neither pool: they are reserved from the `bytesbuf`
 `GlobalPool` on `CustomContext` (a `Sync`, `Arc`-backed pool), so the body reader
 holds its own clone and rents buffers with no lock.
-
-These pools belong to the transport, not to individual requests: requests are
-short-lived and rent from the long-lived pools rather than standing up their own.
 
 ## 7. Connection management
 
