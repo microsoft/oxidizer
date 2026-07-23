@@ -5,7 +5,7 @@
     dead_code,
     unused_imports,
     clippy::unnecessary_safety_comment,
-    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+    reason = "shared test helpers cover feature-gated paths"
 )]
 
 //! Drop and teardown reentrancy tests.
@@ -26,7 +26,7 @@ mod arena_drop_reentrancy {
 
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
     #[test]
     fn drop_runs_destructors_that_drop_other_smart_pointers() {
@@ -278,7 +278,7 @@ mod alloc_reentrancy {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 }
 
@@ -291,6 +291,6 @@ mod drop_behavior {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 }

@@ -18,15 +18,8 @@
     reason = "benchmark code"
 )]
 
-//! Wall-clock (criterion) benchmarks for the allocation functions and the
-//! owning fat-pointer comparison.
-//!
-//! Each criterion iteration performs `N` operations, so the reported time is
-//! for `N` ops (divide by `N` for per-operation cost — `perf_report.rs` does
-//! this). Every body here is also run once by the gungraun suite, so the two
-//! measurements exercise identical code.
-//!
-//! Run with: `cargo bench --bench criterion`.
+//! Criterion allocation and fat-pointer benchmarks. Reported iterations contain
+//! `N` operations; `perf_report.rs` converts them to per-operation times.
 
 use std::hint::black_box;
 

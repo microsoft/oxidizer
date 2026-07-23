@@ -15,29 +15,15 @@
     reason = "test and benchmark code"
 )]
 
-//! Graph-churn benchmark: build and continuously mutate a large node graph,
-//! allocating ~1,000,000 nodes with a realistic random add/remove pattern.
-//!
-//! The exact same precomputed operation stream is replayed against two
-//! allocation backends:
-//!
-//!   1. `plurality::Pool` + `plurality::Box` (this crate).
-//!   2. straight `std::boxed::Box` backed by the **mimalloc** global allocator.
-//!
-//! Both runs build identical node contents, in identical slab positions, in the
-//! identical order — verified by an end-to-end checksum that must match. The
-//! workload also chases graph edges on every insert, so it exercises memory
-//! locality (where the pool's contiguous chunks tend to win) as well as raw
-//! allocation throughput.
-//!
-//! Run with: `cargo bench --bench graph_churn`.
+//! Replays identical graph churn against `plurality::Pool` and `Box` backed by
+//! mimalloc. A checksum verifies equivalent runs.
 
 use core::ops::Deref;
 use std::time::{Duration, Instant};
 
-// Use mimalloc for the whole process. The "mimalloc" backend allocates every
-// node through it; the pool backend only allocates its (few, large) chunks
-// through it, serving individual nodes from its own slots.
+use plurality::Pool;
+
+// Both backends use mimalloc; the pool requests chunks rather than individual nodes.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -60,7 +46,7 @@ struct Node {
     neighbors: [u32; DEG],
 }
 
-/// A single replayable operation. Generated once, replayed by every backend.
+/// A replayable graph mutation.
 enum Op {
     Insert {
         slot: u32,
@@ -73,8 +59,7 @@ enum Op {
     },
 }
 
-/// Tiny deterministic PRNG (SplitMix64) so the workload needs no extra deps and
-/// is byte-for-byte reproducible.
+/// Deterministic SplitMix64 generator.
 struct Rng(u64);
 
 impl Rng {
@@ -91,9 +76,7 @@ impl Rng {
     }
 }
 
-/// Generates the shared operation stream: a churny add/remove sequence that
-/// performs exactly `TARGET_INSERTS` allocations while keeping the live set
-/// bounded by `CAP`.
+/// Generates `TARGET_INSERTS` allocations with at most `CAP` live nodes.
 fn generate_ops() -> Vec<Op> {
     let mut rng = Rng(0x0C0F_FEE1_2345_6789);
     let mut free: Vec<u32> = (0..CAP as u32).rev().collect();
@@ -108,7 +91,7 @@ fn generate_ops() -> Vec<Op> {
         } else if free.is_empty() {
             false
         } else {
-            // 60% inserts / 40% removes -> grows to CAP then churns steadily.
+            // Bias toward insertion until the live set reaches capacity.
             rng.below(100) < 60
         };
 
@@ -142,9 +125,7 @@ fn generate_ops() -> Vec<Op> {
     ops
 }
 
-/// Replays the op stream using `make` to allocate each node. Generic over the
-/// handle type so both backends run byte-identical control flow — only the
-/// allocation call differs.
+/// Replays operations with allocation supplied by `make`.
 ///
 /// Returns the elapsed time (including freeing every remaining node) and a
 /// checksum that encodes the full visited sequence.
@@ -166,8 +147,7 @@ where
                 degree,
                 neighbors,
             } => {
-                // Chase existing edges (pointer-following reads through the
-                // graph) to fold neighbor state into the new node.
+                // Include pointer-following reads in the measured workload.
                 let mut acc = id;
                 for &nb in &neighbors[..degree as usize] {
                     if let Some(node) = &slab[nb as usize] {
@@ -190,7 +170,6 @@ where
             }
         }
     }
-    // Free everything still live (timed).
     for entry in &mut slab {
         if let Some(node) = entry.take() {
             checksum ^= node.id ^ node.payload[1];
@@ -203,7 +182,7 @@ fn bench_pool(ops: &[Op]) -> (Duration, u64) {
     let mut best = Duration::MAX;
     let mut checksum = 0;
     for _ in 0..ITERS {
-        let pool = plurality::Pool::<Node>::builder().chunk_size(8192).build();
+        let pool = Pool::<Node>::builder().chunk_size(8192).build();
         let (elapsed, sum) = replay(ops, |node| pool.alloc_box(node));
         best = best.min(elapsed);
         checksum = sum;
@@ -234,7 +213,7 @@ fn main() {
     let frees = ops.len() - TARGET_INSERTS;
     println!("{} ops ({TARGET_INSERTS} inserts + {frees} removes)", ops.len());
 
-    // Warm both backends once (page in, prime mimalloc) before timing.
+    // Warm pages and allocator state before timing.
     let _ = bench_mimalloc(&ops);
     let _ = bench_pool(&ops);
 

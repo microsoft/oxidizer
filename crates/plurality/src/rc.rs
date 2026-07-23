@@ -7,10 +7,10 @@
 )]
 
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
+use core::mem::{MaybeUninit, forget};
 use core::ops::Deref;
 use core::pin::Pin;
-use core::ptr::NonNull;
+use core::ptr::{NonNull, addr_eq};
 
 use allocator_api2::alloc::{Allocator, Global};
 
@@ -31,6 +31,12 @@ use crate::slot::{SlotCell, check_refcount_overflow};
 /// Derefs to `&T` (read-only); the value is dropped and the slot returned when
 /// the last `Rc` drops. `Rc` may outlive the `Pool` handle. Like [`Box`](crate::Box),
 /// it is generic over `T: ?Sized` and can share an unsized value via [`Rc::unsize`].
+///
+/// Pinning follows [`alloc::rc::Rc::pin`]'s construction-time model. Use
+/// [`Pool::alloc_rc_pin`](crate::Pool::alloc_rc_pin) for `!Unpin` values.
+/// [`Pin::new`] can wrap an existing owner only when `T: Unpin`; Plurality
+/// provides no safe conversion for an existing owner of a `!Unpin` value after
+/// an ordinary alias may have escaped.
 pub struct Rc<T: ?Sized, A: Allocator = Global> {
     /// Pointer to the **value** (field 0 of its `SlotCell<T>`); a fat pointer for
     /// unsized `T`. The refcount is recovered from the value's size.
@@ -39,31 +45,11 @@ pub struct Rc<T: ?Sized, A: Allocator = Global> {
     _not_send_sync: PhantomData<alloc::rc::Rc<()>>,
 }
 
-// `Rc` is explicitly `!Send + !Sync` through the `alloc::rc::Rc` phantom marker.
-// Stable Rust does not support negative impls for user-defined types; the marker
-// makes the property independent of the other fields, and a compile-time
-// `assert_not_impl_any!` in `tests/smart_ptr.rs` locks it in.
-//
-// Being `!Send + !Sync` is what makes a non-atomic refcount sound: an occupied
-// slot is never on the free list, and a single-threaded handle has exclusive
-// access to it, so the count can never be reached from another thread.
-//
-// The count nevertheless lives in an `AtomicU32`, because that field is shared
-// storage with other roles: while the slot is free it holds the free-list link,
-// and the (cross-thread) `Arc` path and the free-list protocol access it
-// atomically. The `Rc` helpers below sidestep those atomics by reaching the
-// integer directly through `AtomicU32::as_ptr()` and doing plain, non-atomic
-// increments/decrements.
-//
-// `loom` builds are the one exception. Under `--cfg loom` the atomic is
-// `loom::sync::atomic::AtomicU32`, loom's instrumented model used only by the
-// concurrency tests. It deliberately has no `as_ptr()`, because loom must see
-// every access through its own API to explore thread interleavings — a raw
-// pointer write would be invisible to it. So the loom variants of these helpers
-// fall back to loom's `fetch_add`/`fetch_sub`/`load` with `Relaxed` ordering.
-// This does not weaken shipped code (loom builds are never released), and since
-// `Rc` access is single-threaded the relaxed atomic behaves exactly like the
-// non-atomic op it stands in for.
+// The `alloc::rc::Rc` marker makes `Rc` unconditionally `!Send + !Sync`, which
+// permits non-atomic refcount access while occupied. The same field is atomic
+// storage because free slots use it as a cross-thread free-list link.
+// Loom lacks `AtomicU32::as_ptr`, so model builds use instrumented relaxed
+// operations; single-threaded access gives them the same semantics here.
 
 #[cfg(not(loom))]
 #[inline]
@@ -155,8 +141,23 @@ impl<T, A: Allocator> Rc<T, A> {
     pub fn unsize<U: ?Sized>(this: Self, coercion: Coercion<T, U, impl FnOnce(*const T) -> *const U>) -> Rc<U, A> {
         let value = coerce::unsize(this.slot, coercion);
         // The returned handle inherits this handle's share of the slot.
-        core::mem::forget(this);
+        forget(this);
         Rc::from_value(value)
+    }
+
+    /// Erases a pinned sized owner while preserving its pinning guarantee.
+    ///
+    /// The allocation stays fixed and no ordinary owner is exposed.
+    #[must_use]
+    pub fn unsize_pin<U: ?Sized>(this: Pin<Self>, coercion: Coercion<T, U, impl FnOnce(*const T) -> *const U>) -> Pin<Rc<U, A>> {
+        // SAFETY: the ordinary owner exists only inside this method. `unsize`
+        // changes pointer metadata without moving or exposing the value, and
+        // the resulting owner is re-pinned before it can escape.
+        unsafe {
+            let owner = Pin::into_inner_unchecked(this);
+            let erased = Self::unsize(owner, coercion);
+            Rc::into_pin_fresh(erased)
+        }
     }
 }
 
@@ -168,6 +169,18 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
             _marker: PhantomData,
             _not_send_sync: PhantomData,
         }
+    }
+
+    /// Pins a newly constructed owner representation before it can escape.
+    ///
+    /// # Safety
+    /// No ordinary, unpinned alias to this allocation may exist. Existing
+    /// aliases, if any, must already be pinned owners.
+    #[inline]
+    pub(crate) unsafe fn into_pin_fresh(this: Self) -> Pin<Self> {
+        // SAFETY: the caller guarantees that no ordinary alias exists, and the
+        // owner retains the occupied slot at a stable address.
+        unsafe { Pin::new_unchecked(this) }
     }
 
     /// Returns a mutable reference to the value if this `Rc` is the only handle
@@ -188,7 +201,7 @@ impl<T: ?Sized, A: Allocator> Rc<T, A> {
     /// allocation). Mirrors [`alloc::rc::Rc::ptr_eq`].
     #[must_use]
     pub fn ptr_eq(a: &Self, b: &Self) -> bool {
-        core::ptr::addr_eq(a.slot.as_ptr(), b.slot.as_ptr())
+        addr_eq(a.slot.as_ptr(), b.slot.as_ptr())
     }
 }
 
@@ -209,23 +222,8 @@ impl<T, A: Allocator> Rc<MaybeUninit<T>, A> {
     pub unsafe fn assume_init(self) -> Rc<T, A> {
         let value = self.slot.cast::<T>();
         // Don't run the uninit handle's destructor; transfer the slot as-is.
-        core::mem::forget(self);
+        forget(self);
         Rc::from_value(value)
-    }
-
-    /// Converts a pinned, uninitialized rc into a pinned, initialized one.
-    ///
-    /// # Safety
-    /// The value must have been fully initialized before calling. If other `Rc`
-    /// clones to this slot exist, they must observe an initialized value.
-    #[must_use]
-    pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Rc<T, A>> {
-        // SAFETY: the caller guarantees initialization; the slot address is
-        // unchanged, so re-pinning is sound.
-        unsafe {
-            let inner = Pin::into_inner_unchecked(this);
-            Pin::new_unchecked(inner.assume_init())
-        }
     }
 }
 

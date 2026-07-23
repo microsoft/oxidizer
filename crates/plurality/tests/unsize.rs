@@ -8,24 +8,28 @@
     reason = "test code"
 )]
 
-//! Tests for the type-erasing [`Box::unsize`] API: turning a sized `Box<T>`
-//! into a `Box<dyn Trait>` or `Box<[U]>` that still lives in the pool, dispatches
-//! correctly, runs the concrete destructor on drop, and returns its slot.
+//! Tests for the type-erasing APIs: turning sized owners into trait objects or
+//! slices that stay in the pool, including pin-preserving `Arc`/`Rc`
+//! conversions.
 
 mod common;
 
+use std::any::Any;
+use std::array::from_fn;
+use std::cell::Cell;
 use std::fmt::Debug;
 use std::marker::PhantomPinned;
 use std::ops::DerefMut;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
-use std::ptr::NonNull;
+use std::ptr::{NonNull, addr_eq, from_ref, null};
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
+use std::thread;
 
 use common::DropCounter;
-use plurality::{Box, Coercion, Pool, coerce};
+use plurality::{Arc, Box, Coercion, Pool, Rc, coerce};
 use static_assertions::assert_not_impl_any;
 
 trait Shape {
@@ -35,6 +39,30 @@ trait Shape {
 trait Contains<T> {
     fn value(&self) -> &T;
 }
+
+trait PinnedValue: Send + Sync {
+    fn value(&self) -> u32;
+}
+
+struct PinnedOwner {
+    value: u32,
+    drops: StdArc<AtomicUsize>,
+    _pin: PhantomPinned,
+}
+
+impl PinnedValue for PinnedOwner {
+    fn value(&self) -> u32 {
+        self.value
+    }
+}
+
+impl Drop for PinnedOwner {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+assert_not_impl_any!(PinnedOwner: Unpin);
 
 struct GenericValue<T>(T);
 
@@ -138,14 +166,14 @@ fn unsized_slices_drop_every_element_and_reclaim_slots() {
     let counter = StdArc::new(AtomicUsize::new(0));
     let pool = Pool::<[DropCounter; 3]>::builder().chunk_size(1).max_chunks(1).build();
 
-    let boxed = pool.alloc_box(core::array::from_fn(|_| DropCounter(StdArc::clone(&counter))));
+    let boxed = pool.alloc_box(from_fn(|_| DropCounter(StdArc::clone(&counter))));
     let slice: Box<[DropCounter]> = Box::unsize(boxed, Coercion::to_slice());
     drop(slice);
     assert_eq!(counter.load(Ordering::SeqCst), 3);
     assert_eq!(pool.len(), 0);
 
-    let arc = pool.alloc_arc(core::array::from_fn(|_| DropCounter(StdArc::clone(&counter))));
-    let slice: plurality::Arc<[DropCounter]> = plurality::Arc::unsize(arc, Coercion::to_slice());
+    let arc = pool.alloc_arc(from_fn(|_| DropCounter(StdArc::clone(&counter))));
+    let slice: Arc<[DropCounter]> = Arc::unsize(arc, Coercion::to_slice());
     let clone = slice.clone();
     drop(slice);
     assert_eq!(counter.load(Ordering::SeqCst), 3);
@@ -210,7 +238,7 @@ fn unsized_box_is_send_and_frees_cross_thread() {
     let pool = Pool::<u32>::new();
     let d: Box<dyn Send> = Box::unsize::<dyn Send>(pool.alloc_box(5u32), coerce!(dyn Send));
     // Drop the erased handle on another thread (cross-thread free).
-    std::thread::spawn(move || drop(d)).join().unwrap();
+    thread::spawn(move || drop(d)).join().unwrap();
     assert_eq!(pool.len(), 0);
 }
 
@@ -219,7 +247,7 @@ fn unsized_box_is_send_and_frees_cross_thread() {
 #[test]
 fn arc_unsize_shares_dispatches_and_frees() {
     let pool = Pool::<Square>::new();
-    let a: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(pool.alloc_arc(Square(5)), coerce!(dyn Shape));
+    let a: Arc<dyn Shape> = Arc::unsize::<dyn Shape>(pool.alloc_arc(Square(5)), coerce!(dyn Shape));
     let a2 = a.clone();
     assert_eq!(a.area(), 25);
     assert_eq!(a2.area(), 25);
@@ -234,8 +262,7 @@ fn arc_unsize_shares_dispatches_and_frees() {
 fn arc_unsize_runs_destructor_once_on_last_drop() {
     let counter = StdArc::new(AtomicUsize::new(0));
     let pool = Pool::<DropCounter>::new();
-    let a: plurality::Arc<dyn Send> =
-        plurality::Arc::unsize::<dyn Send>(pool.alloc_arc(DropCounter(StdArc::clone(&counter))), coerce!(dyn Send));
+    let a: Arc<dyn Send> = Arc::unsize::<dyn Send>(pool.alloc_arc(DropCounter(StdArc::clone(&counter))), coerce!(dyn Send));
     let a2 = a.clone();
     drop(a);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -250,7 +277,7 @@ fn arc_sized_and_erased_clones_share_one_slot() {
     // one slot; whichever drops last frees it, reconstructing the layout either way.
     let pool = Pool::<Square>::new();
     let sized = pool.alloc_arc(Square(4));
-    let erased: plurality::Arc<dyn Shape> = plurality::Arc::unsize::<dyn Shape>(sized.clone(), coerce!(dyn Shape));
+    let erased: Arc<dyn Shape> = Arc::unsize::<dyn Shape>(sized.clone(), coerce!(dyn Shape));
     assert_eq!(sized.area(), 16);
     assert_eq!(erased.area(), 16);
     assert_eq!(pool.len(), 1);
@@ -263,7 +290,7 @@ fn arc_sized_and_erased_clones_share_one_slot() {
 #[test]
 fn arc_unsize_to_slice() {
     let pool = Pool::<[u8; 3]>::new();
-    let a: plurality::Arc<[u8]> = plurality::Arc::unsize::<[u8]>(pool.alloc_arc([7u8, 8, 9]), Coercion::to_slice());
+    let a: Arc<[u8]> = Arc::unsize::<[u8]>(pool.alloc_arc([7u8, 8, 9]), Coercion::to_slice());
     assert_eq!(&*a, &[7, 8, 9]);
     assert_eq!(a.len(), 3);
     drop(a);
@@ -273,12 +300,12 @@ fn arc_unsize_to_slice() {
 #[test]
 fn arc_erased_is_send_sync_and_frees_cross_thread() {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<plurality::Arc<dyn Send + Sync>>();
+    assert_send_sync::<Arc<dyn Send + Sync>>();
 
     let pool = Pool::<u32>::new();
-    let a: plurality::Arc<dyn Send + Sync> = plurality::Arc::unsize::<dyn Send + Sync>(pool.alloc_arc(9u32), coerce!(dyn Send + Sync));
+    let a: Arc<dyn Send + Sync> = Arc::unsize::<dyn Send + Sync>(pool.alloc_arc(9u32), coerce!(dyn Send + Sync));
     let a2 = a.clone();
-    std::thread::spawn(move || drop(a2)).join().unwrap();
+    thread::spawn(move || drop(a2)).join().unwrap();
     drop(a);
     assert_eq!(pool.len(), 0);
 }
@@ -286,7 +313,7 @@ fn arc_erased_is_send_sync_and_frees_cross_thread() {
 #[test]
 fn rc_unsize_shares_dispatches_and_frees() {
     let pool = Pool::<Square>::new();
-    let r: plurality::Rc<dyn Shape> = plurality::Rc::unsize::<dyn Shape>(pool.alloc_rc(Square(6)), coerce!(dyn Shape));
+    let r: Rc<dyn Shape> = Rc::unsize::<dyn Shape>(pool.alloc_rc(Square(6)), coerce!(dyn Shape));
     let r2 = r.clone();
     assert_eq!(r.area(), 36);
     assert_eq!(r2.area(), 36);
@@ -301,13 +328,68 @@ fn rc_unsize_shares_dispatches_and_frees() {
 fn rc_unsize_runs_destructor_once_on_last_drop() {
     let counter = StdArc::new(AtomicUsize::new(0));
     let pool = Pool::<DropCounter>::new();
-    let r: plurality::Rc<dyn std::any::Any> =
-        plurality::Rc::unsize::<dyn std::any::Any>(pool.alloc_rc(DropCounter(StdArc::clone(&counter))), coerce!(dyn std::any::Any));
+    let r: Rc<dyn Any> = Rc::unsize::<dyn Any>(pool.alloc_rc(DropCounter(StdArc::clone(&counter))), coerce!(dyn Any));
     let r2 = r.clone();
     drop(r2);
     assert_eq!(counter.load(Ordering::SeqCst), 0);
     drop(r);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn arc_unsize_pin_preserves_address_and_pinned_clones() {
+    let drops = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<PinnedOwner>::new();
+    let pinned = pool.alloc_arc_pin(PinnedOwner {
+        value: 11,
+        drops: StdArc::clone(&drops),
+        _pin: PhantomPinned,
+    });
+    let sized_clone = pinned.clone();
+    let address = from_ref(pinned.as_ref().get_ref());
+
+    let erased: Pin<Arc<dyn PinnedValue>> = Arc::unsize_pin(pinned, coerce!(dyn PinnedValue));
+    let erased_clone = erased.clone();
+
+    assert!(addr_eq(address, from_ref(erased.as_ref().get_ref())));
+    assert!(addr_eq(address, from_ref(erased_clone.as_ref().get_ref())));
+    assert!(addr_eq(address, from_ref(sized_clone.as_ref().get_ref())));
+    assert_eq!(erased.value(), 11);
+    assert_eq!(pool.len(), 1);
+
+    drop((sized_clone, erased));
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(erased_clone);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert_eq!(pool.len(), 0);
+}
+
+#[test]
+fn rc_unsize_pin_preserves_address_and_pinned_clones() {
+    let drops = StdArc::new(AtomicUsize::new(0));
+    let pool = Pool::<PinnedOwner>::new();
+    let pinned = pool.alloc_rc_pin(PinnedOwner {
+        value: 12,
+        drops: StdArc::clone(&drops),
+        _pin: PhantomPinned,
+    });
+    let sized_clone = pinned.clone();
+    let address = from_ref(pinned.as_ref().get_ref());
+
+    let erased: Pin<Rc<dyn PinnedValue>> = Rc::unsize_pin(pinned, coerce!(dyn PinnedValue));
+    let erased_clone = erased.clone();
+
+    assert!(addr_eq(address, from_ref(erased.as_ref().get_ref())));
+    assert!(addr_eq(address, from_ref(erased_clone.as_ref().get_ref())));
+    assert!(addr_eq(address, from_ref(sized_clone.as_ref().get_ref())));
+    assert_eq!(erased.value(), 12);
+    assert_eq!(pool.len(), 1);
+
+    drop((sized_clone, erased));
+    assert_eq!(drops.load(Ordering::SeqCst), 0);
+    drop(erased_clone);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
     assert_eq!(pool.len(), 0);
 }
 
@@ -332,7 +414,7 @@ fn panicking_coercion_does_not_leak_any_handle() {
     let arc_pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let _ = plurality::Arc::unsize::<dyn Debug>(arc_pool.alloc_arc(1), coercion());
+            let _ = Arc::unsize::<dyn Debug>(arc_pool.alloc_arc(1), coercion());
         }))
         .is_err()
     );
@@ -342,7 +424,7 @@ fn panicking_coercion_does_not_leak_any_handle() {
     let rc_pool = Pool::<u32>::builder().chunk_size(1).max_chunks(1).build();
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            let _ = plurality::Rc::unsize::<dyn Debug>(rc_pool.alloc_rc(1), coercion());
+            let _ = Rc::unsize::<dyn Debug>(rc_pool.alloc_rc(1), coercion());
         }))
         .is_err()
     );
@@ -351,26 +433,26 @@ fn panicking_coercion_does_not_leak_any_handle() {
 }
 
 struct AddressSensitive {
-    pinned_at: std::cell::Cell<*const Self>,
+    pinned_at: Cell<*const Self>,
     _pin: PhantomPinned,
 }
 
 impl AddressSensitive {
     fn new() -> Self {
         Self {
-            pinned_at: std::cell::Cell::new(std::ptr::null()),
+            pinned_at: Cell::new(null()),
             _pin: PhantomPinned,
         }
     }
 
     fn initialize(self: Pin<&mut Self>) {
-        self.pinned_at.set(std::ptr::from_ref(self.as_ref().get_ref()));
+        self.pinned_at.set(from_ref(self.as_ref().get_ref()));
     }
 }
 
 impl Drop for AddressSensitive {
     fn drop(&mut self) {
-        assert_eq!(self.pinned_at.get(), std::ptr::from_ref(self));
+        assert_eq!(self.pinned_at.get(), from_ref(self));
     }
 }
 

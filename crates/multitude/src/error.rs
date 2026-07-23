@@ -4,6 +4,8 @@
 use core::error::Error;
 use core::fmt;
 
+use allocator_api2::alloc::AllocError as BackingAllocError;
+
 /// Why an [`Arena`](crate::Arena) allocation failed.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum ErrorKind {
@@ -139,20 +141,16 @@ impl fmt::Display for AllocError {
 
 impl Error for AllocError {}
 
-/// Bridges a backing-allocator failure (the `allocator-api2` marker carries no
-/// payload) into the arena's allocator-failure kind, so `?` on a
-/// backing-allocator call inside an arena method produces the right kind.
-impl From<allocator_api2::alloc::AllocError> for AllocError {
+/// Converts a backing allocator failure into an arena allocation failure.
+impl From<BackingAllocError> for AllocError {
     #[inline]
-    fn from(_: allocator_api2::alloc::AllocError) -> Self {
+    fn from(_: BackingAllocError) -> Self {
         Self::ALLOCATOR_FAILED
     }
 }
 
-/// Discards the arena's failure kind when bridging back to the `allocator-api2`
-/// `Allocator` trait, whose error type is a zero-payload marker. Used by the
-/// `Allocator for &Arena<A>` impl when forwarding internal failures.
-impl From<AllocError> for allocator_api2::alloc::AllocError {
+/// Converts an arena failure to the backing allocator's marker error.
+impl From<AllocError> for BackingAllocError {
     #[inline]
     fn from(_: AllocError) -> Self {
         Self
@@ -164,6 +162,8 @@ mod tests {
     use alloc::format;
     use alloc::string::ToString;
     use core::error::Error;
+
+    use allocator_api2::alloc::AllocError as BackingAllocError;
 
     use super::AllocError;
 
@@ -223,17 +223,15 @@ mod tests {
 
     #[test]
     fn bridges_to_and_from_allocator_api2() {
-        // A backing-allocator failure maps to the allocator-failure kind.
-        let bridged: AllocError = allocator_api2::alloc::AllocError.into();
+        let bridged: AllocError = BackingAllocError.into();
         assert!(bridged.is_allocator_failure());
 
-        // Bridging back to the zero-payload marker is infallible for every kind.
         for kind in [
             AllocError::ALLOCATOR_FAILED,
             AllocError::ALIGNMENT_TOO_LARGE,
             AllocError::CAPACITY_OVERFLOW,
         ] {
-            let _: allocator_api2::alloc::AllocError = kind.into();
+            let _: BackingAllocError = kind.into();
         }
     }
 }

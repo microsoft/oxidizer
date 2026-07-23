@@ -1,15 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#![expect(
-    clippy::multiple_unsafe_ops_per_block,
-    reason = "pointer-recovery and slot-lifecycle paths group tightly-coupled unsafe operations under a single documented safety invariant; one block per operation would duplicate that invariant and obscure it"
-)]
-
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
+use core::mem::{MaybeUninit, forget};
 use core::ops::{Deref, DerefMut};
-use core::pin::Pin;
 use core::ptr::NonNull;
 
 use allocator_api2::alloc::{Allocator, Global};
@@ -28,6 +22,9 @@ use crate::slot::SlotCell;
 ///
 /// Derefs to `&T`/`&mut T`; dropping it runs `T`'s destructor and returns the
 /// slot to the pool.
+///
+/// `Alloc` cannot be pinned because forgetting it may end the pool borrow
+/// without keeping the backing storage alive.
 pub struct Alloc<'pool, T, A: Allocator = Global> {
     slot: NonNull<SlotCell<T>>,
     // Ties the handle to the pool borrow (so it can't outlive the pool) and, via
@@ -51,22 +48,8 @@ impl<'pool, T, A: Allocator> Alloc<'pool, MaybeUninit<T>, A> {
     pub unsafe fn assume_init(self) -> Alloc<'pool, T, A> {
         let slot = self.slot.cast::<SlotCell<T>>();
         // Don't run the uninit handle's destructor; transfer the slot as-is.
-        core::mem::forget(self);
+        forget(self);
         Alloc::from_slot(slot)
-    }
-
-    /// Converts a pinned, uninitialized handle into a pinned, initialized one.
-    ///
-    /// # Safety
-    /// The value must have been fully initialized before calling.
-    #[must_use]
-    pub unsafe fn assume_init_pin(this: Pin<Self>) -> Pin<Alloc<'pool, T, A>> {
-        // SAFETY: the caller guarantees initialization; the slot address is
-        // unchanged, so re-pinning is sound.
-        unsafe {
-            let inner = Pin::into_inner_unchecked(this);
-            Pin::new_unchecked(inner.assume_init())
-        }
     }
 }
 

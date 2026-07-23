@@ -12,7 +12,9 @@ use core::cell::Cell;
 use core::fmt;
 use core::marker::PhantomData;
 
-use serde::de::{DeserializeSeed, Deserializer, EnumAccess, Error as _, MapAccess, SeqAccess, VariantAccess, Visitor};
+use serde::de::{DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor};
+
+use super::{DeserializationResource, LimitExceeded};
 
 mod deserialization_limits;
 #[cfg(test)]
@@ -33,19 +35,34 @@ where
     D: Deserializer<'de>,
     S: DeserializeSeed<'de>,
 {
+    deserialize_seed_with_limits_detailed(deserializer, seed, limits).0
+}
+
+pub(super) fn deserialize_seed_with_limits_detailed<'de, D, S>(
+    deserializer: D,
+    seed: S,
+    limits: DeserializationLimits,
+) -> (Result<S::Value, D::Error>, Option<LimitExceeded>)
+where
+    D: Deserializer<'de>,
+    S: DeserializeSeed<'de>,
+{
     let state = LimitState {
         limits,
         depth: Cell::new(0),
+        limit_exceeded: Cell::new(None),
     };
-    seed.deserialize(LimitedDeserializer {
+    let result = seed.deserialize(LimitedDeserializer {
         inner: deserializer,
         state: &state,
-    })
+    });
+    (result, state.limit_exceeded.get())
 }
 
 struct LimitState {
     limits: DeserializationLimits,
     depth: Cell<usize>,
+    limit_exceeded: Cell<Option<LimitExceeded>>,
 }
 
 struct DepthGuard<'a>(&'a LimitState);
@@ -58,21 +75,39 @@ impl Drop for DepthGuard<'_> {
 
 impl LimitState {
     fn enter<E: serde::de::Error>(&self) -> Result<(), E> {
+        if self.limits.max_depth == usize::MAX {
+            return Ok(());
+        }
+
         let depth = self.depth.get().saturating_add(1);
         if depth > self.limits.max_depth {
-            return Err(E::custom("deserialization nesting depth limit exceeded"));
+            return Err(self.reject(
+                DeserializationResource::Depth,
+                self.limits.max_depth,
+                "deserialization nesting depth limit exceeded",
+            ));
         }
         self.depth.set(depth);
         Ok(())
     }
 
     fn leave(&self) {
-        self.depth.set(self.depth.get() - 1);
+        if self.limits.max_depth != usize::MAX {
+            self.depth.set(self.depth.get() - 1);
+        }
     }
 
     fn enter_guard<E: serde::de::Error>(&self) -> Result<DepthGuard<'_>, E> {
         self.enter()?;
         Ok(DepthGuard(self))
+    }
+
+    #[cold]
+    fn reject<E: serde::de::Error>(&self, resource: DeserializationResource, limit: usize, message: &'static str) -> E {
+        if self.limit_exceeded.get().is_none() {
+            self.limit_exceeded.set(Some(LimitExceeded::new(resource, limit)));
+        }
+        E::custom(message)
     }
 }
 
@@ -81,28 +116,35 @@ struct LimitedSeed<'a, S> {
     state: &'a LimitState,
 }
 
-struct RejectSeed<T> {
+struct RejectSeed<'a, T> {
+    state: &'a LimitState,
+    resource: DeserializationResource,
+    limit: usize,
     message: &'static str,
     marker: PhantomData<fn() -> T>,
 }
 
-impl<T> RejectSeed<T> {
-    fn new(message: &'static str) -> Self {
+impl<'a, T> RejectSeed<'a, T> {
+    fn new(state: &'a LimitState, resource: DeserializationResource, limit: usize, message: &'static str) -> Self {
         Self {
+            state,
+            resource,
+            limit,
             message,
             marker: PhantomData,
         }
     }
 }
 
-impl<'de, T> DeserializeSeed<'de> for RejectSeed<T> {
+impl<'de, T> DeserializeSeed<'de> for RejectSeed<'_, T> {
     type Value = T;
 
+    #[cold]
     fn deserialize<D>(self, _: D) -> Result<Self::Value, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Err(D::Error::custom(self.message))
+        Err(self.state.reject(self.resource, self.limit, self.message))
     }
 }
 
@@ -311,16 +353,26 @@ impl<'de, V: Visitor<'de>> Visitor<'de> for LimitedVisitor<'_, V> {
 
 impl<V> LimitedVisitor<'_, V> {
     fn check_string<E: serde::de::Error>(&self, value: &str) -> Result<(), E> {
-        if value.len() > self.state.limits.max_string_len {
-            Err(E::custom("deserialization string length limit exceeded"))
+        let limit = self.state.limits.max_string_len;
+        if limit != usize::MAX && value.len() > limit {
+            Err(self.state.reject(
+                DeserializationResource::StringLength,
+                limit,
+                "deserialization string length limit exceeded",
+            ))
         } else {
             Ok(())
         }
     }
 
     fn check_bytes<E: serde::de::Error>(&self, value: &[u8]) -> Result<(), E> {
-        if value.len() > self.state.limits.max_bytes_len {
-            Err(E::custom("deserialization byte string length limit exceeded"))
+        let limit = self.state.limits.max_bytes_len;
+        if limit != usize::MAX && value.len() > limit {
+            Err(self.state.reject(
+                DeserializationResource::ByteStringLength,
+                limit,
+                "deserialization byte string length limit exceeded",
+            ))
         } else {
             Ok(())
         }
@@ -337,17 +389,21 @@ impl<'de, S: SeqAccess<'de>> SeqAccess<'de> for LimitedSeqAccess<'_, S> {
     type Error = S::Error;
 
     fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error> {
-        if self.count >= self.state.limits.max_sequence_len {
-            return self
-                .inner
-                .next_element_seed(RejectSeed::new("deserialization sequence length limit exceeded"));
+        let limit = self.state.limits.max_sequence_len;
+        if limit != usize::MAX && self.count >= limit {
+            return self.inner.next_element_seed(RejectSeed::new(
+                self.state,
+                DeserializationResource::SequenceLength,
+                limit,
+                "deserialization sequence length limit exceeded",
+            ));
         }
 
         let value = self.inner.next_element_seed(LimitedSeed {
             inner: seed,
             state: self.state,
         })?;
-        if value.is_some() {
+        if limit != usize::MAX && value.is_some() {
             self.count += 1;
         }
         Ok(value)
@@ -370,17 +426,21 @@ impl<'de, M: MapAccess<'de>> MapAccess<'de> for LimitedMapAccess<'_, M> {
     type Error = M::Error;
 
     fn next_key_seed<K: DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error> {
-        if self.count >= self.state.limits.max_map_len {
-            return self
-                .inner
-                .next_key_seed(RejectSeed::new("deserialization map length limit exceeded"));
+        let limit = self.state.limits.max_map_len;
+        if limit != usize::MAX && self.count >= limit {
+            return self.inner.next_key_seed(RejectSeed::new(
+                self.state,
+                DeserializationResource::MapLength,
+                limit,
+                "deserialization map length limit exceeded",
+            ));
         }
 
         let key = self.inner.next_key_seed(LimitedSeed {
             inner: seed,
             state: self.state,
         })?;
-        if key.is_some() {
+        if limit != usize::MAX && key.is_some() {
             self.count += 1;
         }
         Ok(key)

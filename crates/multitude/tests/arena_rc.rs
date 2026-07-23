@@ -13,6 +13,7 @@
 mod common;
 
 use core::cell::Cell;
+use core::pin::Pin;
 use std::rc::Rc as StdRc;
 
 use multitude::{Arena, Rc};
@@ -34,6 +35,22 @@ fn alloc_rc_with_constructs_in_place() {
     let arena = Arena::new();
     let v = arena.alloc_rc_with(|| std::vec![1, 2, 3]);
     assert_eq!(&**v, &[1, 2, 3]);
+}
+
+#[test]
+fn get_mut_requires_unique_ownership() {
+    let arena = Arena::new();
+    let mut value = arena.alloc_rc(10_u32);
+    *Rc::get_mut(&mut value).unwrap() = 11;
+
+    let alias = value.clone();
+    assert!(Rc::get_mut(&mut value).is_none());
+    drop(alias);
+    assert_eq!(*Rc::get_mut(&mut value).unwrap(), 11);
+
+    let mut slice = arena.alloc_slice_copy_rc([1_u8, 2, 3]);
+    Rc::get_mut(&mut slice).unwrap()[1] = 9;
+    assert_eq!(&*slice, &[1, 9, 3]);
 }
 
 #[test]
@@ -176,9 +193,21 @@ fn rc_from_vec_and_string() {
 
 #[test]
 fn rc_pin() {
+    struct NotUnpin {
+        value: u32,
+        _pin: core::marker::PhantomPinned,
+    }
+
     let arena = Arena::new();
-    let p = arena.alloc_rc_pin(123_u32);
-    assert_eq!(*p, 123);
+    let pinned = arena.alloc_rc_pin_with(|| NotUnpin {
+        value: 123,
+        _pin: core::marker::PhantomPinned,
+    });
+    let address = (&raw const *pinned) as usize;
+    let clone = pinned.clone();
+    drop(pinned);
+    assert_eq!((&raw const *clone) as usize, address);
+    assert_eq!(clone.value, 123);
 }
 
 #[test]
@@ -206,8 +235,6 @@ fn rc_from_vec_then_clone_and_drop() {
 // Exercises `Rc` allocation variants, conversions, and trait implementations.
 #[test]
 fn rc_remaining_surface_coverage() {
-    use core::pin::Pin;
-
     // value: try_alloc_rc, pin family
     let arena = Arena::new();
     assert_eq!(*arena.try_alloc_rc(1_u32).unwrap(), 1);
@@ -232,7 +259,7 @@ fn rc_remaining_surface_coverage() {
     assert_ne!(s, "bye");
     let _: Rc<[u8]> = Rc::from(s);
 
-    // uninit/zeroed value + slice, try_, pin
+    // uninit/zeroed value + slice, try_
     let _ = arena.alloc_uninit_rc::<u32>();
     let _ = arena.try_alloc_uninit_rc::<u32>().unwrap();
     let _ = arena.alloc_zeroed_rc::<u32>();
@@ -240,26 +267,12 @@ fn rc_remaining_surface_coverage() {
     let _ = arena.try_alloc_uninit_slice_rc::<u32>(2).unwrap();
     let _ = arena.alloc_uninit_slice_rc::<u32>(2);
     let _ = arena.try_alloc_zeroed_slice_rc::<u32>(2).unwrap();
-    let _ = arena.alloc_uninit_rc_pin::<u32>();
-    let _ = arena.try_alloc_uninit_rc_pin::<u32>().unwrap();
-    let _ = arena.alloc_zeroed_rc_pin::<u32>();
-    let _ = arena.try_alloc_zeroed_rc_pin::<u32>().unwrap();
 
-    // assume_init slice + pinned assume_init variants
+    // assume_init slice
     let zs = arena.alloc_zeroed_slice_rc::<u8>(3);
     // SAFETY: zeroed bytes are valid u8s.
     let zs: Rc<[u8]> = unsafe { zs.assume_init() };
     assert_eq!(&*zs, &[0, 0, 0]);
-    let zp = arena.alloc_zeroed_rc_pin::<u16>();
-    // SAFETY: zeroed bytes are a valid u16.
-    let zp: Pin<Rc<u16>> = unsafe { Rc::assume_init_pin(zp) };
-    assert_eq!(*zp, 0);
-    let sp = arena.alloc_zeroed_slice_rc::<u16>(2);
-    let sp = Rc::into_pin(sp);
-    // SAFETY: zeroed bytes are valid u16s.
-    let sp: Pin<Rc<[u16]>> = unsafe { Rc::assume_init_pin_slice(sp) };
-    assert_eq!(&*sp, &[0, 0]);
-
     // String -> Rc<str>
     let mut st = arena.alloc_string();
     st.push_str("abc");

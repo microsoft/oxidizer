@@ -5,8 +5,8 @@
 
 use core::borrow::{Borrow, BorrowMut};
 use core::hash::{Hash, Hasher};
+use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
-use core::pin::Pin;
 use core::{fmt, ptr};
 
 /// An owning handle to a value tied to its [`Arena`](crate::Arena).
@@ -22,6 +22,27 @@ use core::{fmt, ptr};
 /// Leaking an `Alloc` with [`core::mem::forget`] leaks the destructor: the
 /// value's `Drop` never runs. This is sound (no use-after-free), but the value
 /// is simply never finalized.
+///
+/// Unlike [`crate::Box`], `Alloc` does not support pinning. A forgotten handle
+/// does not retain its backing chunk, so the arena may reclaim or reuse the
+/// slot without running the destructor for the pointee.
+///
+/// ```compile_fail
+/// use core::pin::Pin;
+/// use multitude::{Alloc, Arena};
+///
+/// let arena = Arena::new();
+/// let _: Pin<Alloc<'_, u32>> = arena.alloc(1_u32).into();
+/// ```
+///
+/// ```compile_fail
+/// use core::marker::PhantomPinned;
+/// use core::pin::Pin;
+/// use multitude::Arena;
+///
+/// let arena = Arena::new();
+/// let _ = Pin::new(arena.alloc(PhantomPinned));
+/// ```
 ///
 /// # `Send` and `Sync`
 ///
@@ -77,37 +98,11 @@ impl<'a, T: ?Sized> Alloc<'a, T> {
     #[must_use]
     #[inline]
     pub fn leak(this: Self) -> &'a mut T {
-        // Move the `&'a mut T` out of `this` without running `Alloc`'s `Drop`
-        // (which would drop the value in place). Reading the reference value
-        // directly — rather than reborrowing it through a raw pointer — keeps
-        // its original borrow tag intact, so the returned reference stays valid
-        // under Stacked / Tree Borrows.
-        let this = core::mem::ManuallyDrop::new(this);
+        // Moving the stored reference preserves its borrow tag.
+        let this = ManuallyDrop::new(this);
         // SAFETY: `this.inner` is a valid, initialized `&'a mut T`; `ptr::read`
-        // copies it out by value and `this` (a `ManuallyDrop`) is never touched
-        // again, so the reference is moved out exactly once and not aliased.
-        unsafe { core::ptr::read(&raw const this.inner) }
-    }
-
-    /// Converts the `Alloc` into a [`Pin`] of itself.
-    ///
-    /// Sound for any `T` (including `!Unpin`): the value's address is fixed at
-    /// allocation time and the `Alloc` finalizes it in place through its normal
-    /// [`Drop`].
-    ///
-    /// ```
-    /// use multitude::{Alloc, Arena};
-    ///
-    /// let arena = Arena::new();
-    /// let pinned = Alloc::into_pin(arena.alloc(42_u32));
-    /// assert_eq!(*pinned, 42);
-    /// ```
-    #[must_use]
-    #[inline]
-    pub fn into_pin(this: Self) -> Pin<Self> {
-        // SAFETY: the pinned value's address never changes while `this` is
-        // alive and is finalized in place via `Drop`.
-        unsafe { Pin::new_unchecked(this) }
+        // moves it out exactly once without running `Drop`.
+        unsafe { ptr::read(&raw const this.inner) }
     }
 }
 
@@ -214,12 +209,5 @@ impl<T: ?Sized + Hash> Hash for Alloc<'_, T> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         (**self).hash(state);
-    }
-}
-
-impl<'a, T: ?Sized> From<Alloc<'a, T>> for Pin<Alloc<'a, T>> {
-    #[inline]
-    fn from(a: Alloc<'a, T>) -> Self {
-        Alloc::into_pin(a)
     }
 }

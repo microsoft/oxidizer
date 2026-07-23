@@ -6,6 +6,7 @@ use core::marker::PhantomData;
 
 use allocator_api2::alloc::{Allocator, Global};
 
+use crate::internal::chunk::max_bump_extent;
 use crate::internal::constants::{MAX_NORMAL_ALLOC, MIN_CHUNK_BYTES, SizeClass};
 use crate::{AllocError, Arena};
 
@@ -34,10 +35,7 @@ pub struct ArenaBuilder<A: Allocator + Clone = Global> {
 impl ArenaBuilder<Global> {
     /// Start a new builder with default knobs and the [`Global`] allocator.
     ///
-    /// Crate-internal: the public entry point is
-    /// [`Arena::builder`](crate::Arena::builder), per the builder convention
-    /// that a builder is obtained from its target type, not constructed
-    /// directly.
+    /// The public entry point is [`Arena::builder`](crate::Arena::builder).
     #[must_use]
     #[inline]
     pub(crate) fn new() -> Self {
@@ -48,8 +46,7 @@ impl ArenaBuilder<Global> {
 impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// Start a default builder with a custom backing allocator.
     ///
-    /// Crate-internal: the public entry point is
-    /// [`Arena::builder_in`](crate::Arena::builder_in).
+    /// The public entry point is [`Arena::builder_in`](crate::Arena::builder_in).
     #[must_use]
     #[inline]
     pub(crate) fn new_in(allocator: A) -> Self {
@@ -144,7 +141,7 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// out of range.
     #[cold]
     fn validate(&self) {
-        let upper = crate::internal::chunk::max_bump_extent::<A>();
+        let upper = max_bump_extent::<A>();
         assert!(
             (MIN_MAX_NORMAL_ALLOC..=upper).contains(&self.max_normal_alloc),
             "max_normal_alloc must be in [{MIN_MAX_NORMAL_ALLOC}, {upper}], got {}",

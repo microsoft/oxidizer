@@ -1,31 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Safe `Arena`-level reservation primitives.
+//! Arena-level reservation and lifetime promotion.
 //!
-//! These helpers wrap [`ChunkMutator::try_alloc_uninit*`] with the
-//! lifetime promotion that allows the resulting ticket to be consumed
-//! into a `&'arena mut T` reference at the public API boundary.
-//!
-//! # Why the promotion is sound
-//!
-//! Reference reservations (`try_reserve_local*`): when [`Arena::refill`]
-//! rotates out a chunk that handed out a `&mut T`, it pushes the retired
-//! [`ChunkMutator`] into `Arena::retired_local`, where it holds its `+1`
-//! refcount. That list is cleared only on `&mut self` paths (`reset`,
-//! `Drop`). Therefore every slot ever reserved as a reference remains live
-//! for the entire `&Arena` borrow lifetime — even if its chunk has been
-//! rotated out.
-//!
-//! Smart-pointer reservations (`try_reserve_shared*` / `try_reserve_arc*`):
-//! these produce `Arc<T>` / `Box<T>`, not raw `&mut T`. Each handle
-//! independently keeps its hosting chunk alive via the chunk's atomic
-//! refcount, so the `&Arena` lifetime promotion isn't relied upon for them.
-//! The helpers still rebind the ticket lifetime for API symmetry; callers
-//! wrap the resulting reference in a smart pointer before exposing it.
-//!
-//! All `unsafe` related to lifetime extension lives in this single
-//! module; the public `alloc_*.rs` files contain no `unsafe` blocks.
+//! Local reservations remain valid because their chunks are retained until an
+//! exclusive reset or drop. Smart-pointer reservations acquire independent
+//! chunk ownership before the arena borrow ends.
 
 use core::ptr::NonNull;
 
@@ -33,6 +13,7 @@ use allocator_api2::alloc::Allocator;
 
 use super::Arena;
 use crate::internal::chunk::Chunk;
+use crate::internal::thin_dst::Strong;
 use crate::internal::uninit::Uninit;
 
 impl<A: Allocator + Clone> Arena<A> {
@@ -43,13 +24,9 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // body→None ⇒ refill spin (OOM)
     pub(in crate::arena) fn try_reserve_local<T>(&self) -> Option<Uninit<'_, T>> {
         let ticket = self.current().try_alloc_uninit::<T>()?;
-        // Pin the chunk: bare references have no refcount, so a chunk that
-        // served one must be retired (not reclaimed early) when rotated out.
         self.mark_reference_handout();
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow lifetime.
-        // `mark_reference_handout` above pinned the hosting chunk, and once
-        // rotated out it is retired into `Arena::retired_local` (cleared only on
-        // `&mut self`), so the reserved slot stays live for the whole borrow.
+        // SAFETY: reference handouts retain the chunk until an exclusive arena
+        // operation, which cannot overlap this borrow.
         Some(unsafe { ticket.rebind() })
     }
 
@@ -59,14 +36,8 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_local_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let ticket = self.current().try_alloc_uninit_slice::<T>(len)?;
-        // Pin the chunk: bare references have no refcount, so a chunk that
-        // served one must be retired (not reclaimed early) when rotated out.
         self.mark_reference_handout();
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime. `mark_reference_handout` above pinned the hosting
-        // chunk, and once rotated out it is retired into
-        // `Arena::retired_local` (cleared only on `&mut self`), so the
-        // reserved slot stays live for the whole borrow.
+        // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
 
@@ -82,18 +53,10 @@ impl<A: Allocator + Clone> Arena<A> {
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_slice_with_size<T>(&self, len: usize, size: usize) -> Option<Uninit<'_, [T]>> {
-        // SAFETY: the caller guarantees (via this fn's `# Safety` contract)
-        // that `size` equals `size_of::<T>() * len` without overflow; that
-        // obligation is forwarded unchanged to the inner reservation call.
+        // SAFETY: required by this function's contract.
         let ticket = unsafe { self.current().try_alloc_uninit_slice_with_size::<T>(len, size) }?;
-        // Pin the chunk: bare references have no refcount, so a chunk that
-        // served one must be retired (not reclaimed early) when rotated out.
         self.mark_reference_handout();
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime. `mark_reference_handout` above pinned the hosting
-        // chunk, and once rotated out it is retired into
-        // `Arena::retired_local` (cleared only on `&mut self`), so the
-        // reserved slot stays live for the whole borrow.
+        // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
 
@@ -109,14 +72,8 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(crate) fn try_reserve_freezable_slice<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let ticket = self.current().try_alloc_freezable_slice::<T>(len)?;
-        // Pin the chunk: the buffer holds no refcount until it is frozen, so
-        // a chunk that served one must be retired (not reclaimed early).
         self.mark_reference_handout();
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime. `mark_reference_handout` above pinned the hosting
-        // chunk, and once rotated out it is retired into
-        // `Arena::retired_local` (cleared only on `&mut self`), so the
-        // reserved slot stays live for the whole borrow.
+        // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
 
@@ -126,14 +83,8 @@ impl<A: Allocator + Clone> Arena<A> {
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_local`
     pub(in crate::arena) fn try_reserve_local_bytes(&self, len: usize) -> Option<Uninit<'_, [u8]>> {
         let ticket = self.current().try_alloc_bytes(len)?;
-        // Pin the chunk: bare references have no refcount, so a chunk that
-        // served one must be retired (not reclaimed early) when rotated out.
         self.mark_reference_handout();
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime. `mark_reference_handout` above pinned the hosting
-        // chunk, and once rotated out it is retired into
-        // `Arena::retired_local` (cleared only on `&mut self`), so the
-        // reserved slot stays live for the whole borrow.
+        // SAFETY: reference handouts retain the chunk for this borrow.
         Some(unsafe { ticket.rebind() })
     }
 
@@ -148,12 +99,8 @@ impl<A: Allocator + Clone> Arena<A> {
     pub(in crate::arena) fn try_reserve_shared<T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let mutator = self.current();
         let ticket = mutator.try_alloc_uninit::<T>()?;
-        // SAFETY: `try_alloc_uninit` returning `Some` proves the mutator owns a
-        // chunk, so `chunk_ptr_unchecked` is valid. `rebind` promotes the ticket
-        // to the `&Arena` borrow lifetime; the hosting chunk is retired into
-        // `Arena::retired_local` (cleared only on `&mut self`) once rotated out,
-        // and the caller takes a `+1` on the returned chunk before the borrow
-        // ends, so the reserved slot stays live.
+        // SAFETY: a successful reservation proves the chunk exists. The caller
+        // acquires chunk ownership before the promoted borrow ends.
         Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
     }
 
@@ -182,15 +129,9 @@ impl<A: Allocator + Clone> Arena<A> {
         payload_bytes: usize,
     ) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
         let mutator = self.current();
-        // SAFETY: this `unsafe fn`'s contract requires `payload_bytes` to
-        // equal `size_of::<T>() * len` without overflow; that obligation is
-        // forwarded unchanged to the inner reservation call.
+        // SAFETY: required by this function's contract.
         let ticket = unsafe { mutator.try_alloc_uninit_slice_prefixed_with_size::<T>(len, payload_bytes) }?;
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime; the hosting chunk is retired into `Arena::retired_local`
-        // (cleared only on `&mut self`) once rotated out, and the caller
-        // takes a `+1` on the returned chunk before the borrow ends, so the
-        // reserved slot stays live.
+        // SAFETY: the caller acquires chunk ownership before this borrow ends.
         Some(unsafe { (ticket.rebind(), mutator.chunk_ptr_unchecked()) })
     }
 
@@ -199,15 +140,9 @@ impl<A: Allocator + Clone> Arena<A> {
     /// payload (the strong count is already initialized to `1`).
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
-    pub(in crate::arena) fn try_reserve_arc_value<S: crate::internal::thin_dst::Strong, T>(
-        &self,
-    ) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
+    pub(in crate::arena) fn try_reserve_arc_value<S: Strong, T>(&self) -> Option<(Uninit<'_, T>, NonNull<Chunk<A>>)> {
         let (ticket, chunk) = self.current().try_alloc_arc_value::<S, T>()?;
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime; the hosting chunk is retired into `Arena::retired_local`
-        // (cleared only on `&mut self`) once rotated out, and the caller
-        // takes a `+1` on the returned chunk before the borrow ends, so the
-        // reserved slot stays live.
+        // SAFETY: the caller acquires chunk ownership before this borrow ends.
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 
@@ -219,16 +154,9 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
-    pub(in crate::arena) fn try_reserve_arc_slice<S: crate::internal::thin_dst::Strong, T>(
-        &self,
-        len: usize,
-    ) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
+    pub(in crate::arena) fn try_reserve_arc_slice<S: Strong, T>(&self, len: usize) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
         let (ticket, chunk) = self.current().try_alloc_arc_slice::<S, T>(len)?;
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime; the hosting chunk is retired into `Arena::retired_local`
-        // (cleared only on `&mut self`) once rotated out, and the caller
-        // takes a `+1` on the returned chunk before the borrow ends, so the
-        // reserved slot stays live.
+        // SAFETY: the caller acquires chunk ownership before this borrow ends.
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 
@@ -244,20 +172,14 @@ impl<A: Allocator + Clone> Arena<A> {
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
-    pub(in crate::arena) unsafe fn try_reserve_arc_slice_with_size<S: crate::internal::thin_dst::Strong, T>(
+    pub(in crate::arena) unsafe fn try_reserve_arc_slice_with_size<S: Strong, T>(
         &self,
         len: usize,
         payload_bytes: usize,
     ) -> Option<(Uninit<'_, [T]>, NonNull<Chunk<A>>)> {
-        // SAFETY: this `unsafe fn`'s contract requires `payload_bytes` to
-        // equal `size_of::<T>() * len` without overflow; that obligation is
-        // forwarded unchanged to the inner reservation call.
+        // SAFETY: required by this function's contract.
         let (ticket, chunk) = unsafe { self.current().try_alloc_arc_slice_with_size::<S, T>(len, payload_bytes) }?;
-        // SAFETY: `rebind` promotes the ticket to the `&Arena` borrow
-        // lifetime; the hosting chunk is retired into `Arena::retired_local`
-        // (cleared only on `&mut self`) once rotated out, and the caller
-        // takes a `+1` on the returned chunk before the borrow ends, so the
-        // reserved slot stays live.
+        // SAFETY: the caller acquires chunk ownership before this borrow ends.
         Some(unsafe { (ticket.rebind(), chunk) })
     }
 }

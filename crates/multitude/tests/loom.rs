@@ -16,7 +16,7 @@ mod loom_arc {
     use loom::thread;
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are configuration-dependent")]
     use crate::common;
 
     /// A payload type that increments a global counter on Drop.  We use a
@@ -576,7 +576,7 @@ mod loom_bytesbuf {
     use loom::thread;
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are configuration-dependent")]
     use crate::common;
 
     #[test]

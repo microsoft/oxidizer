@@ -536,7 +536,6 @@ impl<T> Drop for ArenaBuf<'_, T> {
 mod tests {
     use super::*;
 
-    // Covers the ZST split_off_buf branch (lines 299-307).
     #[test]
     fn split_off_buf_zst_splits_via_len_only() {
         let mut buf: ArenaBuf<()> = ArenaBuf::new();

@@ -5,7 +5,7 @@
     dead_code,
     unused_imports,
     clippy::unnecessary_safety_comment,
-    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+    reason = "shared test helpers cover feature-gated paths"
 )]
 
 //! Tests for the [`Arena`] type itself: constructors, builder, stats,
@@ -113,6 +113,52 @@ fn try_alloc_vec_with_capacity_zero_works() {
     let v: multitude::vec::Vec<u8, _> = arena.try_alloc_vec_with_capacity(0).unwrap();
     assert_eq!(v.capacity(), 0);
     assert_eq!(v.len(), 0);
+}
+
+#[cfg(feature = "stats")]
+#[test]
+fn arena_stats_report_cache_reuse_and_resets() {
+    let mut arena = Arena::builder().with_capacity(64 * 1024).build();
+    let initial = arena.stats();
+    assert_eq!(initial.cached_chunks, 1);
+    assert_eq!(initial.cached_bytes, 64 * 1024);
+    assert_eq!(initial.total_bytes_allocated, 64 * 1024);
+    assert_eq!(initial.peak_bytes_allocated, 64 * 1024);
+    assert_eq!(initial.normal_chunks_reused, 0);
+    assert_eq!(initial.resets, 0);
+
+    let value = arena.alloc(1_u64);
+    drop(value);
+    let active = arena.stats();
+    assert_eq!(active.cached_chunks, 0);
+    assert_eq!(active.cached_bytes, 0);
+    assert_eq!(active.normal_chunks_reused, 1);
+
+    arena.reset();
+    let reset = arena.stats();
+    assert_eq!(reset.cached_chunks, 1);
+    assert_eq!(reset.cached_bytes, 64 * 1024);
+    assert_eq!(reset.resets, 1);
+
+    let value = arena.alloc(2_u64);
+    drop(value);
+    assert_eq!(arena.stats().normal_chunks_reused, 2);
+}
+
+#[cfg(feature = "stats")]
+#[test]
+fn arena_stats_preserve_peak_after_oversized_storage_is_released() {
+    let arena = Arena::new();
+    let source = vec![0_u8; OVERSIZED_BYTES];
+    let value = arena.alloc_slice_copy_box(&source);
+    let live = arena.stats();
+    assert!(live.total_bytes_allocated >= OVERSIZED_BYTES as u64);
+    assert_eq!(live.peak_bytes_allocated, live.total_bytes_allocated);
+
+    drop(value);
+    let released = arena.stats();
+    assert_eq!(released.total_bytes_allocated, 0);
+    assert_eq!(released.peak_bytes_allocated, live.peak_bytes_allocated);
 }
 
 /// Size that forces an oversized one-shot chunk allocation (i.e. a
@@ -263,10 +309,11 @@ mod reset {
     #![allow(clippy::std_instead_of_core, reason = "tests use std")]
     #![allow(clippy::unwrap_used, reason = "test code")]
     use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
 
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -432,7 +479,7 @@ mod reset {
 
         let barrier = StdArc::new(Barrier::new(2));
         let b = StdArc::clone(&barrier);
-        let h = std::thread::spawn(move || {
+        let h = thread::spawn(move || {
             let _ = b.wait();
             assert_eq!(*r, 99);
             let _ = b.wait();
@@ -513,9 +560,11 @@ mod large_alloc {
     #![allow(clippy::multiple_unsafe_ops_per_block, reason = "test code")]
     #![allow(clippy::as_pointer_underscore, reason = "test code")]
     #![allow(clippy::ptr_as_ptr, reason = "test code")]
+    use std::thread;
+
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     /// 64 KiB worth of bytes (matches `CHUNK_ALIGN`).
@@ -588,7 +637,7 @@ mod large_alloc {
         assert_eq!(a.len(), src.len());
         // Cross-thread sanity: Arc<[u64]> over the oversized chunk must travel.
         let a_clone = a.clone();
-        let h = std::thread::spawn(move || {
+        let h = thread::spawn(move || {
             assert_eq!(a_clone.len(), N_U64);
             assert_eq!(a_clone[N_U64 - 1], (N_U64 - 1) as u64);
         });
@@ -896,7 +945,7 @@ mod large_alloc {
         let s = arena.alloc_str_arc(&big);
         assert_eq!(s.len(), OVER_CHUNK);
         let clone = s.clone();
-        let h = std::thread::spawn(move || {
+        let h = thread::spawn(move || {
             assert_eq!(clone.len(), OVER_CHUNK);
             assert_eq!(&clone[..5], "xxxxx");
         });
@@ -1443,7 +1492,7 @@ mod allocator_impl {
     #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -1496,7 +1545,7 @@ mod mutants_for_chunk_provider {
     #[cfg(feature = "stats")]
     use multitude::{Arena, Box};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[cfg(feature = "stats")]
@@ -1660,7 +1709,7 @@ mod mutants_for_internal {
     use allocator_api2::alloc::{AllocError, Allocator, Global};
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     /// A `Send + Sync` allocator that bumps `drop_count` once per clone
@@ -1804,7 +1853,7 @@ mod mutants_for_kill_boundaries {
     #![allow(dead_code, reason = "test code: probe payload fields are intentionally inert")]
     use multitude::{Arc, Arena, ArenaBuilder};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     const MAX_NORMAL_ALLOC: usize = 16 * 1024;
@@ -2085,10 +2134,6 @@ mod coverage_arena_gaps {
         assert_eq!(r[69_999], 3);
     }
 
-    // ============================================================================
-    // inner_value.rs:927 — `alloc_inner_with_or_panic` over-alignment panic.
-    // ============================================================================
-
     #[cfg(not(utc_backend))]
     #[test]
     #[should_panic(expected = "multitude: allocator returned AllocError")]
@@ -2105,16 +2150,7 @@ mod coverage_arena_gaps {
         let _ = arena.alloc_box_with::<HalfChunkAlign, _>(|| HalfChunkAlign);
     }
 
-    // ============================================================================
-    // inner_slice.rs:430 — `alloc_slice_local_with_or_panic` over-alignment panic.
-    // inner_slice.rs:1003 — shared sibling.
-    // inner_slice.rs:769 — `alloc_slice_local_copy_or_panic` over-alignment panic.
-    //
-    // The panicking *_with helpers are reached via `alloc_uninit_box` /
-    // `alloc_uninit_rc` (local) and `alloc_uninit_arc` (shared). Their
-    // over-alignment check fires before any closure runs, so no value
-    // ever lives on the test stack frame.
-    // ============================================================================
+    // Over-alignment is rejected before initialization.
 
     #[cfg(not(utc_backend))]
     #[test]
@@ -2143,12 +2179,6 @@ mod coverage_arena_gaps {
         let src: &[ChunkAlign] = &[];
         let _ = arena.alloc_slice_copy(src);
     }
-
-    // ============================================================================
-    // inner_slice.rs:550 — `try_alloc_slice_local_no_drop_with` over-alignment.
-    // inner_slice.rs:667 — `try_alloc_slice_local_copy` over-alignment.
-    // inner_slice.rs:833 — `try_alloc_slice_shared_copy` over-alignment.
-    // ============================================================================
 
     #[cfg(not(utc_backend))]
     #[test]
@@ -2181,12 +2211,7 @@ mod coverage_arena_gaps {
         assert!(res.is_err());
     }
 
-    // ============================================================================
-    // Per-`Arc` reference counting removes the `u16` element-count cap on
-    // `Arc<[T]>` slices: a Drop-typed slice longer than `u16::MAX` is now
-    // dropped via `drop_in_place::<[T]>` in `Arc::drop`, not a counted
-    // chunk drop entry, so it allocates successfully.
-    // ============================================================================
+    // Per-value reference counting permits drop slices longer than `u16::MAX`.
 
     #[cfg(all(feature = "std", not(miri)))]
     #[test]
@@ -2201,15 +2226,6 @@ mod coverage_arena_gaps {
         let arc = arena.alloc_slice_fill_with_arc(u16::MAX as usize + 1, |_| D);
         assert_eq!(arc.len(), u16::MAX as usize + 1);
     }
-
-    // ============================================================================
-    // inner_slice.rs:443–444 — `alloc_slice_local_with_or_panic` oversized.
-    // inner_slice.rs:553–554 — `try_alloc_slice_local_no_drop_with` oversized.
-    // inner_slice.rs:670–671 — `try_alloc_slice_local_copy` oversized.
-    // inner_slice.rs:774–775 — `alloc_slice_local_copy_or_panic` oversized.
-    // inner_slice.rs:836–837 — `try_alloc_slice_shared_copy` oversized.
-    // inner_slice.rs:1016–1017 — `alloc_slice_shared_with_or_panic` oversized.
-    // ============================================================================
 
     #[test]
     fn try_alloc_slice_fill_with_oversized() {
@@ -2311,10 +2327,7 @@ mod coverage_arena_gaps {
     }
 
     #[test]
-    // ICE in Miri's weak-memory model (src/tools/miri/src/concurrency/
-    // weak_memory.rs:233 — "cannot have empty store buffer when previous
-    // write was atomic"). Skip under Miri until upstream Miri is fixed;
-    // the regular test runner exercises this path.
+    // Miri's weak-memory model rejects this atomic sequence.
     #[cfg_attr(miri, ignore)]
     fn refill_shared_oversized_chunk_capacity() {
         let arena = Arena::builder().with_capacity(128 * 1024).build();
@@ -2333,44 +2346,31 @@ mod coverage_arena_gaps {
         let src: alloc::vec::Vec<u8> = alloc::vec![0_u8; 4096];
         let _ = arena.alloc_slice_copy(&*src);
     }
-
-    // ============================================================================
-    // primitives.rs:243 — `try_install_slice_drop_entry` returns false
-    // when the value's chunk is no longer the current chunk.
-    // Reached via `Vec::into_arena_rc`'s freeze-fast-path when an
-    // intervening allocation has evicted the chunk hosting the buffer.
-    // ============================================================================
 }
 
 #[cfg(feature = "stats")]
 mod from_mutants_extras_stats {
-    #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
-    #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
-    #![allow(dead_code, reason = "relocated helpers retain fields for layout")]
-    #![allow(
-        unfulfilled_lint_expectations,
-        reason = "relocated #[expect] may be fulfilled at file or feature level"
-    )]
-    #![allow(
-        clippy::undocumented_unsafe_blocks,
-        reason = "relocated test bodies preserve original safety reasoning"
-    )]
-    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "relocated tests group related unsafe ops")]
-    #![allow(clippy::cast_possible_truncation, reason = "relocated tests use bounded values")]
-    #![allow(clippy::cast_sign_loss, reason = "relocated tests use non-negative values")]
-    #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
-    #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
-    #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
+    #![allow(clippy::items_after_statements, reason = "test-local types are declared near use")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests exercise method-call clone syntax")]
+    #![allow(dead_code, reason = "helper fields preserve test layouts")]
+    #![allow(unfulfilled_lint_expectations, reason = "expectations depend on active features")]
+    #![allow(clippy::undocumented_unsafe_blocks, reason = "unsafe test setup is documented at each call site")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe operations")]
+    #![allow(clippy::cast_possible_truncation, reason = "test values fit the target type")]
+    #![allow(clippy::cast_sign_loss, reason = "test values are non-negative")]
+    #![allow(clippy::empty_drop, reason = "empty Drop impls mark drop-sensitive types")]
+    #![allow(clippy::assertions_on_result_states, reason = "tests assert error returns directly")]
+    #![allow(clippy::empty_line_after_doc_comments, reason = "test documentation is adjacent to declarations")]
     use multitude::Box as ArenaBox;
     #[repr(align(64))]
     #[derive(Debug)]
-    #[expect(dead_code, reason = "helper for relocated over-alignment tests")]
+    #[expect(dead_code, reason = "helper drives over-alignment tests")]
     struct Align64(u32);
 
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena, ArenaBuilder};
 
-    #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common::{self, DropCounter, FailingAllocator, SendFailingAllocator};
 
     #[test]
@@ -3763,7 +3763,7 @@ mod alloc_drop_behavior {
 
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[derive(Debug)]
@@ -3967,7 +3967,7 @@ mod alloc_drop_behavior_2 {
     use std::sync::Arc as StdArc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[derive(Debug)]
@@ -4213,7 +4213,7 @@ mod alloc_hot_path_behavior {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     thread_local! {
@@ -4733,9 +4733,8 @@ mod alloc_hot_path_behavior {
     }
 
     #[test]
-    fn arena_2660_large_nondrop_shared_slice() {
-        // Use a non-Copy, non-Drop wrapper so we go through try_alloc_slice_shared_with
-        // (the Copy path bypasses line 2660).
+    fn large_nondrop_shared_slice() {
+        // A non-Copy, non-Drop wrapper exercises initialized shared slices.
         #[derive(Clone, Debug, PartialEq)]
         struct W(u8);
         let arena = Arena::new();
@@ -4906,7 +4905,7 @@ mod routing_boundary_behavior {
 
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     extern crate alloc;
@@ -4968,7 +4967,7 @@ mod misc_alloc_behavior {
     #![allow(clippy::large_stack_arrays, reason = "test allocations are intentional")]
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -5001,7 +5000,7 @@ mod alloc_invariants_audit {
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -5477,7 +5476,7 @@ mod string_slice_utf16_behavior {
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -5673,7 +5672,7 @@ mod freeze_and_box_behavior {
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena, Box as ArenaBox};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -5756,13 +5755,14 @@ mod public_surface_behavior {
     #![allow(clippy::undocumented_unsafe_blocks, reason = "test code")]
     #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe ops")]
     use core::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
 
     #[cfg(feature = "dst")]
     use multitude::Arc;
     use multitude::vec::{CollectIn, Vec};
     use multitude::{Arena, ArenaBuilder};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
     use crate::common::{FailingAllocator, SendFailingAllocator};
 
@@ -5811,22 +5811,18 @@ mod public_surface_behavior {
         b1.push('!');
         b2.push('!');
         b3.push('!');
-        drop(b2); // <-- middle of doubly-linked list
+        drop(b2);
         assert_eq!(*b1, "first!");
         assert_eq!(*b3, "last!");
     }
 
     #[test]
     fn cached_local_chunk_revived_as_shared() {
-        // `revive_cached_chunk(chunk, Shared)` → `reinit_refcount(_, Shared, 1)`
-        // dispatches to the Shared branch. The deterministic way to land
-        // a chunk in the cache is `.preallocate(n)`, which seeds the cache
-        // before the first allocation. Then `alloc_arc` pops the cache and
-        // revives the chunk as Shared.
+        // Preallocation seeds a local chunk that `alloc_arc` revives as shared.
         let arena: Arena = Arena::builder().with_capacity(1024).build();
         let shared = arena.alloc_arc(99_u64);
         assert_eq!(*shared, 99);
-        let join = std::thread::spawn(move || *shared);
+        let join = thread::spawn(move || *shared);
         assert_eq!(99, join.join().unwrap());
     }
 
@@ -5982,7 +5978,7 @@ mod public_surface_behavior {
                 })
             };
             assert_eq!(arc.len(), 1);
-            let h = std::thread::spawn(move || arc.len());
+            let h = thread::spawn(move || arc.len());
             let val = h.join().unwrap();
             assert_eq!(val, 1);
         }
@@ -6394,9 +6390,6 @@ mod public_surface_behavior {
         });
     }
 
-    // grow_for_string slow path: relocate succeeds, old chunk's refcount goes
-    // to 0 (drives lines 1815/1820/1822-1823 in arena.rs).
-
     #[test]
     fn grow_for_string_old_chunk_torn_down() {
         let a = Arena::builder().build();
@@ -6407,14 +6400,9 @@ mod public_surface_behavior {
         drop(s);
     }
 
-    // Oversized + needs_drop=false branch in ChunkHeader::oversized_layout
-    // (lines 188, 189). Default max_normal_alloc = chunk_size/4. We allocate
-    // a chunk-sized payload to force the oversized path with a Copy type.
-
     #[test]
     fn oversized_no_drop_branch() {
         let a = Arena::builder().max_normal_alloc(4 * 1024).build();
-        // 1500 bytes of u8 (Copy, no Drop) > max_normal_alloc(4 * 1024).
         let _s = a.alloc_slice_copy(&[0_u8; 1500][..]);
     }
 
@@ -6428,37 +6416,30 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_try_reserve_no_growth_needed() {
-        // Line 182: try_reserve when capacity already sufficient → Ok(()) without growing.
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
         v.push(1);
         v.push(2);
-        // capacity should be >= 4 after the initial growth; reserve 1 more (already have room).
         assert!(v.try_reserve(1).is_ok());
         assert_eq!(v.len(), 2);
     }
 
     #[test]
     fn vec_try_reserve_exact_realloc_and_overflow() {
-        // Lines 432-436: try_reserve_exact that needs realloc.
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
         v.push(1);
-        // Force exact reserve beyond current capacity.
         assert!(v.try_reserve_exact(100).is_ok());
         assert!(v.capacity() >= 101);
 
-        // Line 436: try_reserve_exact when capacity is already sufficient (no growth).
         assert!(v.try_reserve_exact(1).is_ok());
 
-        // Overflow: len + additional > usize::MAX.
         let err = v.try_reserve_exact(usize::MAX);
         assert!(err.is_err());
     }
 
     #[test]
     fn vec_resize_with_shrink() {
-        // Lines 473-475: resize_with to a smaller size calls truncate.
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..10 {
@@ -6472,20 +6453,16 @@ mod public_surface_behavior {
     #[test]
     fn vec_drain_with_exclusive_start_and_inclusive_end() {
         use core::ops::Bound;
-        // Lines 512-513: Excluded start bound and Unbounded start.
-        // Lines 516-518: Included end bound and Unbounded end.
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
         for i in 0..10 {
             v.push(i);
         }
 
-        // drain((Excluded(0), Included(3))) → start=1, end=4
         let drained: std::vec::Vec<_> = v.drain((Bound::Excluded(0), Bound::Included(3))).collect();
         assert_eq!(drained, vec![1, 2, 3]);
         assert_eq!(v.len(), 7);
 
-        // drain(..) → Unbounded start, Unbounded end → start=0, end=len
         let arena2 = Arena::new();
         let mut v2: Vec<u32> = arena2.alloc_vec();
         for i in 0..5 {
@@ -6498,7 +6475,6 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_zst_operations() {
-        // Lines 360, 586, 594-596: ZST Vec realloc and shrink_to_fit.
         let arena = Arena::new();
         let mut v: Vec<()> = arena.alloc_vec();
         for _ in 0..100 {
@@ -6506,7 +6482,6 @@ mod public_surface_behavior {
         }
         assert_eq!(v.len(), 100);
         v.shrink_to_fit();
-        // ZST shrink_to_fit is a no-op (line 360: size_of::<T>() == 0 → return).
         assert_eq!(v.len(), 100);
     }
 
@@ -6522,7 +6497,6 @@ mod public_surface_behavior {
         assert!(s.contains("Drain"), "Debug output: {s}");
         assert!(s.contains("remaining"), "Debug output: {s}");
 
-        // next_back
         assert_eq!(drain.next_back(), Some(3));
         assert_eq!(drain.next_back(), Some(2));
         assert_eq!(drain.next(), Some(1));
@@ -6531,15 +6505,12 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_insert_triggers_growth() {
-        // Line 284: insert when len == cap forces grow_one.
         let arena = Arena::new();
         let mut v: Vec<u32> = arena.alloc_vec();
-        // Fill to capacity (initial growth is 4).
         for i in 0..4 {
             v.push(i);
         }
         assert_eq!(v.capacity(), 4);
-        // Insert forces growth.
         v.insert(2, 99);
         assert_eq!(v[2], 99);
         assert!(v.capacity() > 4);
@@ -6547,14 +6518,10 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_push_panics_on_alloc_failure() {
-        // Line 126: grow_one → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(1)); // 1 alloc for initial chunk
             let mut v: Vec<u64, _> = arena.alloc_vec();
-            // First pushes may succeed using the chunk, but growth will fail.
-            // FailingAllocator(1) gives exactly one chunk; the second
-            // realloc-on-grow trips the panic well before 100 pushes —
-            // the loop bound is just a defensive cap.
+            // One chunk forces a later growth attempt to fail.
             for _ in 0..100 {
                 v.push(0);
             }
@@ -6563,7 +6530,6 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_reserve_panics_on_alloc_failure() {
-        // Line 168: reserve → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(0));
             let mut v: Vec<u64, _> = arena.alloc_vec();
@@ -6573,7 +6539,6 @@ mod public_surface_behavior {
 
     #[test]
     fn vec_reserve_exact_panics_on_alloc_failure() {
-        // Line 422: reserve_exact → panic_alloc.
         expect_panic(|| {
             let arena = Arena::new_in(FailingAllocator::new(0));
             let mut v: Vec<u64, _> = arena.alloc_vec();
@@ -6583,10 +6548,7 @@ mod public_surface_behavior {
 
     #[test]
     fn shared_bump_fast_path_bail_on_oversize() {
-        // Line 385: the current-chunk bump path returns None for oversize request.
-        // Lines 569-570: try_get_chunk_for_shared creates oversized chunk.
         let arena = Arena::builder().max_normal_alloc(4096).build();
-        // This is larger than max_normal_alloc(4096), so fast path bails → oversized chunk.
         let arc = arena.alloc_arc([0_u64; 1024]); // 8192 bytes > 4096
         assert_eq!(arc[0], 0);
     }
@@ -6594,17 +6556,12 @@ mod public_surface_behavior {
     #[test]
     fn shared_bump_fit_in_current_chunk() {
         let arena = Arena::new();
-        // Allocate many small Arcs to fill the current chunk, then one that
-        // might go through the slow path on a second chunk. The first Arc establishes
-        // the chunk.
         let _a1 = arena.alloc_arc(1_u32);
         let _a2 = arena.alloc_arc(2_u32);
     }
 
     #[test]
     fn shared_oversized_inc_ref_on_non_normal_chunk() {
-        // Lines 799-802: inc_ref_shared_deferred for non-Normal (oversized) chunk.
-        // The oversized shared alloc path: alloc_slice_copy_arc with slice > max_normal_alloc.
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let data = [42_u8; 8192]; // > max_normal_alloc(4096)
         let arc_slice = arena.alloc_slice_copy_arc(&data[..]);
@@ -6614,19 +6571,12 @@ mod public_surface_behavior {
 
     #[test]
     fn shared_eviction_of_pinned_chunk() {
-        // Line 603: push_pinned when evicting a pinned chunk.
-        // Use the smallest possible chunk so a modest number of pushes
-        // reliably overflows the current chunk and triggers eviction of
-        // the pinned (string-builder-owned) chunk on refill.
+        // A small chunk forces refill while the string builder retains it.
         let arena = Arena::builder().with_capacity(512).build();
-        // String builders use chunks with pin_for_bump=true.
         let mut s = arena.alloc_string();
-        // 600 ASCII chars > 512-byte chunk capacity guarantees the refill
-        // path runs while the chunk is pinned, exercising the
-        // pinned-eviction branch regardless of host/Miri.
         let n = 600;
         for _ in 0..n {
-            s.push('A'); // This grows the string builder, pinning the chunk.
+            s.push('A');
         }
         assert!(s.len() >= n);
     }
@@ -6636,7 +6586,6 @@ mod public_surface_behavior {
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_copy_rejects_overaligned() {
-        // Line 1441: layout.align() >= CHUNK_ALIGN → Err(AllocError).
         #[repr(align(131072))]
         #[derive(Clone, Copy)]
         #[expect(dead_code, reason = "field needed for alignment/size but not read")]
@@ -6650,11 +6599,7 @@ mod public_surface_behavior {
 
     #[test]
     fn try_alloc_slice_copy_rejects_overflow() {
-        // Line 1436: total > isize::MAX → Err(AllocError).
         let arena = Arena::new();
-        // Fabricate a slice reference with huge length via unsafe.
-        // Can't actually create such a large allocation, but we can test the
-        // overflow branch by checking try_alloc_slice_fill_with with a huge len.
         let result = arena.try_alloc_slice_fill_with::<u64, _>(usize::MAX / 4, |_| 0);
         assert!(result.is_err());
     }
@@ -6664,7 +6609,6 @@ mod public_surface_behavior {
     // See note on `acquire_slice_slot_rejects_overaligned`: naming a
     // `T` with `align(131072)` aborts on Windows before the guard runs.
     fn try_alloc_slice_fill_with_rejects_overaligned() {
-        // Line 1505: layout.align() >= CHUNK_ALIGN → Err(AllocError).
         #[repr(align(131072))]
         struct HugeAlignDrop(#[expect(dead_code, reason = "field needed for alignment/size but not read")] u8);
         #[expect(clippy::empty_drop, reason = "Drop impl makes needs_drop::<T>() true for test")]
@@ -6679,7 +6623,6 @@ mod public_surface_behavior {
 
     #[test]
     fn try_alloc_slice_fill_with_no_drop_fast_path() {
-        // Line 1509: no-drop type takes the fast-path branch in try_alloc_slice_fill_with.
         let arena = Arena::new();
         let result = arena.try_alloc_slice_fill_with::<u32, _>(10, |i| i as u32);
         assert!(result.is_ok());
@@ -6690,7 +6633,6 @@ mod public_surface_behavior {
 
     #[test]
     fn try_alloc_slice_fill_with_overflow() {
-        // Line 1500: total > isize::MAX for non-drop type.
         let arena = Arena::new();
         let result = arena.try_alloc_slice_fill_with::<u64, _>(usize::MAX / 4, |_| 0);
         assert!(result.is_err());
@@ -6698,7 +6640,6 @@ mod public_surface_behavior {
 
     #[test]
     fn alloc_slice_fill_with_overflow() {
-        // Line 1500: try_alloc_slice_fill_with overflow (total > isize::MAX - (align-1)).
         let arena = Arena::new();
         let len = (isize::MAX as usize) / 8 + 1;
         let result = arena.try_alloc_slice_fill_with::<u64, _>(len, |_| 0);
@@ -6707,11 +6648,8 @@ mod public_surface_behavior {
 
     #[test]
     fn alloc_slice_fill_with_non_drop_fast_path() {
-        // Line 1509: fast-path ptr.cast::<T>() for non-Drop types in try_alloc_slice_fill_with.
         let arena = Arena::new();
-        // First call: allocates a chunk via slow path.
         let _ = arena.alloc_slice_fill_with::<u32, _>(4, |i| i as u32);
-        // Second call: fast path in current chunk (line 1509).
         let slice = arena.alloc_slice_fill_with::<u32, _>(4, |i| (i + 10) as u32);
         assert_eq!(&*slice, &[10, 11, 12, 13]);
     }
@@ -6956,7 +6894,7 @@ mod public_surface_behavior_2 {
     use multitude::vec::Vec as ArenaVec;
     use multitude::{Arc, Arena, FromIn as _};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
     use crate::common::{FailingAllocator, SendFailingAllocator};
 
@@ -6978,8 +6916,6 @@ mod public_surface_behavior_2 {
         }
     }
 
-    // ---- src/arc.rs / src/rc.rs gaps ----
-
     #[test]
     fn arc_from_arena_vec_uses_into_arc() {
         let arena = Arena::new();
@@ -6990,8 +6926,6 @@ mod public_surface_behavior_2 {
         let a: Arc<[i32]> = v.into();
         assert_eq!(&*a, &[1, 2]);
     }
-
-    // ---- src/internal/chunk_provider.rs gaps ----
 
     #[test]
     fn builder_preallocate_shared_releases_budget_on_allocator_error() {
@@ -7130,10 +7064,6 @@ mod public_surface_behavior_2 {
         assert_eq!(s.as_str(), "already allocated");
     }
 
-    // ---- src/strings/utf16_string.rs gaps ----
-
-    // ---- src/vec/vec.rs gaps ----
-
     #[test]
     #[should_panic(expected = "allocator returned AllocError")]
     fn vec_with_capacity_panics_on_allocator_error() {
@@ -7246,8 +7176,6 @@ mod public_surface_behavior_2 {
         assert_eq!(v.len(), 4);
     }
 
-    // ---- src/allocator_impl.rs gaps ----
-
     #[test]
     fn arena_allocator_grow_falls_back_when_in_place_growth_is_ineligible() {
         let arena = Arena::new();
@@ -7318,8 +7246,6 @@ mod public_surface_behavior_2 {
             Allocator::deallocate(&alloc, shrunk.cast(), new);
         }
     }
-
-    // ---- src/arena.rs gaps ----
 
     #[test]
     fn arena_slice_clone_no_drop_branch() {
@@ -7548,32 +7474,16 @@ mod public_surface_behavior_3 {
         assert_eq!(v.capacity(), cap_before);
         assert_eq!(v.len(), 50);
     }
-
-    // ============================================================================
-    // vec.rs:731-734 — into_arena_rc copy-fallback error path
-    // ============================================================================
 }
 
 mod public_surface_behavior_4 {
     #![allow(clippy::std_instead_of_core, reason = "test code uses std")]
     #![allow(clippy::missing_panics_doc, reason = "test code")]
     #![allow(clippy::unwrap_used, reason = "test code")]
-    use multitude::{Arc, Arena};
+    use multitude::Arena;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
-
-    // ---------------------------------------------------------------------------
-    // arc.rs:162-164, rc.rs:167-169, box.rs (From<Handle<T,A>> for Pin<Handle<T,A>>).
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn arc_into_pin_via_from_impl() {
-        let arena = Arena::new();
-        let arc: Arc<u32> = arena.alloc_arc(42_u32);
-        let pinned: core::pin::Pin<Arc<u32>> = arc.into();
-        assert_eq!(*pinned, 42);
-    }
 
     #[test]
     fn box_into_pin_via_from_impl() {
@@ -7582,15 +7492,6 @@ mod public_surface_behavior_4 {
         let pinned: core::pin::Pin<multitude::Box<u32>> = b.into();
         assert_eq!(*pinned, 42);
     }
-
-    // ---------------------------------------------------------------------------
-    // zero_init_macros.rs:58/85/115/142/172/202/232/265/289/290 — the
-    // `panic_alloc()` arms in `BytemuckView` / `ZerocopyView` allocation methods.
-    // ---------------------------------------------------------------------------
-
-    // ---------------------------------------------------------------------------
-    // strings/string.rs / utf16_string.rs — insert at end + replace_range tail.
-    // ---------------------------------------------------------------------------
 
     #[test]
     fn string_insert_str_at_end_of_string() {
@@ -7610,10 +7511,6 @@ mod public_surface_behavior_4 {
         s.replace_range(n..n, "xyz");
         assert_eq!(s.as_str(), "abcxyz");
     }
-
-    // ---------------------------------------------------------------------------
-    // vec/vec.rs:471 — `resize_with` panic-rollback Guard's drop_in_place tail.
-    // ---------------------------------------------------------------------------
 
     #[test]
     fn vec_resize_with_clone_panic_drops_partial() {
@@ -7676,11 +7573,4 @@ mod public_surface_behavior_4 {
             clones_dropped.get()
         );
     }
-
-    // ---------------------------------------------------------------------------
-    // arena/alloc_utf16.rs:26, :65 — the oversized-utf16 branches that route
-    // requests larger than `max_normal_alloc` to the oversized allocator.
-    // Default `max_normal_alloc` is 16 KiB == 8192 u16 elements; allocate
-    // well above that to force entry into the oversized fork.
-    // ---------------------------------------------------------------------------
 }

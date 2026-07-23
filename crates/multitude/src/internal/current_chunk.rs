@@ -67,10 +67,10 @@ impl<A: Allocator + Clone> CurrentChunk<A> {
         let _old = self.replace(new);
     }
 
-    /// Get a mutable reference to the contained mutator. Requires
-    /// `&mut self`, so the borrow checker enforces exclusion.
+    /// Replace the contained mutator through an exclusive borrow and return
+    /// the previous one.
     #[inline]
-    pub(crate) fn get_mut(&mut self) -> &mut ChunkMutator<A> {
-        self.0.get_mut()
+    pub(crate) fn replace_mut(&mut self, new: ChunkMutator<A>) -> ChunkMutator<A> {
+        core::mem::replace(self.0.get_mut(), new)
     }
 }

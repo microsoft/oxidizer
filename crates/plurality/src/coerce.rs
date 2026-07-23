@@ -3,22 +3,13 @@
 
 //! Compiler-checked pointer unsizing for pooled handles.
 //!
-//! Stable Rust does not let a user-defined smart pointer participate in unsizing
-//! coercions (`CoerceUnsized`/`Unsize` are unstable), so [`Box`](crate::Box),
-//! [`Arc`](crate::Arc) and [`Rc`](crate::Rc) convert a sized handle into an
-//! unsized one through a [`Coercion`] token instead.
-//!
-//! A `Coercion<T, U>` carries a function that performs the *real* compiler
-//! unsizing coercion `*const T -> *const U` (for `U` a trait object or slice).
-//! Because the metadata (vtable or slice length) is produced by the compiler and
-//! the address and provenance of the original pointer are preserved by that same
-//! coercion, [`unsize`] simply applies the function and reinterprets the result;
-//! it makes no assumptions about the internal layout of fat pointers.
-//!
-//! Build a token with the safe [`coerce!`](crate::coerce!) macro (for trait
-//! objects) or [`Coercion::to_slice`] (for arrays). [`Coercion::new`] is the
-//! `unsafe` escape hatch for coercions the macro cannot express.
+//! Stable Rust cannot unsize user-defined smart pointers directly. A
+//! [`Coercion`] delegates the raw-pointer coercion to the compiler, preserving
+//! address and provenance while adding DST metadata. Use
+//! [`coerce!`](crate::coerce!) for trait objects or [`Coercion::to_slice`] for
+//! arrays.
 
+use core::fmt;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
@@ -69,8 +60,8 @@ impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> Coercion<T, U, F> {
     }
 }
 
-impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> core::fmt::Debug for Coercion<T, U, F> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl<T, U: ?Sized, F: FnOnce(*const T) -> *const U> fmt::Debug for Coercion<T, U, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Coercion").finish_non_exhaustive()
     }
 }

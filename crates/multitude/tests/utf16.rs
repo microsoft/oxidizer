@@ -5,7 +5,7 @@
     dead_code,
     unused_imports,
     clippy::unnecessary_safety_comment,
-    reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
+    reason = "shared test helpers cover feature-gated paths"
 )]
 
 //! Consolidated UTF-16 tests for builders, formatting, serde, and sharing.
@@ -19,7 +19,7 @@ mod utf16_smoke {
     use multitude::Arena;
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -66,7 +66,7 @@ mod utf16_string_builder {
     use multitude::{Arena, FromIn as _};
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -379,7 +379,7 @@ mod utf16_format {
     use multitude::strings::format_utf16;
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -429,7 +429,7 @@ mod utf16_serde {
     use multitude::Arena;
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -466,7 +466,7 @@ mod utf16_cross_thread {
     use multitude::Arena;
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -515,7 +515,7 @@ mod utf16_coverage {
     use multitude::{Arc, Arena, Box, FromIn as _};
     use widestring::{Utf16Str, utf16str};
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
     use crate::common::{FailingAllocator, SendFailingAllocator};
 
@@ -1208,7 +1208,7 @@ mod mutants_for_utf16_strings {
     use multitude::strings::Utf16String;
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "merged test module re-exports common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common;
 
     #[test]
@@ -2885,29 +2885,23 @@ mod utf16_round2 {
 }
 
 mod from_coverage_extras_utf16 {
-    #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
-    #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
-    #![allow(dead_code, reason = "relocated helpers retain fields for layout")]
-    #![allow(
-        unfulfilled_lint_expectations,
-        reason = "relocated #[expect] may be fulfilled at file or feature level"
-    )]
-    #![allow(
-        clippy::undocumented_unsafe_blocks,
-        reason = "relocated test bodies preserve original safety reasoning"
-    )]
-    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "relocated tests group related unsafe ops")]
-    #![allow(clippy::cast_possible_truncation, reason = "relocated tests use bounded values")]
-    #![allow(clippy::cast_sign_loss, reason = "relocated tests use non-negative values")]
-    #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
-    #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
-    #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
+    #![allow(clippy::items_after_statements, reason = "test-local types are declared near use")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests exercise method-call clone syntax")]
+    #![allow(dead_code, reason = "helper fields preserve test layouts")]
+    #![allow(unfulfilled_lint_expectations, reason = "expectations depend on active features")]
+    #![allow(clippy::undocumented_unsafe_blocks, reason = "unsafe test setup is documented at each call site")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe operations")]
+    #![allow(clippy::cast_possible_truncation, reason = "test values fit the target type")]
+    #![allow(clippy::cast_sign_loss, reason = "test values are non-negative")]
+    #![allow(clippy::empty_drop, reason = "empty Drop impls mark drop-sensitive types")]
+    #![allow(clippy::assertions_on_result_states, reason = "tests assert error returns directly")]
+    #![allow(clippy::empty_line_after_doc_comments, reason = "test documentation is adjacent to declarations")]
     use multitude::strings::Utf16String;
     use multitude::vec::FromIteratorIn;
     use multitude::{Arena, ArenaBuilder, FromIn as _};
     use widestring::utf16str;
 
-    #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common::{self, FailingAllocator};
 
     #[test]
@@ -3023,27 +3017,21 @@ mod from_coverage_extras_utf16 {
 }
 
 mod from_mutants_extras_utf16_scattered {
-    #![allow(clippy::items_after_statements, reason = "relocated tests put inner types near use")]
-    #![allow(clippy::clone_on_ref_ptr, reason = "relocated tests use .clone() on Arc/Rc")]
-    #![allow(dead_code, reason = "relocated helpers retain fields for layout")]
-    #![allow(
-        unfulfilled_lint_expectations,
-        reason = "relocated #[expect] may be fulfilled at file or feature level"
-    )]
-    #![allow(
-        clippy::undocumented_unsafe_blocks,
-        reason = "relocated test bodies preserve original safety reasoning"
-    )]
-    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "relocated tests group related unsafe ops")]
-    #![allow(clippy::cast_possible_truncation, reason = "relocated tests use bounded values")]
-    #![allow(clippy::cast_sign_loss, reason = "relocated tests use non-negative values")]
-    #![allow(clippy::empty_drop, reason = "relocated tests use empty Drop impls to mark dropability")]
-    #![allow(clippy::assertions_on_result_states, reason = "relocated tests deliberately assert error returns")]
-    #![allow(clippy::empty_line_after_doc_comments, reason = "relocated test doc-comments")]
+    #![allow(clippy::items_after_statements, reason = "test-local types are declared near use")]
+    #![allow(clippy::clone_on_ref_ptr, reason = "tests exercise method-call clone syntax")]
+    #![allow(dead_code, reason = "helper fields preserve test layouts")]
+    #![allow(unfulfilled_lint_expectations, reason = "expectations depend on active features")]
+    #![allow(clippy::undocumented_unsafe_blocks, reason = "unsafe test setup is documented at each call site")]
+    #![allow(clippy::multiple_unsafe_ops_per_block, reason = "tests group related unsafe operations")]
+    #![allow(clippy::cast_possible_truncation, reason = "test values fit the target type")]
+    #![allow(clippy::cast_sign_loss, reason = "test values are non-negative")]
+    #![allow(clippy::empty_drop, reason = "empty Drop impls mark drop-sensitive types")]
+    #![allow(clippy::assertions_on_result_states, reason = "tests assert error returns directly")]
+    #![allow(clippy::empty_line_after_doc_comments, reason = "test documentation is adjacent to declarations")]
     extern crate alloc;
     use multitude::Arena;
 
-    #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
+    #[expect(unused_imports, reason = "common helpers are feature-dependent")]
     use crate::common::{self, FailingAllocator, SendFailingAllocator};
 
     #[test]

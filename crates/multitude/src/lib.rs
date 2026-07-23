@@ -11,20 +11,11 @@
 
 //! Fast and flexible arena-based bump allocator.
 //!
-//! `multitude` is a bump allocator for applications with phase-oriented lifetimes.
+//! `multitude` allocates phase-oriented values from chunks and reclaims their
+//! storage in bulk. Escape-capable handles can retain and reclaim individual
+//! chunks independently.
 //!
-//! Groups of related allocations live and die together. Service request handling and parsers are two examples of this pattern which usually
-//! benefit from a bump allocator.
-//!
-//! `multitude` works by accumulating large chunks of memory allocated from the system and then carving out smaller pieces of it for application use
-//! using a fast bump allocation strategy, which is considerably faster than allocating from the system. The downside however is that the individual allocations
-//! can't be freed separately. Instead, memory is reclaimed and returned to the system in bulk when the entire arena is dropped.
-//!
-//! # Why Another Bump Allocator?
-//!
-//! The Rust ecosystem has a few bump allocators, the most popular being [`bumpalo`](https://crates.io/crates/bumpalo).
-//! `multitude` uses a different implementation strategy and has a richer API surface making it suitable for more
-//! use cases. The main features that set `multitude` apart are:
+//! # Key properties
 //!
 //! 1. **Flexibility.** Four allocation styles coexist in the same arena: the
 //!    arena-lifetime owning handle [`Alloc<T>`](Alloc) plus three escape-capable
@@ -32,13 +23,13 @@
 //!    and the unique-owner [`Box`] — each available for sized `T`, `str`, and
 //!    `[T]`. See the [comparison table](#flexibility) for how they differ.
 //!
-//! 2. **Early Reclamation.** In many situations, `multitude` can reclaim memory from individual chunks as soon as their reference counts drop to zero,
-//!    without waiting for the entire arena to be dropped. This allows for more efficient memory usage in long-running arenas with many short-lived allocations.
+//! 2. **Early Reclamation.** A chunk containing only escape-capable allocations
+//!    is reclaimed when its last handle drops.
 //!
-//! 3. **Smart Pointers Can Outlive the Arena.** Some of the smart pointers produced by `multitude` can keep their owning chunk alive even after the arena itself has been dropped,
-//!    allowing for more flexible memory management and longer-lived data structures.
+//! 3. **Escaping Smart Pointers.** `Arc`, `Rc`, and `Box` can outlive the arena
+//!    by retaining their chunk.
 //!
-//! 4. **Drop Support.** `multitude` automatically runs `Drop` for allocated values at the appropriate time.
+//! 4. **Drop Support.** Owning handles run value destructors eagerly.
 //!
 //! 5. **Uniformly Thin Smart Pointers.** `multitude`'s escape-capable smart
 //!    pointers — [`Arc<T>`](Arc), [`Rc<T>`](Rc), and [`Box<T>`](Box) — are
@@ -48,21 +39,23 @@
 //!    `[T]` it is a fat reference (pointer + length), which costs nothing extra
 //!    since it never escapes the arena and isn't stored at scale.
 //!
-//! 6. **Efficient Mutable Strings and Vectors.** `multitude` provides [`String`](strings::String), [`Utf16String`](strings::Utf16String) and [`Vec`](vec::Vec) which are growable collections that live in the arena.
+//! 6. **Growable Collections.** [`String`](strings::String),
+//!    [`Utf16String`](strings::Utf16String), and [`Vec`](vec::Vec) grow in arena
+//!    storage.
 //!
-//! 7. **Dynamically-Sized Types.** `multitude` supports dynamically-sized types (DSTs) like slices and strings, allowing you to allocate and manage them in the
-//!    arena with the same flexibility as sized types. The [`dst-factory`](https://crates.io/crates/dst-factory) crate is a great companion for building DSTs in the arena.
+//! 7. **Dynamically-Sized Types.** Slices, strings, trait objects, and custom
+//!    DSTs use the same ownership forms as sized values.
 //!
-//! 8. **First Class `serde` Support.**. `multitude` lets you deserialize data directly into
-//!    arena-backed memory.
+//! 8. **Serde Support.** Values can be deserialized directly into arena-backed
+//!    storage.
 //!
-//! 9. **`format!`-style Macro.** `multitude` includes a [`format!`](strings::format!)-style macro that allows you to create formatted strings directly in the arena, avoiding intermediate allocations and copies.
+//! 9. **Formatting.** [`format!`](strings::format!) writes formatted strings
+//!    directly into arena storage.
 //!
-//! 10. **UTF-16 Support.** With the `utf16` Cargo feature, `multitude` provides a parallel set of arena-resident UTF-16 string types
-//!     (`Arc<Utf16Str>`, `Box<Utf16Str>`, [`Utf16String`](strings::Utf16String)) and a [`format_utf16!`](strings::format_utf16!) macro for FFI / Windows / JS-engine
-//!     interop without per-call transcoding at every boundary.
+//! 10. **UTF-16 Support.** The `utf16` feature provides arena-backed UTF-16
+//!     strings and formatting.
 //!
-//! 11. **`#![no_std]` Support.** `multitude` can be used in `#![no_std]` environments, making it suitable for embedded systems and other resource-constrained contexts.
+//! 11. **`#![no_std]` Support.** The core allocator requires only `alloc`.
 //!
 //! See [`BUMPALO.md`](https://github.com/microsoft/oxidizer/blob/main/crates/multitude/docs/BUMPALO.md)
 //! for a feature-by-feature comparison with [`bumpalo`](https://crates.io/crates/bumpalo).
