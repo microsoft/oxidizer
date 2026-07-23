@@ -187,6 +187,11 @@ function Write-PackageCargoToml {
         $entries = ($Package.AllowedExternalTypes | ForEach-Object { "`"$_`"" }) -join ', '
         $lines += "allowed_external_types = [$entries]"
     }
+    if ($Package.ContainsKey('ProcMacro') -and $Package.ProcMacro) {
+        $lines += ''
+        $lines += '[lib]'
+        $lines += 'proc-macro = true'
+    }
 
     $allDeps = @()
     if ($null -ne $Package.Deps) { $allDeps = @($Package.Deps) }
