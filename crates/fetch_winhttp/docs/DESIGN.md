@@ -1331,16 +1331,20 @@ the items below are instances of that split being in the wrong place today.
   shape would express this cleanly.
 
 - **Connection-management options are over-abstracted.** `fetch` exposes
-  `max_connections`, `connection_idle_timeout`, and `connection_lifetime` (§7.4), but
+  `max_connections`, `connection_idle_timeout`, `connection_lifetime`, and
+  `ConnectionKeepAlive` (§7.4), but
   different transports pool and manage connections differently, so how (and whether)
   each option can be honored is entirely transport-dependent. `max_connections` is the
   clearest example: it presumes a `fetch`-managed connection pool, yet WinHTTP owns its
   own pool with its own limit knobs, and a transport over a different stack would model
   concurrency differently again - there is no single pooling model to configure
-  uniformly. WinHTTP likewise exposes no per-connection age control, so
-  `connection_lifetime` cannot be implemented here at all (§7.5). Because the transport
-  is the component that actually owns the connections, this configuration belongs on
-  the transport, not abstracted at the `fetch` level.
+  uniformly. The other options are the same story: WinHTTP exposes no per-connection age
+  control, so `connection_lifetime` cannot be implemented here at all (§7.5), and
+  keep-alive is a property of how each stack maintains its own connections - WinHTTP
+  applies its own per-protocol keep-alive with its own floors, so `ConnectionKeepAlive`
+  and `connection_idle_timeout` map only approximately or not at all. Because the
+  transport is the component that actually owns the connections, this configuration
+  belongs on the transport, not abstracted at the `fetch` level.
 
 - **Timeouts are over-abstracted, not under-modeled.** `fetch` models a connect
   timeout but has no concept for resolve or send timeouts. That absence is *not* the
