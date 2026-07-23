@@ -172,7 +172,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// overflow).
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
-    #[allow(
+    #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
@@ -215,7 +215,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// prefix, slice-length metadata, and `len` `T`s.
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
-    #[allow(
+    #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
@@ -240,7 +240,7 @@ impl<A: Allocator + Clone> Arena<A> {
     /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
     #[inline(always)]
     #[cfg_attr(test, mutants::skip)] // see `try_reserve_shared`
-    #[allow(
+    #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]

@@ -22,19 +22,19 @@ ohno = { path = "../../ohno", features = ["app-err"] }
 //!   `scripts/perf_report.rs`                                       — full run (30 samples, 2s measurement)
 //!   `scripts/perf_report.rs --fast`                                — quick run (10 samples, 1s)
 //!   `scripts/perf_report.rs --samples 50 --measurement-time 3`     — custom criterion settings
+//!   `scripts/perf_report.rs --cpu 4`                               — pin benchmark processes to CPU 4
 //!
 //! Both bench suites must be aligned 1:1: each criterion `<group>/<variant>`
 //! corresponds to a gungraun `<group>_<variant>`. The variant order in
 //! `GROUPS` mirrors the order benches are defined in `benches/criterion_*.rs`
 //! and `benches/gungraun_*.rs`; if a bench is added or removed, update
-//! `GROUPS` to match.
+//! `GROUPS`, `TEARDOWN_GROUPS`, or `SERDE_GROUPS` to match.
 
-use std::env;
 use std::fmt::Write as _;
-use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::{env, fs};
 
 use clap::Parser;
 use ohno::{AppError, app_err, bail};
@@ -61,6 +61,15 @@ struct Args {
     #[arg(long)]
     warm_up_time: Option<u32>,
 
+    /// Pin every benchmark process to this logical CPU (Linux only).
+    #[arg(long)]
+    cpu: Option<u32>,
+
+    /// Number of independently warmed runs for each Serde and teardown variant
+    /// (default: 3).
+    #[arg(long, default_value_t = 3)]
+    serde_repetitions: u32,
+
     /// Force-skip the gungraun (Callgrind) benches even when `valgrind` is
     /// available. Always implied on Windows.
     #[arg(long)]
@@ -84,16 +93,15 @@ type Group = (&'static str, &'static [Variant]);
 const GROUPS: &[Group] = &[
     (
         "arena_creation",
-        &[
-            ("multitude_new", Some("multitude_new")),
-            ("bumpalo_new", Some("bumpalo_new")),
-        ],
+        &[("multitude_new", Some("multitude_new")), ("bumpalo_new", Some("bumpalo_new"))],
     ),
     (
         "alloc_u64",
         &[
             ("alloc", Some("alloc")),
+            ("bumpalo_alloc", Some("bumpalo_alloc")),
             ("alloc_with", Some("alloc_with")),
+            ("bumpalo_alloc_with", Some("bumpalo_alloc_with")),
             ("alloc_box", Some("alloc_box")),
             ("alloc_box_with", Some("alloc_box_with")),
             ("alloc_uninit_box", Some("alloc_uninit_box")),
@@ -106,27 +114,29 @@ const GROUPS: &[Group] = &[
             ("alloc_rc_with", Some("alloc_rc_with")),
             ("alloc_uninit_rc", Some("alloc_uninit_rc")),
             ("alloc_zeroed_rc", Some("alloc_zeroed_rc")),
-            ("bumpalo_alloc", Some("bumpalo_alloc")),
-            ("bumpalo_alloc_with", Some("bumpalo_alloc_with")),
         ],
     ),
     (
         "alloc_str",
         &[
             ("alloc_str", Some("alloc_str")),
+            ("bumpalo_alloc_str", Some("bumpalo_alloc_str")),
             ("alloc_str_box", Some("alloc_str_box")),
             ("alloc_str_arc", Some("alloc_str_arc")),
             ("alloc_str_rc", Some("alloc_str_rc")),
-            ("bumpalo_alloc_str", Some("bumpalo_alloc_str")),
         ],
     ),
     (
         "alloc_slice",
         &[
             ("alloc_slice_copy", Some("alloc_slice_copy")),
+            ("bumpalo_alloc_slice_copy", Some("bumpalo_alloc_slice_copy")),
             ("alloc_slice_clone", Some("alloc_slice_clone")),
+            ("bumpalo_alloc_slice_clone", Some("bumpalo_alloc_slice_clone")),
             ("alloc_slice_fill_with", Some("alloc_slice_fill_with")),
+            ("bumpalo_alloc_slice_fill_with", Some("bumpalo_alloc_slice_fill_with")),
             ("alloc_slice_fill_iter", Some("alloc_slice_fill_iter")),
+            ("bumpalo_alloc_slice_fill_iter", Some("bumpalo_alloc_slice_fill_iter")),
             ("alloc_slice_copy_box", Some("alloc_slice_copy_box")),
             ("alloc_slice_clone_box", Some("alloc_slice_clone_box")),
             ("alloc_slice_fill_with_box", Some("alloc_slice_fill_with_box")),
@@ -145,18 +155,14 @@ const GROUPS: &[Group] = &[
             ("alloc_slice_fill_iter_rc", Some("alloc_slice_fill_iter_rc")),
             ("alloc_uninit_slice_rc", Some("alloc_uninit_slice_rc")),
             ("alloc_zeroed_slice_rc", Some("alloc_zeroed_slice_rc")),
-            ("bumpalo_alloc_slice_copy", Some("bumpalo_alloc_slice_copy")),
-            ("bumpalo_alloc_slice_clone", Some("bumpalo_alloc_slice_clone")),
-            ("bumpalo_alloc_slice_fill_with", Some("bumpalo_alloc_slice_fill_with")),
-            ("bumpalo_alloc_slice_fill_iter", Some("bumpalo_alloc_slice_fill_iter")),
         ],
     ),
     (
         "string_builder",
         &[
             ("alloc_string", Some("alloc_string")),
-            ("alloc_string_with_capacity", Some("alloc_string_with_capacity")),
             ("bumpalo_string_new_in", Some("bumpalo_string_new_in")),
+            ("alloc_string_with_capacity", Some("alloc_string_with_capacity")),
             ("bumpalo_string_with_capacity_in", Some("bumpalo_string_with_capacity_in")),
         ],
     ),
@@ -164,18 +170,23 @@ const GROUPS: &[Group] = &[
         "vec_builder",
         &[
             ("alloc_vec", Some("alloc_vec")),
-            ("alloc_vec_with_capacity", Some("alloc_vec_with_capacity")),
             ("bumpalo_vec_new_in", Some("bumpalo_vec_new_in")),
+            ("alloc_vec_with_capacity", Some("alloc_vec_with_capacity")),
             ("bumpalo_vec_with_capacity_in", Some("bumpalo_vec_with_capacity_in")),
+        ],
+    ),
+    (
+        "allocator_grow",
+        &[
+            ("in_place", Some("allocator_grow_in_place")),
+            ("zeroed_in_place", Some("allocator_grow_zeroed_in_place")),
+            ("shrink_in_place", Some("allocator_shrink_in_place")),
         ],
     ),
     // Criterion-only whole-lifecycle comparison (allocate a mixed working set,
     // then release it): `multitude` arena (bulk reset) vs the system allocator.
     // No gungraun counterpart, so the instruction-count columns show "—".
-    (
-        "arena_vs_allocator",
-        &[("arena", None), ("system", None)],
-    ),
+    ("arena_vs_allocator", &[("arena", None), ("system", None)]),
     (
         "drop",
         &[
@@ -197,6 +208,85 @@ const GROUPS: &[Group] = &[
             ("alloc", Some("alloc")),
         ],
     ),
+    ("clone", &[("rc_u64", Some("clone_rc_u64")), ("arc_u64", Some("clone_arc_u64"))]),
+];
+
+const SERDE_GROUPS: &[Group] = &[
+    (
+        "multitude_serde/typed",
+        &[
+            ("arena_owned", Some("typed_arena_owned")),
+            ("serde_json_owned", Some("typed_serde_json_owned")),
+        ],
+    ),
+    (
+        "multitude_serde/dynamic",
+        &[
+            ("arena_value", Some("dynamic_arena_value")),
+            ("serde_json_value", Some("dynamic_serde_json_value")),
+        ],
+    ),
+    (
+        "multitude_serde/typed_lifecycle",
+        &[
+            ("serde_json", Some("lifecycle_serde_json")),
+            ("multitude", Some("lifecycle_multitude")),
+            ("bumpalo", Some("lifecycle_bumpalo")),
+        ],
+    ),
+    (
+        "multitude_serde/batch_lifecycle",
+        &[
+            ("serde_json", Some("batch_lifecycle_serde_json")),
+            ("multitude", Some("batch_lifecycle_multitude")),
+            ("bumpalo", Some("batch_lifecycle_bumpalo")),
+        ],
+    ),
+];
+
+const TEARDOWN_GROUPS: &[Group] = &[
+    (
+        "multitude_teardown/free_1",
+        &[
+            ("standard", Some("free_1_standard")),
+            ("multitude", Some("free_1_multitude")),
+            ("bumpalo", Some("free_1_bumpalo")),
+        ],
+    ),
+    (
+        "multitude_teardown/free_32",
+        &[
+            ("standard", Some("free_32_standard")),
+            ("multitude", Some("free_32_multitude")),
+            ("bumpalo", Some("free_32_bumpalo")),
+        ],
+    ),
+    (
+        "multitude_teardown/free_1000",
+        &[
+            ("standard", Some("free_1000_standard")),
+            ("multitude", Some("free_1000_multitude")),
+            ("bumpalo", Some("free_1000_bumpalo")),
+        ],
+    ),
+];
+
+/// `(workload, criterion_group, arena_variant, standard_variant)`.
+const SERDE_COMPARISONS: &[(&str, &str, &str, &str)] = &[
+    ("Typed record", "multitude_serde/typed", "arena_owned", "serde_json_owned"),
+    ("Dynamic value", "multitude_serde/dynamic", "arena_value", "serde_json_value"),
+];
+
+const SERDE_LIFECYCLE_COMPARISONS: &[(&str, &str, &str)] = &[
+    ("Standard Serde", "serde_json", "lifecycle_serde_json"),
+    ("Multitude", "multitude", "lifecycle_multitude"),
+    ("Bumpalo (manual seed)", "bumpalo", "lifecycle_bumpalo"),
+];
+
+const SERDE_BATCH_LIFECYCLE_COMPARISONS: &[(&str, &str, &str)] = &[
+    ("Standard Serde", "serde_json", "batch_lifecycle_serde_json"),
+    ("Multitude", "multitude", "batch_lifecycle_multitude"),
+    ("Bumpalo (manual seed)", "bumpalo", "batch_lifecycle_bumpalo"),
 ];
 
 const COMPARISONS: &[(&str, &str, &str)] = &[
@@ -252,12 +342,22 @@ fn is_bench_name(s: &str) -> bool {
     if s.contains(':') || s.contains(char::is_whitespace) {
         return false;
     }
-    let Some((g, v)) = s.split_once('/') else { return false; };
-    if g.is_empty() || v.is_empty() {
+    let id_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut segments = s.split('/');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if first.is_empty() || !first.chars().all(id_char) {
         return false;
     }
-    let id_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
-    g.chars().all(id_char) && v.chars().all(id_char)
+    let mut descendants = 0;
+    for segment in segments {
+        if segment.is_empty() || !segment.chars().all(id_char) {
+            return false;
+        }
+        descendants += 1;
+    }
+    descendants > 0
 }
 
 /// Parse a criterion log and return `{group/variant: median_ns}`.
@@ -289,8 +389,7 @@ fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Vec<(String, f64)> 
         }
     }
 
-    let expected_keys: std::collections::HashSet<String> =
-        expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
+    let expected_keys: std::collections::HashSet<String> = expected.iter().map(|(g, v)| format!("{g}/{v}")).collect();
     let got_keys: std::collections::HashSet<String> = out.iter().map(|(k, _)| k.clone()).collect();
     for missing in expected_keys.difference(&got_keys) {
         eprintln!("warning: criterion log missing expected bench {missing}");
@@ -302,7 +401,20 @@ fn parse_criterion(text: &str, expected: &[(&str, &str)]) -> Vec<(String, f64)> 
 }
 
 fn lookup_time(crit: &[(String, f64)], key: &str) -> Option<f64> {
-    crit.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
+    let mut values: Vec<f64> = crit
+        .iter()
+        .filter_map(|(candidate, value)| (candidate == key).then_some(*value))
+        .collect();
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    Some(if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    })
 }
 
 /// One gungraun benchmark's parsed metrics.
@@ -334,8 +446,7 @@ fn parse_gungraun(text: &str, prefix: &str) -> Vec<GungEntry> {
                 };
                 // Reject obvious non-identifier shapes so unrelated lines
                 // that happen to start with the prefix can't slip through.
-                let valid = !fn_name.is_empty()
-                    && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                let valid = !fn_name.is_empty() && fn_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
                 if valid {
                     if let Some(prev) = cur.take() {
                         out.push(prev);
@@ -406,6 +517,26 @@ fn fmt_int(n: Option<u64>) -> String {
     }
 }
 
+fn fmt_float_delta(candidate: Option<f64>, baseline: Option<f64>) -> String {
+    match (candidate, baseline) {
+        (Some(candidate), Some(baseline)) if baseline != 0.0 => {
+            format!("{:+.1}%", (candidate / baseline - 1.0) * 100.0)
+        }
+        _ => "—".into(),
+    }
+}
+
+fn fmt_int_delta(candidate: Option<u64>, baseline: Option<u64>) -> String {
+    match (candidate, baseline) {
+        (Some(candidate), Some(baseline)) if baseline != 0 => {
+            #[expect(clippy::cast_precision_loss, reason = "benchmark instruction counts stay well under 2^53")]
+            let pct = (candidate as f64 / baseline as f64 - 1.0) * 100.0;
+            format!("{pct:+.1}%")
+        }
+        _ => "—".into(),
+    }
+}
+
 fn gung_for(group: &str, variant: &str, g_alloc: &[GungEntry]) -> Option<u64> {
     for (g, vs) in GROUPS {
         if *g != group {
@@ -420,7 +551,15 @@ fn gung_for(group: &str, variant: &str, g_alloc: &[GungEntry]) -> Option<u64> {
     None
 }
 
-fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEntry]) -> String {
+fn build_report(
+    crit: &[(String, f64)],
+    g_alloc: &[GungEntry],
+    g_drop: &[GungEntry],
+    g_teardown: &[GungEntry],
+    g_serde: &[GungEntry],
+    serde_repetitions: u32,
+    cpu: Option<u32>,
+) -> String {
     let mut out = String::new();
     out.push_str("# Multitude Performance Report\n\n");
     out.push_str("Generated by `scripts/perf_report.rs`:\n");
@@ -436,23 +575,54 @@ fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEnt
     );
     out.push_str(
         "- `cargo bench --bench gungraun_alloc` and `gungraun_drop` — \
-         Callgrind instruction-precise counts.\n\n",
+         Callgrind instruction-precise counts.\n",
     );
     out.push_str(
-        "**Workload:** N = 1000 operations per measurement; slice element count = 8.  \n",
+        "- `cargo bench --bench multitude_serde` and `multitude_serde_cg` — \
+         differential wall-clock and instruction-count measurements for \
+         standard Serde and arena deserialization.\n",
+    );
+    out.push_str(
+        "- `cargo bench --bench multitude_teardown` and \
+         `multitude_teardown_cg` — matched measurements of freeing standard \
+         allocations and resetting local-reference arenas.\n\n",
+    );
+    out.push_str("**Workload:** N = 1000 operations per measurement; slice element count = 8.  \n");
+    out.push_str(
+        "Owned slice rows (`Box<[u64]>`, `Arc<[u64]>`, and `Rc<[u64]>` variants) \
+         use N = 768 so their metadata-bearing allocations stay within one \
+         warmed normal arena chunk.\n",
+    );
+    out.push_str(
+        "Serde single-record rows measure one deserialization of the documented \
+         JSON fixture; batch rows process 32 independent documents.\n",
     );
     out.push_str(
         "Criterion median is reported (default 30 samples, 1 s warm-up, \
          2 s measurement; override with `--samples` / `--measurement-time` / \
          `--warm-up-time`).  \n",
     );
+    if let Some(cpu) = cpu {
+        let _ = writeln!(out, "Benchmark processes were pinned to logical CPU {cpu}.");
+    }
+    out.push_str(
+        "Each allocation and drop Criterion group is measured in its own \
+         warmed process, with direct Multitude/Bumpalo alternatives adjacent \
+         to minimize host-load and frequency drift.\n",
+    );
+    let repetition_label = if serde_repetitions == 1 { "run" } else { "runs" };
+    let _ = writeln!(
+        out,
+        "Serde and teardown timing is the median of {serde_repetitions} independently warmed \
+         {repetition_label}, with variant order alternated between runs."
+    );
     out.push_str(
         "Memory accesses = L1 Hits + LL Hits + RAM Hits \
          (Callgrind D-cache references).  \n",
     );
     out.push_str(
-        "Bench names are aligned between criterion and gungraun via the \
-         `GROUPS` table in `scripts/perf_report.rs`.\n\n",
+        "Bench names are aligned between criterion and gungraun via the group \
+         tables in `scripts/perf_report.rs`.\n\n",
     );
 
     for (group, variants) in GROUPS {
@@ -462,7 +632,7 @@ fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEnt
              Branch misses | Mem accesses |\n",
         );
         out.push_str("|---|---:|---:|---:|---:|\n");
-        let src: &[GungEntry] = if *group == "drop" { g_drop } else { g_alloc };
+        let src: &[GungEntry] = if matches!(*group, "drop" | "clone") { g_drop } else { g_alloc };
         for (variant, gung_name) in *variants {
             let t = lookup_time(crit, &format!("{group}/{variant}"));
             let instr = gung_name.and_then(|n| gung_metric(src, n, "Instructions"));
@@ -501,21 +671,8 @@ fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEnt
         let bt = lookup_time(crit, &format!("{group}/{bvar}"));
         let mi = gung_for(group, mvar, g_alloc);
         let bi = gung_for(group, bvar, g_alloc);
-        let dt = match (mt, bt) {
-            (Some(m), Some(b)) if b != 0.0 => format!("{:+.1}%", (m / b - 1.0) * 100.0),
-            _ => "—".into(),
-        };
-        let di = match (mi, bi) {
-            (Some(m), Some(b)) if b != 0 => {
-                #[expect(
-                    clippy::cast_precision_loss,
-                    reason = "bench instruction counts (N=1000) stay well under 2^53"
-                )]
-                let pct = (m as f64 / b as f64 - 1.0) * 100.0;
-                format!("{pct:+.1}%")
-            }
-            _ => "—".into(),
-        };
+        let dt = fmt_float_delta(mt, bt);
+        let di = fmt_int_delta(mi, bi);
         let _ = writeln!(
             out,
             "| `{mvar}` vs `{bvar}` | {} | {} | {} | {} | {} | {} |",
@@ -528,6 +685,162 @@ fn build_report(crit: &[(String, f64)], g_alloc: &[GungEntry], g_drop: &[GungEnt
         );
     }
     out.push('\n');
+
+    out.push_str("## Allocation Teardown\n\n");
+    out.push_str(
+        "Setup is outside the measured region. Each implementation starts with \
+         the same number of independent 64-byte, non-dropping payloads. The \
+         standard path frees individually boxed values; Multitude allocations \
+         use arena-local `Alloc<T>` handles that are leaked before measurement, \
+         then release the generation with `Arena::reset`; Bumpalo likewise \
+         measures only `Bump::reset`. Non-dropping payloads make bulk reset \
+         semantically equivalent across the arena implementations.\n\n",
+    );
+    out.push_str(
+        "| Allocations | Implementation | Time | Δ time vs standard | Instructions | \
+         Δ instr vs standard |\n",
+    );
+    out.push_str("|---:|---|---:|---:|---:|---:|\n");
+    for (count, group) in [
+        (1, "multitude_teardown/free_1"),
+        (32, "multitude_teardown/free_32"),
+        (1_000, "multitude_teardown/free_1000"),
+    ] {
+        let standard_time = lookup_time(crit, &format!("{group}/standard"));
+        let standard_gung = TEARDOWN_GROUPS
+            .iter()
+            .find(|(name, _)| name == &group)
+            .and_then(|(_, variants)| variants.first())
+            .and_then(|(_, name)| *name);
+        let standard_instructions = standard_gung.and_then(|name| gung_metric(g_teardown, name, "Instructions"));
+        for (label, variant) in [
+            ("Standard allocator", "standard"),
+            ("Multitude", "multitude"),
+            ("Bumpalo", "bumpalo"),
+        ] {
+            let time = lookup_time(crit, &format!("{group}/{variant}"));
+            let gung_name = TEARDOWN_GROUPS
+                .iter()
+                .find(|(name, _)| name == &group)
+                .and_then(|(_, variants)| variants.iter().find(|(name, _)| name == &variant))
+                .and_then(|(_, name)| *name);
+            let instructions = gung_name.and_then(|name| gung_metric(g_teardown, name, "Instructions"));
+            let _ = writeln!(
+                out,
+                "| {count} | {label} | {} | {} | {} | {} |",
+                fmt_ns(time),
+                fmt_float_delta(time, standard_time),
+                fmt_int(instructions),
+                fmt_int_delta(instructions, standard_instructions),
+            );
+        }
+    }
+    out.push('\n');
+
+    out.push_str("## Serde Deserialization\n\n");
+    out.push_str(
+        "The arena and standard paths deserialize the same JSON into equivalent \
+         typed or dynamic values. Criterion and Callgrind invoke the same shared, \
+         out-of-line hot-path functions; only their iteration counts differ. Both \
+         run against warmed allocator state; arena backing storage is preallocated \
+         and faulted in during setup. Allocator setup and result teardown are \
+         outside the measured region. Deltas report arena relative to standard \
+         Serde; negative values favor the arena.\n\n",
+    );
+    out.push_str(
+        "| Workload | Arena time | Standard time | Δ time | \
+         Arena instr | Standard instr | Δ instr |\n",
+    );
+    out.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    for (workload, group, arena_variant, standard_variant) in SERDE_COMPARISONS {
+        let arena_time = lookup_time(crit, &format!("{group}/{arena_variant}"));
+        let standard_time = lookup_time(crit, &format!("{group}/{standard_variant}"));
+        let arena_gung = SERDE_GROUPS
+            .iter()
+            .find(|(name, _)| name == group)
+            .and_then(|(_, variants)| variants.iter().find(|(name, _)| name == arena_variant))
+            .and_then(|(_, name)| *name);
+        let standard_gung = SERDE_GROUPS
+            .iter()
+            .find(|(name, _)| name == group)
+            .and_then(|(_, variants)| variants.iter().find(|(name, _)| name == standard_variant))
+            .and_then(|(_, name)| *name);
+        let arena_instructions = arena_gung.and_then(|name| gung_metric(g_serde, name, "Instructions"));
+        let standard_instructions = standard_gung.and_then(|name| gung_metric(g_serde, name, "Instructions"));
+        let _ = writeln!(
+            out,
+            "| {workload} | {} | {} | {} | {} | {} | {} |",
+            fmt_ns(arena_time),
+            fmt_ns(standard_time),
+            fmt_float_delta(arena_time, standard_time),
+            fmt_int(arena_instructions),
+            fmt_int(standard_instructions),
+            fmt_int_delta(arena_instructions, standard_instructions),
+        );
+    }
+    out.push('\n');
+
+    out.push_str("### Reused Allocator Lifecycle\n\n");
+    out.push_str(
+        "This scenario deserializes and consumes the typed record, then performs \
+         the cleanup a reusable allocator needs before the next request. Standard \
+         Serde drops its owned output; Multitude drops its owning arena pointers \
+         and resets the arena; Bumpalo drops its arena-borrowed output and resets \
+         the bump allocator. Bumpalo has no built-in deserialization support, so \
+         its row uses a hand-written `DeserializeSeed` that copies all strings and \
+         sequence storage into the bump arena. Allocator construction remains \
+         outside the measured region.\n\n",
+    );
+    out.push_str("#### One record\n\n");
+    out.push_str(
+        "| Implementation | Time | Δ time vs standard | Instructions | \
+         Δ instr vs standard |\n",
+    );
+    out.push_str("|---|---:|---:|---:|---:|\n");
+    let lifecycle_group = "multitude_serde/typed_lifecycle";
+    let standard_time = lookup_time(crit, &format!("{lifecycle_group}/serde_json"));
+    let standard_instructions = gung_metric(g_serde, "lifecycle_serde_json", "Instructions");
+    for (label, variant, gung_name) in SERDE_LIFECYCLE_COMPARISONS {
+        let time = lookup_time(crit, &format!("{lifecycle_group}/{variant}"));
+        let instructions = gung_metric(g_serde, gung_name, "Instructions");
+        let _ = writeln!(
+            out,
+            "| {label} | {} | {} | {} | {} |",
+            fmt_ns(time),
+            fmt_float_delta(time, standard_time),
+            fmt_int(instructions),
+            fmt_int_delta(instructions, standard_instructions),
+        );
+    }
+    out.push('\n');
+
+    out.push_str("#### 32-record batch\n\n");
+    out.push_str(
+        "This repeats the same complete lifecycle for 32 independent JSON \
+         documents in one reusable allocator generation. All implementations \
+         use an outer standard `Vec`, so its allocation and destruction are \
+         included equally.\n\n",
+    );
+    out.push_str(
+        "| Implementation | Time | Δ time vs standard | Instructions | \
+         Δ instr vs standard |\n",
+    );
+    out.push_str("|---|---:|---:|---:|---:|\n");
+    let batch_lifecycle_group = "multitude_serde/batch_lifecycle";
+    let batch_standard_time = lookup_time(crit, &format!("{batch_lifecycle_group}/serde_json"));
+    let batch_standard_instructions = gung_metric(g_serde, "batch_lifecycle_serde_json", "Instructions");
+    for (label, variant, gung_name) in SERDE_BATCH_LIFECYCLE_COMPARISONS {
+        let time = lookup_time(crit, &format!("{batch_lifecycle_group}/{variant}"));
+        let instructions = gung_metric(g_serde, gung_name, "Instructions");
+        let _ = writeln!(
+            out,
+            "| {label} | {} | {} | {} | {} |",
+            fmt_ns(time),
+            fmt_float_delta(time, batch_standard_time),
+            fmt_int(instructions),
+            fmt_int_delta(instructions, batch_standard_instructions),
+        );
+    }
     out
 }
 
@@ -554,10 +867,27 @@ fn have_valgrind() -> bool {
 /// Run `cargo bench --bench <name> -- <args>` from `cwd`, capturing combined
 /// stdout+stderr (criterion writes summaries to stdout; we mirror the
 /// previous shell script's behaviour of redirecting both streams into one log).
-fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<String, AppError> {
+fn run_bench(
+    cwd: &Path,
+    bench: &str,
+    features: &[&str],
+    extra: &[&str],
+    label: &str,
+    cpu: Option<u32>,
+) -> Result<String, AppError> {
     println!("==> Running {label}");
-    let mut cmd = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let mut cmd = if let Some(cpu) = cpu {
+        let mut cmd = Command::new("taskset");
+        cmd.arg("--cpu-list").arg(cpu.to_string()).arg(cargo);
+        cmd
+    } else {
+        Command::new(cargo)
+    };
     cmd.current_dir(cwd).arg("bench").arg("--bench").arg(bench);
+    if !features.is_empty() {
+        cmd.arg("--features").arg(features.join(","));
+    }
     if !extra.is_empty() {
         cmd.arg("--");
         cmd.args(extra);
@@ -575,8 +905,85 @@ fn run_bench(cwd: &Path, bench: &str, extra: &[&str], label: &str) -> Result<Str
     Ok(combined)
 }
 
+/// Run each benchmark group in an independent process.
+///
+/// Grouping direct alternatives in one process keeps their measurements close
+/// enough to limit host-load and frequency drift. Every Criterion iteration
+/// still creates fresh inputs and freshly warmed allocator state.
+fn run_groups(
+    cwd: &Path,
+    bench: &str,
+    features: &[&str],
+    groups: &[Group],
+    common_args: &[&str],
+    cpu: Option<u32>,
+) -> Result<String, AppError> {
+    let mut combined = String::new();
+    for (group, _) in groups {
+        let filter = format!("^{group}/");
+        let mut args = Vec::with_capacity(common_args.len() + 1);
+        args.push(filter.as_str());
+        args.extend_from_slice(common_args);
+        combined.push_str(&run_bench(
+            cwd,
+            bench,
+            features,
+            &args,
+            &format!("{bench} ({group})"),
+            cpu,
+        )?);
+    }
+    Ok(combined)
+}
+
+/// Run every benchmark variant independently, alternating order between rounds.
+///
+/// This is reserved for cross-implementation lifecycle benchmarks whose setup
+/// has materially different global allocator effects. Alternating order and
+/// reporting the median across rounds reduces host-load and frequency bias.
+fn run_repeated_variants(
+    cwd: &Path,
+    bench: &str,
+    features: &[&str],
+    groups: &[Group],
+    common_args: &[&str],
+    repetitions: u32,
+    cpu: Option<u32>,
+) -> Result<String, AppError> {
+    let mut combined = String::new();
+    for round in 0..repetitions {
+        for (group, variants) in groups {
+            let indices: Vec<usize> = if round.is_multiple_of(2) {
+                (0..variants.len()).collect()
+            } else {
+                (0..variants.len()).rev().collect()
+            };
+            for index in indices {
+                let variant = variants[index].0;
+                let filter = format!("^{group}/{variant}$");
+                let mut args = Vec::with_capacity(common_args.len() + 1);
+                args.push(filter.as_str());
+                args.extend_from_slice(common_args);
+                combined.push_str(&run_bench(
+                    cwd,
+                    bench,
+                    features,
+                    &args,
+                    &format!("{bench} ({group}/{variant}, round {}/{repetitions})", round + 1),
+                    cpu,
+                )?);
+            }
+        }
+    }
+    Ok(combined)
+}
+
 fn run(args: &Args) -> Result<(), AppError> {
     let crate_dir = crate_root();
+
+    if args.cpu.is_some() && !cfg!(target_os = "linux") {
+        bail!("--cpu is only supported on Linux");
+    }
 
     // Skip gungraun on Windows (no valgrind), when explicitly disabled, or
     // when valgrind isn't available on the host.
@@ -614,31 +1021,68 @@ fn run(args: &Args) -> Result<(), AppError> {
         samples.as_str(),
     ];
 
-    let crit_alloc_log = run_bench(
-        &crate_dir,
-        "criterion_alloc",
-        &crit_args,
-        &format!("criterion_alloc: {samples} samples, {meas}s measurement"),
-    )?;
-    let crit_drop_log = run_bench(
-        &crate_dir,
-        "criterion_drop",
-        &crit_args,
-        &format!("criterion_drop: {samples} samples, {meas}s measurement"),
-    )?;
-    let crit_ava_log = run_bench(
+    let alloc_groups: Vec<Group> = GROUPS
+        .iter()
+        .copied()
+        .filter(|(group, _)| !matches!(*group, "drop" | "clone" | "arena_vs_allocator"))
+        .collect();
+    let crit_alloc_log = run_groups(&crate_dir, "criterion_alloc", &[], &alloc_groups, &crit_args, args.cpu)?;
+    let drop_groups: Vec<Group> = GROUPS
+        .iter()
+        .copied()
+        .filter(|(group, _)| matches!(*group, "drop" | "clone"))
+        .collect();
+    let crit_drop_log = run_groups(&crate_dir, "criterion_drop", &[], &drop_groups, &crit_args, args.cpu)?;
+    let arena_vs_allocator_groups: Vec<Group> = GROUPS.iter().copied().filter(|(group, _)| *group == "arena_vs_allocator").collect();
+    let crit_ava_log = run_groups(
         &crate_dir,
         "criterion_arena_vs_allocator",
+        &[],
+        &arena_vs_allocator_groups,
         &crit_args,
-        &format!("criterion_arena_vs_allocator: {samples} samples, {meas}s measurement"),
+        args.cpu,
     )?;
-    let (gung_alloc_log, gung_drop_log) = if run_gungraun {
+    let crit_teardown_log = run_repeated_variants(
+        &crate_dir,
+        "multitude_teardown",
+        &[],
+        TEARDOWN_GROUPS,
+        &crit_args,
+        args.serde_repetitions,
+        args.cpu,
+    )?;
+    let crit_serde_log = run_repeated_variants(
+        &crate_dir,
+        "multitude_serde",
+        &["serde_json"],
+        SERDE_GROUPS,
+        &crit_args,
+        args.serde_repetitions,
+        args.cpu,
+    )?;
+    let (gung_alloc_log, gung_drop_log, gung_teardown_log, gung_serde_log) = if run_gungraun {
         (
-            run_bench(&crate_dir, "gungraun_alloc", &[], "gungraun_alloc")?,
-            run_bench(&crate_dir, "gungraun_drop", &[], "gungraun_drop")?,
+            run_bench(&crate_dir, "gungraun_alloc", &[], &[], "gungraun_alloc", args.cpu)?,
+            run_bench(&crate_dir, "gungraun_drop", &[], &[], "gungraun_drop", args.cpu)?,
+            run_bench(
+                &crate_dir,
+                "multitude_teardown_cg",
+                &[],
+                &[],
+                "multitude_teardown_cg",
+                args.cpu,
+            )?,
+            run_bench(
+                &crate_dir,
+                "multitude_serde_cg",
+                &["serde_json"],
+                &[],
+                "multitude_serde_cg",
+                args.cpu,
+            )?,
         )
     } else {
-        (String::new(), String::new())
+        (String::new(), String::new(), String::new(), String::new())
     };
 
     println!("==> Building docs/PERF.md");
@@ -647,12 +1091,12 @@ fn run(args: &Args) -> Result<(), AppError> {
     // so it is excluded from the alloc-log keys and parsed from its own log.
     let alloc_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| *g != "drop" && *g != "arena_vs_allocator")
+        .filter(|(g, _)| !matches!(*g, "drop" | "clone" | "arena_vs_allocator"))
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let drop_keys: Vec<(&str, &str)> = GROUPS
         .iter()
-        .filter(|(g, _)| *g == "drop")
+        .filter(|(g, _)| matches!(*g, "drop" | "clone"))
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
     let ava_keys: Vec<(&str, &str)> = GROUPS
@@ -660,23 +1104,46 @@ fn run(args: &Args) -> Result<(), AppError> {
         .filter(|(g, _)| *g == "arena_vs_allocator")
         .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
         .collect();
+    let serde_keys: Vec<(&str, &str)> = SERDE_GROUPS
+        .iter()
+        .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
+        .collect();
+    let teardown_keys: Vec<(&str, &str)> = TEARDOWN_GROUPS
+        .iter()
+        .flat_map(|(g, vs)| vs.iter().map(move |(v, _)| (*g, *v)))
+        .collect();
 
     let mut crit = parse_criterion(&crit_alloc_log, &alloc_keys);
     crit.extend(parse_criterion(&crit_drop_log, &drop_keys));
     crit.extend(parse_criterion(&crit_ava_log, &ava_keys));
+    crit.extend(parse_criterion(&crit_teardown_log, &teardown_keys));
+    crit.extend(parse_criterion(&crit_serde_log, &serde_keys));
     let g_alloc = parse_gungraun(&gung_alloc_log, "gungraun_alloc");
     let g_drop = parse_gungraun(&gung_drop_log, "gungraun_drop");
+    let g_teardown = parse_gungraun(&gung_teardown_log, "multitude_teardown_cg");
+    let g_serde = parse_gungraun(&gung_serde_log, "multitude_serde_cg");
 
-    let report = build_report(&crit, &g_alloc, &g_drop);
+    let report = build_report(
+        &crit,
+        &g_alloc,
+        &g_drop,
+        &g_teardown,
+        &g_serde,
+        args.serde_repetitions,
+        args.cpu,
+    );
     let out_path = crate_dir.join("docs").join("PERF.md");
     fs::write(&out_path, &report).map_err(|e| app_err!("writing {}: {e}", out_path.display()))?;
 
     println!(
-        "Wrote {} ({} criterion, {} gungraun_alloc, {} gungraun_drop benches)",
+        "Wrote {} ({} criterion, {} gungraun_alloc, {} gungraun_drop, \
+         {} multitude_teardown_cg, {} multitude_serde_cg benches)",
         out_path.display(),
         crit.len(),
         g_alloc.len(),
         g_drop.len(),
+        g_teardown.len(),
+        g_serde.len(),
     );
     println!("==> Done. Report written to docs/PERF.md");
     Ok(())

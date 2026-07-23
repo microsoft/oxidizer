@@ -426,27 +426,20 @@ fn split_off_returns_tail() {
 
 #[test]
 fn split_off_shares_chunk_without_copying() {
-    // No-copy split_off: the tail's data pointer must equal the head's
-    // original data + at. Both halves share the underlying chunk via
-    // an extra inc_ref.
+    // Both halves share the allocation, and the tail starts at the split.
     let arena = Arena::new();
     let mut v = arena.alloc_vec::<u32>();
     v.extend(0_u32..10);
     let head_data_before = v.as_ptr();
     let head_cap_before = v.capacity();
     let tail = v.split_off(4);
-    // Head's data pointer is unchanged.
     assert_eq!(v.as_ptr(), head_data_before);
-    // Tail's data pointer is exactly head_data + 4 elements.
-    // SAFETY: `head_data_before + 4` is within the original allocation.
     // SAFETY: split is at index 4 < head_cap_before, so the resulting
     // pointer lies inside the original buffer.
     let expected_tail_ptr = unsafe { head_data_before.add(4) };
     assert_eq!(tail.as_ptr(), expected_tail_ptr);
-    // Head's capacity was shrunk to `at`; tail covers the remainder.
     assert_eq!(v.capacity(), 4);
     assert_eq!(tail.capacity(), head_cap_before - 4);
-    // Both halves can be dropped without UAF / double-free.
     drop(tail);
     drop(v);
 }
@@ -506,18 +499,15 @@ fn split_off_out_of_bounds_panics() {
 
 #[test]
 fn split_off_then_append_adjacent_round_trips() {
-    // split_off followed by append on adjacent halves should round-trip
-    // through the adjacency fast path with no copy.
+    // Adjacent halves recombine without moving the allocation.
     let arena = Arena::new();
     let mut head = arena.alloc_vec::<u32>();
     head.extend(0_u32..8);
     let head_data_before = head.as_ptr();
     let mut tail = head.split_off(5);
     head.append(&mut tail);
-    // Restored to the original contents and the original data pointer.
     assert_eq!(head.as_slice(), &[0, 1, 2, 3, 4, 5, 6, 7]);
     assert_eq!(head.as_ptr(), head_data_before);
-    // Tail was absorbed: empty and dangling.
     assert!(tail.is_empty());
     assert_eq!(tail.capacity(), 0);
 }
@@ -542,45 +532,18 @@ fn append_adjacency_fast_path_zero_copy() {
         let a_data_before = a.as_ptr();
         a.append(&mut b);
         assert_eq!(a.as_slice(), &[1, 2, 3, 4, 5, 6, 7, 8]);
-        // No copy: a's data pointer unchanged.
         assert_eq!(a.as_ptr(), a_data_before);
-        // Capacity absorbed both halves exactly. Asserts on the
-        // `self.cap += other.cap` write — kills `+= → -=` (mutant
-        // would leave cap == 0) and `+= → *=` (mutant would leave
-        // cap == 16).
+        // Capacity and length absorb both halves exactly.
         assert_eq!(a.capacity(), 8);
-        // Length absorbed both halves' lens. Catches mutations on
-        // `self.len += other.len` independently of the slice check
-        // above (slice access only requires `len` of bytes; a
-        // `-=` mutant would give `len == 0`, a `*=` mutant `len ==
-        // 16` — both leave `as_slice` incorrect, but the explicit
-        // assertion documents the invariant).
         assert_eq!(a.len(), 8);
         assert!(b.is_empty());
         assert_eq!(b.capacity(), 0);
     }
-    // If a's bump cursor was not at b's start (e.g. due to bump
-    // alignment padding), the test gracefully degrades — the
-    // fast-path precondition is environment-sensitive but the
-    // semantic behavior of `append` is checked by the existing
-    // `append_moves_elements` test.
 }
 
 #[test]
 fn append_zst_preserves_other_capacity_default_path() {
-    // Kills the `elem_size != 0 → == 0` mutant on `Vec::append`'s
-    // adjacency gate: ZSTs (size_of::<T>() == 0) must always take the
-    // default copy path, never the in-place absorption path.
-    //
-    // For ZSTs, both vectors' `data` pointers are `NonNull::dangling()`
-    // — the same address — so the inner `ptr::eq` check would
-    // succeed and the fast path would absorb `other.cap` into
-    // `self.cap`, zeroing `other`'s capacity. The mutant
-    // `elem_size == 0` enables exactly that behavior for ZSTs.
-    //
-    // Under the original `!= 0` semantics, ZST `append` goes through
-    // the default copy path: only `other.len` is reset to 0; its
-    // capacity is preserved.
+    // ZST append uses the copy path and preserves the source capacity.
     let arena = Arena::new();
     let mut a = arena.alloc_vec::<()>();
     for _ in 0..3 {
@@ -595,21 +558,12 @@ fn append_zst_preserves_other_capacity_default_path() {
     a.append(&mut b);
     assert_eq!(a.len(), 5);
     assert!(b.is_empty());
-    // Under original (default path): `other.len = 0` but capacity is
-    // not modified. Under mutant (fast path absorbing for ZST):
-    // `other.cap = 0`. The distinguishing assertion.
     assert_eq!(b.capacity(), b_cap_before);
 }
 
 #[test]
 fn append_adjacent_other_with_zero_len_does_not_absorb() {
-    // Kills the `other.len != 0 → == 0` mutant on `Vec::append`'s
-    // adjacency gate. Construct two contiguous arena allocations
-    // where the second has nonzero capacity but zero length. Under
-    // the original `!= 0` semantics the fast path is disabled
-    // (other.len is zero), so `self.cap` is unchanged and `other`
-    // retains its allocation. The mutant `== 0` enables absorption,
-    // moving `other.cap` into `self.cap` and zeroing `other`.
+    // An empty source retains its allocation even when adjacent.
     let arena = Arena::new();
     let mut a = arena.alloc_vec::<u32>();
     a.reserve_exact(4);
@@ -625,10 +579,6 @@ fn append_adjacent_other_with_zero_len_does_not_absorb() {
         let a_cap_before = a.capacity();
         let b_cap_before = b.capacity();
         a.append(&mut b);
-        // No absorption: `self.cap` unchanged because `other.len == 0`
-        // disqualifies the fast path. Under the `other.len == 0`
-        // mutant the absorption would set `a.capacity()` to 8 and
-        // `b.capacity()` to 0.
         assert_eq!(a.capacity(), a_cap_before);
         assert_eq!(b.capacity(), b_cap_before);
         assert_eq!(a.len(), 4);
@@ -638,13 +588,7 @@ fn append_adjacent_other_with_zero_len_does_not_absorb() {
 
 #[test]
 fn append_adjacency_fast_path_returns_early() {
-    // Covers the `return;` at the end of `Vec::append`'s in-place
-    // fast path (mutate.rs line 176). `split_off` deterministically
-    // produces two halves that sit back-to-back in the same chunk
-    // with `self.len == self.cap`, satisfying the adjacency gate.
-    // After `append`, the fallback copy path must NOT run: `other`'s
-    // buffer is absorbed (capacity transferred, not copied) and its
-    // raw parts are zeroed.
+    // Adjacent halves transfer capacity and clear the source raw parts.
     let arena = Arena::new();
     let mut head = arena.alloc_vec::<u32>();
     head.extend(0_u32..6);
@@ -652,41 +596,21 @@ fn append_adjacency_fast_path_returns_early() {
     let head_cap_before = head.capacity();
     let mut tail = head.split_off(4);
     let tail_cap_before = tail.capacity();
-    // Precondition: split_off capped `head` at its length.
     assert_eq!(head.len(), head.capacity());
     assert!(tail_cap_before > 0);
 
     head.append(&mut tail);
 
-    // Concatenation is correct.
     assert_eq!(head.as_slice(), &[0, 1, 2, 3, 4, 5]);
-    // No copy happened: head's data pointer is unchanged.
     assert_eq!(head.as_ptr(), head_ptr_before);
-    // Capacity was absorbed (sum equals the original allocation).
     assert_eq!(head.capacity(), head_cap_before);
-    // `other`'s raw parts were zeroed after the early return.
     assert!(tail.is_empty());
     assert_eq!(tail.capacity(), 0);
 }
 
 #[test]
 fn append_outer_gate_true_inner_ptr_eq_false_falls_through() {
-    // Covers the closing `}` of the inner `if core::ptr::eq(...)`
-    // in `Vec::append` (mutate.rs line 176) by entering the outer
-    // gate on line 162 but failing the inner adjacency check on
-    // line 166, so control flows past line 176 into the fallback
-    // copy path.
-    //
-    // Requirements to enter the outer gate:
-    //   * elem_size != 0      — `u32`
-    //   * other.len != 0      — `b` has 4 elements
-    //   * self.len == self.cap — achieved via `reserve_exact` then
-    //                            filling exactly to capacity.
-    //
-    // To make the inner `ptr::eq(self_end, other.data)` false we
-    // push the arena's bump cursor forward between the two
-    // allocations with an intervening `spacer` vec. After that,
-    // `b`'s buffer no longer abuts `a`'s end.
+    // A spacer makes the buffers nonadjacent, requiring the copy fallback.
     let arena = Arena::new();
 
     let mut a = arena.alloc_vec::<u32>();
@@ -699,8 +623,6 @@ fn append_outer_gate_true_inner_ptr_eq_false_falls_through() {
     // pointer for `a`'s allocation, which is valid for pointer comparison.
     let a_end_before = unsafe { a_data_before.add(a_cap_before) };
 
-    // Intervening allocation: bumps the cursor so `b` won't land
-    // immediately after `a`.
     let mut spacer = arena.alloc_vec::<u32>();
     spacer.reserve_exact(4);
     spacer.extend(100_u32..104);
@@ -709,52 +631,26 @@ fn append_outer_gate_true_inner_ptr_eq_false_falls_through() {
     b.reserve_exact(4);
     b.extend([10_u32, 20, 30, 40]);
 
-    // Precondition for this test: the inner `ptr::eq` must be false.
     assert!(!core::ptr::eq(a_end_before, b.as_ptr()), "spacer must have separated a and b");
 
     a.append(&mut b);
 
-    // Fallback path ran: contents concatenated by copy.
     assert_eq!(a.as_slice(), &[0, 1, 2, 3, 10, 20, 30, 40]);
-    // `a` was reallocated (or at minimum grew beyond its old cap),
-    // since the fast path didn't absorb `b`.
     assert!(a.capacity() >= 8);
-    // Fallback only resets `other.len`; it does NOT zero capacity
-    // (that's a fast-path-only side effect).
     assert!(b.is_empty());
 
-    // Keep `spacer` alive past the assertions so the arena layout
-    // stays as constructed.
     assert_eq!(spacer.as_slice(), &[100, 101, 102, 103]);
 }
 
 #[test]
 fn split_off_at_len_returns_empty_tail_with_zero_capacity() {
-    // Kills the `|| → &&` mutant on the outer condition of
-    // `split_off`'s copy-path gate (`elem_size == 0 || self.cap == 0
-    // || tail_len == 0`). At `at == self.len` the original gate is
-    // true (tail_len == 0), routing to the copy path which builds an
-    // empty tail via `with_capacity_in(0)` — `tail.capacity() == 0`.
-    //
-    // Under the mutant `(elem_size == 0 && self.cap == 0) ||
-    // tail_len == 0` the gate is still true here (tail_len == 0
-    // still satisfies the right side), so this *single* mutant
-    // isn't killed by this test. The mutant lives on the *first*
-    // `||` (col 27) — col 44 is the second `||`. Under col 44's
-    // mutant `elem_size == 0 || (self.cap == 0 && tail_len == 0)`,
-    // when `tail_len == 0` and `self.cap > 0` and `elem_size > 0`:
-    //   * Original: true (third disjunct holds) → copy path → tail.cap == 0.
-    //   * Mutant:   false (second conjunct fails, first false) → in-place
-    //     split → tail.cap == self.cap - at > 0.
-    // The capacity assert distinguishes the two.
+    // Splitting at the length returns an empty, zero-capacity tail.
     let arena = Arena::new();
     let mut v = arena.alloc_vec::<u32>();
     v.extend([1_u32, 2, 3]);
     let tail = v.split_off(3);
     assert_eq!(v.as_slice(), &[1, 2, 3]);
     assert!(tail.is_empty());
-    // The defining observation: original routes through
-    // `with_capacity_in(0)` which yields cap == 0.
     assert_eq!(tail.capacity(), 0);
 }
 
@@ -1224,9 +1120,7 @@ fn resize_panic_in_clone_drops_already_written() {
         v.resize(6, PanicOnThirdClone(99));
     }));
     assert!(result.is_err());
-    // The 2 successfully cloned elements + the original value (PanicOnThirdClone(99))
-    // passed to resize should be dropped. The original vec element (v[0]) is
-    // dropped when `v` is dropped.
+    // Successfully cloned elements are dropped during unwinding.
     let drops = DROPS.load(Ordering::Relaxed);
     assert!(drops >= 2, "at least 2 cloned elements should be dropped; got {drops}");
 }
@@ -1558,9 +1452,6 @@ mod io_write {
     fn many_small_writes_grow_the_buffer() {
         let arena = Arena::new();
         let mut v = arena.alloc_vec::<u8>();
-        // Amortized doubling: ~5 growths get us through every interesting
-        // capacity transition. 32 writes (= 256 bytes) is more than enough
-        // to exercise the `Write` impl across multiple reallocations.
         let n = 32;
         for _ in 0..n {
             v.write_all(b"abcdefgh").unwrap();
@@ -1707,10 +1598,6 @@ mod mutants_for_vec {
         }
         // Some growth happened — capacity is now > 4.
         assert!(v.capacity() >= 4096);
-        // `relocations` should be > 0 if at least one cross-chunk realloc
-        // happened. With `>` (correct), this works; with `>=` on 808 the
-        // logic also works because the in-place check ultimately confirms.
-        // We just keep the counter accessible for debugging.
         let _ = s.relocations;
     }
 
@@ -1719,12 +1606,6 @@ mod mutants_for_vec {
         use multitude::vec::Vec as MVec;
 
         let arena = Arena::new();
-        // Use a vec of types where `into_box` takes the copy path
-        // (any type works for into_box, but copy path is the cold
-        // tail; we exercise it indirectly via empty-builder edge case in
-        // tests/arena_vec.rs). Here we exercise the public into_box
-        // path with non-Copy types so the slow-path is taken on some
-        // configurations.
         let mut v: MVec<'_, String> = arena.alloc_vec();
         for i in 0..8_u32 {
             v.push(format!("item-{i}"));
@@ -1736,16 +1617,10 @@ mod mutants_for_vec {
     }
 }
 
-/// Regression test for a use-after-free between `Vec::split_off`'s
-/// zero-copy sharing and oversized-chunk reclamation on growth.
-///
 /// `split_off` of an oversized-backed `Vec` leaves the head and tail
 /// sharing one chunk's payload (no copy). Growing one half past the
 /// oversized threshold relocates it to a fresh chunk. The old chunk
-/// must NOT be freed at that point, because the sibling half still
-/// points into it — freeing it would dangle the sibling. We grow the
-/// head, then read and drop the tail (whose elements run real
-/// destructors); under the bug this touches freed memory.
+/// remains live while the sibling still points into it.
 #[test]
 fn split_off_sibling_survives_oversized_growth_of_other_half() {
     use std::sync::Arc as StdArc;
@@ -2315,6 +2190,36 @@ mod arena_buf_zst_split {
         let drained: usize = v.drain(..16).count();
         assert_eq!(drained, 16);
         assert_eq!(v.len(), 16);
+    }
+
+    #[test]
+    fn dropping_unconsumed_zst_drain_restores_tail_and_drops_elements() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+
+        struct ZstDrop;
+
+        impl Drop for ZstDrop {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        DROPS.store(0, Ordering::Relaxed);
+        {
+            let arena = Arena::new();
+            let mut v = arena.alloc_vec();
+            for _ in 0..4 {
+                v.push(ZstDrop);
+            }
+
+            drop(v.drain(1..3));
+
+            assert_eq!(v.len(), 2);
+            assert_eq!(DROPS.load(Ordering::Relaxed), 2);
+        }
+        assert_eq!(DROPS.load(Ordering::Relaxed), 4);
     }
 }
 

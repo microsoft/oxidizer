@@ -16,6 +16,13 @@ const MIN_MAX_NORMAL_ALLOC: usize = 4096;
 ///
 /// All knobs have sensible defaults. The defaults reproduce
 /// `Arena::new()` exactly.
+///
+/// # Example
+///
+/// ```
+/// let builder: multitude::ArenaBuilder = multitude::Arena::builder();
+/// assert!(format!("{builder:?}").contains("ArenaBuilder"));
+/// ```
 pub struct ArenaBuilder<A: Allocator + Clone = Global> {
     allocator: A,
     max_normal_alloc: usize,
@@ -39,8 +46,7 @@ impl ArenaBuilder<Global> {
 }
 
 impl<A: Allocator + Clone> ArenaBuilder<A> {
-    /// Start a new builder with default knobs and a custom backing
-    /// allocator.
+    /// Start a default builder with a custom backing allocator.
     ///
     /// Crate-internal: the public entry point is
     /// [`Arena::builder_in`](crate::Arena::builder_in).
@@ -62,6 +68,13 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// oversized chunk. Must be in `[4096, MAX_CHUNK_BYTES - chunk_header_size]`;
     /// out-of-range values cause [`Self::build`] / [`Self::try_build`] to panic
     /// with the resolved bounds in the panic message.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let builder = multitude::Arena::builder().max_normal_alloc(8 * 1024);
+    /// assert!(format!("{builder:?}").contains("8192"));
+    /// ```
     #[must_use]
     #[inline]
     pub const fn max_normal_alloc(mut self, bytes: usize) -> Self {
@@ -73,6 +86,13 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     ///
     /// Limits the total bytes of chunk capacity (live + cached) that may be
     /// outstanding at any one time.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().byte_budget(64 * 1024).build();
+    /// assert!(arena.try_alloc(1_u8).is_ok());
+    /// ```
     #[must_use]
     #[inline]
     pub const fn byte_budget(mut self, bytes: usize) -> Self {
@@ -84,6 +104,13 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     /// (header + payload), warming the arena's chunk cache. `bytes` must be
     /// `0` or at least 512. One capacity knob covers references and smart
     /// pointers alike.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().with_capacity(4096).build();
+    /// assert_eq!(*arena.alloc(7), 7);
+    /// ```
     #[must_use]
     #[inline]
     pub const fn with_capacity(mut self, bytes: usize) -> Self {
@@ -93,6 +120,14 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
 
     /// Replace the backing allocator. Returns a builder over the new
     /// allocator type with all other settings preserved.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use allocator_api2::alloc::Global;
+    /// let arena = multitude::Arena::builder().allocator_in(Global).build();
+    /// let _: &Global = arena.allocator();
+    /// ```
     #[must_use]
     #[inline]
     pub fn allocator_in<A2: Allocator + Clone>(self, allocator: A2) -> ArenaBuilder<A2> {
@@ -141,6 +176,13 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     ///
     /// Panics if any builder knob is out of range, or if the backing
     /// allocator fails while preallocating chunks.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::builder().with_capacity(4096).build();
+    /// assert_eq!(*arena.alloc(1), 1);
+    /// ```
     #[must_use]
     #[cold]
     pub fn build(self) -> Arena<A>
@@ -164,6 +206,15 @@ impl<A: Allocator + Clone> ArenaBuilder<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails while
     /// preallocating chunks.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let Ok(arena) = multitude::Arena::builder().try_build() else {
+    ///     panic!("arena construction failed");
+    /// };
+    /// assert_eq!(*arena.alloc(2), 2);
+    /// ```
     #[cold]
     pub fn try_build(self) -> Result<Arena<A>, AllocError>
     where

@@ -33,7 +33,9 @@ case-sensitive; the parser performs no case folding.
 
 The grammar mirrors the reference [`google.api.HttpRule`][__link5] path syntax:
 
-* a **literal** segment (`shelves`) must match verbatim;
+* a **literal** segment (`shelves`) must match verbatim and contain only RFC
+  3986 `pchar` characters, with valid `%HH` escapes; raw `*` is reserved for
+  the wildcard atoms below and must be percent-encoded in a literal;
 * **`*`** ([`Segment::Single`][__link6]) matches exactly one non-empty segment;
 * **`**`** ([`Segment::Rest`][__link7]) matches the remaining segments and may only
   appear as the final element;
@@ -91,31 +93,39 @@ assert_eq!(book.field_path(), "book");
 assert!(book.segments().eq([Segment::Rest]));
 ```
 
+## Crate features
+
+* **`std`** (default) — captures a `std::backtrace::Backtrace` into a
+  [`ParseError`][__link21] for richer diagnostics. Disable (`default-features = false`)
+  for `#![no_std]` use; the crate then requires only `alloc` and captures no
+  backtrace. `ParseError` implements `core::error::Error` either way.
+
 
 <hr/>
 <sub>
 This crate was developed as part of <a href="../..">The Oxidizer Project</a>. Browse this crate's <a href="https://github.com/microsoft/oxidizer/tree/main/crates/http_path_template">source code</a>.
 </sub>
 
- [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbdehWW1wo3-MbQZ4f-tMBwgsbFQlyCp62fwcbNkxL2v1MviZhZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjEuMA
+ [__cargo_doc2readme_dependencies_info]: ggGmYW0CYXZlMC43LjJhdIQbLiTyV0MU86EbZU15e0PmecoboQ9jo59bnAEbyDXw04U13GlhYvRhcoQbi6Iwi6yia9cb-_nab-IwSV0bii4s3u_Erlgbh-UNpgxvX8phZIGCcmh0dHBfcGF0aF90ZW1wbGF0ZWUwLjIuMA
  [__link0]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
- [__link1]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=PathTemplate
- [__link10]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Grammar
- [__link11]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Grammar
- [__link12]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Grammar::with_segment_affixes
- [__link13]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Affix
- [__link14]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment
- [__link15]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Literal
- [__link16]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Variable
- [__link17]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Single
- [__link18]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Literal
- [__link19]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Variable
- [__link2]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment
- [__link20]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Rest
- [__link3]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Variable
- [__link4]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=PathTemplate
+ [__link1]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=PathTemplate
+ [__link10]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Grammar
+ [__link11]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Grammar
+ [__link12]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Grammar::with_segment_affixes
+ [__link13]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Affix
+ [__link14]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment
+ [__link15]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Literal
+ [__link16]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Variable
+ [__link17]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Single
+ [__link18]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Literal
+ [__link19]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Variable
+ [__link2]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment
+ [__link20]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Rest
+ [__link21]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=ParseError
+ [__link3]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Variable
+ [__link4]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=PathTemplate
  [__link5]: https://github.com/googleapis/googleapis/blob/master/google/api/http.proto
- [__link6]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Single
- [__link7]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Rest
- [__link8]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=Segment::Variable
- [__link9]: https://docs.rs/http_path_template/0.1.0/http_path_template/?search=PathTemplate::parse
+ [__link6]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Single
+ [__link7]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Rest
+ [__link8]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=Segment::Variable
+ [__link9]: https://docs.rs/http_path_template/0.2.0/http_path_template/?search=PathTemplate::parse

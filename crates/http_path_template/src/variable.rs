@@ -88,7 +88,10 @@ impl<'a> Variable<'a> {
     /// ```
     #[must_use]
     pub fn segments(&self) -> SegmentIter<'a> {
-        SegmentIter { rest: Some(self.sub) }
+        SegmentIter {
+            rest: Some(self.sub),
+            remaining: self.sub.bytes().filter(|&byte| byte == b'/').count() + 1,
+        }
     }
 
     /// The raw sub-template substring (`*` for the `{field}` shorthand). Used by
@@ -107,6 +110,8 @@ pub struct SegmentIter<'a> {
     /// The remainder of the sub-template still to yield, or `None` once
     /// exhausted. Splitting on the ASCII `/` byte keeps `str` boundaries valid.
     rest: Option<&'a str>,
+    /// The exact number of segments still to yield.
+    remaining: usize,
 }
 
 impl<'a> Iterator for SegmentIter<'a> {
@@ -114,6 +119,8 @@ impl<'a> Iterator for SegmentIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let rest = self.rest?;
+        debug_assert!(self.remaining > 0);
+        self.remaining -= 1;
         let seg = if let Some(idx) = rest.as_bytes().iter().position(|&b| b == b'/') {
             // `rest[idx]` is the ASCII `/`; split there and drop it from the tail.
             let (seg, after) = rest.split_at(idx);
@@ -129,4 +136,17 @@ impl<'a> Iterator for SegmentIter<'a> {
             other => Segment::Literal(other),
         })
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let length = self.len();
+        (length, Some(length))
+    }
 }
+
+impl ExactSizeIterator for SegmentIter<'_> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
+
+impl core::iter::FusedIterator for SegmentIter<'_> {}
