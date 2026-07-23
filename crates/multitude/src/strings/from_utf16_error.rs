@@ -13,6 +13,14 @@ use core::fmt;
 /// an odd length, or it contained an unpaired surrogate. The arena-bound
 /// analog of [`std::string::FromUtf16Error`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// ```
+/// use multitude::Arena;
+/// use multitude::strings::FromUtf16Error;
+///
+/// let arena = Arena::new();
+/// let result: Result<_, FromUtf16Error> = arena.alloc_string_from_utf16le([0]);
+/// assert!(result.is_err());
+/// ```
 pub struct FromUtf16Error(());
 
 impl FromUtf16Error {

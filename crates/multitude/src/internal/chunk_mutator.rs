@@ -33,10 +33,10 @@ pub(crate) struct ChunkMutator<A: Allocator + Clone> {
 }
 
 // SAFETY: the mutator owns one strong chunk ref and moves that ownership
-// across threads only when `Chunk<A>: Send` (i.e. `A: Send`). The chunk's
-// refcounts and links are atomic. The `Cell` fields intentionally make this
-// `!Sync`.
-unsafe impl<A: Allocator + Clone + Send> Send for ChunkMutator<A> {}
+// across threads only when the shared allocator handle is `Send` (i.e.
+// `A: Send + Sync`). The chunk's refcounts and links are atomic. The `Cell`
+// fields intentionally make this `!Sync`.
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for ChunkMutator<A> {}
 
 impl<A: Allocator + Clone> ChunkMutator<A> {
     /// Builds a mutator owning the +1 already on `chunk`.
@@ -145,8 +145,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// overflow-free alignment math. `aligned_addr + size` still uses
     /// `checked_add` because `size` is caller-controlled.
     #[inline]
-    // Mutation testing is suppressed: any mutation that always rejects
-    // sends callers into an infinite refill spin (OOM).
+    // Always rejecting requests would make caller refill loops infinite.
     #[cfg_attr(test, mutants::skip)]
     pub(crate) fn try_alloc(&self, size: usize, align: usize) -> Option<InChunk<u8>> {
         debug_assert!(align.is_power_of_two(), "align must be a power of two");
@@ -155,13 +154,9 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
         let cur_addr = cur.as_ptr() as usize;
         let limit_addr = self.end.get().as_ptr() as usize;
         // SAFETY: `cur_addr` is a live chunk bump-cursor address, hence non-zero;
-        // and on 64-bit targets a chunk address always fits in `isize` (address
-        // space is < 2^63), so these hints let the optimizer treat the align-up
-        // below as overflow-free. Narrower targets fall back to checked math.
+        // on 64-bit targets, chunk addresses fit in `isize`.
         unsafe {
             hint::assert_unchecked(cur_addr > 0);
-            // On 64-bit targets this lets the optimizer treat align-up as
-            // overflow-free. Narrower targets use checked arithmetic.
             #[cfg(target_pointer_width = "64")]
             hint::assert_unchecked(isize::try_from(cur_addr).is_ok());
         }
@@ -262,10 +257,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// init helpers fill exactly `len * size_of::<T>()` bytes and have
     /// no awareness of the prefix.
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
-    )]
     pub(crate) fn try_alloc_uninit_slice_prefixed<T>(&self, len: usize) -> Option<Uninit<'_, [T]>> {
         let (payload, _) = self.try_alloc_prefixed_slice_payload::<T>(len)?;
         Some(Uninit::new(payload))
@@ -278,10 +269,6 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     ///
     /// `payload_bytes` must equal `size_of::<T>() * len` without overflow.
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
-    )]
     pub(crate) unsafe fn try_alloc_uninit_slice_prefixed_with_size<T>(&self, len: usize, payload_bytes: usize) -> Option<Uninit<'_, [T]>> {
         // SAFETY: forwarded to the caller.
         let (payload, _) = unsafe { self.try_alloc_prefixed_slice_payload_unchecked::<T>(len, payload_bytes) }?;
@@ -332,7 +319,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// prefix and slice-length metadata word.
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
-    #[allow(
+    #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
     )]
@@ -349,13 +336,9 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// `payload_bytes` must equal `size_of::<T>() * len` (without overflow).
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`: body→None ⇒ refill spin
-    #[allow(
+    #[expect(
         clippy::type_complexity,
         reason = "ticket + chunk-ptr tuple is the natural shape; type alias would obscure rather than clarify"
-    )]
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "slice-length metadata is written/read unaligned immediately before the payload"
     )]
     pub(crate) unsafe fn try_alloc_arc_slice_with_size<S: super::thin_dst::Strong, T>(
         &self,
@@ -442,7 +425,7 @@ impl<A: Allocator + Clone> ChunkMutator<A> {
     /// overflow).
     #[inline]
     #[cfg_attr(test, mutants::skip)] // see `try_alloc`
-    #[allow(
+    #[expect(
         clippy::cast_ptr_alignment,
         reason = "prefix slot may be unaligned for T's whose align < align_of::<usize>(); paired with write_unaligned/read_unaligned"
     )]
@@ -616,33 +599,17 @@ mod tests {
         ChunkMutator::<Global>::empty()
     }
 
-    // Covers try_reclaim_tail's chunk-is-None arm (line 314-316).
     #[test]
     fn try_reclaim_tail_on_empty_mutator_is_false() {
         let m = empty_mutator();
         assert!(!m.try_reclaim_tail(0, 0));
     }
 
-    // Covers try_grow_in_place's chunk-is-None arm (line 332-334).
     #[test]
     fn try_grow_in_place_on_empty_mutator_is_false() {
         let m = empty_mutator();
         assert!(!m.try_grow_in_place(0, 0, 1));
     }
-
-    // Covers try_grow_in_place's shrink/equal short-circuit (line 462-463)
-    // and overflow checked_add arm (line 470-471): see the direct
-    // `try_grow_in_place_non_growing_returns_true` /
-    // `try_grow_in_place_new_len_overflow_returns_false` tests below,
-    // which drive `ChunkMutator` directly (public Vec paths reject
-    // these inputs before reaching `try_grow_in_place`).
-
-    // --- Mutation-kill targets: dead-code-annotated helpers.
-    //
-    // `free_bytes` / `capacity` / `align_up` carry `#[allow(dead_code)]`
-    // because no production call site is wired up yet, but they're
-    // still mutated by cargo-mutants; exercising them here keeps
-    // mutation testing honest.
 
     #[test]
     fn free_bytes_on_empty_mutator_is_zero() {
@@ -652,9 +619,6 @@ mod tests {
 
     #[test]
     fn capacity_and_free_bytes_match_chunk_layout() {
-        // The mutator isn't reachable externally, so exercise its
-        // free_bytes/capacity arithmetic end-to-end through a real arena
-        // chunk (the empty-mutator path is unit-tested above).
         let arena = crate::Arena::builder().with_capacity(1024).build();
         let _ = arena.alloc(0_u32);
         let v = arena.alloc(42_u32);
@@ -663,9 +627,6 @@ mod tests {
 
     #[test]
     fn align_up_round_trips_powers_of_two() {
-        // None case: overflow path is unreachable for any align <= 64K
-        // and value <= usize::MAX - align + 1, but we still pin the
-        // arithmetic.
         assert_eq!(align_up(0, 8), Some(0));
         assert_eq!(align_up(1, 8), Some(8));
         assert_eq!(align_up(7, 8), Some(8));
@@ -673,37 +634,27 @@ mod tests {
         assert_eq!(align_up(9, 8), Some(16));
         assert_eq!(align_up(16, 16), Some(16));
         assert_eq!(align_up(17, 16), Some(32));
-        // Powers-of-two non-aligned values.
         assert_eq!(align_up(33, 32), Some(64));
         assert_eq!(align_up(100, 64), Some(128));
-        // align == 1 → identity.
         assert_eq!(align_up(0, 1), Some(0));
         assert_eq!(align_up(7, 1), Some(7));
-        // checked_add overflow path: value + mask must overflow.
         assert_eq!(align_up(usize::MAX, 8), None);
     }
 
-    // Kills `try_alloc_bytes`'s `end_addr > the payload end` boundary
-    // mutation (`> → >=`): an allocation that exactly fills the
-    // remaining payload must succeed. With `>`, `end_addr == the payload end`
-    // is allowed; with `>=`, the same case is rejected.
+    // An allocation may end exactly at the payload boundary.
     #[test]
     fn try_alloc_bytes_at_exact_remaining_capacity_succeeds() {
         let arena = crate::Arena::new();
-        // Force the first refill so `current` carries a live chunk.
         let _ = arena.alloc(0_u8);
         let m = arena.current();
         let free = m.free_bytes();
         assert!(free > 0, "post-refill chunk must have remaining capacity");
         let result = m.try_alloc_bytes(free);
         assert!(result.is_some(), "try_alloc_bytes(free_bytes) must succeed at the exact boundary");
-        // After consuming everything, the next byte must fail.
         assert!(m.try_alloc_bytes(1).is_none());
     }
 
-    // Kills `try_grow_in_place`'s `new_bump_addr > the payload end`
-    // boundary mutation (`> → >=`): growing a prior allocation so its
-    // new end lands exactly on `the payload end` must succeed.
+    // An in-place growth may end exactly at the payload boundary.
     #[test]
     fn try_grow_in_place_at_exact_remaining_capacity_succeeds() {
         let arena = crate::Arena::new();
@@ -711,34 +662,24 @@ mod tests {
         let m = arena.current();
         let free = m.free_bytes();
         assert!(free > 16, "need slack for an initial alloc plus grow");
-        // Capture the bump cursor *before* the initial alloc so we know
-        // `prev_addr` exactly.
         let prev_addr = m.bump.get().as_ptr() as usize;
         let initial = 16_usize;
         let _ = m.try_alloc_bytes(initial).expect("initial alloc");
-        // Grow to exactly fill the remaining payload: new_len = free
-        // ⇒ new_bump_addr = prev_addr + free = the payload end.
         let new_len = free;
         assert!(
             m.try_grow_in_place(prev_addr, initial, new_len),
             "try_grow_in_place at exact remaining capacity must succeed",
         );
-        // Bump should now sit at the payload end.
         assert_eq!(m.free_bytes(), 0);
     }
 
-    // Directly exercises `try_grow_in_place`'s `new_len <= prev_len`
-    // short-circuit (returns `true` without touching the bump cursor).
-    // Public Vec paths can't reach this line because they reject
-    // non-growing reservations before calling `try_grow_in_place`.
+    // Non-growing requests succeed without moving the bump cursor.
     #[test]
     fn try_grow_in_place_non_growing_returns_true() {
         let arena = crate::Arena::new();
         let _ = arena.alloc(0_u8);
         let m = arena.current();
         let bump_before = m.bump.get().as_ptr() as usize;
-        // `prev_addr` is irrelevant here: the `new_len <= prev_len`
-        // guard short-circuits before it is inspected.
         assert!(m.try_grow_in_place(0, 8, 8), "equal lengths must succeed");
         assert!(m.try_grow_in_place(0, 8, 4), "shrink must succeed");
         assert_eq!(
@@ -748,23 +689,15 @@ mod tests {
         );
     }
 
-    // Directly exercises `try_grow_in_place`'s `checked_add` overflow
-    // arm (`prev_addr + new_len` wraps `usize` ⇒ returns `false`).
-    // Public Vec paths reject `usize::MAX` capacities before reaching
-    // this line.
+    // Address overflow rejects an in-place growth.
     #[test]
     fn try_grow_in_place_new_len_overflow_returns_false() {
         let arena = crate::Arena::new();
         let _ = arena.alloc(0_u8);
         let m = arena.current();
-        // Capture the cursor before the allocation so we know
-        // `prev_addr` exactly (align-1 byte alloc lands here).
         let prev_addr = m.bump.get().as_ptr() as usize;
         let initial = 16_usize;
         let _ = m.try_alloc_bytes(initial).expect("initial alloc");
-        // `new_len == usize::MAX` is > prev_len and `prev_addr + prev_len`
-        // equals the current bump, so we reach the `checked_add(new_len)`
-        // overflow guard, which must reject the grow.
         assert!(
             !m.try_grow_in_place(prev_addr, initial, usize::MAX),
             "overflowing new_len must fail",

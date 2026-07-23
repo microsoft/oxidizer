@@ -9,6 +9,11 @@
 //! (e.g. by introducing a `!Send` field) or widens it past the
 //! intended bounds.
 
+use core::alloc::Layout;
+use core::cell::Cell;
+use core::ptr::NonNull;
+
+use allocator_api2::alloc::{Allocator, Global};
 use multitude::{Alloc, Arc, Arena, Box, Rc};
 
 fn assert_send<T: Send>() {}
@@ -36,6 +41,21 @@ fn assert_not_sync<T: ?Sized>() {
     let _ = <T as AmbiguousIfSync<_>>::probe;
 }
 
+#[derive(Clone, Default)]
+struct SendOnlyAllocator(Cell<()>);
+
+// SAFETY: allocation and deallocation forward unchanged to `Global`.
+unsafe impl Allocator for SendOnlyAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+        Global.allocate(layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        // SAFETY: forwarded under the caller's Allocator contract.
+        unsafe { Global.deallocate(ptr, layout) };
+    }
+}
+
 #[test]
 fn arena_is_send() {
     // `Arena: Send` is intended to be auto-derived from its fields.
@@ -55,6 +75,13 @@ fn arena_is_send() {
         });
         assert_eq!(h.join().unwrap(), 99);
     });
+}
+
+#[test]
+fn arena_is_not_send_when_allocator_is_not_sync() {
+    assert_not_send::<Arena<SendOnlyAllocator>>();
+    assert_not_send::<Arc<u64, SendOnlyAllocator>>();
+    assert_not_send::<Box<u64, SendOnlyAllocator>>();
 }
 
 #[test]

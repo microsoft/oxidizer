@@ -2487,7 +2487,7 @@ dependencies = [
 
 [[package]]
 name = "multitude"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alloc_tracker",
  "allocator-api2 0.2.21",
@@ -2502,12 +2502,32 @@ dependencies = [
  "hashbrown 0.17.1",
  "loom",
  "mimalloc",
+ "multitude_macros",
  "mutants",
  "ptr_meta",
  "serde",
  "serde_json",
  "widestring",
  "zerocopy",
+]
+
+[[package]]
+name = "multitude_macros"
+version = "0.1.0"
+dependencies = [
+ "multitude_macros_impl",
+ "mutants",
+ "syn",
+]
+
+[[package]]
+name = "multitude_macros_impl"
+version = "0.1.0"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

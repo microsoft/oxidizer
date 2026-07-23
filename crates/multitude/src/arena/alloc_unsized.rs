@@ -63,6 +63,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// - `T::Metadata` must be either zero-sized (sized `T`) or
     ///   `usize`-sized (slice DSTs `[U]` and trait objects `dyn Trait`,
     ///   whose metadata is a slice length or vtable pointer).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_arc::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
         &self,
@@ -91,6 +112,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_arc::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_arc<T: ?Sized + Send + Sync + Pointee>(
         &self,
@@ -119,6 +163,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// See [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_box::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn alloc_dst_box<T: ?Sized + Pointee>(&self, layout: Layout, metadata: T::Metadata, init: impl FnOnce(*mut T)) -> Box<T, A> {
         // SAFETY: forwarded.
@@ -138,6 +203,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// See [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_box::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_box<T: ?Sized + Pointee>(
         &self,
@@ -149,8 +237,9 @@ impl<A: Allocator + Clone> Arena<A> {
         unsafe { self.impl_alloc_dst_box::<T>(layout, metadata, init) }
     }
 
-    /// Allocate a possibly-unsized `T` and return an [`Rc<T, A>`](crate::Rc) —
-    /// the non-atomic, single-thread sibling of [`Self::alloc_dst_arc`]. `T`
+    /// Allocate a possibly-unsized `T` in an [`Rc<T, A>`](crate::Rc).
+    ///
+    /// This is the non-atomic, single-thread sibling of [`Self::alloc_dst_arc`]. `T`
     /// needs no `Send`/`Sync` bound.
     ///
     /// # Panics
@@ -160,6 +249,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_rc::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn alloc_dst_rc<T: ?Sized + Pointee>(&self, layout: Layout, metadata: T::Metadata, init: impl FnOnce(*mut T)) -> Rc<T, A> {
         // SAFETY: forwarded.
@@ -176,6 +286,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_rc::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_rc<T: ?Sized + Pointee>(
         &self,
@@ -392,6 +525,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_arc_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
     pub unsafe fn alloc_dst_arc_pin<T: ?Sized + Send + Sync + Pointee>(
@@ -416,6 +570,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::try_alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_arc_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_arc_pin<T: ?Sized + Send + Sync + Pointee>(
         &self,
@@ -439,6 +616,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_rc_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
     pub unsafe fn alloc_dst_rc_pin<T: ?Sized + Pointee>(
@@ -463,6 +661,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_arc`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_rc_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_rc_pin<T: ?Sized + Pointee>(
         &self,
@@ -488,6 +709,27 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::alloc_dst_box`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let value = unsafe {
+    ///     arena.alloc_dst_box_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     #[must_use]
     pub unsafe fn alloc_dst_box_pin<T: ?Sized + Pointee>(
@@ -512,6 +754,29 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Safety
     ///
     /// Same contract as [`Self::try_alloc_dst_box`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "dst")]
+    /// # {
+    /// use core::alloc::Layout;
+    /// let arena = multitude::Arena::new();
+    /// let source = [1_u32, 2, 3];
+    /// let Ok(layout) = Layout::array::<u32>(source.len()) else {
+    ///     panic!("slice layout overflow");
+    /// };
+    /// // SAFETY: the layout, metadata, and initializer describe `source`.
+    /// let Ok(value) = (unsafe {
+    ///     arena.try_alloc_dst_box_pin::<[u32]>(layout, source.len(), |dst| {
+    ///         core::ptr::copy_nonoverlapping(source.as_ptr(), dst.cast::<u32>(), source.len());
+    ///     })
+    /// }) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &source);
+    /// # }
+    /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "dst")))]
     pub unsafe fn try_alloc_dst_box_pin<T: ?Sized + Pointee>(
         &self,

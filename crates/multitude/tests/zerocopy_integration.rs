@@ -119,14 +119,8 @@ fn try_alloc_slice_arc_ok() {
     assert!(v.iter().all(|&x| x == 0));
 }
 
-// Note on the Windows-gated `*_over_aligned` tests below: under coverage
-// instrumentation on Windows, generic functions that take or return an
-// `OverAligned` value (the panic-wrapper `alloc_*` and the closure-based
-// `try_alloc_slice`) are not inlined, which forces them to materialize an
-// `OverAligned` slot in their stack frame — and Windows' default 1 MiB
-// stack cannot satisfy a 64 KiB-aligned frame. The non-slice
-// `try_*_over_aligned_returns_err` siblings exercise the same
-// alignment-rejection guard on every platform.
+// Windows cannot materialize a 64 KiB-aligned value in its default stack;
+// non-slice variants check the same alignment guard there.
 #[cfg(not(utc_backend))]
 #[derive(FromZeros)]
 #[repr(C, align(65536))]

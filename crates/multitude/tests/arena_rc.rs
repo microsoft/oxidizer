@@ -203,8 +203,7 @@ fn rc_from_vec_then_clone_and_drop() {
     drop(c2);
 }
 
-// Exercises the remaining `Rc` public surface for coverage: try_/pin/uninit
-// variants, conversions, and trait impls across all features.
+// Exercises `Rc` allocation variants, conversions, and trait implementations.
 #[test]
 fn rc_remaining_surface_coverage() {
     use core::pin::Pin;

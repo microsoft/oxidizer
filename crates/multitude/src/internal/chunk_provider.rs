@@ -14,8 +14,8 @@
 
 // These `unsafe fn`s have item-level safety contracts; inner unsafe blocks
 // would not add a boundary here.
-#![allow(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
-#![allow(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
+#![expect(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
+#![expect(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
 
 use alloc::sync::{Arc, Weak};
 use core::mem;
@@ -92,7 +92,7 @@ impl ChunkAllocStats {
 
 /// Allocates and caches chunks for one arena.
 pub(crate) struct ChunkProvider<A: Allocator + Clone> {
-    allocator: A,
+    allocator: Arc<A>,
     config: ChunkProviderConfig,
     weak_self: Weak<Self>,
     /// Bytes currently outstanding (allocated, not yet freed). Updated via
@@ -121,25 +121,21 @@ pub(crate) struct ChunkProvider<A: Allocator + Clone> {
 // `non_send_fields_in_send_ty`: the `Weak<Self>` back-pointer is the flagged
 // field; it is sound because every owning chunk reaches the provider through it
 // and the provider is single-owner per arena.
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "Weak<Self> back-pointer is sound; provider is single-owner per arena"
-)]
 // SAFETY: `cache` is composed of `AtomicPtr`s, which are `Send + Sync`;
-// `allocator` is `A: Allocator + Clone` (callers must use `Send + Sync`-capable
-// allocators when sharing the provider across threads). Only the owning thread
-// pops the cache (single-popper Treiber-stack invariant).
-unsafe impl<A: Allocator + Clone + Send> Send for ChunkProvider<A> {}
-// SAFETY: `cache` is composed of `AtomicPtr`s (`Send + Sync`) and `allocator`
-// is `A: Sync`; sharing `&ChunkProvider` across threads only exposes those, and
-// the single-popper Treiber-stack invariant is unaffected by shared `&`-access.
-unsafe impl<A: Allocator + Clone + Sync> Sync for ChunkProvider<A> {}
+// the shared allocator handle is `Send` only when `A: Send + Sync`. Only the
+// owning thread pops the cache (single-popper Treiber-stack invariant).
+unsafe impl<A: Allocator + Clone + Send + Sync> Send for ChunkProvider<A> {}
+// SAFETY: `cache` is composed of `AtomicPtr`s (`Send + Sync`), and the shared
+// allocator handle is `Sync` when `A: Send + Sync`. The single-popper
+// Treiber-stack invariant is unaffected by shared `&`-access.
+unsafe impl<A: Allocator + Clone + Send + Sync> Sync for ChunkProvider<A> {}
 
 impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Builds a new provider returning an `Arc` that owning chunks will
     /// reference weakly.
     pub(crate) fn new(allocator: A, config: ChunkProviderConfig) -> Arc<Self> {
-        Arc::new_cyclic(|weak| Self {
+        let allocator = Arc::new(allocator);
+        Arc::new_cyclic(move |weak| Self {
             allocator,
             config,
             weak_self: Weak::clone(weak),
@@ -206,7 +202,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
 
     /// Returns a borrowed handle to the provider's allocator.
     pub(crate) fn allocator(&self) -> &A {
-        &self.allocator
+        self.allocator.as_ref()
     }
 
     /// Acquires a normal-class chunk with at least `min_payload` bytes.
@@ -224,10 +220,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
     /// Acquires a cacheable chunk in `class`, bumping the floor first
     /// when needed.
     //
-    // Mutation testing is suppressed on the `class > floor` branch: `>` with
-    // `<` / `==` only changes when the floor advances (cache memory pressure,
-    // not a correctness bug, and exercised by the stats-driven cache-class
-    // tests), and `>` with `>=` is a redundant no-op floor advance.
+    // Advancing at the current floor is an observationally equivalent no-op.
     #[cfg_attr(test, mutants::skip)]
     fn acquire_normal(&self, class: SizeClass) -> Result<NonNull<Chunk<A>>, AllocError> {
         // SAFETY: only the owning thread bumps the floor / pops (single-
@@ -292,7 +285,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let total = class.bytes();
         let payload_size = total - header;
         self.reserve_bytes(total)?;
-        match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload_size) {
+        match Chunk::<A>::allocate(Arc::clone(&self.allocator), Weak::clone(&self.weak_self), payload_size) {
             Ok(chunk) => {
                 #[cfg(feature = "stats")]
                 self.normal_chunks_allocated.fetch_add(1, Ordering::Relaxed);
@@ -379,7 +372,7 @@ impl<A: Allocator + Clone> ChunkProvider<A> {
         let payload = round_up_to_word_align(min_payload.checked_add(slack).ok_or(AllocError::CAPACITY_OVERFLOW)?)?;
         let total = Chunk::<A>::footprint(payload)?;
         self.reserve_bytes(total)?;
-        match Chunk::<A>::allocate(self.allocator.clone(), Weak::clone(&self.weak_self), payload) {
+        match Chunk::<A>::allocate(Arc::clone(&self.allocator), Weak::clone(&self.weak_self), payload) {
             Ok(chunk) => {
                 #[cfg(feature = "stats")]
                 self.oversized_chunks_allocated.fetch_add(1, Ordering::Relaxed);
@@ -491,7 +484,7 @@ fn is_cacheable_size(total: usize) -> bool {
 /// alignment (`align_of::<usize>()`). Returns `Err(AllocError)` on overflow.
 /// Keeps the usable capacity from falling below `min_payload` after the bump
 /// cursor pays any payload-start alignment skew.
-#[cfg_attr(test, mutants::skip)] // mask mutations underfit payload → OOM spin
+#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
     let mask = mem::align_of::<usize>() - 1;
@@ -505,10 +498,7 @@ fn round_up_to_word_align(min_payload: usize) -> Result<usize, AllocError> {
 /// oversized chunk's (possibly unaligned) payload. Added to oversized
 /// requests so the first allocation always fits after alignment.
 #[inline]
-// Mutation testing is suppressed: `align - 1` is the exact maximum skew.
-// The `-`→`+` / `-`→`/` mutants only ever *over*-reserve by a few bytes
-// (never under-allocate), so they are equivalent for correctness and
-// invisible through any public API contract.
+// `align - 1` is the exact maximum skew; extra slack is unobservable.
 #[cfg_attr(test, mutants::skip)]
 fn oversized_payload_align_slack() -> usize {
     mem::align_of::<usize>() - 1
@@ -516,13 +506,11 @@ fn oversized_payload_align_slack() -> usize {
 
 /// Wraps the `needed_total > MAX_CHUNK_BYTES` check used by the
 /// `acquire_*` routing gates.
-#[cfg_attr(test, mutants::skip)] // boundary unreachable: max_normal_alloc capped well below
+#[cfg_attr(test, mutants::skip)]
 #[inline]
 fn exceeds_max_chunk_bytes(needed_total: usize) -> bool {
     needed_total > MAX_CHUNK_BYTES
 }
-
-// --- Helpers wired into the chunk type via an inherent impl -------------------
 
 impl<A: Allocator + Clone> Chunk<A> {
     /// Routes a just-acquired refcount-1 chunk straight to the provider cache
@@ -587,7 +575,6 @@ mod tests {
         PUSH_RETRY_COUNT.with(|c| c.set(c.get() + 1));
     }
 
-    /// Covers `Default for ChunkProviderConfig` (lines 58-63).
     #[test]
     fn chunk_provider_config_default_matches_constants() {
         let c = ChunkProviderConfig::default();
@@ -595,20 +582,15 @@ mod tests {
         assert_eq!(c.max_normal_alloc(), MAX_NORMAL_ALLOC);
     }
 
-    // Kills `reserve_bytes`' `new > byte_budget` boundary mutations
-    // (`> → >=` and `> → ==`): reserving exactly up to the budget must
-    // succeed (rejected by both mutants), while exceeding it must fail.
+    // The byte budget is inclusive.
     #[test]
     fn reserve_bytes_allows_exactly_budget_and_rejects_over() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::new(100, 4096));
-        // Reaching exactly the budget is allowed (`new == budget` is not `> budget`).
         provider.reserve_bytes(100).expect("reaching exactly the budget must be allowed");
-        // One more byte exceeds the budget and must be rejected.
         provider.reserve_bytes(1).expect_err("exceeding the budget must be rejected");
     }
 
-    // Covers `pop`'s below-floor straggler arm by raising the floor,
-    // then pushing a smaller chunk.
+    // Chunks below the current class floor are destroyed rather than cached.
     #[test]
     fn pop_destroys_below_floor_straggler() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
@@ -616,40 +598,26 @@ mod tests {
         // on an empty freelist, then a below-floor straggler is injected
         // and popped, exactly mirroring the documented push/floor race.
         unsafe {
-            // Raise the floor well above class 0 (512 B) — class 3 = 4 KiB.
             provider.advance_cache_floor(SizeClass::new(3));
-            // Allocate a class-0 (512 B) chunk: below the new floor.
             let chunk = provider.allocate_fresh(SizeClass::ZERO).expect("fresh class-0 chunk");
-            // `push` requires a refcount-zero, uniquely-owned chunk.
             assert!(chunk.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(chunk);
-            // The straggler is below the floor, so the pop destroys it and
-            // finds the now-empty cache, returning `None`.
             assert!(provider.pop().is_none());
         }
     }
 
-    /// `is_cacheable_size` checks the closed interval [MIN, MAX] **and**
-    /// power-of-two. Pin both arms so `&&`/`||` mutations flip the
-    /// result on probes that exercise either constraint independently.
+    /// Cacheable sizes are powers of two in the closed supported interval.
     #[test]
     fn is_cacheable_size_requires_range_and_power_of_two() {
-        // In range, power of two → true.
         assert!(is_cacheable_size(MIN_CHUNK_BYTES));
         assert!(is_cacheable_size(MAX_CHUNK_BYTES));
-        // In range, NOT power of two → false (would be `true` under
-        // `&& → ||` if the right arm dominated).
         assert!(!is_cacheable_size(MIN_CHUNK_BYTES + 1));
-        // Out of range, power of two → false (would be `true` under
-        // `&& → ||`).
         assert!(!is_cacheable_size(MAX_CHUNK_BYTES * 2));
         assert!(!is_cacheable_size(MIN_CHUNK_BYTES / 2));
-        // Zero is below the lower bound (and not a power of two).
         assert!(!is_cacheable_size(0));
     }
 
-    // Covers `push`'s contended CAS retry arm via deterministic
-    // thread-local race injection.
+    // A contended cache push retries without losing any chunk.
     #[test]
     fn push_retries_on_contended_cas() {
         let provider = ChunkProvider::<Global>::new(Global, ChunkProviderConfig::default());
@@ -659,25 +627,20 @@ mod tests {
         // injected chunk is spliced into the freelist by the hook, so the
         // stack stays valid and the provider's drain frees all three.
         unsafe {
-            // Base chunk C establishes a non-null head for the race.
             let c = provider.allocate_fresh(SizeClass::ZERO).expect("chunk c");
             assert!(c.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(c);
 
-            // Chunk D is injected by the hook during the next push to model
-            // a concurrent pusher mutating `head`.
             let d = provider.allocate_fresh(SizeClass::ZERO).expect("chunk d");
             assert!(d.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             INJECT_PUSH_RACE.with(|slot| slot.set(d.cast::<u8>().as_ptr()));
 
-            // Pushing B loads head == C, but the hook publishes D before B's
-            // CAS, forcing the retry arm before B finally settles on top.
             let b = provider.allocate_fresh(SizeClass::ZERO).expect("chunk b");
             assert!(b.as_ref().dec_ref(), "fresh chunk drops to refcount 0");
             provider.push(b);
         }
-        // At least one retry must have run (CAS may also fail spuriously on
-        // weakly-ordered targets, so we assert a lower bound, not equality).
+        // Weak compare-exchange may also fail spuriously, so only a lower
+        // bound is stable.
         assert!(
             PUSH_RETRY_COUNT.with(Cell::get) >= 1,
             "the contended CAS retry arm must run at least once",

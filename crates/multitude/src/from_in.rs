@@ -37,6 +37,15 @@ use crate::Arena;
 /// Builds `Self` from `value`, allocating into `arena`. Use this for
 /// conversions that `std` exposes as [`From`] but that need an arena to
 /// materialize the result.
+///
+/// ```
+/// use multitude::vec::Vec;
+/// use multitude::{Arena, FromIn as _};
+///
+/// let arena = Arena::new();
+/// let values = Vec::from_in([1_u8, 2, 3], &arena);
+/// assert_eq!(values.as_slice(), &[1, 2, 3]);
+/// ```
 pub trait FromIn<'a, T, A: Allocator + Clone = Global>: Sized {
     /// Builds `Self` from `value`, allocating into `arena`.
     fn from_in(value: T, arena: &'a Arena<A>) -> Self;

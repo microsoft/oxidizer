@@ -46,11 +46,8 @@ fn clear_when_unallocated_is_noop() {
 
 #[test]
 fn size_40_bytes_on_64bit() {
-    // 40 bytes = data ptr + cached len + cap + a freeze-prefix flag + arena
-    // ref. The cached len (added for perf) avoids a chunk-memory load on every
-    // read; the freeze-prefix flag records whether the backing buffer carries
-    // the `Arc<[T]>` freeze prefix, letting `into_arc` / `into_boxed_slice`
-    // reuse the buffer in place with no copy.
+    // Five pointer-sized fields hold the buffer, length, capacity, freeze
+    // prefix state, and arena reference.
     if size_of::<usize>() == 8 {
         assert_eq!(size_of::<String<'_>>(), 40);
     }
@@ -64,6 +61,19 @@ fn push_single_char() {
     s.push('é');
     s.push('日');
     assert_eq!(s.as_str(), "aé日");
+}
+
+#[test]
+fn push_str_handles_every_inline_copy_length() {
+    let arena = Arena::new();
+    let mut string = arena.alloc_string_with_capacity(45);
+    let source = "abcdefghi";
+
+    for len in 0..=9 {
+        string.push_str(&source[..len]);
+    }
+
+    assert_eq!(string.as_str(), "aababcabcdabcdeabcdefabcdefgabcdefghabcdefghi");
 }
 
 #[test]
@@ -434,7 +444,7 @@ fn insert_multibyte_char() {
 fn insert_str_grows() {
     let arena = Arena::new();
     let mut s = String::from_in("ad", &arena);
-    s.insert_str(1, "bc");
+    s.insert_str(1, std::string::String::from("bc"));
     assert_eq!(s.as_str(), "abcd");
 }
 
@@ -525,7 +535,7 @@ fn retain_with_multibyte() {
 fn replace_range_same_length() {
     let arena = Arena::new();
     let mut s = String::from_in("hello world", &arena);
-    s.replace_range(6..11, "earth");
+    s.replace_range(6..11, std::string::String::from("earth"));
     assert_eq!(s.as_str(), "hello earth");
 }
 

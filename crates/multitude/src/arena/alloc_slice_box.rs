@@ -31,6 +31,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the underlying allocator fails or if the `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_slice_copy_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_copy_box([1, 2, 3]);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_copy_box<T: Copy>(&self, slice: impl AsRef<[T]>) -> Box<[T], A> {
@@ -44,13 +52,22 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_copy_box([1, 2, 3]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_copy_box<T: Copy>(&self, slice: impl AsRef<[T]>) -> Result<Box<[T], A>, AllocError> {
         self.impl_alloc_slice_box_copy::<T>(slice.as_ref())
     }
 
-    /// Clone every element of `slice` into the arena and return an
-    /// owned, mutable [`Box<[T], A>`](crate::Box).
+    /// Clone `slice` into an arena-backed [`Box<[T], A>`](crate::Box).
     ///
     /// # Panics
     ///
@@ -59,6 +76,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May panic if `T::clone` panics; already-cloned elements are dropped before the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_clone_box([String::from("a"), String::from("b")]);
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn alloc_slice_clone_box<T: Clone>(&self, slice: impl AsRef<[T]>) -> Box<[T], A> {
         let s = slice.as_ref();
@@ -76,6 +101,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May panic if `T::clone` panics; already-cloned elements are
     /// dropped before the panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_clone_box([String::from("a"), String::from("b")]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[String::from("a"), String::from("b")]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_clone_box<T: Clone>(&self, slice: impl AsRef<[T]>) -> Result<Box<[T], A>, AllocError> {
         let s = slice.as_ref();
@@ -93,6 +128,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// If `f` panics, already-initialized elements are dropped (drop guard) and the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_box(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_with_box<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Box<[T], A> {
         (self.impl_alloc_slice_box_with::<T, F>(len, f)).expect_alloc()
@@ -109,6 +152,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// If `f` panics, already-initialized elements are dropped and the
     /// panic propagates.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_box(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_box<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Box<[T], A>, AllocError> {
         self.impl_alloc_slice_box_with::<T, F>(len, f)
@@ -125,6 +178,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// May also panic if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_iter_box([3, 1, 4]);
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn alloc_slice_fill_iter_box<T, I>(&self, iter: I) -> Box<[T], A>
     where
@@ -147,6 +208,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the iterator yields fewer elements than its
     /// `ExactSizeIterator::len()` reported.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_iter_box([3, 1, 4]) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[3, 1, 4]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_iter_box<T, I>(&self, iter: I) -> Result<Box<[T], A>, AllocError>
     where
@@ -258,13 +329,22 @@ impl<A: Allocator + Clone> Arena<A> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Allocate `len` slots and fill each via `f(i)`, returning a
-    /// [`Pin<Box<[T], A>>`](core::pin::Pin). Each element is pinned
+    /// Allocate a pinned [`Box`] slice of `len` elements initialized by `f(i)`.
+    ///
+    /// Each element is pinned
     /// to its slot.
     ///
     /// # Panics
     ///
     /// See [`Self::alloc_slice_fill_with_box`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_slice_fill_with_box_pin(3, |i| i + 1);
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_slice_fill_with_box_pin<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Pin<Box<[T], A>>
@@ -279,6 +359,16 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::try_alloc_slice_fill_with_box`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_slice_fill_with_box_pin(3, |i| i + 1) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(&*value, &[1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_fill_with_box_pin<T, F: FnMut(usize) -> T>(&self, len: usize, f: F) -> Result<Pin<Box<[T], A>>, AllocError>
     where

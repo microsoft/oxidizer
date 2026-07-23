@@ -8,15 +8,15 @@
 //! escape-capable smart pointers (`Box` / `Arc` / `Rc`, which also drop eagerly and
 //! take a per-handle chunk refcount). Refcounts and cache-list links are atomic
 //! so handles released from any thread can race the arena's own teardown, and
-//! the chunk holds a `Weak` provider back-pointer plus its own allocator clone
+//! the chunk holds a `Weak` provider back-pointer plus a shared allocator handle
 //! so a smart pointer that outlives the arena can free the chunk itself.
 
 // Raw-memory methods are `unsafe fn` with item-level safety contracts; inner
 // unsafe blocks would not add a boundary here.
-#![allow(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
-#![allow(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
+#![expect(unsafe_op_in_unsafe_fn, reason = "see module doc: inner unsafe blocks in unsafe fn add noise here")]
+#![expect(clippy::unnecessary_safety_comment, reason = "safety rationale documented at function level")]
 
-use alloc::sync::Weak;
+use alloc::sync::{Arc, Weak};
 use core::cell::UnsafeCell;
 use core::mem;
 use core::ptr::{self, NonNull};
@@ -39,7 +39,7 @@ use crate::AllocError;
 /// [`payload_ptr`](Self::payload_ptr).
 #[repr(C)]
 pub(crate) struct Chunk<A: Allocator + Clone> {
-    allocator: A,
+    allocator: Arc<A>,
     provider: Weak<ChunkProvider<A>>,
     capacity: usize,
     ref_count: AtomicUsize,
@@ -79,10 +79,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     #[inline]
-    // Mutation testing is suppressed: this is a pure const layout computation
-    // pinned exactly by the `header_size_for_global_matches_layout` test under
-    // both feature configs, and the `#[cfg(not(feature = "stats"))]` branch is
-    // dead code under the all-features mutants run.
+    // This is the exact fixed header size for either feature layout.
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) const fn header_size() -> usize {
         // Under `stats`, `wasted_at_retire` is the last fixed-size field;
@@ -99,7 +96,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     }
 
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // both branches saturate at CHUNK_ALIGN
+    #[cfg_attr(test, mutants::skip)]
     const fn struct_align() -> usize {
         let base = Self::value_align();
         if base >= CHUNK_ALIGN { base } else { CHUNK_ALIGN }
@@ -108,9 +105,9 @@ impl<A: Allocator + Clone> Chunk<A> {
     /// The chunk type's own alignment, used to round allocation size. This is
     /// separate from [`Self::struct_align`], the base-address alignment.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // pure layout constant pinned by a dedicated test
+    #[cfg_attr(test, mutants::skip)]
     const fn value_align() -> usize {
-        let a = mem::align_of::<A>();
+        let a = mem::align_of::<Arc<A>>();
         let b = mem::align_of::<usize>();
         if a >= b { a } else { b }
     }
@@ -119,7 +116,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     ///
     /// Uses [`NonNull::byte_sub`] to preserve provenance.
     #[inline]
-    #[cfg_attr(test, mutants::skip)] // mask mutations break refcount → OOM in mutant harness
+    #[cfg_attr(test, mutants::skip)]
     pub(crate) fn header_from_value_ptr(value: NonNull<u8>) -> NonNull<u8> {
         let offset_within_chunk = (value.as_ptr() as usize) & (CHUNK_ALIGN - 1);
         // SAFETY: the smart-pointer invariant guarantees `value` lies
@@ -137,7 +134,7 @@ impl<A: Allocator + Clone> Chunk<A> {
     ///
     /// `header` must carry full chunk-allocation provenance.
     #[inline]
-    #[allow(
+    #[expect(
         clippy::cast_ptr_alignment,
         reason = "chunk header is over-aligned; capacity offset is a multiple of usize alignment"
     )]
@@ -147,16 +144,19 @@ impl<A: Allocator + Clone> Chunk<A> {
         ptr::slice_from_raw_parts_mut(header, cap) as *mut Self
     }
 
-    // Mutation testing is suppressed: `> → >=` only differs at the
-    // unreachable exact-`isize::MAX` boundary.
+    // A chunk allocation must remain within pointer-offset limits.
     #[cfg_attr(test, mutants::skip)]
+    #[expect(
+        clippy::cast_ptr_alignment,
+        reason = "alloc_chunk_raw returns storage aligned to struct_align(), which is at least Chunk's value alignment"
+    )]
     pub(in crate::internal) fn allocate(
-        allocator: A,
+        allocator: Arc<A>,
         provider: Weak<ChunkProvider<A>>,
         payload_size: usize,
     ) -> Result<NonNull<Self>, AllocError> {
         let (raw_u8_ptr, _layout) = crate::internal::chunk_alloc::alloc_chunk_raw(
-            &allocator,
+            allocator.as_ref(),
             Self::header_size(),
             payload_size,
             Self::value_align(),
@@ -204,7 +204,7 @@ impl<A: Allocator + Clone> Chunk<A> {
         let header = Self::header_size();
         let header_ref = &*chunk.as_ptr();
         let capacity = header_ref.capacity;
-        let allocator: A = ptr::read(&raw const (*chunk.as_ptr()).allocator);
+        let allocator: Arc<A> = ptr::read(&raw const (*chunk.as_ptr()).allocator);
         ptr::drop_in_place(&raw mut (*chunk.as_ptr()).provider);
         let layout = crate::internal::chunk_alloc::chunk_layout(header, capacity, Self::value_align(), Self::struct_align())
             .expect("matches allocate(); header+capacity stayed within isize::MAX");
@@ -332,9 +332,7 @@ impl<A: Allocator + Clone> Chunk<A> {
 
     /// Returns the chunk's payload capacity in bytes (i.e. `data.len()`).
     #[inline]
-    // Mutation testing is suppressed: a 0/1 capacity drives the allocator's
-    // refill loop into an unbounded spin, hanging the suite instead of
-    // failing it.
+    // Returning an incorrect capacity can make allocation retries infinite.
     #[cfg_attr(test, mutants::skip)]
     pub(in crate::internal) fn capacity(&self) -> usize {
         self.capacity
@@ -421,32 +419,38 @@ mod tests {
     use super::*;
 
     /// `header_size` is `offset_of!(<last field>) + size_of::<<last field>>()`.
-    /// For `Chunk<Global>`, the header layout is fixed:
-    /// 0 (allocator ZST) + 8 (provider `Weak`) + 8 (capacity) +
-    /// 8 (`ref_count`) + 8 (`next`) = 32 bytes.
-    /// Under the `stats` feature an additional `wasted_at_retire: AtomicU32`
-    /// is appended (at offset 32) for 36 bytes total.
+    /// Every fixed header field is pointer-sized and pointer-aligned, so the
+    /// header packs without padding. It contains the allocator `Arc`, provider
+    /// `Weak`, capacity, `ref_count`, and `next`. Under the `stats` feature an
+    /// `AtomicU32` (`wasted_at_retire`) is appended. Computing the expectation
+    /// from `size_of` keeps this assertion valid on non-64-bit targets rather
+    /// than baking in 8-byte field widths.
     #[test]
     fn header_size_for_global_matches_layout() {
+        let expected = mem::size_of::<Arc<Global>>()
+            + mem::size_of::<Weak<ChunkProvider<Global>>>()
+            + mem::size_of::<usize>()
+            + mem::size_of::<AtomicUsize>()
+            + mem::size_of::<AtomicPtr<u8>>();
+
         #[cfg(not(feature = "stats"))]
-        assert_eq!(Chunk::<Global>::header_size(), 32);
+        assert_eq!(Chunk::<Global>::header_size(), expected);
         #[cfg(feature = "stats")]
-        assert_eq!(Chunk::<Global>::header_size(), 36);
+        assert_eq!(Chunk::<Global>::header_size(), expected + mem::size_of::<AtomicU32>());
     }
 
-    /// `struct_align` returns the max of `align_of::<A>()`,
-    /// `align_of::<usize>()`, and `CHUNK_ALIGN`. Pin the exact value so
-    /// the `>= → <` mutation flips it.
+    /// `struct_align` is the maximum of the allocator handle alignment,
+    /// `align_of::<usize>()`, and `CHUNK_ALIGN`.
     #[test]
     fn struct_align_is_max_of_components() {
         let got = Chunk::<Global>::struct_align();
         // Chunks must be CHUNK_ALIGN-aligned so smart-pointer
         // chunk-header recovery via `byte_sub` lands on the header.
         assert!(got >= super::super::constants::CHUNK_ALIGN);
-        assert!(got >= mem::align_of::<Global>());
+        assert!(got >= mem::align_of::<Arc<Global>>());
         assert!(got >= mem::align_of::<usize>());
-        // Equality at the typical case: Global is ZST so its align is
-        // 1, usize align is 8 (on 64-bit), CHUNK_ALIGN dominates.
+        // Equality at the typical case: pointer and usize alignment are
+        // both 8 on 64-bit, so CHUNK_ALIGN dominates.
         assert_eq!(got, super::super::constants::CHUNK_ALIGN);
     }
 
@@ -498,7 +502,7 @@ mod tests {
     fn value_align_matches_real_alignment() {
         // SAFETY: single-threaded test; refcount forced to 0 before destroy.
         unsafe {
-            let chunk = Chunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             let real = mem::align_of_val(chunk.as_ref());
             assert_eq!(
                 Chunk::<Global>::value_align(),
@@ -511,8 +515,7 @@ mod tests {
         }
     }
 
-    /// `max_bump_extent` subtracts the header from `MAX_CHUNK_BYTES`;
-    /// pin the relation so `- → +` mutation is caught.
+    /// `max_bump_extent` is the maximum chunk size minus its header.
     #[test]
     fn max_bump_extent_is_max_minus_header() {
         let header = Chunk::<Global>::header_size();
@@ -521,20 +524,14 @@ mod tests {
         assert!(extent < super::super::constants::MAX_CHUNK_BYTES);
     }
 
-    // Covers `inc_ref`'s refcount-overflow guard call site: forcing the
-    // refcount to its saturation point and incrementing once routes through
-    // `refcount_overflow_abort`, which panics (instead of aborting) under
-    // `cfg(test)` so the otherwise-unreachable guard can be exercised.
+    // The test configuration turns the overflow abort into a panic.
     #[test]
     #[should_panic(expected = "refcount overflow")]
     fn inc_ref_overflow_triggers_abort_guard() {
-        // SAFETY: single-threaded test. Allocate a real chunk, force its
-        // refcount to the saturation point, then `inc_ref` to drive the
-        // overflow guard. We catch the panic, restore the refcount so the
-        // chunk can be safely destroyed (avoiding a Miri leak), then resume
-        // unwinding so `should_panic` observes the original panic.
+        // SAFETY: the test owns the chunk and restores its count before
+        // destruction.
         unsafe {
-            let chunk = Chunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             chunk.as_ref().set_ref_count_for_test(usize::MAX);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 chunk.as_ref().inc_ref();
@@ -545,15 +542,14 @@ mod tests {
         }
     }
 
-    // Covers the `n == 0` early-return guards in `pre_credit_refs` /
-    // `refund_refs` (no-op, refcount untouched) plus a non-zero
-    // credit/refund round-trip that returns the count to its start.
+    // Zero credit/refund operations preserve the count; nonzero operations
+    // round-trip to the initial count.
     #[test]
     fn pre_credit_and_refund_zero_are_noops() {
         // SAFETY: single-threaded test owning the only references; we
         // restore the refcount to 0 before destroying the chunk.
         unsafe {
-            let chunk = Chunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             let header = chunk.as_ref();
             let before = header.ref_count.load(Ordering::Relaxed);
 
@@ -579,18 +575,14 @@ mod tests {
         }
     }
 
-    // Covers `pre_credit_refs`' overflow guard call site: forcing the
-    // refcount to its saturation point and pre-crediting one more routes
-    // through `refcount_overflow_abort`, which panics under `cfg(test)`.
+    // The test configuration turns pre-credit overflow into a panic.
     #[test]
     #[should_panic(expected = "refcount overflow")]
     fn pre_credit_refs_overflow_triggers_abort_guard() {
-        // SAFETY: single-threaded test. Mirrors
-        // `inc_ref_overflow_triggers_abort_guard`: drive the guard, catch
-        // the panic, restore the refcount so the chunk destroys cleanly,
-        // then resume unwinding so `should_panic` observes it.
+        // SAFETY: the test owns the chunk and restores its count before
+        // destruction.
         unsafe {
-            let chunk = Chunk::<Global>::allocate(Global, Weak::new(), 64).expect("allocate chunk");
+            let chunk = Chunk::<Global>::allocate(Arc::new(Global), Weak::new(), 64).expect("allocate chunk");
             chunk.as_ref().set_ref_count_for_test(usize::MAX);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 chunk.as_ref().pre_credit_refs(1);
