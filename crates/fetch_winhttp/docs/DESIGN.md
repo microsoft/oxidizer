@@ -487,53 +487,39 @@ reclaim it on `HANDLE_CLOSING`); we use the same shape with a pooled context
 
 ### 5.3 Ownership rule: the pool owns the context, the callback frees it
 
-A `RequestContext` is allocated as a `plurality::Box<RequestContext>` from a
-transport-owned, per-core object pool (§6). The status callback is registered
-**once on the session handle** at build time, with the notification mask
-`WINHTTP_CALLBACK_FLAG_ALL_COMPLETIONS | WINHTTP_CALLBACK_FLAG_SECURE_FAILURE |
-WINHTTP_CALLBACK_FLAG_HANDLES` - the completion notifications the state machine
-drives on (`SENDREQUEST_COMPLETE`, `WRITE_COMPLETE`, `HEADERS_AVAILABLE`,
-`DATA_AVAILABLE`, `READ_COMPLETE`, `REQUEST_ERROR`), plus `SECURE_FAILURE` for TLS
-diagnostics (§9) and `HANDLE_CLOSING` for context reclamation. Every request handle
-inherits it (§3, step S2). The
-only per-request handoff is installing the context on the new request handle:
+A `RequestContext` is a `plurality::Box<RequestContext>` rented from a per-core
+pool (§6) and handed to WinHTTP as the opaque handle context. One rule governs its
+lifetime: **the driver owns the `Box` until `WinHttpSetOption(CONTEXT_VALUE)`
+succeeds; after that WinHTTP owns it and the callback reclaims it on the final
+`HANDLE_CLOSING`.**
+
+The status callback is registered once on the session handle at build time (§3, step
+S2) with mask `ALL_COMPLETIONS | SECURE_FAILURE | HANDLES`, and every request handle
+inherits it. The only per-request handoff is installing the context pointer via
 `WinHttpSetOption(WINHTTP_OPTION_CONTEXT_VALUE, ptr)`.
 
-Until that `SetOption` succeeds the driver **still owns the `Box`**: if
-`WinHttpOpenRequest` or the context `SetOption` fails, the driver drops the `Box`
-directly (returning it to the pool) and closes the handle. The trampoline tolerates
-this because WinHTTP initializes a handle's context to null: any callback - including
-the `HANDLE_CLOSING` for an early-failed request, a connect handle, or the session -
-that arrives with a null context is ignored and never reconstructs a `Box`. Only a
-request handle whose context `SetOption` succeeded carries a non-null pointer, so
-only it is reclaimed. Once that `SetOption` succeeds the `Box` is conceptually handed
-to WinHTTP for the request handle's lifetime, and reclamation moves to the callback.
-Dropping whoever owns the `RequestGuard` (the driver, or the
-`WinHttpBodyReader` it moves into, §11.3) synchronously closes the request handle,
-closes the connect handle, and drops the session `Arc` - but does **not** free the
-context. Closing the request handle aborts any outstanding operation (its
-completion, or a cancelled `REQUEST_ERROR`, reaches a gone receiver and is dropped)
-and makes WinHTTP deliver exactly one final `HANDLE_CLOSING`; only there does the
-trampoline reclaim the `plurality::Box<RequestContext>` and drop it back into the
-pool. The context is thus the single deferred free. Releasing the connect handle and
-session `Arc` synchronously - before that `HANDLE_CLOSING` - is safe because WinHTTP
-reference-counts parent handles internally and keeps them alive until the child
-request finishes tearing down.
+Before that `SetOption` succeeds, a failed `WinHttpOpenRequest` or `SetOption` lets
+the driver drop the `Box` directly back into the pool. This is safe because WinHTTP
+initializes a handle's context to null, and the trampoline ignores any callback
+(including `HANDLE_CLOSING`) whose context is null - so early-failed requests,
+connect handles, and the session never reconstruct a `Box`.
 
-The pooled backing memory is reference-counted and outlives the `Pool` handle, so a
-`RequestContext` stays valid even if the transport or the request future is gone,
-right up until the callback drops it (the `events_once` pools are `Arc`-backed the
-same way). Validity is therefore tied to the callback protocol, not to transport or
-request lifetime - the same deferred-free discipline as `oxidizer_io`'s IOCP path,
-giving no use-after-free regardless of when the caller cancels.
+After `SetOption` succeeds, dropping the `RequestGuard` owner (the driver or the
+`WinHttpBodyReader` it moves into, §11.3) synchronously closes the request and
+connect handles and releases the session `Arc`, but does **not** free the context.
+Closing the request handle aborts any outstanding operation and makes WinHTTP deliver
+one final `HANDLE_CLOSING`, where the trampoline reclaims the `Box`. The context is
+thus the single deferred free; releasing the parent handles early is safe because
+WinHTTP reference-counts them internally and keeps them alive until the child request
+finishes tearing down.
 
-**Reclaiming a pooled Box across FFI.** Handing the `Box` to WinHTTP as an opaque
-pointer and later reconstructing it to drop it back into the pool needs a
-raw-pointer round-trip: `plurality::Box::into_raw(this) -> NonNull<T>` and
-`unsafe fn from_raw(NonNull<T>) -> Box<T>` (mirroring `std::boxed::Box` and the
-pool's slot-reclaim machinery). These land with
-[PR #585](https://github.com/microsoft/oxidizer/pull/585), so the context pointer
-both identifies and owns the `RequestContext`, with no side registry.
+Because the pool's backing memory is reference-counted (like the `Arc`-backed
+`events_once` pools), the context stays valid even after the transport or request
+future is gone - validity is tied to the callback protocol, not to transport or
+request lifetime, the same deferred-free discipline as `oxidizer_io`'s IOCP path.
+Reclaiming the `Box` across the FFI boundary uses `plurality::Box::into_raw` /
+`from_raw`, so the context pointer both identifies and owns the `RequestContext`
+with no side registry.
 
 ### 5.4 The request lifecycle is the `RequestDriver`
 
@@ -1298,7 +1284,7 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
   `Send + Sync`, cheaply clonable, and returns rented endpoints to the pool on
   drop with no external access (§6).
 - `plurality` provides the FFI raw-pointer round-trip (`Box::into_raw`/`from_raw`,
-  §5.3) as of [PR #585](https://github.com/microsoft/oxidizer/pull/585).
+  §5.3).
 - Dev: `mockall`, `static_assertions`, a localhost test server (`wiremock` or a
   hand-rolled `std::net` server), `quinn` + `h3` (localhost HTTP/3 server),
   `testing_aids`.
