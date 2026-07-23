@@ -63,6 +63,7 @@ this same extension point rather than a bespoke one.
 pub struct WinHttpDeps {
     pub tls: WinHttpTlsConfig,     // WinHTTP-specific TLS knobs (§9)
     pub options: WinHttpOptions,   // WinHTTP-specific tuning (§8, §10, §12)
+    pub sink: observed::Sink,      // telemetry sink for events/metrics (v1.1)
 }
 
 /// Creates an `HttpClientBuilder` wired to the WinHTTP transport.
@@ -82,8 +83,10 @@ it and `Arc`-clones it into each per-core transport instance it builds, keeping
 `WinHttpDeps` to plain, relocatable configuration. `WinHttpDeps` derives
 `ThreadAware` so `fetch` can clone and relocate that config per core (§4.2). The
 clock and read-buffer pool come from `CustomContext`, so they are not duplicated in
-`Extras`. There is no `anyspawn::Spawner`: no WinHTTP call the transport makes can
-block (§3.1).
+`Extras`. The `observed::Sink` is carried in `WinHttpDeps` and, like the config, is
+`Clone`/`ThreadAware` so it relocates per core; the transport emits its telemetry
+through it (detailed in v1.1). There is no `anyspawn::Spawner`: no WinHTTP call the
+transport makes can block (§3.1).
 
 ### 1.2 TLS is configured on the transport, not through `fetch`'s `TlsOptions`
 
@@ -1266,7 +1269,8 @@ Planned crate dependencies (all `default-features = false`, per workspace policy
 - `fetch`, `http_extensions`, `fetch_options`, `bytesbuf`, `bytesbuf_io` (whose
   `ReadExt::into_futures_stream` feeds the response body, §11.2), `thread_aware`,
   `tick`, `events_once`, `plurality`,
-  `ohno`, `recoverable`, `http`, `http-body`, `opentelemetry` (meter), `tracing`,
+  `ohno`, `recoverable`, `http`, `http-body`, `observed` (telemetry events and
+  metrics),
   `widestring` (UTF-16), `smallvec`. No `anyspawn`: nothing the transport calls
   can block (§3.1), so there is no blocking pool and no `Spawner`.
 - `events_once` provides the reusable one-shot event pool
@@ -1374,8 +1378,8 @@ options arrive through the generic `fetch` configuration and callers set them
 transport-agnostically, the transport routinely receives settings it cannot honor -
 a `connection_lifetime` of `Fixed`/`PerConnection` (§7.5), an idle timeout WinHTTP
 ignores (§7.4), and so on. The transport applies one policy to all of them: at build
-time, for each configured option it cannot faithfully honor, it emits a `warn`-level
-`tracing` event (and a telemetry counter) naming the option, then proceeds.
+time, for each configured option it cannot faithfully honor, it emits a `warn`-severity
+`observed` event (which also drives a telemetry counter) naming the option, then proceeds.
 
 The two alternatives are both worse. Silently ignoring an option would let a caller
 who configured, say, a bounded connection age for cert rotation believe a guarantee
