@@ -13,6 +13,33 @@ use core::{mem, str};
 
 use super::in_chunk::InChunk;
 
+/// Copies bytes into non-overlapping storage, inlining common short lengths
+/// instead of dispatching to dynamic `memcpy`.
+///
+/// # Safety
+///
+/// `dst` must be valid for writes of `len` bytes, `src` must be valid for reads
+/// of `len` bytes, and the regions must not overlap.
+#[inline]
+pub(crate) unsafe fn copy_bytes_nonoverlapping(src: *const u8, dst: *mut u8, len: usize) {
+    // SAFETY: the caller guarantees readable/writable non-overlapping regions
+    // for `len`; every match arm copies at most that exact byte count.
+    unsafe {
+        match len {
+            0 => {}
+            1 => ptr::copy_nonoverlapping(src, dst, 1),
+            2 => ptr::copy_nonoverlapping(src, dst, 2),
+            3 => ptr::copy_nonoverlapping(src, dst, 3),
+            4 => ptr::copy_nonoverlapping(src, dst, 4),
+            5 => ptr::copy_nonoverlapping(src, dst, 5),
+            6 => ptr::copy_nonoverlapping(src, dst, 6),
+            7 => ptr::copy_nonoverlapping(src, dst, 7),
+            8 => ptr::copy_nonoverlapping(src, dst, 8),
+            _ => ptr::copy_nonoverlapping(src, dst, len),
+        }
+    }
+}
+
 /// Storage reserved for a value (or slice) that has no drop requirements.
 ///
 /// Created by [`ChunkMutator::try_alloc_uninit`](super::chunk_mutator::ChunkMutator::try_alloc_uninit)
@@ -130,7 +157,11 @@ impl<'a, T> Uninit<'a, [T]> {
         // provenance (no narrow `&mut [T]` retag).
         unsafe {
             let dst = slice_ptr.as_ptr().cast::<T>();
-            ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
+            if const { mem::size_of::<T>() == 1 } {
+                copy_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast(), len);
+            } else {
+                ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
+            }
         }
         slice_ptr
     }

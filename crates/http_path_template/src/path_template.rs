@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
 use crate::error::{ParseError, ParseErrorKind};
 use crate::grammar::Grammar;
 use crate::segment::Segment;
@@ -74,7 +77,8 @@ impl<'a> PathTemplate<'a> {
     /// # Errors
     ///
     /// Returns a [`ParseError`] describing the first structural problem found
-    /// (missing leading slash, unbalanced braces, misplaced `**`, …).
+    /// (missing leading slash, invalid URI literal, unbalanced braces, misplaced
+    /// `**`, …).
     pub fn parse(template: &'a str, grammar: Grammar) -> Result<Self, ParseError> {
         Self::parse_inner(template, grammar)
     }
@@ -260,10 +264,10 @@ fn split_verb(template: &str) -> Result<(&str, Option<&str>), ParseError> {
             if verb.is_empty() {
                 return Err(ParseError::new(ParseErrorKind::EmptyVerb));
             }
-            // A verb is a `LITERAL`, so it may not contain the structural
-            // characters `/`, `*`, `{`, or `}`. (Rejecting braces also prevents a
-            // stray `{` in the verb from unbalancing the colon-depth scan above.)
-            if verb.contains(['/', '*', '{', '}']) {
+            // A verb is a path-template literal. The top-level scan has already
+            // handled `:` separators, and the literal validator rejects
+            // structural characters and malformed percent escapes.
+            if !is_valid_literal(verb) {
                 return Err(ParseError::new(ParseErrorKind::InvalidVerb));
             }
             Ok((&template[..idx], Some(verb)))
@@ -353,20 +357,9 @@ fn parse_segment(seg: &str, extended: bool) -> Result<Segment<'_>, ParseError> {
     if extended && bytes.contains(&b'{') {
         return parse_affix(seg);
     }
-    // Plain literal: reject stray braces and wildcard characters. A segment
-    // reaching here always has balanced braces (`split_and_parse_segments`
-    // guarantees it), so a `{` implies an embedded, malformed brace. Braces take
-    // priority over `*`, so return immediately on a `{` (it wins wherever it
-    // appears) and only flag a `*` for after the scan.
-    let mut has_star = false;
-    for &byte in seg.as_bytes() {
-        match byte {
-            b'{' => return Err(ParseError::new(ParseErrorKind::UnbalancedBraces)),
-            b'*' => has_star = true,
-            _ => {}
-        }
-    }
-    if has_star {
+    // Plain literals use the RFC 3986 path-segment character set. Braces remain
+    // structural, and `*`/`**` are reserved as whole-segment wildcards.
+    if !is_valid_literal(seg) {
         return Err(ParseError::new(ParseErrorKind::InvalidLiteral));
     }
     Ok(Segment::Literal(seg))
@@ -415,8 +408,9 @@ fn parse_affix(seg: &str) -> Result<Segment<'_>, ParseError> {
     let field_str = &seg[open + 1..close];
     let suffix = &seg[close + 1..];
 
-    // Prefix and suffix are literals, so a `*` is invalid there.
-    if prefix.as_bytes().contains(&b'*') || suffix.as_bytes().contains(&b'*') {
+    // Prefix and suffix are URI path-segment literals; `*` remains reserved for
+    // whole-segment wildcards.
+    if !is_valid_literal(prefix) || !is_valid_literal(suffix) {
         return Err(ParseError::new(ParseErrorKind::InvalidLiteral));
     }
     if field_str.is_empty() {
@@ -474,8 +468,9 @@ fn parse_variable(inner: &str) -> Result<Segment<'_>, ParseError> {
                 if seg.contains(&b'{') {
                     return Err(ParseError::new(ParseErrorKind::NestedVariable));
                 }
-                // Only `*`/`**` may contain a wildcard; any other `*` is invalid.
-                if seg != b"*" && seg != b"**" && seg.contains(&b'*') {
+                // `*`/`**` are wildcard atoms; every other sub-segment must be a
+                // valid URI path-segment literal.
+                if seg != b"*" && seg != b"**" && !is_valid_literal_bytes(seg) {
                     return Err(ParseError::new(ParseErrorKind::InvalidLiteral));
                 }
             }
@@ -494,4 +489,54 @@ fn is_valid_ident(ident: &[u8]) -> bool {
         _ => return false,
     }
     ident[1..].iter().all(|&b| b == b'_' || b.is_ascii_alphanumeric())
+}
+
+/// Whether `literal` is a valid URI path-segment literal for this grammar.
+///
+/// This is RFC 3986 `pchar` without raw `*`, which path templates reserve for
+/// the `*` and `**` wildcard atoms. Percent escapes must contain exactly two
+/// hexadecimal digits.
+fn is_valid_literal(literal: &str) -> bool {
+    is_valid_literal_bytes(literal.as_bytes())
+}
+
+fn is_valid_literal_bytes(bytes: &[u8]) -> bool {
+    let mut remaining = bytes;
+    while let Some((&byte, tail)) = remaining.split_first() {
+        if byte == b'%' {
+            let Some((&hi, tail)) = tail.split_first() else {
+                return false;
+            };
+            let Some((&lo, tail)) = tail.split_first() else {
+                return false;
+            };
+            if !hi.is_ascii_hexdigit() || !lo.is_ascii_hexdigit() {
+                return false;
+            }
+            remaining = tail;
+            continue;
+        }
+        if !(byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'+' | b',' | b';' | b'=' | b':' | b'@'
+            ))
+        {
+            return false;
+        }
+        remaining = tail;
+    }
+    true
+}
+
+#[cfg(test)]
+mod literal_tests {
+    use super::is_valid_literal_bytes;
+
+    #[test]
+    fn valid_percent_escapes_advance_to_following_bytes() {
+        assert!(is_valid_literal_bytes(b"%41"));
+        assert!(is_valid_literal_bytes(b"a%41z"));
+        assert!(is_valid_literal_bytes(b"%41%42"));
+    }
 }

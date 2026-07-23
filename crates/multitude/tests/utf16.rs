@@ -8,8 +8,7 @@
     reason = "residue of Rc-test removal: orphaned helpers/imports kept to preserve surrounding test bodies verbatim"
 )]
 
-//! Consolidated UTF-16 tests (smoke, builder, format, serde, cross-thread,
-//! coverage gaps, and mutation-kill cases).
+//! Consolidated UTF-16 tests for builders, formatting, serde, and sharing.
 
 #![cfg(feature = "utf16")]
 
@@ -121,7 +120,9 @@ mod utf16_string_builder {
         s.push_str(utf16str!("hello"));
         s.insert(0, 'X');
         assert_eq!(s.as_utf16_str(), utf16str!("Xhello"));
-        s.insert_utf16_str(2, utf16str!("YY"));
+        let mut inserted = arena.alloc_utf16_string();
+        inserted.push_str(utf16str!("YY"));
+        s.insert_utf16_str(2, inserted);
         assert_eq!(s.as_utf16_str(), utf16str!("XhYYello"));
         let removed = s.remove(0);
         assert_eq!(removed, 'X');
@@ -133,7 +134,9 @@ mod utf16_string_builder {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string();
         s.push_str(utf16str!("Hello, world!"));
-        s.replace_range(7..12, utf16str!("everyone"));
+        let mut everyone = arena.alloc_utf16_string();
+        everyone.push_str(utf16str!("everyone"));
+        s.replace_range(7..12, everyone);
         assert_eq!(s.as_utf16_str(), utf16str!("Hello, everyone!"));
         s.replace_range(7..15, utf16str!("X"));
         assert_eq!(s.as_utf16_str(), utf16str!("Hello, X!"));
@@ -229,14 +232,6 @@ mod utf16_string_builder {
         out.try_push_from_str("!").unwrap();
         assert_eq!(out.as_utf16_str(), utf16str!("hello, 💖!"));
     }
-
-    // === Fast, direct tests targeting Utf16String::len and ===
-    // === Utf16String::try_with_capacity_in mutants.          ===
-    //
-    // These mutants survive when the only coverage runs through heavy
-    // integration paths. Keep these tests minimal so cargo-mutants can
-    // kill them quickly (a `len -> 0` replacement should fail in
-    // milliseconds, not minutes).
 
     #[test]
     fn len_is_zero_for_fresh_string() {
@@ -2520,8 +2515,7 @@ mod utf16_tests {
         assert_eq!(s.len(), 0);
     }
 
-    /// Also kills: `utf16_string.rs:191:20` by testing truncation to len-1
-    /// where len-1 lands on a valid boundary.
+    /// Truncation to a smaller valid code-unit boundary preserves the prefix.
     #[test]
     fn utf16_191_truncate_boundary() {
         let arena = Arena::new();
@@ -2537,7 +2531,6 @@ mod utf16_tests {
     #[test]
     fn utf16_203_shrink_to_fit_or_to_and() {
         let arena = Arena::new();
-        // Case: cap > 0 && len == cap → should be no-op
         let mut s = arena.alloc_utf16_string_with_capacity(5);
         s.push('A');
         s.push('B');
@@ -2545,11 +2538,9 @@ mod utf16_tests {
         s.push('D');
         s.push('E');
         assert_eq!(s.len(), 5);
-        // Now len == cap, shrink should be no-op
         s.shrink_to_fit();
         assert_eq!(s.len(), 5);
 
-        // Case: cap == 0 → should be no-op
         let s2 = arena.alloc_utf16_string_with_capacity(0);
         assert_eq!(s2.len(), 0);
     }
@@ -2560,8 +2551,7 @@ mod utf16_tests {
         let mut s = arena.alloc_utf16_string_with_capacity(20);
         s.push('A');
         s.push('B');
-        // len=2, cap=20, reclaim_units should be 18
-        // If / instead of -, reclaim_units = 20/2 = 10 (wrong)
+        // Shrink reclaims the unused 18 code units.
         s.shrink_to_fit();
         // After shrink, cap should equal len if reclaim succeeded
         // (best-effort, so we just verify no crash)
@@ -2586,15 +2576,13 @@ mod utf16_tests {
     fn utf16_260_push_from_str_boundary() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string_with_capacity(5);
-        // Push exactly 5 ASCII chars (each is 1 u16)
-        // needed = 0 + 5*2 = 10 (worst case), but actual is 5
+        // Fill the allocation with single-unit characters.
         s.try_push_from_str("A").unwrap();
         s.try_push_from_str("B").unwrap();
         s.try_push_from_str("C").unwrap();
         s.try_push_from_str("D").unwrap();
         s.try_push_from_str("E").unwrap();
         assert_eq!(s.len(), 5);
-        // Now cap == len, pushing one more should trigger grow
         s.try_push_from_str("F").unwrap();
         assert_eq!(s.len(), 6);
     }
@@ -2603,12 +2591,10 @@ mod utf16_tests {
     fn utf16_277_push_slice_boundary() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string_with_capacity(3);
-        // Push 3 chars to fill capacity exactly
         s.push('A');
         s.push('B');
         s.push('C');
-        assert_eq!(s.len(), 3); // needed == cap, no grow
-        // Push one more to trigger grow
+        assert_eq!(s.len(), 3);
         s.push('D');
         assert_eq!(s.len(), 4);
     }
@@ -2631,13 +2617,10 @@ mod utf16_tests {
         s.push('A');
         s.push('B');
         s.push('C');
-        // Insert at end (idx == len)
         s.insert(3, 'D');
         assert_eq!(s.len(), 4);
-        // Insert at beginning
         s.insert(0, 'Z');
         assert_eq!(s.len(), 5);
-        // Now len==cap==5, insert one more to trigger grow
         s.insert(2, 'X');
         assert_eq!(s.len(), 6);
     }
@@ -2763,13 +2746,11 @@ mod utf16_round2 {
     fn utf16_337_insert_copy_oob() {
         let arena = Arena::new();
         let mut s = arena.alloc_utf16_string_with_capacity(20);
-        // Build "ABCDEFGHIJ" (10 chars)
         for ch in "ABCDEFGHIJ".chars() {
             s.push(ch);
         }
         assert_eq!(s.len(), 10);
-        // Insert "XY" at idx=3 — must shift 7 elements right
-        // With mutation: copies 10+3=13 elements (OOB!)
+        // Insertion shifts the seven trailing code units.
         s.insert(3, 'X');
         assert_eq!(s.len(), 11);
         let slice = s.as_slice();
@@ -3011,19 +2992,11 @@ mod from_coverage_extras_utf16 {
         let len = 4096;
         let src = "a".repeat(len);
 
-        // First exercise the default arena so any default-config code paths
-        // remain covered.
         let arena = Arena::new();
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
 
-        // Then force a small `max_normal_alloc` (in bytes) so the 8 KiB
-        // UTF-16 payload transcoded from a 4096-char ASCII string (2 bytes
-        // per code unit, plus the length prefix) deterministically takes
-        // the oversized-shared branch regardless of any future change to
-        // the default threshold. (A shorter string than before keeps the
-        // one-shot transcode affordable under Miri while still clearing the
-        // 4 KiB threshold.)
+        // The 8 KiB UTF-16 payload exceeds the configured 4 KiB threshold.
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let arc = arena.alloc_utf16_str_arc_from_str(&src);
         assert_eq!(arc.len(), len);
@@ -3036,19 +3009,11 @@ mod from_coverage_extras_utf16 {
         let len = 4096;
         let src = "a".repeat(len);
 
-        // First exercise the default arena so any default-config code paths
-        // remain covered.
         let arena = Arena::new();
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
 
-        // Then force a small `max_normal_alloc` (in bytes) so the 8 KiB
-        // UTF-16 payload transcoded from a 4096-char ASCII string (2 bytes
-        // per code unit, plus the length prefix) deterministically takes
-        // the oversized-shared branch regardless of any future change to
-        // the default threshold. (A shorter string than before keeps the
-        // one-shot transcode affordable under Miri while still clearing the
-        // 4 KiB threshold.)
+        // The 8 KiB UTF-16 payload exceeds the configured 4 KiB threshold.
         let arena = Arena::builder().max_normal_alloc(4096).build();
         let b = arena.alloc_utf16_str_box_from_str(&src);
         assert_eq!(b.len(), len);
@@ -3081,10 +3046,6 @@ mod from_mutants_extras_utf16_scattered {
     #[expect(unused_imports, reason = "relocated tests may reference common helpers")]
     use crate::common::{self, FailingAllocator, SendFailingAllocator};
 
-    // =====================================================================
-    // vec/vec.rs mutants
-    // =====================================================================
-
     #[test]
     fn vec_362_shrink_to_fit_boundary() {
         let arena = Arena::new();
@@ -3102,10 +3063,6 @@ mod from_mutants_extras_utf16_scattered {
         v.shrink_to_fit(); // should not panic or reallocate
         assert_eq!(v.len(), 3);
     }
-
-    // =====================================================================
-    // Vec stronger tests
-    // =====================================================================
 
     #[test]
     fn vec_451_resize_tight_budget() {
@@ -3135,22 +3092,10 @@ mod from_mutants_extras_utf16_scattered {
         let len = s.len();
         assert!(cap_before >= len + 8, "test prerequisites: cap={cap_before}, len={len}");
 
-        // Original `*`: shrink reclaims (cap_before - 8) * 2 bytes.
-        // Mutated `+`:  reclaims (cap_before - 8) + 2 bytes.
-        // In both, the shrink either succeeds (cap → 8) or fails (no-op),
-        // so cap alone may not distinguish. We instead allocate a probe
-        // immediately afterward and check whether it could fit in the
-        // *expected* reclaimed range.
+        // Shrink reclaims unused capacity in bytes, not code units.
         s.shrink_to_fit();
-        // If the shrink succeeded, cap == len. If it failed, cap unchanged.
-        // The mutation does NOT cause `try_shrink_at_cursor` to fail
-        // outright (smaller reclaim is accepted), so the observable here is
-        // the post-shrink allocation cursor — exercised indirectly by
-        // pushing more data and confirming content integrity.
         s.push('z');
         assert_eq!(s.len(), len + 1);
-        // Content integrity is the strongest assertion we can make without
-        // exposing internal arena cursors.
         let units: alloc::vec::Vec<u16> = s.as_slice().to_vec();
         let last = units.last().copied().expect("non-empty");
         assert_eq!(last, u16::from(b'z'));
@@ -3216,8 +3161,7 @@ mod from_mutants_extras_utf16_scattered {
         assert_eq!(actual, "Hello, Rust!");
     }
 
-    /// Regression guard for the prefixed shared-allocation routing
-    /// (`impl_alloc_prefixed_shared_arc`): an odd-length `u8` (`Arc<str>`)
+    /// An odd-length `u8` (`Arc<str>`)
     /// allocation leaves the shared bump cursor odd, then a `u16`
     /// (`Arc<Utf16Str>`) allocation reserves a block aligned to 4 bytes (so
     /// the per-`Arc` `AtomicU32` strong prefix is aligned, via
@@ -3229,14 +3173,8 @@ mod from_mutants_extras_utf16_scattered {
     /// contents.
     #[test]
     fn prefixed_shared_alloc_boundary_terminates_for_mixed_u8_u16() {
-        // `max_normal_alloc` must be >= MIN_MAX_NORMAL_ALLOC (4096), so the
-        // u16 normal/oversized boundary sits at `chars = mna / 2`. Sweep a
-        // few char lengths right around that boundary for an even and an
-        // odd `mna` (the parity drives the alignment edge case) plus one
-        // larger boundary position. Verifying length + a handful of
-        // sentinel code units (rather than decoding every unit) keeps the
-        // per-iteration cost down to the unavoidable one-shot transcode,
-        // which is what makes this affordable under Miri.
+        // Sweep around even and odd routing boundaries; sentinel checks keep
+        // the Miri workload bounded.
         for &mna in &[4096_usize, 4097, 6144] {
             let arena = Arena::builder().max_normal_alloc(mna).build();
             let center = mna / 2;

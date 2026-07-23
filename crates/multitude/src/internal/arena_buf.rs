@@ -14,7 +14,7 @@ use core::ptr::{self, NonNull};
 use core::{mem, slice};
 
 use super::constants::buffer_freezable;
-use super::uninit::Uninit;
+use super::uninit::{Uninit, copy_bytes_nonoverlapping};
 
 /// A growable buffer of `T` whose storage lives in an arena chunk.
 ///
@@ -107,7 +107,7 @@ impl<'a, T> ArenaBuf<'a, T> {
     }
 
     /// Returns the raw mutable pointer to the buffer's start.
-    #[allow(
+    #[expect(
         clippy::needless_pass_by_ref_mut,
         reason = "mutable self required for API safety: callers must hold exclusive access to obtain a mutable pointer"
     )]
@@ -231,7 +231,12 @@ impl<'a, T> ArenaBuf<'a, T> {
         // that `ArenaBuf` keeps `T`-aligned even while dangling (`cap == 0`
         // / ZST), and `src.as_ptr()` is likewise non-null and aligned.
         unsafe {
-            ptr::copy_nonoverlapping(src.as_ptr(), self.ptr.as_ptr().add(self.len), src.len());
+            let dst = self.ptr.as_ptr().add(self.len);
+            if const { mem::size_of::<T>() == 1 } {
+                copy_bytes_nonoverlapping(src.as_ptr().cast(), dst.cast(), src.len());
+            } else {
+                ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len());
+            }
         }
         self.len += src.len();
     }

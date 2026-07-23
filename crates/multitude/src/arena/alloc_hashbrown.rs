@@ -34,8 +34,7 @@ impl<A: Allocator + Clone> Arena<A> {
         HashMap::new_in(self)
     }
 
-    /// Create a new [`hashbrown::HashMap`] backed by this arena with room for
-    /// at least `capacity` entries before resizing.
+    /// Create an arena-backed [`hashbrown::HashMap`] with the requested capacity.
     ///
     /// # Example
     ///
@@ -68,8 +67,7 @@ impl<A: Allocator + Clone> Arena<A> {
         HashSet::new_in(self)
     }
 
-    /// Create a new [`hashbrown::HashSet`] backed by this arena with room for
-    /// at least `capacity` elements before resizing.
+    /// Create an arena-backed [`hashbrown::HashSet`] with the requested capacity.
     ///
     /// # Example
     ///

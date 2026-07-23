@@ -4,7 +4,7 @@
 [package]
 name = "http_path_template"
 description = "Parser for the google.api.http path-template grammar"
-version = "0.1.0"
+version = "0.2.0"
 readme = "README.md"
 keywords = ["grpc", "rest", "path", "template", "http"]
 categories = ["parser-implementations", "web-programming"]
@@ -20,6 +20,14 @@ repository = "https://github.com/microsoft/oxidizer/tree/main/crates/http_path_t
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 all-features = true
+
+[features]
+default = ["std"]
+# Captures a `std::backtrace::Backtrace` into `ParseError` for richer
+# diagnostics. Disable for `#![no_std]` use; the crate then requires only
+# `alloc` and captures no backtrace. `ParseError` implements
+# `core::error::Error` either way.
+std = []
 
 [dependencies]
 

@@ -1,13 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Tests for the optional serde Serialize impls (gated on the
-//! `serde` feature).
-//!
-//! Multitude provides Serialize but not Deserialize — deserializing into
-//! arena-backed types requires an arena context that serde's stock
-//! Deserialize trait cannot carry. These tests verify only Serialize
-//! round-trips.
+//! Tests for the optional Serde serialization support.
 
 #![cfg(feature = "serde")]
 #![allow(clippy::std_instead_of_core, reason = "tests use std")]
@@ -69,6 +63,15 @@ fn arena_vec_of_strings_serializes() {
     v.push("b".to_string());
     let json = serde_json::to_string(&v).unwrap();
     assert_eq!(json, "[\"a\",\"b\"]");
+}
+
+#[test]
+fn frozen_arena_slice_serializes_to_array() {
+    let arena = Arena::new();
+    let mut values = arena.alloc_vec();
+    values.extend([1_u32, 2, 3]);
+    let values = values.into_boxed_slice();
+    assert_eq!(serde_json::to_string(&values).unwrap(), "[1,2,3]");
 }
 
 mod from_coverage_extras_serde {

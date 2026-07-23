@@ -42,9 +42,7 @@ fn alloc_box_mutable_access() {
 
 #[test]
 fn alloc_box_with_copy_type_no_panic() {
-    // Regression: ArenaBox<T: Copy> originally tried to unlink a non-existent
-    // DropEntry. The bug would panic on the *first* alloc; any modest N
-    // proves the fix.
+    // Copy values have no drop entry to unlink.
     let arena = Arena::new();
     let mut handles = std::vec::Vec::new();
     let n: u64 = 256;
@@ -54,7 +52,7 @@ fn alloc_box_with_copy_type_no_panic() {
     let sum: u64 = handles.iter().map(|h| **h).sum();
     drop(handles);
     drop(arena);
-    assert_eq!(sum, (0..n).sum());
+    assert_eq!(sum, (0..n).sum::<u64>());
 }
 
 #[test]
@@ -79,16 +77,8 @@ fn try_alloc_box_with_succeeds() {
     assert_eq!(*b, 42);
 }
 
-// Regression test for the entry-alignment bug discovered during the
-// safety audit (2026-04-26): when `align_of::<T>() > align_of::<DropEntry>() = 8`,
-// the alloc path placed the `DropEntry` at an 8-aligned position that was
-// NOT `align_of::<T>()`-aligned. The reverse formula in `ArenaBox::Drop`
-// (which only knows the value's alignment) then computed a wrong entry
-// address, causing `unlink_drop_entry` to corrupt the chunk's drop list.
-//
-// Fix: alloc now over-aligns the entry slot to
-// `max(align_of::<DropEntry>(), align_of::<T>())`, so the reverse formula
-// matches the layout regardless of `T`'s alignment.
+// Drop entries use the value's alignment so allocation and unlinking compute
+// the same address.
 #[test]
 fn alloc_box_high_alignment_drop_locates_entry_correctly() {
     #[repr(align(16))]
@@ -104,9 +94,7 @@ fn alloc_box_high_alignment_drop_locates_entry_correctly() {
         _s: String,
     }
 
-    // Force the bump cursor to a non-`align_of::<T>()`-aligned position
-    // by allocating a `u8` first, then verify multiple high-alignment
-    // ArenaBox allocations (and their drops) work.
+    // Start from an unaligned cursor and verify aligned allocation and drop.
     let arena = Arena::new();
     let _decoy = arena.alloc(0_u8);
     let b16_1 = arena.alloc_box(Aligned16 { _s: "a".to_string() });
@@ -114,23 +102,16 @@ fn alloc_box_high_alignment_drop_locates_entry_correctly() {
     let b32 = arena.alloc_box(Aligned32 { _s: "c".to_string() });
     let b64 = arena.alloc_box(Aligned64 { _s: "d".to_string() });
 
-    // Each value must actually be at its required alignment.
     assert_eq!(core::ptr::from_ref::<Aligned16>(&*b16_1) as usize % 16, 0);
     assert_eq!(core::ptr::from_ref::<Aligned16>(&*b16_2) as usize % 16, 0);
     assert_eq!(core::ptr::from_ref::<Aligned32>(&*b32) as usize % 32, 0);
     assert_eq!(core::ptr::from_ref::<Aligned64>(&*b64) as usize % 64, 0);
 
-    // Drops must locate the right DropEntry slots — without the fix,
-    // this corrupts the chunk's drop list and produces a heap fault on
-    // chunk teardown (or earlier under heavy heap-checking).
     drop(b16_1);
     drop(b16_2);
     drop(b32);
     drop(b64);
 }
-
-// Trait impls (Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)
-// and as_ptr / as_mut_ptr
 
 #[test]
 fn arena_box_debug_display() {
@@ -162,7 +143,6 @@ fn arena_box_hash_via_hashmap() {
     let arena = Arena::new();
     let k = arena.alloc_box(7_u32);
 
-    // Folded mutants_extras::box_hash_forwards_to_inner.
     let bh = BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default();
     let mut h_box = bh.build_hasher();
     std::hash::Hash::hash(&k, &mut h_box);

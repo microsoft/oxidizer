@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Instruction-precise drop benchmarks for multitude.
+//! Instruction-precise clone and drop benchmarks for multitude.
 //!
 //! Mirrors `benches/criterion_drop.rs` 1:1: each gungraun function
 //! `drop_<variant>` corresponds to a criterion benchmark `drop/<variant>`.
@@ -37,5 +37,5 @@ use linux::*;
 gungraun::main!(
     config = gungraun::LibraryBenchmarkConfig::default()
         .tool(gungraun::Callgrind::with_args(["--branch-sim=yes"]));
-    library_benchmark_groups = drop_group
+    library_benchmark_groups = drop_group, clone_group
 );

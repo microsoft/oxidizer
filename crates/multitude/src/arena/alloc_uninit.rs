@@ -34,6 +34,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let mut value = arena.alloc_uninit::<u32>();
+    /// value.write(42);
+    /// assert_eq!(unsafe { value.assume_init_ref() }, &42);
+    /// ```
     #[inline]
     pub fn alloc_uninit<T>(&self) -> Alloc<'_, MaybeUninit<T>> {
         self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
@@ -45,6 +54,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(mut value) = arena.try_alloc_uninit::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// value.write(42);
+    /// assert_eq!(unsafe { value.assume_init_ref() }, &42);
+    /// ```
     #[inline]
     pub fn try_alloc_uninit<T>(&self) -> Result<Alloc<'_, MaybeUninit<T>>, AllocError> {
         self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
@@ -56,6 +76,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn alloc_zeroed<T>(&self) -> Alloc<'_, MaybeUninit<T>> {
         self.alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
@@ -67,6 +96,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed<T>(&self) -> Result<Alloc<'_, MaybeUninit<T>>, AllocError> {
         self.try_alloc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
@@ -81,6 +121,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_slice`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_slice::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[inline]
     pub fn alloc_uninit_slice<T>(&self, len: usize) -> Alloc<'_, [MaybeUninit<T>]> {
         self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
@@ -92,6 +140,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_slice::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_slice<T>(&self, len: usize) -> Result<Alloc<'_, [MaybeUninit<T>]>, AllocError> {
         self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
@@ -103,6 +161,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_slice`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_slice::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn alloc_zeroed_slice<T>(&self, len: usize) -> Alloc<'_, [MaybeUninit<T>]> {
         self.alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
@@ -114,6 +181,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_slice::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_slice<T>(&self, len: usize) -> Result<Alloc<'_, [MaybeUninit<T>]>, AllocError> {
         self.try_alloc_slice_fill_with::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
@@ -121,8 +199,7 @@ impl<A: Allocator + Clone> Arena<A> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Allocate uninitialized space for a `T` and return an
-    /// [`Box<MaybeUninit<T>, A>`](crate::Box). The caller must
+    /// Allocate uninitialized `T` storage in an arena-backed [`Box`](crate::Box). The caller must
     /// initialize the value (e.g., via [`MaybeUninit::write`]) before
     /// calling [`Box::<MaybeUninit<T>, A>::assume_init`].
     ///
@@ -133,6 +210,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_box::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_box<T>(&self) -> Box<MaybeUninit<T>, A> {
@@ -145,6 +230,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_box::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_box<T>(&self) -> Result<Box<MaybeUninit<T>, A>, AllocError> {
         self.try_alloc_box_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
@@ -156,6 +251,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_box::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_box<T>(&self) -> Box<MaybeUninit<T>, A> {
@@ -168,13 +272,23 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_box::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_box<T>(&self) -> Result<Box<MaybeUninit<T>, A>, AllocError> {
         self.try_alloc_box_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
-    /// Allocate uninitialized space for a `T` and return an
-    /// [`Arc<MaybeUninit<T>, A>`](crate::Arc).
+    /// Allocate uninitialized `T` storage in an arena-backed [`Arc`](crate::Arc).
     ///
     /// Dropping `Arc<MaybeUninit<T>>` without `assume_init` is sound
     /// (`MaybeUninit<T>` has no drop glue); after
@@ -186,6 +300,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_arc::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_arc<T>(&self) -> Arc<MaybeUninit<T>, A>
@@ -202,6 +324,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_arc::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_arc<T>(&self) -> Result<Arc<MaybeUninit<T>, A>, AllocError>
     where
@@ -217,6 +349,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_arc::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_arc<T>(&self) -> Arc<MaybeUninit<T>, A>
@@ -233,6 +374,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_arc::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_arc<T>(&self) -> Result<Arc<MaybeUninit<T>, A>, AllocError>
     where
@@ -242,8 +394,7 @@ impl<A: Allocator + Clone> Arena<A> {
         self.try_alloc_arc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
-    /// Allocate `len` uninitialized `T` slots and return an
-    /// [`Arc<[MaybeUninit<T>], A>`](crate::Arc).
+    /// Allocate `len` uninitialized `T` slots in an arena-backed [`Arc`](crate::Arc).
     ///
     /// Dropping `Arc<[MaybeUninit<T>]>`
     /// without `assume_init` is sound (`MaybeUninit<T>` has no drop
@@ -255,6 +406,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_slice_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_slice_arc::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_slice_arc<T>(&self, len: usize) -> Arc<[MaybeUninit<T>], A>
@@ -271,6 +430,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_slice_arc::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_slice_arc<T>(&self, len: usize) -> Result<Arc<[MaybeUninit<T>], A>, AllocError>
     where
@@ -286,6 +455,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_slice_arc`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_slice_arc::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_slice_arc<T>(&self, len: usize) -> Arc<[MaybeUninit<T>], A>
@@ -302,6 +480,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_slice_arc::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_slice_arc<T>(&self, len: usize) -> Result<Arc<[MaybeUninit<T>], A>, AllocError>
     where
@@ -313,12 +502,19 @@ impl<A: Allocator + Clone> Arena<A> {
 
     // ===== `Rc<MaybeUninit<T>>` / `Rc<[MaybeUninit<T>]>` mirror =====
 
-    /// Allocate uninitialized space for a `T` and return an
-    /// [`Rc<MaybeUninit<T>, A>`](crate::Rc). See [`Self::alloc_uninit_arc`].
+    /// Allocate uninitialized `T` storage in an arena-backed [`Rc`](crate::Rc). See [`Self::alloc_uninit_arc`].
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_rc::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
@@ -331,6 +527,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_rc::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
         self.try_alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::uninit)
@@ -341,6 +547,15 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_rc::<u32>();
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_rc<T>(&self) -> Rc<MaybeUninit<T>, A> {
@@ -353,17 +568,35 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_rc::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(core::mem::size_of_val(&*value), core::mem::size_of::<u32>());
+    /// assert_eq!(unsafe { *(&*value).as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_rc<T>(&self) -> Result<Rc<MaybeUninit<T>, A>, AllocError> {
         self.try_alloc_rc_with::<MaybeUninit<T>, _>(MaybeUninit::zeroed)
     }
 
-    /// Allocate `len` uninitialized `T` slots and return an
-    /// [`Rc<[MaybeUninit<T>], A>`](crate::Rc). See [`Self::alloc_uninit_slice_arc`].
+    /// Allocate `len` uninitialized `T` slots in an arena-backed [`Rc`](crate::Rc). See [`Self::alloc_uninit_slice_arc`].
     ///
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_slice_rc::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_slice_rc<T>(&self, len: usize) -> Rc<[MaybeUninit<T>], A> {
@@ -376,6 +609,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_slice_rc::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
         self.try_alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
@@ -386,6 +629,15 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_slice_rc::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_slice_rc<T>(&self, len: usize) -> Rc<[MaybeUninit<T>], A> {
@@ -398,13 +650,23 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_slice_rc::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_slice_rc<T>(&self, len: usize) -> Result<Rc<[MaybeUninit<T>], A>, AllocError> {
         self.try_alloc_slice_fill_with_rc::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
     }
 
-    /// Allocate `len` uninitialized `T` slots and return an
-    /// [`Box<[MaybeUninit<T>], A>`](crate::Box).
+    /// Allocate `len` uninitialized `T` slots in an arena-backed [`Box`](crate::Box).
     ///
     /// Dropping `Box<[MaybeUninit<T>]>` without `assume_init` is sound and does
     /// not run any element destructors (`MaybeUninit<T>` has no drop glue).
@@ -413,6 +675,14 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_uninit_slice_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_slice_box::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_slice_box<T>(&self, len: usize) -> Box<[MaybeUninit<T>], A> {
@@ -425,6 +695,16 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_slice_box::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_slice_box<T>(&self, len: usize) -> Result<Box<[MaybeUninit<T>], A>, AllocError> {
         self.try_alloc_slice_fill_with_box::<MaybeUninit<T>, _>(len, |_| MaybeUninit::uninit())
@@ -436,6 +716,15 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if the data alignment is at least 32 KiB.
     /// Use [`Self::try_alloc_zeroed_slice_box`] for a fallible variant.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_slice_box::<u32>(2);
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_slice_box<T>(&self, len: usize) -> Box<[MaybeUninit<T>], A> {
@@ -448,6 +737,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if the data alignment
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_slice_box::<u32>(2) else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(value.len(), 2);
+    /// assert_eq!(unsafe { *value[0].as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_slice_box<T>(&self, len: usize) -> Result<Box<[MaybeUninit<T>], A>, AllocError> {
         self.try_alloc_slice_fill_with_box::<MaybeUninit<T>, _>(len, |_| MaybeUninit::zeroed())
@@ -455,8 +755,7 @@ impl<A: Allocator + Clone> Arena<A> {
 }
 
 impl<A: Allocator + Clone> Arena<A> {
-    /// Allocate an uninitialized `MaybeUninit<T>` slot and return a
-    /// [`Pin<Box<MaybeUninit<T>, A>>`](core::pin::Pin). Pair with
+    /// Allocate uninitialized `T` storage in a pinned [`Box`](crate::Box). Pair with
     /// [`Box::assume_init_pin`](crate::Box::assume_init_pin) once
     /// initialization completes to obtain `Pin<Box<T, A>>` without
     /// ever moving the value off-arena.
@@ -465,6 +764,17 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Panics if the backing allocator fails or if `align_of::<T>()`
     /// is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_box_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_box_pin<T>(&self) -> Pin<Box<MaybeUninit<T>, A>>
@@ -480,6 +790,19 @@ impl<A: Allocator + Clone> Arena<A> {
     ///
     /// Returns [`AllocError`] if the backing allocator fails or if
     /// `align_of::<T>()` is at least 32 KiB.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_box_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_box_pin<T>(&self) -> Result<Pin<Box<MaybeUninit<T>, A>>, AllocError>
     where
@@ -493,6 +816,18 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_box_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_box_pin<T>(&self) -> Pin<Box<MaybeUninit<T>, A>>
@@ -507,6 +842,20 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_box_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_box_pin<T>(&self) -> Result<Pin<Box<MaybeUninit<T>, A>>, AllocError>
     where
@@ -520,6 +869,17 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_arc_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_arc_pin<T>(&self) -> Pin<Arc<MaybeUninit<T>, A>>
@@ -535,6 +895,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_arc_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_arc_pin<T>(&self) -> Result<Pin<Arc<MaybeUninit<T>, A>>, AllocError>
     where
@@ -549,6 +922,18 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_arc_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_arc_pin<T>(&self) -> Pin<Arc<MaybeUninit<T>, A>>
@@ -564,6 +949,20 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_arc_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_arc_pin<T>(&self) -> Result<Pin<Arc<MaybeUninit<T>, A>>, AllocError>
     where
@@ -578,6 +977,17 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_uninit_rc_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_uninit_rc_pin<T>(&self) -> Pin<Rc<MaybeUninit<T>, A>>
@@ -592,6 +1002,19 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_uninit_rc_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// ```
     #[inline]
     pub fn try_alloc_uninit_rc_pin<T>(&self) -> Result<Pin<Rc<MaybeUninit<T>, A>>, AllocError>
     where
@@ -605,6 +1028,18 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Panics
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let value = arena.alloc_zeroed_rc_pin::<u32>();
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[must_use]
     #[inline]
     pub fn alloc_zeroed_rc_pin<T>(&self) -> Pin<Rc<MaybeUninit<T>, A>>
@@ -619,6 +1054,20 @@ impl<A: Allocator + Clone> Arena<A> {
     /// # Errors
     ///
     /// See [`Self::alloc_uninit_box_pin`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let arena = multitude::Arena::new();
+    /// let Ok(value) = arena.try_alloc_zeroed_rc_pin::<u32>() else {
+    ///     panic!("allocation failed");
+    /// };
+    /// assert_eq!(
+    ///     core::mem::size_of_val(value.as_ref().get_ref()),
+    ///     core::mem::size_of::<u32>()
+    /// );
+    /// assert_eq!(unsafe { *value.as_ref().get_ref().as_ptr() }, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed_rc_pin<T>(&self) -> Result<Pin<Rc<MaybeUninit<T>, A>>, AllocError>
     where

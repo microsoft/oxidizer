@@ -129,12 +129,6 @@ fn verb_may_contain_underscores_and_digits() {
 }
 
 #[test]
-fn literals_may_contain_non_ascii() {
-    let t = parse("/café/{shelf}").expect("valid");
-    assert_eq!(t.segments()[0], Segment::Literal("café"));
-}
-
-#[test]
 fn returned_slices_borrow_from_the_input() {
     // The literal must be a sub-slice of the *input* buffer, not a copy.
     let input = String::from("/alpha/{beta}");
@@ -192,7 +186,7 @@ fn invalid_templates_report_the_expected_error() {
         // and wins over the (otherwise empty) verb.
         ("/a}:", ParseError::is_unbalanced_braces, "stray brace before empty verb"),
         ("/a}:b", ParseError::is_unbalanced_braces, "stray brace before verb"),
-        ("/a{b}c", ParseError::is_unbalanced_braces, "embedded braces (strict)"),
+        ("/a{b}c", ParseError::is_invalid_literal, "embedded braces (strict)"),
         ("/a*b", ParseError::is_invalid_literal, "star in literal"),
         ("/*a", ParseError::is_invalid_literal, "star-prefixed literal"),
         ("/{a=*b}", ParseError::is_invalid_literal, "star in sub-literal"),
@@ -303,7 +297,7 @@ const VALID_STRICT: &[&str] = &[
     "/v1/shelves/{shelf}/books/{book=**}",
     "/v1/shelves/{shelf}/books/{book}:archive",
     "/a/{b=c:d}",
-    "/café/{shelf}",
+    "/caf%C3%A9/{shelf}",
     "/a:b",
     "/x/{y}/**:read",
 ];
