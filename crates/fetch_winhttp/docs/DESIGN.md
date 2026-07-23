@@ -1011,8 +1011,8 @@ timers for the transport-owned steps. The transport owns exactly one timeout tha
 | `fetch` concept | Type / default | Where enforced | WinHTTP equivalent |
 |-----------------|----------------|----------------|--------------------|
 | Connect timeout | `TransportOptions.connect_timeout` (30 s) | This transport (`fetch` core does not wrap connect; `fetch_hyper` enforces it in its own connector) | `WINHTTP_OPTION_CONNECT_TIMEOUT`, applied to the send-time TCP/TLS handshake |
-| Response timeout | `http_extensions::ResponseTimeout` | Above transport, in `fetch::HttpClient::execute` (wraps the whole pipeline, maps to `HttpError::timeout`) | `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` as backstop |
-| Body idle timeout | `http_extensions::BodyTimeout` | We apply it, like `fetch_hyper`, via `HttpBodyOptions::timeout` on the response body (§11.2) | `WINHTTP_OPTION_RECEIVE_TIMEOUT` per read as backstop |
+| Response timeout | `http_extensions::ResponseTimeout` | Above transport, in `fetch::HttpClient::execute` (wraps the whole pipeline, maps to `HttpError::timeout`) | `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` (native backstop, §12.3) |
+| Body idle timeout | `http_extensions::BodyTimeout` | We apply it, like `fetch_hyper`, via `HttpBodyOptions::timeout` on the response body (§11.2) | `WINHTTP_OPTION_RECEIVE_TIMEOUT` per read (native backstop, §12.3) |
 | Seatbelt request timeout | `seatbelt::TimeoutLayer` (30 s) | Above transport | n/a |
 | Resolve/send timeouts | (no distinct `fetch` concept; transport-specific by design, §17) | this transport | `WinHttpSetTimeouts` resolve/send fields, set from `WinHttpOptions` |
 
@@ -1029,51 +1029,65 @@ send timeouts have no distinct `fetch` concept, so they are exposed as
 transport-specific `WinHttpOptions` knobs - the appropriate home for
 fine-grained network-phase timers, as discussed in the `fetch` API feedback (§17).
 
-### 12.2 One transport-scheduled delay: the outer connect deadline
+### 12.2 The outer connect timeout
 
-`WINHTTP_OPTION_CONNECT_TIMEOUT` bounds a single TCP connection *attempt*. For a
-multi-homed host (several A/AAAA records) WinHTTP tries addresses in turn, and for
-transient failures it may retry, so the *total* wall-clock time to establish a
-connection can exceed `TransportOptions.connect_timeout` even though every
-individual attempt honored the native per-attempt timer. To make
-`connect_timeout` behave as the total deadline `fetch` callers expect, the driver
-races the connect/send phase against a single `tick::Clock::delay(connect_timeout)`
-using the clock already threaded in from `CustomContext` (the same clock the body
-builder uses; no new dependency). The raced phase runs up to
-`SENDREQUEST_COMPLETE`, which covers name resolution, the TCP/TLS connect, proxy
-discovery, and submission of the request line and headers. Because this transport
-always streams the request body with `WinHttpWriteData` *after*
-`SENDREQUEST_COMPLETE` (§11.1), the body transfer is outside this deadline and is
-governed by the send/body timers instead. Whichever resolves first wins: on
-the delay firing, the driver closes the request handle (which cancels the in-flight
-connect/send, §5.3) and returns `HttpError::timeout`; on the connect/send
-completion, the delay future is dropped. One consequence worth stating: the deadline
-can fire after the request headers reached the server, so for a bodyless
-non-idempotent request the peer may already have begun processing. Deciding whether
-such a request is safe to retry is `seatbelt`'s concern (idempotency/retry policy),
-not the transport's; the transport only reports the timeout.
+`WINHTTP_OPTION_CONNECT_TIMEOUT` bounds a single TCP connection *attempt*. A
+multi-homed host has several addresses that WinHTTP tries in turn, retrying
+transient failures, so the *total* time to establish a connection can exceed
+`TransportOptions.connect_timeout` even though every individual attempt honored
+the native per-attempt timer. `fetch` callers expect `connect_timeout` to be a
+*total* deadline, so the transport enforces the total itself.
 
-This is the transport's *only* self-scheduled delay. The native per-attempt
-timers (`WINHTTP_OPTION_CONNECT_TIMEOUT` inner, plus the resolve/send/receive
-timers) remain in force; the `tick::Clock` race sits *outside* them as the total
-budget. Every other timeout is either a native WinHTTP timer for a step WinHTTP
-owns, enforced above the transport by `fetch`/`seatbelt`, or applied to the
-response body via `HttpBodyOptions` (§11.2). `tick::Clock` is the sole source of
-time on this path; the transport never calls `std::thread::sleep` or `tokio::time`.
+The driver races the connect/send phase against a single
+`tick::Clock::delay(connect_timeout)`, using the clock already threaded in from
+`CustomContext` (no new dependency). Whichever finishes first wins: if the timer
+fires, the driver closes the request handle - which cancels the in-flight
+connect (§5.3) - and returns `HttpError::timeout`; if the connect completes
+first, the timer future is dropped.
 
-### 12.3 What is controllable in tests
+The raced phase runs up to `SENDREQUEST_COMPLETE`: name resolution, TCP/TLS
+connect, proxy discovery, and sending the request line and headers. The request
+body is streamed afterward with `WinHttpWriteData` (§11.1), so it lies outside
+this deadline and is governed by the send/body timers instead.
+
+One consequence: the deadline can fire after the headers reached the server, so a
+bodyless non-idempotent request may already be in processing when it trips.
+Whether that request is safe to retry is `seatbelt`'s concern, not the
+transport's; the transport only reports the timeout.
+
+This is the transport's *only* self-scheduled timer. `tick::Clock` is the sole
+source of time on this path; the transport never calls `std::thread::sleep` or
+`tokio::time`.
+
+### 12.3 Why the native receive timers are a backstop
+
+WinHTTP always applies its own receive timers - they have non-zero defaults that
+cannot be disabled - so the transport sets them to the `fetch`-configured value
+rather than leaving them at WinHTTP's defaults. This serves two purposes. First,
+it keeps the two layers in agreement: without it, WinHTTP's default timer could
+fire *before* the `fetch`-level timeout and surface as a raw WinHTTP error
+instead of the canonical `HttpError::timeout`. Second, it is a liveness backstop.
+The `fetch`-level response and body timeouts are futures driven by the caller's
+async executor; if that executor stalls, those timeouts cannot fire. The native
+timers run on WinHTTP's own threads, independent of the caller's executor, so a
+hung network read is always aborted at the OS level and its socket released,
+regardless of executor liveness. In the normal case the `fetch`-level timeout
+still fires first and reports the canonical error; the native timer only bites
+when the upper layer cannot.
+
+### 12.4 What is controllable in tests
 
 Timeout *configuration* is asserted in unit tests: the mock bindings record the
 `WinHttpSetTimeouts` arguments and the `WINHTTP_OPTION_CONNECT_TIMEOUT` /
 `WINHTTP_OPTION_RECEIVE_RESPONSE_TIMEOUT` set-option calls, so a test asserts that
 each `fetch` timeout option is translated into the correct WinHTTP timer value.
 
-The one transport-scheduled delay - the outer connect deadline (§12.2) - *is*
+The one transport-scheduled timer - the outer connect timeout (§12.2) - *is*
 driven by `tick::Clock`, so it is unit-testable deterministically: with a mock
 clock and mock bindings that never complete the connect, a test advances the clock
 past `connect_timeout` and asserts the driver closes the handle and yields
 `HttpError::timeout`, and conversely that a connect completing before the deadline
-drops the delay without firing.
+drops the timer without firing.
 
 Timeout *firing against the real OS* cannot be made deterministic: the real
 WinHTTP path uses the real OS clock, which the tests cannot freeze or
@@ -1168,7 +1182,7 @@ after the table.
 | TLS (§9) | `WINHTTP_FLAG_SECURE` iff `https`; security-flags bitmask per `accept_invalid_*`; `SECURE_FAILURE` -> `tls`-labeled, non-retryable | mTLS out of scope (§9.1) - nothing to assert |
 | Compression / redirects / statelessness (§10) | `DECOMPRESSION`, `REDIRECT_POLICY_NEVER`, `DISABLE_COOKIES`, `DISABLE_AUTHENTICATION` set; an already-decoded body streams untouched; a 3xx is surfaced verbatim | brotli/zstd response passes through still-encoded |
 | Connection management (§7) | connect handle opened per request and closed with it; max-conns mapping; keep-alive left enabled; `DISABLE_GLOBAL_POOLING` on the session | `connection_lifetime` Fixed/PerConnection: accepted, no recycling, emits the `warn` "not honored" event |
-| Timeouts (§12) | `WinHttpSetTimeouts` + connect/response options get values derived from `fetch` options; mock-clock connect deadline (§12.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the delay unfired |
+| Timeouts (§12) | `WinHttpSetTimeouts` + connect/response options get values derived from `fetch` options; mock-clock connect deadline (§12.2): advance past `connect_timeout` -> handle closed + `HttpError::timeout` | a connect completing first drops the timer unfired |
 
 - **Inline / reentrant completion.** Configure `MockBindings` so an async call
   (e.g. `read_data`) fires its completion *synchronously, inline, on the submitting
@@ -1230,7 +1244,7 @@ elsewhere in `fetch`). These validate the real OS path end to end:
   QUIC unreachable" path yields the expected failure (`0x2EFE`/`0x2EFD`).
 - Connection reuse: two sequential requests to the same authority reuse the
   connection (observable via server-side connection counting).
-- Timeout configuration is validated only structurally (unit, §12.3). Integration
+- Timeout configuration is validated only structurally (unit, §12.4). Integration
   tests set every timeout large enough that it can never fire during a healthy
   run, so a tripped timeout is always a real failure, never a timing race. No
   integration test asserts a timeout *firing* against a slow/black-hole endpoint,
