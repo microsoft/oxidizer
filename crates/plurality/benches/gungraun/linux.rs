@@ -12,6 +12,7 @@
     clippy::borrow_as_ptr,
     clippy::doc_markdown,
     clippy::cast_precision_loss,
+    clippy::used_underscore_binding,
     reason = "test and benchmark code"
 )]
 #![allow(missing_docs, reason = "benchmark")]
@@ -21,27 +22,20 @@
     reason = "gungraun bench inputs are passed by value by the framework"
 )]
 
-//! Callgrind (instruction-count) benchmarks for every allocation function, run
-//! via [gungraun]. Each benchmark runs the hot operation **once** — Callgrind
-//! counts instructions exactly, so no loop is needed.
-//!
-//! This mirrors `benches/criterion_alloc.rs` 1:1: every benchmark here calls the
-//! same `ops::<name>` body that the criterion suite loops `N` times. The
+//! Callgrind (instruction-count) benchmarks, run via [gungraun]. Each benchmark
+//! runs the hot operation **once** — Callgrind counts instructions exactly, so
+//! no loop is needed. Every body here is also looped by the criterion suite; the
 //! `perf_report.rs` script aligns the two by `<group>/<name>`.
-//!
-//! Run with: `cargo bench --bench gungraun_alloc` (needs `valgrind`).
 //!
 //! [gungraun]: https://github.com/gungraun/gungraun
 
 use std::hint::black_box;
 
 use gungraun::prelude::*;
+use infinity_pool::{BlindPool, LocalBlindPool, LocalPinnedPool, PinnedPool};
 use plurality::{Arc, Pool, Rc};
 
-#[path = "../shared/ops.rs"]
-mod ops;
-
-use ops::Obj;
+use crate::ops::{self, Obj};
 
 /// Defines a `#[library_benchmark]` that runs `ops::<name>` once against a
 /// pre-warmed pool (returned from the timed region so teardown isn't measured).
@@ -59,6 +53,8 @@ macro_rules! alloc_bench {
 alloc_bench!(box_val);
 alloc_bench!(box_with);
 alloc_bench!(box_uninit);
+alloc_bench!(box_unsize);
+alloc_bench!(arc_unsize);
 alloc_bench!(arc_val);
 alloc_bench!(arc_with);
 alloc_bench!(arc_uninit);
@@ -83,12 +79,55 @@ fn rc_clone((pool, base): (Pool<Obj>, Rc<Obj>)) -> (Pool<Obj>, Rc<Obj>) {
     (pool, base)
 }
 
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_plurality)]
+fn plurality_box(pool: Pool<Obj>) -> Pool<Obj> {
+    ops::plurality_box(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_infinity_pinned)]
+fn infinity_pinned(pool: PinnedPool<Obj>) -> PinnedPool<Obj> {
+    ops::infinity_pinned(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_infinity_local_pinned)]
+fn infinity_local_pinned(pool: LocalPinnedPool<Obj>) -> LocalPinnedPool<Obj> {
+    ops::infinity_local_pinned(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_infinity_blind)]
+fn infinity_blind(pool: BlindPool) -> BlindPool {
+    ops::infinity_blind(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_infinity_local_blind)]
+fn infinity_local_blind(pool: LocalBlindPool) -> LocalBlindPool {
+    ops::infinity_local_blind(black_box(&pool), 0);
+    pool
+}
+
+#[library_benchmark]
+#[bench::op(args = (ops::CAP,), setup = ops::setup_std_box)]
+fn std_box(_setup: ()) {
+    ops::std_box(0);
+}
+
 library_benchmark_group!(
     name = alloc,
     benchmarks = [
         box_val,
         box_with,
         box_uninit,
+        box_unsize,
+        arc_unsize,
         arc_val,
         arc_with,
         arc_uninit,
@@ -102,3 +141,15 @@ library_benchmark_group!(
 );
 
 library_benchmark_group!(name = clone, benchmarks = [arc_clone, rc_clone]);
+
+library_benchmark_group!(
+    name = dyn_box,
+    benchmarks = [
+        plurality_box,
+        infinity_pinned,
+        infinity_local_pinned,
+        infinity_blind,
+        infinity_local_blind,
+        std_box
+    ]
+);
