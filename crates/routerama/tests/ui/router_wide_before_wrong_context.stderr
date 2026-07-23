@@ -1,0 +1,13 @@
+error: a router-wide `#[before]` interceptor runs before route resolution and takes `&mut BeforeContext<'_>`, the whole mutable request head. Name handlers (`#[before(handler, ...)]`) to run after route selection instead, taking `&mut SelectedContext<'_>`
+  --> tests/ui/router_wide_before_wrong_context.rs:16:27
+   |
+16 |     async fn guard(&self, _ctx: &mut SelectedContext<'_>) -> Before<StatusCode> {
+   |                           ^^^^
+
+warning: unused imports: `Before`, `SelectedContext`, and `StatusCode`
+ --> tests/ui/router_wide_before_wrong_context.rs:4:24
+  |
+4 | use routerama::route::{Before, SelectedContext, StatusCode, router};
+  |                        ^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

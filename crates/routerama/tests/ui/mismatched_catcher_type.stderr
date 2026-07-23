@@ -1,0 +1,5 @@
+error: the `#[catch(RejectionType)]` argument must exactly match the catcher's by-value parameter type
+  --> tests/ui/mismatched_catcher_type.rs:18:41
+   |
+18 |     async fn catcher(&self, _rejection: BodyRejection<core::convert::Infallible>) -> StatusCode {
+   |                                         ^^^^^^^^^^^^^

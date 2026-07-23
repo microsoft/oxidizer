@@ -1,0 +1,13 @@
+error: a `#[before]` interceptor must return `Before<R>`
+  --> tests/ui/before_bad_return.rs:16:60
+   |
+16 |     async fn guard(&self, _ctx: &mut BeforeContext<'_>) -> StatusCode {
+   |                                                            ^^^^^^^^^^
+
+warning: unused imports: `BeforeContext` and `StatusCode`
+ --> tests/ui/before_bad_return.rs:4:24
+  |
+4 | use routerama::route::{BeforeContext, StatusCode, router};
+  |                        ^^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

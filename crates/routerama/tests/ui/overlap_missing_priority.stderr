@@ -1,0 +1,5 @@
+error: overlapping routes require an explicit `priority = <integer>` on every declaration
+  --> tests/ui/overlap_missing_priority.rs:17:7
+   |
+17 |     #[route(GET, "/", host = "two.example")]
+   |       ^^^^^

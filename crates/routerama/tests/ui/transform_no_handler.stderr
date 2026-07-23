@@ -1,0 +1,25 @@
+error: unexpected end of input, `#[transform]` must name at least one handler whose body it owns, so unrelated routes are not forced to buffer or wrap
+  --> tests/ui/transform_no_handler.rs:18:27
+   |
+18 |     #[transform(limit = 64)]
+   |                           ^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_no_handler.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `routerama::response::Body`
+ --> tests/ui/transform_no_handler.rs:5:5
+  |
+5 | use routerama::response::Body;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BodyTransform`, `BytesBody`, `RequestParts`, and `StatusCode`
+ --> tests/ui/transform_no_handler.rs:6:24
+  |
+6 | use routerama::route::{BodyTransform, BytesBody, RequestParts, StatusCode, router};
+  |                        ^^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^

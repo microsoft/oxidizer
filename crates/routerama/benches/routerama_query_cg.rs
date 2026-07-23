@@ -68,32 +68,38 @@ mod linux {
     }
 
     #[library_benchmark]
-    fn produce_common_routerama_reserved() {
-        let query = direct_common_value();
-        let mut output = String::with_capacity(64);
+    #[bench::run(direct_common_value(), String::with_capacity(64))]
+    fn produce_common_routerama_reserved(query: DirectCommon<'static>, mut output: String) -> (DirectCommon<'static>, String) {
         direct_produce_common(&query, &mut output);
+        (query, output)
     }
 
     #[library_benchmark]
-    fn produce_common_serde_html_form_reserved() {
-        let query = serde_common_value();
-        let mut output = String::with_capacity(64);
+    #[bench::run(serde_common_value(), String::with_capacity(64))]
+    fn produce_common_serde_html_form_reserved(query: SerdeCommon<'static>, mut output: String) -> (SerdeCommon<'static>, String) {
         serde_html_form_produce_common_reserved(&query, &mut output);
+        (query, output)
     }
 
     #[library_benchmark]
-    fn produce_common_routerama_allocating() {
-        direct_produce_common_allocating(&direct_common_value());
+    #[bench::run(direct_common_value())]
+    fn produce_common_routerama_allocating(query: DirectCommon<'static>) -> DirectCommon<'static> {
+        direct_produce_common_allocating(&query);
+        query
     }
 
     #[library_benchmark]
-    fn produce_common_serde_urlencoded_allocating() {
-        serde_urlencoded_produce_common(&serde_common_value());
+    #[bench::run(serde_common_value())]
+    fn produce_common_serde_urlencoded_allocating(query: SerdeCommon<'static>) -> SerdeCommon<'static> {
+        serde_urlencoded_produce_common(&query);
+        query
     }
 
     #[library_benchmark]
-    fn produce_common_serde_html_form_allocating() {
-        serde_html_form_produce_common(&serde_common_value());
+    #[bench::run(serde_common_value())]
+    fn produce_common_serde_html_form_allocating(query: SerdeCommon<'static>) -> SerdeCommon<'static> {
+        serde_html_form_produce_common(&query);
+        query
     }
 
     library_benchmark_group!(

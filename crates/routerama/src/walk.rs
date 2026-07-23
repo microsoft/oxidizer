@@ -5,6 +5,7 @@ use routerama_build::trie::Leaf;
 use smallvec::SmallVec;
 
 use crate::codegen_helpers::ScannedPath;
+use crate::literal_edge::find_literal;
 use crate::rt_node::RtNode;
 
 /// Request state shared by trie descent.
@@ -19,13 +20,13 @@ enum WalkAction<'a> {
     Leaves(&'a [Leaf]),
 }
 
-impl<'p> Walk<'_, 'p> {
+impl Walk<'_, '_> {
     /// Returns the first matching leaf without recursive trie descent.
     // Static/dynamic differential and structured-path tests exercise traversal;
     // many local rewrites are equivalent because pending edges backtrack.
     #[cfg_attr(test, mutants::skip)]
-    pub(crate) fn descend_iterative<const VERBS: bool>(&self, mut node: &'p RtNode, mut depth: usize) -> Option<&'p Leaf> {
-        let mut pending: SmallVec<[WalkAction<'p>; 4]> = SmallVec::new();
+    pub(crate) fn descend_iterative<'n, const VERBS: bool>(&self, mut node: &'n RtNode, mut depth: usize) -> Option<&'n Leaf> {
+        let mut pending: SmallVec<[WalkAction<'n>; 4]> = SmallVec::new();
         let count = self.path.count();
         loop {
             let segment = self.path.segment(depth);
@@ -46,10 +47,7 @@ impl<'p> Walk<'_, 'p> {
                 && (!node.literals.is_empty() || !node.affix.is_empty())
             {
                 let bytes = segment.as_bytes();
-                let literal = node.literals.iter().find(|(key, _)| {
-                    let key = key.as_bytes();
-                    key.len() == bytes.len() && key.first() == bytes.first() && key == bytes
-                });
+                let literal = find_literal(&node.literals, bytes);
                 let first_affix = node.affix.iter().enumerate().find(|(_, (prefix, suffix, _))| {
                     bytes.len() > prefix.len() + suffix.len() && bytes.starts_with(prefix.as_bytes()) && bytes.ends_with(suffix.as_bytes())
                 });
@@ -57,7 +55,7 @@ impl<'p> Walk<'_, 'p> {
                 if node.affix.is_empty()
                     && node.single.is_none()
                     && node.rest.is_empty()
-                    && let Some((_, child)) = literal
+                    && let Some(child) = literal
                 {
                     node = child;
                     depth += 1;
@@ -84,7 +82,6 @@ impl<'p> Walk<'_, 'p> {
                     }
 
                     node = literal
-                        .map(|(_, child)| child)
                         .or_else(|| first_affix.map(|(_, (_, _, child))| child))
                         .or(single)
                         .expect("at least one matching child was found");
@@ -131,7 +128,7 @@ impl<'p> Walk<'_, 'p> {
     }
 
     /// Selects the first leaf matching the method and custom verb.
-    fn dispatch<const VERBS: bool>(&self, leaves: &'p [Leaf]) -> Option<&'p Leaf> {
+    fn dispatch<'n, const VERBS: bool>(&self, leaves: &'n [Leaf]) -> Option<&'n Leaf> {
         leaves
             .iter()
             .find(|leaf| leaf.method == self.method && (!VERBS || leaf.verb.as_deref() == self.verb))
@@ -148,8 +145,209 @@ mod tests {
     use http_path_template::{Grammar, PathTemplate};
     use routerama_build::Route;
 
+    use crate::literal_edge::SORTED_LITERAL_FANOUT;
     use crate::raw_resolver::RawResolver;
     use crate::route_match::RouteMatch;
+
+    /// Widths straddling the linear/binary lookup boundary.
+    const WIDTHS: [usize; 5] = [
+        SORTED_LITERAL_FANOUT - 1,
+        SORTED_LITERAL_FANOUT,
+        SORTED_LITERAL_FANOUT + 1,
+        4 * SORTED_LITERAL_FANOUT,
+        64 * SORTED_LITERAL_FANOUT,
+    ];
+
+    /// Builds a `GET` route from a default-grammar template.
+    fn route(name: &str, pattern: &str) -> Route {
+        Route::new(
+            name,
+            "GET",
+            PathTemplate::parse(pattern, Grammar::default().with_segment_affixes()).expect("valid template"),
+        )
+    }
+
+    #[test]
+    fn wide_literal_fanout_resolves_first_middle_last_and_misses() {
+        for width in WIDTHS {
+            let resolver = RawResolver::new((0..width).map(|entry| route(&format!("Entry{entry}"), &format!("/scale/entry-{entry:04}"))));
+
+            for entry in [0, width / 2, width - 1] {
+                let path = format!("/scale/entry-{entry:04}");
+                let matched = resolver
+                    .resolve("GET", &path)
+                    .unwrap_or_else(|| panic!("width {width} failed to match entry {entry}"));
+                assert_eq!(matched.name(), format!("Entry{entry}"));
+            }
+            assert!(
+                resolver.resolve("GET", "/scale/entry-9999").is_none(),
+                "width {width} matched a miss"
+            );
+            assert!(resolver.resolve("GET", "/scale/entry-0000/extra").is_none());
+            assert!(resolver.resolve("GET", "/scale").is_none());
+            assert!(resolver.resolve("POST", "/scale/entry-0000").is_none());
+        }
+    }
+
+    #[test]
+    fn wide_literal_fanout_keeps_precedence_over_affix_single_and_rest() {
+        for width in WIDTHS {
+            let mut routes: Vec<Route> = (0..width)
+                .map(|entry| route(&format!("Entry{entry}"), &format!("/mix/entry-{entry:04}")))
+                .collect();
+            // Siblings of every other kind at the same wide node.
+            routes.push(route("Affix", "/mix/img-{id}.png"));
+            routes.push(route("Single", "/mix/{name}"));
+            routes.push(route("Rest", "/mix/{tail=**}"));
+            let resolver = RawResolver::new(routes);
+
+            let last = format!("/mix/entry-{:04}", width - 1);
+            let literal = resolver.resolve("GET", &last).expect("the last literal matches");
+            assert_eq!(
+                literal.name(),
+                format!("Entry{}", width - 1),
+                "width {width} lost literal precedence"
+            );
+            assert_eq!(literal.captures().count(), 0);
+
+            let affix = resolver.resolve("GET", "/mix/img-7.png").expect("the affix sibling matches");
+            assert_eq!(affix.name(), "Affix");
+            assert_eq!(affix.capture("id"), Some("7"));
+
+            let single = resolver.resolve("GET", "/mix/other").expect("the single wildcard matches");
+            assert_eq!(single.name(), "Single");
+            assert_eq!(single.capture("name"), Some("other"));
+
+            let rest = resolver.resolve("GET", "/mix/other/deeper").expect("the rest sibling matches");
+            assert_eq!(rest.name(), "Rest");
+            assert_eq!(rest.capture("tail"), Some("other/deeper"));
+
+            // A literal segment also reachable through the rest edge stays a
+            // literal match at its own depth and a rest match below it.
+            let below = format!("/mix/entry-{:04}/deeper", width - 1);
+            let deeper = resolver
+                .resolve("GET", &below)
+                .expect("a deeper path falls through to the rest sibling");
+            assert_eq!(deeper.name(), "Rest");
+        }
+    }
+
+    #[test]
+    fn wide_literal_fanout_still_backtracks_to_single_and_rest() {
+        for width in WIDTHS {
+            let mut routes: Vec<Route> = (0..width)
+                .map(|entry| route(&format!("DeadEnd{entry}"), &format!("/back/entry-{entry:04}/no")))
+                .collect();
+            routes.push(route("Single", "/back/{name}/yes"));
+            routes.push(route("Rest", "/back/{tail=**}"));
+            let resolver = RawResolver::new(routes);
+
+            for entry in [0, width / 2, width - 1] {
+                let key = format!("entry-{entry:04}");
+                let path = format!("/back/{key}/yes");
+                let matched = resolver
+                    .resolve("GET", &path)
+                    .unwrap_or_else(|| panic!("width {width} failed to backtrack for entry {entry}"));
+                assert_eq!(matched.name(), "Single");
+                assert_eq!(matched.capture("name"), Some(key.as_str()));
+
+                let deep = format!("/back/{key}/deep/er");
+                let rested = resolver
+                    .resolve("GET", &deep)
+                    .unwrap_or_else(|| panic!("width {width} failed to reach the rest edge for entry {entry}"));
+                assert_eq!(rested.name(), "Rest");
+            }
+        }
+    }
+
+    #[test]
+    fn wide_literal_fanout_is_sorted_even_when_subtree_weights_differ() {
+        // Sibling weights decide the narrow-node order, so a wide node whose
+        // children carry very different subtree weights is the case where the
+        // weight order and the key order disagree. Compilation must sort it, or
+        // the search would miss keys the scan used to find.
+        for width in [SORTED_LITERAL_FANOUT, SORTED_LITERAL_FANOUT + 4] {
+            let mut routes: Vec<Route> = (0..width)
+                .map(|entry| route(&format!("Leaf{entry}"), &format!("/heavy/k{entry:02}")))
+                .collect();
+            // Two late keys become the heaviest subtrees in the node.
+            for entry in [width - 1, width - 2] {
+                for extra in 0..8 {
+                    routes.push(route(&format!("Sub{entry}x{extra}"), &format!("/heavy/k{entry:02}/sub{extra}")));
+                }
+            }
+            let resolver = RawResolver::new(routes);
+
+            for entry in 0..width {
+                let path = format!("/heavy/k{entry:02}");
+                let matched = resolver
+                    .resolve("GET", &path)
+                    .unwrap_or_else(|| panic!("width {width}: `{path}` must resolve after weight-independent sorting"));
+                assert_eq!(matched.name(), format!("Leaf{entry}"));
+            }
+            let heavy = format!("/heavy/k{:02}/sub3", width - 1);
+            assert_eq!(
+                resolver.resolve("GET", &heavy).expect("the heavy subtree still resolves").name(),
+                format!("Sub{}x3", width - 1)
+            );
+            assert!(resolver.resolve("GET", "/heavy/k99").is_none());
+        }
+    }
+
+    #[test]
+    fn wide_literal_fanout_matches_keys_that_are_prefixes_of_each_other() {
+        // Binary search compares whole keys in byte order, so keys that share a
+        // prefix and differ only in length must still resolve exactly.
+        let mut routes: Vec<Route> = (0..SORTED_LITERAL_FANOUT)
+            .map(|entry| route(&format!("Pad{entry}"), &format!("/pre/pad-{entry:04}")))
+            .collect();
+        for (index, key) in ["a", "ab", "abc", "b", "ba"].into_iter().enumerate() {
+            routes.push(route(&format!("Key{index}"), &format!("/pre/{key}")));
+        }
+        let resolver = RawResolver::new(routes);
+
+        for (index, key) in ["a", "ab", "abc", "b", "ba"].into_iter().enumerate() {
+            let path = format!("/pre/{key}");
+            let matched = resolver.resolve("GET", &path).unwrap_or_else(|| panic!("`{key}` must resolve"));
+            assert_eq!(matched.name(), format!("Key{index}"));
+        }
+        for miss in ["abcd", "ac", "bb", ""] {
+            let path = format!("/pre/{miss}");
+            assert!(resolver.resolve("GET", &path).is_none(), "`{miss}` must miss");
+        }
+    }
+
+    #[test]
+    fn wide_literal_fanout_agrees_with_a_linear_scan_over_a_generated_request_space() {
+        // Differential property: every probe over a wide table must select the
+        // same route a linear scan of the registered keys would.
+        let width = 4 * SORTED_LITERAL_FANOUT;
+        let keys: Vec<String> = (0..width).map(|entry| format!("k{entry:03}x{}", entry % 7)).collect();
+        let resolver = RawResolver::new(
+            keys.iter()
+                .enumerate()
+                .map(|(entry, key)| route(&format!("Entry{entry}"), &format!("/probe/{key}"))),
+        );
+
+        let mut probes: Vec<String> = keys.clone();
+        for entry in 0..width {
+            probes.push(format!("k{entry:03}"));
+            probes.push(format!("k{entry:03}x{}z", entry % 7));
+            probes.push(format!("K{entry:03}x{}", entry % 7));
+        }
+        probes.extend([String::new(), "k".into(), "zzz".into()]);
+
+        for probe in &probes {
+            let expected = keys.iter().position(|key| key == probe).map(|entry| format!("Entry{entry}"));
+            let path = format!("/probe/{probe}");
+            let matched = resolver.resolve("GET", &path);
+            assert_eq!(
+                matched.as_ref().map(RouteMatch::name),
+                expected.as_deref(),
+                "disagreement on `/probe/{probe}`"
+            );
+        }
+    }
 
     #[test]
     fn deep_paths_beyond_max_segments_return_none_without_panicking() {

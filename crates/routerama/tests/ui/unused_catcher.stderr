@@ -1,0 +1,5 @@
+error: unused extractor catcher: no built-in extractor in this service has that rejection type; custom extractors require `from = ExtractorType`
+  --> tests/ui/unused_catcher.rs:17:7
+   |
+17 |     #[catch(StatusCode)]
+   |       ^^^^^

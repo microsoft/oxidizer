@@ -1,0 +1,5 @@
+error: request-parts extractor lifetimes must be elided or use `'_`; an explicit lifetime cannot be tied unambiguously to the request-parts borrow
+  --> tests/ui/named_parts_lifetime.rs:16:39
+   |
+16 |     async fn invalid(&self, headers: &'static HeaderMap) -> StatusCode {
+   |                                       ^^^^^^^

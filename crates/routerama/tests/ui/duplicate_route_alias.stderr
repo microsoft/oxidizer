@@ -1,0 +1,11 @@
+error: duplicate method/path aliases on one handler are not candidates; remove the duplicate declaration
+  --> tests/ui/duplicate_route_alias.rs:12:7
+   |
+12 |     #[route(GET, "/items", priority = 1)]
+   |       ^^^^^
+
+error: duplicate method/path aliases on one handler are not candidates; remove the duplicate declaration
+  --> tests/ui/duplicate_route_alias.rs:13:7
+   |
+13 |     #[route(GET, "/items", priority = 0)]
+   |       ^^^^^

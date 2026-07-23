@@ -1,0 +1,25 @@
+error: `#[transform]` interceptor methods cannot have generic parameters; only a streaming `#[transform(stream, ...)]` is generic, over its transport request body
+  --> tests/ui/transform_buffered_generic.rs:19:19
+   |
+19 |     async fn wrap<B>(&self, _parts: &RequestParts, body: Bytes) -> BodyTransform<Body, StatusCode>
+   |                   ^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_buffered_generic.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `routerama::response::Body`
+ --> tests/ui/transform_buffered_generic.rs:5:5
+  |
+5 | use routerama::response::Body;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BodyTransform`, `BytesBody`, `RequestParts`, and `StatusCode`
+ --> tests/ui/transform_buffered_generic.rs:6:24
+  |
+6 | use routerama::route::{BodyTransform, BytesBody, RequestParts, StatusCode, router};
+  |                        ^^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^

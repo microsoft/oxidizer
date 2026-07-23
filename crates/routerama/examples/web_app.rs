@@ -6,17 +6,17 @@
 //!
 //! Instead of registering routes with the router from `axum`, every request falls
 //! through to a single [`fallback`](axum::Router::fallback) handler that hands
-//! the method and path to a [`#[resolver]`](routerama::resolver) and matches on
-//! the typed result. The list route separately decodes and produces a typed
-//! query string.
+//! the complete request to a [`#[router]`](routerama::route::router). The list
+//! handler extracts a typed query directly.
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::State;
-use axum::http::{Method, StatusCode, Uri};
+use axum::extract::State as AxumState;
+use axum::http::StatusCode;
 use routerama::query::{FromQuery, ToQuery};
-use routerama::{ResolveError, resolver};
+use routerama::response::Response;
+use routerama::route::{Query, Request, router};
 use tokio::net::TcpListener;
 
 #[derive(Clone, Debug, FromQuery, ToQuery)]
@@ -26,54 +26,54 @@ struct BooksQuery {
     tag: Vec<String>,
 }
 
-/// The application's routing table. Captures are typed and validated against the
-/// path template at compile time.
-#[resolver]
-enum Route<'p> {
-    #[route(GET, "/books")]
-    ListBooks,
-
-    #[route(GET, "/books/{id}")]
-    GetBook { id: u32 },
-
-    #[route(GET, "/hello/{name}")]
-    Greet { name: String },
-
-    #[route(GET, "/echo/{word}")]
-    Echo { word: &'p str },
-}
-
 /// Shared, read-only application state.
 struct AppState {
-    resolver: RouteResolver,
     books: Vec<(u32, &'static str)>,
 }
 
-/// The single handler: axum extracts the method and URI, `routerama`
-/// does all the routing, and each typed `Route` becomes a response.
-async fn dispatch(State(state): State<Arc<AppState>>, method: Method, uri: Uri) -> (StatusCode, String) {
-    match state.resolver.resolve(method.as_str(), uri.path()) {
-        Ok(Route::ListBooks) => list_books(&state.books, uri.query().unwrap_or_default()),
-        Ok(Route::GetBook { id }) => match state.books.iter().find(|(book_id, _)| *book_id == id) {
+#[allow(
+    clippy::allow_attributes,
+    unknown_lints,
+    clippy::unused_async,
+    clippy::unused_async_trait_impl,
+    reason = "router handlers must be async; `clippy::unused_async_trait_impl` does not exist before clippy 0.1.98"
+)]
+#[router]
+impl AppState {
+    #[route(GET, "/books")]
+    async fn list_books(&self, query: Query<BooksQuery>) -> (StatusCode, String) {
+        list_books(&self.books, query.into_inner())
+    }
+
+    #[route(GET, "/books/{id}")]
+    async fn get_book(&self, id: u32) -> (StatusCode, String) {
+        match self.books.iter().find(|(book_id, _)| *book_id == id) {
             Some((id, title)) => (StatusCode::OK, format!("{id}: {title}\n")),
             None => (StatusCode::NOT_FOUND, format!("no book with id {id}\n")),
-        },
-        Ok(Route::Greet { name }) => (StatusCode::OK, format!("Hello, {name}!\n")),
-        Ok(Route::Echo { word }) => (StatusCode::OK, format!("{word}\n")),
-        Err(error @ (ResolveError::MissingCapture(_) | ResolveError::InvalidCapture(_) | ResolveError::UndecodableCapture(_))) => {
-            (StatusCode::BAD_REQUEST, format!("bad request: {error}\n"))
         }
-        Err(ResolveError::NotFound(_)) => (StatusCode::NOT_FOUND, "nothing here\n".to_owned()),
-        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, format!("routing error: {error}\n")),
+    }
+
+    #[route(GET, "/hello/{name}")]
+    async fn greet(&self, name: String) -> (StatusCode, String) {
+        (StatusCode::OK, format!("Hello, {name}!\n"))
+    }
+
+    #[route(GET, "/echo/{word}")]
+    async fn echo(&self, word: &str) -> (StatusCode, String) {
+        (StatusCode::OK, format!("{word}\n"))
     }
 }
 
-fn list_books(books: &[(u32, &'static str)], query: &str) -> (StatusCode, String) {
-    use std::fmt::Write as _;
+/// The single handler hands request ownership to Routerama, which dispatches
+/// directly to the matching `AppState` method. Axum's transport boundary adds
+/// its `Send + 'static` body and error requirements here rather than in core
+/// routing.
+async fn dispatch(AxumState(state): AxumState<Arc<AppState>>, request: Request<axum::body::Body>) -> Response<axum::body::Body> {
+    state.route(request, &()).await.map(axum::body::Body::new)
+}
 
-    let Ok(query) = BooksQuery::from_query(query) else {
-        return (StatusCode::BAD_REQUEST, "invalid query string\n".to_owned());
-    };
+fn list_books(books: &[(u32, &'static str)], query: BooksQuery) -> (StatusCode, String) {
+    use std::fmt::Write as _;
 
     let page = query.page.unwrap_or(1);
     let Some(offset) = page.checked_sub(1).and_then(|page| page.checked_mul(2)) else {
@@ -105,10 +105,7 @@ fn list_books(books: &[(u32, &'static str)], query: &str) -> (StatusCode, String
 
 #[tokio::main]
 async fn main() {
-    let resolver = Route::resolver();
-
     let state = Arc::new(AppState {
-        resolver,
         books: vec![
             (1, "The Rust Programming Language"),
             (2, "Rust for Rustaceans"),

@@ -5,18 +5,20 @@
 
 use std::hint::black_box;
 
-use routerama::HttpMethod;
+use routerama::resolve::HttpMethod;
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum MixedScenario {
     #[route(GET, "/health")]
     Health,
     #[route(GET, "/numbers/{value}")]
     Number { value: u32 },
+    #[route(dynamic)]
     Plugin {
         name: String,
     },
+    #[route(dynamic)]
     NumberFallback {
         value: String,
     },

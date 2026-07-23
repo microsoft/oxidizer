@@ -1,0 +1,5 @@
+error: routing catcher methods cannot have generic parameters
+  --> tests/ui/generic_catcher.rs:18:22
+   |
+18 |     async fn catcher<T>(&self, _rejection: T) -> StatusCode {
+   |                      ^

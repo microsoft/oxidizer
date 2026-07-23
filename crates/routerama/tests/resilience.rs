@@ -7,8 +7,8 @@ use std::fmt::Write as _;
 use std::process::Command;
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::__rt::{RawResolver, Route};
-use routerama::{HttpMethod, ResolveError, resolver};
+use routerama::resolve::__private::{RawResolver, Route};
+use routerama::resolve::{HttpMethod, ResolveError, resolver};
 
 #[resolver]
 #[derive(Debug)]
@@ -16,24 +16,15 @@ enum AdversarialRoute<'p> {
     #[route(GET, "/health")]
     Health,
     #[route(GET, "/raw/{value}")]
-    Raw {
-        value: &'p str,
-    },
+    Raw { value: &'p str },
     #[route(GET, "/owned/{value}")]
-    Owned {
-        value: String,
-    },
+    Owned { value: String },
     #[route(GET, "/files/{tail=**}")]
-    Files {
-        tail: &'p str,
-    },
+    Files { tail: &'p str },
     #[route(POST, "/jobs/{id}:cancel")]
-    Cancel {
-        id: &'p str,
-    },
-    Dynamic {
-        value: String,
-    },
+    Cancel { id: &'p str },
+    #[route(dynamic)]
+    Dynamic { value: String },
 }
 
 fn resolver() -> AdversarialRouteResolver {
@@ -137,5 +128,8 @@ fn attacker_controlled_paths_remain_bounded_and_non_recursive() {
     assert!(raw.resolve("GET", &many_segments).is_none());
     let matched = raw.resolve("GET", &path).expect("high-capture path resolves");
     assert_eq!(matched.captures().count(), 64);
-    assert_eq!(routerama::__rt::RouteMatch::capture(&matched, "capture63"), Some("value63"));
+    assert_eq!(
+        routerama::resolve::__private::RouteMatch::capture(&matched, "capture63"),
+        Some("value63")
+    );
 }

@@ -1,0 +1,13 @@
+error: `#[after]` interceptors must return `()`
+  --> tests/ui/after_bad_return.rs:16:59
+   |
+16 |     async fn stamp(&self, _ctx: &mut AfterContext<'_>) -> String {
+   |                                                           ^^^^^^
+
+warning: unused imports: `AfterContext` and `StatusCode`
+ --> tests/ui/after_bad_return.rs:4:24
+  |
+4 | use routerama::route::{AfterContext, StatusCode, router};
+  |                        ^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

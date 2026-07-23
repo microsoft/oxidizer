@@ -25,7 +25,7 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use routerama::ResolveError;
+use routerama::resolve::ResolveError;
 
 /// Custom capture type parsed through `FromStr`.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl FromStr for Isbn {
     }
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum BookRoute<'p> {
     #[route(GET, "/books")]

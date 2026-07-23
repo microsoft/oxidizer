@@ -1,0 +1,5 @@
+error: routing policy arguments are passed by value
+  --> tests/ui/invalid_fallback_signature.rs:18:40
+   |
+18 |     async fn fallback(&self, _failure: &RouteFailure<'_>) -> StatusCode {
+   |                                        ^

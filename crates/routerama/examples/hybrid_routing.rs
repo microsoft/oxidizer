@@ -11,8 +11,8 @@
 //!
 //! - built-in routes are annotated with `#[route]`, compiled into the static trie,
 //!   and may borrow captures from the request path;
-//! - run-time routes omit `#[route]`, are registered through the generated
-//!   builder, and own their captured values.
+//! - run-time routes use `#[route(dynamic)]`, are registered through the
+//!   generated builder, and own their captured values.
 //!
 //! A resolved request returns one typed enum, with static routes taking
 //! precedence over dynamic registrations.
@@ -22,7 +22,7 @@
     reason = "route path templates use `{var}` capture syntax, not string formatting"
 )]
 
-use routerama::{HttpMethod, ResolveError, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, resolver};
 
 #[resolver]
 #[derive(Debug, PartialEq, Eq)]
@@ -31,23 +31,17 @@ enum Api<'p> {
     ListBooks,
 
     #[route(GET, "/books/{book}")]
-    GetBook {
-        book: &'p str,
-    },
+    GetBook { book: &'p str },
 
     #[route(GET, "/health")]
     Health,
 
-    Plugin {
-        name: String,
-    },
-    PluginAction {
-        name: String,
-        action: String,
-    },
-    ExtensionBook {
-        book: String,
-    },
+    #[route(dynamic)]
+    Plugin { name: String },
+    #[route(dynamic)]
+    PluginAction { name: String, action: String },
+    #[route(dynamic)]
+    ExtensionBook { book: String },
 }
 
 /// The action a resolved request maps to, tagged with which side served it.

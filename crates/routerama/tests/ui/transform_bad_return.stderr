@@ -1,0 +1,19 @@
+error: a `#[transform]` interceptor must return `BodyTransform<B, R>` or `BodyConsumed<R>`
+  --> tests/ui/transform_bad_return.rs:18:67
+   |
+18 |     async fn shrink(&self, _parts: &RequestParts, body: Bytes) -> StatusCode {
+   |                                                                   ^^^^^^^^^^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_bad_return.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `BytesBody`, `RequestParts`, and `StatusCode`
+ --> tests/ui/transform_bad_return.rs:5:24
+  |
+5 | use routerama::route::{BytesBody, RequestParts, StatusCode, router};
+  |                        ^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^

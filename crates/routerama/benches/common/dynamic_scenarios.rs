@@ -7,14 +7,17 @@ use std::hint::black_box;
 use std::fmt::Write as _;
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::__rt::{RawResolver, Route};
-use routerama::HttpMethod;
+use routerama::resolve::__private::{RawResolver, Route};
+use routerama::resolve::HttpMethod;
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum DynamicTypedScenario {
+    #[route(dynamic)]
     Unit,
+    #[route(dynamic)]
     Parse { value: u32 },
+    #[route(dynamic)]
     Owned { value: String },
 }
 

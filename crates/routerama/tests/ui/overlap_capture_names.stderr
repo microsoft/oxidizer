@@ -1,0 +1,5 @@
+error: overlapping routes must use identical capture names and capture positions
+  --> tests/ui/overlap_capture_names.rs:18:7
+   |
+18 |     #[route(GET, "/items/{name}", host = "two.example", priority = 1)]
+   |       ^^^^^

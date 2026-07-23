@@ -692,7 +692,7 @@ fn unraw_ident(ident: &Ident) -> String {
 }
 
 /// Converts an `UpperCamelCase` variant name into `snake_case`.
-fn to_snake_case(name: &str) -> String {
+pub(crate) fn to_snake_case(name: &str) -> String {
     let mut out = String::with_capacity(name.len() + 4);
     for (index, ch) in name.chars().enumerate() {
         if ch.is_ascii_uppercase() {

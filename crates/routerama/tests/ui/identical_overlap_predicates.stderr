@@ -1,0 +1,13 @@
+error: overlapping candidates with identical predicates make the lower priority unreachable
+  --> tests/ui/identical_overlap_predicates.rs:15:7
+   |
+15 |     #[route(GET, "/", produces = "application/json", priority = 0)]
+   |       ^^^^^
+
+warning: unused import: `StatusCode`
+ --> tests/ui/identical_overlap_predicates.rs:4:24
+  |
+4 | use routerama::route::{StatusCode, router};
+  |                        ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

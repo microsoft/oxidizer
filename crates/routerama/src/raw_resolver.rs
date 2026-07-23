@@ -100,7 +100,7 @@ impl<T> RawResolver<T> {
     /// Resolves `method` + `path`, returning the matched route or [`None`].
     ///
     /// `method` is matched by exact, case-sensitive token (e.g. `"GET"`), so pass
-    /// the request method verbatim. [`HttpMethod`](crate::HttpMethod) may be
+    /// the request method verbatim. [`HttpMethod`](crate::resolve::HttpMethod) may be
     /// passed directly, as it implements [`AsRef<str>`].
     ///
     /// Resolution is linear in the request-path length and does not use
@@ -142,11 +142,11 @@ impl<T> RawResolver<T> {
     ///
     /// Returns [`InvalidPath`](crate::codegen_helpers::InvalidPath) when `path`
     /// contains a query or fragment delimiter.
-    pub fn resolve_scanned_checked<'p, P, R>(
-        &'p self,
+    pub fn resolve_scanned_checked<'r, 'p, P, R>(
+        &'r self,
         method: impl AsRef<str>,
         path: &'p P,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Result<Option<R>, crate::codegen_helpers::InvalidPath>
     where
         P: AsRef<str> + ?Sized,
@@ -186,13 +186,13 @@ impl<T> RawResolver<T> {
         Ok(self.finish_scanned(method, verb, &path, finish))
     }
 
-    fn resolve_with_heap_offsets<'p, R>(
-        &'p self,
+    fn resolve_with_heap_offsets<'r, 'p, R>(
+        &'r self,
         method: &str,
         body: &'p str,
         verb: Option<&str>,
         segment_count: usize,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Option<R> {
         let capacity = segment_count.min(self.max_segments);
         let mut heap_offsets = vec![0_usize; capacity * 2];
@@ -201,12 +201,12 @@ impl<T> RawResolver<T> {
         self.finish_scanned(method, verb, &path, finish)
     }
 
-    fn finish_scanned<'p, R>(
-        &'p self,
+    fn finish_scanned<'r, 'p, R>(
+        &'r self,
         method: &str,
         verb: Option<&str>,
         path: &ScannedPath<'p, '_>,
-        finish: impl for<'s> FnOnce(&'p Leaf, &'p T, &ScannedPath<'p, 's>) -> R,
+        finish: impl for<'s> FnOnce(&'r Leaf, &'r T, &ScannedPath<'p, 's>) -> R,
     ) -> Option<R> {
         let walk = Walk { path, method, verb };
         let leaf = if self.any_verb {

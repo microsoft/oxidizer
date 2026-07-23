@@ -1,0 +1,7 @@
+error: service handlers must declare an explicit response type
+ --> tests/ui/handler_missing_return_type.rs:8:1
+  |
+8 | #[router]
+  | ^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `router` (in Nightly builds, run with -Z macro-backtrace for more info)

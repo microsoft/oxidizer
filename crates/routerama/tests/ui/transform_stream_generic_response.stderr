@@ -1,0 +1,19 @@
+error: a streaming `#[transform]` short-circuit response cannot depend on the generic body parameter `B`; name a concrete response type so it can join the generated response body sum
+  --> tests/ui/transform_stream_generic_response.rs:18:81
+   |
+18 |     async fn wrap<B>(&self, _parts: &RequestParts, body: B) -> BodyTransform<B, B>
+   |                                                                                 ^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_stream_generic_response.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `BodyTransform`, `BytesBody`, and `RequestParts`
+ --> tests/ui/transform_stream_generic_response.rs:5:24
+  |
+5 | use routerama::route::{BodyTransform, BytesBody, RequestParts, router};
+  |                        ^^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^

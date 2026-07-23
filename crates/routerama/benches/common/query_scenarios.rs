@@ -38,9 +38,9 @@ struct SerdeCommon<'q> {
 }
 
 #[derive(Debug, routerama::query::FromQuery, routerama::query::ToQuery)]
-struct DirectRepeated<'q> {
-    q: &'q str,
-    tag: Vec<Cow<'q, str>>,
+struct DirectRepeated {
+    q: String,
+    tag: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -105,12 +105,14 @@ fn serde_html_form_parse_long() {
 
 fn direct_produce_common(query: &DirectCommon<'_>, output: &mut String) {
     output.clear();
-    query.write_query(black_box(output)).expect("query production succeeds");
+    black_box(query)
+        .write_query(black_box(output))
+        .expect("query production succeeds");
     black_box(output);
 }
 
 fn direct_produce_common_allocating(query: &DirectCommon<'_>) {
-    black_box(query.to_query_string().expect("query production succeeds"));
+    black_box(black_box(query).to_query_string().expect("query production succeeds"));
 }
 
 fn serde_urlencoded_produce_common(query: &SerdeCommon<'_>) {

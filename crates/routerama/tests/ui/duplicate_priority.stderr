@@ -1,0 +1,5 @@
+error: duplicate `priority` route argument
+  --> tests/ui/duplicate_priority.rs:12:37
+   |
+12 |     #[route(GET, "/", priority = 1, priority = 2)]
+   |                                     ^^^^^^^^

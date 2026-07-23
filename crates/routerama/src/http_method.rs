@@ -54,14 +54,18 @@ impl HttpMethod {
     /// # Examples
     ///
     /// ```
-    /// use routerama::HttpMethod;
+    /// # #[cfg(feature = "resolve")]
+    /// use routerama::resolve::HttpMethod;
     ///
-    /// # fn main() -> Result<(), routerama::ConfigurationError> {
+    /// # #[cfg(feature = "resolve")]
+    /// # fn main() -> Result<(), routerama::resolve::ConfigurationError> {
     /// let method = HttpMethod::custom("M-SEARCH")?;
     /// assert_eq!(method.as_str(), "M-SEARCH");
     /// assert_eq!(HttpMethod::custom("GET")?, HttpMethod::GET);
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "resolve"))]
+    /// # fn main() {}
     /// ```
     pub fn custom(value: impl AsRef<str>) -> Result<Self, ConfigurationError> {
         let value = value.as_ref();
@@ -98,13 +102,17 @@ impl HttpMethod {
     /// # Examples
     ///
     /// ```
-    /// use routerama::HttpMethod;
+    /// # #[cfg(feature = "resolve")]
+    /// use routerama::resolve::HttpMethod;
     ///
-    /// # fn main() -> Result<(), routerama::ConfigurationError> {
+    /// # #[cfg(feature = "resolve")]
+    /// # fn main() -> Result<(), routerama::resolve::ConfigurationError> {
     /// assert_eq!(HttpMethod::GET.as_str(), "GET");
     /// assert_eq!(HttpMethod::custom("M-SEARCH")?.as_str(), "M-SEARCH");
     /// # Ok(())
     /// # }
+    /// # #[cfg(not(feature = "resolve"))]
+    /// # fn main() {}
     /// ```
     #[inline]
     #[must_use]

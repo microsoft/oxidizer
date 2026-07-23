@@ -5,14 +5,16 @@ use crate::ResolveError;
 
 /// Resolves an HTTP method and path to a typed route.
 ///
-/// [`resolver`](macro@crate::resolver) generates a concrete implementation for
+/// The `resolver` macro generates a concrete implementation for
 /// each route enum. Static-only route enums provide an infallible `resolver`
 /// constructor; route enums with dynamic variants provide a builder.
 ///
 /// ```
-/// use routerama::{ResolveError, Resolver};
+/// # #[cfg(feature = "resolve")]
+/// # fn main() {
+/// use routerama::resolve::{ResolveError, Resolver};
 ///
-/// #[routerama::resolver]
+/// #[routerama::resolve::resolver]
 /// enum AppRoute {
 ///     #[route(GET, "/")]
 ///     Home,
@@ -27,6 +29,9 @@ use crate::ResolveError;
 ///
 /// let resolver = AppRoute::resolver();
 /// assert!(matches!(resolve_get(&resolver, "/"), Ok(AppRoute::Home)));
+/// # }
+/// # #[cfg(not(feature = "resolve"))]
+/// # fn main() {}
 /// ```
 pub trait Resolver {
     /// The route enum produced for a request path borrowed for `'p`.

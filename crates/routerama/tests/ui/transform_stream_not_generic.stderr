@@ -1,0 +1,25 @@
+error: a streaming `#[transform(stream, ...)]` interceptor must be generic over its transport request body, for example `async fn wrap<B>(&self, parts: &RequestParts, body: B) -> BodyTransform<Wrapper<B>, R> where B: http_body::Body<Data = Bytes>`
+  --> tests/ui/transform_stream_not_generic.rs:19:14
+   |
+19 |     async fn wrap(&self, _parts: &RequestParts, body: Bytes) -> BodyTransform<Body, StatusCode> {
+   |              ^^^^
+
+warning: unused import: `bytes::Bytes`
+ --> tests/ui/transform_stream_not_generic.rs:4:5
+  |
+4 | use bytes::Bytes;
+  |     ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `routerama::response::Body`
+ --> tests/ui/transform_stream_not_generic.rs:5:5
+  |
+5 | use routerama::response::Body;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `BodyTransform`, `BytesBody`, `RequestParts`, and `StatusCode`
+ --> tests/ui/transform_stream_not_generic.rs:6:24
+  |
+6 | use routerama::route::{BodyTransform, BytesBody, RequestParts, StatusCode, router};
+  |                        ^^^^^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^

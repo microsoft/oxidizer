@@ -22,6 +22,12 @@
 //! [`ToQuery::to_query_string_with`] or [`ToQuery::write_query_with`] to supply
 //! application-specific limits.
 //!
+//! The additive `form` feature reuses [`FromQuery`] for bounded
+//! `routerama::route::form::Form` bodies. URI query extraction may borrow from
+//! its request URI, while form extraction deliberately requires a schema that
+//! can decode for every input lifetime so references into its temporary body
+//! buffer cannot escape.
+//!
 //! # Derive helper attributes
 //!
 //! `#[derive(FromQuery)]` and `#[derive(ToQuery)]` register `#[query(...)]` as a
@@ -74,23 +80,109 @@ mod query_limits;
 mod scan;
 mod to_query;
 
-/// Repeated query-field storage used by generated decoders.
-#[doc(hidden)]
-pub type Repeated<T> = alloc::vec::Vec<T>;
-
-#[doc(hidden)]
-pub use decode_fields::DecodeFields;
-#[doc(hidden)]
-pub use decoded::{Decoded, parse_borrowed, parse_cow, parse_owned, parse_value};
-#[doc(hidden)]
-pub use encode_fields::EncodeFields;
-#[doc(hidden)]
-pub use encoder::Encoder;
+use decode_fields::DecodeFields;
+use decoded::Decoded;
+use encode_fields::EncodeFields;
+use encoder::Encoder;
 pub use error::Error;
 pub use error_kind::ErrorKind;
 pub use from_query::FromQuery;
-#[doc(hidden)]
-pub use query_decoder::QueryDecoder;
+use query_decoder::QueryDecoder;
 pub use query_limits::QueryLimits;
-pub use routerama_macros::{FromQuery, ToQuery};
+/// Derives direct query-string decoding for a named-field struct.
+///
+/// # Example
+///
+/// ```
+/// use routerama::query::FromQuery;
+///
+/// #[derive(Debug, PartialEq, FromQuery)]
+/// #[query(rename_all = "camelCase", deny_unknown_fields)]
+/// struct Search<'q> {
+///     search_term: &'q str,
+///     #[query(alias = "limit")]
+///     max_results: Option<u32>,
+///     #[query(rename = "tag")]
+///     tags: Vec<String>,
+/// }
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let value = Search::from_query("searchTerm=rust&limit=10&tag=fast&tag=safe")?;
+/// assert_eq!(value.search_term, "rust");
+/// assert_eq!(value.max_results, Some(10));
+/// assert_eq!(value.tags, ["fast", "safe"]);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The obsolete `repeated` marker is rejected because [`Vec`] alone expresses
+/// repeated parameters:
+///
+/// ```compile_fail
+/// #[derive(routerama::query::FromQuery)]
+/// struct Unsupported {
+///     #[query(repeated)]
+///     values: Vec<String>,
+/// }
+/// ```
+///
+/// Borrowing through distinct query lifetimes is rejected:
+///
+/// ```compile_fail
+/// #[derive(routerama::query::FromQuery)]
+/// struct Unsupported<'a, 'b> {
+///     first: &'a str,
+///     second: &'b str,
+/// }
+/// ```
+///
+/// [`Vec`]: alloc::vec::Vec
+///
+/// # Reference
+pub use routerama_macros::FromQuery;
+/// Derives direct query-string encoding for a named-field struct.
+///
+/// # Example
+///
+/// ```
+/// use routerama::query::ToQuery;
+///
+/// #[derive(ToQuery)]
+/// #[query(rename_all = "camelCase")]
+/// struct Search<'q> {
+///     search_term: &'q str,
+///     #[query(rename = "tag")]
+///     tags: Vec<&'q str>,
+/// }
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let value = Search {
+///     search_term: "rust language",
+///     tags: vec!["fast", "safe"],
+/// };
+/// assert_eq!(
+///     value.to_query_string()?,
+///     "searchTerm=rust+language&tag=fast&tag=safe"
+/// );
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Reference
+pub use routerama_macros::ToQuery;
 pub use to_query::ToQuery;
+
+/// Runtime support referenced by generated query codecs.
+#[doc(hidden)]
+pub mod __private {
+    /// Repeated query-field storage used by generated decoders.
+    pub type Repeated<T> = alloc::vec::Vec<T>;
+
+    pub use super::decode_fields::DecodeFields;
+    pub use super::decoded::{Decoded, parse_borrowed, parse_cow, parse_owned, parse_value};
+    pub use super::encode_fields::EncodeFields;
+    pub use super::encoder::Encoder;
+    pub use super::error::Error;
+    pub use super::query_decoder::QueryDecoder;
+    pub use super::query_limits::QueryLimits;
+}

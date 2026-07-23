@@ -11,7 +11,7 @@ use core::{iter, mem};
 use routerama_build::trie::{Leaf, Node, affix_edges_in_match_order};
 
 use crate::affix_edge::AffixEdge;
-use crate::literal_edge::LiteralEdge;
+use crate::literal_edge::{LiteralEdge, SORTED_LITERAL_FANOUT};
 
 /// Runtime representation of a [`Node`].
 pub(crate) struct RtNode {
@@ -99,7 +99,7 @@ impl RtNode {
             index += 1;
         }
 
-        order_literals_by_weight(&mut flat);
+        order_literals(&mut flat);
 
         let mut built: Vec<Option<Self>> = iter::repeat_with(|| None).take(flat.len()).collect();
         for (index, node) in flat.into_iter().enumerate().rev() {
@@ -158,10 +158,21 @@ impl RtNode {
     }
 }
 
-fn order_literals_by_weight(nodes: &mut [FlatNode]) {
+/// Orders each node's literal edges for the lookup strategy its fanout selects.
+///
+/// Narrow nodes are ordered by descending subtree weight so the busiest child is
+/// found first by a linear scan; nodes at or above [`SORTED_LITERAL_FANOUT`] are
+/// sorted by key bytes so `find_literal` can binary search them. Keys are unique
+/// within a node, so neither order changes which edge a segment matches.
+fn order_literals(nodes: &mut [FlatNode]) {
     let weights = node_weights(nodes);
     for node in nodes {
-        node.literals.sort_by_key(|(_, child)| Reverse(weights[*child]));
+        if node.literals.len() >= SORTED_LITERAL_FANOUT {
+            node.literals
+                .sort_unstable_by(|(left, _), (right, _)| left.as_bytes().cmp(right.as_bytes()));
+        } else {
+            node.literals.sort_by_key(|(_, child)| Reverse(weights[*child]));
+        }
     }
 }
 
@@ -193,16 +204,17 @@ impl Drop for RtNode {
 mod tests {
     use alloc::boxed::Box;
     use alloc::string::String;
-    use alloc::vec;
     use alloc::vec::Vec;
+    use alloc::{format, vec};
 
     use http_path_template::{Grammar, PathTemplate};
     use routerama_build::Route;
     use routerama_build::trie::{Leaf, build_trie};
 
+    use crate::literal_edge::SORTED_LITERAL_FANOUT;
     use crate::raw_resolver::RawResolver;
     use crate::route_match::RouteMatch;
-    use crate::rt_node::{FlatNode, RtNode, node_weights, order_literals_by_weight};
+    use crate::rt_node::{FlatNode, RtNode, node_weights, order_literals};
 
     fn flat_node(exact: usize) -> FlatNode {
         FlatNode {
@@ -235,8 +247,45 @@ mod tests {
         let mut nodes = vec![root, weighted, flat_node(2), flat_node(3), flat_node(4)];
 
         assert_eq!(node_weights(&nodes)[1], 11);
-        order_literals_by_weight(&mut nodes);
+        order_literals(&mut nodes);
         assert_eq!(nodes[0].literals[0].0.as_ref(), "weighted");
+    }
+
+    #[test]
+    fn wide_nodes_are_sorted_by_key_and_narrow_nodes_stay_weight_ordered() {
+        // Two parents sharing the same children: one just below the threshold,
+        // one exactly at it, so only fanout distinguishes them. Child weights
+        // ascend with key order, so descending weight is the reverse of key
+        // order and the two strategies cannot be confused.
+        let width = SORTED_LITERAL_FANOUT;
+        let mut narrow = flat_node(0);
+        let mut wide = flat_node(0);
+        let mut children = Vec::new();
+        for index in 0..width {
+            let key = format!("key-{index:04}").into_boxed_str();
+            if index + 1 < width {
+                narrow.literals.push((key.clone(), 2 + index));
+            }
+            wide.literals.push((key, 2 + index));
+            children.push(flat_node(index + 1));
+        }
+        let mut nodes = vec![narrow, wide];
+        nodes.extend(children);
+
+        assert_eq!(nodes[0].literals.len(), SORTED_LITERAL_FANOUT - 1);
+        assert_eq!(nodes[1].literals.len(), SORTED_LITERAL_FANOUT);
+
+        order_literals(&mut nodes);
+
+        let keys = |node: &FlatNode| node.literals.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>();
+        let sorted: Vec<_> = (0..width).map(|index| format!("key-{index:04}").into_boxed_str()).collect();
+        assert_eq!(keys(&nodes[1]), sorted, "a node at the threshold is sorted by key");
+        let heaviest_first: Vec<_> = sorted.iter().take(width - 1).rev().cloned().collect();
+        assert_eq!(
+            keys(&nodes[0]),
+            heaviest_first,
+            "a node below the threshold stays ordered by descending subtree weight"
+        );
     }
 
     #[test]

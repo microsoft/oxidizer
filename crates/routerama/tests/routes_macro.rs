@@ -3,7 +3,7 @@
 
 //! Behavioral tests for the `#[resolver]` macro.
 
-use routerama::{ResolveError, Resolver, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, Resolver, resolver};
 
 #[resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +118,7 @@ enum ErrorNameRoutes {
 enum ExplicitRoute {
     #[route(GET, "/explicit")]
     Static,
+    #[route(dynamic)]
     Dynamic,
 }
 
@@ -133,7 +134,7 @@ fn explicit_resolver() -> ExplicitResolver {
 }
 
 fn explicit_resolver_builder() -> ExplicitResolverBuilder {
-    ExplicitRoute::builder().add_dynamic(routerama::HttpMethod::GET, "/dynamic")
+    ExplicitRoute::builder().add_dynamic(HttpMethod::GET, "/dynamic")
 }
 
 #[test]

@@ -1,0 +1,13 @@
+error: `erased_mounts` requires a fixed `state = StateType` router contract
+ --> tests/ui/erased_mounts_without_state.rs:8:10
+  |
+8 | #[router(erased_mounts)]
+  |          ^^^^^^^^^^^^^
+
+warning: unused import: `StatusCode`
+ --> tests/ui/erased_mounts_without_state.rs:4:24
+  |
+4 | use routerama::route::{StatusCode, router};
+  |                        ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

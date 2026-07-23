@@ -5,7 +5,7 @@
 
 use std::hint::black_box;
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum StaticScenario<'p> {
     #[route(GET, "/health")]
@@ -65,14 +65,14 @@ enum StaticScenario<'p> {
     Image { id: &'p str },
 }
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum NoVerbScenario<'p> {
     #[route(GET, "/books/{book}")]
     GetBook { book: &'p str },
 }
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum WithVerbScenario<'p> {
     #[route(GET, "/books/{book}")]
@@ -81,14 +81,14 @@ enum WithVerbScenario<'p> {
     ArchiveBook { book: &'p str },
 }
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum ShallowTable {
     #[route(GET, "/hot")]
     Hot,
 }
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum DeepOutlierTable {
     #[route(GET, "/hot")]
@@ -100,7 +100,7 @@ enum DeepOutlierTable {
     Deep,
 }
 
-#[::routerama::resolver]
+#[::routerama::resolve::resolver]
 #[derive(Debug)]
 enum AffixFanout<'p> {
     #[route(GET, "/asset-00-{id}.png")]

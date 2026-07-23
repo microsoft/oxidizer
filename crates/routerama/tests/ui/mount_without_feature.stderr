@@ -1,0 +1,13 @@
+error[E0432]: unresolved import `routerama::route::mount`
+ --> tests/ui/mount_without_feature.rs:4:23
+  |
+4 | use routerama::route::mount::ErasedMountRouter;
+  |                       ^^^^^ could not find `mount` in `route`
+  |
+note: found an item that was configured out
+ --> src/route.rs
+  |
+  | #[cfg(feature = "mount")]
+  |       ----------------- the item is gated behind the `mount` feature
+  | pub mod mount;
+  |         ^^^^^

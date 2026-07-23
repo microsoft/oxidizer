@@ -7,18 +7,24 @@ use core::fmt;
 
 use crate::build_error_entry::BuildErrorEntry;
 
-/// An error caused by invalid resolver configuration.
+/// An error caused by invalid runtime route configuration.
 ///
-/// Returned when an HTTP method token is invalid or when a generated resolver
-/// builder finds invalid or missing dynamic route registrations.
+/// Returned when an HTTP method token is invalid, when a generated resolver
+/// builder finds invalid or missing dynamic route registrations, or when an
+/// erased mount router contains invalid or conflicting registrations.
 ///
 /// # Examples
 ///
 /// ```
-/// use routerama::HttpMethod;
+/// # #[cfg(feature = "resolve")]
+/// # fn main() {
+/// use routerama::resolve::HttpMethod;
 ///
 /// let error = HttpMethod::custom("BAD METHOD").expect_err("spaces are not allowed");
 /// assert_eq!(error.invalid_http_method_value(), Some("BAD METHOD"));
+/// # }
+/// # #[cfg(not(feature = "resolve"))]
+/// # fn main() {}
 /// ```
 #[derive(Debug)]
 pub struct ConfigurationError {
@@ -28,7 +34,10 @@ pub struct ConfigurationError {
 #[derive(Debug)]
 enum ConfigurationErrorKind {
     InvalidHttpMethod(String),
-    Resolver(Vec<BuildErrorEntry>),
+    Routes {
+        context: &'static str,
+        entries: Vec<BuildErrorEntry>,
+    },
 }
 
 impl ConfigurationError {
@@ -40,7 +49,20 @@ impl ConfigurationError {
 
     pub(crate) fn resolver(entries: Vec<BuildErrorEntry>) -> Self {
         Self {
-            kind: ConfigurationErrorKind::Resolver(entries),
+            kind: ConfigurationErrorKind::Routes {
+                context: "resolver",
+                entries,
+            },
+        }
+    }
+
+    #[cfg(feature = "mount")]
+    pub(crate) fn mounts(entries: Vec<BuildErrorEntry>) -> Self {
+        Self {
+            kind: ConfigurationErrorKind::Routes {
+                context: "erased mount router",
+                entries,
+            },
         }
     }
 
@@ -49,18 +71,18 @@ impl ConfigurationError {
     pub fn invalid_http_method_value(&self) -> Option<&str> {
         match &self.kind {
             ConfigurationErrorKind::InvalidHttpMethod(value) => Some(value),
-            ConfigurationErrorKind::Resolver(_) => None,
+            ConfigurationErrorKind::Routes { .. } => None,
         }
     }
 
     /// Iterates the upstream errors retained from failed route registrations.
     ///
-    /// Resolver construction may aggregate multiple failures, so this supplements
+    /// Route construction may aggregate multiple failures, so this supplements
     /// [`core::error::Error::source`], which returns only the first cause.
     pub fn causes(&self) -> impl Iterator<Item = &(dyn core::error::Error + 'static)> {
         let entries = match &self.kind {
             ConfigurationErrorKind::InvalidHttpMethod(_) => &[][..],
-            ConfigurationErrorKind::Resolver(entries) => entries.as_slice(),
+            ConfigurationErrorKind::Routes { entries, .. } => entries.as_slice(),
         };
         entries.iter().filter_map(BuildErrorEntry::source)
     }
@@ -72,8 +94,8 @@ impl fmt::Display for ConfigurationError {
             ConfigurationErrorKind::InvalidHttpMethod(value) => {
                 write!(f, "`{value}` is not a valid RFC 9110 HTTP method token")
             }
-            ConfigurationErrorKind::Resolver(entries) => {
-                f.write_str("failed to build resolver:")?;
+            ConfigurationErrorKind::Routes { context, entries } => {
+                write!(f, "failed to build {context}:")?;
                 for entry in entries {
                     write!(f, "\n  - {entry}")?;
                 }

@@ -1,0 +1,5 @@
+error: configured dynamic routes reject `priority`: runtime registrations must not overlap, and static routes remain direct
+  --> tests/ui/dynamic_priority.rs:12:33
+   |
+12 |     #[route(dynamic, priority = 1)]
+   |                                 ^

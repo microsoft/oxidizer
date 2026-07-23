@@ -1,0 +1,13 @@
+error: an interceptor method cannot also be a `#[fallback]` or `#[catch]` policy method
+  --> tests/ui/interceptor_on_policy.rs:17:14
+   |
+17 |     async fn fallback(&self, failure: RouteFailure<'_>) -> StatusCode {
+   |              ^^^^^^^^
+
+warning: unused imports: `AfterContext`, `RouteFailure`, and `StatusCode`
+ --> tests/ui/interceptor_on_policy.rs:4:24
+  |
+4 | use routerama::route::{AfterContext, RouteFailure, StatusCode, router};
+  |                        ^^^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

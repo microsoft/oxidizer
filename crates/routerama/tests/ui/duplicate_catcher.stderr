@@ -1,0 +1,11 @@
+error: duplicate catcher for rejection type `StatusCode`
+  --> tests/ui/duplicate_catcher.rs:32:7
+   |
+32 |     #[catch(StatusCode, from = Reject)]
+   |       ^^^^^
+
+error: the first catcher for this type is declared here
+  --> tests/ui/duplicate_catcher.rs:27:7
+   |
+27 |     #[catch(StatusCode, from = Reject)]
+   |       ^^^^^

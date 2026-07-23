@@ -3,6 +3,7 @@
 
 use alloc::vec;
 use core::fmt;
+use core::ops::Range;
 
 use super::scan::scan_segments_checked;
 
@@ -63,6 +64,13 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn capture(&self, first: usize, last: usize) -> Option<&'p str> {
+        let range = self.capture_range(first, last)?;
+        // SAFETY: `capture_range` checks that both offsets came from this scan
+        // and delimit an ordered UTF-8 range in `body`.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn capture_range(&self, first: usize, last: usize) -> Option<Range<usize>> {
         if first > last || last >= self.count || last >= self.capacity {
             return None;
         }
@@ -70,9 +78,7 @@ impl<'p> ScannedPath<'p, '_> {
         let start = unsafe { *self.starts.get_unchecked(first) };
         // SAFETY: the explicit length checks above cover the ends buffer.
         let end = unsafe { *self.ends.get_unchecked(last) };
-        // SAFETY: both offsets came from this scan, and ordered segment indices
-        // imply an ordered range with UTF-8-boundary endpoints.
-        Some(unsafe { self.body.get_unchecked(start..end) })
+        Some(start..end)
     }
 
     /// Returns a capture from `first` through the end of the path.
@@ -80,8 +86,15 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn rest(&self, first: usize) -> Option<&'p str> {
+        let range = self.rest_range(first)?;
+        // SAFETY: `rest_range` checks that the start offset came from this scan;
+        // both it and the string end are UTF-8 boundaries.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn rest_range(&self, first: usize) -> Option<Range<usize>> {
         if first == self.count {
-            return Some("");
+            return Some(self.body.len()..self.body.len());
         }
         if first > self.count {
             return None;
@@ -91,9 +104,7 @@ impl<'p> ScannedPath<'p, '_> {
         }
         // SAFETY: `first` was checked against the starts buffer length.
         let start = unsafe { *self.starts.get_unchecked(first) };
-        // SAFETY: the start offset came from this scan and is therefore an
-        // in-bounds UTF-8 boundary; the string end is also a boundary.
-        Some(unsafe { self.body.get_unchecked(start..) })
+        Some(start..self.body.len())
     }
 
     /// Returns a segment capture after removing literal prefix and suffix bytes.
@@ -101,6 +112,12 @@ impl<'p> ScannedPath<'p, '_> {
     #[inline]
     #[cfg_attr(test, mutants::skip)]
     pub fn affix(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<&'p str> {
+        let range = self.affix_range(index, prefix_len, suffix_len)?;
+        // SAFETY: `affix_range` checks bounds and UTF-8 boundaries.
+        Some(unsafe { self.body.get_unchecked(range) })
+    }
+
+    pub(crate) fn affix_range(&self, index: usize, prefix_len: usize, suffix_len: usize) -> Option<Range<usize>> {
         if index >= self.count || index >= self.capacity {
             return None;
         }
@@ -113,8 +130,7 @@ impl<'p> ScannedPath<'p, '_> {
         if start > end || !self.body.is_char_boundary(start) || !self.body.is_char_boundary(end) {
             return None;
         }
-        // SAFETY: bounds and UTF-8 boundaries were checked above.
-        Some(unsafe { self.body.get_unchecked(start..end) })
+        Some(start..end)
     }
 }
 

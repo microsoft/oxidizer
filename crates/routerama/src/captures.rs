@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#[cfg(feature = "mount")]
+use core::ops::Range;
+
 use routerama_build::trie::{Leaf, VarPlan};
 
 use crate::codegen_helpers::ScannedPath;
@@ -54,6 +57,27 @@ pub(crate) fn materialize<'p>(plan: &VarPlan, path: &ScannedPath<'p, '_>) -> &'p
             a, prefix_len, suffix_len, ..
         } => path
             .affix(*a, *prefix_len, *suffix_len)
+            .expect("matched affix literals delimit a valid capture"),
+    }
+}
+
+/// Materializes one capture's byte range inside the scanned path.
+///
+/// Only the explicitly erased `mount` router needs precomputed ranges: the
+/// generated routes borrow their captures directly.
+#[cfg(feature = "mount")]
+pub(crate) fn materialize_range(plan: &VarPlan, path: &ScannedPath<'_, '_>) -> Range<usize> {
+    match plan {
+        VarPlan::Span { a, b, .. } => path
+            .capture_range(*a, *b)
+            .expect("route capture plan references scanned segment indices"),
+        VarPlan::Rest { a, .. } => path
+            .rest_range(*a)
+            .expect("route rest plan starts at or before the scanned segment count"),
+        VarPlan::Affix {
+            a, prefix_len, suffix_len, ..
+        } => path
+            .affix_range(*a, *prefix_len, *suffix_len)
             .expect("matched affix literals delimit a valid capture"),
     }
 }

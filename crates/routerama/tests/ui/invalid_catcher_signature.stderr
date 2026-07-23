@@ -1,0 +1,5 @@
+error: routing policy arguments cannot use `#[body]` or `#[capture]`; catchers cannot recursively extract a request
+  --> tests/ui/invalid_catcher_signature.rs:18:31
+   |
+18 |     async fn catcher(&self, #[body] rejection: StatusCode) -> StatusCode {
+   |                               ^^^^

@@ -4,10 +4,10 @@
 //! Differential tests for static and runtime resolution.
 
 use http_path_template::{Grammar, PathTemplate};
-use routerama::__rt::{RawResolver, Route, RouteMatch};
-use routerama::{HttpMethod, ResolveError};
+use routerama::resolve::__private::{RawResolver, Route, RouteMatch};
+use routerama::resolve::{HttpMethod, ResolveError};
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ApiRoute<'p> {
     #[route(GET, "/books")]
@@ -113,7 +113,7 @@ fn dynamic_resolver() -> RawResolver {
     ])
 }
 
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ExoticRoute<'p> {
     #[route(GET, "/x/{type}")]
@@ -271,7 +271,7 @@ fn static_core_falls_back_to_a_dynamic_overlay() {
 }
 
 // Covers lifetime-free generated enums and static promotion of their resolver.
-#[routerama::resolver]
+#[routerama::resolve::resolver]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ping {
     #[route(GET, "/health")]

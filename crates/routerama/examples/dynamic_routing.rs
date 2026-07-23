@@ -5,11 +5,11 @@
 //!
 //! Run it with `cargo run --example dynamic_routing`.
 //!
-//! Static routes put `#[route]` on enum variants and bake their paths into the
-//! resolver. Dynamic variants omit `#[route]`: they name the typed outcomes your
-//! service can handle, while the generated builder registers their method + path
-//! templates at run time from config, a database, a plugin registry, or
-//! per-tenant setup.
+//! Static routes use `#[route(METHOD, "path")]` and bake their paths into the
+//! resolver. Dynamic variants use `#[route(dynamic)]`: they name the typed
+//! outcomes your service can handle, while the generated builder registers
+//! their method + path templates at run time from config, a database, a plugin
+//! registry, or per-tenant setup.
 //!
 //! The resolver is still a typed value: resolving a request returns the enum
 //! variant directly, with captures already coerced into owned fields.
@@ -19,15 +19,20 @@
     reason = "route path templates use `{var}` capture syntax, not string formatting"
 )]
 
-use routerama::{HttpMethod, ResolveError, resolver};
+use routerama::resolve::{HttpMethod, ResolveError, resolver};
 
 #[resolver]
 #[derive(Debug, PartialEq, Eq)]
 enum RuntimeRoute {
+    #[route(dynamic)]
     ListBooks,
+    #[route(dynamic)]
     CreateBook,
+    #[route(dynamic)]
     GetBook { book: String },
+    #[route(dynamic)]
     GetReview { book: String, review: u32 },
+    #[route(dynamic)]
     Assets { path: String },
 }
 

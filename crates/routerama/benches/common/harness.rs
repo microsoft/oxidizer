@@ -39,10 +39,10 @@ fn coerce(value: &str, ty: Ty) {
             black_box(value);
         }
         Ty::U32 => {
-            let _ = black_box(::routerama::__rt::coerce_parse::<u32>(value, "benchmark"));
+            let _ = black_box(::routerama::resolve::__private::coerce_parse::<u32>(value, "benchmark"));
         }
         Ty::Owned => {
-            let _ = black_box(::routerama::__rt::coerce_owned(value, "benchmark"));
+            let _ = black_box(::routerama::resolve::__private::coerce_owned(value, "benchmark"));
         }
     }
 }
