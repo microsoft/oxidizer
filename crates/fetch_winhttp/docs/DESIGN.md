@@ -675,15 +675,15 @@ covered in §7.5.
 
 `fetch_options::ConnectionPoolOptions` (reached via `TransportOptions`) exposes
 `max_connections`, `connection_idle_timeout`, and `connection_lifetime`, plus
-`ConnectionKeepAlive`. WinHTTP's controls do not map one-to-one, so the mapping is
-partly advisory and is documented as such:
+`ConnectionKeepAlive`. WinHTTP's controls do not map one-to-one, so some options are
+honored only approximately and others cannot be honored at all:
 
 | `fetch` option | WinHTTP mechanism | Fidelity |
 |----------------|-------------------|----------|
-| `max_connections` (per pool) | `WINHTTP_OPTION_MAX_CONNS_PER_SERVER` | Advisory: WinHTTP bounds per authority, `fetch` counts per pool. |
-| `connection_idle_timeout` | WinHTTP's own idle keep-alive management; `PurgeKeepAlives` to force-clear | Advisory: no exact idle-TTL knob is exposed; WinHTTP applies its own default. |
+| `max_connections` (per pool) | `WINHTTP_OPTION_MAX_CONNS_PER_SERVER` | Approximate: the limit is applied, but WinHTTP enforces it per authority whereas `fetch` counts per pool, so a multi-host pool's effective cap differs. |
+| `connection_idle_timeout` | WinHTTP's own idle keep-alive management; `PurgeKeepAlives` to force-clear | Not honored: WinHTTP exposes no idle-TTL knob, so the configured value has no effect and WinHTTP applies its own default. |
 | `connection_lifetime = Unlimited` (default) | nothing to do | Exact. |
-| `connection_lifetime = Fixed(_)` / `PerConnection(_)` | not honored in v1 (see §7.5) | Documented limitation. |
+| `connection_lifetime = Fixed(_)` / `PerConnection(_)` | not honored in v1 (see §7.5) | Not honored (see §7.5). |
 | `ConnectionKeepAlive::ActiveConnections{..}` | `WINHTTP_OPTION_HTTP2_KEEPALIVE` / `WINHTTP_OPTION_HTTP3_KEEPALIVE` (floor 5000 ms) | Approximate for h2/h3; HTTP/1.1 keep-alive is automatic. |
 | `ConnectionKeepAlive::Disabled` (default) | leave keep-alive at WinHTTP defaults | n/a |
 
@@ -693,9 +693,8 @@ connection age is not observable and no per-connection identity is exposed.
 (`WINHTTP_OPTION_EXPIRE_CONNECTION` can blindly retire the connection a given
 request rode, but without age/identity visibility it cannot drive the
 age-conditional poisoning `ConnectionInfo` models; see §7.5.) A response from
-this transport carries no `ConnectionInfo`. Where fidelity is "advisory" or
-"approximate", the gap is a property of WinHTTP's opaque pool, not of this
-transport.
+this transport carries no `ConnectionInfo`. Every approximation or omission above
+is a property of WinHTTP's opaque pool, not of this transport.
 
 ### 7.5 Connection lifetime (bounded connection age)
 
