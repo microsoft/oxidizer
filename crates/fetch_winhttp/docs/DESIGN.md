@@ -952,7 +952,7 @@ let stream = WinHttpBodyReader::new(/* .. */).into_futures_stream();
 let body = builder.stream(stream); // HttpBodyBuilder::stream, Send-clean
 ```
 
-No hand-written `http_body::Body` is needed. The resulting `HttpBody` is pull-based:
+The resulting `HttpBody` is pull-based:
 WinHTTP reads are issued lazily as the consumer polls, so backpressure is natural and
 there is no unbounded buffering. A
 body-timeout from request extensions is honored via the same `HttpBodyOptions`
