@@ -16,7 +16,16 @@ pub(crate) fn system_memory() -> usize {
     // SAFETY: sysinfo syscall initialized the structure.
     let sys_info = unsafe { sys_info.assume_init() };
 
-    usize::try_from(sys_info.totalram).expect("total memory exceeds usize")
+    // On Linux, sysinfo memory amounts are expressed in units of `mem_unit` bytes, not bytes.
+    // Kernels use a larger unit to represent memory on systems where the byte count would not
+    // fit into the field, so we must scale by `mem_unit` to recover the true byte count. A
+    // reported unit of zero means "assume one byte" (legacy behavior before the field existed).
+    let mem_unit = usize::try_from(sys_info.mem_unit).expect("mem_unit exceeds usize").max(1);
+
+    usize::try_from(sys_info.totalram)
+        .expect("total memory exceeds usize")
+        .checked_mul(mem_unit)
+        .expect("total memory in bytes overflows usize")
 }
 
 #[cfg(all(not(miri), target_os = "windows"))]
